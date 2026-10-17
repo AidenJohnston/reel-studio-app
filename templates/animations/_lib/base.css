@@ -1,0 +1,51 @@
+/* Shared base for every animation template. Fonts are vendored in templates/fonts (OFL). */
+@font-face { font-family: "Inter"; font-weight: 500; src: url("../../fonts/Inter_500Medium.ttf") format("truetype"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url("../../fonts/Inter_600SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Inter"; font-weight: 700; src: url("../../fonts/Inter_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Fraunces"; font-weight: 600; src: url("../../fonts/Fraunces_600SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Fraunces"; font-weight: 700; src: url("../../fonts/Fraunces_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Montserrat"; font-weight: 100 900; src: url("../../fonts/Montserrat-VF.ttf") format("truetype"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 500; src: url("../../fonts/JetBrainsMono-Medium.ttf") format("truetype"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url("../../fonts/JetBrainsMono-Bold.ttf") format("truetype"); }
+
+:root {
+  /* set by RS.applyTheme */
+  --card: #FBFAF7; --ink: #1D1B18; --muted: #6E675D; --line: rgba(29, 27, 24, 0.12);
+  --page: #F4F1EB; --accent: #2F5BFF; --accent-ink: #FFFFFF; --hl: #2F5BFF;
+  --k: 1; /* type scale, grown or shrunk by RS.fit until the content fits its region */
+  --maxw: 940px; /* region width, set by RS.fit */
+}
+
+/* Deterministic frames: nothing may animate on its own clock. */
+*, *::before, *::after { transition: none !important; animation: none !important; box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; width: 1080px; height: 1920px; overflow: hidden;
+  background: transparent;
+  font-family: "Inter", sans-serif; color: var(--ink);
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+  font-kerning: normal;
+}
+body.layout-full { background: var(--page); }
+body.pre-enter { background: transparent; }
+body.pre-enter #stage { visibility: hidden; }
+
+/* The region the content must stay inside (set from params.region or the layout default). */
+#stage { position: absolute; display: flex; align-items: center; justify-content: center; }
+#content { position: relative; transform-origin: 50% 50%; }
+/* no will-change anywhere: a composited layer keeps a bitmap rastered at an EARLIER scale, so the
+   same t could render differently depending on which frame came before it */
+
+.card {
+  background: var(--card); color: var(--ink);
+  border-radius: calc(var(--k) * 40px);
+  padding: calc(var(--k) * 44px) calc(var(--k) * 56px);
+  box-shadow: 0 calc(var(--k) * 18px) calc(var(--k) * 54px) rgba(0, 0, 0, 0.30), 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+body.layout-full .card { box-shadow: none; background: transparent; padding: 0; }
+body.layout-full.boxed .card { background: var(--card); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12); padding: calc(var(--k) * 44px) calc(var(--k) * 56px); }
+
+.card { max-width: var(--maxw); }
+.balance { text-wrap: balance; }
+.num { font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1; }
+.hidden { opacity: 0; }

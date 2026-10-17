@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../_lib/base.css">
+<style>
+  .card { min-width: calc(var(--k) * 560px); }
+  .title {
+    font-family: "Fraunces"; font-weight: 700; color: var(--ink);
+    font-size: calc(var(--k) * 72px); line-height: 1.05; letter-spacing: -0.01em;
+    margin-bottom: calc(var(--k) * 22px); text-wrap: balance;
+  }
+  .row { display: flex; align-items: center; gap: calc(var(--k) * 26px); }
+  .row + .row { margin-top: calc(var(--k) * 14px); }
+  .chip {
+    flex: none; width: calc(var(--k) * 76px); height: calc(var(--k) * 76px); border-radius: 50%;
+    background: var(--hl); color: var(--card); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: calc(var(--k) * 42px);
+  }
+  body.theme-accent .chip { background: var(--ink); color: var(--card); }
+  .dot { flex: none; width: calc(var(--k) * 22px); height: calc(var(--k) * 22px); border-radius: 50%; background: var(--hl); margin: 0 calc(var(--k) * 10px); }
+  .item { font-weight: 700; font-size: calc(var(--k) * 72px); line-height: 1.08; letter-spacing: -0.015em; white-space: nowrap; }
+  .row.past .item { color: var(--muted); }
+  /* 4-5 items above the head: two columns, read left to right then down, so items stay big */
+  .grid { display: grid; grid-template-columns: auto auto; column-gap: calc(var(--k) * 44px); row-gap: calc(var(--k) * 18px); }
+  .grid .row + .row { margin-top: 0; }
+  body.layout-full .title { font-size: calc(var(--k) * 88px); }
+  body.layout-full .item { font-size: calc(var(--k) * 76px); }
+  body.layout-full .chip { width: calc(var(--k) * 92px); height: calc(var(--k) * 92px); font-size: calc(var(--k) * 52px); }
+  body.layout-full .row + .row { margin-top: calc(var(--k) * 34px); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="content"></div></div>
+<script src="../_lib/runtime.js"></script>
+<script>
+  function timing(p, n) {
+    const step = Number(p.itemStep) > 0 ? Number(p.itemStep) : 0.5;
+    return RS.beats(n, p.at, p.text ? 0.25 : 0, step);
+  }
+  RS.define({
+    fonts: ['700 60px Inter', '700 66px Fraunces'],
+    tilt: -1.5,
+    duration(p) {
+      const n = (p.items || []).length;
+      const t = timing(p, n);
+      return Math.max(3, Math.min(12, (t[n - 1] || 0) + 1.8));
+    },
+    enterAt: (p, ctx) => (ctx.title ? 0 : RS.firstBeat(ctx.times)),
+    build(p, ctx) {
+      const items = (p.items || []).slice(0, 5);
+      ctx.content.innerHTML = `
+        <div class="card" id="card">
+          ${p.text ? `<div class="title" id="title">${RS.escapeHtml(p.text)}</div>` : ''}
+          <div class="${ctx.region.layout === 'top' && items.length >= 4 ? 'grid' : 'rows'}">${items.map((it, i) => `<div class="row" data-i="${i}">${p.numbered === false ? '<div class="dot"></div>' : `<div class="chip">${i + 1}</div>`}<div class="item">${RS.escapeHtml(it)}</div></div>`).join('')}</div>
+        </div>`;
+      ctx.card = document.getElementById('card');
+      ctx.title = document.getElementById('title');
+      ctx.rows = Array.from(document.querySelectorAll('.row'));
+      ctx.times = timing(p, ctx.rows.length);
+    },
+    seek(t, p, ctx) {
+      // The card enters WITH content, never as an empty box: with its title, or with the first item
+      // when there is no title (the first item may be timed to a word said later).
+      const enter = ctx.enter;
+      RS.applyPop(ctx.card, RS.pop(t, enter, { dur: 0.2, from: 0.9 }));
+      if (ctx.title) RS.applyPop(ctx.title, RS.pop(t, enter, { dur: 0.18, from: 1, dy: 14 }));
+      // Build one row per beat; earlier rows step back (muted) so the newest one is the idea on screen.
+      let newest = -1;
+      ctx.rows.forEach((el, i) => {
+        const st = RS.pop(t, ctx.times[i], { dur: 0.2, from: 1, dy: 0, dx: -60 });
+        RS.applyPop(el, st);
+        if (st.visible) newest = i;
+      });
+      const focus = p.focus !== false;
+      ctx.rows.forEach((el, i) => el.classList.toggle('past', focus && i < newest));
+    },
+  });
+</script>
+</body>
+</html>

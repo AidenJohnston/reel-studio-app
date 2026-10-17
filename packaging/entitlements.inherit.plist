@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The Electron helpers (GPU, renderer, plugin) run V8, which JIT-compiles under the hardened runtime.
+       This is the ONLY entitlement they get. Deliberately absent:
+         allow-dyld-environment-variables   would let DYLD_INSERT_LIBRARIES inject code into the app
+         disable-library-validation         every dylib in the bundle is re-signed with our own identity by sign-mac.sh
+         allow-unsigned-executable-memory   not needed since Electron 12 (allow-jit covers V8)
+       The bundled python, ffmpeg, ffprobe and every .so/.dylib are signed with NO entitlements at all. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

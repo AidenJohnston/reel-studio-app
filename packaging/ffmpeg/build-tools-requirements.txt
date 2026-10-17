@@ -1,0 +1,3 @@
+# Build tools only (never linked into the shipped binaries). Used on macOS; on Windows the MSYS2 packages supply them.
+meson==1.6.1
+ninja==1.11.1.3

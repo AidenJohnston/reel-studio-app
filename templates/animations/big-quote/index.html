@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../_lib/base.css">
+<style>
+  .mark {
+    font-family: "Fraunces"; font-weight: 700; color: var(--hl);
+    font-size: calc(var(--k) * 190px); line-height: 0.6; height: calc(var(--k) * 78px);
+    margin-left: calc(var(--k) * -6px);
+  }
+  .quote {
+    font-family: "Fraunces"; font-weight: 700; color: var(--ink);
+    font-size: calc(var(--k) * 96px); line-height: 1.08; letter-spacing: -0.015em; text-wrap: balance;
+  }
+  .w { display: inline-block; transform-origin: 50% 80%; }
+  .w.hl { color: var(--hl); }
+  .by { font-weight: 600; color: var(--muted); font-size: calc(var(--k) * 44px); margin-top: calc(var(--k) * 26px); }
+  body.layout-full .quote { font-size: calc(var(--k) * 124px); }
+  body.layout-full .by { font-size: calc(var(--k) * 56px); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="content"></div></div>
+<script src="../_lib/runtime.js"></script>
+<script>
+  const norm = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+  function timing(p, n) {
+    const step = Number(p.wordStep) > 0 ? Number(p.wordStep) : Math.max(0.12, Math.min(0.28, 2.2 / Math.max(1, n)));
+    return RS.beats(n, p.wordTimes, 0, step);
+  }
+  RS.define({
+    fonts: ['700 92px Fraunces', '600 44px Inter'],
+    tilt: -1.5,
+    duration(p) {
+      const n = RS.words(p.text).length;
+      const t = timing(p, n);
+      return Math.max(2.5, Math.min(10, (t[n - 1] || 0) + 1.6));
+    },
+    enterAt: (p, ctx) => RS.firstBeat(ctx.times),
+    build(p, ctx) {
+      const ws = RS.words(p.text);
+      const hl = new Set((Array.isArray(p.highlight) ? p.highlight : []).flatMap((h) => RS.words(h)).map(norm));
+      ctx.content.innerHTML = `
+        <div class="card" id="card">
+          ${p.quoteMarks === false ? '' : '<div class="mark">“</div>'}
+          <div class="quote">${ws.map((w, i) => `<span class="w${hl.has(norm(w)) ? ' hl' : ''}" data-i="${i}">${RS.escapeHtml(w)}</span>`).join(' ')}</div>
+          ${p.author ? `<div class="by" id="by">${RS.escapeHtml(p.author)}</div>` : ''}
+        </div>`;
+      ctx.card = document.getElementById('card');
+      ctx.ws = Array.from(document.querySelectorAll('.w'));
+      ctx.by = document.getElementById('by');
+      ctx.times = timing(p, ctx.ws.length);
+    },
+    seek(t, p, ctx) {
+      // The card enters WITH its first word (which may be timed to the speech), never empty.
+      RS.applyPop(ctx.card, RS.pop(t, ctx.enter, { dur: 0.2, from: 0.9 }));
+      ctx.ws.forEach((el, i) => RS.applyPop(el, RS.pop(t, ctx.times[i], { dur: 0.16, from: 1, dy: 26 })));
+      if (ctx.by) RS.applyPop(ctx.by, RS.pop(t, (ctx.times[ctx.times.length - 1] || 0) + 0.15, { dur: 0.18, from: 1, dy: 14 }));
+    },
+  });
+</script>
+</body>
+</html>

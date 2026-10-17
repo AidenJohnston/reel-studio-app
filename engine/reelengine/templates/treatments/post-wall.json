@@ -1,0 +1,27 @@
+{
+  "id": "post-wall",
+  "label": "Post wall",
+  "description": "A full-screen grid of pictures (posts, covers) that builds one tile per spoken word. asset = a folder of images, or params.items = a list.",
+  "hidesFace": true,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "items": {
+      "default": [],
+      "help": "image paths, in order"
+    },
+    "columns": {
+      "default": 3,
+      "help": "tiles per row"
+    },
+    "gap": {
+      "default": 0.012,
+      "help": "gap, fraction of frame width"
+    },
+    "background": {
+      "default": "#101010",
+      "help": "colour behind the grid"
+    }
+  }
+}

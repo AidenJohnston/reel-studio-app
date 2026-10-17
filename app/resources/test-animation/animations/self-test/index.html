@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+      #box {
+        position: absolute; left: 0; top: 40%; width: 360px; height: 220px; border-radius: 24px;
+        background: #2f9e6a; color: #fff; font: 700 72px system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="box">0</div>
+    <script>
+      // Proves the renderer: a green card slides across a transparent frame and counts up.
+      let p = { text: 'Hi', duration: 1 }
+      window.__setup = (params) => { p = Object.assign(p, params || {}); return { duration: p.duration } }
+      window.__seek = (t) => {
+        const box = document.getElementById('box')
+        const k = Math.min(1, t / p.duration)
+        box.style.transform = 'translateX(' + Math.round(k * (1080 - 360)) + 'px)'
+        box.textContent = p.text + ' ' + Math.round(k * 100)
+      }
+    </script>
+  </body>
+</html>

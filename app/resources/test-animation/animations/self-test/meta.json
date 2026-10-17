@@ -1,0 +1,14 @@
+{
+  "id": "self-test",
+  "name": "Renderer self-test",
+  "description": "Dev and test only: a green card slides across a transparent frame. Proves the animation renderer.",
+  "defaultDuration": 1,
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "text": { "type": "string", "default": "Hi" },
+      "duration": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 10 }
+    }
+  }
+}

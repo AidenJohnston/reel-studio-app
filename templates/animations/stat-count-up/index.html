@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../_lib/base.css">
+<style>
+  .card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .stack { display: grid; }
+  .stack > * { grid-area: 1 / 1; justify-self: center; white-space: nowrap; }
+  .sizer { visibility: hidden; }
+  .value {
+    font-family: "Inter"; font-weight: 700; color: var(--hl);
+    font-size: calc(var(--k) * 230px); line-height: 0.95; letter-spacing: -0.035em;
+  }
+  .bar { height: calc(var(--k) * 12px); border-radius: 99px; background: var(--hl); margin-top: calc(var(--k) * 26px); transform-origin: 0 50%; }
+  .label {
+    font-weight: 600; font-size: calc(var(--k) * 66px); line-height: 1.12; letter-spacing: -0.01em;
+    margin-top: calc(var(--k) * 26px); color: var(--ink); text-wrap: balance;
+  }
+  body.layout-full .value { font-size: calc(var(--k) * 300px); }
+  body.layout-full .label { font-size: calc(var(--k) * 76px); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="content"></div></div>
+<script src="../_lib/runtime.js"></script>
+<script>
+  // "3,000" -> { prefix: "", n: 3000, decimals: 0, commas: true, suffix: "" }; "$1.5M" -> prefix "$", n 1.5, suffix "M"
+  function parseValue(v) {
+    const s = String(v ?? '').trim();
+    const m = s.match(/^(.*?)(\d[\d,]*(?:\.\d+)?)(.*)$/);
+    if (!m) return { text: s };
+    const num = m[2];
+    return {
+      prefix: m[1], suffix: m[3], n: parseFloat(num.replace(/,/g, '')),
+      decimals: num.includes('.') ? num.split('.')[1].length : 0, commas: num.includes(','), final: s,
+    };
+  }
+  function fmt(x, d, commas) {
+    let s = x.toFixed(d);
+    if (commas) { const [i, f] = s.split('.'); s = i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (f ? '.' + f : ''); }
+    return s;
+  }
+
+  RS.define({
+    fonts: ['700 100px Inter', '600 60px Inter'],
+    tilt: -2,
+    duration: () => 3,
+    build(p, ctx) {
+      const v = parseValue(p.value);
+      ctx.v = v;
+      ctx.content.innerHTML = `
+        <div class="card" id="card">
+          <div class="stack value num"><span class="sizer">${RS.escapeHtml(v.final ?? v.text)}</span><span id="val"></span></div>
+          <div class="bar" id="bar"></div>
+          ${p.text ? `<div class="label" id="label">${RS.escapeHtml(p.text)}</div>` : ''}
+        </div>`;
+      ctx.val = document.getElementById('val');
+      ctx.val.textContent = v.final ?? v.text;
+      ctx.card = document.getElementById('card');
+      ctx.bar = document.getElementById('bar');
+      ctx.label = document.getElementById('label');
+      // the bar is as wide as the number
+      ctx.bar.style.width = '100%';
+      ctx.bar.style.alignSelf = 'stretch';
+    },
+    seek(t, p, ctx) {
+      RS.applyPop(ctx.card, RS.pop(t, 0, { dur: 0.22 }));
+      const v = ctx.v;
+      const countDur = Math.min(Number(p.countDuration) || 1.0, ctx.duration * 0.6);
+      const q = RS.ease.outExpo(RS.prog(t, 0.04, countDur));
+      if (v.text !== undefined) {
+        ctx.val.textContent = v.text;
+      } else {
+        const from = Number.isFinite(Number(p.from)) ? Number(p.from) : 0;
+        ctx.val.textContent = q >= 1 ? v.final : v.prefix + fmt(RS.lerp(from, v.n, q), v.decimals, v.commas) + v.suffix;
+      }
+      ctx.bar.style.transform = `scaleX(${q.toFixed(4)})`;
+      if (ctx.label) RS.applyPop(ctx.label, RS.pop(t, Number(p.labelAt) >= 0 ? Number(p.labelAt) : 0.12, { dur: 0.2, from: 1, dy: 20 }));
+    },
+  });
+</script>
+</body>
+</html>

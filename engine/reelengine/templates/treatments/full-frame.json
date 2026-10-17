@@ -1,0 +1,36 @@
+{
+  "id": "full-frame",
+  "label": "Full screen",
+  "description": "The asset covers the whole frame and hides the speaker. Pictures shaped like the frame fill it; other shapes keep their whole picture on a plain dark background.",
+  "hidesFace": true,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "fit": {
+      "default": "auto",
+      "help": "auto | cover | contain"
+    },
+    "focusX": {
+      "default": 0.5,
+      "help": "cover crop: 0 left .. 1 right"
+    },
+    "focusY": {
+      "default": 0.5,
+      "help": "cover crop: 0 top .. 1 bottom"
+    },
+    "background": {
+      "default": "#101010",
+      "help": "colour behind a contained asset"
+    },
+    "in": {
+      "default": 0.0,
+      "help": "clips: start offset"
+    },
+    "hold": {
+      "default": null,
+      "help": "minimum seconds on screen"
+    }
+  }
+}

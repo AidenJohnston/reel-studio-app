@@ -1,0 +1,24 @@
+{
+  "name": "@reelstudio/ai",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Reel Studio AI editor: providers, prompts, tools, agent loop.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "reelstudio-ai": "./dist/cli.js" },
+  "files": ["dist", "prompts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "5.9",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "recordedWith": {
+    "provider": "claude-cli",
+    "model": "claude-sonnet-5-5"
+  },
+  "task": "pickTakes-bread",
+  "createdAt": "2026-10-17T05:44:16.972Z",
+  "steps": [
+    {
+      "response": {
+        "text": "{\"keep\":[{\"from\":\"w16\",\"to\":\"w56\"}],\"notes\":\"Used the complete second take of the hook, dropped the first incomplete take and the 'let me try that again' meta-talk, kept the rest as said once.\"}",
+        "toolCalls": []
+      },
+      "lastMessage": "user"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "side-card",
+  "label": "Card beside the face",
+  "description": "A card to the left or right of the face, level with it; it may overlap the side of the head or the ear, never the eyes, nose or mouth. With no readable room beside a close-up face it goes over the hair on that side; if even that can't read, it is shown above the speaker in a split view instead, and the render result says so.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "side": {
+      "default": "auto",
+      "help": "left | right | auto (auto = the side with more room)"
+    },
+    "tilt": {
+      "default": 2.0,
+      "help": "degrees, mirrored per side"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits"
+    },
+    "radius": {
+      "default": 0.022,
+      "help": "corner radius"
+    },
+    "iconic": {
+      "default": null,
+      "help": "true for a logo/icon (reads smaller); default: guessed (transparent background or tiny image)"
+    }
+  }
+}

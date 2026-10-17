@@ -1,0 +1,136 @@
+# Reel Studio packaging config. ONE config for the real app and for packaging/spike.
+#
+# This file is a TEMPLATE. Never pass it to electron-builder directly: `node packaging/make-config.js` fills in the
+# ${env.RS_*} values and writes packaging/.build/electron-builder.resolved.yml. Use packaging/build-win.ps1 or
+# packaging/build-mac.sh, which set the RS_* variables, call make-config.js and run electron-builder with
+# --projectDir = the folder that holds package.json + out/ (app/ for the real app, packaging/spike/ for the spike).
+#
+#   RS_REPO_ROOT    repo root (absolute)
+#   RS_RUNTIME_DIR  packaging/runtime/<win-x64|mac-arm64>  (python/ + ffmpeg/, from fetch_runtime.py)
+#   RS_ENGINE_DIR   folder that CONTAINS the `reelengine` package (engine/ in the repo)
+#   RS_TEMPLATES_DIR  templates/ (b-roll treatments + animations)
+#   RS_APP_DIR      the project dir (app/): its resources/test-animation ships too
+#
+# Installed layout (process.resourcesPath):
+#   python/            bundled CPython + site-packages        (python.exe | bin/python3)
+#   ffmpeg/            ffmpeg + ffprobe (static)
+#   engine/            PYTHONPATH root: engine/reelengine/
+#   fonts/             packaging/fonts (OFL TTFs + licenses)  -> REELENGINE_FONTS
+#   templates/         HTML templates
+#   test-animation/    app/resources/test-animation
+#   licenses/          LICENSE + THIRD_PARTY.md + texts/ (GPL-3.0, LGPL-3.0, LGPL-2.1, YuNet MIT: packaging/licenses)
+# All of it is extraResources (a plain folder next to app.asar), NOT inside asar, so executables, dylibs and
+# .so/.pyd files stay real files that can be spawned, signed and notarized.
+
+appId: dev.reelstudio.app
+productName: Reel Studio
+copyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+electronLanguages: [en-US]
+compression: normal
+
+directories:
+  output: release
+
+# The per-user install folder is %LOCALAPPDATA%\Programs\<package.json "name">; the real app's name is the
+# scoped "@reelstudio/app", which would give an ugly folder. Only the packaged copy of package.json changes.
+extraMetadata:
+  name: reel-studio
+
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+  - "!**/node_modules/.cache/**"
+
+extraResources:
+  - from: ${env.RS_RUNTIME_DIR}/python
+    to: python
+  - from: ${env.RS_RUNTIME_DIR}/ffmpeg
+    to: ffmpeg
+  - from: ${env.RS_ENGINE_DIR}
+    to: engine
+    filter:
+      - "**/*"
+      - "!**/tests/**"
+      - "!**/*.egg-info/**"
+      - "!pyproject.toml"
+  - from: ${env.RS_REPO_ROOT}/packaging/fonts
+    to: fonts
+  # No dev leftovers: a developer's `npm install` inside templates/animations leaves node_modules (Playwright), and
+  # test/ + tools/ are not runtime files.
+  - from: ${env.RS_TEMPLATES_DIR}
+    to: templates
+    filter:
+      - "**/*"
+      - "!**/node_modules/**"
+      - "!**/test/**"
+      - "!**/tests/**"
+      - "!**/tools/**"
+      - "!**/package-lock.json"
+      - "!**/.DS_Store"
+  # app/resources/test-animation is read by the app from <resources>/test-animation (app/src/main/paths.ts)
+  - from: ${env.RS_APP_DIR}/resources/test-animation
+    to: test-animation
+  - from: ${env.RS_REPO_ROOT}
+    to: licenses
+    filter:
+      - LICENSE
+      - THIRD_PARTY.md
+  # GPL/LGPL texts the shipped binaries require (fetch_runtime.py refuses to build without them)
+  - from: ${env.RS_REPO_ROOT}/packaging/licenses
+    to: licenses/texts
+  # The YuNet model's MIT notice, next to the .onnx it covers (engine/ is owned by another stream)
+  - from: ${env.RS_REPO_ROOT}/packaging/licenses/yunet-MIT.txt
+    to: engine/reelengine/models/LICENSE-YuNet-MIT.txt
+
+# afterPack (packaging/after-pack.js: compiles .pyc for python/ and engine/ BEFORE signing, so the bundle is
+# never written to at runtime and engine start-up stays fast) is appended by make-config.js.
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.video
+  icon: ${env.RS_REPO_ROOT}/packaging/icons/icon.icns
+  minimumSystemVersion: "14.0"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Least privilege, per executable role (review finding 24; packaging/sign-mac.sh applies the same split):
+  # main app / helpers = JIT only; bundled python, ffmpeg and every dylib = none.
+  entitlements: ${env.RS_REPO_ROOT}/packaging/entitlements.main.plist
+  entitlementsInherit: ${env.RS_REPO_ROOT}/packaging/entitlements.inherit.plist
+  # Unsigned here on purpose. packaging/sign-mac.sh signs every nested binary inside-out, notarizes and staples.
+  identity: null
+  extendInfo:
+    NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+
+dmg:
+  title: Reel Studio
+  sign: false
+  artifactName: Reel-Studio-${version}-${arch}.${ext}
+  contents:
+    - { x: 130, y: 190 }
+    - { x: 410, y: 190, type: link, path: /Applications }
+
+win:
+  icon: ${env.RS_REPO_ROOT}/packaging/icons/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  # Unsigned for now. A real certificate removes the SmartScreen warning; see docs/install-windows.md.
+
+nsis:
+  oneClick: true              # one click, no wizard pages
+  perMachine: false           # per-user install under %LOCALAPPDATA%\Programs: NO admin prompt
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false   # never delete the user's videos or settings
+  differentialPackage: false
+  artifactName: Reel-Studio-Setup-${version}-${arch}.${ext}

@@ -1,0 +1,15 @@
+{
+  "id": "animation",
+  "label": "Animation",
+  "description": "A ready-made animated graphic from make_animation (a .mov with its .anim.json sidecar), laid over the whole frame exactly as rendered: no card, no scaling, no backdrop. If the words run longer than the animation, its last frame holds. Any asset with an animation sidecar is shown this way whatever treatment was asked for.",
+  "hidesFace": false,
+  "assetKinds": [
+    "video"
+  ],
+  "params": {
+    "hold": {
+      "default": null,
+      "help": "minimum seconds on screen (default: the animation's own length)"
+    }
+  }
+}

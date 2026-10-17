@@ -1,0 +1,154 @@
+{
+  "id": "typing-terminal",
+  "name": "Typing terminal / chat",
+  "description": "Text types itself into a terminal window or a chat bubble, with an optional reply. Use when the speaker describes typing a prompt, a command or a message.",
+  "defaultDuration": 3.5,
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160,
+        "description": "The text that gets typed."
+      },
+      "style": {
+        "type": "string",
+        "enum": [
+          "terminal",
+          "chat"
+        ],
+        "default": "terminal",
+        "description": "terminal = a code window with a prompt. chat = a message bubble."
+      },
+      "response": {
+        "type": "string",
+        "maxLength": 160,
+        "description": "Optional reply that lands after the typing (output line or answer bubble)."
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 30,
+        "description": "Optional window title (terminal style)."
+      },
+      "prompt": {
+        "type": "string",
+        "maxLength": 12,
+        "default": "> ",
+        "description": "Prompt before the typed text (terminal style)."
+      },
+      "cps": {
+        "type": "number",
+        "minimum": 6,
+        "maximum": 120,
+        "description": "Typing speed in characters per second. Default finishes a line in ~1.6 s."
+      },
+      "typeAt": {
+        "type": "number",
+        "minimum": 0,
+        "default": 0.2,
+        "description": "Seconds from the start when typing begins."
+      },
+      "layout": {
+        "type": "string",
+        "enum": [
+          "top",
+          "full"
+        ],
+        "default": "top",
+        "description": "top = card above the head, speaker stays visible. full = covers the frame (speaker hidden)."
+      },
+      "theme": {
+        "type": "string",
+        "enum": [
+          "light",
+          "dark",
+          "accent"
+        ],
+        "default": "dark",
+        "description": "light = warm white card, dark = near-black card, accent = card in the accent colour."
+      },
+      "accentColor": {
+        "type": "string",
+        "pattern": "^#?[0-9a-fA-F]{6}$",
+        "description": "Optional accent colour, e.g. #2F5BFF."
+      },
+      "tilt": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "minimum": -8,
+        "maximum": 8,
+        "default": null,
+        "description": "Tilt in degrees. Default 0."
+      },
+      "duration": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 30,
+        "description": "Clip length in seconds. Leave out to use the template's own length."
+      },
+      "drift": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 0.08,
+        "default": 0.015,
+        "description": "Slow push-in over the clip (0 = perfectly still)."
+      },
+      "region": {
+        "$ref": "#/definitions/region"
+      }
+    },
+    "definitions": {
+      "region": {
+        "type": "object",
+        "description": "Optional box (frame px, 1080x1920) the content must stay inside; the engine passes the free space above the face.",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number"
+          },
+          "h": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "example": {
+    "text": "cut my video and add captions",
+    "title": "Terminal",
+    "response": "Done. 41 cuts, 112 captions."
+  },
+  "variants": [
+    {
+      "text": "can you make it shorter?",
+      "style": "chat",
+      "response": "Cut it to 45 seconds.",
+      "theme": "light"
+    },
+    {
+      "text": "npm run build",
+      "response": "Built in 3.2s",
+      "layout": "full",
+      "theme": "dark"
+    }
+  ]
+}

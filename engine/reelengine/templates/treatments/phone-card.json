@@ -1,0 +1,32 @@
+{
+  "id": "phone-card",
+  "label": "Phone",
+  "description": "The asset shown inside a phone, beside the speaker's face. If there is no room beside the face, the phone goes in the top half with the speaker below.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "side": {
+      "default": "auto",
+      "help": "auto | left | right"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits"
+    },
+    "focusY": {
+      "default": 0.0,
+      "help": "which part of a tall screenshot shows: 0 top .. 1 bottom"
+    },
+    "background": {
+      "default": "#EDEBE7",
+      "help": "plain colour behind the phone when it sits above the speaker"
+    },
+    "in": {
+      "default": 0.0,
+      "help": "clips: start offset"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "text-pop",
+  "label": "Big words",
+  "description": "Words above the speaker's head. style 'pop' (default): big bold white words with a black outline, slightly tilted. style 'label': dark words on a white box, as written (a hook title or a picture's label). Uses params.text, or the spoken words of the anchor.",
+  "hidesFace": false,
+  "assetKinds": [],
+  "params": {
+    "text": {
+      "default": null,
+      "help": "the words to show; default = the anchor's spoken words"
+    },
+    "tilt": {
+      "default": -3.0,
+      "help": "degrees"
+    },
+    "size": {
+      "default": 0.11,
+      "help": "font size as a fraction of frame width (shrinks to fit)"
+    },
+    "color": {
+      "default": "#FFFFFF",
+      "help": "fill"
+    },
+    "outline": {
+      "default": "#000000",
+      "help": "outline"
+    },
+    "case": {
+      "default": "upper",
+      "help": "upper | asis"
+    },
+    "style": {
+      "default": "pop",
+      "help": "pop | label"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+release/
+build/
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+testdata/
+packaging/cache/
+packaging/runtime/
+*.log
+.DS_Store

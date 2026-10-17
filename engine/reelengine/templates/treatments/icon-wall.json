@@ -1,0 +1,19 @@
+{
+  "id": "icon-wall",
+  "label": "Icon wall",
+  "description": "Logos or icons above the face, appearing one per spoken word. Dark logos get a white tile so they don't disappear. Too many to read above the face becomes a full-screen wall.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "items": {
+      "default": [],
+      "help": "image paths, in order"
+    },
+    "tile": {
+      "default": "auto",
+      "help": "auto | white | none"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": "split-top",
+  "label": "Split screen",
+  "description": "The asset fills the top part, the speaker is shown below it. The split is sized so the speaker's head sits above the captions when it can. Pictures keep their whole frame on a plain background unless they already have the right shape.",
+  "hidesFace": true,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "split": {
+      "default": "auto",
+      "help": "auto, or the fraction of the height the asset takes (0.3 to 0.5)"
+    },
+    "fit": {
+      "default": "auto",
+      "help": "auto | cover | contain"
+    },
+    "background": {
+      "default": "#101010",
+      "help": "colour behind a contained asset"
+    },
+    "focusX": {
+      "default": 0.5,
+      "help": "cover crop: 0 left .. 1 right"
+    },
+    "focusY": {
+      "default": 0.5,
+      "help": "cover crop: 0 top .. 1 bottom"
+    },
+    "in": {
+      "default": 0.0,
+      "help": "clips: start offset"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "id": "card-above-head",
+  "label": "Card above the head",
+  "description": "An image or clip on a card above the speaker's eyes, slightly tilted, sized to read on a phone (at least 55% of the width for anything with text). It may cover hair and forehead down to the eyebrows, never the eyes, nose, mouth or captions. If it can't read there, a tall asset goes beside the face and anything else goes in a split view (the render result says so). Best for screenshots, prices, headlines.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "tilt": {
+      "default": -2.5,
+      "help": "degrees; stills only, clips stay level"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits; lower to shrink"
+    },
+    "maxWidth": {
+      "default": 0.88,
+      "help": "fraction of frame width"
+    },
+    "radius": {
+      "default": 0.026,
+      "help": "corner radius, fraction of frame width"
+    },
+    "shadow": {
+      "default": true,
+      "help": "soft drop shadow"
+    },
+    "in": {
+      "default": 0.0,
+      "help": "clips: start this many seconds into the clip"
+    },
+    "hold": {
+      "default": null,
+      "help": "minimum seconds on screen (stills default 2.0)"
+    },
+    "fade": {
+      "default": null,
+      "help": "seconds, or [in, out]; default is a hard cut"
+    },
+    "iconic": {
+      "default": null,
+      "help": "true for a logo/icon (reads smaller); default: guessed (transparent background or tiny image)"
+    },
+    "minWidth": {
+      "default": null,
+      "help": "readable floor, fraction of frame width (default 0.55; logos 0.22)"
+    }
+  }
+}

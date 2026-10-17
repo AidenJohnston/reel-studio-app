@@ -1,0 +1,18 @@
+{
+  "name": "reel-studio",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "workspaces": [
+    "app",
+    "ai"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w ai && npm run build -w app",
+    "start": "npm run start -w app",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "e2e": "npm run build -w ai && npm run e2e -w app"
+  }
+}

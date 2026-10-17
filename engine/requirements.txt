@@ -1,0 +1,106 @@
+# Pinned runtime dependencies of the Reel Studio engine (Python 3.11, Windows x64 + macOS arm64/x64).
+# Packaging installs exactly this into the bundled python-build-standalone runtime:
+#   python -m pip install --no-deps -r requirements.txt && python -m pip install --no-deps .
+# No torch. Regenerate after changing pyproject.toml:
+#   uv pip compile pyproject.toml --universal --python-version 3.11 --no-header -o requirements.txt
+# (then put this header back). Optional extra not included: pillow-heif (see THIRD_PARTY.md).
+anyio==4.15.1 ; sys_platform != 'emscripten'
+    # via httpx2
+attrs==26.1.0
+    # via
+    #   jsonschema
+    #   referencing
+av==18.1.0 ; python_full_version < '3.12'
+    # via faster-whisper
+av==19.0.1 ; python_full_version >= '3.12'
+    # via faster-whisper
+click==8.5.0
+    # via huggingface-hub
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via tqdm
+ctranslate2==4.8.3
+    # via faster-whisper
+faster-whisper==1.2.1
+    # via reelengine (pyproject.toml)
+filelock==4.2.0
+    # via huggingface-hub
+flatbuffers==25.12.19
+    # via onnxruntime
+fsspec==2026.9.0
+    # via huggingface-hub
+h11==0.16.0 ; sys_platform != 'emscripten'
+    # via httpcore2
+hf-xet==1.7.0 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via huggingface-hub
+httpcore2==2.13.1 ; sys_platform != 'emscripten'
+    # via httpx2
+httpx2==2.13.1
+    # via huggingface-hub
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
+    # via httpx2
+huggingface-hub==2.2.0
+    # via
+    #   faster-whisper
+    #   tokenizers
+idna==3.20
+    # via
+    #   anyio
+    #   httpx2
+jsonschema==4.26.0
+    # via reelengine (pyproject.toml)
+jsonschema-specifications==2025.9.1
+    # via jsonschema
+numpy==2.4.6 ; python_full_version < '3.12'
+    # via
+    #   reelengine (pyproject.toml)
+    #   ctranslate2
+    #   onnxruntime
+    #   opencv-python-headless
+numpy==2.5.4 ; python_full_version >= '3.12'
+    # via
+    #   reelengine (pyproject.toml)
+    #   ctranslate2
+    #   onnxruntime
+    #   opencv-python-headless
+onnxruntime==1.31.0
+    # via faster-whisper
+opencv-python-headless==5.0.0.93
+    # via reelengine (pyproject.toml)
+packaging==26.3
+    # via
+    #   huggingface-hub
+    #   onnxruntime
+pillow==13.0.0
+    # via reelengine (pyproject.toml)
+protobuf==7.36.2
+    # via onnxruntime
+pyyaml==6.0.3
+    # via
+    #   ctranslate2
+    #   huggingface-hub
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
+rpds-py==2026.9.1
+    # via
+    #   jsonschema
+    #   referencing
+tokenizers==0.23.3
+    # via faster-whisper
+tqdm==4.70.1
+    # via
+    #   faster-whisper
+    #   huggingface-hub
+truststore==0.10.5 ; sys_platform != 'emscripten'
+    # via
+    #   httpcore2
+    #   httpx2
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   httpx2
+    #   huggingface-hub
+    #   referencing
+yt-dlp==2026.8.19
+    # via reelengine (pyproject.toml)

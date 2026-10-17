@@ -1,0 +1,18 @@
+{
+  "name": "reel-studio-spike",
+  "productName": "Reel Studio Spike",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "description": "Packaging spike: proves a packaged Electron app can run the bundled Python + ffmpeg.",
+  "author": "Reel Studio",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "prep": "node prep.js",
+    "start": "npm run prep && electron . --self-test"
+  },
+  "devDependencies": {
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3"
+  }
+}

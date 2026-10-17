@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reelstudio.local/schema/project.schema.json",
+  "title": "Reel Studio project",
+  "description": "project.json schemaVersion 1 (docs/architecture.md section 3). Times are seconds. B-roll, zooms, music automation and caption overrides are anchored to transcript WORD IDs, never output seconds. Optional fields may be added; nothing is ever removed or renamed.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "title", "slug", "format", "sources", "cut"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "slug": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" },
+    "version": { "type": "integer", "minimum": 0 },
+    "format": {
+      "type": "object",
+      "required": ["width", "height", "fps"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 16, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 16, "maximum": 4096 },
+        "fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 120 }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^s[0-9]+$" },
+          "path": { "$ref": "#/$defs/relPath" },
+          "duration": { "type": "number", "minimum": 0 },
+          "fps": { "type": "number", "minimum": 0 },
+          "width": { "type": "integer", "minimum": 0 },
+          "height": { "type": "integer", "minimum": 0 },
+          "rotation": { "type": "integer" },
+          "originalName": { "type": "string" },
+          "hdr": { "type": "boolean" }
+        }
+      }
+    },
+    "transcript": {
+      "type": ["object", "null"],
+      "properties": {
+        "file": { "const": "work/transcript.json", "description": "always work/transcript.json; the engine never reads or writes another path" },
+        "language": { "type": ["string", "null"] },
+        "model": { "type": "string" }
+      }
+    },
+    "cut": {
+      "type": "object",
+      "required": ["keep"],
+      "properties": {
+        "keep": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "$ref": "#/$defs/wordId" },
+              "to": { "$ref": "#/$defs/wordId" }
+            }
+          }
+        },
+        "gapCap": { "type": "number", "minimum": 0, "maximum": 5 },
+        "minSaving": { "type": "number", "minimum": 0, "maximum": 2 },
+        "source": { "type": "string", "description": "who wrote the cut: autocut | ai | user" }
+      }
+    },
+    "captions": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "style": {
+          "type": "object",
+          "properties": {
+            "preset": { "type": "string" },
+            "font": { "type": "string" },
+            "size": { "type": "number", "minimum": 10, "maximum": 300 },
+            "maxWords": { "type": "integer", "minimum": 1, "maximum": 12 },
+            "case": { "enum": ["upper", "lower", "as-is", "title"] },
+            "color": { "$ref": "#/$defs/color" },
+            "outline": { "type": "number", "minimum": 0, "maximum": 40 },
+            "outlineColor": { "$ref": "#/$defs/color" },
+            "shadow": { "type": "number", "minimum": 0, "maximum": 40 },
+            "position": { "type": "number", "minimum": 0.05, "maximum": 0.95 },
+            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" }
+          }
+        },
+        "corrections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string" } }
+          }
+        },
+        "hidden": {
+          "type": "array",
+          "description": "word-id ranges whose captions are suppressed (e.g. under a full-frame card)",
+          "items": { "$ref": "#/$defs/wordRange" }
+        }
+      }
+    },
+    "music": {
+      "type": ["object", "null"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "track": { "anyOf": [{ "$ref": "#/$defs/relPath" }, { "type": "null" }] },
+        "startAt": { "type": "number", "minimum": 0 },
+        "level": { "type": "string" },
+        "automation": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["fromWord", "toWord", "gainDb"],
+            "properties": {
+              "fromWord": { "$ref": "#/$defs/wordId" },
+              "toWord": { "$ref": "#/$defs/wordId" },
+              "gainDb": { "type": "number", "minimum": -60, "maximum": 24 }
+            }
+          }
+        },
+        "fadeOut": { "type": "number", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "broll": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "anchor", "treatment"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "also part of layer file names: no paths" },
+          "anchor": { "$ref": "#/$defs/wordRange" },
+          "leadIn": { "type": "number" },
+          "treatment": { "type": "string" },
+          "asset": { "anyOf": [{ "$ref": "#/$defs/relPath" }, { "type": "null" }] },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "zooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["anchor", "scale"],
+        "properties": {
+          "anchor": { "$ref": "#/$defs/wordRange" },
+          "scale": { "type": "number", "minimum": 1, "maximum": 3 }
+        }
+      }
+    },
+    "cover": {
+      "type": ["object", "null"],
+      "properties": {
+        "atSourceTime": { "type": ["number", "null"], "minimum": 0 },
+        "source": { "type": ["string", "null"] },
+        "text": { "type": ["string", "null"] },
+        "exact": { "type": ["boolean", "null"] }
+      }
+    },
+    "post": {
+      "type": ["object", "null"],
+      "properties": {
+        "caption": { "type": "string" },
+        "hashtags": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
+        "keywords": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": { "type": "integer" },
+          "text": { "type": "string" },
+          "applied": { "type": "array", "items": { "type": "string" } },
+          "at": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "wordId": { "type": "string", "pattern": "^w[0-9]+$" },
+    "wordRange": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": { "from": { "$ref": "#/$defs/wordId" }, "to": { "$ref": "#/$defs/wordId" } }
+    },
+    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$" },
+    "relPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "relative to the project (media/..., work/...) or the Reel Studio root (Library/...). No absolute, drive, UNC or '..' paths: the engine also re-checks the resolved real path.",
+      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!(.*[\\\\/])?\\.\\.([\\\\/]|$))[^\\u0000]+$"
+    }
+  }
+}

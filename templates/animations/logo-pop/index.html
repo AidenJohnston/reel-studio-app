@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../_lib/base.css">
+<style>
+  .wrap { display: flex; flex-direction: column; align-items: center; }
+  .tile { display: flex; align-items: center; justify-content: center; }
+  .tile img { display: block; object-fit: contain; max-width: calc(var(--k) * var(--logo) * 1.8); max-height: calc(var(--k) * var(--logo)); }
+  /* card: one card holds logo + label. bare: the logo floats with a soft shadow, the label gets its own pill. */
+  .mode-card .tile { background: transparent; }
+  .mode-white .tile {
+    background: #FFFFFF; border: calc(var(--k) * 4px) solid #1D1B18;
+    border-radius: calc(var(--k) * 44px); padding: calc(var(--k) * 40px);
+    box-shadow: 0 calc(var(--k) * 16px) calc(var(--k) * 46px) rgba(0,0,0,0.3);
+  }
+  .label {
+    font-weight: 700; font-size: calc(var(--k) * 72px); line-height: 1.1; letter-spacing: -0.015em;
+    text-align: center; color: var(--ink); text-wrap: balance;
+  }
+  .mode-card .label { margin-top: calc(var(--k) * 30px); }
+  .pill {
+    max-width: var(--maxw);
+    margin-top: calc(var(--k) * 30px); background: var(--card); border-radius: calc(var(--k) * 28px);
+    padding: calc(var(--k) * 18px) calc(var(--k) * 36px);
+    box-shadow: 0 calc(var(--k) * 12px) calc(var(--k) * 36px) rgba(0,0,0,0.28);
+  }
+  body.layout-full .pill { box-shadow: none; background: transparent; padding: 0; }
+  body.layout-full .label { font-size: calc(var(--k) * 84px); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="content"></div></div>
+<script src="../_lib/runtime.js"></script>
+<script>
+  const labelAt = (p) => (Number(p.labelAt) >= 0 ? Number(p.labelAt) : 0.18);
+  RS.define({
+    fonts: ['700 62px Inter'],
+    tilt: 0, // a logo is never tilted
+    ownDrift: true,
+    duration: () => 2.5,
+    // In `card` mode the label sits INSIDE the card, so the card waits for it: a card holding only the
+    // logo with an empty half under it reads as half built. `white` / `bare` keep the logo-then-label beat
+    // (the label is its own pill, nothing is empty).
+    enterAt: (p, ctx) => (ctx.mode === 'card' && p.text ? labelAt(p) : 0),
+    async build(p, ctx) {
+      const mode = ['card', 'bare', 'white'].includes(p.background) ? p.background : 'card';
+      const size = Math.max(120, Math.min(560, Number(p.size) || 300));
+      document.documentElement.style.setProperty('--logo', size + 'px');
+      const label = p.text ? `<div class="label">${RS.escapeHtml(p.text)}</div>` : '';
+      ctx.content.innerHTML = mode === 'card'
+        ? `<div class="card wrap mode-card" id="card"><div class="tile" id="tile"><img id="img" alt=""></div><div id="lab">${label}</div></div>`
+        : `<div class="wrap mode-${mode}" id="card"><div class="tile" id="tile"><img id="img" alt=""></div>${p.text ? `<div class="pill" id="lab">${label}</div>` : '<div id="lab"></div>'}</div>`;
+      await RS.loadImage(document.getElementById('img'), p.image);
+      ctx.mode = mode;
+      ctx.card = document.getElementById('card');
+      ctx.tile = document.getElementById('tile');
+      ctx.lab = document.getElementById('lab');
+    },
+    afterFit(p, ctx) { ctx.sprite = RS.imageSprite(document.getElementById('img'), 1.4); },
+    seek(t, p, ctx) {
+      // Nothing here scales with a transform (see RS.imageSprite): boxes only move, the logo's
+      // pop and the slow push are painted into its canvas.
+      const e = ctx.enter;
+      if (ctx.mode === 'card') RS.applyPop(ctx.card, RS.pop(t, e, { dur: 0.2, from: 1, dy: 24 }));
+      else ctx.card.style.opacity = '1';
+      if (ctx.mode === 'white') RS.applyPop(ctx.tile, RS.pop(t, e, { dur: 0.2, from: 1, dy: 24 }));
+      const pop = t < e ? 0 : RS.lerp(ctx.mode === 'card' ? 0.55 : 0.5, 1, RS.ease.outBack(RS.prog(t, e, 0.3), 2.2));
+      ctx.sprite.draw(pop * ctx.push, ctx.mode === 'bare' && ctx.region.layout === 'top');
+      RS.applyPop(ctx.lab, RS.pop(t, Math.max(e, labelAt(p)), { dur: 0.2, from: 1, dy: 24 }));
+    },
+  });
+</script>
+</body>
+</html>

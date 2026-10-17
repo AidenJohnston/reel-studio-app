@@ -1,0 +1,292 @@
+{
+  "version": 1,
+  "recordedWith": {
+    "provider": "claude-cli",
+    "model": "claude-sonnet-5-5"
+  },
+  "task": "firstEdit-bread",
+  "createdAt": "2026-10-17T05:43:21.500Z",
+  "steps": [
+    {
+      "response": {
+        "text": "Start by reading the project and the full transcript before cutting.",
+        "toolCalls": [
+          {
+            "id": "cli_1",
+            "name": "get_project",
+            "args": {}
+          },
+          {
+            "id": "cli_2",
+            "name": "get_transcript",
+            "args": {}
+          }
+        ]
+      },
+      "lastMessage": "user"
+    },
+    {
+      "response": {
+        "text": "Cut to the last clean take, tighten pauses, fix number captions, and check the library.",
+        "toolCalls": [
+          {
+            "id": "cli_3",
+            "name": "set_cut",
+            "args": {
+              "keep": [
+                {
+                  "from": "w16",
+                  "to": "w56"
+                }
+              ]
+            }
+          },
+          {
+            "id": "cli_4",
+            "name": "set_gap_cap",
+            "args": {
+              "seconds": 0.12
+            }
+          },
+          {
+            "id": "cli_5",
+            "name": "add_caption_correction",
+            "args": {
+              "from": "twenty bucks",
+              "to": "$20"
+            }
+          },
+          {
+            "id": "cli_6",
+            "name": "add_caption_correction",
+            "args": {
+              "from": "eighteen hours",
+              "to": "18 hours"
+            }
+          },
+          {
+            "id": "cli_7",
+            "name": "list_library",
+            "args": {
+              "kind": "music"
+            }
+          },
+          {
+            "id": "cli_8",
+            "name": "list_library",
+            "args": {
+              "kind": "images"
+            }
+          },
+          {
+            "id": "cli_9",
+            "name": "list_library",
+            "args": {
+              "kind": "broll"
+            }
+          }
+        ]
+      },
+      "lastMessage": "get_project,get_transcript"
+    },
+    {
+      "response": {
+        "text": "Add music, b-roll, a zoom, cover and post kit, then render a draft.",
+        "toolCalls": [
+          {
+            "id": "cli_10",
+            "name": "choose_music",
+            "args": {
+              "track": "Library/Music/gentle piano.mp3",
+              "startAt": 4,
+              "level": "under-voice"
+            }
+          },
+          {
+            "id": "cli_11",
+            "name": "set_music_automation",
+            "args": {
+              "automation": [
+                {
+                  "fromWord": "w53",
+                  "toWord": "w56",
+                  "gainDb": 3
+                }
+              ]
+            }
+          },
+          {
+            "id": "cli_12",
+            "name": "add_broll",
+            "args": {
+              "anchor": {
+                "from": "w29",
+                "to": "w34"
+              },
+              "treatment": "card-above-head",
+              "asset": "Library/Images/bag of flour.png",
+              "search": null,
+              "animation": null,
+              "params": {
+                "tilt": null,
+                "scale": null,
+                "text": null
+              }
+            }
+          },
+          {
+            "id": "cli_13",
+            "name": "add_broll",
+            "args": {
+              "anchor": {
+                "from": "w48",
+                "to": "w51"
+              },
+              "treatment": "text-pop",
+              "asset": null,
+              "search": null,
+              "animation": null,
+              "params": {
+                "tilt": null,
+                "scale": null,
+                "text": "18 hours"
+              }
+            }
+          },
+          {
+            "id": "cli_14",
+            "name": "add_broll",
+            "args": {
+              "anchor": {
+                "from": "w53",
+                "to": "w56"
+              },
+              "treatment": "card-above-head",
+              "asset": "Library/Images/sourdough loaf.png",
+              "search": null,
+              "animation": null,
+              "params": {
+                "tilt": null,
+                "scale": null,
+                "text": null
+              }
+            }
+          },
+          {
+            "id": "cli_15",
+            "name": "set_zoom",
+            "args": {
+              "zooms": [
+                {
+                  "anchor": {
+                    "from": "w25",
+                    "to": "w26"
+                  },
+                  "scale": 1.1
+                }
+              ]
+            }
+          },
+          {
+            "id": "cli_16",
+            "name": "set_cover",
+            "args": {
+              "atSourceTime": 8.2,
+              "source": "s1",
+              "text": "Waiting"
+            }
+          },
+          {
+            "id": "cli_17",
+            "name": "write_post",
+            "args": {
+              "caption": "The hardest part of baking bread nobody warns you about\n\nI spent $20 on fancy flour and got a brick. Then I tried the slow method, 18 hours in the fridge, and it finally worked.",
+              "hashtags": [
+                "#breadbaking",
+                "#homebaker",
+                "#sourdoughtok",
+                "#slowbread",
+                "#bakingtips"
+              ],
+              "keywords": [
+                "hardest part of baking bread",
+                "slow method bread",
+                "18 hours in the fridge",
+                "first loaf was a brick",
+                "fancy flour"
+              ]
+            }
+          },
+          {
+            "id": "cli_18",
+            "name": "render_draft",
+            "args": {}
+          }
+        ]
+      },
+      "lastMessage": "set_cut,set_gap_cap,add_caption_correction,add_caption_correction,list_library,list_library,list_library"
+    },
+    {
+      "response": {
+        "text": "Check the opening and the b-roll moments in the rendered draft.",
+        "toolCalls": [
+          {
+            "id": "cli_19",
+            "name": "look_at_frames",
+            "args": {
+              "times": [
+                1,
+                6,
+                9,
+                11
+              ],
+              "words": null
+            }
+          }
+        ]
+      },
+      "lastMessage": "choose_music,set_music_automation,add_broll,add_broll,add_broll,set_zoom,set_cover,write_post,render_draft"
+    },
+    {
+      "response": {
+        "text": "All four preview frames came back as plain red squares, so I can't confirm the face, b-roll or captions; I'll re-render and look again.",
+        "toolCalls": [
+          {
+            "id": "cli_20",
+            "name": "render_draft",
+            "args": {}
+          },
+          {
+            "id": "cli_21",
+            "name": "look_at_frames",
+            "args": {
+              "times": [
+                1,
+                6,
+                9,
+                11
+              ],
+              "words": null
+            }
+          }
+        ]
+      },
+      "lastMessage": "look_at_frames"
+    },
+    {
+      "response": {
+        "text": "The preview frames are plain red squares again, so I can't check them visually; the render reports no problems, so I'll finish and say so.",
+        "toolCalls": [
+          {
+            "id": "cli_22",
+            "name": "finish",
+            "args": {
+              "summary_for_user": "I kept your last clean take of the opening and cut the pauses so it moves fast. I added soft piano, a picture of the flour and of the loaf, a text card for 18 hours, a gentle zoom on the big line, and wrote your caption. The preview images wouldn't load for me, so please give the draft a quick watch to check the pictures and captions look right."
+            }
+          }
+        ]
+      },
+      "lastMessage": "render_draft,look_at_frames"
+    }
+  ]
+}

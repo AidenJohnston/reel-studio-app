@@ -1,0 +1,5 @@
+# Packages the BUNDLE adds on top of engine/requirements.txt (the engine's own pins).
+# pi-heif, NOT pillow-heif: pillow-heif's wheels bundle x265 (GPL-2.0+) and load it in-process. pi-heif is the
+# decode-only fork: its wheels contain only libheif + libde265 (both LGPL-3.0). Same register_heif_opener() API,
+# import name `pi_heif`. Verified 2026-10-17: no x265/aom/dav1d strings in the win_amd64 or macOS arm64 libheif.
+pi-heif==1.4.0

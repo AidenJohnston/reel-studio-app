@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../_lib/base.css">
+<style>
+  .shadow { filter: drop-shadow(0 calc(var(--k) * 16px) calc(var(--k) * 26px) rgba(0,0,0,0.32)); }
+  body.layout-full .shadow { filter: none; }
+  /* A tag: pointed left end with a punched hole. */
+  .tag {
+    position: relative; background: var(--card); color: var(--ink);
+    padding: calc(var(--k) * 40px) calc(var(--k) * 64px) calc(var(--k) * 44px) calc(var(--k) * 150px);
+    clip-path: polygon(calc(var(--k) * 70px) 0, 100% 0, 100% 100%, calc(var(--k) * 70px) 100%, 0 50%);
+    -webkit-mask: radial-gradient(circle at calc(var(--k) * 66px) 50%, transparent calc(var(--k) * 17px), #000 calc(var(--k) * 18px));
+            mask: radial-gradient(circle at calc(var(--k) * 66px) 50%, transparent calc(var(--k) * 17px), #000 calc(var(--k) * 18px));
+    border-radius: 0 calc(var(--k) * 34px) calc(var(--k) * 34px) 0;
+    display: flex; flex-direction: column; align-items: flex-start; min-width: calc(var(--k) * 560px); max-width: var(--maxw);
+  }
+  body.layout-full.theme-light .tag { background: #FFFFFF; }
+  .name { font-weight: 700; font-size: calc(var(--k) * 54px); color: var(--muted); letter-spacing: 0.01em; margin-bottom: calc(var(--k) * 6px); }
+  .old { position: relative; display: inline-block; font-weight: 700; color: var(--muted); font-size: calc(var(--k) * 92px); line-height: 1; letter-spacing: -0.02em; }
+  .strike { position: absolute; left: -4%; right: -4%; top: 52%; height: calc(var(--k) * 12px); border-radius: 99px; background: #E0362C; transform-origin: 0 50%; transform: rotate(-8deg) scaleX(0); }
+  body.theme-accent .strike { background: var(--ink); }
+  .price { font-weight: 700; color: var(--hl); font-size: calc(var(--k) * 196px); line-height: 0.98; letter-spacing: -0.035em; white-space: nowrap; }
+  .per { font-weight: 600; color: var(--ink); font-size: calc(var(--k) * 62px); margin-top: calc(var(--k) * 8px); text-wrap: balance; }
+  body.layout-full .price { font-size: calc(var(--k) * 240px); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="content"></div></div>
+<script src="../_lib/runtime.js"></script>
+<script>
+  RS.define({
+    fonts: ['700 196px Inter', '600 54px Inter'],
+    tilt: -3,
+    duration: (p) => (p.oldValue ? 3.2 : 2.6),
+    build(p, ctx) {
+      ctx.content.innerHTML = `
+        <div class="shadow" id="slide"><div class="tag" id="tag">
+          ${p.name ? `<div class="name">${RS.escapeHtml(p.name)}</div>` : ''}
+          ${p.oldValue ? `<div class="old num" id="old">${RS.escapeHtml(p.oldValue)}<div class="strike" id="strike"></div></div>` : ''}
+          <div class="price num" id="price">${RS.escapeHtml(p.value)}</div>
+          ${p.text ? `<div class="per" id="per">${RS.escapeHtml(p.text)}</div>` : ''}
+        </div></div>`;
+      ctx.slide = document.getElementById('slide');
+      ctx.strike = document.getElementById('strike');
+      ctx.price = document.getElementById('price');
+      ctx.per = document.getElementById('per');
+    },
+    seek(t, p, ctx) {
+      // the tag slides in from the right: opaque on its first frame, settled in ~0.26 s
+      RS.applyPop(ctx.slide, RS.pop(t, 0, { dur: 0.26, from: 0.96, dy: 0, dx: 160, overshoot: 1.0 }));
+      const strikeAt = Number(p.strikeAt) >= 0 ? Number(p.strikeAt) : 0.35;
+      const priceAt = p.oldValue ? strikeAt + 0.28 : 0;
+      if (ctx.strike) {
+        const q = RS.ease.outCubic(RS.prog(t, strikeAt, 0.16));
+        ctx.strike.style.transform = `rotate(-8deg) scaleX(${q.toFixed(4)})`;
+      }
+      RS.applyPop(ctx.price, p.oldValue ? RS.pop(t, priceAt, { dur: 0.22, from: 0.7, dy: 0, overshoot: 2.0 }) : { opacity: 1, transform: 'none' });
+      if (ctx.per) RS.applyPop(ctx.per, RS.pop(t, priceAt + 0.12, { dur: 0.18, from: 1, dy: 14 }));
+    },
+  });
+</script>
+</body>
+</html>

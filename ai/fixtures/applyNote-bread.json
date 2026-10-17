@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "recordedWith": {
+    "provider": "claude-cli",
+    "model": "claude-sonnet-5-5"
+  },
+  "task": "applyNote-bread",
+  "createdAt": "2026-10-17T05:44:02.801Z",
+  "steps": [
+    {
+      "response": {
+        "text": "I need to read the project and transcript to find the words about the fridge before changing the music.",
+        "toolCalls": [
+          {
+            "id": "cli_23",
+            "name": "get_project",
+            "args": {}
+          },
+          {
+            "id": "cli_24",
+            "name": "get_transcript",
+            "args": {}
+          }
+        ]
+      },
+      "lastMessage": "user"
+    },
+    {
+      "response": {
+        "text": "The fridge line is w48 to w52, so I'll dip the music there and save the general preference about quieter music under voice.",
+        "toolCalls": [
+          {
+            "id": "cli_25",
+            "name": "set_music_automation",
+            "args": {
+              "automation": [
+                {
+                  "fromWord": "w48",
+                  "toWord": "w52",
+                  "gainDb": -7
+                }
+              ]
+            }
+          },
+          {
+            "id": "cli_26",
+            "name": "add_style_rule",
+            "args": {
+              "rule": "Keep music quieter under my voice."
+            }
+          },
+          {
+            "id": "cli_27",
+            "name": "render_draft",
+            "args": {}
+          }
+        ]
+      },
+      "lastMessage": "get_project,get_transcript"
+    },
+    {
+      "response": {
+        "text": "The music dip is in place and the draft rendered, so I'll finish since this change is audio only and has nothing to check visually.",
+        "toolCalls": [
+          {
+            "id": "cli_28",
+            "name": "finish",
+            "args": {
+              "summary_for_user": "I turned the music down while you talk about the fridge so your voice comes through clearly. I'll remember that for next time."
+            }
+          }
+        ]
+      },
+      "lastMessage": "set_music_automation,add_style_rule,render_draft"
+    }
+  ]
+}
