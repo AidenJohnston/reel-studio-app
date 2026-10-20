@@ -27,7 +27,10 @@ export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;
   reelStudioRoot(): string;
+  /** Screenshot of a web page into outPath (PNG). Only the Electron app has one (offscreen window). */
+  captureWebsite?(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop' }): Promise<CaptureResult>;
 }
+export interface CaptureResult { path: string; url: string; site: string; title: string; width: number; height: number }
 
 export type ProviderId = 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none';
 export interface ProviderStatus { id: ProviderId; connected: boolean; label: string; detail?: string; error?: UserFacingError }

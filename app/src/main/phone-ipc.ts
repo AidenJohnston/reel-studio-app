@@ -4,6 +4,7 @@ import { BrowserWindow, ShareMenu, shell, type IpcMainInvokeEvent } from 'electr
 import { realpathSync, statSync } from 'node:fs'
 import { basename, extname, resolve, sep } from 'node:path'
 import type { PhoneEvent, PhoneShare } from '../shared/api'
+import { PHONE_WAIT_MS } from '../shared/phone-help'
 import { lanAddresses, startShare, type LanAddress, type ShareServer } from './phone-share'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -86,7 +87,7 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
     }
     current = s
     d.log(`[phone] link open on ${pick.name} for 15 minutes`) // no token, no file name
-    const wait = Number(d.test ? process.env.REELSTUDIO_PHONE_WAIT_MS : '') || 60_000
+    const wait = Number(d.test ? process.env.REELSTUDIO_PHONE_WAIT_MS : '') || PHONE_WAIT_MS
     return {
       url: s.url,
       address: pick.address,

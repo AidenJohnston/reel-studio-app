@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { AppInfo } from '../../../shared/api'
 import { RELEASES_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
@@ -9,6 +10,22 @@ import { useNotify } from '../App'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
   const notify = useNotify()
+  const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null)
+  useEffect(() => {
+    reel.update
+      .status()
+      .then((st) => setCheckUpdates(st.enabled))
+      .catch(() => {})
+  }, [])
+  const toggleUpdates = async (on: boolean) => {
+    setCheckUpdates(on)
+    try {
+      setCheckUpdates((await reel.update.setEnabled(on)).enabled)
+    } catch (e) {
+      setCheckUpdates(!on)
+      notify(userMessage(e), 'error')
+    }
+  }
 
   const change = async () => {
     const p = await reel.app.chooseFolder()
@@ -71,8 +88,19 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <p className="muted" style={{ marginTop: 6 }}>
           Reel Studio {info.version}. Free and open source (MIT). No accounts, no tracking.
         </p>
+        {checkUpdates !== null && (
+          <>
+            <label className="toggle" style={{ marginTop: 12 }}>
+              <input type="checkbox" checked={checkUpdates} onChange={(e) => void toggleUpdates(e.target.checked)} data-testid="check-updates" />
+              Check for updates
+            </label>
+            <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
+              Once a day, Reel Studio asks GitHub if there is a newer version. Nothing about you or your videos is sent.
+            </p>
+          </>
+        )}
         <div className="row" style={{ marginTop: 12 }}>
-          {/* Opens in the browser (window open handler); the app never checks for updates on its own. */}
+          {/* Opens the releases page in the browser (window open handler). The automatic check is main/update-check.ts. */}
           <a className="btn ghost" href={RELEASES_URL} target="_blank" rel="noreferrer">
             <Icon name="external" size={16} /> Check for a newer version
           </a>

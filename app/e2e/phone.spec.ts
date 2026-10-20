@@ -118,6 +118,7 @@ test('send to my phone: QR link, phone fetch, Sent!, fallbacks', async () => {
   expect(url2).not.toBe(url) // a fresh one-time link
   await expect(page.getByTestId('phone-fallbacks')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Email it to yourself')
+  await expect(page.getByTestId('phone-why')).toHaveText('School, work and hotel Wi-Fi often block this. Use one of these instead:')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('iCloud Drive')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Use a cable')
   if (process.platform === 'darwin') await expect(page.getByTestId('phone-airdrop')).toBeVisible()

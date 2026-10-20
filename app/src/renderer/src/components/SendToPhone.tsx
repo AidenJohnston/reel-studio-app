@@ -1,8 +1,10 @@
 // "Send to my phone": the finished video is on the computer, Instagram is on the phone. A QR code opens
 // the video on the phone (over the home Wi-Fi, from a temporary link only this video answers on), and
-// if the phone cannot reach it, plain fallbacks: email, iCloud/Google Drive, a cable, AirDrop on a Mac.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+// if the phone cannot reach it (school, work and hotel Wi-Fi often block it), plain fallbacks, best first:
+// AirDrop on a Mac, iCloud/Google Drive, email, a cable (order in shared/phone-help.ts).
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PhoneShare } from '../../../shared/api'
+import { fallbackOrder, PHONE_HELP, waitForPhone, type PhoneFallback } from '../../../shared/phone-help'
 import { qrSvg } from '../../../shared/qr'
 import { reel, userMessage } from '../api'
 import { Icon } from './icons'
@@ -119,17 +121,93 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
     []
   )
 
-  // No visit a minute after the code appeared: the phone probably cannot reach this computer.
+  // No visit ~20 seconds after the code appeared: the phone probably cannot reach this computer (school,
+  // work and hotel Wi-Fi). Cancelled when the phone opens the page, the link stops, a new code is made
+  // (share goes back to null) or the panel closes, so it never sets state after unmount.
   useEffect(() => {
-    if (!share || sent) return
-    const t = setTimeout(() => {
-      if (!sentRef.current) setHelp(true)
-    }, share.waitMs)
-    return () => clearTimeout(t)
-  }, [share, sent])
+    if (!share || sent || stopped) return
+    return waitForPhone(share.waitMs, () => {
+      if (!sentRef.current && mounted.current) setHelp(true)
+    })
+  }, [share, sent, stopped])
 
   const others = share?.addresses ?? []
   const big = (share?.size ?? 0) > EMAIL_LIMIT
+
+  // The other ways, rendered in fallbackOrder(): AirDrop first on a Mac, a drive first on Windows.
+  const ways: Record<PhoneFallback, ReactNode> = {
+    airdrop: (
+      <div className="phone-way">
+        <Glyph name="phone" />
+        <div>
+          <b>AirDrop</b> (iPhone or iPad near this Mac)
+          <p className="muted-sm">Click Share, choose AirDrop, then pick your phone. Tap Accept on the phone.</p>
+        </div>
+        <button className="btn small" onClick={() => void reel.phone.shareSheet(video)} data-testid="phone-airdrop">
+          Share
+        </button>
+      </div>
+    ),
+    cloud: (
+      <div className="phone-way">
+        <Glyph name="cloud" />
+        <div>
+          <b>Put it in iCloud Drive or Google Drive</b>
+          <p className="muted-sm">
+            Upload the video at icloud.com/iclouddrive or drive.google.com (the buttons open them). Then open the Files app (iPhone) or Drive app (Android) on your phone and save it from there.
+          </p>
+        </div>
+        <div className="stack" style={{ gap: 6 }}>
+          <a className="btn small" href={ICLOUD_URL} target="_blank" rel="noreferrer" data-testid="phone-icloud">
+            iCloud Drive
+          </a>
+          <a className="btn small" href={GDRIVE_URL} target="_blank" rel="noreferrer" data-testid="phone-gdrive">
+            Google Drive
+          </a>
+        </div>
+      </div>
+    ),
+    email: (
+      <div className="phone-way">
+        <Glyph name="mail" />
+        <div>
+          <b>Email it to yourself</b>
+          <p className="muted-sm">
+            I'll start an email and open {FOLDER_APP} with your video. Drag the video into the email, send it to yourself, then open it on your phone.
+            {share && (big ? ` Your video is ${mb(share.size)}, which is probably too big for email (most allow about 20 MB). Use iCloud Drive or Google Drive instead.` : ` Your video is ${mb(share.size)}.`)}
+          </p>
+          {emailed && (
+            <p className="muted-sm" data-testid="phone-emailed">
+              Your email app should be open now.
+            </p>
+          )}
+        </div>
+        <button
+          className="btn small"
+          onClick={async () => {
+            await reel.phone.emailSelf(video)
+            setEmailed(true)
+          }}
+          data-testid="phone-email"
+        >
+          Email
+        </button>
+      </div>
+    ),
+    cable: (
+      <div className="phone-way">
+        <Glyph name="cable" />
+        <div>
+          <b>Use a cable</b>
+          <p className="muted-sm">
+            <b>Android:</b> plug the phone in, unlock it, choose "File transfer", then drag the video into its Movies folder.
+            <br />
+            <b>iPhone:</b> a cable is the hard way. iCloud Drive or email is quicker.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="stack send-phone" data-testid="send-to-phone">
@@ -237,72 +315,20 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
 
       {help && (
         <div className="phone-fallbacks" data-testid="phone-fallbacks">
-          <h3>{sent ? 'Other ways to get it on your phone' : "Phone can't open it? Other ways:"}</h3>
-          {IS_MAC && (
-            <div className="phone-way">
-              <Glyph name="phone" />
-              <div>
-                <b>AirDrop</b> (iPhone or iPad near this Mac)
-                <p className="muted-sm">Click Share, choose AirDrop, then pick your phone. Tap Accept on the phone.</p>
-              </div>
-              <button className="btn small" onClick={() => void reel.phone.shareSheet(video)} data-testid="phone-airdrop">
-                Share
-              </button>
+          {sent || error ? (
+            <h3>{PHONE_HELP.other}</h3>
+          ) : (
+            // The Wi-Fi reason is only true while the page has not opened; once it has, only the heading stays.
+            <div>
+              <h3>{PHONE_HELP.title}</h3>
+              <p className="muted-sm" data-testid="phone-why">
+                {PHONE_HELP.why}
+              </p>
             </div>
           )}
-          <div className="phone-way">
-            <Glyph name="mail" />
-            <div>
-              <b>Email it to yourself</b>
-              <p className="muted-sm">
-                I'll start an email and open {FOLDER_APP} with your video. Drag the video into the email, send it to yourself, then open it on your phone.
-                {share && (big ? ` Your video is ${mb(share.size)}, which is probably too big for email (most allow about 20 MB). Use a drive below instead.` : ` Your video is ${mb(share.size)}.`)}
-              </p>
-              {emailed && (
-                <p className="muted-sm" data-testid="phone-emailed">
-                  Your email app should be open now.
-                </p>
-              )}
-            </div>
-            <button
-              className="btn small"
-              onClick={async () => {
-                await reel.phone.emailSelf(video)
-                setEmailed(true)
-              }}
-              data-testid="phone-email"
-            >
-              Email
-            </button>
-          </div>
-          <div className="phone-way">
-            <Glyph name="cloud" />
-            <div>
-              <b>Put it in iCloud Drive or Google Drive</b>
-              <p className="muted-sm">
-                Upload the video at icloud.com/iclouddrive or drive.google.com (the buttons open them). Then open the Files app (iPhone) or Drive app (Android) on your phone and save it from there.
-              </p>
-            </div>
-            <div className="stack" style={{ gap: 6 }}>
-              <a className="btn small" href={ICLOUD_URL} target="_blank" rel="noreferrer" data-testid="phone-icloud">
-                iCloud Drive
-              </a>
-              <a className="btn small" href={GDRIVE_URL} target="_blank" rel="noreferrer" data-testid="phone-gdrive">
-                Google Drive
-              </a>
-            </div>
-          </div>
-          <div className="phone-way">
-            <Glyph name="cable" />
-            <div>
-              <b>Use a cable</b>
-              <p className="muted-sm">
-                <b>Android:</b> plug the phone in, unlock it, choose "File transfer", then drag the video into its Movies folder.
-                <br />
-                <b>iPhone:</b> a cable is the hard way. Email or iCloud Drive is quicker.
-              </p>
-            </div>
-          </div>
+          {fallbackOrder(IS_MAC).map((way) => (
+            <Fragment key={way}>{ways[way]}</Fragment>
+          ))}
         </div>
       )}
 

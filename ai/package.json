@@ -1,13 +1,18 @@
 {
   "name": "@reelstudio/ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "description": "Reel Studio AI editor: providers, prompts, tools, agent loop.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "reelstudio-ai": "./dist/cli.js" },
-  "files": ["dist", "prompts"],
+  "bin": {
+    "reelstudio-ai": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "prompts"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",

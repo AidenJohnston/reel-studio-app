@@ -98,6 +98,12 @@ a { color: inherit; }
 .sidebar-foot { margin-top: auto; padding: 10px 12px; font-size: 13.5px; color: var(--ink-3); }
 .ai-on { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); }
 .dot-on { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+/* "Reel Studio 0.1.1 is out." (components/UpdateNotice.tsx): quiet, in the sidebar, never over the work. */
+.update-card { margin-top: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); display: flex; flex-direction: column; gap: 4px; }
+.update-card + .sidebar-foot { margin-top: 0; }
+.update-text { font-size: 14px; font-weight: 600; color: var(--ink); }
+.update-sub { font-size: 13px; color: var(--ink-3); }
+.update-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 
 .main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; position: relative; padding-top: var(--titlebar); }
 .page { max-width: 1120px; margin: 0 auto; padding: 14px 40px 60px; }

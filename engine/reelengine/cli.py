@@ -118,8 +118,53 @@ def cmd_search_images(args):
     from . import assets
     query = args.query or " ".join(args.words or [])
     progress("search", 10, "Looking for pictures", force=True)
-    results = assets.search_images(query, n=args.n)
-    return {"query": query, "results": results}
+    found = assets.search(query, n=args.n, copyrighted=True if args.copyrighted else None)
+    res = {"query": query, "results": found["results"], "plan": found["plan"]}
+    if found.get("website"):
+        res["website"] = found["website"]
+    return res
+
+
+def _thumb(proj: Path, out: Path) -> str | None:
+    """A small still the AI LOOKS at before placing a picture: a matching title can hide a wrong one."""
+    try:
+        from PIL import Image
+        tdir = proj / "work" / "thumbs"
+        tdir.mkdir(parents=True, exist_ok=True)
+        with Image.open(out) as im:
+            im = im.convert("RGBA")
+            bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+            bg.alpha_composite(im)
+            bg = bg.convert("RGB")
+            bg.thumbnail((320, 320))
+            thumb = tdir / f"{out.stem}.jpg"
+            bg.save(thumb, "JPEG", quality=80)
+        return str(thumb)
+    except Exception as e:  # noqa: BLE001 -- a missing thumbnail never costs the picture
+        from .compose_util import log
+        log(f"no thumbnail for {out.name}: {e}")
+        return None
+
+
+def cmd_register_capture(args):
+    """A website screenshot the app captured into <project>/work/assets: record its credit
+    ("Screenshot of <site>") in credits.json and make the still the AI looks at."""
+    from . import assets
+    from .safepath import safe_child
+    proj = _project(args)
+    rel = (args.asset or "").replace("\\", "/")
+    if not rel.startswith("work/assets/") or "/" in rel[len("work/assets/"):]:
+        raise EngineError("BAD_ARGS", f"register-capture: bad asset {args.asset!r}",
+                          "Reel Studio lost track of that screenshot. Please try again.")
+    out = safe_child(proj / "work" / "assets", rel[len("work/assets/"):], "image")
+    if not out.is_file():
+        raise EngineError("NOT_FOUND", f"register-capture: {out} missing", "The screenshot wasn't saved. Please try again.")
+    credit = assets.register_capture(out, args.url, args.title)
+    res = {"asset": rel, "path": str(out), "credit": credit}
+    thumb = _thumb(proj, out)
+    if thumb:
+        res["thumb"] = thumb
+    return res
 
 
 def cmd_fetch_image(args):
@@ -142,23 +187,9 @@ def cmd_fetch_image(args):
     res = {"path": str(out), "url": url}
     if proj:
         res["asset"] = _rel_to(out, proj)
-        # a small still the AI LOOKS at before placing it: a matching title can hide a wrong picture
-        try:
-            from PIL import Image
-            tdir = proj / "work" / "thumbs"
-            tdir.mkdir(parents=True, exist_ok=True)
-            with Image.open(out) as im:
-                im = im.convert("RGBA")
-                bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
-                bg.alpha_composite(im)
-                bg = bg.convert("RGB")
-                bg.thumbnail((320, 320))
-                thumb = tdir / f"{out.stem}.jpg"
-                bg.save(thumb, "JPEG", quality=80)
-            res["thumb"] = str(thumb)
-        except Exception as e:  # noqa: BLE001 -- a missing thumbnail never costs the download
-            from .compose_util import log
-            log(f"no thumbnail for {out.name}: {e}")
+        thumb = _thumb(proj, out)
+        if thumb:
+            res["thumb"] = thumb
     return res
 
 
@@ -313,7 +344,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("search-images", cmd_search_images, "find freely licensed pictures on the web")
     sp.add_argument("--query")
     sp.add_argument("--n", type=int, default=8)
+    sp.add_argument("--copyrighted", action="store_true",
+                    help="also posters/stills of shows and films (copyrighted; labelled as such)")
     sp.add_argument("words", nargs="*")
+    sp = add("register-capture", cmd_register_capture, "credit a website screenshot saved in work/assets")
+    sp.add_argument("--asset", required=True)
+    sp.add_argument("--url", required=True)
+    sp.add_argument("--title")
     sp = add("fetch-image", cmd_fetch_image, "download a picture into the project")
     sp.add_argument("--url")
     sp.add_argument("url_pos", nargs="?")

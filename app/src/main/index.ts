@@ -40,6 +40,7 @@ import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
+import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
@@ -49,6 +50,7 @@ import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
+import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -94,6 +96,7 @@ const runEngine: RunEngine = createEngineRunner({
 const host: EngineHost = {
   runEngine,
   renderAnimation: (template, params, outPath) => renderAnimation(template, params, outPath),
+  captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
   reelStudioRoot
 }
 
@@ -132,6 +135,18 @@ const jobs = createJobManager(
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
+// "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
+const updates = createUpdateService({
+  active: !TEST,
+  version: app.getVersion(),
+  load: loadSettings,
+  save: saveSettings,
+  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
+  now: () => Date.now(),
+  log,
+  openExternal: (url) => shell.openExternal(url),
+  send: (n) => broadcast('update:change', n)
+})
 
 // ---- helpers ------------------------------------------------------------------------------------
 type Handler = (e: IpcMainInvokeEvent, ...args: any[]) => unknown
@@ -507,6 +522,11 @@ function registerIpc(): void {
     return ai.writeScript(String(idea), () => {})
   })
 
+  handle('update:status', () => updates.status())
+  handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
+  handle('update:open', (_e, url: unknown) => updates.open(url))
+  handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
+
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
     if (template) return host.renderAnimation(template, params ?? {}, outPath)
@@ -592,6 +612,7 @@ app.whenReady().then(async () => {
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()
   createWindow()
+  updates.start() // a few seconds after the window, so launch is never slower
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

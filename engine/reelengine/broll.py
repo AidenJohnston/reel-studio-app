@@ -23,7 +23,9 @@ House rules carried over from the original pipeline (general taste, not brand):
     treatments that hide the speaker on purpose (full-frame, post-wall, split-top); cards may cover
     hair, the forehead down to just above the brows, and the sides of the head
   * sized to read on a phone: a card with text is >= 55% of the frame wide (logos/icons smaller);
-    it sits as low as the brow line allows; split view only when nothing readable fits
+    it sits as low as the brow line allows; a text card is cropped to its words first (only plain
+    margins / flat blocks go, and the floor shrinks with the width dropped, so the words stay as
+    big); then over the hair on one side; split view only when nothing readable fits
   * no blurred backdrops behind anything
   * a gap under ~0.22 s between two b-roll windows flashes the bare face: close it
 """
@@ -61,7 +63,7 @@ except ImportError:  # pragma: no cover - only before A1's render_ctx exists
         fade_in: float = 0.0
         fade_out: float = 0.0
 
-VERSION = 7                    # bump when drawing code changes so cached files are redrawn
+VERSION = 8                    # bump when drawing code changes so cached files are redrawn
 LEAD = 0.13
 MIN_GAP = 0.22
 STILL_MIN_HOLD = 2.0
@@ -76,6 +78,7 @@ ICON_MIN_WIDTH = 0.22          # a logo / cut-out / tiny asset: >= 22% wide (~24
 ICON_MIN_AREA = 0.035          # ...and this fraction of the frame (a ~270 px square logo at 1080x1920)
 UPPER_SIDE_WIDTH = 0.70        # side card over the hair: the half of the top band on its side
 UPPER_SIDE_MIN_WIDTH = 0.40    # ...and a text card there must still be this wide
+TEXT_MIN_WIDTH_FLOOR = 0.30    # a text card cropped to its words may shrink its floor, never below this
 MIN_PHONE_WIDTH = 0.30         # phone screen width, fraction of frame width
 SIDE_MIN_WIDTH = ICON_MIN_WIDTH   # side card beside the face: at least this fraction of the frame wide...
 SIDE_MIN_AREA = ICON_MIN_AREA     # ...and this fraction of its area
@@ -716,10 +719,20 @@ def _load_still(ctx, path: Path, params: Optional[dict] = None) -> dict:
         content = "logo" if params["iconic"] else "text"
     else:
         content = "logo" if cut else placement.content_kind(img)
-    box = placement.subject_box(img, content) if params.get("crop", True) is not False else None
+    box, tscale = None, 1.0
+    if params.get("crop", True) is not False:
+        box = placement.text_box(img) if content == "text" and not cut else placement.subject_box(img, content)
     if box:
+        if content == "text":                      # the same words on a narrower card: same size
+            tscale = (box[2] - box[0]) / img.width
         img = img.crop(box)
-    return {"image": img, "cutout": cut, "content": content, **({"crop": list(box)} if box else {})}
+    return {"image": img, "cutout": cut, "content": content, **({"crop": list(box)} if box else {}),
+            **({"textScale": round(tscale, 4)} if tscale < 1.0 else {})}
+
+
+def text_scale(st: Optional[dict]) -> float:
+    """How much narrower a text card is than the image it was cropped from (1.0 = uncropped)."""
+    return float((st or {}).get("textScale") or 1.0)
 
 
 def is_photo(st: Optional[dict], params: dict) -> bool:
@@ -732,6 +745,7 @@ def _content_rec(st: Optional[dict]) -> dict:
     if not st:
         return {}
     return {"content": st.get("content"), **({"crop": st["crop"]} if st.get("crop") else {}),
+            **({"textScale": st["textScale"]} if st.get("textScale") else {}),
             **({"aspectCrop": st["aspectCrop"]} if st.get("aspectCrop") else {})}
 
 
@@ -751,7 +765,7 @@ def _refit_photo(st: Optional[dict], zone: Optional[dict], W: int, H: int, param
 def _side_fit(zones, side, st, aspect, W, H, tilt, iconic, params):
     """side_card_fit, and for a photo that doesn't read there, the same with the photo cropped to
     the side zone's shape. -> (fit, st, aspect)."""
-    fit = side_card_fit(zones, side, aspect, W, H, tilt, iconic, photo=is_photo(st, params))
+    fit = side_card_fit(zones, side, aspect, W, H, tilt, iconic, photo=is_photo(st, params), tscale=text_scale(st))
     if not fit["ok"]:
         st2 = _refit_photo(st, fit["zone"] or _side_zone(zones, side), W, H, params)
         if st2 is not None:
@@ -774,10 +788,12 @@ def is_iconic(st: Optional[dict], W: int, params: dict) -> bool:
 
 
 def readable(cw: float, ch: float, W: int, H: int, iconic: bool, params: dict, scale: float = 1.0,
-             min_width: Optional[float] = None, photo: bool = False) -> bool:
+             min_width: Optional[float] = None, photo: bool = False, tscale: float = 1.0) -> bool:
     """Is a cw x ch card big enough to read on a phone? Text cards: >= CARD_MIN_WIDTH of the frame
     wide (or params.minWidth); icons: >= ICON_MIN_WIDTH wide and ICON_MIN_AREA of the frame. A
-    deliberate scale < 1 lowers the floor with it."""
+    deliberate scale < 1 lowers the floor with it. `tscale` < 1 = a text card cropped to its words
+    (placement.text_box): the floor shrinks with it, so its words render exactly as big as on the
+    whole image at the full floor (never below TEXT_MIN_WIDTH_FLOOR)."""
     s = min(1.0, float(scale))
     if iconic:
         return cw >= ICON_MIN_WIDTH * W * s and cw * ch >= ICON_MIN_AREA * W * H * s * s
@@ -785,6 +801,8 @@ def readable(cw: float, ch: float, W: int, H: int, iconic: bool, params: dict, s
     mw = float(mw) if mw is not None else (min_width if min_width is not None else CARD_MIN_WIDTH)
     if photo and params.get("minWidth") is None:       # a picture reads smaller than words
         mw = min(mw, placement.PHOTO_MIN_WIDTH)
+    elif tscale < 1.0 and params.get("minWidth") is None:
+        mw = max(min(mw, TEXT_MIN_WIDTH_FLOOR), mw * tscale)
     return cw >= mw * W * s - 0.5
 
 
@@ -802,7 +820,8 @@ def _t_card(ctx, plan, params, kind, src, zones, face, frame, where="above-face"
         st = _load_still(ctx, src, params)
         canvas, x, y, (cw, ch) = _card_layout(ctx, st, zone, tilt, scale, maxw, face, radius,
                                               shadow=bool(params.get("shadow", True)), low=low)
-        ok = readable(cw, ch, W, H, is_iconic(st, W, params), params, scale, photo=is_photo(st, params))
+        ok = readable(cw, ch, W, H, is_iconic(st, W, params), params, scale, photo=is_photo(st, params),
+                      tscale=text_scale(st))
         st2 = None if ok else _refit_photo(st, zone, W, H, params)
         if st2 is not None:                  # a photo cropped to the room's shape may read there
             c2 = _card_layout(ctx, st2, zone, tilt, scale, maxw, face, radius,
@@ -850,12 +869,26 @@ def _card_fallback(ctx, plan, params, kind, src, zones, face, frame, aspect, ico
         tilt = abs(float(params.get("tilt", 2.0))) if kind == "image" else 0.0
         fit, _st, _a = _side_fit(zones, "auto", st, aspect, W, H, tilt, iconic, params)
         if fit["ok"] and readable(fit["w"], fit["h"], W, H, iconic, params, min_width=UPPER_SIDE_MIN_WIDTH,
-                                  photo=photo):
+                                  photo=photo, tscale=text_scale(st)):
             layers, rec = _t_side(ctx, plan, {k: v for k, v in params.items() if k not in ("side", "maxWidth")},
                                   kind, src, zones, face, frame, allow_upper=False)
             rec["fallback"] = "too tall to read above the head; shown beside the face instead"
             rec["fallbackTreatment"] = "side-card"
             return layers, rec
+    if kind == "image" and st is not None:
+        # over the hair on one side of the top band, as low as the brows allow: the spot a side card
+        # takes when the strip beside a close-up face is too narrow (same readable floor)
+        tilt0 = abs(float(params.get("tilt", 2.5)))
+        side = "right" if face[0] + face[2] / 2 < W / 2 else "left"     # the side with more room
+        for sd in (side, "left" if side == "right" else "right"):
+            up = _upper_side(ctx, plan, {k: v for k, v in params.items() if k not in ("side", "maxWidth")},
+                             kind, src, zones, face, frame, st, aspect, tilt0, sd)
+            if up is not None:
+                layers, rec = up
+                rec.pop("note", None)               # moved and smaller than asked: the render result says so
+                rec["fallback"] = (f"too big to read centred above the face; shown a little smaller over the hair "
+                                   f"on the {sd} instead")
+                return layers, rec
     layers, rec = _t_split(ctx, plan, params, kind, src, zones, face, frame)
     rec["fallback"] = "too small to read above the face; shown above the speaker instead"
     rec["fallbackTreatment"] = "split-top"
@@ -873,7 +906,7 @@ def _side_zone(zones, side: str):
 
 
 def side_card_fit(zones, side: str, aspect: float, W: int, H: int, tilt: float = 2.0,
-                  iconic: bool = True, photo: bool = False) -> dict:
+                  iconic: bool = True, photo: bool = False, tscale: float = 1.0) -> dict:
     """Where a side card would go and whether it reads: {"zone", "side", "w", "h", "ok", "why"}.
     `side` is left | right | auto (auto = the side giving the bigger card). Readable = at least
     SIDE_MIN_WIDTH of the frame wide and SIDE_MIN_AREA of its area: a card squeezed into the strip
@@ -891,8 +924,8 @@ def side_card_fit(zones, side: str, aspect: float, W: int, H: int, tilt: float =
     ok = best["zone"] is not None and best["w"] >= SIDE_MIN_WIDTH * W and \
         best["w"] * best["h"] >= SIDE_MIN_AREA * W * H
     if ok and not iconic:          # a card with text must still read: no small still beside the face
-        ok = best["w"] >= (min(UPPER_SIDE_MIN_WIDTH, placement.PHOTO_MIN_WIDTH) if photo
-                           else UPPER_SIDE_MIN_WIDTH) * W
+        ok = readable(best["w"], best["h"], W, H, False, {}, min_width=UPPER_SIDE_MIN_WIDTH, photo=photo,
+                      tscale=tscale)
     why = None
     if not ok:
         room = int(best["zone"]["w"]) if best["zone"] else 0
@@ -967,10 +1000,17 @@ def _upper_side(ctx, plan, params, kind, src, zones, face, frame, st, aspect, ti
         return None
     scale = float(params.get("scale", 1.0))
     gz = shadow_zone(z, W, H)
-    cw = fit_rotated(aspect, gz["w"], gz["h"], tilt0, _shadow_pad(0, W)) * min(1.0, scale)
-    if not readable(cw, cw / aspect, W, H, is_iconic(st, W, params) if st else bool(params.get("iconic")),
-                    params, scale, UPPER_SIDE_MIN_WIDTH, photo=is_photo(st, params)):
-        return None
+    iconic = is_iconic(st, W, params) if st else bool(params.get("iconic"))
+
+    def reads(a):
+        cw = fit_rotated(a, gz["w"], gz["h"], tilt0, _shadow_pad(0, W)) * min(1.0, scale)
+        return readable(cw, cw / a, W, H, iconic, params, scale, UPPER_SIDE_MIN_WIDTH, photo=is_photo(st, params),
+                        tscale=text_scale(st))
+    if not reads(aspect):
+        st2 = _refit_photo(st, z, W, H, params) if kind == "image" else None   # a tall photo: cover-crop it
+        if st2 is None or not reads(st2["image"].width / st2["image"].height):
+            return None
+        st, aspect = st2, st2["image"].width / st2["image"].height
     if kind == "video":
         layers, rec = _t_card(ctx, plan, {**params, "tilt": 0, "maxWidth": 1.0}, kind, src,
                               [{**z, "zone": "above-face"}], face, frame, where="upper")

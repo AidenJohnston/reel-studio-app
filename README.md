@@ -94,8 +94,13 @@ Nothing else is sent. With no AI connected, nothing is sent at all.
 
 Reel Studio itself makes only these other network requests, and only when you use the feature: the one-time
 speech model download from Hugging Face, image search (Openverse and Wikimedia Commons) and brand logos
-(Simple Icons) with the words the AI chose, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
+(Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
+
+One request happens without you asking: at most once a day it asks GitHub's public releases list
+(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`) whether a newer version is out, sending only a
+generic `User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so;
+nothing is downloaded or installed. Turn it off in Settings with "Check for updates".
 
 ## Build from source
 

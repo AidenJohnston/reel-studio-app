@@ -95,17 +95,21 @@ def score_frames(ctx, sid: str, times: list[float]) -> list[dict]:
         face = gray[max(0, int(y)): int(y + h), max(0, int(x)): int(x + w)]
         rows.append({"t": t, "det": round(conf, 3), "sharp": _sharpness(face) if face.size else 0.0,
                      "eyes": _eye_openness(gray, lm, w), "between": _between_words(ctx, sid, t),
-                     "faceArea": w * h})
+                     # the whole frame: a talking hand smeared across the chest blurs the cover
+                     # even when the face is sharp
+                     "still": _sharpness(gray), "faceArea": w * h})
     good = [r for r in rows if r.get("det")]
     if not good:
         return rows
-    for key in ("sharp", "eyes"):
+    for key in ("sharp", "eyes", "still"):
         vals = np.array([r[key] for r in good])
         hi = float(np.percentile(vals, 90)) or 1.0
         for r in good:
             r[key + "N"] = min(1.0, r[key] / hi)
     for r in good:
-        r["score"] = round(r["det"] * (0.45 * r["sharpN"] + 0.45 * r["eyesN"] + 0.10 * (1.0 if r["between"] else 0.0)), 4)
+        # between words = mouth closed or relaxed, never a mid-word smear
+        r["score"] = round(r["det"] * (0.35 * r["sharpN"] + 0.35 * r["eyesN"] + 0.10 * r["stillN"]
+                                       + 0.20 * (1.0 if r["between"] else 0.0)), 4)
     return rows
 
 
@@ -204,12 +208,29 @@ def cover_text_zone(zones: list, H: int) -> tuple:
     return dict(below, h=int(min(below["h"], COVER_BELOW_MAX * H))), "below"
 
 
+def _detect_face(bgr: np.ndarray):
+    """The face on the composed cover. At full size the detector can take a talking hand or the
+    microphone for a face (measured: a hand at 0.67 while the real face scored 0.92 at the size the
+    cover frames are scored at), which put the cover words on the chest. Detect at both sizes and
+    keep the surer one."""
+    import cv2
+    s = DETECT_W / bgr.shape[1]
+    small = None
+    if s < 1:
+        d = placement.detect_in_frame(cv2.resize(bgr, (DETECT_W, max(1, int(round(bgr.shape[0] * s))))))
+        if d:
+            small = dict(d, box=[v / s for v in d["box"]], core=[v / s for v in d["core"]] if d.get("core") else None)
+    full = placement.detect_in_frame(bgr)
+    cands = [d for d in (full, small) if d]          # a tie keeps the full-size box
+    return max(cands, key=lambda d: float(d.get("score") or 0.0)) if cands else None
+
+
 def _draw_text(ctx, img, text, src_bgr, W, H):
     from .broll import _place_in, _rotate, _text_image
     # Detect on the COMPOSED cover (output px), not the raw source: the cover is a face-centred crop
     # of the source, so source boxes mapped by a plain centre crop landed in the wrong place.
     composed = np.ascontiguousarray(np.array(img.convert("RGB"))[:, :, ::-1])
-    det = placement.detect_in_frame(composed)
+    det = _detect_face(composed)
     track = {"width": W, "height": H,
              "samples": [{"t": 0.0, "box": det["box"], "core": det.get("core")}] if det else []}
     zones = placement.safe_boxes(track, 0.0, {"width": W, "height": H, "captions": False})

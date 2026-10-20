@@ -199,7 +199,7 @@ small TypeScript project API and then ask the main process to re-render. The set
 `get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`,
 `set_gap_cap`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
-`remove_broll`, `search_images(query)` / `fetch_image(url)`, `make_animation(template, params)`, `set_zoom`,
+`remove_broll`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 
@@ -243,6 +243,9 @@ forehead down to just above the brows, and the sides of the head.
   tall asset that cannot read above the brows may go beside the face (at least 40% wide).
 - `side-card` sits beside the eyes-to-chin zone; with no readable room there it goes over the hair on its
   side; text cards stay at least 40% wide.
+- A text card is first cropped to its words (plain margins and empty blocks only; the readable floor shrinks
+  with the width dropped, never below 30%). A `card-above-head` that still can't read centred goes a little
+  smaller over the hair on one side.
 - Split view is the last resort, used only when even the relaxed zone leaves no readable placement; the render
   result reports every such fallback in plain words.
 - `full-frame`, `post-wall` and `split-top` cover or move the face on purpose.
@@ -269,6 +272,7 @@ export interface EngineHost {                                // implemented by t
   runEngine(command: string, args: string[], onProgress?: (p: { stage: string; pct: number; message: string }) => void,
             signal?: AbortSignal): Promise<any>;             // resolves with the engine's `done.result`, rejects with {code,userMessage}
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;
+  captureWebsite(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop' }): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>;
   reelStudioRoot(): string;                                  // <Documents>/Reel Studio
 }
 

@@ -54,10 +54,16 @@ def cm_page(i, title, lic, mime="image/jpeg", w=4000, h=3000, restrictions="", n
 class FakeNet:
     """Routes assets._get by host; records every URL asked for."""
 
-    def __init__(self, openverse=None, commons=None, svg=ZORBLAX_SVG, fail=()):
+    def __init__(self, openverse=None, commons=None, svg=ZORBLAX_SVG, fail=(), wikidata=None, files=None,
+                 wikipedia=None, tvmaze=None):
         self.openverse = openverse or (lambda q: [])
         self.commons = commons or (lambda q: [])
         self.svg, self.fail, self.urls = svg, set(fail), []
+        # wikidata: {Qid: entity}; wbsearchentities returns the ids whose label starts with the query
+        self.wikidata = wikidata or {}
+        self.files = files or {}                 # Commons "File:<name>" -> page (Wikidata P154/P18)
+        self.wikipedia = wikipedia or {}         # article title -> {"source", "width", "height"}
+        self.tvmaze = tvmaze or {}               # show name -> show JSON
 
     def __call__(self, url, accept="*/*", ua=None, timeout=30, limit=0, deadline=90.0):
         self.urls.append(url)
@@ -75,8 +81,36 @@ class FakeNet:
         if "openverse" in u.netloc:
             assert q["license"] == "cc0,pdm,by,by-sa"
             return json.dumps({"results": self.openverse(q["q"])}).encode(), "application/json"
+        if "commons.wikimedia" in u.netloc and "titles" in q:
+            pages = [self.files[t[5:]] for t in q["titles"].split("|") if t[5:] in self.files]
+            return json.dumps({"query": {"pages": pages}}).encode(), "application/json"
         if "commons.wikimedia" in u.netloc:
             return json.dumps({"query": {"pages": self.commons(q["gsrsearch"])}}).encode(), "application/json"
+        if "wikidata.org" in u.netloc:
+            if q.get("action") == "wbsearchentities":
+                hits = [{"id": k} for k, e in self.wikidata.items()
+                        if e["labels"]["en"]["value"].lower().startswith(q["search"].lower())]
+                return json.dumps({"search": hits}).encode(), "application/json"
+            if q.get("action") == "wbgetentities":
+                ids = q["ids"].split("|")
+                return json.dumps({"entities": {i: self.wikidata[i] for i in ids if i in self.wikidata}}).encode(), ""
+            if q.get("list") == "search":
+                assert "haswbstatement:P31=" in q["srsearch"]
+                return json.dumps({"query": {"search": []}}).encode(), "application/json"
+        if "en.wikipedia.org" in u.netloc:
+            img = self.wikipedia.get(q["titles"])
+            page = {"title": q["titles"], **({"original": img, "pageimage": "Poster.jpg"} if img else {})}
+            return json.dumps({"query": {"pages": [page]}}).encode(), "application/json"
+        if "api.tvmaze.com" in u.netloc:
+            if u.path == "/singlesearch/shows":
+                show = self.tvmaze.get(q["q"])
+                if not show:
+                    raise EngineError("HTTP_ERROR", "HTTP 404", "x")
+                return json.dumps(show).encode(), "application/json"
+            if u.path.endswith("/images"):
+                return json.dumps([{"type": "background", "resolutions": {"original": {
+                    "url": "https://static.tvmaze.com/uploads/images/original_untouched/1/2.jpg",
+                    "width": 1920, "height": 1080}}}, {"type": "poster"}]).encode(), "application/json"
         raise AssertionError(f"unexpected url {url}")
 
 
@@ -133,7 +167,7 @@ def test_plan_query_kinds(net):
     assert assets.plan_query("loneliness")["kind"] == "concept"
     assert assets.plan_query("studying")["kind"] == "concept"
     assert assets.plan_query("coffee cup photo") == {"kind": "object", "subject": "coffee cup", "logoIntent": False,
-                                                      "brand": None, "maybeBrand": False}
+                                                      "brand": None, "maybeBrand": False, "app": False}
     assert assets.plan_query("iPhone")["maybeBrand"]
 
 

@@ -37,6 +37,11 @@ export interface EngineHost {
   ): Promise<any>
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>
   reelStudioRoot(): string
+  captureWebsite?(
+    url: string,
+    outPath: string,
+    opts?: { layout?: 'phone' | 'desktop' }
+  ): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>
 }
 
 export interface ProviderStatus {

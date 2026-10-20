@@ -90,6 +90,79 @@ def stitch_numbers(words: list) -> list:
     return out
 
 
+_NUM_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * (i + 2) for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split())}
+# "one" is a pronoun far more often than a number ("the best one"): only these make it a count
+_ONE_AFTER = {"number", "step", "day", "part", "rule", "tip", "chapter", "level", "round", "reason", "top",
+              "season", "episode", "week", "phase", "lesson", "page"}
+
+
+def _num_value(core: str):
+    """'three' -> 3, 'twenty-five' -> 25, else None."""
+    c = core.lower()
+    if c in _NUM_WORDS:
+        return _NUM_WORDS[c]
+    if c in _TENS:
+        return _TENS[c]
+    m = re.fullmatch(r"([a-z]+)-([a-z]+)", c)
+    if m and m.group(1) in _TENS and m.group(2) in _NUM_WORDS and 0 < _NUM_WORDS[m.group(2)] < 10:
+        return _TENS[m.group(1)] + _NUM_WORDS[m.group(2)]
+    return None
+
+
+def _split(word: str):
+    m = re.match(r"^([^\w$%]*)([\w$][\w$%,.'’-]*?)([^\w$%]*)$", word.strip(), flags=re.U)
+    return m.groups() if m else ("", word.strip(), "")
+
+
+def digits_for_numbers(words: list) -> list:
+    """Numbers on screen are digits: "three" -> "3", "twenty five" -> "25", "64 %" / "64 percent" ->
+    "64%", "Number one" -> "Number 1". "one" stays a word unless it is clearly a count (after
+    "number"/"step"/..., or a list item opening a sentence: "One, ..."), so "the best one" is safe."""
+    out: list = []
+    i = 0
+    while i < len(words):
+        w = dict(words[i])
+        lead, core, tail = _split(w["w"])
+        val = _num_value(core)
+        prev = out[-1] if out else None
+        if val is not None and core.lower() == "one":
+            prev_core = _bare(prev["w"]).lower() if prev else ""
+            opens = prev is None or is_sentence_end(prev["w"])
+            nxt = _bare(words[i + 1]["w"]).lower() if i + 1 < len(words) else ""
+            if not (prev_core in _ONE_AFTER or (opens and tail[:1] in (",", ".", ":"))) or nxt == "of":
+                val = None
+        if val is not None:
+            # "twenty five" said as two words
+            if val in _TENS.values() and i + 1 < len(words) and not tail:
+                l2, c2, t2 = _split(words[i + 1]["w"])
+                v2 = _num_value(c2)
+                if not l2 and v2 is not None and 0 < v2 < 10:
+                    val += v2
+                    tail = t2
+                    w["e"] = words[i + 1]["e"]
+                    w["ids"] = w.get("ids", [w.get("id")]) + words[i + 1].get("ids", [words[i + 1].get("id")])
+                    i += 1
+            w["w"] = f"{lead}{val}{tail}"
+            core = str(val)
+        # "64 %" / "64 percent" -> "64%"
+        if re.fullmatch(r"[$€£]?\d[\d,.]*", core) and not tail and i + 1 < len(words):
+            l2, c2, t2 = _split(words[i + 1]["w"])
+            if (c2 == "%" or c2.lower() == "percent" or words[i + 1]["w"].strip().startswith("%")) and not l2:
+                rest = words[i + 1]["w"].strip()
+                t2 = rest[1:] if rest.startswith("%") else t2
+                w["w"] = f"{lead}{core}%{t2}"
+                w["e"] = words[i + 1]["e"]
+                w["ids"] = w.get("ids", [w.get("id")]) + words[i + 1].get("ids", [words[i + 1].get("id")])
+                i += 1
+        w.setdefault("ids", [w.get("id")])
+        out.append(w)
+        i += 1
+    return out
+
+
 def normalize_corrections(corrections) -> dict:
     """project.json's [{from, to}] -> {"single": {...}, "spans": [...]}"""
     single, spans = {}, []
@@ -381,6 +454,8 @@ def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, sta
     words = [{"s": w["s"], "e": w["e"], "w": w["w"], "id": w["id"]} for w in words_out]
     words = stitch_numbers(words)
     words = apply_corrections(words, normalize_corrections(cap.get("corrections")), stats)
+    if cap.get("digits", True):
+        words = digits_for_numbers(words)
     cues = []
     for run in split_runs(words):
         cues.extend(hold(chunk(run, max_words)))

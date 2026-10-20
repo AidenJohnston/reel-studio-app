@@ -505,7 +505,7 @@ def find_arrivals(curve: list, window: float, lookback: float = 30.0, top: int =
             for d, o, b, a in sorted(picked, key=lambda m: m[1])]
 
 
-ANALYSIS_VERSION = 2     # bump when analyze_track's output changes (the analysis cache key)
+ANALYSIS_VERSION = 3     # bump when analyze_track's output changes (the analysis cache key)
 
 
 def mood_of(energy: str, brightness: str, dynamic: bool, bpm) -> str:
@@ -561,6 +561,11 @@ def analyze_track(path, ctx=None) -> dict:
     score += 1.0 if onset_rate >= 2.0 else (0.5 if onset_rate >= 1.0 else 0.0)
     score += 1.0 if I >= -11 else (0.5 if I >= -16 else 0.0)
     energy = "energetic" if score >= 2.0 else ("medium" if score >= 1.0 else "calm")
+    # Soft, dark material (solo piano, strings, a sad theme) is calm whatever the tempo/onset guess
+    # says: the beat tracker reads piano arpeggios as 90-150 bpm, which made them "medium" and
+    # labelled them "dramatic" or "steady groove", so a rant could be scored with a lullaby.
+    if energy != "energetic" and (I < -24 or (centroid < 900 and (I < -15 or dyn >= 15))):
+        energy = "calm"
     tags = [energy, "bright" if centroid > 2200 else "dark" if centroid < 1200 else "warm",
             "builds" if arrivals and max(a["riseDb"] for a in arrivals) >= 6 else "steady"]
     if dyn >= 12:

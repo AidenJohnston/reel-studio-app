@@ -5,11 +5,11 @@ import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore } from './style';
-import { ToolContext, ToolState, captionWithCredits, doRender, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
+import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic,
+  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
 } from './project';
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
@@ -175,6 +175,29 @@ async function wrapUpPost(deps: EditorDeps, provider: ModelProvider, ctx: ToolCo
   }
 }
 
+/** A short, focused caption proofread after the edit: inside the long edit the model skims its own
+ * "check the unsure words" step (measured: 3 of 4 flagged mishearings left on screen), so one
+ * reply that does only this. Fails soft: the edit stands without it. */
+async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
+  const { p, t } = await load(ctx).catch(() => ({ p: null as Project | null, t: null as Transcript | null }));
+  if (!p || !t || !p.captions.enabled || !p.cut.keep.length) return;
+  // nothing the speech model was unsure of in the cut: nothing worth a second look
+  const kept = new Set(keptWords(t, p.cut.keep).map((w) => w.id));
+  if (!unsureWords(t, 400).some((u) => kept.has(u.id))) return;
+  const finished = ctx.state.finished;
+  ctx.state.finished = null;
+  onEvent({ type: 'status', message: 'Checking your captions', phase: 'edit' });
+  try {
+    await runAgent({ provider, system: await systemPrompt(deps), task: deps.prompts.render('proofread', { captions: captionsForProofread(t, p) }),
+      ctx, onEvent, signal, maxSteps: 3, maxMisses: 2, tokenBudget: deps.tokenBudget,
+      tools: ['add_caption_correction', 'remove_caption_correction', 'finish'] });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  } finally {
+    ctx.state.finished = finished;
+  }
+}
+
 async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void): Promise<number> {
   await refreshCredits(ctx).catch(() => undefined);
   const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
@@ -250,6 +273,7 @@ ${summary}
     }
     throw e;
   }
+  await proofreadCaptions(deps, provider, ctx, onEvent, signal);
   await wrapUpPost(deps, provider, ctx, onEvent, signal);
   onEvent({ type: 'status', message: 'Finishing your video', pct: 94, phase: 'final' });
   const version = await finalize(deps, ctx, onEvent);

@@ -150,6 +150,9 @@ export function parseXmlCalls(text: string, tools: ToolSchema[] = []): ToolCall[
     let q: RegExpExecArray | null;
     while ((q = pr.exec(body))) args[q[1]] = xmlValue(q[2], props[q[1]]);
     if (!Object.keys(args).length && Object.keys(props).length) continue;     // an empty call to a tool that takes input
+    // a catalog-style dump carries placeholder values: a `finish` with summary "x" ended a first edit and the user
+    // read "x" as its whole explanation. A real summary has words; drop the call and the loop asks again.
+    if (name === 'finish' && (String(args.summary_for_user ?? '').match(/[\p{L}\p{N}']+/gu) ?? []).length < 3) continue;
     const key = `${name}:${JSON.stringify(args)}`;
     if (seen.has(key)) continue;
     seen.add(key);

@@ -1,6 +1,7 @@
 """Close-up b-roll: photos read smaller than text, photos are cropped to their subject (and, when
-that is what it takes to read, to the room's shape), text is never cropped, and nothing placed
-covers the eyes-to-chin zone or the captions. (status/issues-placement.md)"""
+that is what it takes to read, to the room's shape), text is never cropped through its words (only
+its plain strips go: test_q3_split.py), and nothing placed covers the eyes-to-chin zone or the
+captions. (status/issues-placement.md)"""
 from __future__ import annotations
 
 import json
@@ -109,8 +110,8 @@ def test_load_still_crops_photos_only(tmp_path, synth):
     st = broll._load_still(None, p)
     assert st["content"] == "photo" and st["crop"] and st["image"].width < 900
     assert "crop" not in broll._load_still(None, p, {"crop": False})
-    txt = broll._load_still(None, synth["screenshot"])
-    assert txt["content"] == "text" and "crop" not in txt and txt["image"].size == (1600, 900)
+    txt = broll._load_still(None, synth["screenshot"])           # text: only its plain bottom strip goes
+    assert txt["content"] == "text" and txt["image"].width == 1600 and txt["image"].height >= 700
 
 
 def test_aspect_crop_moves_toward_the_room_and_keeps_most_of_the_photo():

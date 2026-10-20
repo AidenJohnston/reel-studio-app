@@ -10,11 +10,17 @@
   download_media(url, dest, kind)  -> Path (kind: "video" -> mp4, "music"/"audio" -> mp3) via yt-dlp
   logo(slug, dest, png=False)      -> brand mark from Simple Icons: SVG, or a PNG in the brand colour
 
-Search plans the query offline (logo / place / concept / object), asks Simple Icons (brand marks),
-Wikimedia Commons (MediaWiki API, per-file licence metadata) and Openverse (CC photos) in
+  search(query, n, copyrighted)    -> {results, plan, website?}: the same results plus the official
+                                      website of the app / brand / show named (for a screenshot)
+  register_capture(path, url)      -> credit for a website screenshot the app captured itself
+
+Search plans the query offline (logo / work / place / concept / object), asks Wikidata (CC0) which
+thing a name means (a show? an app? its own logo file, its website), asks Simple Icons (brand
+marks), Wikimedia Commons (MediaWiki API, per-file licence metadata) and Openverse (CC photos) in
 parallel, keeps only licences a reel may use (CC0, public domain, CC BY, CC BY-SA), and ranks by
-title relevance + licence simplicity + size. Every request sends a generic app User-Agent: never a
-personal name or email.
+title relevance + licence simplicity + size. Copyrighted posters/stills of shows and films
+(Wikipedia lead image, TVmaze) come back ONLY when asked for, and are labelled as copyrighted.
+Every request sends a generic app User-Agent: never a personal name or email.
 
 Errors raise EngineError with a plain-English userMessage. CLI (JSON lines on stdout, docs/architecture.md section 4):
 
@@ -103,7 +109,7 @@ def _get(url: str, accept: str = "*/*", ua: str = API_UA, timeout: int = 30, lim
          deadline: float = 90.0):
     check_url(url)
     # Wikimedia throttles (HTTP 429) clients that pretend to be a browser; it wants an honest app UA.
-    if "wikimedia.org" in url or "wikipedia.org" in url:
+    if "wikimedia.org" in url or "wikipedia.org" in url or "wikidata.org" in url:
         ua = API_UA
     t_end = time.monotonic() + deadline
     for attempt in range(2):
@@ -165,7 +171,11 @@ TRADEMARK_NOTE = ("A logo is a trademark: fine to show when talking about the br
 
 _STOP = {"a", "an", "the", "of", "and", "in", "on", "at", "for", "with", "to", "from", "by", "my", "your"}
 _LOGO_WORDS = {"logo", "logos", "icon", "icons", "wordmark", "logotype", "emblem", "brand", "symbol", "badge"}
-_APP_WORDS = {"app", "apps"}
+_APP_WORDS = {"app", "apps", "website", "site", "homepage", "webpage", "web"}
+# "<title> TV show / anime / movie": the title is a WORK (a show or film), looked up as one.
+_WORK_WORDS = {"tv", "show", "shows", "series", "sitcom", "anime", "movie", "movies", "film", "films",
+               "cartoon", "miniseries", "season", "episode", "trailer", "drama", "kdrama", "k-drama", "netflix",
+               "hbo", "documentary"}
 _PHOTO_WORDS = {"photo", "photos", "picture", "pictures", "image", "images", "pic", "pics", "photograph",
                 "stock", "png", "jpg", "hd", "high", "resolution", "real"}
 _PLACE_WORDS = {"tower", "square", "street", "avenue", "bridge", "park", "campus", "university", "college",
@@ -275,6 +285,9 @@ def _attribution(r: dict) -> str:
     """A one-line credit for a post caption (TASL: title, author, source, licence)."""
     if r.get("provider") == "simpleicons":
         return f"{r['title']} via Simple Icons (CC0)"
+    if r.get("copyrighted"):
+        via = {"wikipedia": "Wikipedia", "tvmaze": "TVmaze"}.get(r.get("provider"), r.get("provider") or "the web")
+        return f"{r.get('title')}: {r.get('creator')}, via {via} (copyrighted: used as commentary)"
     via = {"wikimedia": "Wikimedia Commons"}.get(r.get("provider"), r.get("_site") or "Openverse")
     who = r.get("creator") or "unknown author"
     return f"\"{r.get('title') or 'Untitled'}\" by {who}, {r.get('license')}, via {via}"
@@ -378,16 +391,27 @@ def _simple_icon_color(url: str) -> Optional[str]:
 # --- query planning ----------------------------------------------------------------------------
 
 def plan_query(query: str) -> dict:
-    """Cheap, offline classification -> {kind, subject, logoIntent, brand, maybeBrand}.
-    kind: "logo" | "place" | "concept" | "object". subject = the query minus logo/photo words."""
+    """Cheap, offline classification -> {kind, subject, logoIntent, brand, maybeBrand, app}.
+    kind: "logo" | "work" (a show / film / anime) | "place" | "concept" | "object". subject = the
+    query minus logo/photo/app/work words. app = the query named an app or website."""
     raw = [t for t in re.split(r"\s+", query.strip()) if t]
     low = [_norm(t) for t in raw]
     logo_intent = any(t in _LOGO_WORDS for t in low)
     app = any(t in _APP_WORDS for t in low)
     drop = _LOGO_WORDS | _PHOTO_WORDS | _APP_WORDS | (_APP_CATEGORY_WORDS if app else set())
     keep = [t for t, l in zip(raw, low) if l and l not in drop]
+    # "The Office TV show", "Spirited Away movie": a title plus a work word. Only when what's left
+    # still reads as a title (capitalised), so "dog show" or "film camera" stay ordinary objects.
+    work_keep = [t for t in keep if _norm(t) not in _WORK_WORDS]
+    work = (not app and len(work_keep) < len(keep) and bool(work_keep)
+            and any(c.isupper() for c in " ".join(work_keep)) and len(_tokens(" ".join(work_keep))) <= 6)
+    if work:
+        keep = work_keep
     subject = " ".join(keep) or query.strip()
     toks = _tokens(subject)
+    if work:
+        return {"kind": "work", "subject": subject, "logoIntent": logo_intent, "brand": None,
+                "maybeBrand": False, "app": False}
     brand = _si_lookup(subject) if len(toks) <= 4 else None
     proper = any(c.isupper() for c in subject)
     if logo_intent or app or brand:
@@ -400,7 +424,7 @@ def plan_query(query: str) -> dict:
         kind = "object"
     maybe_brand = kind == "object" and proper and len(toks) <= 3
     return {"kind": kind, "subject": subject, "logoIntent": logo_intent or app, "brand": brand,
-            "maybeBrand": maybe_brand}
+            "maybeBrand": maybe_brand, "app": app}
 
 
 # --- sources -----------------------------------------------------------------------------------
@@ -458,7 +482,11 @@ def _commons(query: str, n: int, filetypes: str = "bitmap") -> list[dict]:
                                           "UsageTerms|Copyrighted|Restrictions|NonFree|ObjectName|"
                                           "ImageDescription|Categories"})
     data, _ = _get(f"{COMMONS}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=25)
-    pages = (json.loads(data).get("query") or {}).get("pages") or []
+    return _commons_pages(json.loads(data))
+
+
+def _commons_pages(reply: dict, wikidata: bool = False) -> list[dict]:
+    pages = (reply.get("query") or {}).get("pages") or []
     if isinstance(pages, dict):                               # formatversion=1 shape
         pages = list(pages.values())
     out = []
@@ -482,6 +510,7 @@ def _commons(query: str, n: int, filetypes: str = "bitmap") -> list[dict]:
         if _sensitive(title, _clean_html(meta.get("ImageDescription"), 2000), str(meta.get("Categories", "")),
                       _clean_html(meta.get("Credit"), 400), _clean_html(meta.get("Artist"), 400)):
             continue
+        shot = bool(_SCREENSHOT.search(title.lower()))
         out.append({"url": use, "thumbnail": ii.get("thumburl") or url, "title": title,
                     "width": ii.get("thumbwidth") if use != url else ii.get("width"),
                     "height": ii.get("thumbheight") if use != url else ii.get("height"),
@@ -489,7 +518,226 @@ def _commons(query: str, n: int, filetypes: str = "bitmap") -> list[dict]:
                     "source": ii.get("descriptionurl") or url, "provider": "wikimedia",
                     "licenseUrl": meta.get("LicenseUrl", ""), "licenseKind": lic["kind"], "_tier": lic["tier"],
                     "attributionRequired": attr_req, "mime": mime, "_svg": svg,
-                    "trademark": "trademark" in str(meta.get("Restrictions", "")).lower(), "_rank": len(out)})
+                    "trademark": "trademark" in str(meta.get("Restrictions", "")).lower(), "_rank": len(out),
+                    **({"kind": "screenshot"} if shot and not svg else {}),
+                    **({"_wikidata": True} if wikidata else {})})
+    return out
+
+
+# --- Wikidata: which THING a name means (CC0 data) --------------------------------------------
+#
+# One wbsearchentities + one wbgetentities call, cached a month in the user cache. Used to tell a
+# show/film title from a brand ("Naruto", "Friends"), to pick the right one ("The Office" = the
+# American sitcom, the first hit that IS a show), to get that work's own title-logo file on Commons
+# (P154 logo image, P18 image: their licences are read from Commons and gated like any other file),
+# and an app's official website (P856), which the AI can capture as a screenshot.
+
+WIKIDATA = "https://www.wikidata.org/w/api.php"
+_WD_TTL = 30 * 86400
+_WORK_DESC = re.compile(r"\b(television|tv|web|streaming|anime|animated|cartoon|drama|comedy|reality|limited)\s+"
+                        r"(series|show|program|programme|sitcom|drama|miniseries)\b|\bsitcom\b|\bminiseries\b|"
+                        r"\b(film|movie|anime|manga|telenovela|k-?drama|soap opera)\b|\bfilm series\b")
+_APP_DESC = re.compile(r"\b(app|application|software|website|web site|web service|online|service|platform|"
+                       r"search engine|social (network|media)|chatbot|messenger|marketplace|streaming|"
+                       r"company|video game|browser|dating)\b")
+_WD_MEM: dict = {}
+
+
+def _claim_values(ent: dict, prop: str) -> list:
+    out = []
+    for c in (ent.get("claims") or {}).get(prop) or []:
+        v = ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        if v is not None and c.get("rank") != "deprecated":
+            out.append(v)
+    return out
+
+
+# P31 classes of a show or film, for the full-text fallback (OR-ed): TV series, film, anime TV
+# series, animated film, miniseries, animated TV series, web series, anime film, TV programme.
+_WORK_CLASSES = "|".join(f"P31={q}" for q in ("Q5398426", "Q11424", "Q63952888", "Q202866", "Q1259759",
+                                                "Q117467246", "Q526877", "Q20650540", "Q15416"))
+
+
+def _wd_picks(ids: list, name: str, want: Optional[str]) -> list[dict]:
+    """Entities among ids whose English label or alias IS the name, classified work / app / other
+    (want keeps only that kind), in the order given."""
+    if not ids:
+        return []
+    q = urlencode({"action": "wbgetentities", "ids": "|".join(ids[:10]),
+                   "props": "claims|descriptions|labels|aliases|sitelinks", "languages": "en|mul", "format": "json"})
+    raw, _ = _get(f"{WIKIDATA}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=20,
+                  limit=8 * 1024 * 1024)
+    ents = json.loads(raw).get("entities") or {}
+    picks = []
+    for i in ids[:10]:
+        ent = ents.get(i) or {}
+        # many items now keep their name only in the language-neutral "mul" label (e.g. the sitcom Friends)
+        labels, aliases = ent.get("labels") or {}, ent.get("aliases") or {}
+        label = (labels.get("en") or labels.get("mul") or {}).get("value") or ""
+        names = [label] + [a.get("value", "") for lang in ("en", "mul") for a in aliases.get(lang) or []]
+        if not any(nm and _norm(nm) == name for nm in names):      # "The Friends" is not "Friends"
+            continue
+        desc = ((ent.get("descriptions") or {}).get("en") or {}).get("value") or ""
+        d = desc.lower()
+        kind = "work" if (_WORK_DESC.search(d) and "company" not in d) else "app" if _APP_DESC.search(d) else "other"
+        if want and kind != want:
+            continue
+        links = ent.get("sitelinks") or {}
+        picks.append({"id": i, "label": label, "description": desc, "kind": kind, "_links": len(links),
+                      "wiki": (links.get("enwiki") or {}).get("title"),
+                      "website": next((x for x in _claim_values(ent, "P856") if isinstance(x, str)
+                                       and x.lower().startswith(("http://", "https://"))), None),
+                      "logo": next((x for x in _claim_values(ent, "P154") if isinstance(x, str)), None),
+                      "image": next((x for x in _claim_values(ent, "P18") if isinstance(x, str)), None)})
+    return picks
+
+
+def wikidata_lookup(subject: str, want: Optional[str] = None) -> Optional[dict]:
+    """-> {id, label, description, kind ("work" | "app" | "other"), website, logo, image} for the
+    entity a name most likely means, or None. Only hits whose label (or an alias) IS the name count;
+    want="work" / "app" takes the first such hit of that kind, else the first such hit. Never raises."""
+    key = f"{_norm(subject)}|{want or ''}"
+    if not _norm(subject):
+        return None
+    if key in _WD_MEM:
+        return _WD_MEM[key]
+    f = cache_dir() / "wikidata.json"
+    try:
+        hit = json.loads(f.read_text(encoding="utf-8")).get(key)
+        if hit and time.time() - hit.get("t", 0) < _WD_TTL:
+            _WD_MEM[key] = hit.get("v")
+            return hit.get("v")
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        q = urlencode({"action": "wbsearchentities", "search": subject, "language": "en", "uselang": "en",
+                       "type": "item", "limit": 7, "format": "json"})
+        raw, _ = _get(f"{WIKIDATA}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=15)
+        ids = [h["id"] for h in json.loads(raw).get("search") or [] if h.get("id")]
+        picks = _wd_picks(ids, _norm(subject), want)
+        if want != "app" and not any(x["kind"] in ("work", "app") for x in picks):
+            # a title that is also a common word ("Friends"): ask the full-text index for works only
+            q = urlencode({"action": "query", "list": "search", "srnamespace": 0, "srlimit": 10, "format": "json",
+                           "srsearch": f"{subject} haswbstatement:{_WORK_CLASSES}"})
+            raw, _ = _get(f"{WIKIDATA}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=15)
+            more = [h["title"] for h in (json.loads(raw).get("query") or {}).get("search") or []
+                    if re.fullmatch(r"Q\d+", h.get("title") or "") and h["title"] not in ids]
+            picks += _wd_picks(more, _norm(subject), want)
+        # a show or an app beats a namesake ("Naruto" the anime, not the city or the selfie macaque)
+        # a show or an app beats a namesake, and the most-linked one wins ("Friends" = the sitcom)
+        known = [x for x in picks if x["kind"] != "other"]
+        v = max(known, key=lambda x: x["_links"]) if known else (picks[0] if picks else None)
+        if v:
+            v = {k: val for k, val in v.items() if not k.startswith("_")}
+    except (EngineError, ValueError, KeyError, TypeError, AttributeError) as e:
+        log(f"wikidata lookup {subject!r}: {getattr(e, 'message', e)}")
+        return None                                        # not cached: asked again next time
+    _WD_MEM[key] = v
+    try:
+        with _FileLock(f):
+            try:
+                book = json.loads(f.read_text(encoding="utf-8"))
+                if not isinstance(book, dict):
+                    book = {}
+            except (OSError, ValueError):
+                book = {}
+            book[key] = {"t": time.time(), "v": v}
+            if len(book) > 2000:
+                book = dict(list(book.items())[-2000:])
+            _write_json(f, book)
+    except OSError as e:
+        log(f"wikidata cache not written: {e}")
+    return v
+
+
+def _commons_files(names: list) -> list[dict]:
+    """Named Commons files (Wikidata P154 / P18) through the same licence gate as a search."""
+    names = [n for n in names if n]
+    if not names:
+        return []
+    q = urlencode({"action": "query", "format": "json", "formatversion": 2,
+                   "titles": "|".join(f"File:{n}" for n in names[:10]),
+                   "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": 1280,
+                   "iiextmetadatafilter": "LicenseShortName|LicenseUrl|License|Artist|Credit|AttributionRequired|"
+                                          "UsageTerms|Copyrighted|Restrictions|NonFree|ObjectName|"
+                                          "ImageDescription|Categories"})
+    data, _ = _get(f"{COMMONS}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=25)
+    return _commons_pages(json.loads(data), wikidata=True)
+
+
+# --- copyrighted artwork: OFF unless asked for -------------------------------------------------
+#
+# Posters, key art and show stills are copyrighted. Creators commonly show them when talking about a
+# show (commentary), but nobody here can clear that, so these sources only run when the caller opts
+# in (search --copyrighted, or REELENGINE_ALLOW_COPYRIGHTED=1), and every such result says so:
+# licenseKind "copyrighted", copyrighted: true, a credit line naming the owner, and COPYRIGHT_NOTE.
+#   * Wikipedia's lead image of the work's article (a poster or title card, hosted there as non-free).
+#   * TVmaze (keyless; its DATA is CC BY-SA, the images are the studios'): a show's poster and
+#     "background" stills.
+
+WIKIPEDIA_EN = "https://en.wikipedia.org/w/api.php"
+TVMAZE = "https://api.tvmaze.com"
+COPYRIGHT_NOTE = ("Copyrighted: used as commentary, your responsibility. This picture belongs to its "
+                  "owner; it's commonly shown when talking about the work, but nobody has licensed it to you.")
+
+
+def copyrighted_allowed(flag: Optional[bool] = None) -> bool:
+    if flag is not None:
+        return bool(flag)
+    return os.environ.get("REELENGINE_ALLOW_COPYRIGHTED") == "1"
+
+
+def _copyrighted(r: dict, owner: str) -> dict:
+    return {**r, "license": "Copyrighted (not licensed)", "creator": f"{owner} (c) its owner",
+            "licenseUrl": "", "licenseKind": "copyrighted", "_tier": 2, "attributionRequired": True,
+            "copyrighted": True, "mime": "", "_work": True}
+
+
+def _wikipedia_lead(article: str, label: Optional[str] = None) -> list[dict]:
+    label = label or article
+    q = urlencode({"action": "query", "format": "json", "formatversion": 2, "redirects": 1, "titles": article,
+                   "prop": "pageimages", "piprop": "original|name", "pilicense": "any"})
+    raw, _ = _get(f"{WIKIPEDIA_EN}?{q}", accept="application/json", timeout=SEARCH_TIMEOUT, deadline=20)
+    out = []
+    for p in (json.loads(raw).get("query") or {}).get("pages") or []:
+        img = p.get("original") or {}
+        if not img.get("source") or p.get("missing"):
+            continue
+        name = p.get("pageimage") or Path(urlparse(img["source"]).path).name
+        # the infobox image: a poster for most films, a title card for many shows
+        out.append(_copyrighted({"url": img["source"], "thumbnail": img["source"],
+                                 "title": f"{label} (Wikipedia lead image)",
+                                 "width": img.get("width"), "height": img.get("height"),
+                                 "source": f"https://en.wikipedia.org/wiki/File:{quote(name)}",
+                                 "provider": "wikipedia", "kind": "artwork", "_rank": 0}, label))
+    return out
+
+
+def _tvmaze(title: str) -> list[dict]:
+    raw, _ = _get(f"{TVMAZE}/singlesearch/shows?{urlencode({'q': title})}", accept="application/json",
+                  timeout=SEARCH_TIMEOUT, deadline=15)
+    show = json.loads(raw) or {}
+    if not show.get("id") or _tokens(show.get("name") or "") != _tokens(title):
+        return []
+    name, page = show.get("name") or title, show.get("url") or "https://www.tvmaze.com"
+    out = []
+    img = show.get("image") or {}
+    if img.get("original"):
+        out.append(_copyrighted({"url": img["original"], "thumbnail": img.get("medium") or img["original"],
+                                 "title": f"{name} poster", "width": 680, "height": 1000, "source": page,
+                                 "provider": "tvmaze", "kind": "poster", "_rank": 0}, name))
+    try:
+        raw, _ = _get(f"{TVMAZE}/shows/{int(show['id'])}/images", accept="application/json",
+                      timeout=SEARCH_TIMEOUT, deadline=15)
+        stills = [i for i in json.loads(raw) if isinstance(i, dict) and i.get("type") == "background"]
+        for k, im in enumerate(stills[:4]):
+            o = (im.get("resolutions") or {}).get("original") or {}
+            if o.get("url"):
+                out.append(_copyrighted({"url": o["url"], "thumbnail": o["url"], "title": f"{name} still",
+                                         "width": o.get("width"), "height": o.get("height"), "source": page,
+                                         "provider": "tvmaze", "kind": "still", "_rank": k + 1}, name))
+    except (EngineError, ValueError, TypeError):
+        pass
     return out
 
 
@@ -514,23 +762,35 @@ def _relevance(subject_toks: list[str], text: str) -> float:
     return hit / len(subject_toks)
 
 
+_SCREENSHOT = re.compile(r"\b(screenshot|screen ?shot|screencap|user interface|homepage|home page|web ?site)\b")
 _LOGOISH = re.compile(r"\b(logo|logos|wordmark|logotype|icon|emblem|svg)\b")
 
 
-def _is_brand_logo(r: dict, toks: list[str]) -> bool:
+# words a show's own title-logo file may carry besides its title ("Squid Game 2021 vector logo english")
+_WORK_LOGO_EXTRA = frozenset({"vector", "english", "us", "uk", "series", "season", "title", "card", "tv",
+                              "film", "movie", "anime", "horizontal", "international", "anglophone", "wordmark"})
+
+
+def _is_brand_logo(r: dict, toks: list[str], extra: frozenset = frozenset()) -> bool:
     """A file that is just "<subject> logo" (years, versions, "with wordmark" aside): proof the
     subject is a brand, e.g. "Kestrel logo.svg" for "Kestrel", but not "Logo of the Linksys iPhone"."""
     title = re.sub(r"[.](svg|png|jpe?g|gif|webp)$", "", (r.get("title") or "").lower())
     if not _LOGOISH.search(title):
         return False
-    rest = [t for t in _tokens(title) if t not in _LOGO_WORDS and not t.isdigit()
+    rest = [t for t in _tokens(title) if t not in _LOGO_WORDS and not t.isdigit() and t not in extra
             and t not in {"svg", "png", "new", "old", "official", "text", "app"}]
     return bool(toks) and [_stem(t) for t in rest] == [_stem(t) for t in toks]
 
 
+def _has_phrase(subject: str, title: str) -> bool:
+    """The whole title of a work, in order, inside a file title ("the office us logo" has "the office")."""
+    a, b = f" {_norm(subject)} ", f" {_norm(re.sub(r'[_]', ' ', title))} "
+    return a in b or a.replace(" ", "") in b.replace(" ", "")
+
+
 def _score(r: dict, plan: dict, toks: list[str]) -> float:
     title = r.get("title") or ""
-    rel = _relevance(toks, title)
+    rel = 1.0 if (r.get("_wikidata") or r.get("_work")) else _relevance(toks, title)
     if r.get("_tags"):
         rel = max(rel, 0.6 * _relevance(toks, " ".join(r["_tags"])))
     logoish = bool(_LOGOISH.search(title.lower())) or r.get("provider") == "simpleicons"
@@ -551,8 +811,28 @@ def _score(r: dict, plan: dict, toks: list[str]) -> float:
         s += 0.3
     elif short and short < 400:
         s -= 0.8
-    if plan["kind"] == "logo":
-        if r.get("provider") == "simpleicons":
+    if plan["kind"] == "work":
+        # what says "this show" on screen: its poster or a still (only when copyrighted art was asked
+        # for), else its own title logo; then the cast, sets and merch photos Commons has
+        if r.get("copyrighted"):
+            # asked for: a poster or key art says "this show" best
+            s += {"poster": 4.0, "artwork": 3.6}.get(r.get("kind"), 3.2)
+        elif r.get("_wikidata"):
+            # the work's own logo file (Wikidata P154), or its own image (P18)
+            s += 2.5 if title == (plan.get("wikidata") or {}).get("logo") else 1.2
+        elif _is_brand_logo(r, toks, _WORK_LOGO_EXTRA):
+            s += 2.0
+        elif not _has_phrase(plan["subject"], title):
+            s -= 1.2                                         # "Office at the bank" is not "The Office"
+        elif logoish:
+            s -= 0.8                                         # "<title> Depot logo": another thing's logo
+        if re.search(r"\b(fr|de|es|it|ja|ko|zh|ru|pt|pl|nl|tr|ar|uk)\b", title.lower().rsplit(".", 1)[0]):
+            s -= 0.6                                         # "Spirited Away Logo fr.svg": a foreign-language title
+    elif plan["kind"] == "logo":
+        if r.get("kind") == "screenshot":
+            # a free screenshot that names the app beats its other logos (not the exact brand mark)
+            s += 2.8 if _has_phrase(plan["subject"], title) else -1.0
+        elif r.get("provider") == "simpleicons":
             s += 4.0 if plan.get("brand") else 2.0
         elif logoish:
             s += 1.5
@@ -582,7 +862,9 @@ def _finish(r: dict, plan: dict) -> dict:
     r["kind"] = r.get("kind") or ("logo" if (_LOGOISH.search((r.get("title") or "").lower()) or r.get("_svg")) else "photo")
     r["trademark"] = bool(r.get("trademark") or r["kind"] == "logo")
     r["attribution"] = _attribution(r)
-    if r["trademark"]:
+    if r.get("copyrighted"):
+        r["note"] = COPYRIGHT_NOTE
+    elif r["trademark"]:
         r["note"] = TRADEMARK_NOTE
     return {k: v for k, v in r.items() if not k.startswith("_")}
 
@@ -595,10 +877,22 @@ def _jobs(plan: dict, n: int, fallback: bool = False) -> list[tuple]:
             return []
         subj = " ".join(toks)
     k = plan["kind"]
+    if k == "work":
+        wd = plan.get("wikidata") or {}
+        jobs = [(_commons, f"{subj} logo", n, "drawing|bitmap"), (_commons, subj, n, "bitmap"), (_openverse, subj, n)]
+        if not fallback and (wd.get("logo") or wd.get("image")):
+            jobs.insert(0, (_commons_files, [wd.get("logo"), wd.get("image")]))
+        if plan.get("copyrighted") and not fallback:
+            # the work's own English article (Wikidata's sitelink): "The Office" alone is a disambiguation page
+            jobs += [(_wikipedia_lead, wd.get("wiki") or wd.get("label") or subj, wd.get("label") or subj),
+                     (_tvmaze, wd.get("label") or subj)]
+        return jobs
     if k == "logo":
         jobs = [(_commons, f"{subj} logo", n, "drawing|bitmap"), (_openverse, f"{subj} logo", n)]
         if not plan["logoIntent"]:
             jobs.append((_openverse, subj, n))                # a bare brand name: its products/stores too
+        if (plan.get("app") or (plan.get("wikidata") or {}).get("kind") == "app") and not fallback:
+            jobs.append((_commons, f"{subj} screenshot", n, "bitmap"))   # the rare free screenshot of an app
         return jobs
     if k == "place":
         return [(_commons, subj, n, "bitmap"), (_openverse, subj, n)]
@@ -627,16 +921,33 @@ def _run(jobs: list[tuple]) -> tuple[list[dict], list[EngineError]]:
     return results, errors
 
 
-def search_images(query: str, n: int = 6) -> list[dict]:
-    """Up to n freely licensed images, best first. Each result keeps the original keys (url,
-    thumbnail, title, width, height, license, creator, source, provider) and adds licenseUrl,
-    licenseKind (cc0 | public-domain | cc-by | cc-by-sa), attributionRequired, attribution (a
-    one-line credit), trademark, kind (logo | photo), mime, score, and color (Simple Icons)."""
+def search_images(query: str, n: int = 6, copyrighted: Optional[bool] = None) -> list[dict]:
+    """Up to n images, best first (see search())."""
+    return search(query, n, copyrighted)["results"]
+
+
+def search(query: str, n: int = 6, copyrighted: Optional[bool] = None) -> dict:
+    """{"results": [...], "plan": kind, "website"?: {url, name}}. Results are freely licensed
+    unless copyrighted art was asked for (copyrighted=True or REELENGINE_ALLOW_COPYRIGHTED=1).
+    Each result keeps the original keys (url, thumbnail, title, width, height, license, creator,
+    source, provider) and adds licenseUrl, licenseKind (cc0 | public-domain | cc-by | cc-by-sa |
+    copyrighted), attributionRequired, attribution (a one-line credit), trademark, copyrighted,
+    kind (logo | photo | poster | still), mime, score, color (Simple Icons) and note.
+    `website` is the official site of the app/brand/work the query named (Wikidata P856), for
+    a screenshot (the app's capture_website): a site's own screen beats its logo."""
     query = (query or "").strip()
     if not query:
         raise EngineError("EMPTY_QUERY", "empty query", "Type what picture you're looking for.")
     plan = plan_query(query)
+    plan["copyrighted"] = copyrighted_allowed(copyrighted)
     toks = _tokens(plan["subject"])
+    wd = None
+    if plan["kind"] == "work" or plan["app"] or (plan["kind"] == "logo" and not plan["logoIntent"]) \
+            or plan["maybeBrand"]:
+        wd = wikidata_lookup(plan["subject"], "work" if plan["kind"] == "work" else None)
+        if wd and wd["kind"] == "work" and plan["kind"] != "work" and not plan["app"] and not plan["logoIntent"]:
+            plan.update(kind="work", maybeBrand=False)       # "Naruto", "Friends": a show, not a brand
+        plan["wikidata"] = wd
     found: list[dict] = []
     if plan["brand"] and plan["kind"] == "logo":
         found.append(_si_result(plan["brand"]))
@@ -661,13 +972,16 @@ def search_images(query: str, n: int = 6) -> list[dict]:
         raise EngineError("NO_RESULTS", f"no images for {query!r}",
                           "I couldn't find pictures for that. Try different words.")
     _remember(ranked[:max(n, 12)])
-    return ranked[:n]
+    out = {"results": ranked[:n], "plan": plan["kind"]}
+    if wd and wd.get("website") and (plan["app"] or wd["kind"] in ("app", "work") or plan["kind"] == "logo"):
+        out["website"] = {"url": wd["website"], "name": wd.get("label") or plan["subject"]}
+    return out
 
 
 # --- credits: search results -> the asset the AI actually fetched -------------------------------
 
 CREDIT_KEYS = ("title", "creator", "source", "provider", "license", "licenseUrl", "licenseKind",
-               "attributionRequired", "attribution", "trademark", "kind")
+               "attributionRequired", "attribution", "trademark", "copyrighted", "kind", "note")
 _CREDITS_MAX = 500
 
 
@@ -704,6 +1018,44 @@ def _write_credit(saved: Path, url: str) -> Optional[dict]:
     c = credit_for(url)
     if not c:
         return None
+    book_path = saved.parent / "credits.json"
+    try:
+        with _FileLock(book_path):
+            try:
+                book = json.loads(book_path.read_text(encoding="utf-8"))
+                if not isinstance(book, dict):
+                    book = {}
+            except (OSError, ValueError):
+                book = {}
+            book[saved.name] = {**c, "url": url}
+            _write_json(book_path, book)
+    except OSError as e:
+        log(f"credit not written for {saved.name}: {e}")
+    return c
+
+
+SCREENSHOT_NOTE = ("A screenshot of {site}: your own capture, but the page belongs to its owner. "
+                   "Show it when you're talking about it (commentary), your responsibility; "
+                   "don't imply the site made or endorses the video.")
+
+
+def site_name(url: str) -> str:
+    host = (urlparse(url or "").hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def register_capture(saved: Path, url: str, title: Optional[str] = None) -> dict:
+    """Record a website screenshot the app captured (Electron, offscreen) in <folder>/credits.json:
+    licenseKind "screenshot", labelled "Screenshot of <site>", never presented as free to reuse."""
+    u = urlparse((url or "").strip())
+    if u.scheme.lower() not in ("http", "https") or not u.hostname:
+        raise EngineError("BAD_URL", f"register-capture: bad url {url!r}", "That isn't a web address.")
+    site = site_name(url)
+    label = f"Screenshot of {site}"
+    c = {"title": _clean_html(title, 120) if title else label, "creator": site, "source": url, "provider": "capture",
+         "license": "Screenshot (your own capture)", "licenseUrl": "", "licenseKind": "screenshot",
+         "attributionRequired": False, "attribution": label, "trademark": True, "copyrighted": True,
+         "kind": "screenshot", "note": SCREENSHOT_NOTE.format(site=site)}
     book_path = saved.parent / "credits.json"
     try:
         with _FileLock(book_path):

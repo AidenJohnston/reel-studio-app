@@ -1,7 +1,7 @@
 {
   "id": "card-above-head",
   "label": "Card above the head",
-  "description": "An image or clip on a card above the speaker's eyes, slightly tilted, sized to read on a phone (at least 55% of the width for anything with text). It may cover hair and forehead down to the eyebrows, never the eyes, nose, mouth or captions. If it can't read there, a tall asset goes beside the face and anything else goes in a split view (the render result says so). Best for screenshots, prices, headlines.",
+  "description": "An image or clip on a card above the speaker's eyes, slightly tilted, sized to read on a phone (at least 55% of the width for anything with text). It may cover hair and forehead down to the eyebrows, never the eyes, nose, mouth or captions. A text card is first cropped to its words (only plain margins and empty blocks go). If it still can't read there, a tall asset goes beside the face, then the card goes a little smaller over the hair on one side, and only then in a split view (the render result says so). Best for screenshots, prices, headlines.",
   "hidesFace": false,
   "assetKinds": [
     "image",

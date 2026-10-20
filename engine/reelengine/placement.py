@@ -159,9 +159,12 @@ def detect_faces(video_path, out_json=None, fps: float = SAMPLE_FPS, ctx=None) -
     """Face box track for a video. Writes `out_json` if given and returns the track dict:
 
     {"version": 2, "video": str, "width": W, "height": H, "fps": sample fps, "detector": str,
-     "samples": [{"t": s, "box": [x, y, w, h] | null, "core": [x, y, w, h] | null, "score": float}],
+     "samples": [{"t": s, "box": [x, y, w, h] | null, "core": [x, y, w, h] | null, "score": float,
+                  "rawCore": [x, y, w, h] (only where a face was really found)}],
      "median": [x, y, w, h] | null, "found": fraction of samples with a real detection}
-    Samples are smoothed and gap-filled; `core` is the eyes-to-chin protected zone.
+    Samples are smoothed and gap-filled; `core` is the eyes-to-chin protected zone. `rawCore` is the
+    same zone unsmoothed: the running median lags a moving head by up to ~40 px at the brows, so a
+    window's protected zone takes both (face_union).
     """
     video_path = Path(video_path)
     info = probe(video_path, ctx)
@@ -194,8 +197,9 @@ def detect_faces(video_path, out_json=None, fps: float = SAMPLE_FPS, ctx=None) -
         "version": TRACK_VERSION, "video": str(video_path), "width": W, "height": H, "fps": fps,
         "detector": det.kind if det else "none",
         "samples": [{"t": t, "box": None if b is None else [round(x, 1) for x in b],
-                     "core": None if c is None else [round(x, 1) for x in c], "score": s}
-                    for t, b, c, s in zip(times, smooth, smooth_core, scores)],
+                     "core": None if c is None else [round(x, 1) for x in c], "score": s,
+                     **({"rawCore": [round(x, 1) for x in rc]} if rc is not None else {})}
+                    for t, b, c, s, rc in zip(times, smooth, smooth_core, scores, cores)],
         "median": None if med is None else [round(x, 1) for x in med],
         "found": round(found / max(1, len(raw)), 3),
     }
@@ -240,13 +244,22 @@ def face_at(track: Optional[dict], t: float, key: str = "box") -> list:
     return [a[j] + (b[j] - a[j]) * u for j in range(4)]
 
 
+def _same_face(raw, smooth) -> bool:
+    """A raw sample is the same head as the smoothed one (its centre inside it): a one-frame false
+    detection elsewhere must not blow the protected zone up."""
+    cx, cy = raw[0] + raw[2] / 2, raw[1] + raw[3] / 2
+    return smooth[0] <= cx <= smooth[0] + smooth[2] and smooth[1] <= cy <= smooth[1] + smooth[3]
+
+
 def face_union(track: Optional[dict], t0: float, t1: float, key: str = "box") -> list:
     """Union of the face boxes (or eyes-to-chin zones, key "core") over a source window: a graphic
     must clear it the WHOLE time."""
     if not track:
         return (core_from_box if key == "core" else list)(default_face(1080, 1920))
-    boxes = [_sample_box(s, key) for s in track.get("samples", [])
-             if s.get("box") and t0 - 0.4 <= s["t"] <= t1 + 0.4]
+    near = [s for s in track.get("samples", []) if s.get("box") and t0 - 0.4 <= s["t"] <= t1 + 0.4]
+    boxes = [_sample_box(s, key) for s in near]
+    if key == "core":                       # the unsmoothed zone too: the median lags a moving head
+        boxes += [s["rawCore"] for s in near if s.get("rawCore") and s.get("core") and _same_face(s["rawCore"], s["core"])]
     boxes += [face_at(track, t0, key), face_at(track, t1, key)]
     x0 = min(b[0] for b in boxes)
     y0 = min(b[1] for b in boxes)
@@ -587,6 +600,91 @@ def subject_box(img, kind: str) -> Optional[tuple]:
     x0, y0 = max(0.0, x0 - px), max(0.0, y0 - py)
     x1, y1 = min(float(w), x1 + px), min(float(h), y1 + py)
     if (x1 - x0) * (y1 - y0) > (1 - CROP_MIN_GAIN) * w * h:
+        return None
+    return (int(x0 / s), int(y0 / s), min(W0, int(np.ceil(x1 / s))), min(H0, int(np.ceil(y1 / s))))
+
+
+# A TEXT card is never cut through its content, but the plain parts around it can go: a screenshot's
+# empty margin, the blank space under a short tweet, a flat colour block with nothing on it. Its
+# words then sit on a smaller card at the SAME size (the readable floor scales with how much width
+# was dropped, see text_box), so it fits above a close-up face instead of falling back to a split.
+TEXT_CROP_MIN_GAIN = 0.12       # crop a text card only if that removes at least this much of it
+TEXT_CROP_PAD = 0.03            # margin kept around the content (fraction of the image's long side)
+TEXT_PLAIN_COLOURS = 2          # a dropped strip holds at most this many flat colours...
+TEXT_PLAIN_SHARE = 0.97         # ...covering this much of it (a soft photo, a gradient: kept)
+
+
+def _plain_strip(a: np.ndarray) -> bool:
+    """Is this strip (RGB array) flat colour only: >= TEXT_PLAIN_SHARE of it within a small distance
+    of its TEXT_PLAIN_COLOURS commonest colours? A margin or a flat block is; a photo, a gradient,
+    a chart or any text is not."""
+    if a.size == 0:
+        return True
+    px = a.reshape(-1, 3).astype(np.int32)
+    q = px // 24
+    keys, cnt = np.unique(q[:, 0] * 4096 + q[:, 1] * 64 + q[:, 2], return_counts=True)
+    top = keys[np.argsort(cnt)[::-1][:TEXT_PLAIN_COLOURS]]
+    cols = [px[(q[:, 0] * 4096 + q[:, 1] * 64 + q[:, 2]) == k].mean(axis=0) for k in top]
+    near = np.zeros(len(px), bool)
+    for c in cols:
+        near |= np.abs(px - c).max(axis=1) <= 20
+    return float(near.mean()) >= TEXT_PLAIN_SHARE
+
+
+def text_box(img) -> Optional[tuple]:
+    """(x0, y0, x1, y1) crop of a TEXT card to its content, or None to keep it whole.
+
+    Content = every edge the text-line detector's first stage sees (morphological gradient, Otsu,
+    closed horizontally), except the thin outline of a big flat box (a block's border carries no
+    information). The crop keeps TEXT_CROP_PAD around that, and each side is cut only when the strip
+    it drops is plain (_plain_strip): text, photos, gradients and charts are never cropped away.
+    Dropped when it would save < TEXT_CROP_MIN_GAIN of the area."""
+    import cv2
+    im = _flat_rgb(img)
+    W0, H0 = im.size
+    s = min(1.0, 960.0 / max(W0, H0))
+    small = im.resize((max(1, round(W0 * s)), max(1, round(H0 * s))))
+    a = np.asarray(small)
+    h, w = a.shape[:2]
+    g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)
+    grad = cv2.morphologyEx(g, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+    t, _ = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    bw = (grad >= max(t, 24)).astype(np.uint8)
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 1)))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(bw, 8)
+
+    def outline(i) -> bool:             # a big box's thin border: (nearly) all its pixels on its bbox edge
+        x, y, bw_, bh_, area = st[i]
+        if bw_ <= 40 or bh_ <= 40 or area >= 0.12 * bw_ * bh_:
+            return False
+        inner = lab[y + 4:y + bh_ - 4, x + 4:x + bw_ - 4] == i
+        return float(inner.sum()) <= 0.05 * area
+    keep = [i for i in range(1, n) if st[i, 4] >= 4 and not outline(i)]
+    if not keep:
+        return None
+    x0 = min(st[i, 0] for i in keep)
+    y0 = min(st[i, 1] for i in keep)
+    x1 = max(st[i, 0] + st[i, 2] for i in keep)
+    y1 = max(st[i, 1] + st[i, 3] for i in keep)
+    pad = TEXT_CROP_PAD * max(w, h)
+    x0, y0 = int(max(0, x0 - pad)), int(max(0, y0 - pad))
+    x1, y1 = int(min(w, np.ceil(x1 + pad))), int(min(h, np.ceil(y1 + pad)))
+    def line_ok(line) -> bool:          # the new edge runs through ONE colour (never half a button)
+        px = line.reshape(-1, 3).astype(np.int32)
+        return px.size == 0 or float((np.abs(px - np.median(px, axis=0)).max(axis=1) <= 20).mean()) >= 0.95
+
+    # A dropped strip that is NOT plain means the content map missed something (a smooth photo's
+    # edge reads as a box outline): keep the whole image. A new edge through a shape (half a
+    # button) only keeps that side.
+    if (x0 and not _plain_strip(a[:, :x0])) or (x1 < w and not _plain_strip(a[:, x1:])):
+        return None
+    x0 = x0 if line_ok(a[y0:y1, x0]) else 0
+    x1 = x1 if x1 >= w or line_ok(a[y0:y1, x1 - 1]) else w
+    if (y0 and not _plain_strip(a[:y0, x0:x1])) or (y1 < h and not _plain_strip(a[y1:, x0:x1])):
+        return None
+    y0 = y0 if line_ok(a[y0, x0:x1]) else 0
+    y1 = y1 if y1 >= h or line_ok(a[y1 - 1, x0:x1]) else h
+    if (x1 - x0) * (y1 - y0) > (1 - TEXT_CROP_MIN_GAIN) * w * h:
         return None
     return (int(x0 / s), int(y0 / s), min(W0, int(np.ceil(x1 / s))), min(H0, int(np.ceil(y1 / s))))
 
