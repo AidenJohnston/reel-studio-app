@@ -283,6 +283,8 @@ describe('honest progress', () => {
     const tracker = new ProgressTracker('rerender', 60, empty(), () => now)
     tracker.update('final', 0, true)
     now = 10_000
+    tracker.update('final', 10, true)
+    expect(tracker.snapshot()).toMatchObject({ overall: 10, etaSec: 90, approximate: true })
     tracker.update('final', 50, true)
     expect(tracker.snapshot()).toMatchObject({ overall: 50, etaSec: 10, approximate: true })
     tracker.update('final', 100)
@@ -328,5 +330,22 @@ describe('honest progress', () => {
     tracker.update('final', 0)
     expect(Number.isFinite(tracker.snapshot().overall)).toBe(true)
     expect(tracker.snapshot().etaSec).toBeGreaterThan(0)
+  })
+
+  it('keeps the note1 replay bar within 15 points of elapsed quarters and never decreases', async () => {
+    const fixture = (await import('./fixtures/live-note1-progress.json')).default
+    let now = 0
+    const tracker = new ProgressTracker('note', fixture.mediaSeconds, empty(), () => now)
+    tracker.update('edit', 0)
+    let previous = 0
+    const checkpoints = [0.25, 0.5, 0.75].map((fraction) => fixture.duration * fraction)
+    const times = [...fixture.samples.map((s) => s.t), ...checkpoints].sort((a, b) => a - b)
+    for (const time of times) {
+      now = time * 1000
+      const bar = tracker.snapshot().overall
+      expect(bar).toBeGreaterThanOrEqual(previous)
+      previous = bar
+      if (checkpoints.includes(time)) expect(Math.abs(bar - time / fixture.duration * 100)).toBeLessThanOrEqual(15)
+    }
   })
 })

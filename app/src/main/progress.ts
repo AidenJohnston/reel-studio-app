@@ -136,44 +136,43 @@ export class ProgressTracker {
     this.phaseStart = t
   }
 
-  private fraction(): number {
-    if (this.cur < 0) return 0
-    const x = (this.now() - this.phaseStart) / 1000 / this.phaseEstimate(this.phases[this.cur])
-    const byTime = this.phases[this.cur] === 'edit'
-      ? 0.95 * (1 - Math.exp(-x))
-      : x <= 1 ? 0.9 * x : 1 - 0.1 / x
-    return Math.max(0, byTime)
-  }
-
   snapshot(): { overall: number; etaSec: number | null; etaMaxSec?: number; approximate: boolean; overdue: boolean } {
     if (this.cur < 0) return { overall: this.best, etaSec: null, approximate: true, overdue: false }
     const estimates = this.phases.map((p) => this.spent[p] === 0 ? 0 : this.phaseEstimate(p))
-    const total = estimates.reduce((a, b) => a + b, 0)
-    const done = estimates.slice(0, this.cur).reduce((a, b) => a + b, 0)
+    const done = this.phases.slice(0, this.cur).reduce((sum, phase) => sum + (this.spent[phase] ?? 0), 0)
     const current = estimates[this.cur]
-    const elapsed = (this.now() - this.phaseStart) / 1000
+    const elapsed = Math.max(0, (this.now() - this.phaseStart) / 1000)
     const later = estimates.slice(this.cur + 1).reduce((a, b) => a + b, 0)
     const remaining = Math.max(0, current - elapsed) + later
-    const overall = Math.min(99, ((done + this.fraction() * current) / total) * 100)
+    const observed = this.factor() !== undefined
+    const unknownEdit = this.phases.slice(this.cur).includes('edit') && !this.local('edit')
+    // Use the larger AI budget that timeLeftWords displays, rather than a separate eased curve.
+    const aiBudget = unknownEdit && observed ? this.phaseEstimate('edit') : 0
+    const aiElapsed = this.phases[this.cur] === 'edit' ? elapsed : 0
+    const other = this.phases[this.cur] === 'edit' ? later : remaining - aiBudget
+    const displayRemaining = aiBudget ? 2 * aiBudget + aiElapsed + other : remaining
+    // Count completed wall time and elapsed work, keeping a sliver of the phase unfinished.
+    // An overrun grows its budget without completing the phase or changing the ETA policy.
+    const phaseBudget = Math.max(current, elapsed)
+    const aggregateLeft = this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart
+      ? (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct - (this.now() - this.jobStart) / 1000
+      : undefined
+    const total = done + elapsed + Math.max(0, aggregateLeft ?? displayRemaining)
+    const phaseEnd = (done + phaseBudget * 0.99) / (done + phaseBudget + later) * 100
+    const overall = Math.min(99, aggregateLeft === undefined ? phaseEnd : 99, (done + elapsed) / total * 100)
     this.best = Math.max(this.best, overall, Math.min(99, this.aggregate?.pct ?? 0))
     const remainingPhases = this.phases.slice(this.cur)
     const approximate = remainingPhases.some((p) => !this.local(p) || this.local(p)?.approximate)
     const out = { overall: this.best, approximate }
     if (!(this.mediaSec > 0)) return { ...out, etaSec: null, overdue: false }
     // Only explicitly whole-job percentages can estimate throughput across render substeps.
-    if (this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart) {
-      const duration = (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct
-      const left = duration - (this.now() - this.jobStart) / 1000
-      return { ...out, approximate: true, etaSec: left > 0 ? Math.max(1, left) : null, overdue: false }
+    if (aggregateLeft !== undefined) {
+      return { ...out, approximate: true, etaSec: aggregateLeft > 0 ? Math.max(1, aggregateLeft) : null, overdue: false }
     }
-    const observed = this.factor() !== undefined
-    const unknownEdit = remainingPhases.includes('edit') && !this.local('edit')
     // An unmeasured AI step has a remaining-time budget, not a countdown to a known deadline.
     if (unknownEdit && observed) {
       const ai = this.phaseEstimate('edit')
-      const aiElapsed = this.phases[this.cur] === 'edit' ? elapsed : 0
-      const other = this.phases[this.cur] === 'edit' ? later : remaining - ai
-      return { ...out, etaSec: ai + other, etaMaxSec: 2 * ai + aiElapsed + other, overdue: false }
+      return { ...out, etaSec: ai + other, etaMaxSec: displayRemaining, overdue: false }
     }
     // Use the existing 30-second near-completion cutoff only with local history for all work left.
     if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
