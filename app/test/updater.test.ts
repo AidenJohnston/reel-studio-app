@@ -132,6 +132,35 @@ describe('once a day', () => {
   })
 })
 
+describe('a check that falls while a download runs', () => {
+  it('waits and tries again, instead of rescheduling itself with no delay', async () => {
+    vi.useFakeTimers()
+    try {
+      let asks = 0
+      let finish!: () => void
+      const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
+      // a remembered release and no check for days: the first automatic check is due 15 s after start
+      const { u } = setup(async () => (asks++, v013), {
+        memory: { updateLatest: { version: '0.1.3', url: page } },
+        download: () => new Promise<void>((r) => (finish = r))
+      })
+      await u.init()
+      const timers = vi.spyOn(globalThis, 'setTimeout')
+      u.start()
+      void u.download() // reads the release (one ask), then downloads until finish()
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(asks).toBe(1)
+      expect(timers.mock.calls.filter(([, ms]) => ms === 0)).toEqual([])
+      finish()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(asks).toBe(2)
+      u.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('remembered across launches', () => {
   it('a start without internet still offers the release found before; an installed one is forgotten', async () => {
     const offline = async (): Promise<FoundUpdate | null> => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com'))
@@ -148,6 +177,19 @@ describe('remembered across launches', () => {
     await b.u.init()
     expect(b.u.state().status).toBe('idle')
     expect(b.memory().updateLatest).toBeNull()
+  })
+})
+
+describe('turning "Check for updates" back on', () => {
+  it('shows the remembered release at once, still hidden from the sidebar if it was put off', async () => {
+    const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
+    const { u } = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com')), {
+      memory: { checkUpdates: false, updateLatest: { version: '0.1.3', url: page }, updateDismissed: { version: '0.1.3', at: 1000 } }
+    })
+    await u.init()
+    expect(u.state().availableVersion).toBeNull()
+    await u.setEnabled(true)
+    expect(u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, snoozed: true })
   })
 })
 

@@ -55,6 +55,7 @@ import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { RELEASES_API, releasePageBackend, type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
+import { autoUpdater } from 'electron-updater'
 import { electronUpdaterBackend } from './updater-electron'
 import { disabledReason, parseFeedFile, updateMode, type FeedFile } from './update-machine'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
@@ -184,6 +185,7 @@ const updates = createUpdater({
     ? null
     : updateHow === 'install'
       ? electronUpdaterBackend({
+          updater: autoUpdater,
           version: app.getVersion(),
           fetch: githubFetch,
           releasesApi: TEST_FEED ? `${TEST_FEED}/releases` : RELEASES_API,

@@ -12,6 +12,7 @@ import { releaseNotesFrom } from './release-notes'
 import {
   FIRST_CHECK_DELAY_MS,
   isRateLimited,
+  BUSY_RETRY_MS,
   isSnoozed,
   nextCheckIn,
   onAvailable,
@@ -132,7 +133,15 @@ export function createUpdater(d: UpdaterDeps) {
 
   async function tick(): Promise<void> {
     const outcome = await runCheck('auto')
-    schedule(nextCheckIn(outcome ?? 'answered', lastAnswered, d.now()))
+    // skipped (a download or install is running): try again shortly, never in a tight loop
+    schedule(outcome ? nextCheckIn(outcome, lastAnswered, d.now()) : BUSY_RETRY_MS)
+  }
+
+  /** A remembered release (main/settings.ts updateLatest) shown as available, as the old update note did. */
+  function offerRemembered(base: UpdateState, latest: unknown): UpdateState {
+    const kept = stillNewer(latest, d.version)
+    if (!kept || !enabled()) return base
+    return { ...onAvailable(base, kept.version, d.now(), kept.notes ?? null, kept.url), checkedAt: base.checkedAt }
   }
 
   function answered(): void {
@@ -198,10 +207,9 @@ export function createUpdater(d: UpdaterDeps) {
       const kept = stillNewer(mem.updateLatest, d.version)
       // installed since, or not ours: forget it
       if (mem.updateLatest && !kept) remember({ updateLatest: null })
-      let first: UpdateState = { ...state, autoCheck: mem.checkUpdates }
+      const first: UpdateState = { ...state, autoCheck: mem.checkUpdates }
       // Offered as the old update note did: only while automatic checks are on.
-      if (kept && enabled() && mem.checkUpdates) first = { ...onAvailable(first, kept.version, d.now(), kept.notes ?? null, kept.url), checkedAt: null }
-      set(first)
+      set(mem.checkUpdates ? offerRemembered(first, mem.updateLatest) : first)
       armSnoozeEnd()
     },
 
@@ -286,7 +294,10 @@ export function createUpdater(d: UpdaterDeps) {
     async setEnabled(on: unknown): Promise<{ enabled: boolean }> {
       const autoCheck = on === true
       await d.save({ checkUpdates: autoCheck })
-      set({ ...state, autoCheck })
+      let next: UpdateState = { ...state, autoCheck }
+      // Turned on: show what the last check found at once, as the old update note did ("Not now" still applies).
+      if (autoCheck && state.availableVersion === null) next = offerRemembered(next, (await d.load().catch(() => null))?.updateLatest)
+      set(next)
       // on: look if a day has passed since the last answer. off: schedule() only clears the next look.
       schedule(nextCheckIn('answered', lastAnswered, d.now()))
       return { enabled: autoCheck }

@@ -11,7 +11,7 @@
 //
 // resources/app-update.yml (electron-builder writes it from the `publish` block) still has to exist:
 // electron-updater reads its download cache folder name from it.
-import { autoUpdater, type ProgressInfo } from 'electron-updater'
+import type { AppUpdater, ProgressInfo } from 'electron-updater'
 import { newerRelease, type FetchLike } from './update-check'
 import type { UpdateBackend } from './updater'
 
@@ -23,7 +23,29 @@ import type { UpdateBackend } from './updater'
  */
 export const SAME_FOR_EVERYONE = { 'x-user-staging-id': '00000000-0000-0000-0000-000000000000' }
 
+/** The parts of electron-updater's autoUpdater this uses (main/index.ts passes the real one, tests a fake). */
+export type UpdaterLike = Pick<
+  AppUpdater,
+  | 'logger'
+  | 'autoDownload'
+  | 'autoInstallOnAppQuit'
+  | 'allowDowngrade'
+  | 'disableDifferentialDownload'
+  | 'requestHeaders'
+  | 'forceDevUpdateConfig'
+  | 'updateConfigPath'
+  | 'setFeedURL'
+  | 'checkForUpdates'
+  | 'downloadUpdate'
+  | 'quitAndInstall'
+> & {
+  on(event: 'error', listener: (e: Error) => void): unknown
+  on(event: 'download-progress', listener: (p: ProgressInfo) => void): unknown
+  removeListener(event: 'download-progress', listener: (p: ProgressInfo) => void): unknown
+}
+
 export function electronUpdaterBackend(opts: {
+  updater: UpdaterLike
   version: string
   fetch: FetchLike
   /** GitHub's releases list (a local server in the update e2e). */
@@ -36,7 +58,7 @@ export function electronUpdaterBackend(opts: {
   /** Errors electron-updater reports by event, not by promise (Squirrel.Mac's install). */
   onError(e: unknown): void
 }): UpdateBackend {
-  const u = autoUpdater
+  const u = opts.updater
   u.logger = {
     info: (m: unknown) => opts.log(`[updater] ${String(m)}`),
     warn: (m: unknown) => opts.log(`[updater] warn: ${String(m)}`),
@@ -64,7 +86,11 @@ export function electronUpdaterBackend(opts: {
       u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
       const r = await u.checkForUpdates()
       if (!r) throw new Error('The updater is not active in this build.')
-      // latest-mac.yml names an older version than its release tag: nothing to install
+      // The checksum only proves the zip matches latest-mac.yml, not that the yml belongs to this release: a yml
+      // naming another version (a stale or mixed-up upload) would install that version instead.
+      if (r.updateInfo.version !== found.version) {
+        throw new Error(`latest-mac.yml in release v${found.version} is for version ${r.updateInfo.version}`)
+      }
       if (!r.isUpdateAvailable) return null
       return { version: r.updateInfo.version, notes: found.notes, releaseUrl: found.url }
     },

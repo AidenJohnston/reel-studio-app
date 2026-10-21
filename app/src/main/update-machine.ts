@@ -96,6 +96,9 @@ export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 /** A check that got no answer (offline, GitHub down) is tried again in an hour (0.1.2's hourly look). */
 export const RETRY_AFTER_FAILURE_MS = 60 * 60 * 1000
 
+/** An automatic check that falls while a download or install runs is tried again this much later. */
+export const BUSY_RETRY_MS = 60 * 1000
+
 export type CheckOutcome = 'answered' | 'failed'
 
 /** How long until the next automatic check. A last answer in the future (clock set back) counts as due. */
