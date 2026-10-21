@@ -1,9 +1,11 @@
 // The job event contract (shared/api.ts JobUpdate -> JobEvent) end to end without Electron: what a job
 // emits, what main adds (overall, secondsLeft, thinking kept across ticks, a playable `video` for every
 // render), and how the renderer folds it (shared/live.ts).
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import type { Emit } from '../src/main/jobs'
 import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, timeLeftWords, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
@@ -171,5 +173,44 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses[0]).toMatchObject({ secondsLeft: null })
     expect(statuses.every((e) => e.type === 'status' && (e.secondsLeft === null || typeof e.secondsLeft === 'number'))).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
+  })
+
+  it('hydrates the last shown job estimate after an overrun when the screen reopens', async () => {
+    setupPaths()
+    const slug = 'eta-reopen'
+    mkdirSync(projectDir(slug), { recursive: true })
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    let release = (): void => {}
+    const hold = new Promise<void>((resolve) => { release = resolve })
+    let emit: Emit | undefined
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined,
+      mediaSeconds: async () => 60, tickMs: 10
+    })
+    jobs.start(slug, 'rerender', async (send) => {
+      emit = send
+      send({ type: 'status', message: 'Updating your video', phase: 'final', pct: 0 })
+      await hold
+      return { summary: 'ok', quiet: true }
+    })
+    const running = jobs.forSlug(slug)
+    if (!running) throw new Error('Expected a running rerender')
+    try {
+      await vi.waitFor(() => expect(running.secondsLeft).toBeGreaterThan(0))
+      const shown = timeLeftWords(liveFromDetail(running))
+      now = 120_000
+      if (!emit) throw new Error('Expected the rerender status emitter')
+      emit({ type: 'status', message: 'Updating your video', phase: 'final', pct: 0 })
+      expect(running.secondsLeft).not.toBeNull()
+      expect(timeLeftWords(liveFromDetail(running))).toBe(shown)
+      const latest = events.at(-1)
+      expect(latest).toMatchObject({ type: 'status', secondsLeft: running.secondsLeft })
+    } finally {
+      release()
+      await running.done
+      clock.mockRestore()
+    }
   })
 })

@@ -36,12 +36,17 @@ export { timeLeftText as formatEta } from '../shared/progress'
 
 /** Preserve a legacy estimate at this video's duration, then persist only the rate. */
 export function migrateHistory(history: SpeedHistory, mediaSec: number): SpeedHistory {
-  if (!(mediaSec > 0)) return history
+  if (!(mediaSec > 0) || !Number.isFinite(mediaSec)) return history
   let out = history
   for (const [key, model] of Object.entries(history.phases)) {
-    if (!model || model.n <= 0 || !(model.base > 0) || !Number.isFinite(model.base + model.perMin)) continue
+    if (!model) continue
+    const rate = model.perMin + model.base / (mediaSec / 60)
+    const valid = Number.isFinite(model.base) && model.base >= 0 && Number.isFinite(model.perMin) && model.perMin >= 0 && Number.isFinite(rate) && rate >= 0
+    if (valid && (model.base === 0 || model.n <= 0)) continue
     if (out === history) out = { v: 1, phases: { ...history.phases } }
-    out.phases[key] = { base: 0, perMin: model.perMin + model.base / (mediaSec / 60), n: model.n, approximate: true }
+    // Invalid history falls back to defaults instead of producing NaN progress.
+    if (!valid) delete out.phases[key]
+    else out.phases[key] = { base: 0, perMin: rate, n: model.n, approximate: true }
   }
   return out
 }

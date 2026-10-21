@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
+import ts from 'typescript'
+import type { JobUpdate } from '../src/shared/api'
+import type { EngineProgress } from '../src/main/engine'
 import { performance } from 'node:perf_hooks'
 import { DEFAULTS, ProgressTracker, learn, migrateHistory, type SpeedHistory } from '../src/main/progress'
 import { timeLeftText as formatEta } from '../src/shared/progress'
@@ -283,5 +288,45 @@ describe('honest progress', () => {
     tracker.update('final', 100)
     tracker.update('final', 5)
     expect(tracker.snapshot()).toMatchObject({ overall: 50, etaSec: 10 })
+  })
+
+  it('counts only render-stage percentages in both manual rerender callbacks', () => {
+    // Execute the real callbacks without importing Electron's app startup.
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+    const start = source.indexOf("handle('projects:rerender'")
+    const file = ts.createSourceFile('rerender.ts', source.slice(start, source.indexOf("\n  handle(", start + 1)), ts.ScriptTarget.Latest)
+    const callbacks: ts.ArrowFunction[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(file) === 'runEngine') {
+        const callback = node.arguments[2]
+        if (callback && ts.isArrowFunction(callback)) callbacks.push(callback)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+    expect(callbacks).toHaveLength(2)
+    for (const node of callbacks) {
+      const events: JobUpdate[] = []
+      const callback: (p: EngineProgress) => void = runInNewContext(`(${node.getText(file)})`, { emit: (e: JobUpdate) => events.push(e), words: 'Updating your video' })
+      callback({ stage: 'music', pct: 100, message: 'Adding music' })
+      expect(events).toEqual([])
+      callback({ stage: 'render', pct: 10, message: 'Putting it all together' })
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({ type: 'status', aggregate: true })
+    }
+  })
+
+  it('drops legacy models with negative inputs or overflowing converted rates', () => {
+    const history: SpeedHistory = { v: 1, phases: {
+      'note:edit': { base: 6, perMin: -100, n: 1 },
+      'note:final': { base: -6, perMin: 22, n: 1 },
+      'rerender:final': { base: 1e308, perMin: 0, n: 1 }
+    } }
+    const migrated = migrateHistory(history, 1)
+    expect(migrated.phases).toEqual({})
+    const tracker = new ProgressTracker('rerender', 1, migrated, () => 0)
+    tracker.update('final', 0)
+    expect(Number.isFinite(tracker.snapshot().overall)).toBe(true)
+    expect(tracker.snapshot().etaSec).toBeGreaterThan(0)
   })
 })

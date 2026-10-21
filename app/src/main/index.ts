@@ -487,14 +487,18 @@ function registerIpc(): void {
       const look: any = await runEngine(
         'render',
         ['--project', dir, '--draft', '--no-cover'],
-        (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final', aggregate: true }),
+        (p) => {
+          if (p.stage === 'render') emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final', aggregate: true })
+        },
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
         ['--project', dir],
-        (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final', aggregate: true }),
+        (p) => {
+          if (p.stage === 'render') emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final', aggregate: true })
+        },
         signal
       )
       const version = Number(r?.version ?? (await readProject(slug)).version)

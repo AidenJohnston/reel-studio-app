@@ -66,13 +66,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     const status = (): void => {
       const snap = tracker.snapshot()
       job.overall = snap.overall
-      job.secondsMaxLeft = snap.etaMaxSec
       job.approximate = snap.approximate
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
       // later: wait for duration before showing a number.
-      job.secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
+      const secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
+      // Project-detail hydration must retain the same estimate as an already-open screen.
+      if (secondsLeft !== null) {
+        job.secondsLeft = secondsLeft
+        job.secondsMaxLeft = snap.etaMaxSec
+      }
       job.overdue = snap.overdue
-      send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, ...(snap.etaMaxSec ? { secondsMaxLeft: snap.etaMaxSec } : {}), approximate: snap.approximate, overdue: job.overdue, thinking: job.thinking })
+      send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, ...(job.secondsMaxLeft !== undefined ? { secondsMaxLeft: job.secondsMaxLeft } : {}), approximate: snap.approximate, overdue: job.overdue, thinking: job.thinking })
     }
     // re-broadcast once a second: time moves the bar and the estimate even while the AI thinks
     const tick = setInterval(() => status(), progress?.tickMs ?? 1000)
