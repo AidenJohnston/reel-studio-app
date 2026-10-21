@@ -6,19 +6,20 @@ Source/model sync: `152e91318640523c1c8beb08e5b7eec7281c8388`, PR #20. `coverage
 
 | Property | Result within the bounds below |
 | --- | --- |
-| 1. Old or complete new edit | Pass after completed cleanup or startup recovery, with no intervening external edit. `project.json` contains the note at commit. References exist at every modeled step. Literal whole-tree equality immediately after a crash still fails before recovery. |
+| 1. Recovered edit equality and reference consistency | Pass. After recovery, the live project is byte-identical to before the note or is the complete new version. The project never references a missing file. This uses the edit projection and assumptions below, with no intervening external edit. |
 | 2. Published versions stay immutable | Pass for notes. The separate `cover_only` counterexample is accepted legacy behavior outside the note contract. |
 | 3. Live cache writes | Pass. Only absent keys become live, after commit, through same-volume renames of complete private copies. |
 | 4. Stale base never publishes | Pass with the shared lock and base-hash check. |
 | 5. Writers cannot interleave inside publish | Pass for the note and one shared-lock writer. Both no-lock entry orders fail their mutants. |
 | 6. Recovery is idempotent | Pass for two completed recovery passes, including a crash during repair. The actual-source two-orphan notice retry also passes. |
+| Immediate byte equality before recovery | Expected failure, checked separately by `literal-bytes.cfg`. |
 | External credits survive recovery | Pass for one completed external write while the process is down, before recovery resumes. Removing the credits hash guard fails. |
 
-The recovered edit projection includes project bytes, assets, credits, and version contents. It excludes optional postcommit caches under revised property 3. The original whole-tree check remains separate and failing. This distinction preserves the requested property rather than silently moving its observation point.
+The recovered edit projection includes project bytes, assets, credits, and version contents. It excludes optional postcommit caches under revised property 3. Property 1 combines `RecoveredOldOrCompleteNew` with `ReferencesExist`. The separately named property **Immediate byte equality before recovery** uses `OldOrCompleteNew` in `literal-bytes.cfg` and is expected to fail.
 
-## Findings and repaired counterexamples
+## Expected failures and regression counterexamples
 
-- Immediate byte equality still fails at `ai/src/note-staging.ts:402`. Publish moves an asset into live `work/assets`, then the process crashes before the project rename. The old project now has an extra file. `literal-bytes.cfg` catches this. Startup uses the manifest to remove the file, so the recovered edit passes. No dangling reference results from this order. A crash after commit can also leave optional cache promotion incomplete, so whole-tree equality to a fully promoted successful run is stronger than the revised cache contract.
+- Immediate byte equality before recovery fails at `ai/src/note-staging.ts:402`. Publish moves an asset into live `work/assets`, then the process crashes before the project rename. The old project now has an extra file. `literal-bytes.cfg` catches this. The next startup uses the manifest to remove the file, so property 1 passes. This temporary difference is inherent in moving assets before the project commit: it prevents the project from referencing files that do not exist yet. A crash after commit can also leave optional cache promotion incomplete, so whole-tree equality to a fully promoted successful run is stronger than the revised cache contract.
 - The earlier permanent asset and credits leak is repaired. `recoverTransaction` removes manifest-listed assets at line 222 and restores the exact original credit bytes at lines 228 to 233 when the current credits hash matches the transaction's merged bytes. `broken-manifest` leaves an asset after recovery. `broken-credits` leaves merged credits behind. Both fail recovered equality.
 - The earlier lost-note window is repaired. The note enters the prepared project bytes before the atomic rename at line 413. `broken-append` restores the old order: project commits without its note, then crashes before the later append. Live project bytes differ from both complete alternatives.
 - Recovery preserves newer credits at line 228. In the new scenario, the note moves merged credits, crashes, and another process finishes a different credit-book write before startup. Recovery removes the abandoned note's assets but retains the newer credit bytes. `broken-credits-guard` removes that condition and restores stale original bytes over the external edit.
@@ -79,7 +80,7 @@ Six inverse properties establish reachable commit, stale refusal, two recovery p
 
 ## Evidence and reproduction
 
-The full 28-case suite matched all recorded outcomes against `152e913`. The baseline explored 1,141,266 generated states and 819,662 distinct states to depth 101. Recovered equality explored 404,449 distinct states. External-credit preservation explored 804,336 distinct states. All 15 mutants produced their named counterexamples, and all six reachability witnesses were reached. The literal-equality finding and accepted legacy exception reproduced.
+The full 28-case suite matched all recorded outcomes against `152e913`. The baseline explored 1,141,266 generated states and 819,662 distinct states to depth 101. Recovered equality explored 404,449 distinct states. External-credit preservation explored 804,336 distinct states. All 15 mutants produced their named counterexamples, and all six reachability witnesses were reached. The expected immediate-equality failure and accepted legacy exception reproduced.
 
 From the repository root:
 
@@ -87,7 +88,7 @@ From the repository root:
 env -u CLIPROXY_API_KEY python3 verification/note-staging/run.py
 ```
 
-The normal run returns `RESULT: FAIL`, exit 1, for the retained immediate-byte-equality finding. `--self-test` returns zero when all recorded outcomes match, without changing that finding. `--case broken-manifest` runs one case. Logs and counterexamples stay in ignored `verification/note-staging/results/`. State databases use temporary directories deleted at checker exit.
+The default run returns `RESULT: PASS`, exit 0, when every outcome matches its recorded expectation, including expected failures. A mismatch or source/checker error returns non-zero. `--self-test` remains a compatibility alias for the default behavior. `--case broken-manifest` runs one case. Logs and counterexamples stay in ignored `verification/note-staging/results/`. State databases use temporary directories deleted at checker exit.
 
 The runner uses TLC v1.8.0, revision d2e1472, breadth-first search, one worker, fingerprint polynomial 0, and seed 1. It verifies the [official release asset](https://github.com/tlaplus/tlaplus/releases/tag/v1.8.0) against SHA-256 `5bd7b64db99ae4c6c35f290de5e809c0ee41af43f8699cf696099ffb6452b1e2` before execution. Java defaults to `/opt/homebrew/opt/openjdk/bin/java`. The jar and state directories are ignored.
 

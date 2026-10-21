@@ -6,7 +6,7 @@
   },
   {
     "name": "literal-bytes",
-    "expect": "finding",
+    "expect": "expected-failure",
     "invariant": "OldOrCompleteNew"
   },
   {

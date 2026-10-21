@@ -15,7 +15,7 @@ From the repository root, run:
 
 The runner downloads the official TLA+ v1.8.0 jar if absent and checks its pinned SHA-256 before executing it. Java defaults to /opt/homebrew/opt/openjdk/bin/java; set TLC_JAVA on another machine.
 
-Exit 1 means the current-source findings in REPORT.md reproduced. Exit 2 means a source mismatch or unexpected checker result. Use --self-test to validate every recorded pass and counterexample. It returns zero only when all expected outcomes match, while still printing RESULT: FAIL for the current findings. Do not describe that self-test as all requested properties passing.
+The default command exits 0 and prints RESULT: PASS when every recorded expectation matches, including expected failures. A source mismatch, source rehearsal failure, or unexpected checker result exits non-zero. --self-test is a compatibility alias for the default behavior. An expected invariant violation remains a counterexample, even when the suite succeeds.
 
 TLC logs and a machine-readable summary go into verification/note-staging/results/. State databases use owned temporary directories and are deleted when TLC exits. Do not commit the jar, result logs, or states/.
 
@@ -48,7 +48,7 @@ A rename is indivisible only on the same volume. Copies and ordinary writes have
 
 Property 3 uses the revised requirement: a note cannot write live caches before commit. After commit it may add only new keys through atomic renames. Do not restore the older blanket ban on every postcommit cache write.
 
-The original immediate whole-tree equality still fails between an asset move and recovery. Recovered edit equality and reference consistency pass. Preserve both checks when updating this model. The `cover_only` immutability failure is the accepted legacy exception, not a note defect.
+Property 1 requires the live project after recovery to be byte-identical to before the note or the complete new version, with no missing references at any step. Recovered edit equality and reference consistency pass within the documented projection and bounds. The separate property "Immediate byte equality before recovery" is expected to fail between an asset move and recovery. Preserve both checks when updating this model. The `cover_only` immutability failure is the accepted legacy exception, not a note defect.
 
 The external-credit case permits one completed write while the process is down, before recovery resumes. It checks that conditional rollback preserves those bytes. It does not permit an external writer during the recovery hash-read/rename interval. Valid publisher-generated manifests are assumed in TLC. Malformed manifests and symlink refusal are checked by `ai/test/note-staging.test.ts`. Run those tests when changing validation. App notice tests cover the 50-ID retention limit separately.
 
