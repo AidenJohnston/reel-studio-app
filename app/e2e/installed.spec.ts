@@ -1,6 +1,6 @@
-// The INSTALLED app, run the way its owner runs it: real user data, real Documents\Reel Studio, the
-// speech model downloaded through the first-run screen, the bundled engine. Skipped unless asked for:
-//   REELSTUDIO_E2E_INSTALLED=<path to the installed Reel Studio.exe>
+// The INSTALLED app, run the way its owner runs it: real user data, real Documents/Reel Studio, the
+// speech model downloaded through the first-run screen, the bundled engine. Windows or macOS. Skipped unless asked for:
+//   REELSTUDIO_E2E_INSTALLED=<the installed Reel Studio.exe, or .../Reel Studio.app/Contents/MacOS/Reel Studio>
 //   REELSTUDIO_E2E_TAKES_LIST=<take.mp4>;<take.mp4>   real takes, read in place
 //   REELSTUDIO_E2E_NOTES=<JSON array, one note per take>   REELSTUDIO_E2E_MUSIC=<song>;<song> (Library, first take)
 //   REELSTUDIO_E2E_OUT=<results folder>   REELSTUDIO_E2E_EXPECT_AI=claude-cli|none (none also skips the note)
@@ -10,17 +10,18 @@
 //   REELSTUDIO_E2E_PHONE=1    after Export: "Send to my phone", fetch the page + video like a phone, expect "Sent!"
 //     (the installed app is not a test build, so the link binds to the real Wi-Fi address: a firewall prompt
 //     may appear; a desktop screenshot is taken right after the panel opens)
-//   REELSTUDIO_E2E_PROFILE=<dir>  optional: a throwaway profile (user data + Reel Studio folder) instead of the
-//     real one, with REELSTUDIO_E2E_MODELS=<models dir> to reuse an already downloaded speech model
-// Verify uses the installed engine exactly as the app spawns it: <resources>\python\python.exe -s -E -B -X utf8
-// -m reelengine verify, cwd <resources>\engine. Leaves what it made in Documents\Reel Studio for a person to
+//   REELSTUDIO_E2E_PROFILE=<dir>  optional: a throwaway profile (user data + Reel Studio folder + engine cache) instead
+//     of the real one, with REELSTUDIO_E2E_MODELS=<models dir> to reuse an already downloaded speech model
+// Verify uses the installed engine exactly as the app spawns it: the bundled python (runtime.ts) -s -E -B -X utf8
+// -m reelengine verify, cwd <resources>/engine. Leaves what it made in Documents/Reel Studio for a person to
 // look at; cleaning up is the caller's job.
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import { attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
+import { installedRuntime } from './runtime'
 
 const EXE = process.env.REELSTUDIO_E2E_INSTALLED
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
@@ -30,11 +31,13 @@ const EXPECT_AI = process.env.REELSTUDIO_E2E_EXPECT_AI ?? 'claude-cli'
 const PROFILE = process.env.REELSTUDIO_E2E_PROFILE
 const ATTACH = process.env.REELSTUDIO_E2E_ATTACH
 const ROOT = PROFILE ? join(PROFILE, 'Reel Studio') : join(homedir(), 'Documents', 'Reel Studio')
+// The encoder probe cache; without a profile the app keeps its own default, like a real install.
+const CACHE = PROFILE ? join(PROFILE, 'engine cache') : undefined
 
 test.skip(!EXE, 'set REELSTUDIO_E2E_INSTALLED to run')
 test.describe.configure({ mode: 'serial' })
 
-const resources = (): string => join(dirname(EXE!), 'resources')
+const runtime = () => installedRuntime(EXE!)
 
 async function open(): Promise<{ app: ElectronApplication; page: Page }> {
   const env: Record<string, string> = {}
@@ -47,6 +50,7 @@ async function open(): Promise<{ app: ElectronApplication; page: Page }> {
     env.REELSTUDIO_USER_DATA = join(PROFILE, 'user data')
     env.REELSTUDIO_ROOT = ROOT
     if (process.env.REELSTUDIO_E2E_MODELS) env.REELSTUDIO_MODELS_DIR = process.env.REELSTUDIO_E2E_MODELS
+    env.REELENGINE_CACHE = CACHE!
   }
   const app = await electron.launch({ executablePath: EXE!, args: [], env })
   const page = await app.firstWindow()
@@ -85,12 +89,15 @@ function newest(dir: string, filter: (n: string) => boolean): string | null {
 
 function engineEnv(): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env }
-  for (const k of Object.keys(e)) if (/^(PYTHON|ELECTRON_RUN_AS_NODE)/i.test(k)) delete e[k]
+  for (const k of Object.keys(e)) if (/^(PYTHON|ELECTRON_RUN_AS_NODE|REELENGINE_)/i.test(k)) delete e[k]
+  const r = runtime()
   return {
     ...e,
-    REELENGINE_FFMPEG: join(resources(), 'ffmpeg', 'ffmpeg.exe'),
-    REELENGINE_FFPROBE: join(resources(), 'ffmpeg', 'ffprobe.exe'),
-    REELENGINE_FONTS: join(resources(), 'fonts')
+    PYTHONDONTWRITEBYTECODE: '1', // never write .pyc into the installed app
+    REELENGINE_FFMPEG: r.ffmpeg,
+    REELENGINE_FFPROBE: r.ffprobe,
+    REELENGINE_FONTS: r.fonts,
+    ...(CACHE ? { REELENGINE_CACHE: CACHE } : {})
   }
 }
 
@@ -279,11 +286,11 @@ TAKES.forEach((take, i) => {
       result.project = project
 
       // verify, exactly the way the app runs its engine
-      const py = join(resources(), 'python', 'python.exe')
+      const { python: py, engine } = runtime()
       let stdout = ''
       try {
         stdout = execFileSync(py, ['-s', '-E', '-B', '-X', 'utf8', '-u', '-m', 'reelengine', 'verify', '--project', project!, exportFile!], {
-          cwd: join(resources(), 'engine'),
+          cwd: engine,
           env: engineEnv(),
           maxBuffer: 64 * 1024 * 1024
         }).toString('utf8')
@@ -295,8 +302,8 @@ TAKES.forEach((take, i) => {
       result.verify = verify
       // frames + music level (dev tool), with the installed python
       const check = execFileSync(py, ['-s', '-B', join(__dirname, 'tools', 'check_export.py'), '--project', project!, '--export', exportFile!, '--out', join(out, 'frames')], {
-        cwd: join(resources(), 'engine'),
-        env: { ...engineEnv(), PYTHONPATH: join(resources(), 'engine'), PYTHONUTF8: '1' },
+        cwd: engine,
+        env: { ...engineEnv(), PYTHONPATH: engine, PYTHONUTF8: '1' },
         maxBuffer: 64 * 1024 * 1024
       }).toString('utf8')
       result.check = JSON.parse(check.trim().split('\n').pop()!)

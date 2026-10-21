@@ -108,13 +108,19 @@ mac:
   extendInfo:
     NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
 
+# The same window as packaging/dmg/make-dmg.sh, which builds the dmg we hand out (sign-mac.sh). build-mac.sh renders
+# the background (packaging/dmg/render-background.sh) before electron-builder runs. electron-builder takes the window
+# size from the background (640x432) and ignores `window` when a background is set.
 dmg:
-  title: Reel Studio
+  title: ${productName} ${version} Installer
   sign: false
   artifactName: Reel-Studio-${version}-${arch}.${ext}
+  background: ${env.RS_REPO_ROOT}/packaging/.build/dmg/background.tiff
+  iconSize: 120
+  iconTextSize: 12
   contents:
-    - { x: 130, y: 190 }
-    - { x: 410, y: 190, type: link, path: /Applications }
+    - { x: 166, y: 214, type: file }
+    - { x: 474, y: 214, type: link, path: /Applications }
 
 win:
   icon: ${env.RS_REPO_ROOT}/packaging/icons/icon.ico

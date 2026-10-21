@@ -82,7 +82,14 @@ Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh
 3. `codesign --verify --deep --strict`.
 4. Zips the app, sends it to Apple with `xcrun notarytool submit --wait`, then `xcrun stapler staple`
    attaches the approval ticket to the app so it also works offline.
-5. Builds the `.dmg`, signs it, notarizes it, staples it.
+5. Builds the `.dmg` (`packaging/dmg/make-dmg.sh`), signs it, notarizes it, staples it. The disk opens as a designed
+   window: the background art (`packaging/dmg/background.svg`), the app on the left, an arrow, and Applications on the
+   right. Finder itself saves that layout, so the script asks to control Finder: the first time, macOS asks
+   "Terminal wants to control Finder". Click **OK**. The script asks at the start, before anything slow runs.
+   The script waits for Finder to save `.DS_Store` before compressing. Inspect the finished image in Finder before release.
+   Over SSH, in CI, or if you click **Don't Allow**, the script still finishes: it prints
+   `Plain disk window, without the art: <why>.` and builds the plain window older versions had. For a release, run it
+   at the Mac and allow Finder control so people get the designed window.
 6. Final checks: `codesign --verify --deep --strict`, `spctl -a -vv` (must say `accepted` and
    `source=Notarized Developer ID`), `xcrun stapler validate`.
 
