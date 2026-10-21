@@ -3,7 +3,7 @@ import { clock } from '../../../shared/progress'
 import { groupMarks, type NoteMark } from '../../../shared/moments'
 import { Icon } from './icons'
 import { reel } from '../api'
-import { createPlayhead, usePlayhead, type Playhead } from './playhead'
+import { createPlayhead, useFollowPlayhead, type Playhead } from './playhead'
 import { NO_LAYERS, layersReducer, type Layer } from './videoLayers'
 
 /**
@@ -132,27 +132,46 @@ function frameReady(v: HTMLVideoElement, poster: string | null): Promise<void> {
 // Matches the opacity transition on .phone-screen > video.layer.
 const FADE_MS = 140
 
-/** Follows the playhead every frame, so it re-renders on its own and the player does not. */
+/** Follows the playhead every frame by writing to its own input, so playing the video renders nothing. */
 function ScrubRange({ playhead, dur, onSeek }: { playhead: Playhead; dur: number; onSeek: (seconds: number) => void }) {
-  const t = usePlayhead(playhead, (s) => s)
+  const input = useRef<HTMLInputElement>(null)
+  const write = useCallback(
+    (t: number) => {
+      const el = input.current
+      if (!el) return
+      el.value = String(Math.min(t, dur || 1))
+      el.style.setProperty('--pct', `${dur ? (t / dur) * 100 : 0}%`)
+    },
+    [dur]
+  )
+  useFollowPlayhead(playhead, write)
   return (
     <input
+      ref={input}
       type="range"
       min={0}
       max={dur || 1}
       step={0.01}
-      value={Math.min(t, dur || 1)}
+      defaultValue={0}
       aria-label="Position in the video"
       aria-keyshortcuts="ArrowLeft ArrowRight"
-      style={{ ['--pct' as string]: `${dur ? (t / dur) * 100 : 0}%` }}
       onChange={(e) => onSeek(Number(e.target.value))}
     />
   )
 }
 
-/** Time left, which changes once a second. */
+/** Time left. Written to its own span when the shown second changes, without rendering. */
 function ScrubTime({ playhead, dur }: { playhead: Playhead; dur: number }) {
-  return <span className="scrub-time">{usePlayhead(playhead, (s) => clock(dur ? dur - s : 0))}</span>
+  const span = useRef<HTMLSpanElement>(null)
+  const write = useCallback(
+    (t: number) => {
+      const text = clock(dur ? dur - t : 0)
+      if (span.current && span.current.textContent !== text) span.current.textContent = text
+    },
+    [dur]
+  )
+  useFollowPlayhead(playhead, write)
+  return <span className="scrub-time" ref={span} />
 }
 
 const MARK_STATE: Record<NoteMark['state'], string> = { making: 'Being made', done: 'Done', failed: "Didn't work", stopped: 'Stopped' }
