@@ -88,7 +88,7 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await reply.getByTestId('action-connect').click()
   await expect(page.getByTestId('connect-screen')).toBeVisible()
   await expect(page.getByTestId('signin-chatgpt')).toBeVisible()
-  await expect(page.getByTestId('claude-key-toggle')).toHaveText('Use a Claude key (advanced)')
+  await expect(page.getByTestId('claude-key-toggle')).toHaveText('Use an Anthropic API key (advanced)')
   await expect(page.getByTestId('without-ai')).toContainText('Without AI')
   await shot(page, 'ux-05-connect')
   await page.getByTestId('claude-key-toggle').click()
