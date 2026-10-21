@@ -324,7 +324,8 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
    The column is as tall as the window (top 10px sticky offset, 24px page bottom, 6px to spare), and the
    phone's slot gets the height that is left. A row that any change adds under the phone shrinks the phone
    instead of pushing "Send to my phone" below the window, and there is no fixed height reserve to keep
-   in step. Working keeps the window-based .phone size above (it has no slot). */
+   in step. Working keeps the window-based .phone size above (it has no slot). When a frame wraps the
+   phone (device previews), the slot goes around that frame only, so its picker stays a row below. */
 .reel-left:has(> .phone-slot) { height: calc(100vh - var(--titlebar) - 40px); }
 .phone-slot { flex: 1 1 0; min-height: 0; align-self: stretch; container-type: size; display: flex; justify-content: center; }
 /* Sized from the slot, over any rule that sizes it from the window. A frame that draws a real phone
