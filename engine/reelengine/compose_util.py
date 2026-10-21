@@ -264,10 +264,11 @@ def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None
                                   "Something went wrong while making your video. Try again.")
         finally:
             timer.cancel()
-            timer.join()
             proc.kill()
             proc.wait()
             proc.stdout.close()
+            if timer.ident is not None:
+                timer.join()
 
 
 def grab_frame(path: Path, t: float, ctx=None, width: Optional[int] = None) -> np.ndarray:
