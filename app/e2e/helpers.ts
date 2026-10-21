@@ -29,7 +29,14 @@ export function makeMedia(): { video: string; song: string; picture: string; doc
   return { video, song, picture, doc }
 }
 
-export async function launch(extraEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
+/**
+ * `realViewport`: leave the page at the window's real size. Otherwise the page is pinned to
+ * 1280 x 820 so screenshots compare, and it stays that size even when the window resizes or goes full screen.
+ */
+export async function launch(
+  extraEnv: Record<string, string> = {},
+  { realViewport = false }: { realViewport?: boolean } = {}
+): Promise<{ app: ElectronApplication; page: Page }> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
   delete env.ELECTRON_RUN_AS_NODE
@@ -55,7 +62,7 @@ export async function launch(extraEnv: Record<string, string> = {}): Promise<{ a
     ? await electron.launch({ executablePath: exe, args: [], cwd: BASE, env })
     : await electron.launch({ args: [APP_DIR], cwd: APP_DIR, env })
   const page = await app.firstWindow()
-  await page.setViewportSize({ width: 1280, height: 820 })
+  if (!realViewport) await page.setViewportSize({ width: 1280, height: 820 })
   await page.waitForLoadState('domcontentloaded')
   return { app, page }
 }

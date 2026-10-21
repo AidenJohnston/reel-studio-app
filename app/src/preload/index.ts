@@ -26,7 +26,8 @@ const api: ReelApi = {
     chooseFolder: () => call('app:chooseFolder'),
     setRoot: (p) => call('app:setRoot', p),
     onCommand: (cb) => on<AppCommand>('app:command', cb),
-    startDrag: (file) => ipcRenderer.send('app:startDrag', file)
+    startDrag: (file) => ipcRenderer.send('app:startDrag', file),
+    fullScreen: (on) => call('app:fullScreen', on)
   },
   model: {
     status: () => call('model:status'),
