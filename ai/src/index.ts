@@ -2,8 +2,9 @@
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import {
-  AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, ProviderId, ProviderStatus, ScriptResult, SecretStore,
+  AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
@@ -13,6 +14,8 @@ import { SiwcAuth } from './providers/siwc';
 import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
+import { CONNECTION_KINDS, ConnectionKind, listConnectionModels, noRedirectFetch, normalizeBaseURL } from './providers/connection';
+import { OpenAICompatibleProvider } from './providers/openaiCompatible';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import * as editor from './editor';
 
@@ -28,6 +31,9 @@ export { SiwcAuth, USAGE_URL } from './providers/siwc';
 export { OpenAIResponsesProvider, listChatGPTModels, mapResponsesError } from './providers/openai';
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 export { ReplayProvider, RecordingProvider } from './providers/replay';
+export { OpenAICompatibleProvider, toChatMessages, fromChatCompletion } from './providers/openaiCompatible';
+export { CONNECTION_KINDS, listConnectionModels, mapConnectionError, normalizeBaseURL } from './providers/connection';
+export type { ConnectionKind } from './providers/connection';
 export { detectLocalClaude, findClaude, claudeCandidates, claudeFromLoginShell, CLAUDE_CODE_MESSAGES } from './providers/localClaude';
 export type { LocalClaude, ClaudeCodeState } from './providers/localClaude';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
@@ -41,7 +47,39 @@ export interface AISettings {
   chatgptModel?: string;
   cliModel?: string;
   replayFixture?: string;
+  /** the person's own servers (provider 'custom'); each key is a separate encrypted file, never in here */
+  connections?: CustomConnection[];
+  /** which connection 'custom' uses */
+  activeConnection?: string;
 }
+
+export interface CustomConnection { id: string; label: string; kind: ConnectionKind; baseURL: string; model: string }
+/** What the app sees of a connection: never the key, only whether one is stored. */
+export interface ConnectionInfo extends CustomConnection { hasKey: boolean; active: boolean }
+export interface ConnectionInput {
+  /** set when editing a saved connection */
+  id?: string;
+  label: string; kind: ConnectionKind; baseURL: string; model: string;
+  /** a new key; empty or missing keeps the stored one when editing; null removes it */
+  key?: string | null;
+}
+/** Which field the person should fix. */
+export type ConnectionField = 'label' | 'address' | 'key' | 'model';
+export interface SaveConnectionResult {
+  status: ProviderStatus;
+  connection?: ConnectionInfo;
+  error?: UserFacingError & { field?: ConnectionField };
+}
+
+const CONNECTION_ID = /^c_[a-f0-9]{8}$/;
+function sameOrigin(a: string, b: string): boolean {
+  try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
+const CHECK_TIMEOUT_MS = 30_000;
+const FIELD_OF: Record<string, ConnectionField> = {
+  connection_bad_address: 'address', connection_unreachable: 'address', connection_wrong_address: 'address', connection_timeout: 'address',
+  connection_bad_key: 'key', no_secure_storage: 'key', connection_model: 'model',
+};
 
 export interface CreateAIOptions {
   host: EngineHost;
@@ -74,9 +112,9 @@ export interface CreateAIOptions {
 // Reel Studio is not Claude Code, it uses the Claude Code app the person signed in to themselves.
 export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)';
 const LABELS: Record<ProviderId, string> = {
-  chatgpt: 'ChatGPT', claude: 'Claude', 'codex-cli': 'Codex CLI (dev)', 'claude-cli': CLAUDE_CODE_LABEL, replay: 'Replay (dev)', none: 'No AI',
+  chatgpt: 'ChatGPT', claude: 'Claude', 'codex-cli': 'Codex CLI (dev)', 'claude-cli': CLAUDE_CODE_LABEL, custom: 'Your own server', replay: 'Replay (dev)', none: 'No AI',
 };
-const PEOPLE_PROVIDERS: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', 'none'];
+const PEOPLE_PROVIDERS: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', 'custom', 'none'];
 
 const LOCAL_CLAUDE_TTL_MS = 60_000;
 
@@ -115,22 +153,75 @@ export function createAI(opts: CreateAIOptions) {
     await writeFileAtomic(settingsFile, JSON.stringify({ ...(await settings()), ...patch }, null, 2));
   }
 
-  // ---- Claude key (secret)
-  const keyEnc = path.join(opts.settingsDir, 'claude-key.bin');
-  const keyPlain = path.join(opts.settingsDir, 'claude-key.txt');
-  async function claudeKey(): Promise<string | null> {
+  // ---- secrets: <name>.bin encrypted with the secret store; <name>.txt only for the dev CLI's --insecure-plaintext
+  const secretFiles = (name: string) => ({ enc: path.join(opts.settingsDir, `${name}.bin`), plain: path.join(opts.settingsDir, `${name}.txt`) });
+  async function readSecret(name: string): Promise<string | null> {
+    const f = secretFiles(name);
     try {
-      if (fs.existsSync(keyEnc) && opts.secretStore) return opts.secretStore.decryptString(await fsp.readFile(keyEnc));
-      if (opts.allowPlaintextSecrets && fs.existsSync(keyPlain)) return (await fsp.readFile(keyPlain, 'utf8')).trim() || null;
+      if (fs.existsSync(f.enc) && opts.secretStore) return opts.secretStore.decryptString(await fsp.readFile(f.enc));
+      if (opts.allowPlaintextSecrets && fs.existsSync(f.plain)) return (await fsp.readFile(f.plain, 'utf8')).trim() || null;
     } catch { /* unreadable */ }
     return null;
   }
-  async function storeClaudeKey(key: string | null): Promise<void> {
-    await fsp.rm(keyEnc, { force: true }); await fsp.rm(keyPlain, { force: true });
-    if (!key) return;
-    if (opts.secretStore?.isEncryptionAvailable()) await writeFileAtomic(keyEnc, opts.secretStore.encryptString(key), 0o600);
-    else if (opts.allowPlaintextSecrets) await writeFileAtomic(keyPlain, key, 0o600);
-    else throw new AIError('no_secure_storage', 'This computer has no safe place to keep your Claude key, so I did not save it. Add it from the Reel Studio app.');
+  const hasSecret = (name: string) => { const f = secretFiles(name); return fs.existsSync(f.enc) || (!!opts.allowPlaintextSecrets && fs.existsSync(f.plain)); };
+  /** Replaces the secret. The old one stays until the new one is written, so a failed replacement keeps it. */
+  async function writeSecret(name: string, value: string | null, noStorageMessage: string): Promise<void> {
+    const f = secretFiles(name);
+    if (!value) { await fsp.rm(f.enc, { force: true }); await fsp.rm(f.plain, { force: true }); return; }
+    if (opts.secretStore?.isEncryptionAvailable()) {
+      await writeFileAtomic(f.enc, opts.secretStore.encryptString(value), 0o600);
+      await fsp.rm(f.plain, { force: true });
+    } else if (opts.allowPlaintextSecrets) {
+      await writeFileAtomic(f.plain, value, 0o600);
+      await fsp.rm(f.enc, { force: true });
+    } else throw new AIError('no_secure_storage', noStorageMessage);
+  }
+
+  // ---- Claude key (secret)
+  const claudeKey = () => readSecret('claude-key');
+  const storeClaudeKey = (key: string | null) => writeSecret('claude-key', key, 'This computer has no safe place to keep your Claude key, so I did not save it. Add it from the Reel Studio app.');
+
+  // ---- the person's own servers ('custom'); the key of connection <id> is the secret connection-<id>
+  const connectionSecret = (id: string) => {
+    if (!CONNECTION_ID.test(id)) throw new AIError('connection_gone', 'That connection is no longer saved.');
+    return `connection-${id}`;
+  };
+  const connectionInfo = (c: CustomConnection, s: AISettings): ConnectionInfo => ({
+    id: c.id, label: c.label, kind: c.kind, baseURL: c.baseURL, model: c.model,
+    hasKey: hasSecret(connectionSecret(c.id)), active: s.active === 'custom' && activeConnection(s)?.id === c.id,
+  });
+  // Connection changes run one at a time: a save that is still checking must not undo a later edit (and leave a
+  // key bound to the wrong address).
+  let connectionQueue: Promise<unknown> = Promise.resolve();
+  function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+    const run = connectionQueue.then(fn, fn);
+    connectionQueue = run.catch(() => undefined);
+    return run;
+  }
+  function activeConnection(s: AISettings): CustomConnection | undefined {
+    const list = s.connections ?? [];
+    return list.find((c) => c.id === s.activeConnection) ?? list[0];
+  }
+  function connectionProvider(c: CustomConnection, key: string | null, check = false): ModelProvider {
+    if (c.kind === 'anthropic') {
+      return new AnthropicProvider({
+        id: 'custom', apiKey: key!, model: c.model, baseURL: c.baseURL,
+        // the key goes as x-api-key; an Authorization header could only come from the environment
+        fetch: noRedirectFetch(opts.fetch, ['authorization', 'proxy-authorization', 'cookie']),
+        ...(check ? { maxRetries: 0, timeoutMs: CHECK_TIMEOUT_MS, maxTokens: 64 } : {}),
+      });
+    }
+    return new OpenAICompatibleProvider({ baseURL: c.baseURL, apiKey: key, model: c.model, fetch: opts.fetch, ...(check ? { timeoutMs: CHECK_TIMEOUT_MS } : {}) });
+  }
+  /** One small request through the connection. Throws the plain-words AIError of what went wrong. */
+  async function checkConnection(c: CustomConnection, key: string | null): Promise<void> {
+    try {
+      await connectionProvider(c, key, true).complete({ system: 'Reply with exactly the word OK.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Say OK.' }] }], tools: [], jsonOnly: true });
+    } catch (e: any) {
+      // it answered and ran out of room on a one-word reply: the address, key and model all work
+      if (e instanceof AIError && e.code === 'connection_truncated') return;
+      throw e;
+    }
   }
 
   async function statusOf(id: ProviderId): Promise<ProviderStatus> {
@@ -152,6 +243,17 @@ export function createAI(opts: CreateAIOptions) {
           ...(lc.state === 'ready' ? {} : { error: { code: `claude_code_${lc.state}`, userMessage: lc.reason ?? 'Your Claude Code app is not ready.' } }),
         };
       }
+      case 'custom': {
+        const c = activeConnection(s);
+        if (!c) return { id, connected: false, label: LABELS.custom };
+        const base = { id, label: c.label, detail: c.model, connectionId: c.id };
+        const key = await readSecret(connectionSecret(c.id));
+        if (!key && hasSecret(connectionSecret(c.id))) {
+          return { ...base, connected: false, error: { code: 'connection_key_unreadable', userMessage: `I could not read the saved key for ${c.label}. Edit the connection and paste the key again.` } };
+        }
+        // an Anthropic-compatible server always needs a key (connectionProvider); an OpenAI-compatible one may not
+        return { ...base, connected: c.kind === 'openai' || !!key };
+      }
       case 'codex-cli': return { id, connected: true, label: LABELS['codex-cli'], detail: s.cliModel };
       case 'replay': {
         const f = s.replayFixture ?? process.env.REELSTUDIO_REPLAY;
@@ -163,7 +265,8 @@ export function createAI(opts: CreateAIOptions) {
 
   async function providers(): Promise<ProviderStatus[]> {
     // claude-cli is always listed, in its real state (the Connect screen shows how to get it ready)
-    const ids: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', ...(opts.dev ? (['codex-cli', 'replay'] as ProviderId[]) : []), 'none'];
+    const custom: ProviderId[] = (await settings()).connections?.length ? ['custom'] : [];
+    const ids: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', ...custom, ...(opts.dev ? (['codex-cli', 'replay'] as ProviderId[]) : []), 'none'];
     await localClaude(true);
     return Promise.all(ids.map(statusOf));
   }
@@ -204,16 +307,91 @@ export function createAI(opts: CreateAIOptions) {
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
         return new ClaudeCliProvider({ model: s.cliModel, session: true, ...(bin ? { bin } : {}) });
       }
+      case 'custom': {
+        const c = activeConnection(s)!;
+        return connectionProvider(c, await readSecret(connectionSecret(c.id)));
+      }
       case 'codex-cli': return new CodexCliProvider({ model: s.cliModel });
       case 'replay': return new ReplayProvider((s.replayFixture ?? process.env.REELSTUDIO_REPLAY)!);
       default: return null;
     }
   }
 
+  async function saveConnection(input: ConnectionInput): Promise<SaveConnectionResult> {
+    const fail = (e: unknown): SaveConnectionResult => {
+      const err = e instanceof AIError ? e : new AIError('connection_error', 'Something went wrong talking to your server. Try again.', { detail: String((e as any)?.message ?? e) });
+      return { status: { id: 'custom', connected: false, label: input.label?.trim() || LABELS.custom, error: err.toJSON() }, error: { ...err.toJSON(), ...(FIELD_OF[err.code] ? { field: FIELD_OF[err.code] } : {}) } };
+    };
+    const field = (f: ConnectionField, code: string, message: string): SaveConnectionResult => ({ ...fail(new AIError(code, message)), error: { code, userMessage: message, field: f } });
+    if (!(input.kind in CONNECTION_KINDS)) return field('address', 'connection_bad_kind', 'Choose the kind of server first.');
+    const label = String(input.label ?? '').trim();
+    if (!label) return field('label', 'connection_no_label', 'Enter a name for this connection.');
+    if (label.length > 60) return field('label', 'connection_no_label', 'Use a shorter name (60 characters at most).');
+    const model = String(input.model ?? '').trim();
+    if (!model) return field('model', 'connection_no_model', 'Enter a model name.');
+    let baseURL: string;
+    try { baseURL = normalizeBaseURL(String(input.baseURL ?? '')); } catch (e) { return fail(e); }
+
+    const s = await settings();
+    const before = input.id ? s.connections?.find((c) => c.id === input.id) : undefined;
+    if (input.id && !before) return fail(new AIError('connection_gone', 'That connection is no longer saved.'));
+    const id = before?.id ?? `c_${randomBytes(4).toString('hex')}`;
+    const secret = connectionSecret(id);
+    const typed = typeof input.key === 'string' ? input.key.trim() : '';
+    if (!typed && input.key !== null && before && hasSecret(secret) && !sameOrigin(before.baseURL, baseURL)) {
+      return field('key', 'connection_key_new_address', 'The server address changed, so paste the key again. A saved key is only sent to the address it was saved for.');
+    }
+    const key = typed || (input.key === null || !before ? null : await readSecret(secret));
+    if (input.kind === 'anthropic' && !key) {
+      return field('key', 'connection_no_key', 'Paste the key for this server. Anthropic-compatible servers always need one.');
+    }
+    const conn: CustomConnection = { id, label, kind: input.kind, baseURL, model };
+    try { await checkConnection(conn, key); } catch (e: any) {
+      // busy / out of quota still proves the address, key and model are real: keep it
+      if (!(e instanceof AIError && e.code === 'connection_busy')) return fail(e);
+    }
+    if (typed || input.key === null) {
+      try { await writeSecret(secret, key, 'This computer has no safe place to keep that key, so I did not save it.'); } catch (e) { return fail(e); }
+    }
+    const list = (s.connections ?? []).filter((c) => c.id !== id);
+    const at = before ? (s.connections ?? []).findIndex((c) => c.id === id) : list.length;
+    list.splice(at, 0, conn);
+    await saveSettings({ connections: list, active: 'custom', activeConnection: id });
+    const now = await settings();
+    return { status: await statusOf('custom'), connection: connectionInfo(conn, now) };
+  }
+  async function removeConnection(id: string): Promise<void> {
+    const secret = connectionSecret(id);
+    const s = await settings();
+    const list = (s.connections ?? []).filter((c) => c.id !== id);
+    const wasActive = s.active === 'custom' && activeConnection(s)?.id === id;
+    await writeSecret(secret, null, '');
+    await saveSettings({
+      connections: list.length ? list : undefined,
+      ...(s.activeConnection === id ? { activeConnection: undefined } : {}),
+      ...(wasActive ? { active: undefined } : {}),
+    });
+  }
+  async function connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]> {
+    if (!(q.kind in CONNECTION_KINDS)) return [];
+    // a saved key only goes to the address it was saved for
+    const saved = q.id ? (await settings()).connections?.find((c) => c.id === q.id) : undefined;
+    const key = q.key?.trim() || (saved && sameOrigin(saved.baseURL, q.baseURL) ? await readSecret(connectionSecret(saved.id)) : null);
+    try { return await listConnectionModels(q.kind, q.baseURL, key, { fetch: opts.fetch }); } catch { return []; }
+  }
+
   return {
     providers,
     active,
-    async setActive(id: ProviderId): Promise<void> {
+    /** `connectionId` picks which saved connection 'custom' uses (default: the one used last). */
+    async setActive(id: ProviderId, connectionId?: string): Promise<void> {
+      if (id === 'custom') {
+        const s = await settings();
+        const c = connectionId ? s.connections?.find((x) => x.id === connectionId) : activeConnection(s);
+        if (!c) throw new AIError('not_available', 'That connection is no longer saved.');
+        await saveSettings({ active: 'custom', activeConnection: c.id });
+        return;
+      }
       if (id === 'claude-cli') {
         const lc = await localClaude(true);
         if (lc.state !== 'ready') throw new AIError('not_available', lc.reason ?? 'Your Claude Code app is not ready.');
@@ -263,6 +441,24 @@ export function createAI(opts: CreateAIOptions) {
       }
       await saveSettings({ active: 'claude' });
       return statusOf('claude');
+    },
+    /** The person's own servers, without their keys. */
+    async connections(): Promise<ConnectionInfo[]> {
+      const s = await settings();
+      return (s.connections ?? []).map((c) => connectionInfo(c, s));
+    },
+    /** Adds or edits a connection. It is saved and used only after one small request through it works; otherwise
+     * nothing changes and `error` says what to fix (and which field). */
+    saveConnection(input: ConnectionInput): Promise<SaveConnectionResult> {
+      return oneAtATime(() => saveConnection(input));
+    },
+    removeConnection(id: string): Promise<void> {
+      return oneAtATime(() => removeConnection(id));
+    },
+    /** The models a server reports, for the model list while adding a connection. Empty when it does not say.
+     * `key` empty with `id` set uses that connection's stored key (it never leaves this process). */
+    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]> {
+      return oneAtATime(() => connectionModels(q));
     },
     async setModel(which: 'claude' | 'chatgpt' | 'cli', model: string | null): Promise<void> {
       await saveSettings({ [`${which}Model`]: model ?? undefined } as Partial<AISettings>);

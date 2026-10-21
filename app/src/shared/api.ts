@@ -207,11 +207,45 @@ export interface DropResult {
 }
 
 export interface ProviderInfo {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none'
+  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string
   error?: UserError
+  /** id 'custom': which saved connection */
+  connectionId?: string
+}
+
+/** The kind of server a connection talks to: one that works like Claude's or like ChatGPT's. */
+export type ConnectionKind = 'anthropic' | 'openai'
+
+/** A saved connection to the person's own AI server. The key never comes back to the page, only `hasKey`. */
+export interface ConnectionInfo {
+  id: string
+  label: string
+  kind: ConnectionKind
+  baseURL: string
+  model: string
+  hasKey: boolean
+  active: boolean
+}
+
+export interface ConnectionInput {
+  /** set when editing */
+  id?: string
+  label: string
+  kind: ConnectionKind
+  baseURL: string
+  model: string
+  /** a new key; empty keeps the stored one when editing */
+  key?: string
+}
+
+/** Saving checks the connection with one small request first; `error.field` is the field to fix. */
+export interface SaveConnectionResult {
+  status: ProviderInfo
+  connection?: ConnectionInfo
+  error?: UserError & { field?: 'label' | 'address' | 'key' | 'model' }
 }
 
 export interface AppInfo {
@@ -323,7 +357,7 @@ export interface ReelApi {
   ai: {
     providers(): Promise<ProviderInfo[]>
     active(): Promise<ProviderInfo>
-    setActive(id: ProviderInfo['id']): Promise<void>
+    setActive(id: ProviderInfo['id'], connectionId?: string): Promise<void>
     signInChatGPT(): Promise<ProviderInfo>
     cancelSignIn(): Promise<void>
     signOutChatGPT(): Promise<void>
@@ -332,6 +366,12 @@ export interface ReelApi {
     claudeCodeStatus(): Promise<ClaudeCodeInfo>
     /** Opens a terminal window where the person signs in to their Claude Code app themselves. */
     openClaudeSignIn(): Promise<void>
+    /** The person's own AI servers (advanced). */
+    connections(): Promise<ConnectionInfo[]>
+    saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
+    removeConnection(id: string): Promise<void>
+    /** Models the server reports; empty when it does not say (then the person types one). */
+    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]>
   }
   projects: {
     list(): Promise<ProjectSummary[]>

@@ -3,6 +3,7 @@ import type { ClaudeCodeInfo, ModelStatus, ProviderInfo } from '../../../shared/
 import { reel, userMessage } from '../api'
 import { Progress, Spinner } from './ui'
 import { Icon } from './icons'
+import { Connections } from './Connections'
 
 /** What works with no AI at all. One honest line, shown wherever we ask people to connect. */
 export const WITHOUT_AI =
@@ -21,8 +22,8 @@ const WAIT_FOR_MS = 10 * 60_000
 /**
  * Connect your AI editor, for normal people. Whatever the person already has comes first: a signed-in Claude Code
  * app makes "Use Claude (your Claude Code app)" the big button; otherwise "Sign in with ChatGPT" is, with the
- * Claude choice below it in its real state (sign in, or how to install it). "Use an Anthropic API key" stays the
- * quiet advanced choice. Used by the Connect screen, Settings and First run.
+ * Claude choice below it in its real state (sign in, or how to install it). "Use an Anthropic API key" and "Use
+ * your own AI server" stay the quiet advanced choices. Used by the Connect screen, Settings and First run.
  *
  * Reel Studio never sees the Claude sign-in: it happens in Anthropic's own app, in a terminal window, and the app
  * only asks that app "signed in or not?".
@@ -31,6 +32,9 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
   const [active, setActive] = useState<ProviderInfo | null>(null)
   const [key, setKey] = useState('')
   const [showKey, setShowKey] = useState(false)
+  // "Your own AI server" stays one quiet link until it is opened or a connection is saved
+  const [showOwn, setShowOwn] = useState(false)
+  const [hasOwn, setHasOwn] = useState(false)
   // Once connected, the sign-in choices fold away behind "Use a different AI…" (critique 2).
   const [showOther, setShowOther] = useState(false)
   const [busy, setBusy] = useState<'chatgpt' | 'claude' | 'claude-code' | null>(null)
@@ -88,6 +92,10 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
 
   useEffect(() => {
     reel.ai.active().then(setActive).catch(() => {})
+    reel.ai
+      .connections()
+      .then((l) => setHasOwn(l.length > 0))
+      .catch(() => {})
     void checkClaude()
   }, [checkClaude])
 
@@ -326,6 +334,19 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
           </p>
         </>
       )}
+      {choices &&
+        (showOwn || hasOwn ? (
+          <Connections
+            onConnected={(p) => {
+              setHasOwn(true)
+              done(p)
+            }}
+          />
+        ) : (
+          <button className="link center" onClick={() => setShowOwn(true)} data-testid="own-server-toggle">
+            Use your own AI server (advanced)
+          </button>
+        ))}
       {active?.error && !error && <div className="banner error">{active.error.userMessage}</div>}
       {error && (
         <div className="banner error">

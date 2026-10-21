@@ -416,6 +416,54 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .toast.error { background: #7d2618; padding-right: 8px; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* ---- your own AI server (components/Connections.tsx) ---- */
+.conn-block { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+.conn-block > .muted-sm { margin-top: -4px; }
+.conn-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.conn-card { display: flex; align-items: center; gap: 12px; padding: 12px 8px 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.conn-card.active { border-color: var(--line-2); box-shadow: var(--shadow); }
+.conn-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--soft); color: var(--ink-2); display: grid; place-items: center; flex: none; }
+.conn-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.conn-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.conn-label { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-meta { font-size: 13px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-card .more > .icon-btn { width: 36px; height: 36px; border: 0; background: transparent; }
+.conn-card .more > .icon-btn:hover { background: var(--soft); }
+.conn-add { align-self: flex-start; }
+.conn-dialog-head { display: flex; flex-direction: column; gap: 4px; }
+.conn-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.conn-fieldset legend { padding: 0; margin-bottom: 8px; }
+.conn-kind { align-items: flex-start; }
+.conn-kind input { margin-top: 2px; }
+.conn-kind > span { display: flex; flex-direction: column; gap: 2px; }
+.conn-kind-title { font-weight: 650; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.input[aria-invalid="true"] { border-color: var(--red-ink); }
+.input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(142,42,28,.12); }
+.conn-details { gap: 16px; }
+.conn-details select.input { max-width: none; }
+.conn-model-head { gap: 10px; min-height: 22px; }
+.conn-looking { gap: 6px; }
+.conn-foot { margin-top: 2px; }
+.conn-foot .muted-sm { text-align: right; }
+.btn.primary .spin { border-color: rgba(255,255,255,.35); border-top-color: #fff; }
+
+/* Add-connection steps (from T3 Code's wizard): the current step is the raised pill, done steps carry a check. */
+.wizard-steps { list-style: none; margin: 0; padding: 4px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: var(--soft); border-radius: var(--radius-sm); }
+.wizard-step { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink-3); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.wizard-step:hover:not(:disabled):not([aria-current]) { color: var(--ink); }
+.wizard-step[aria-current="step"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.wizard-step:disabled { cursor: default; }
+.wizard-num { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-2); display: grid; place-items: center; flex: none; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.wizard-step[aria-current="step"] .wizard-num { border-color: var(--ink); }
+.wizard-step.done .wizard-num { background: var(--ink); border-color: var(--ink); color: #fff; }
+/* A new step slides in a few pixels from the side it comes from, so Next and Back read as moving along. */
+.wizard-panel { display: flex; flex-direction: column; gap: 14px; animation: step-in .2s var(--ease) both; }
+.wizard-panel[data-dir="back"] { animation-name: step-in-back; }
+@keyframes step-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes step-in-back { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.conn-error { animation: fade .16s ease-out; }
+
 /* ---- first run ---- */
 .first { height: 100%; display: grid; place-items: center; padding: calc(var(--titlebar) + 10px) 30px 30px; overflow-y: auto; }
 .first-card { width: min(560px, 100%); text-align: center; display: flex; flex-direction: column; gap: 18px; align-items: center; }
@@ -452,4 +500,5 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
   .progress > div::after, .phone-scan { display: none; }
+  .wizard-panel, .wizard-panel[data-dir="back"] { animation-name: fade; }
 }

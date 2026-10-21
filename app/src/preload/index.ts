@@ -37,13 +37,17 @@ const api: ReelApi = {
   ai: {
     providers: () => call('ai:providers'),
     active: () => call('ai:active'),
-    setActive: (id) => call('ai:setActive', id),
+    setActive: (id, connectionId) => call('ai:setActive', id, connectionId),
     signInChatGPT: () => call('ai:signInChatGPT'),
     cancelSignIn: () => call('ai:cancelSignIn'),
     signOutChatGPT: () => call('ai:signOutChatGPT'),
     setClaudeKey: (k) => call('ai:setClaudeKey', k),
     claudeCodeStatus: () => call('ai:claudeCodeStatus'),
-    openClaudeSignIn: () => call('ai:openClaudeSignIn')
+    openClaudeSignIn: () => call('ai:openClaudeSignIn'),
+    connections: () => call('ai:connections'),
+    saveConnection: (input) => call('ai:saveConnection', input),
+    removeConnection: (id) => call('ai:removeConnection', id),
+    connectionModels: (q) => call('ai:connectionModels', q)
   },
   projects: {
     list: () => call('projects:list'),

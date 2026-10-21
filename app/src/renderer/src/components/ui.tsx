@@ -47,8 +47,10 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
-/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
-export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
+const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+
+/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it and Tab stays in it. */
+export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
@@ -69,7 +71,29 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
+      <div
+        ref={ref}
+        className={`modal${wide ? ' wide' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return
+          // aria-modal does not stop Tab: wrap from the last control to the first and back
+          const all = Array.from(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((el) => el.offsetParent !== null)
+          if (!all.length) return
+          const [first, last] = [all[0], all[all.length - 1]]
+          if (e.shiftKey && (document.activeElement === first || !ref.current?.contains(document.activeElement))) {
+            e.preventDefault()
+            last.focus()
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault()
+            first.focus()
+          }
+        }}
+        role="dialog"
+        aria-modal
+        aria-labelledby={labelledBy}
+        data-testid={testid}
+      >
         {children}
       </div>
     </div>

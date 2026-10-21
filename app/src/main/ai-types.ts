@@ -45,11 +45,40 @@ export interface EngineHost {
 }
 
 export interface ProviderStatus {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none'
+  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string
   error?: UserFacingError
+  /** id 'custom': which saved connection */
+  connectionId?: string
+}
+
+/** A connection to the person's own AI server, as @reelstudio/ai shows it: never the key. */
+export interface ConnectionInfo {
+  id: string
+  label: string
+  kind: 'anthropic' | 'openai'
+  baseURL: string
+  model: string
+  hasKey: boolean
+  active: boolean
+}
+
+export interface ConnectionInput {
+  id?: string
+  label: string
+  kind: 'anthropic' | 'openai'
+  baseURL: string
+  model: string
+  /** a new key; empty keeps the stored one when editing */
+  key?: string | null
+}
+
+export interface SaveConnectionResult {
+  status: ProviderStatus
+  connection?: ConnectionInfo
+  error?: UserFacingError & { field?: 'label' | 'address' | 'key' | 'model' }
 }
 
 /** Mirrors Electron's safeStorage. */
@@ -62,7 +91,7 @@ export interface SecretStore {
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
-  setActive(id: ProviderStatus['id']): Promise<void>
+  setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>
   signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
@@ -84,6 +113,11 @@ export interface AI {
   cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */
+  connections?(): Promise<ConnectionInfo[]>
+  saveConnection?(input: ConnectionInput): Promise<SaveConnectionResult>
+  removeConnection?(id: string): Promise<void>
+  connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<string[]>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void
 }

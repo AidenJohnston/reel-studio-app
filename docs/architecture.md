@@ -229,6 +229,13 @@ Prompts are plain markdown in `ai/prompts/`.
   in a terminal window the app opens, running `claude auth login`: the person signs in to Anthropic there. The
   Connect screen recommends what the person already has (a signed-in Claude Code app first, otherwise ChatGPT)
   and never switches to it on its own. There is one installer per system; there is no build flag.
+- **Your own AI server** (`custom`, advanced, folded behind a link next to the API key): a connection to an
+  Anthropic-compatible server (Messages API, through the same Anthropic adapter with the person's base URL) or an
+  OpenAI-compatible one (Chat Completions, `ai/src/providers/openaiCompatible.ts`, because most compatible servers
+  implement that endpoint). Label, kind, address and model live in `ai-settings.json`; each key is its own file
+  encrypted with `safeStorage` (`connection-<id>.bin`), never returned to the page, never sent after a redirect,
+  and only sent to the address it was saved for. Saving makes one small request first and, if it fails, says
+  which field to fix (address, key or model).
 - **Developer providers** (behind a dev flag, never shown to users): `codex-cli` and a recorded-response replay
   provider used by tests.
 
@@ -284,14 +291,19 @@ export interface EngineHost {                                // implemented by t
   reelStudioRoot(): string;                                  // <Documents>/Reel Studio
 }
 
-export interface ProviderStatus { id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none'; connected: boolean; label: string }
+export interface ProviderStatus { id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'; connected: boolean; label: string; connectionId?: string }
 export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: boolean }): {
   providers(): Promise<ProviderStatus[]>;
   active(): Promise<ProviderStatus>;
-  setActive(id: ProviderStatus['id']): Promise<void>;
+  setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>;
   signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>;
   signOutChatGPT(): Promise<void>;
   setClaudeKey(key: string | null): Promise<ProviderStatus>;   // validates the key with a tiny request
+  connections(): Promise<ConnectionInfo[]>;                    // the person's own servers, never their keys
+  saveConnection(c: { id?: string; label: string; kind: 'anthropic' | 'openai'; baseURL: string; model: string; key?: string | null }):
+    Promise<{ status: ProviderStatus; connection?: ConnectionInfo; error?: UserFacingError & { field?: 'label' | 'address' | 'key' | 'model' } }>; // checks first
+  removeConnection(id: string): Promise<void>;
+  connectionModels(q: { kind: 'anthropic' | 'openai'; baseURL: string; key?: string; id?: string }): Promise<string[]>; // [] when the server does not say
   claudeCodeStatus(): Promise<{ state: 'missing' | 'broken' | 'signed_out' | 'ready'; version?: string; plan?: string }>; // the person's own Claude Code app, a fresh look
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>;
   applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal,
