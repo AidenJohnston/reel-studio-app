@@ -484,13 +484,6 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
   .perm-end { flex-basis: 100%; justify-content: flex-start; padding-left: 50px; }
 }
 .perm-wait { color: var(--ink-2); }
-/* The Listening stage's timing check (screens/setup/ListeningStage.tsx): one quiet line, no bar, because it is a few
-   seconds and not something to watch. The done line takes the same slot, so the card does not jump. */
-.listen-state { min-height: 24px; }
-.listen-line { display: flex; align-items: center; gap: 12px; color: var(--ink-2); }
-.listen-line.done { color: var(--green-ink); font-weight: 600; gap: 14px; }
-.listen-line.done .icon { animation: allowed-in .2s var(--ease) both; }
-.listen-note { color: var(--ink-3); font-size: 14px; }
 /* Same height as the checklist it waits for, so the card does not jump when the status arrives. */
 .stage-loading { min-height: 132px; display: grid; place-items: center; }
 

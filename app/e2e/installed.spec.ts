@@ -109,8 +109,7 @@ test('first run: speech model + AI', async () => {
       await passMacStage(page)
       await snap(page, '01-download')
       const t0 = Date.now()
-      // A model already here moves on by itself after the short timing check.
-      if ((await listeningState(page)) === 'download') await page.getByTestId('download-model').click()
+      await page.getByTestId((await listeningState(page)) === 'download' ? 'download-model' : 'model-next').click()
       const connect = page.getByText('Connect your AI editor')
       while (!(await connect.isVisible())) {
         if (Date.now() - t0 > 25 * 60_000) throw new Error('model download took over 25 minutes')

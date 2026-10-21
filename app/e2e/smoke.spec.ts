@@ -26,12 +26,11 @@ test('make a reel end to end', async () => {
   await passMacStage(page)
   // "One download" before the model is here, "Ready to listen" once it is (grandma3 #1).
   await expect(page.getByTestId('model-heading')).toHaveText(/One download, about 500 MB|Ready to listen/)
-  // Use an installed model if there is one; else "download" (instant with the stand-in engine). Either way the short
-  // timing check runs and the stage moves on by itself.
+  // Use an installed model if there is one; else "download" (instant with the stand-in engine), which moves on by itself.
   const state = await listeningState(page)
   await shot(page, '02-firstrun-model')
-  if (state === 'download') await page.getByTestId('download-model').click()
-  await expect(page.getByText('Connect your AI editor')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId(state === 'download' ? 'download-model' : 'model-next').click()
+  await expect(page.getByText('Connect your AI editor')).toBeVisible()
   await shot(page, '03-firstrun-connect')
   await page.getByTestId('skip').click()
 

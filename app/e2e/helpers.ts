@@ -80,23 +80,18 @@ export async function passMacStage(page: Page): Promise<void> {
 
 /**
  * Waits for the Listening setup stage to settle: 'download' when the model is missing and the Download button shows,
- * 'here' when the model is in place (the stage then moves on by itself after its short timing check).
+ * 'here' when the model is already on this computer and Next shows.
  */
 export async function listeningState(page: Page): Promise<'download' | 'here'> {
   const download = page.getByTestId('download-model')
-  const here = page.getByTestId('model-heading').filter({ hasText: 'Ready to listen' }).or(page.getByText('Connect your AI editor'))
-  await expect(download.or(here).first()).toBeVisible({ timeout: 30_000 })
+  await expect(download.or(page.getByTestId('model-next'))).toBeVisible({ timeout: 30_000 })
   return (await download.isVisible()) ? 'download' : 'here'
 }
 
-/** Gets past the Listening stage without downloading: "Do this later", or wait while it moves on by itself. */
+/** Gets past the Listening stage without downloading: "Do this later", or Next when the model is already here. */
 export async function passListeningStage(page: Page): Promise<void> {
-  if ((await listeningState(page)) === 'download') await page.getByTestId('later').click()
-  const connect = page.getByText('Connect your AI editor')
-  const next = page.getByTestId('model-next') // only after a failed timing check
-  await expect(connect.or(next)).toBeVisible({ timeout: 15_000 })
-  if (await next.isVisible()) await next.click()
-  await expect(connect).toBeVisible()
+  await page.getByTestId((await listeningState(page)) === 'download' ? 'later' : 'model-next').click()
+  await expect(page.getByText('Connect your AI editor')).toBeVisible()
 }
 
 /** Gets past the first-run screens if this is a fresh profile. */

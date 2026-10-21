@@ -375,7 +375,7 @@ export function DevProviders() {
 }
 
 /** Shown when a matching listening model was already on this computer (T3 Code's "Using your installed Codex"). */
-export const MODEL_FOUND = 'Found the listener on this computer. Using it, no download needed.'
+export const MODEL_FOUND = 'Found the listening model on this computer. Using it, no download needed.'
 
 const mb = (bytes: number): number => Math.round(bytes / 1e6)
 
@@ -387,32 +387,57 @@ export function downloadLine(s: ModelStatus, verb: 'Downloading' | 'Paused at'):
 /**
  * The listening model: looks for a matching copy already on this computer first (main/models.ts), else the one-time
  * download with progress and Pause. First run's Listening stage, Settings and the "model missing" screen use it.
+ * With `onReady`, a finished download moves on by itself; a model that was already here waits for Next.
  */
-export function ModelDownload() {
+export function ModelDownload({ onReady }: { onReady?: () => void }) {
   const [s, setS] = useState<ModelStatus | null>(null)
+  const wasInstalled = useRef<boolean | null>(null)
   useEffect(() => {
     let alive = true
-    const off = reel.model.onProgress((m) => alive && setS(m))
+    const show = (m: ModelStatus) => {
+      if (!alive) return
+      setS(m)
+      // Only the moment a download finishes; later updates (or a copy found here) don't move the stage on.
+      if (wasInstalled.current === false && m.installed && !m.reused) onReady?.()
+      wasInstalled.current = m.installed
+    }
+    const off = reel.model.onProgress(show)
     reel.model
       .status()
       .then((m) => {
-        if (!alive) return
-        setS(m)
-        if (!m.installed && !m.downloading) return reel.model.find().then((f) => alive && setS(f))
+        show(m)
+        if (!m.installed && !m.downloading) return reel.model.find().then(show)
       })
       .catch(() => undefined)
     return () => {
       alive = false
       off()
     }
-  }, [])
+  }, [onReady])
   if (!s) return <Spinner />
-  if (s.installed) return <div className="banner good">{s.reused ? MODEL_FOUND : 'The listening model is ready.'}</div>
+  if (s.installed)
+    return (
+      <div className="stack">
+        <div className="banner good">The listening model is ready.</div>
+        {/* The background timing check (main/models.ts) is shown only when it fails. */}
+        {s.checkFailed && (
+          <p className="muted-sm" data-testid="model-check-failed">
+            I couldn't work out the fastest settings for this computer, so the listening model uses its usual ones.
+            Everything still works.
+          </p>
+        )}
+        {onReady && (
+          <button className="btn primary big" onClick={onReady} data-testid="model-next">
+            Next
+          </button>
+        )}
+      </div>
+    )
   if (s.checking)
     return (
       <div className="stack" data-testid="model-checking">
         <Progress pct={s.pct} label="Checking the listening model" />
-        <span className="muted">Checking the listener on this computer</span>
+        <span className="muted">Checking the listening model on this computer</span>
       </div>
     )
   const paused = !s.downloading && s.pct > 0 && s.pct < 100

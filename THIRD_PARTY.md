@@ -198,7 +198,7 @@ cache, setup copies them instead of downloading.
 
 `engine/reelengine/models/speech-check.wav`: 11 seconds of John F. Kennedy's inaugural address (1961), a work of
 the US federal government and in the public domain. The same recording as faster-whisper's `tests/data/jfk.flac`,
-converted to 16 kHz mono WAV. Setup transcribes it to time the speech model on the computer.
+converted to 16 kHz mono WAV. The app transcribes it in the background to time the speech model on the computer.
 
 ### Fonts (bundled, SIL OFL 1.1 or Apache-2.0)
 

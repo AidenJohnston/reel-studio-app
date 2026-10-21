@@ -21,8 +21,7 @@ test('first run downloads the listening model with progress', async () => {
     const t0 = Date.now()
     await page.getByTestId('download-model').click()
     const seen = new Set<number>()
-    // When the download finishes and the short timing check passes, the screen moves on to "Connect your AI editor"
-    // by itself.
+    // When the download finishes the screen moves on to "Connect your AI editor" by itself.
     const connect = page.getByText('Connect your AI editor')
     // A dropped connection stops the download with an error banner and a "Keep downloading" button, like a
     // person would see it. Click it, as they would; the engine resumes the .part file with an HTTP Range request.

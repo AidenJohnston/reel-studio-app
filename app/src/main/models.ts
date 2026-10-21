@@ -38,9 +38,6 @@ export interface SpeechCheckResult {
   threads: number | null
 }
 
-/** A failed timing check changes nothing the person relies on, so it says so and lets them go on. */
-const CHECK_FAILED = "I couldn't finish getting the listener ready for this computer, so it will use its usual settings. Everything still works."
-
 const thisMachine = (): string => `${process.arch} ${cpus()[0]?.model ?? 'unknown'} x${cpus().length}`
 
 export interface ModelDeps {
@@ -51,6 +48,8 @@ export interface ModelDeps {
   saveCheck: (r: SpeechCheckResult) => Promise<void>
   /** The engine reads the chosen count from REELENGINE_ASR_THREADS (main/paths.ts). */
   useThreads: (n: number | null) => void
+  /** A video is being made: the timing check waits, or stops, so it never competes with real work. */
+  busy: () => boolean
   log: (line: string) => void
 }
 
@@ -63,7 +62,7 @@ export function createModelManager(deps: ModelDeps) {
     downloading: false,
     checking: false,
     reused: false,
-    check: 'needed',
+    checkFailed: false,
     pct: 0,
     bytes: 0,
     total: total(),
@@ -71,7 +70,7 @@ export function createModelManager(deps: ModelDeps) {
   }
   let download: AbortController | null = null
   let finding: Promise<ModelStatus> | null = null
-  let timing: { abort: AbortController; done: Promise<ModelStatus> } | null = null
+  let timing: Promise<void> | null = null
 
   const set = (patch: Partial<ModelStatus>): ModelStatus => {
     state = { ...state, ...patch }
@@ -79,6 +78,46 @@ export function createModelManager(deps: ModelDeps) {
     return state
   }
   const checkDone = async (): Promise<boolean> => (await deps.loadCheck())?.machine === thisMachine()
+
+  /**
+   * The timing check, in the background: the engine transcribes a short bundled recording at a few thread counts and
+   * returns the fastest that hears exactly the same words at the same times. A creator can't judge this, so it is
+   * never a setup step; it runs once the model is here and nothing else is running, and stops if a video starts.
+   */
+  function checkInBackground(): Promise<void> {
+    timing ??= (async () => {
+      if (!modelInstalled() || deps.busy() || (await checkDone())) return
+      const abort = new AbortController()
+      const watch = setInterval(() => deps.busy() && abort.abort(), 500)
+      try {
+        const r = (await runEngine('speech-check', ['--name', modelName()], undefined, abort.signal)) as {
+          threads?: unknown
+          runs?: unknown
+          complete?: unknown
+        } | null
+        const threads = typeof r?.threads === 'number' && r.threads > 0 ? r.threads : null
+        // Cut short by its time budget (a busy computer): use what it found now, but don't keep it, so it runs again
+        // on a later start. Seen 2026-10-21: one 7 s run at 8 threads, 4 never tried.
+        const complete = r?.complete !== false
+        if (complete) await deps.saveCheck({ machine: thisMachine(), threads })
+        deps.useThreads(threads)
+        log(`[model] speech check: ${threads ?? 'usual'} thread(s)${complete ? '' : ' (cut short, not saved)'} ${JSON.stringify(r?.runs ?? [])}`)
+      } catch (e) {
+        const err = toUserError(e)
+        if (err.code === 'CANCELLED') return // a video started; try again on a later start
+        // A failure that would repeat: main's thread count (the engine's own rule), saved so it doesn't run again here.
+        log(`[model] speech check failed: ${err.code} ${err.message ?? ''}`)
+        await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
+        deps.useThreads(null)
+        set({ checkFailed: true })
+      } finally {
+        clearInterval(watch)
+      }
+    })()
+      .catch((e) => log(`[model] speech check: ${String(e)}`))
+      .finally(() => (timing = null))
+    return timing
+  }
 
   async function findOnComputer(): Promise<ModelStatus> {
     const pin = pinnedModel()
@@ -93,6 +132,7 @@ export function createModelManager(deps: ModelDeps) {
         const r = await adoptCopy(src, dest, pin.files, (b) => set({ pct: Math.floor((b / total()) * 100) }))
         if (r.ok && modelInstalled()) {
           log(`[model] reused ${src} (verified in ${Date.now() - t0} ms)`)
+          void checkInBackground()
           return set({ checking: false, installed: true, reused: true, pct: 100 })
         }
         log(`[model] not using ${src}: ${r.ok ? 'incomplete' : `${r.file} ${r.reason}`}`)
@@ -107,8 +147,8 @@ export function createModelManager(deps: ModelDeps) {
   }
 
   return {
-    async status(): Promise<ModelStatus> {
-      state = { ...state, name: modelName(), installed: modelInstalled(), total: total(), check: timing ? 'running' : (await checkDone()) ? 'done' : 'needed' }
+    status(): ModelStatus {
+      state = { ...state, name: modelName(), installed: modelInstalled(), total: total() }
       return state
     },
     /** Use a matching copy already on this computer, if there is one. Never downloads. */
@@ -127,6 +167,7 @@ export function createModelManager(deps: ModelDeps) {
       try {
         // The engine's percent is bytes / total of the pinned files, so it converts back to MB exactly.
         await runEngine('download-model', ['--name', modelName()], (p) => set({ pct: Math.round(p.pct), bytes: Math.round((p.pct / 100) * total()) }), download.signal)
+        void checkInBackground()
         return set({ installed: modelInstalled(), downloading: false, pct: 100, bytes: total() })
       } catch (e) {
         const err = toUserError(e)
@@ -138,57 +179,11 @@ export function createModelManager(deps: ModelDeps) {
     cancel(): void {
       download?.abort()
     },
-    /**
-     * The timing check: the engine transcribes a short bundled recording at a few thread counts and returns the
-     * fastest that hears exactly the same words at the same times. Saved for this computer; a skip saves nothing.
-     * `busy` stops it when real work starts (the background run for people who never saw setup).
-     */
-    runCheck(opts: { busy?: () => boolean } = {}): Promise<ModelStatus> {
-      if (timing) return timing.done
-      const abort = new AbortController()
-      const watch = opts.busy ? setInterval(() => opts.busy!() && abort.abort(), 500) : null
-      const done = (async (): Promise<ModelStatus> => {
-        if (!modelInstalled()) return state
-        set({ check: 'running', error: null })
-        try {
-          const r = (await runEngine('speech-check', ['--name', modelName()], undefined, abort.signal)) as {
-            threads?: unknown
-            runs?: unknown
-            complete?: unknown
-          } | null
-          const threads = typeof r?.threads === 'number' && r.threads > 0 ? r.threads : null
-          // Cut short by its time budget (a busy computer): use what it found now, but don't keep it, so the quiet
-          // background check tries again on a later start. Seen 2026-10-21: one 7 s run at 8 threads, 4 never tried.
-          const complete = r?.complete !== false
-          if (complete) await deps.saveCheck({ machine: thisMachine(), threads })
-          deps.useThreads(threads)
-          log(`[model] speech check: ${threads ?? 'usual'} thread(s)${complete ? '' : ' (cut short, not saved)'} ${JSON.stringify(r?.runs ?? [])}`)
-          return set({ check: 'done' })
-        } catch (e) {
-          const err = toUserError(e)
-          if (err.code === 'CANCELLED') return set({ check: 'needed' })
-          // It failed for a reason that would repeat: keep the usual setting and don't run it again on this computer.
-          // The engine's own message would talk about videos; this one says what it means here.
-          log(`[model] speech check failed: ${err.code} ${err.message ?? ''}`)
-          await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
-          deps.useThreads(null)
-          return set({ check: 'done', error: CHECK_FAILED })
-        } finally {
-          if (watch) clearInterval(watch)
-          timing = null
-        }
-      })()
-      timing = { abort, done }
-      return done
-    },
-    skipCheck(): void {
-      timing?.abort.abort()
-    },
+    checkInBackground,
     /** The saved thread count for this computer, for the engine (null: none saved here). */
     async savedThreads(): Promise<number | null> {
       const r = await deps.loadCheck()
       return r?.machine === thisMachine() ? r.threads : null
-    },
-    checkDone
+    }
   }
 }

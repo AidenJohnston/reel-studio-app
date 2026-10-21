@@ -249,8 +249,8 @@ export interface ModelStatus {
   checking: boolean
   /** This session put a copy found on this computer in place, so nothing was downloaded. */
   reused: boolean
-  /** The short timing check that picks how the listener runs on this computer (main/models.ts runCheck). */
-  check: 'needed' | 'running' | 'done'
+  /** The background timing check that picks the thread count for this computer failed (main/models.ts). */
+  checkFailed: boolean
   pct: number
   /** Downloaded so far and in all, in bytes (0 when the size is not known). */
   bytes: number
@@ -327,9 +327,6 @@ export interface ReelApi {
     /** Use a matching copy already on this computer, if there is one. Never downloads. */
     find(): Promise<ModelStatus>
     cancel(): Promise<void>
-    /** The timing check; resolves when it finishes or is skipped. */
-    runCheck(): Promise<ModelStatus>
-    skipCheck(): Promise<void>
     onProgress(cb: (s: ModelStatus) => void): () => void
   }
   ai: {

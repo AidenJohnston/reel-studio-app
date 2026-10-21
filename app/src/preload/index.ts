@@ -33,8 +33,6 @@ const api: ReelApi = {
     download: () => call('model:download'),
     find: () => call('model:find'),
     cancel: () => call('model:cancel'),
-    runCheck: () => call('model:runCheck'),
-    skipCheck: () => call('model:skipCheck'),
     onProgress: (cb) => on<ModelStatus>('model:progress', cb)
   },
   ai: {

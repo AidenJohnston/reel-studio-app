@@ -316,7 +316,7 @@ def cmd_download_model(args: list[str]) -> dict:
 def cmd_speech_check(_args: list[str]) -> dict:
     steps = 10
     for i in range(steps):
-        progress("speech-check", i * 100 / steps, "Getting the listener ready for this computer")
+        progress("speech-check", i * 100 / steps, "Getting the listening model ready for this computer")
         time.sleep(float(os.environ.get("FAKE_ENGINE_SPEECH_CHECK", "1")) / steps)
     return {"threads": 4, "default": 8, "device": "cpu",
             "runs": [{"threads": 8, "seconds": 2.5, "sameWords": True}, {"threads": 4, "seconds": 1.4, "sameWords": True}]}

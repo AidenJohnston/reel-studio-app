@@ -333,8 +333,8 @@ def cuda_selftest(model_path: str, timeout: float = 180.0) -> bool:
 #
 # More threads is not faster. Measured 2026-10-20 on an M4 Pro (8 performance + 4 efficiency
 # cores), small.en int8 on six talking-head clips: 4 threads 24.8 s, 8 threads 51.7 s, 12 threads
-# 155.5 s, with identical words and word times. The best count depends on the machine, so setup
-# measures it (speech_check) and the app passes the answer back in REELENGINE_ASR_THREADS.
+# 155.5 s, with identical words and word times. The best count depends on the machine, so the app
+# measures it in the background (speech_check) and passes the answer back in REELENGINE_ASR_THREADS.
 
 def default_threads() -> int:
     """The rule from before the speech check, still used when the check has not run."""
@@ -386,7 +386,7 @@ def fast_cores() -> Optional[int]:
 
 
 SPEECH_CHECK_WAV = Path(__file__).parent / "models" / "speech-check.wav"
-SPEECH_CHECK_BUDGET = 15.0      # seconds; setup promises a short check, so no new count starts past this
+SPEECH_CHECK_BUDGET = 15.0      # seconds; it runs in the background beside whatever the person is doing
 
 
 def thread_candidates(default: int, fast: Optional[int]) -> list:
@@ -419,7 +419,7 @@ def speech_check(name: Optional[str] = None) -> dict:
         return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
-    progress("speech-check", 0, "Getting the listener ready for this computer", force=True)
+    progress("speech-check", 0, "Getting the listening model ready for this computer", force=True)
     get_vad_model()              # loaded once, on first use: keep that out of the first count's time
     duration = len(audio_env.read_wav(SPEECH_CHECK_WAV)) / 16000
     cands = thread_candidates(default, fast_cores())
@@ -438,10 +438,10 @@ def speech_check(name: Optional[str] = None) -> dict:
         runs.append({"threads": n, "seconds": round(seconds, 3),
                      "words": [(w["w"], w["s"], w["e"]) for w in words]})
         log(f"# speech check: {n} thread(s) {seconds:.2f}s, {len(words)} words")
-        progress("speech-check", 100 * (i + 1) / len(cands), "Getting the listener ready for this computer")
+        progress("speech-check", 100 * (i + 1) / len(cands), "Getting the listening model ready for this computer")
     if not runs[0]["words"]:
         raise EngineError("SPEECH_CHECK_EMPTY", "the speech check sample produced no words",
-                          "The listener didn't hear the test recording. Reel Studio will keep its usual settings.")
+                          "The listening model didn't hear the test recording. Reel Studio will keep its usual settings.")
     return {"threads": choose_threads(runs), "default": default, "device": "cpu",
             "complete": len(runs) == len(cands),
             "runs": [{"threads": r["threads"], "seconds": r["seconds"],

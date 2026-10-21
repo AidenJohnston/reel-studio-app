@@ -1,6 +1,6 @@
 // The Listening setup stage with the stand-in engine: a listening model found on this computer is reused (no
-// download), a missing one downloads with MB progress and Pause, and either way the short timing check runs, its
-// answer is saved, and the stage moves on by itself. Skip moves on at once; only a failed check waits for Next.
+// download) and waits for Next; a missing one downloads with MB progress and Pause and moves on by itself. The
+// thread-count timing check runs in the background either way: its answer is saved, and nothing shows unless it fails.
 // Stand-in model files are pinned through REELSTUDIO_TEST_SPEECH_PINS, so nothing reads the real Hugging Face cache
 // (helpers.ts points HF_HUB_CACHE at an empty folder).
 // Screenshots go to e2e/screenshots/listening/.
@@ -17,9 +17,26 @@ function fresh(name: string) {
   return { dir, userData: join(dir, 'user data'), models: join(dir, 'models') }
 }
 
-async function snap(page: Page, name: string, settle = 400): Promise<void> {
+/** A Hugging Face cache holding the (stand-in) pinned files, as another app would have left it, and their pins. */
+function cachedModel(dir: string): { env: Record<string, string>; files: Record<string, Buffer>; snapshot: string } {
+  const files: Record<string, Buffer> = {
+    'config.json': Buffer.from('{"model_type": "whisper"}'),
+    'model.bin': Buffer.alloc(8 << 20, 3),
+    'tokenizer.json': Buffer.from('{"version": "1.0"}'),
+    'vocabulary.txt': Buffer.from('a\nb\n')
+  }
+  const snapshot = join(dir, 'hf', 'models--Systran--faster-whisper-small.en', 'snapshots', 'rev1')
+  mkdirSync(snapshot, { recursive: true })
+  for (const [n, b] of Object.entries(files)) writeFileSync(join(snapshot, n), b)
+  const pins = join(dir, 'pins.json')
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+  writeFileSync(pins, JSON.stringify({ 'small.en': { repo: 'Systran/faster-whisper-small.en', revision: 'rev1', files: Object.entries(files).map(([name, b]) => ({ name, size: b.length, sha256: sha(b) })) } }))
+  return { env: { HF_HUB_CACHE: join(dir, 'hf'), REELSTUDIO_TEST_SPEECH_PINS: pins }, files, snapshot }
+}
+
+async function snap(page: Page, name: string): Promise<void> {
   mkdirSync(OUT, { recursive: true })
-  await page.waitForTimeout(settle) // let the stage finish sliding in
+  await page.waitForTimeout(400) // let the stage finish sliding in
   await page.screenshot({ path: join(OUT, `${name}.png`) })
 }
 
@@ -29,46 +46,30 @@ async function toListening(page: Page): Promise<void> {
 }
 
 const connect = (page: Page) => page.getByText('Connect your AI editor')
+/** The timing check's saved answer, or null before the app has written settings.json. */
+const savedCheck = (userData: string) => () => {
+  const file = join(userData, 'settings.json')
+  return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')).speechCheck ?? null) : null
+}
 
-test('a listening model already on this computer is used without a download, then the stage moves on by itself', async () => {
+test('a listening model already on this computer is used without a download; the timing check runs unseen', async () => {
   const d = fresh('found')
-  // A Hugging Face cache holding the (stand-in) pinned files, as another app would have left it.
-  const files: Record<string, Buffer> = {
-    'config.json': Buffer.from('{"model_type": "whisper"}'),
-    'model.bin': Buffer.alloc(8 << 20, 3),
-    'tokenizer.json': Buffer.from('{"version": "1.0"}'),
-    'vocabulary.txt': Buffer.from('a\nb\n')
-  }
-  const snapshot = join(d.dir, 'hf', 'models--Systran--faster-whisper-small.en', 'snapshots', 'rev1')
-  mkdirSync(snapshot, { recursive: true })
-  for (const [n, b] of Object.entries(files)) writeFileSync(join(snapshot, n), b)
-  const pins = join(d.dir, 'pins.json')
-  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
-  writeFileSync(pins, JSON.stringify({ 'small.en': { repo: 'Systran/faster-whisper-small.en', revision: 'rev1', files: Object.entries(files).map(([name, b]) => ({ name, size: b.length, sha256: sha(b) })) } }))
-
-  const { app, page } = await launch({
-    REELSTUDIO_USER_DATA: d.userData,
-    REELSTUDIO_MODELS_DIR: d.models,
-    HF_HUB_CACHE: join(d.dir, 'hf'),
-    REELSTUDIO_TEST_SPEECH_PINS: pins,
-    FAKE_ENGINE_SPEECH_CHECK: '3'
-  })
+  const cache = cachedModel(d.dir)
+  const { app, page } = await launch({ REELSTUDIO_USER_DATA: d.userData, REELSTUDIO_MODELS_DIR: d.models, ...cache.env })
   try {
     await toListening(page)
     await expect(page.getByTestId('model-heading')).toHaveText('Ready to listen')
-    await expect(page.getByText('Found the listener on this computer. Using it, no download needed.')).toBeVisible()
+    await expect(page.getByText('Found the listening model on this computer. Using it, no download needed.').first()).toBeVisible()
     await expect(page.getByTestId('download-model')).toHaveCount(0)
-    await expect(page.getByTestId('speech-check')).toHaveText('Getting the listener ready for this computer')
-    await snap(page, '02-timing-check')
-    await expect(page.getByTestId('speech-ready')).toHaveText('Set up for this computer', { timeout: 10_000 })
-    await snap(page, '01-found-done', 250) // the success beat, before the stage leaves
-    await expect(page.getByTestId('model-next')).toHaveCount(0)
-    await expect(connect(page)).toBeVisible() // no click
+    await snap(page, '01-found')
+    for (const [n, b] of Object.entries(cache.files)) expect(readFileSync(join(d.models, 'small.en', n)).equals(b)).toBe(true)
+    expect(existsSync(join(cache.snapshot, 'model.bin'))).toBe(true) // copied, never moved out of the cache
 
-    for (const [n, b] of Object.entries(files)) expect(readFileSync(join(d.models, 'small.en', n)).equals(b)).toBe(true)
-    expect(existsSync(join(snapshot, 'model.bin'))).toBe(true) // copied, never moved out of the cache
-    const settings = JSON.parse(readFileSync(join(d.userData, 'settings.json'), 'utf8'))
-    expect(settings.speechCheck).toMatchObject({ threads: 4 })
+    // The check ran in the background and saved its answer; the stage never showed it.
+    await expect.poll(savedCheck(d.userData), { timeout: 10_000 }).toMatchObject({ threads: 4 })
+    await expect(page.getByTestId('model-check-failed')).toHaveCount(0)
+    await page.getByTestId('model-next').click()
+    await expect(connect(page)).toBeVisible()
   } finally {
     await app.close()
   }
@@ -86,8 +87,8 @@ test('without one it downloads with MB progress and Pause, and says what to do w
     await page.getByTestId('pause-model').click()
     await expect(page.getByTestId('model-progress')).toHaveText(/^Paused at \d+ of 486 MB$/)
     await page.getByTestId('download-model').click() // "Keep downloading"
-    await expect(page.getByTestId('model-heading')).toHaveText('Ready to listen', { timeout: 20_000 })
-    await expect(connect(page)).toBeVisible({ timeout: 10_000 }) // after the timing check, with no click
+    await expect(connect(page)).toBeVisible({ timeout: 20_000 }) // the finished download moves on by itself
+    await expect.poll(savedCheck(d.userData), { timeout: 10_000 }).toMatchObject({ threads: 4 })
   } finally {
     await app.close()
   }
@@ -107,31 +108,20 @@ test('without one it downloads with MB progress and Pause, and says what to do w
   }
 })
 
-test('Skip moves on at once; a failed timing check waits for Next', async () => {
-  const d = fresh('skip')
-  const { app, page } = await launch({ REELSTUDIO_USER_DATA: d.userData, REELSTUDIO_MODELS_DIR: d.models, FAKE_ENGINE_SPEECH_CHECK: '20' })
+test('a failed timing check keeps the usual thread count and says so, once', async () => {
+  const d = fresh('failed')
+  const cache = cachedModel(d.dir)
+  const { app, page } = await launch({ REELSTUDIO_USER_DATA: d.userData, REELSTUDIO_MODELS_DIR: d.models, ...cache.env, FAKE_ENGINE_FAIL: 'speech-check' })
   try {
     await toListening(page)
-    await page.getByTestId('download-model').click()
-    await page.getByTestId('skip-check').click()
-    await expect(connect(page)).toBeVisible({ timeout: 2000 })
+    await expect(page.getByTestId('model-check-failed')).toHaveText(
+      "I couldn't work out the fastest settings for this computer, so the listening model uses its usual ones. Everything still works."
+    )
+    expect(savedCheck(d.userData)()).toMatchObject({ threads: null }) // main's rule, and no second try on this computer
+    await snap(page, '05-check-failed')
+    await page.getByTestId('model-next').click()
+    await expect(connect(page)).toBeVisible()
   } finally {
     await app.close()
-  }
-
-  const f = fresh('failed')
-  const failed = await launch({ REELSTUDIO_USER_DATA: f.userData, REELSTUDIO_MODELS_DIR: f.models, FAKE_ENGINE_FAIL: 'speech-check' })
-  try {
-    await toListening(failed.page)
-    await failed.page.getByTestId('download-model').click()
-    await expect(failed.page.getByTestId('speech-ready')).toHaveText(
-      "I couldn't finish getting the listener ready for this computer, so it will use its usual settings. Everything still works."
-    )
-    await expect(failed.page.getByTestId('model-next')).toBeFocused()
-    await snap(failed.page, '05-check-failed')
-    await failed.page.keyboard.press('Enter')
-    await expect(connect(failed.page)).toBeVisible()
-  } finally {
-    await failed.app.close()
   }
 })
