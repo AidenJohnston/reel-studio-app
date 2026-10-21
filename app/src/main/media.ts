@@ -3,6 +3,7 @@ import { protocol } from 'electron'
 import { createReadStream, promises as fs } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
+import { isLinkedMedia } from './media-allow'
 import { MEDIA_SCHEME, pathFromMediaUrl } from './media-url'
 
 const TYPES: Record<string, string> = {
@@ -48,7 +49,7 @@ export function handleMediaProtocol(allowedRoots: () => string[]): void {
       return known ? new Response('not found', { status: 404 }) : new Response('forbidden', { status: 403 })
     }
     const roots = await Promise.all(allowedRoots().map((r) => fs.realpath(r).catch(() => null)))
-    if (!roots.some((root) => root !== null && inside(real, root))) return new Response('forbidden', { status: 403 })
+    if (!roots.some((root) => root !== null && inside(real, root)) && !isLinkedMedia(real)) return new Response('forbidden', { status: 403 })
     file = real
     let size: number
     try {

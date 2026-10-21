@@ -7,6 +7,8 @@ let serve: (req: Request) => Promise<Response>
 vi.mock('electron', () => ({ protocol: { handle: (_scheme: string, fn: typeof serve) => (serve = fn) } }))
 const { handleMediaProtocol } = await import('../src/main/media')
 const { mediaUrl } = await import('../src/main/media-url')
+const { listLibrary } = await import('../src/main/library')
+const { setupPaths } = await import('./helpers')
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'rs-media-')))
 afterAll(() => rmSync(base, { recursive: true, force: true }))
@@ -32,5 +34,22 @@ describe('reel-media: protocol', () => {
     expect((await serve(new Request(mediaUrl(join(base, 'secret.jpg'))))).status).toBe(403)
     expect((await serve(new Request(mediaUrl(join(root, 'Projects', 'p', 'gone.jpg'))))).status).toBe(404)
     expect((await serve(new Request(mediaUrl(join(base, 'gone.jpg'))))).status).toBe(403)
+  })
+
+  it('plays a Library entry the person linked from outside, and still refuses other outside files', async () => {
+    const { root } = setupPaths()
+    const outside = join(base, 'elsewhere')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'song.mp3'), 'mp3')
+    writeFileSync(join(outside, 'other.mp3'), 'no')
+    mkdirSync(join(root, 'Library', 'Music'), { recursive: true })
+    symlinkSync(join(outside, 'song.mp3'), join(root, 'Library', 'Music', 'song.mp3'))
+    handleMediaProtocol(() => [root])
+
+    const song = (await listLibrary()).find((b) => b.key === 'music')!.files[0]
+    const res = await serve(new Request(song.url))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('mp3')
+    expect((await serve(new Request(mediaUrl(join(outside, 'other.mp3'))))).status).toBe(403)
   })
 })
