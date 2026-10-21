@@ -2,11 +2,14 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { AIError } from './types';
 import { loadProject, NoteEntry, writeFileAtomic } from './project';
 import { StyleStore } from './style';
 
 const projectLocks = new Map<string, Promise<unknown>>();
+const copyOnMac = promisify(execFile);
 
 /** Main-process edits and note publication share this queue, including read-modify-write edits. */
 export function withProjectLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
@@ -29,8 +32,10 @@ async function names(dir: string): Promise<string[]> {
 async function cloneFile(src: string, dest: string): Promise<void> {
   const stat = await fs.stat(src);
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  // Reflinks keep large render caches cheap on APFS; the fallback copy still isolates writes.
-  await fs.copyFile(src, dest, constants.COPYFILE_FICLONE);
+  // Node/libuv 1.52.1 returns ENOSYS for FICLONE_FORCE on macOS, making FICLONE a full copy.
+  // macOS cp -c uses clonefile on APFS and falls back to an isolated copy on other volumes.
+  if (process.platform === 'darwin') await copyOnMac('/bin/cp', ['-c', src, dest]);
+  else await fs.copyFile(src, dest, constants.COPYFILE_FICLONE);
   await fs.utimes(dest, stat.atimeMs / 1000, stat.mtimeMs / 1000);
 }
 

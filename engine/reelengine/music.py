@@ -321,6 +321,22 @@ def normalize(ctx, x: np.ndarray, work: Path, tag: str = "mix") -> tuple[np.ndar
     return y, {"inputLUFS": round(I0, 2), "pass1LUFS": round(I1, 2), "finalLUFS": round(I2, 2)}
 
 
+def _numeric_cache_values(value):
+    # Python writes 0.0 while a JavaScript project save writes 0. They render the same audio.
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _numeric_cache_values(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_numeric_cache_values(v) for v in value]
+    return value
+
+
+def _mix_signature(voice_hash, config, track_identity, offset):
+    return hashlib.sha1(json.dumps([4, voice_hash, config, track_identity, offset], sort_keys=True,
+                                  default=str).encode()).hexdigest()[:12]
+
+
 def build_audio(ctx, voice_wav) -> Path:
     """Cut voice wav (output timeline) + project.music -> work/audio/mix-<hash>.wav at -14 LUFS.
     Writes work/audio/mix.json with the measured numbers."""
@@ -342,27 +358,39 @@ def build_audio(ctx, voice_wav) -> Path:
             raise EngineError("MUSIC_MISSING", f"music not found: {track}",
                               "The song for this video is missing. Pick another song.")
     # Staging clones may round mtimes; identical cut audio must still reuse the same mix.
-    sig = hashlib.sha1(json.dumps([4, file_digest(voice_wav), mcfg,
-                                   cache_input_identity(track, ctx) if track else None, offset], sort_keys=True,
-                                  default=str).encode()).hexdigest()[:12]
+    voice_hash = file_digest(voice_wav)
+    track_identity = cache_input_identity(track, ctx) if track else None
+    sig = _mix_signature(voice_hash, _numeric_cache_values(mcfg), track_identity, offset)
     out = work / f"mix-{sig}.wav"
     rep_path = work / "mix.json"
     if out.exists() and rep_path.exists():
         return out
     if getattr(ctx, "staged_dir", None) is not None and rep_path.exists():
+        # Reconstruct older keys using the live JSON's number spelling, only when its music
+        # settings are equal. A note must not rebuild the same old live mix on every run.
+        configs = [mcfg]
+        live_config = json.loads((Path(ctx.project_dir) / "project.json").read_text(encoding="utf-8")).get("music") or {}
+        if live_config == mcfg:
+            configs.append(live_config)
+        for config in configs:
+            prior = work / f"mix-{_mix_signature(voice_hash, config, track_identity, offset)}.wav"
+            if prior.exists():
+                prior.replace(out)
+                return out
         # Existing projects have mixes keyed with the live voice's absolute path and timestamp.
         # Read those inputs only; the matching mix was already cloned into this staged work dir.
         live_voice = Path(ctx.project_dir) / "work" / voice_wav.relative_to(Path(ctx.work))
         if live_voice.exists():
             st = live_voice.stat()
-            legacy_sig = hashlib.sha1(json.dumps(
-                [3, str(live_voice), st.st_size, st.st_mtime_ns, mcfg, str(track) if track else None,
-                 track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
-                default=str).encode()).hexdigest()[:12]
-            legacy_mix = work / f"mix-{legacy_sig}.wav"
-            if legacy_mix.exists() and file_digest(live_voice) == file_digest(voice_wav):
-                legacy_mix.replace(out)
-                return out
+            for config in configs:
+                legacy_sig = hashlib.sha1(json.dumps(
+                    [3, str(live_voice), st.st_size, st.st_mtime_ns, config, str(track) if track else None,
+                     track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
+                    default=str).encode()).hexdigest()[:12]
+                legacy_mix = work / f"mix-{legacy_sig}.wav"
+                if legacy_mix.exists() and file_digest(live_voice) == voice_hash:
+                    legacy_mix.replace(out)
+                    return out
     rep = {"duration": round(dur, 3), "music": None}
     mix = voice.copy()
     if track is not None:

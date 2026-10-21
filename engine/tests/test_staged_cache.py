@@ -1,4 +1,6 @@
 """A caption-only staged edit can reuse the completed render inputs."""
+import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
@@ -19,10 +21,10 @@ def test_render_caches_survive_staging_root_and_cloned_voice_mtime(tmp_path, mon
     source = live / "media" / "take.mp4"
     source.write_bytes(b"source and b-roll input")
     shutil.copy2(source, staged / "media" / "take.mp4")
-    project = {"music": {"enabled": False}}
+    project = {"music": {"enabled": False, "startAt": 0.0}}
     live_ctx = SimpleNamespace(project=project, project_dir=live, work=live / "work", root=tmp_path,
                                staged_dir=None, ffmpeg="ffmpeg", duration=1)
-    stage_ctx = SimpleNamespace(project=project, project_dir=staged, work=staged / "work", root=tmp_path,
+    stage_ctx = SimpleNamespace(project={"music": {"enabled": False, "startAt": 0}}, project_dir=staged, work=staged / "work", root=tmp_path,
                                 staged_dir=staged, ffmpeg="ffmpeg", duration=1)
     spans = [Segment("s1", 0, 1, 0)]
     voice = live / "work" / "render" / "voice.wav"
@@ -63,3 +65,10 @@ def test_render_caches_survive_staging_root_and_cloned_voice_mtime(tmp_path, mon
     assert reused.name == mixed.name
     assert reused.read_bytes() == b"completed mix"
     assert reused.parent == staged / "work" / "audio"
+
+    # Older installs hashed Python's 0.0 spelling. A note saves 0 but must reuse that mix too.
+    old_key = hashlib.sha1(json.dumps([4, music.file_digest(voice), project["music"], None, 0.0],
+                                     sort_keys=True).encode()).hexdigest()[:12]
+    reused.rename(reused.with_name(f"mix-{old_key}.wav"))
+    (staged / "project.json").write_text(json.dumps(project))
+    assert music.build_audio(stage_ctx, cloned_voice) == reused

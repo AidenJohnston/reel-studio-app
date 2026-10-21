@@ -18,8 +18,10 @@ The app keeps playing the published video while the note runs. A post-text-only 
 also renders a new version; this implementation does not reuse encoded media.
 
 At the start of a note, completed voice, music-mix, b-roll, and cover caches are
-cloned from live `work/` with `COPYFILE_FICLONE`. APFS shares the file data until a
-write; other filesystems fall back to a separate copy. No hard links are used.
+cloned from live `work/`. macOS uses `/bin/cp -c` because Node/libuv 1.52.1 does not
+implement `COPYFILE_FICLONE_FORCE` there and silently copies for `COPYFILE_FICLONE`.
+Other platforms use `COPYFILE_FICLONE`. APFS shares the file data until a write;
+filesystems without cloning fall back to a separate copy. No hard links are used.
 The clones retain timestamps for freshness checks, and partial files are skipped.
 Notes write only their clones and never refresh the live caches. Cache keys use
 project-relative input names or content hashes, so moving work into staging does
@@ -27,6 +29,8 @@ not invalidate it. Generated voice audio uses a content hash because restoring a
 timestamp through Node can lose nanosecond precision. Existing voice, music, and
 b-roll caches with older keys can still be read; cover code changes retain the
 existing rule that invalidates cached covers.
+Music keys also treat integral JSON numbers such as `0` and `0.0` as equal, so a
+TypeScript project save does not invalidate audio rendered from Python's JSON.
 
 The engine accepts additive options:
 
