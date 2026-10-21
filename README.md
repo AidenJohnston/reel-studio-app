@@ -109,8 +109,8 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-One request happens without you asking: 15 seconds after it opens and then every 4 hours, Reel Studio asks GitHub
-whether a newer version is out: one GET of GitHub's public releases list
+One request happens without you asking: at most once a day (the first a little after the app opens), Reel Studio
+asks GitHub whether a newer version is out: one GET of GitHub's public releases list
 (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`) with a generic `User-Agent: ReelStudio/<version>`.
 On a Mac, when there is a newer version, it also reads that release's `latest-mac.yml` from GitHub. Nothing
 about you or your videos is sent: no cookies, account or ID. (The update library normally adds a random ID per

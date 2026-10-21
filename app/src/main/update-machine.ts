@@ -86,24 +86,23 @@ export function progressWorthSending(s: UpdateState, percent: number): boolean {
 /** First check this long after start, so launch is never slower (T3 Code: 15 s). */
 export const FIRST_CHECK_DELAY_MS = 15_000
 /**
- * Then every 4 hours. T3 Code polls its own feed every 4 minutes; Reel Studio asks GitHub, anonymously. Each
- * check reads GitHub's releases API, which allows 60 unauthenticated requests an hour per IP address, and a
- * school or office network puts many people behind one address. Every 4 h is at most 6 checks a day per copy,
- * so about 240 copies can share one address before the limit; releases come weeks apart, so a person still
- * hears about one the same day. No measurement backs the 4 h: it is a judgment.
+ * Then at most once a day, as 0.1.2 did: its Settings line promises "Once a day, Reel Studio asks GitHub", and
+ * GitHub's releases API allows 60 unauthenticated requests an hour per IP address, which a school or office
+ * network shares. T3 Code polls its own feed every 4 minutes; nothing here needs that. The day counts from the
+ * last answer GitHub gave (a "slow down" too), kept across launches (updateCheckedAt), so reopening the app
+ * does not ask again. A check the person asks for (Settings, the menu) runs any time.
  */
-export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
-/** After a failed check (offline, GitHub down): 30 min, then 1 h, 2 h, never longer than the interval. */
-export const RETRY_FIRST_MS = 30 * 60 * 1000
-/** GitHub said slow down (403 rate limit or 429): wait a full day. */
-export const RATE_LIMIT_WAIT_MS = 24 * 60 * 60 * 1000
+export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+/** A check that got no answer (offline, GitHub down) is tried again in an hour (0.1.2's hourly look). */
+export const RETRY_AFTER_FAILURE_MS = 60 * 60 * 1000
 
-export type CheckOutcome = 'ok' | 'failed' | 'rate-limited'
+export type CheckOutcome = 'answered' | 'failed'
 
-export function nextCheckDelay(outcome: CheckOutcome, failuresInARow: number): number {
-  if (outcome === 'rate-limited') return RATE_LIMIT_WAIT_MS
-  if (outcome === 'ok') return CHECK_INTERVAL_MS
-  return Math.min(CHECK_INTERVAL_MS, RETRY_FIRST_MS * 2 ** Math.max(0, failuresInARow - 1))
+/** How long until the next automatic check. A last answer in the future (clock set back) counts as due. */
+export function nextCheckIn(outcome: CheckOutcome, lastAnswered: number | null, now: number): number {
+  if (outcome === 'failed') return RETRY_AFTER_FAILURE_MS
+  if (lastAnswered === null || lastAnswered > now) return 0
+  return Math.max(0, lastAnswered + CHECK_INTERVAL_MS - now)
 }
 
 /** A GitHub answer that means "too many requests": the error's status, or the code in its message
@@ -132,6 +131,8 @@ export interface Dismissal {
 export interface UpdateMemory {
   /** Settings > "Check for updates": automatic checks. */
   checkUpdates: boolean
+  /** When GitHub last answered a check (ms since 1970), or null. */
+  updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
 }

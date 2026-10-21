@@ -1,8 +1,8 @@
 // The updater's state machine (main/updater.ts + main/update-machine.ts) driven through a fake backend, and
 // the Windows decision: an unsigned installer never self-updates.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createUpdater, type FoundUpdate, type UpdateBackend } from '../src/main/updater'
-import { parseFeedFile, SNOOZE_MS, updateMode, type UpdateMemory } from '../src/main/update-machine'
+import { CHECK_INTERVAL_MS, parseFeedFile, SNOOZE_MS, updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction, type UpdateState } from '../src/shared/update'
 
 function setup(
@@ -10,7 +10,7 @@ function setup(
   opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; memory?: Partial<UpdateMemory> } = {}
 ) {
   const installs: number[] = []
-  let memory: UpdateMemory = { checkUpdates: true, updateLatest: null, updateDismissed: null, ...opts.memory }
+  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
   let now = 1000
   const backend: UpdateBackend = {
     check: found,
@@ -108,6 +108,27 @@ describe('state machine', () => {
     await u.download()
     expect(await u.install()).toMatchObject({ accepted: false, refused: 'exporting' })
     expect(installs).toHaveLength(0)
+  })
+})
+
+describe('once a day', () => {
+  it("a launch within a day of GitHub's last answer does not ask again until the day is up", async () => {
+    vi.useFakeTimers()
+    try {
+      let asks = 0
+      const hour = 60 * 60 * 1000
+      // answered 23 hours before this launch (setup's clock reads 1000)
+      const { u } = setup(async () => (asks++, null), { memory: { updateCheckedAt: 1000 - CHECK_INTERVAL_MS + hour } })
+      await u.init()
+      u.start()
+      await vi.advanceTimersByTimeAsync(hour - 1)
+      expect(asks).toBe(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(asks).toBe(1)
+      u.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

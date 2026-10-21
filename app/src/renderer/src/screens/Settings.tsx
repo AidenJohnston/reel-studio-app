@@ -95,7 +95,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
               Check for updates
             </label>
             <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
-              Every few hours, Reel Studio asks GitHub if there is a newer version. It downloads one only when you click. Nothing about you or your videos is sent.
+              Once a day, Reel Studio asks GitHub if there is a newer version. Nothing about you or your videos is sent.
             </p>
           </>
         )}

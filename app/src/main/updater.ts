@@ -13,7 +13,7 @@ import {
   FIRST_CHECK_DELAY_MS,
   isRateLimited,
   isSnoozed,
-  nextCheckDelay,
+  nextCheckIn,
   onAvailable,
   onCheckFailed,
   onCheckStart,
@@ -78,7 +78,8 @@ const why = (e: unknown): string => String((e as Error)?.message ?? e).slice(0, 
 export function createUpdater(d: UpdaterDeps) {
   let state = initialUpdateState(d.version, d.mode, true, d.disabledReason)
   let active: Action | null = null
-  let failures = 0
+  // when GitHub last answered (kept across launches): automatic checks wait a day from it
+  let lastAnswered: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let started = false
   let dismissed: Dismissal | null = null
@@ -131,7 +132,12 @@ export function createUpdater(d: UpdaterDeps) {
 
   async function tick(): Promise<void> {
     const outcome = await runCheck('auto')
-    schedule(nextCheckDelay(outcome ?? 'ok', failures))
+    schedule(nextCheckIn(outcome ?? 'answered', lastAnswered, d.now()))
+  }
+
+  function answered(): void {
+    lastAnswered = d.now()
+    remember({ updateCheckedAt: lastAnswered })
   }
 
   /** null = skipped (busy, off, or installing). */
@@ -142,21 +148,24 @@ export function createUpdater(d: UpdaterDeps) {
     d.log(`[update] checking (${reason}), running ${d.version}`)
     try {
       applyFound(await d.backend!.check())
-      failures = 0
-      return 'ok'
+      answered()
+      return 'answered'
     } catch (e) {
-      failures++
       set(onCheckFailed(state, plainError('check', e), d.now()))
       d.log(`[update] check failed: ${why(e)}`)
-      return isRateLimited(e) ? 'rate-limited' : 'failed'
+      // "slow down" is an answer: it uses up the day, as in 0.1.2
+      if (!isRateLimited(e)) return 'failed'
+      answered()
+      return 'answered'
     } finally {
       active = null
     }
   }
 
+  /** Never during launch; otherwise when the day since GitHub's last answer is up. */
   function start(firstDelayMs = FIRST_CHECK_DELAY_MS): void {
     started = true
-    schedule(firstDelayMs)
+    schedule(Math.max(firstDelayMs, nextCheckIn('answered', lastAnswered, d.now())))
   }
 
   function stop(): void {
@@ -171,7 +180,7 @@ export function createUpdater(d: UpdaterDeps) {
     active = null
     set(onInstallFailed(state, plainError('install', e)))
     d.log(`[update] install failed: ${why(e)}`)
-    start(nextCheckDelay('ok', 0))
+    start()
   }
 
   return {
@@ -181,8 +190,10 @@ export function createUpdater(d: UpdaterDeps) {
     async init(): Promise<void> {
       const mem = await d.load().catch((e) => {
         d.log(`[update] could not read settings: ${why(e)}`)
-        return { checkUpdates: true, updateLatest: null, updateDismissed: null }
+        return { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }
       })
+      const at = mem.updateCheckedAt
+      lastAnswered = typeof at === 'number' && Number.isFinite(at) ? at : null
       dismissed = validDismissal(mem.updateDismissed)
       const kept = stillNewer(mem.updateLatest, d.version)
       // installed since, or not ours: forget it
@@ -201,7 +212,7 @@ export function createUpdater(d: UpdaterDeps) {
     /** A check the person asked for (menu, Settings): runs even with automatic checks off. */
     async check(reason: string): Promise<{ checked: boolean; state: UpdateState }> {
       const outcome = await runCheck(reason)
-      if (outcome) schedule(nextCheckDelay(outcome, failures))
+      if (outcome) schedule(nextCheckIn(outcome, lastAnswered, d.now()))
       return { checked: outcome !== null, state }
     },
 
@@ -276,8 +287,8 @@ export function createUpdater(d: UpdaterDeps) {
       const autoCheck = on === true
       await d.save({ checkUpdates: autoCheck })
       set({ ...state, autoCheck })
-      // on: look right away. off: schedule() only clears the next look.
-      schedule(0)
+      // on: look if a day has passed since the last answer. off: schedule() only clears the next look.
+      schedule(nextCheckIn('answered', lastAnswered, d.now()))
       return { enabled: autoCheck }
     }
   }

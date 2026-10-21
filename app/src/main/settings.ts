@@ -8,6 +8,8 @@ import type { Dismissal, RememberedRelease } from './update-machine'
 export interface Settings {
   /** Settings > "Check for updates": automatic update checks (main/updater.ts). Default on. */
   checkUpdates: boolean
+  /** When GitHub last answered an update check: automatic checks wait a day from it. */
+  updateCheckedAt: number | null
   /** The newest release the last check found, so a start without internet still offers it. */
   updateLatest: RememberedRelease | null
   /** "Not now" in the update popover: which version, and when. */
@@ -20,7 +22,7 @@ export interface Settings {
   aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true, updateLatest: null, updateDismissed: null }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }
 
 export async function loadSettings(): Promise<Settings> {
   try {
