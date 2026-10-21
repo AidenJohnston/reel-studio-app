@@ -14,7 +14,7 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
-import { isMacVolumePath, logDuration } from './diagnostics'
+import { isMacAppTranslocationPath, isMacVolumePath, logDuration } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -639,6 +639,9 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   if (isMacVolumePath(process.execPath, process.platform)) {
     log('[start] executable is under /Volumes/ on macOS; running from a mounted volume that may be a read-only disk image')
+  }
+  if (isMacAppTranslocationPath(process.execPath, process.platform)) {
+    log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
