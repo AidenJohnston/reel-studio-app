@@ -1,6 +1,8 @@
 // "See it on": switch the Reel screen's phone between real phone shapes, turn Instagram view on and off on
 // each, and check the choice is remembered after a reload. Saves a picture of every shape, with and without
-// Instagram view, to REELSTUDIO_DEVICE_SHOTS (default e2e/screenshots/devices).
+// Instagram view, to REELSTUDIO_DEVICE_SHOTS (default e2e/screenshots/devices). Also the phone around it: the
+// Working phone is paper until the first frame shows, the Reel column fits the window without scrolling,
+// and the subtitle preview never splits a word.
 //
 // Run: npx playwright test e2e/device-preview.spec.ts (after npm run build).
 import { test, expect, type Page } from '@playwright/test'
@@ -35,6 +37,9 @@ test('see it on: phone shapes, Instagram view on each, remembered', async () => 
     await passFirstRun(page)
     await page.getByTestId('new-video').click()
     await page.getByTestId('file-input').setInputFiles([media.video])
+    // Working: the take's first frame fades in over paper.
+    await expect(page.getByTestId('working-frame')).toHaveClass(/shown/, { timeout: 60_000 })
+    await expect(page.getByTestId('working-screen')).not.toHaveClass(/waiting/)
     await expect(page.getByTestId('player')).toBeVisible({ timeout: 10 * 60_000 })
     await expect(page.getByTestId('export')).toBeEnabled({ timeout: 10 * 60_000 })
     await pauseAt(page, 3)
@@ -85,6 +90,36 @@ test('see it on: phone shapes, Instagram view on each, remembered', async () => 
     await page.getByTestId('device-pick').selectOption('any')
     await expect(page.getByTestId('device-frame')).toHaveAttribute('data-device', 'any')
     await expect(page.getByTestId('device-layer')).toHaveCount(0)
+
+    // The phone column fits the window: Send to my phone in view, and nothing in the column makes the page scroll.
+    for (const [width, height] of [[1280, 820], [1024, 700]]) {
+      await page.setViewportSize({ width, height })
+      for (const id of ['any', ...DEVICES.map((d) => d.id)]) {
+        await page.getByTestId('device-pick').selectOption(id)
+        const send = (await page.getByTestId('send-to-phone-reel').boundingBox())!
+        expect(send.y + send.height, `${width}x${height} ${id}`).toBeLessThanOrEqual(height - 24) // the page's bottom padding
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 820 })
+    await page.getByTestId('device-pick').selectOption('any')
+    // With the right column short enough too (the "No AI editor yet" banner put away), the page does not scroll.
+    await page.getByTestId('banner-close').click()
+    expect(await page.evaluate(() => { const m = document.querySelector('.main')!; return m.scrollHeight - m.clientHeight })).toBe(0)
+
+    // Big subtitles: the preview breaks lines only between words, as the export does.
+    await page.getByTestId('edit-myself').click()
+    await page.getByTestId('tab-captions').click()
+    await page.getByTestId('cap-size-big').click()
+    const sub = page.getByTestId('sub-preview')
+    await expect(sub).toBeVisible()
+    // Every word on a line is a whole word of the transcript ("PLACEHOLDE" / "R" would not be).
+    const slug = (await page.evaluate(() => window.reel.projects.list()))[0].slug
+    const heard = new Set((await page.evaluate((s) => window.reel.projects.get(s), slug)).words.map((w) => w.w.toUpperCase()))
+    const lines = await sub.locator('span').allTextContents()
+    expect(lines.length).toBeGreaterThan(0)
+    for (const word of lines.join(' ').split(' ')) expect(heard, word).toContain(word)
+    await page.screenshot({ path: join(OUT, 'subtitles-big.png') })
+    await page.keyboard.press('Escape')
   } finally {
     await app.close().catch(() => {})
   }
