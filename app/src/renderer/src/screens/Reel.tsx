@@ -13,7 +13,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { VersionSwitch } from '../components/VersionSwitch'
-import { versionChanges } from '../../../shared/versions'
+import { readNotes, versionChanges } from '../../../shared/versions'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -292,9 +292,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'post') extras.push({ key: c.key, label: 'Write a post caption', run: () => setPostDraft(d.project.post?.caption ?? ''), testid: 'write-post' })
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
-  // An older version on screen: "What I did" describes it, from its own project.json, and hides the
-  // Change links and extras, which would edit the latest version. Without that file the card says it
-  // describes the latest version.
+  // An older version on screen: "What I did" describes it, from its own project.json copy (without a
+  // readable copy, the card says it describes the latest version). Its Change links and extras are
+  // hidden either way: they edit the latest version, not the one playing.
   const olderShown = !!version && version.n !== d.versions[d.versions.length - 1]?.n
   const olderList = olderShown && version ? d.versionChecklists[version.n] : undefined
   const done = (olderList ?? d.checklist).filter((c) => c.done)
@@ -402,7 +402,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <VersionSwitch
                   versions={d.versions}
                   shown={version.n}
-                  changes={versionChanges(d.versions, d.chat, d.project.notes)}
+                  changes={versionChanges(d.versions, d.chat, readNotes(d.project.notes) ?? [], d.versionNotes)}
                   onPick={(n) => {
                     setSelected(n)
                     setFreshPlay(false)
@@ -459,7 +459,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     <div style={{ minWidth: 0 }}>
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
-                      {line.act && !job && !olderList && (
+                      {line.act && !job && !olderShown && (
                         <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
@@ -469,7 +469,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && !olderList && (
+            {extras.length > 0 && !job && !olderShown && (
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (

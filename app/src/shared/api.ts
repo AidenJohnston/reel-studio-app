@@ -91,8 +91,11 @@ export interface ProjectDetail extends ProjectSummary {
   keptIds: string[]
   checklist: ChecklistItem[]
   /** "What I did" for each older version (number -> list), from the project.json its final render saved.
-   * A version with no readable snapshot is missing. The latest version uses `checklist`. */
+   * A version whose copy is missing or damaged has none. The latest version uses `checklist`. */
   versionChecklists: Record<number, ChecklistItem[]>
+  /** The notes list in each version's project.json copy (shared/versions.ts), for the version menu.
+   * A version whose copy or notes list is missing or damaged has none. */
+  versionNotes: Record<number, NonNullable<ProjectJson['notes']>>
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
   job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null

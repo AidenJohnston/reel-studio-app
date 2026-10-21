@@ -1,30 +1,33 @@
 // The version menu's "what changed" line for each version (src/shared/versions.ts).
 import { expect, it } from 'vitest'
-import { versionChanges } from '../src/shared/versions'
-import type { ChatMessage, ProjectJson, VersionInfo } from '../src/shared/api'
+import { versionChanges, type ProjectNote } from '../src/shared/versions'
+import type { ChatMessage, VersionInfo } from '../src/shared/api'
 
-const at = (minute: number): string => new Date(Date.UTC(2026, 9, 21, 9, minute)).toISOString()
-const version = (n: number, minute: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: at(minute) })
-const editor = (text: string, v: number, minute: number): ChatMessage => ({ id: `${v}-${minute}`, from: 'editor', text, at: at(minute), version: v })
-type Note = NonNullable<ProjectJson['notes']>[number]
-const note = (text: string, v: number, minute: number, applied = ['captions']): Note => ({ version: v, text, applied, at: at(minute) })
+const version = (n: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: '' })
+const editor = (text: string, v: number): ChatMessage => ({ id: `${v}-${text}`, from: 'editor', text, at: '', version: v })
+const note = (text: string, v: number, applied = ['captions']): ProjectNote => ({ version: v, text, applied, at: `${v}-${text}` })
 
-it('takes a line only from what was recorded once the final render made that version', () => {
-  const versions = [version(1, 0), version(2, 20), version(3, 30), version(4, 40)]
+it("credits a version to the note tagged with it that its own project.json copy does not hold yet, else to a change made by hand", () => {
+  // A note's final render failed: it was saved tagged 2 (the number its edit would have got) before Version 2
+  // existed, so Version 2's copy, taken when its render started, already holds it.
+  const failed = note('make the subtitles pop', 2)
+  // The note that made Version 2 is saved after that render, so only later copies hold it.
+  const made2 = note('music too loud', 2, ['music'])
+  const styleOnly = note('always use yellow', 4, [])
   const chat = [
-    editor('Your video is ready.', 1, 1),
-    // a note whose final render failed: its reply and note entry carry the number the edit would have got
-    editor('I made your subtitles pop.', 2, 10),
-    editor('I made the music quieter.', 2, 21),
-    editor('Version 3: new cover.', 3, 31),
-    // no announcement for Version 4, only a later reply that changed nothing
-    editor('I looked, but I was not sure what to change.', 4, 45)
+    editor('Your video is ready.', 1),
+    editor('I made your subtitles pop.', 2),
+    editor('I made the music quieter.', 2),
+    editor('Version 3: new cover.', 3),
+    editor('I looked, but I was not sure what to change.', 4)
   ]
-  const notes = [note('make the subtitles pop', 2, 10), note('music too loud', 2, 21, ['music']), note('thanks', 4, 45, [])]
-  expect([...versionChanges(versions, chat, notes)]).toEqual([
+  const copies = { 1: [], 2: [failed], 3: [failed, made2], 4: [failed, made2] } // Version 5's copy could not be read
+  const live = [failed, made2, styleOnly, note('louder voice', 5)]
+  expect([...versionChanges([1, 2, 3, 4, 5].map(version), chat, live, copies)]).toEqual([
     [1, 'First edit'],
     [2, '“music too loud”'],
     [3, 'New cover'],
-    [4, 'Changes not recorded']
+    [4, 'Changes not recorded'],
+    [5, 'Changes not recorded']
   ])
 })
