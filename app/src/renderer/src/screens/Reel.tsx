@@ -125,6 +125,21 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
+  const latestN = d?.versions[d.versions.length - 1]?.n
+  const older = version && version.n !== latestN ? version : null
+  // "What I did" for an older version on screen, loaded only then (store.ts versionChecklist), and kept with
+  // the video it describes: a new render of that version asks again.
+  const [olderLoaded, setOlderLoaded] = useState<{ video: string; list: ChecklistItem[] | null } | null>(null)
+  useEffect(() => {
+    if (!older) return
+    let live = true
+    const settle = (list: ChecklistItem[] | null) => live && setOlderLoaded({ video: older.video, list })
+    reel.projects.versionChecklist(slug, older.n).then(settle, () => settle(null))
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one load per version and video, not per detail refresh
+  }, [slug, older?.n, older?.video])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -292,12 +307,17 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'post') extras.push({ key: c.key, label: 'Write a post caption', run: () => setPostDraft(d.project.post?.caption ?? ''), testid: 'write-post' })
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
-  // An older version on screen: "What I did" describes it, from its own project.json copy (without a
-  // readable copy, the card says it describes the latest version). Its Change links and extras are
-  // hidden either way: they edit the latest version, not the one playing.
-  const olderShown = !!version && version.n !== d.versions[d.versions.length - 1]?.n
-  const olderList = olderShown && version ? d.versionChecklists[version.n] : undefined
+  // An older version on screen: "What I did" describes it once its list has loaded (until then the card stays
+  // as it was; without a readable copy it says it describes the latest version).
+  const loaded = older && olderLoaded?.video === older.video ? olderLoaded : null
+  const olderList = loaded?.list ?? undefined
   const done = (olderList ?? d.checklist).filter((c) => c.done)
+  // The Change links, extras and "Edit it myself" change the newest version: with an older one on screen,
+  // switch to the newest first, so what changes is what is shown.
+  const onLatest = (run: () => void) => () => {
+    if (older && latestN !== undefined) setSelected(latestN)
+    run()
+  }
 
   const many = d.versions.length > 1
   const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
@@ -412,7 +432,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 />
               )}
             </div>
-            <button className="btn" onClick={() => setDrawer('cut')} data-testid="edit-myself">
+            <button className="btn" onClick={onLatest(() => setDrawer('cut'))} data-testid="edit-myself">
               <Icon name="pencil" size={16} /> Edit it myself
             </button>
             <MoreMenu
@@ -447,8 +467,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
           <section className="panel did" data-testid="what-i-did">
             <h2>
-              {olderList && version ? `What I did in Version ${version.n}` : 'What I did'}
-              {olderShown && !olderList && <span className="muted-sm did-scope"> In the latest version</span>}
+              {older && olderList ? `What I did in Version ${older.n}` : 'What I did'}
+              {loaded && !loaded.list && <span className="muted-sm did-scope"> In the latest version</span>}
             </h2>
             <ul className="checklist two">
               {done.map((c) => {
@@ -459,8 +479,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     <div style={{ minWidth: 0 }}>
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
-                      {line.act && !job && !olderShown && (
-                        <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
+                      {line.act && !job && (
+                        <button className="item-action" onClick={onLatest(line.act.run)} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
                       )}
@@ -469,11 +489,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && !olderShown && (
+            {extras.length > 0 && !job && (
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                  <button key={x.key} className="extra" onClick={onLatest(x.run)} data-testid={x.testid}>
                     <Icon name="plus" size={14} stroke={2} /> {x.label}
                   </button>
                 ))}

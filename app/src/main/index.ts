@@ -29,6 +29,7 @@ import {
   titleFromFile,
   uniqueSlug,
   updateAppState,
+  versionChecklist,
   writeJson,
   writeProject
 } from './store'
@@ -500,6 +501,7 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:versionChecklist', (_e, slug: string, n: number) => versionChecklist(slug, n))
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {
