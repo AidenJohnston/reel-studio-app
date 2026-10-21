@@ -34,6 +34,13 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await expect(page.getByTestId('player')).toBeVisible({ timeout: 240_000 })
   expect(projects()).toHaveLength(1)
   const slug = projects()[0]
+  // the reel autoplays on arrival: hold it at 0:00, so the moment and its words are the same every run
+  await page.evaluate(() => {
+    const v = document.querySelector('[data-testid=player]') as HTMLVideoElement
+    v.pause()
+    v.currentTime = 0
+  })
+  await expect(page.getByTestId('change-at')).toContainText('0:00')
   await page.getByTestId('change-at').click()
   // the words on screen at the playhead, read from this render's timeline
   await expect(page.getByTestId('change-context')).toContainText('Around "')
@@ -113,6 +120,8 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   // Whatever the stand-in AI answers, it makes no new version, so the note's mark says it didn't work.
   await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 60_000 })
   await expect(page.getByTestId('scrub-mark')).toHaveAttribute('data-state', 'failed')
+  // a screen reader hears the state apart from the request; the mark sits where its middle word plays (w1)
+  await expect(page.getByTestId('scrub-mark')).toHaveAttribute('aria-label', "Didn't work, 0:01: Put this here")
   // the next note starts empty
   await page.getByTestId('change-at').click()
   await expect(page.getByTestId('note-attachment')).toHaveCount(0)

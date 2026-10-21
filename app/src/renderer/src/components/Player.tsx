@@ -300,7 +300,8 @@ export function PhonePlayer({
                       key={g.items[0].id}
                       className={`scrub-mark ${g.state}${pct < 0.3 ? ' tip-start' : pct > 0.7 ? ' tip-end' : ''}`}
                       style={{ left: `calc(6px + (100% - 12px) * ${pct})` }}
-                      aria-label={g.items.map((m) => `At ${clock(m.at)}: ${m.text}. ${MARK_STATE[m.state]}`).join(' ')}
+                      // "Stopped, 0:11: cut this part; Done, 0:12: zoom in here": state, then time and request
+                      aria-label={g.items.map((m) => `${MARK_STATE[m.state]}, ${clock(m.at)}: ${m.text}`).join('; ')}
                       onClick={() => {
                         const v = video.current
                         if (v) v.currentTime = Math.min(g.at, dur)
