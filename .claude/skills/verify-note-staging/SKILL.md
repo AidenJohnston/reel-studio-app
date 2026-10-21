@@ -34,7 +34,7 @@ Last confirmed source commit: 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4. coverage
 - engine/reelengine/render.py: staged output contract and the legacy cover writer used by the global-immutability counterexample.
 - docs/versions.md: protocol and threat-model claims.
 
-When a covered file changes, compare it with the sync commit. Inspect every changed write destination, await boundary, guard, lock lifetime, and recovery action. Read REPORT.md, update the model to describe the implementation, preserve the separate literal-byte and reference checks, refresh coverage.json only after confirming correspondence, then rerun the full command and source rehearsal. For wider maintenance, use /maintain-formal-verification-skill.
+When a covered file changes, compare it with the sync commit. Inspect every changed write destination, await boundary, guard, lock lifetime, and recovery action. Read REPORT.md, update the model to describe the implementation, preserve the separate literal-byte and reference checks, refresh coverage.json and advance the sync commit here only after confirming correspondence, then rerun the full command and source rehearsal. For wider maintenance, use /maintain-formal-verification-skill.
 
 ## Interpret a counterexample
 
@@ -48,4 +48,4 @@ Property 3 uses the revised requirement: a note cannot write live caches before 
 
 Run node verification/note-staging/source-probes.cjs after npm ci --ignore-scripts --no-audit --no-fund if needed. The probe copies the real TypeScript modules into an owned temporary directory, compiles them with the repository TypeScript compiler, runs stale-base and crash-boundary assertions, changes the scratch source hash guard to if (false), and checks that the mutant fails while restored source passes. It never edits tracked product files.
 
-Also run run.py --case broken-hash. TLC must fail StaleNeverPublishes. An unexpected result requires a source/model review before committing verification changes.
+Also run python3 verification/note-staging/run.py --case broken-hash. TLC must fail StaleNeverPublishes. An unexpected result requires a source/model review before committing verification changes.

@@ -10,6 +10,12 @@ Source/model sync: 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4, PR #20. The runner 
 
 These are findings against the stated requirements, not product changes. No dangling asset or version reference was found in the baseline model.
 
+## Checked result and pending source change
+
+The final run explored 1,094,072 generated states and 263,517 distinct states in the baseline, to depth 71. All six narrower baseline invariants passed. All six broken variants and all three reachability witnesses produced the intended counterexample. The two literal-equality checks and the legacy-writer check failed as documented above. The real-source mutation rehearsal passed, and the existing note-staging test file passed all six tests.
+
+The final fetch of fork/ai-note-staging still resolved to 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4. It contains no postcommit cache-promotion step. Sam's revised property 3 permits only new cache keys published by atomic rename after commit. Its precommit part is checked here; the announced promotion implementation remains unverified until it is pushed and this model is resynchronized. The source-digest gate will refuse that changed implementation. This report does not claim the old blanket cache invariant covers the forthcoming promotion.
+
 ## Checks and bounds
 
 TLC v1.8.0, revision d2e1472, checks safety by exhaustive breadth-first traversal. TLA+ fits this task because the main question is ordering independent filesystem effects. It checks a model, not the TypeScript implementation.
