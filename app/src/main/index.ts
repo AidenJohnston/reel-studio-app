@@ -816,6 +816,8 @@ async function selfTestAndQuit(): Promise<void> {
     outcome = { ok: result.ok, result }
   } catch (e) {
     outcome = { ok: false, error: e instanceof Error ? e.stack ?? e.message : String(e) }
+  } finally {
+    await killAllEngines()
   }
   const payload = {
     ...outcome,
@@ -864,6 +866,7 @@ app.whenReady().then(async () => {
         writeError: writeErrorCode
       },
       {
+        destinationExists: () => existsSync('/Applications/Reel Studio.app'),
         ask: async (q) => (await dialog.showMessageBox(q)).response,
         askNow: (q) => dialog.showMessageBoxSync(q),
         move: (options) => app.moveToApplicationsFolder(options),

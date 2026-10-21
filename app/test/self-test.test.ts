@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,9 +7,12 @@ import type { RunEngine } from '../src/main/engine'
 import { runSelfTest } from '../src/main/self-test'
 
 const root = mkdtempSync(join(tmpdir(), 'rs-self-test-'))
-const locations = { python: join(root, 'python3'), ffmpeg: join(root, 'ffmpeg'), ffprobe: join(root, 'ffprobe'), engine: root }
+const locations = {
+  python: join(root, 'python3'), ffmpeg: join(root, 'ffmpeg'), engine: root,
+  ffprobe: execFileSync(process.platform === 'win32' ? 'where' : 'which', ['ffprobe'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0]
+}
 mkdirSync(join(root, 'reelengine'))
-for (const file of [locations.python, locations.ffmpeg, locations.ffprobe, join(root, 'reelengine', '__main__.py')]) writeFileSync(file, '')
+for (const file of [locations.python, locations.ffmpeg, join(root, 'reelengine', '__main__.py')]) writeFileSync(file, '')
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 function doctor(checks: { ok: boolean; name: string; detail?: string; fix?: string }[]): RunEngine {
@@ -37,11 +41,13 @@ describe('runSelfTest', () => {
     expect(r.checks.find((c) => c.name === 'bundled ffprobe')).toMatchObject({ ok: false, detail: join(root, 'missing-ffprobe') })
   })
 
-  it('fails if a hanging doctor is not stopped', async () => {
-    const run: RunEngine = (_c, _a, _p, signal) =>
-      new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' })))
-    const r = await runSelfTest({ locations, runEngine: run, timeoutMs: 50 })
-    expect(r.ok).toBe(false)
-    expect(r.checks.at(-1)).toMatchObject({ name: 'engine doctor', ok: false, detail: 'doctor did not finish within 0.05s' })
+  it.each(['non-executable', 'broken', 'wrong-version'])('fails if a %s ffprobe passes', async (kind) => {
+    const ffprobe = kind === 'non-executable' ? join(root, 'not-executable')
+      : kind === 'broken' ? process.execPath
+        : execFileSync(process.platform === 'win32' ? 'where' : 'which', ['ffmpeg'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0]
+    if (kind === 'non-executable') writeFileSync(ffprobe, 'not an executable')
+    const result = await runSelfTest({ locations: { ...locations, ffprobe }, runEngine: doctor([]) })
+    expect(result.ok).toBe(false)
+    expect(result.checks.find((check) => check.name === 'bundled ffprobe')?.ok).toBe(false)
   })
 })

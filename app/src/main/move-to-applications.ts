@@ -40,6 +40,7 @@ export interface Question {
 }
 
 export interface MoveDeps {
+  destinationExists(): boolean
   ask(q: Question): Promise<number>
   /** dialog.showMessageBoxSync: moveToApplicationsFolder's conflictHandler has to answer synchronously. */
   askNow(q: Question): number
@@ -87,11 +88,17 @@ export async function offerMoveToApplications(c: MoveContext, deps: MoveDeps): P
   if (!reason) return 'not-offered'
   deps.log(`[move] running from ${c.exePath} (${reason}); offering to move it to Applications`)
   if ((await deps.ask(reason === 'temporary-copy' ? MOVE_QUESTION_TEMPORARY_COPY : MOVE_QUESTION)) !== 0) return 'declined'
+  // Electron's privileged copy can bypass conflictHandler, so confirm before invoking it.
+  let replaceConfirmed = false
+  if (deps.destinationExists()) {
+    if ((await deps.ask(REPLACE_QUESTION)) !== 0) return 'declined'
+    replaceConfirmed = true
+  }
   try {
     const moving = deps.move({
       // 'exists': an older copy sits in Applications and is not running. 'existsAndRunning': that copy is open, so
       // Electron brings it forward and quits this one, which is what the person wants.
-      conflictHandler: (conflict) => conflict === 'existsAndRunning' || deps.askNow(REPLACE_QUESTION) === 0
+      conflictHandler: (conflict) => conflict === 'existsAndRunning' || replaceConfirmed || deps.askNow(REPLACE_QUESTION) === 0
     })
     deps.log(moving ? '[move] moving to Applications and reopening' : '[move] cancelled')
     return moving ? 'moving' : 'cancelled'

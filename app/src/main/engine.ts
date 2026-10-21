@@ -98,10 +98,12 @@ export interface RunnerConfig {
 }
 
 const running = new Set<ChildProcess>()
+// Cancellation settles before process-group termination; shutdown must still await that drain.
+const stopping = new Set<Promise<void>>()
 
 /** Kills every engine process this runner started. Used when the app quits. */
 export async function killAllEngines(): Promise<void> {
-  await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
+  await Promise.all([...stopping, ...[...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve()))])
 }
 
 export function createEngineRunner(cfg: RunnerConfig) {
@@ -148,7 +150,12 @@ export function createEngineRunner(cfg: RunnerConfig) {
       }
 
       const onAbort = (): void => {
-        if (child.pid) void killTree(child.pid)
+        if (child.pid) {
+          const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+          const stopped = Promise.all([killTree(child.pid), closed]).then(() => undefined)
+          stopping.add(stopped)
+          void stopped.finally(() => stopping.delete(stopped))
+        }
         finish(() => rejectPromise(cancelled()))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
