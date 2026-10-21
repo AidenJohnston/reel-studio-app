@@ -12,7 +12,8 @@ function madeAt(iso: string): string {
 }
 
 /**
- * Which version of the reel is showing, as one quiet line under its title: "Version 3 · Latest".
+ * Which version of the reel is showing, as one quiet line under its title: "Version 3" and a muted
+ * "Latest", with no separator dot (the old "Version 1" pill's dot design was asked to go).
  * The arrows (and Left/Right while it has focus) step through versions, and the menu lists every
  * version, newest first, with what changed. An older version turns amber and offers a way back,
  * so it is never mistaken for the latest.
@@ -111,9 +112,6 @@ export function VersionSwitch({
             data-testid="version-switch"
           >
             <span className="vswitch-name">{versionName(shown)}</span>
-            <span className="vswitch-sep" aria-hidden>
-              ·
-            </span>
             <span className="vswitch-state">{older ? 'Older' : 'Latest'}</span>
             <Icon name="chevron-down" size={14} />
           </button>
