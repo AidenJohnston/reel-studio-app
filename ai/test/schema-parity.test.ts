@@ -29,7 +29,7 @@ for (const name of ['update_broll', 'remove_broll']) pairs.push([`${name} id`, t
 
 const constraints = (schema: JSONSchema) => Object.fromEntries(
   ['pattern', 'minLength', 'enum'].filter((key) => schema[key] !== undefined)
-    .map((key) => [key, key === 'enum' ? schema[key].filter((v: unknown) => v !== null) : schema[key]]),
+    .map((key) => [key, key === 'enum' ? new Set(schema[key].filter((v: unknown) => v !== null)) : schema[key]]),
 );
 
 describe('hand-mirrored engine constraints', () => {

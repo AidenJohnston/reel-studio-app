@@ -80,12 +80,28 @@ describe('tool implementations', () => {
     expect(ctx.state.summaries).toEqual([]);
   });
 
-  it('fails if direct tool calls bypass argument validation', async () => {
-    const { ctx, dir } = await ctxFor();
+  it('fails if a fully shadowed correction is saved or reported as fixed', async () => {
+    const { ctx, dir, events } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = "Claude’s";
+    transcript.words[1].w = "Claude";
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w0' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: "Claude’s", to: 'the assistant' })).isError).toBe(false);
     const before = await fsp.readFile(path.join(dir, 'project.json'));
-    await expect(TOOLS.find((t) => t.name === 'set_caption_style')!.run(ctx, { size: NaN })).rejects.toThrow();
+    const summaries = [...ctx.state.summaries];
+    const eventCount = events.length;
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Claude’s");
+    expect(result.summary).toBeUndefined();
     expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
-    expect([...ctx.state.changed]).toEqual([]);
+    expect(ctx.state.summaries).toEqual(summaries);
+    expect(events).toHaveLength(eventCount);
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w1' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toContainEqual({ from: 'Claude', to: 'Claud' });
   });
 
   it('fails if an update saves a missing b-roll asset', async () => {
