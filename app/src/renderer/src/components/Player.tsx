@@ -51,7 +51,8 @@ export function SubtitleSample({ look, text, width, testid }: { look: SubtitleLo
   const fontSize = look.size * k
   const outline = Math.max(0.6, look.outline * k)
   const style: React.CSSProperties = {
-    top: `${look.position * 100}%`,
+    // On a phone shape (DevicePreview.css) the reel is drawn in only part of the screen: --sub-top and --sub-h say which.
+    top: `calc(var(--sub-top, 0%) + ${look.position} * var(--sub-h, 100%))`,
     fontSize,
     color: look.color,
     textTransform: look.upper ? 'uppercase' : 'none'

@@ -1,0 +1,96 @@
+/* "See it on" (DevicePreview.tsx). The plain phone (data-device="any") keeps its old look; a real phone
+   reshapes the same .phone and .phone-screen from the numbers frameVars() puts on .device-frame, all
+   fractions of the screen so it draws at any window size. */
+
+.device-frame { position: relative; }
+
+/* The picker below adds a row to the phone column, so the phone budgets 44px more of the window height
+   than styles.css's 250px; Export and Send to my phone stay in view on a short window. */
+.device-frame .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 294px) * 9 / 16 + 24px), 340px); }
+@media (max-width: 1180px) {
+  .device-frame .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 294px) * 9 / 16 + 24px), 300px); }
+}
+
+/* ---- a real phone: its own width, corners and camera; 24px shorter than the plain phone, which is the
+   line under the picker that says how much Instagram may cut off, so nothing below moves ---- */
+.device-frame:not([data-device="any"]) {
+  --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 294px), 562px);
+  /* the chin is the whole forehead or chin (devices.ts), so it replaces the plain 12px bezel rather than adding to it */
+  --bezel-y: max(12px, calc(var(--frame-h) * var(--dev-chin)));
+  --screen-h: calc(var(--frame-h) - 2 * var(--bezel-y));
+  --screen-r: calc(var(--screen-h) * var(--dev-radius));
+}
+@media (max-width: 1180px) {
+  .device-frame:not([data-device="any"]) { --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 294px), 491px); }
+}
+.device-frame:not([data-device="any"]) .phone {
+  width: calc(var(--screen-h) * var(--dev-ratio) + 24px);
+  padding: var(--bezel-y) 12px;
+  border-radius: max(40px, calc(var(--screen-r) + 12px));
+}
+.device-frame:not([data-device="any"]) .phone-screen { aspect-ratio: var(--dev-ratio); border-radius: var(--screen-r); }
+/* The reel where Instagram draws it on this screen, filled and trimmed (object-fit: cover, from styles.css). */
+.device-frame:not([data-device="any"]) .phone-screen > video {
+  position: absolute; left: var(--dev-viewer-left); top: var(--dev-viewer-top); width: var(--dev-viewer-w); height: var(--dev-viewer-h);
+}
+/* The drawer's subtitle preview (Player.tsx SubtitleSample) sits on the reel, not the whole screen, at the reel's size. */
+.device-frame:not([data-device="any"]) .phone-screen { --sub-top: var(--dev-viewer-top); --sub-h: var(--dev-viewer-h); }
+.device-frame:not([data-device="any"]) .phone-screen > .sub-sample { scale: var(--dev-reel-scale); }
+/* Instagram view draws this phone's real layout instead of the plain phone's stand-in buttons. */
+.device-frame:not([data-device="any"]) .ig { display: none; }
+/* A narrow phone at the smallest window has about 155px of screen. The range input's default minimum width
+   (about 129px) would push the sound button out of the scrub bar, so let it shrink and tighten the bar. */
+.device-frame .scrub input[type=range] { min-width: 0; }
+.device-frame:not([data-device="any"]) .scrub { gap: 4px; padding-left: 6px; padding-right: 6px; }
+/* The player's own buttons stay on top of Instagram's zones. styles.css makes .phone-screen a size container,
+   which also walls its children into their own stacking layer; a real phone does not use container units. */
+.device-frame:not([data-device="any"]) .phone-screen { container-type: normal; }
+.device-frame:not([data-device="any"]) .phone-screen > :is(.big-play, .scrub, .sound-chip, .phone-tag) { z-index: 2; }
+
+/* Over the screen, never in the way of the player's buttons. */
+.device-layer {
+  position: absolute; left: 12px; right: 12px; top: var(--bezel-y); height: var(--screen-h);
+  border-radius: var(--screen-r); overflow: hidden; pointer-events: none; container-type: inline-size; z-index: 1;
+}
+/* The finish moment's slide-in (styles.css) moves the whole frame once, so the camera and home button arrive
+   with the phone; switching phones later replays nothing. */
+.fresh .reel-left .device-frame { animation: phone-in .6s var(--ease) both; }
+.fresh .reel-left .device-frame .phone { animation: none; }
+.island { position: absolute; background: #000; border-radius: 999px; }
+.home-button {
+  /* drawn, not measured: about 0.6 of the chin, as the button looks on the phone */
+  position: absolute; left: 50%; bottom: calc(var(--bezel-y) / 2); width: calc(var(--bezel-y) * .6); aspect-ratio: 1;
+  transform: translate(-50%, 50%); border-radius: 50%; border: 2px solid #2a2a2a; pointer-events: none;
+}
+
+/* What Instagram covers: a quiet wash with a dashed edge and a plain label, so the reel stays readable under it. */
+.device-covered { position: absolute; inset: 0; opacity: 1; transition: opacity .18s var(--ease); }
+@starting-style { .device-covered { opacity: 0; } }
+.zone {
+  position: absolute; background: rgba(20, 18, 16, .46); outline: 1px dashed rgba(255, 255, 255, .6); outline-offset: -1px;
+  color: #fff; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 5px 6px; overflow: hidden;
+  font-size: clamp(9.5px, 3.3cqw, 12px); line-height: 1.2;
+}
+.zone span { background: rgba(0, 0, 0, .55); padding: 2px 6px; border-radius: 999px; font-weight: 650; white-space: nowrap; }
+.zone em { font-style: normal; opacity: .85; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.zone-buttons { align-items: center; justify-content: center; }
+.zone-buttons span { writing-mode: vertical-rl; padding: 6px 2px; }
+.zone-caption { justify-content: flex-end; }
+
+/* ---- the picker: one pill, the whole of it opens the phone list ---- */
+.device-pick { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.device-select {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 28px 0 10px; border-radius: 999px;
+  border: 1px solid transparent; color: var(--ink-2); font-size: 13.5px; font-weight: 600; cursor: pointer;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2357524c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+}
+@media (hover: hover) { .device-select:hover { background-color: var(--soft); color: var(--ink); } }
+.device-select b { color: var(--ink); font-weight: 650; }
+.device-select select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.device-select:has(select:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.device-fit { font-size: 12.5px; line-height: 20px; color: var(--ink-3); text-align: center; max-width: 300px; }
+
+/* Instagram's menu bar under the reel: five quiet marks, enough to read as the app's bar and no more. */
+.ig-menu { position: absolute; display: flex; align-items: center; justify-content: space-around; padding: 0 6%; }
+.ig-menu i { width: 7cqw; height: 7cqw; max-width: 22px; max-height: 22px; border-radius: 28%; border: 1.5px solid rgba(255, 255, 255, .32); }
+.ig-menu i:last-child { border-radius: 50%; }
