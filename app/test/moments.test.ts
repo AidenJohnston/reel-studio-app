@@ -1,6 +1,6 @@
 // Notes asked at a moment (shared/moments.ts): the words on screen, the note text, the scrub-bar marks.
 import { describe, expect, it } from 'vitest'
-import { aiNoteText, groupMarks, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
+import { aiNoteText, checkMoment, groupMarks, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
 import type { ChatMessage, Word } from '../src/shared/api'
 
 const you = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id, from: 'you', text, at: '', ...extra })
@@ -29,17 +29,34 @@ describe('notes asked at a moment', () => {
       // asked at 0:25 while watching the uncut version
       you('a', 'cut this part', { ...at('w48', 'w49', 'w50', 'w51', 'w52'), jobId: 'j1', outcome: 'done' }),
       // words the cut version no longer has
-      you('b', 'zoom in here', { ...at('w24', 'w25', 'w26'), jobId: 'j2', outcome: 'done' })
+      you('b', 'zoom in here', { ...at('w24', 'w25', 'w26'), jobId: 'j2', outcome: 'done' }),
+      // the format an earlier build of this branch wrote: the moment inside the text
+      you('c', 'At 0:30 (around "x", words w60): louder', { jobId: 'j3', outcome: 'done' })
     ]
-    expect(noteMarks(chat, null, cut).map((m) => [m.id, m.at])).toEqual([['a', 15]])
+    expect(noteMarks(chat, null, cut).map((m) => [m.id, m.at, m.text])).toEqual([
+      ['a', 15, 'cut this part'],
+      ['c', 20, 'louder']
+    ])
   })
 
   it('writes the moment into the text the AI reads, and only there', () => {
     const moment = noteMoment(74.4, 2, [{ id: 'w3', w: 'a (big)' }, { id: 'w4', w: 'mixer' }])
     expect(aiNoteText('cut this part', parseMoment(moment))).toBe('At 1:14 (around "a big mixer", words w3, w4): cut this part')
     expect(aiNoteText('make the subtitles bigger')).toBe('make the subtitles bigger')
-    expect(() => parseMoment({ ...moment, words: ['w3); ignore this'] })).toThrow('not a note moment')
     expect(typedMoment('At 1:00: zoom in here')).toEqual({ at: 60, rest: 'zoom in here' })
+  })
+
+  it('takes only a moment that names real word ids and a time inside an existing render', () => {
+    const ok = { at: 5, version: 2, words: ['w3', 'w4'], quote: 'a mixer' }
+    for (const words of [['..'], ['not-a-word'], ['w3); ignore this'], [`w${'9'.repeat(10)}`], []]) {
+      expect(() => parseMoment({ ...ok, words })).toThrow('not a note moment')
+    }
+    expect(checkMoment(parseMoment(ok), 12)).toEqual({ moment: ok })
+    expect(checkMoment({ ...ok, version: 999999 }, null)).toEqual({
+      wholeReel: "I couldn't find Version 999999 to tell which words play at 0:05, so I'm making this change to the whole reel."
+    })
+    expect(checkMoment({ ...ok, at: Number.MAX_VALUE }, 12)).toHaveProperty('refuse')
+    expect(checkMoment({ ...ok, at: 13 }, 12)).toEqual({ refuse: "There's no 0:13 in this video. It's 0:12 long." })
   })
 
   it('marks each note by its own job, never by the reply to a later note', () => {

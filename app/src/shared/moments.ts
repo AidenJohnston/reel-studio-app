@@ -56,6 +56,9 @@ export function aiNoteText(text: string, moment?: NoteMoment): string {
   return moment ? `At ${clock(moment.at)} (around "${unquote(moment.quote)}", words ${moment.words.join(', ')}): ${text}` : text
 }
 
+// transcript word ids: project.schema.json wordId (^w[0-9]+$), with a length bound
+const WORD_ID = /^w[0-9]{1,9}$/
+
 /** A moment from the page, checked before it reaches the chat or the AI. Throws on anything else. */
 export function parseMoment(x: unknown): NoteMoment {
   const m = (x ?? {}) as Partial<Record<keyof NoteMoment, unknown>>
@@ -63,7 +66,7 @@ export function parseMoment(x: unknown): NoteMoment {
     typeof m.at === 'number' && Number.isFinite(m.at) && m.at >= 0 &&
     Number.isInteger(m.version) && (m.version as number) >= 0 &&
     Array.isArray(m.words) && m.words.length > 0 && m.words.length <= 200 &&
-    m.words.every((w) => typeof w === 'string' && /^[\w.-]{1,40}$/.test(w)) &&
+    m.words.every((w) => typeof w === 'string' && WORD_ID.test(w)) &&
     typeof m.quote === 'string' && m.quote.length <= 2000
   if (!ok) throw new Error(`not a note moment: ${JSON.stringify(x)?.slice(0, 200)}`)
   return { at: m.at as number, version: m.version as number, words: m.words as string[], quote: m.quote as string }
@@ -73,6 +76,28 @@ export function parseMoment(x: unknown): NoteMoment {
 export function typedMoment(text: string): { at: number; rest: string } | null {
   const m = /^at (\d+):([0-5]\d)\b[:,]?\s*/i.exec(text.trim())
   return m ? { at: Number(m[1]) * 60 + Number(m[2]), rest: text.trim().slice(m[0].length) } : null
+}
+
+/**
+ * A parsed moment against the render it names. `duration` is that render's length, or null when the
+ * version or its timeline is gone: then the note goes to the whole reel, with the reason. A time past
+ * the end is refused, in the pop-up's words.
+ */
+export function checkMoment(m: NoteMoment, duration: number | null): { moment: NoteMoment } | { wholeReel: string } | { refuse: string } {
+  const name = m.version === 0 ? 'the Preview' : `Version ${m.version}`
+  if (duration === null) return { wholeReel: `I couldn't find ${name} to tell which words play at ${clock(m.at)}, so I'm making this change to the whole reel.` }
+  if (m.at > duration) return { refuse: `There's no ${clock(m.at)} in this video. It's ${clock(duration)} long.` }
+  return { moment: m }
+}
+
+// The note text an earlier build of this branch wrote, with the moment inside it. Read for marks
+// only; nothing is rewritten.
+const LEGACY = /^At \d+:[0-5]\d \(around "[^"]*", words ([^()]*)\): /
+
+function noteIds(m: ChatMessage): { ids: string[]; text: string } {
+  if (m.moment) return { ids: m.moment.words, text: m.text }
+  const old = LEGACY.exec(m.text)
+  return old ? { ids: old[1].split(', ').filter((id) => WORD_ID.test(id)), text: m.text.slice(old[0].length) } : { ids: [], text: m.text }
 }
 
 export type MarkState = 'making' | NoteOutcome
@@ -99,10 +124,11 @@ export function noteMarks(chat: ChatMessage[], runningJobId: string | null, plac
   const marks: NoteMark[] = []
   for (const m of chat) {
     if (m.from !== 'you') continue
-    const times = (m.moment?.words ?? []).flatMap((id) => plays.get(id) ?? [])
+    const { ids, text } = noteIds(m)
+    const times = ids.flatMap((id) => plays.get(id) ?? [])
     if (!times.length) continue
     const state: MarkState = !m.jobId ? 'failed' : m.jobId === runningJobId ? 'making' : (m.outcome ?? 'stopped')
-    marks.push({ id: m.id, at: times[Math.floor(times.length / 2)], text: m.text, state })
+    marks.push({ id: m.id, at: times[Math.floor(times.length / 2)], text, state })
   }
   return marks
 }

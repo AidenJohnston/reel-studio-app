@@ -48,9 +48,9 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, PlacedWord, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
-import { aiNoteText, parseMoment, placeWords, type RenderSegment } from '../shared/moments'
+import { aiNoteText, checkMoment, parseMoment, placeWords, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
@@ -308,6 +308,18 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 }
 
 // ---- IPC ----------------------------------------------------------------------------------------
+// Every word version `n` (0 = the Preview) plays, placed by that render's own timeline: the segments
+// the engine cut it from (render.json segmentsDetail, docs/versions.md). null when the version or its
+// timeline is missing.
+async function readTimeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null> {
+  const dir = projectDir(slug)
+  const file = n === 0 ? join(dir, 'versions', PREVIEW_DIR, 'render_draft.json') : join(dir, 'versions', `v${n}`, 'render.json')
+  const r = await readJson<{ duration?: number; segmentsDetail?: RenderSegment[] }>(file, {})
+  if (typeof r.duration !== 'number' || !r.segmentsDetail?.length) return null
+  const words = await readWords(dir, await readProject(slug))
+  return { duration: r.duration, words: placeWords(r.segmentsDetail, words) }
+}
+
 function registerIpc(): void {
   handle('app:info', () => appInfo())
   handle('app:finishFirstRun', async () => {
@@ -441,12 +453,22 @@ function registerIpc(): void {
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     let moment: NoteMoment | undefined
-    try {
-      moment = at === undefined ? undefined : parseMoment(at)
-    } catch (e) {
-      throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
+    let wholeReel: string | undefined
+    if (at !== undefined) {
+      let asked: NoteMoment
+      try {
+        asked = parseMoment(at)
+      } catch (e) {
+        throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
+      }
+      // checked against the render it names, the one the pop-up read its words from
+      const c = checkMoment(asked, (await readTimeline(slug, asked.version))?.duration ?? null)
+      if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
+      if ('wholeReel' in c) wholeReel = c.wholeReel
+      else moment = c.moment
     }
     const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat), moment)
+    if (wholeReel) await addChat(slug, 'editor', wholeReel)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
@@ -476,16 +498,9 @@ function registerIpc(): void {
     })
     return { jobId }
   })
-  // Every word version `n` (0 = the Preview) plays, placed by that render's own timeline: the segments
-  // the engine cut it from (render.json segmentsDetail, docs/versions.md).
   handle('projects:timeline', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of your video first.' }
-    const dir = projectDir(slug)
-    const file = n === 0 ? join(dir, 'versions', PREVIEW_DIR, 'render_draft.json') : join(dir, 'versions', `v${n}`, 'render.json')
-    const r = await readJson<{ duration?: number; segmentsDetail?: RenderSegment[] }>(file, {})
-    if (typeof r.duration !== 'number' || !r.segmentsDetail?.length) return null
-    const words = await readWords(dir, await readProject(slug))
-    return { duration: r.duration, words: placeWords(r.segmentsDetail, words) }
+    return readTimeline(slug, n)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
