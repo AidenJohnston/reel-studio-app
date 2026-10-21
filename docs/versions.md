@@ -82,7 +82,8 @@ by manual updates and live engine renders:
 5. Rename the synced temporary project file over live `project.json`. This is the
    commit point. Its bytes match the version snapshot, including the note record and
    `notes[].txnId`; there is no later project-file append. Sync the project directory
-   after this rename.
+   after this rename. Unsupported directory syncs warn and continue. Other sync
+   errors abort before commit, but only warn after commit because the version is live.
 6. Save requested style rules. The immutable version contains `style-rules.json` with
    the rules and their destination root. If the app closes before this finishes,
    startup replays the rules before deleting staging. Equivalent rules are not added twice.
@@ -96,9 +97,11 @@ versions and staging. The manifest remains until repairs finish, so another cras
 can repeat recovery. Before deleting anything, recovery validates the
 whole manifest: only transaction-prefixed basenames in `work/assets` or `work/thumbs`
 are allowed, with no separators or `..` in the basename. Symlinks within any recovery
-path cause refusal. Invalid manifests are logged and retained without cleanup. Project
-root aliases remain supported. After commit, recovery retains the complete version
-and its note record, and finishes any style append. Reordering assets after the project
+path cause refusal. Recovery rechecks parent paths immediately before deleting and
+unlinks individual files. Invalid manifests are logged and retained without cleanup;
+other transactions still recover and new notes can run. The general unpublished-version
+sweep waits until no refused transaction remains. Project root aliases remain supported.
+After commit, recovery retains the complete version and its note record, and finishes any style append. Reordering assets after the project
 commit would instead expose a project referencing files that do not exist yet.
 
 ## Stop, failure, and startup
@@ -124,11 +127,11 @@ returns for consent instead of creating a video version to save it.
 Startup kills recorded orphan engines before accepting jobs. If staging contains an
 unpublished note, it saves the existing interrupted-change chat message even when
 the app job record is missing. The message records the announced transaction IDs, so
-retrying cleanup does not repeat it even if only some orphan folders remain. Only
-the latest 50 transaction IDs are retained; older chat messages remain visible. The
-committed version snapshot identifies notes that already published.
-Recovery removes the whole `.staging` directory, including an empty one, and removes
-version folders newer than `project.json.version`.
+retrying cleanup does not repeat it even if only some orphan folders remain. An ID
+is retained while its staging folder exists, then removed from the notice metadata
+after cleanup. The chat text remains visible. The committed version snapshot
+identifies notes that already published. Recovery removes `.staging` once empty and,
+when no transaction was refused, version folders newer than `project.json.version`.
 Publication also removes unpublished version folders before choosing the next number.
 If the optional AI package has been removed since a note ran, the app keeps any
 publication manifest and its staging for recovery after the package is restored.
@@ -143,6 +146,7 @@ including parallel tools, and manual edits or other jobs racing a note in the sa
 The same-app lock covers the final hash check through the commit and append. An AI
 edit lock also prevents overlapping AI runs on one project.
 
+A concurrent local process racing recovery is outside the threat model.
 User-created symlinks inside a project folder are outside this guarantee.
 Injected disk I/O errors are outside this guarantee.
 Another program editing project files mid-note is outside the same-app lock; the
