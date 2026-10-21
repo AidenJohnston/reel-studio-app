@@ -205,9 +205,7 @@ export function createAI(opts: CreateAIOptions) {
   function connectionProvider(c: CustomConnection, key: string | null, check = false): ModelProvider {
     if (c.kind === 'anthropic') {
       return new AnthropicProvider({
-        id: 'custom', apiKey: key!, model: c.model, baseURL: c.baseURL,
-        // the key goes as x-api-key; an Authorization header could only come from the environment
-        fetch: noRedirectFetch(opts.fetch, ['authorization', 'proxy-authorization', 'cookie']),
+        id: 'custom', apiKey: key!, model: c.model, baseURL: c.baseURL, fetch: noRedirectFetch(opts.fetch),
         ...(check ? { maxRetries: 0, timeoutMs: CHECK_TIMEOUT_MS, maxTokens: 64 } : {}),
       });
     }
@@ -307,10 +305,13 @@ export function createAI(opts: CreateAIOptions) {
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
         return new ClaudeCliProvider({ model: s.cliModel, session: true, ...(bin ? { bin } : {}) });
       }
-      case 'custom': {
-        const c = activeConnection(s)!;
-        return connectionProvider(c, await readSecret(connectionSecret(c.id)));
-      }
+      case 'custom':
+        // read the address and its key together, never halfway through a save that changes both
+        return oneAtATime(async () => {
+          const c = activeConnection(await settings());
+          if (!c) throw new AIError('no_ai', 'That connection is no longer saved. Pick your AI editor again in Settings.');
+          return connectionProvider(c, await readSecret(connectionSecret(c.id)));
+        });
       case 'codex-cli': return new CodexCliProvider({ model: s.cliModel });
       case 'replay': return new ReplayProvider((s.replayFixture ?? process.env.REELSTUDIO_REPLAY)!);
       default: return null;

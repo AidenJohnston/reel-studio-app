@@ -56,6 +56,7 @@ function messageText(content: unknown): string {
 export function fromChatCompletion(json: any): CompletionResponse {
   const choice = json?.choices?.[0];
   const msg = choice?.message ?? {};
+  const seen = new Set<string>();
   const toolCalls: ToolCall[] = (Array.isArray(msg.tool_calls) ? msg.tool_calls : [])
     .filter((c: any) => c?.function?.name)
     .map((c: any, i: number) => {
@@ -65,8 +66,10 @@ export function fromChatCompletion(json: any): CompletionResponse {
       else if (typeof raw === 'string' && raw.trim()) {
         try { args = JSON.parse(raw); } catch { args = { __unparseable: raw }; }
       }
-      // some servers send no id; the next request must still match each tool result to its call
-      return { id: c.id ? String(c.id) : `call_${randomUUID().slice(0, 8)}_${i}`, name: String(c.function.name), args };
+      // some servers send no id, or the same one twice; the next request must still match each result to its call
+      const id = c.id && !seen.has(String(c.id)) ? String(c.id) : `call_${randomUUID().slice(0, 8)}_${i}`;
+      seen.add(id);
+      return { id, name: String(c.function.name), args };
     });
   const u = json?.usage ?? {};
   return {
@@ -122,7 +125,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     // 200 with an error object (some proxies) or without choices (not a Chat Completions server)
     if (json?.error) throw mapConnectionError(Number(json.error.status ?? json.error.code) || undefined, json, ctx);
     const choice = Array.isArray(json?.choices) ? json.choices[0] : undefined;
-    if (!choice || typeof choice.message !== 'object' || choice.message === null) throw wrongAddress(ctx, 'answer had no message', res.status);
+    const msg = choice?.message;
+    const answered = msg && typeof msg === 'object' && (typeof msg.content === 'string' || Array.isArray(msg.content) || (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0));
+    if (!answered) throw wrongAddress(ctx, 'answer had no message', res.status);
     const out = fromChatCompletion(json);
     if (choice.finish_reason === 'length' && !out.toolCalls.length) {
       throw new AIError('connection_truncated', 'The AI ran out of room on that step. Try again.', { retryable: true });

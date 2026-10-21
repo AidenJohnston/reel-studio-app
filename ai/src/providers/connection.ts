@@ -30,15 +30,9 @@ export function normalizeBaseURL(raw: string): string {
 }
 
 /** fetch that refuses redirects, so a key is never forwarded to another host (Anthropic's SDK and undici forward
- * custom headers such as x-api-key on a cross-origin redirect). `drop` removes headers before sending: the
- * Anthropic SDK adds ANTHROPIC_CUSTOM_HEADERS from the environment, which must not reach the person's server. */
-export function noRedirectFetch(base: typeof fetch = fetch, drop: string[] = []): typeof fetch {
-  return ((input: any, init?: RequestInit) => {
-    if (!drop.length) return base(input, { ...init, redirect: 'error' });
-    const headers = new Headers(init?.headers);
-    for (const h of drop) headers.delete(h);
-    return base(input, { ...init, headers, redirect: 'error' });
-  }) as typeof fetch;
+ * custom headers such as x-api-key on a cross-origin redirect). */
+export function noRedirectFetch(base: typeof fetch = fetch): typeof fetch {
+  return ((input: any, init?: RequestInit) => base(input, { ...init, redirect: 'error' })) as typeof fetch;
 }
 
 /** The same error with every copy of `secret` in its diagnostic text replaced: a server that echoes the key in an

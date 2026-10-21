@@ -160,7 +160,7 @@ describe('what reaches the person\'s server, and what comes back', () => {
   it('no credential from the environment rides along with the key', async () => {
     const saved = { token: process.env.ANTHROPIC_AUTH_TOKEN, headers: process.env.ANTHROPIC_CUSTOM_HEADERS };
     process.env.ANTHROPIC_AUTH_TOKEN = 'env-token-should-stay-home';
-    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token';
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key';
     try {
       const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null } });
       expect((await ai.saveConnection({ label: 'P', kind: 'anthropic', baseURL: mock.origin, model: 'mock-small', key: KEY })).error).toBeUndefined();
@@ -186,8 +186,17 @@ describe('what reaches the person\'s server, and what comes back', () => {
 
   it('an answer with no message is not an AI server; a cut-off answer still proves the connection', async () => {
     const p = new OpenAICompatibleProvider({ baseURL: `${mock.origin}/v1`, apiKey: KEY, model: 'mock-small' });
-    mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end('{"choices":[]}'));
-    expect((await caught(p.complete(sayOk))).code).toBe('connection_wrong_address');
+    for (const body of ['{"choices":[]}', '{"choices":[{"message":{},"finish_reason":"stop"}]}']) {
+      mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(body));
+      expect((await caught(p.complete(sayOk))).code, body).toBe('connection_wrong_address');
+    }
+    // the same tool-call id twice: the second gets its own, so each result still matches one call
+    mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: null, tool_calls: [
+      { id: 'dup', type: 'function', function: { name: 'set_cut', arguments: '{}' } }, { id: 'dup', type: 'function', function: { name: 'set_cut', arguments: '{}' } },
+    ] }, finish_reason: 'tool_calls' }] })));
+    const ids = (await p.complete(sayOk)).toolCalls.map((c) => c.id);
+    expect(ids[0]).toBe('dup');
+    expect(new Set(ids).size).toBe(2);
     mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: 'O' }, finish_reason: 'length' }] })));
     expect((await caught(p.complete(sayOk))).code).toBe('connection_truncated');
     mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: 'O' }, finish_reason: 'length' }] })));

@@ -135,10 +135,21 @@ export class AnthropicProvider implements ModelProvider {
     this.model = opts.model || DEFAULT_CLAUDE_MODEL;
     this.maxTokens = opts.maxTokens ?? 16000;
     this.apiKey = opts.apiKey;
-    // baseURL, apiKey and authToken explicit: the SDK otherwise honours ANTHROPIC_BASE_URL (an env var could send
-    // the user's key to another host), sends ANTHROPIC_AUTH_TOKEN from the environment next to the key, and with
-    // no key looks for credentials on disk
-    this.client = new Anthropic({ apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? 'https://api.anthropic.com', fetch: opts.fetch as any, maxRetries: opts.maxRetries ?? 2, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) });
+    // Everything explicit, because the SDK reads the environment: ANTHROPIC_BASE_URL (could send the key to another
+    // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (can replace x-api-key or add
+    // credentials), ANTHROPIC_LOG (debug logs print error bodies that may echo the key), and with no key it looks
+    // for credentials on disk. The fetch below sends exactly this key and no other credential header.
+    const base = opts.fetch ?? fetch;
+    const onlyThisKey = ((input: any, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      for (const h of ['authorization', 'proxy-authorization', 'cookie']) headers.delete(h);
+      headers.set('x-api-key', opts.apiKey);
+      return base(input, { ...init, headers });
+    }) as typeof fetch;
+    this.client = new Anthropic({
+      apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? 'https://api.anthropic.com', fetch: onlyThisKey as any,
+      logLevel: 'off', maxRetries: opts.maxRetries ?? 2, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    });
   }
 
   private mapError(err: any): AIError {
