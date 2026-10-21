@@ -6,7 +6,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, passFirstRun, shot } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'design-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
@@ -197,10 +197,12 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')
   await shot(page, 'd-12-reel-with-ai')
 
-  // ---- AI detection that never answers: the reel still opens at once, only the note box waits ----
+  // ---- AI detection that has not answered: the reel still opens at once, only the note box waits ----
   await app.evaluate(({ ipcMain }) => {
     ipcMain.removeHandler('ai:active')
-    ipcMain.handle('ai:active', () => new Promise(() => {}))
+    const g = globalThis as any
+    g.__aiWaiting = []
+    ipcMain.handle('ai:active', () => new Promise((answer) => g.__aiWaiting.push(answer)))
   })
   await page.getByTestId('nav-home').click()
   const opened = Date.now()
@@ -216,6 +218,19 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('note-input')).toBeDisabled()
   await expect(page.getByTestId('ai-banner')).toHaveCount(0)
   await expect(page.getByTestId('composer-connect')).toHaveCount(0)
+  // A picture dropped on the note box meanwhile is held: nothing can be sent until the check answers...
+  await dropFiles(page, 'note-drop', [media.picture])
+  await expect(page.getByTestId('note-attachment-busy')).toBeVisible()
+  await page.waitForTimeout(2000) // a picture copies in about 0.2 s, so an early attach would have landed by now
+  await expect(page.getByTestId('note-attachment')).toHaveCount(0)
+  await expect(page.getByTestId('send')).toBeDisabled()
+  // ...then it is attached like any drop.
+  await app.evaluate(() => {
+    for (const answer of (globalThis as any).__aiWaiting) answer({ ok: true, value: { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' } })
+  })
+  await expect(page.getByTestId('note-attachment')).toHaveCount(1)
+  await expect(page.getByTestId('send')).toBeEnabled()
+  await page.getByTestId('note-attachment-remove').click()
   await stubConnected(app)
 
   // ---- Library: a drop anywhere on the window lands in the Library ----
