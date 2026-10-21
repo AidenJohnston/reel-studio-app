@@ -28,6 +28,7 @@ from typing import Optional
 from . import captions as capmod, cut as cutmod, project as projmod, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
+from .cache import cache_input_identity
 
 STAGE = "render"
 TARGET_LUFS = -14.0
@@ -255,29 +256,38 @@ def _f(t: float) -> str:
 
 # --- audio --------------------------------------------------------------------------------------
 
-def voice_signature(segments: list, src_paths: dict) -> str:
+def voice_signature(segments: list, src_paths: dict, ctx=None, *, legacy: bool = False) -> str:
     import hashlib
 
     def st(p) -> list:
         try:
-            s = Path(p).stat()
-            return [str(p), s.st_size, s.st_mtime_ns]
+            if legacy:
+                s = Path(p).stat()
+                return [str(p), s.st_size, s.st_mtime_ns]
+            return cache_input_identity(Path(p), ctx)
         except OSError:
-            return [str(p), None, None]
-    data = [1, [[s.source, round(s.src_start, 6), round(s.src_end, 6)] for s in segments],
+            return [Path(p).name, None, None]
+    data = [1 if legacy else 2, [[s.source, round(s.src_start, 6), round(s.src_end, 6)] for s in segments],
             {k: st(v) for k, v in sorted(src_paths.items())}]
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def render_voice(ctx: RenderCtx, segments: list, src_paths: dict, out: Path) -> Path:
     """The cut voice: atrim/concat of exactly the picture's segments, 48 kHz stereo wav.
-    Kept (same file, same mtime) when the segments and sources are unchanged, so music.build_audio's
-    mix cache, keyed on this file's mtime, hits on every render that did not change the cut."""
-    sig = voice_signature(segments, src_paths)
+    Kept when the segments and sources are unchanged, so the music mix reuses the same cut audio."""
+    sig = voice_signature(segments, src_paths, ctx)
     sig_file = out.with_suffix(".sig")
     try:
-        if out.exists() and sig_file.read_text(encoding="utf-8").strip() == sig:
-            return out
+        if out.exists():
+            saved = sig_file.read_text(encoding="utf-8").strip()
+            if saved == sig:
+                return out
+            if saved == voice_signature(segments, src_paths, legacy=True):
+                # Completed caches from earlier app versions still describe this exact cut.
+                tmp = sig_file.with_suffix(".sig.part")
+                tmp.write_text(sig, encoding="utf-8")
+                tmp.replace(sig_file)
+                return out
     except OSError:
         pass
     sig_file.unlink(missing_ok=True)
@@ -315,7 +325,9 @@ def render_voice(ctx: RenderCtx, segments: list, src_paths: dict, out: Path) -> 
             "-c:a", "pcm_s16le", "-f", "wav", str(tmp)]
     tools.text_run(cmd, max(300, ctx.duration * 6), "voice render")
     os.replace(tmp, out)
-    sig_file.write_text(sig, encoding="utf-8")
+    sig_tmp = sig_file.with_suffix(".sig.part")
+    sig_tmp.write_text(sig, encoding="utf-8")
+    sig_tmp.replace(sig_file)
     return out
 
 
@@ -989,10 +1001,14 @@ class CoverJob:
                     for old in sorted(cache.glob("*.png"), key=lambda f: f.stat().st_mtime)[:-8]:
                         old.unlink(missing_ok=True)
                         old.with_suffix(".json").unlink(missing_ok=True)
-                    shutil.copy2(self._res, hit)
+                    tmp = hit.with_suffix(".part.png")
+                    shutil.copy2(self._res, tmp)
                     cj = Path(ctx.work) / "cover.json"
                     if cj.exists():
-                        shutil.copy2(cj, cache / f"{key}.json")
+                        meta_tmp = cache / f"{key}.part.json"
+                        shutil.copy2(cj, meta_tmp)
+                        meta_tmp.replace(cache / f"{key}.json")
+                    tmp.replace(hit)
                 except OSError:
                     pass
             except BaseException as exc:   # noqa: BLE001 -- re-raised in result()

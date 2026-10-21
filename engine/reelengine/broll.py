@@ -35,10 +35,12 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from . import placement
+from .cache import cache_input_identity
 from .compose_util import (EngineError, _get, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
                            open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_path,
                            source_spans, word_end, word_ids_between, word_start)
@@ -527,17 +529,37 @@ def _label_image(text: str, max_w: int, size: int, W: int, fill="#FFFFFF", ink="
 
 # --- caching -----------------------------------------------------------------------------------
 
+@dataclass
+class _AssetSignature:
+    portable: list
+    legacy: str = field(compare=False)
+    cache_dir: Optional[Path] = field(compare=False)
+
+
 def _key(*parts) -> str:
-    h = hashlib.sha1(json.dumps([VERSION, *parts], sort_keys=True, default=str).encode())
-    return h.hexdigest()[:12]
+    def digest(legacy=False):
+        values = [(p.legacy if legacy else p.portable) if isinstance(p, _AssetSignature) else p
+                  for p in parts]
+        return hashlib.sha1(json.dumps([VERSION, *values], sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+    assets = [p for p in parts if isinstance(p, _AssetSignature) and p.cache_dir is not None]
+    if assets:
+        old_key = digest(legacy=True)
+        # Reuse completed entries cloned from before keys used logical project paths.
+        for cached in assets[0].cache_dir.glob(f"*-{old_key}*"):
+            if cached.suffix in {".png", ".mov", ".mp4"} and ".part." not in cached.name \
+                    and not cached.stem.endswith(("-chrome", "-mask")):
+                return old_key
+    return digest()
 
 
-def _asset_sig(p: Path) -> str:
+def _asset_sig(p: Path, ctx=None) -> _AssetSignature:
     try:
         st = p.stat()
-        return f"{p}:{st.st_size}:{st.st_mtime_ns}"
+        return _AssetSignature(cache_input_identity(p, ctx), f"{p}:{st.st_size}:{st.st_mtime_ns}",
+                               Path(ctx.work) / "layers" if ctx is not None else None)
     except OSError:
-        return str(p)
+        return _AssetSignature([p.name, None, None], str(p), None)
 
 
 def _save_png(img, ctx, stem: str) -> Path:
@@ -823,7 +845,7 @@ def _t_card(ctx, plan, params, kind, src, zones, face, frame, where="above-face"
     scale = float(params.get("scale", 1.0))
     maxw = float(params.get("maxWidth", 0.88))
     radius = float(params.get("radius", 0.026))
-    stem = f"{plan['id']}-{_key(plan['treatment'], _asset_sig(src), params, zone, face, frame.get('zoom'))}"
+    stem = f"{plan['id']}-{_key(plan['treatment'], _asset_sig(src, ctx), params, zone, face, frame.get('zoom'))}"
     fallback_ok = params.get("fallback", True) and where == "above-face"
     if kind == "image":
         st = _load_still(ctx, src, params)
@@ -994,7 +1016,7 @@ def _t_side(ctx, plan, params, kind, src, zones, face, frame, allow_upper=True):
     # vertically centre on the face
     gz = shadow_zone(z, W, H)
     y = int(min(max(face[1] + face[3] / 2 - canvas.height / 2, gz["y"]), gz["y"] + gz["h"] - canvas.height))
-    stem = f"{plan['id']}-{_key('side', _asset_sig(src), params, z, face)}"
+    stem = f"{plan['id']}-{_key('side', _asset_sig(src, ctx), params, z, face)}"
     path = _save_png(canvas, ctx, stem)
     return [Layer(path, "image", plan["t0"], plan["t1"], x, y, canvas.width, canvas.height, 0.0)], \
         {"zone": z["zone"], "bbox": _opaque_bbox(canvas, x, y), "cardWidth": round(cw / W, 3), **_content_rec(st)}
@@ -1028,7 +1050,7 @@ def _upper_side(ctx, plan, params, kind, src, zones, face, frame, st, aspect, ti
     tilt = tilt0 * (1 if side == "right" else -1)           # lean toward the face
     canvas, x, y, (cw, ch) = _card_layout(ctx, st, z, tilt, scale, 1.0, face, float(params.get("radius", 0.022)),
                                           center_x=z["x"] + (0 if side == "left" else z["w"]), low=True)
-    stem = f"{plan['id']}-{_key('side-up', _asset_sig(src), params, z, face)}"
+    stem = f"{plan['id']}-{_key('side-up', _asset_sig(src, ctx), params, z, face)}"
     path = _save_png(canvas, ctx, stem)
     return [Layer(path, "image", plan["t0"], plan["t1"], x, y, canvas.width, canvas.height, 0.0)], \
         {"zone": z["zone"], "bbox": _opaque_bbox(canvas, x, y), "cardWidth": round(cw / W, 3), **_content_rec(st),
@@ -1046,7 +1068,7 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
     W, H, _ = fmt_of(ctx)
     z = _side_zone(zones, params.get("side", "auto"))
     ratio = 19.5 / 9.0
-    stem = f"{plan['id']}-{_key('phone', _asset_sig(src), params, zones, face, frame.get('zoom'))}"
+    stem = f"{plan['id']}-{_key('phone', _asset_sig(src, ctx), params, zones, face, frame.get('zoom'))}"
     if z is None or min(z["w"], z["h"] / ratio) < MIN_PHONE_WIDTH * W * 1.09:
         # no room beside the face for a phone you can read: phone on top, speaker below. A phone
         # is tall, so its top part is at least 45% of the frame even if captions then touch the chin.
@@ -1115,7 +1137,7 @@ def _t_full(ctx, plan, params, kind, src, zones, face, frame):
     fit = params.get("fit", "auto")
     bg = params.get("background", "#101010")
     fx, fy = float(params.get("focusX", 0.5)), float(params.get("focusY", 0.5))
-    stem = f"{plan['id']}-{_key('full', _asset_sig(src), params, W, H)}"
+    stem = f"{plan['id']}-{_key('full', _asset_sig(src, ctx), params, W, H)}"
     if kind == "image":
         img = open_image(src)
         if fit == "auto":
@@ -1141,7 +1163,7 @@ def _t_full(ctx, plan, params, kind, src, zones, face, frame):
 
 def _t_split(ctx, plan, params, kind, src, zones, face, frame):
     W, H, _ = fmt_of(ctx)
-    stem = f"{plan['id']}-{_key('split', _asset_sig(src), params, face, W, H)}"
+    stem = f"{plan['id']}-{_key('split', _asset_sig(src, ctx), params, face, W, H)}"
     th, _, clear = split_geometry(ctx, face, params)
     if kind == "image":
         from PIL import Image
@@ -1265,7 +1287,7 @@ def _t_post_wall(ctx, plan, params, kind, src, zones, face, frame):
         x = gap + c * (tw + gap)
         y = y_off + gap + r * (th + gap)
         tile = _round(_cover(open_image(p), tw, th, 0.5, 0.3), int(0.012 * W))
-        path = _save_png(tile, ctx, f"{plan['id']}-t{k}-{_key(_asset_sig(p), tw, th)}")
+        path = _save_png(tile, ctx, f"{plan['id']}-t{k}-{_key(_asset_sig(p, ctx), tw, th)}")
         layers.append(Layer(path, "image", times[k], plan["t1"], x, y, tw, th, 0.0, k + 1))
     return layers, {"zone": "full", "bbox": (0, 0, W, H), "tiles": n}
 
@@ -1315,7 +1337,7 @@ def _t_icon_wall(ctx, plan, params, kind, src, zones, face, frame):
                                                    outline=(30, 30, 30, 255), width=max(2, int(cell * 0.015)))
         tile.alpha_composite(ic, ((tile.width - ic.width) // 2, (tile.height - ic.height) // 2))
         x, y = int(ox + c * cell), int(oy + r * cell)
-        path = _save_png(tile, ctx, f"{plan['id']}-i{k}-{_key(_asset_sig(p), cell, params)}")
+        path = _save_png(tile, ctx, f"{plan['id']}-i{k}-{_key(_asset_sig(p, ctx), cell, params)}")
         layers.append(Layer(path, "image", times[k], plan["t1"], x, y, tile.width, tile.height, 0.0, k + 1))
         bb = _opaque_bbox(tile, x, y)
         if bb:
@@ -1337,7 +1359,7 @@ def _t_anim(ctx, plan, params, kind, src, zones, face, frame):
     want = plan["t1"] - plan["t0"]
     path = src
     if have and want > have + 1.0 / fps:          # hold the last frame for the rest of the window
-        stem = f"{plan['id']}-{_key('anim-hold', _asset_sig(src), round(want, 3))}"
+        stem = f"{plan['id']}-{_key('anim-hold', _asset_sig(src, ctx), round(want, 3))}"
         out = layers_dir(ctx) / f"{stem}.mov"
         if not out.exists():
             tmp = layers_dir(ctx) / f"{stem}.part.mov"

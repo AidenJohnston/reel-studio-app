@@ -36,6 +36,7 @@ from typing import Optional
 
 import numpy as np
 
+from .cache import cache_input_identity, file_digest
 from .compose_util import (EngineError, ffmpeg_bin, log, probe, report, resolve_asset, run, word_end,
                            word_start)
 
@@ -340,14 +341,28 @@ def build_audio(ctx, voice_wav) -> Path:
         if not track.exists():
             raise EngineError("MUSIC_MISSING", f"music not found: {track}",
                               "The song for this video is missing. Pick another song.")
-    sig = hashlib.sha1(json.dumps([3, str(voice_wav), voice_wav.stat().st_size, voice_wav.stat().st_mtime_ns,
-                                   mcfg, str(track) if track else None,
-                                   track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
+    # Staging clones may round mtimes; identical cut audio must still reuse the same mix.
+    sig = hashlib.sha1(json.dumps([4, file_digest(voice_wav), mcfg,
+                                   cache_input_identity(track, ctx) if track else None, offset], sort_keys=True,
                                   default=str).encode()).hexdigest()[:12]
     out = work / f"mix-{sig}.wav"
     rep_path = work / "mix.json"
     if out.exists() and rep_path.exists():
         return out
+    if getattr(ctx, "staged_dir", None) is not None and rep_path.exists():
+        # Existing projects have mixes keyed with the live voice's absolute path and timestamp.
+        # Read those inputs only; the matching mix was already cloned into this staged work dir.
+        live_voice = Path(ctx.project_dir) / "work" / voice_wav.relative_to(Path(ctx.work))
+        if live_voice.exists():
+            st = live_voice.stat()
+            legacy_sig = hashlib.sha1(json.dumps(
+                [3, str(live_voice), st.st_size, st.st_mtime_ns, mcfg, str(track) if track else None,
+                 track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
+                default=str).encode()).hexdigest()[:12]
+            legacy_mix = work / f"mix-{legacy_sig}.wav"
+            if legacy_mix.exists() and file_digest(live_voice) == file_digest(voice_wav):
+                legacy_mix.replace(out)
+                return out
     rep = {"duration": round(dur, 3), "music": None}
     mix = voice.copy()
     if track is not None:
@@ -402,7 +417,9 @@ def build_audio(ctx, voice_wav) -> Path:
     rep["file"] = str(out)
     rep["truePeakDb"] = round(true_peak_db(mix), 2)
     rep["clipped"] = bool(np.abs(mix).max() >= 0.999)
-    rep_path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    rep_tmp = rep_path.with_suffix(".part.json")
+    rep_tmp.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    rep_tmp.replace(rep_path)
     report(ctx, "music", 100, "Balancing the sound")
     return out
 

@@ -26,6 +26,48 @@ async function names(dir: string): Promise<string[]> {
   try { return await fs.readdir(dir); } catch (e: any) { if (e.code === 'ENOENT') return []; throw e; }
 }
 
+async function cloneFile(src: string, dest: string): Promise<void> {
+  const stat = await fs.stat(src);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  // Reflinks keep large render caches cheap on APFS; the fallback copy still isolates writes.
+  await fs.copyFile(src, dest, constants.COPYFILE_FICLONE);
+  await fs.utimes(dest, stat.atimeMs / 1000, stat.mtimeMs / 1000);
+}
+
+async function seedRenderCache(liveDir: string, dir: string, signal?: AbortSignal): Promise<void> {
+  const copy = async (rel: string) => {
+    if (signal?.aborted) throw cancelled();
+    await cloneFile(path.join(liveDir, rel), path.join(dir, rel));
+  };
+  const render = path.join(liveDir, 'work', 'render');
+  for (const name of await names(path.join(liveDir, 'work'))) {
+    if (!/^face-.+\.json$/.test(name)) continue;
+    try { JSON.parse(await fs.readFile(path.join(liveDir, 'work', name), 'utf8')); }
+    catch (e) { if (e instanceof SyntaxError) continue; throw e; }
+    await copy(`work/${name}`);
+  }
+  try {
+    if (/^[a-f0-9]{40}$/.test((await fs.readFile(path.join(render, 'voice.sig'), 'utf8')).trim())) {
+      await copy('work/render/voice.wav');
+      await copy('work/render/voice.sig');
+    }
+  } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+  // Final cache media are renamed into place by the engine. Never seed partial files or
+  // the directly-written chrome/mask scratch images used to construct video treatments.
+  for (const folder of ['layers', 'render/cover-cache']) {
+    for (const name of await names(path.join(liveDir, 'work', folder))) {
+      if (!/\.(png|mp4|mov|json)$/.test(name) || /\.part\.|-(chrome|mask)\.png$/.test(name) || name === 'layers.json') continue;
+      await copy(`work/${folder}/${name}`);
+    }
+  }
+  const audio = path.join(liveDir, 'work', 'audio');
+  try { JSON.parse(await fs.readFile(path.join(audio, 'mix.json'), 'utf8')); }
+  catch (e: any) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return; throw e; }
+  for (const name of await names(audio)) {
+    if (/^mix-[a-f0-9]+\.wav$/.test(name) || name === 'mix.json') await copy(`work/audio/${name}`);
+  }
+}
+
 async function removeUnpublished(dir: string, version: number): Promise<void> {
   for (const name of await names(path.join(dir, 'versions'))) {
     if (/^v\d+$/.test(name) && Number(name.slice(1)) > version) {
@@ -101,13 +143,15 @@ export class NoteTransaction {
       for (const folder of ['assets', 'thumbs']) {
         const staged = path.join(this.dir, 'work', folder);
         const dest = path.join(this.liveDir, 'work', folder);
+        const existing = new Set(await names(dest));
         for (const name of await names(staged)) {
           if (folder === 'assets' && name === 'credits.json') continue;
           if (!name.startsWith(`${this.txnId}-`)) throw new Error(`Staged ${folder} file has no transaction prefix: ${name}`);
           await fs.mkdir(dest, { recursive: true });
-          // New UUID names cannot replace an existing asset, even if another job added a file.
-          await fs.copyFile(path.join(staged, name), path.join(dest, name), constants.COPYFILE_EXCL);
-          await fs.unlink(path.join(staged, name));
+          // The lock protects this check from same-app writers. Rename preserves the exact
+          // mtime recorded in assets.json, so the next unchanged render reuses this version.
+          if (existing.has(name)) throw new Error(`Asset already exists: ${name}`);
+          await fs.rename(path.join(staged, name), path.join(dest, name));
         }
       }
       afterStep?.('assets');
@@ -150,12 +194,19 @@ export async function beginNote(liveDir: string, signal?: AbortSignal): Promise<
     const txnId = randomUUID();
     const dir = path.join(liveDir, '.staging', txnId);
     await fs.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
-    await fs.writeFile(path.join(dir, 'project.json'), bytes);
-    // Small read inputs are copied. Raw media and existing assets remain read-only live inputs.
-    for (const rel of ['work/transcript.json', 'work/analysis.json', 'work/analyze.json', 'work/face.json', 'work/assets/credits.json']) {
-      try { await fs.copyFile(path.join(liveDir, rel), path.join(dir, rel)); }
-      catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+    try {
+      await fs.writeFile(path.join(dir, 'project.json'), bytes);
+      // Raw media and existing assets remain read-only live inputs.
+      for (const rel of ['work/transcript.json', 'work/analysis.json', 'work/analyze.json', 'work/face.json', 'work/assets/credits.json']) {
+        try { await cloneFile(path.join(liveDir, rel), path.join(dir, rel)); }
+        catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+      }
+      await seedRenderCache(liveDir, dir, signal);
+      if (signal?.aborted) throw cancelled();
+      return new NoteTransaction(liveDir, dir, txnId, hash(bytes), signal);
+    } catch (e) {
+      await fs.rm(dir, { recursive: true, force: true });
+      throw e;
     }
-    return new NoteTransaction(liveDir, dir, txnId, hash(bytes), signal);
   });
 }

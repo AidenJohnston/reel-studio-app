@@ -17,6 +17,17 @@ candidates, animation files, thumbnails, and all caches stay under the same tran
 The app keeps playing the published video while the note runs. A post-text-only edit
 also renders a new version; this implementation does not reuse encoded media.
 
+At the start of a note, completed voice, music-mix, b-roll, and cover caches are
+cloned from live `work/` with `COPYFILE_FICLONE`. APFS shares the file data until a
+write; other filesystems fall back to a separate copy. No hard links are used.
+The clones retain timestamps for freshness checks, and partial files are skipped.
+Notes write only their clones and never refresh the live caches. Cache keys use
+project-relative input names or content hashes, so moving work into staging does
+not invalidate it. Generated voice audio uses a content hash because restoring a
+timestamp through Node can lose nanosecond precision. Existing voice, music, and
+b-roll caches with older keys can still be read; cover code changes retain the
+existing rule that invalidates cached covers.
+
 The engine accepts additive options:
 
 - `render --project <live-dir> --project-file <staged-project.json> --out <dir>`
@@ -39,7 +50,9 @@ by manual updates and live engine renders:
 1. Hash the live `project.json` again. A different SHA-256 refuses publication with
    "Your video changed while I was working. Send your note again."
 2. Move new assets and thumbnails into their live folders. Their unique names are
-   not referenced by the old edit. Existing files cannot be replaced.
+   not referenced by the old edit. Existing files cannot be replaced. Same-volume
+   renames preserve the exact timestamps recorded in `assets.json`, so an unchanged
+   manual rerender reuses the version just published.
 3. Atomically replace the credit book, preserving existing entries and adding only
    this note's new asset credits.
 4. Rename the complete staged version folder to `versions/vN+1/`.
