@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { engineMode, modelsDir } from './paths'
 import type { ModelStatus } from '../shared/api'
 import { toUserError, type RunEngine } from './engine'
+import type { WorkGate } from './work-gate'
 import { adoptCopy, findCachedCopies, hfHubCache, type PinnedModel } from './model-cache'
 import pinnedModels from '../../../engine/reelengine/models/speech-models.json'
 
@@ -48,8 +49,8 @@ export interface ModelDeps {
   saveCheck: (r: SpeechCheckResult) => Promise<void>
   /** The engine reads the chosen count from REELENGINE_ASR_THREADS (main/paths.ts). */
   useThreads: (n: number | null) => void
-  /** A video is being made: the timing check waits, or stops, so it never competes with real work. */
-  busy: () => boolean
+  /** Shared with jobs (main/work-gate.ts): the check never runs while a video is being made, and a job stops it. */
+  gate: WorkGate
   log: (line: string) => void
 }
 
@@ -82,15 +83,16 @@ export function createModelManager(deps: ModelDeps) {
   /**
    * The timing check, in the background: the engine transcribes a short bundled recording at a few thread counts and
    * returns the fastest that hears exactly the same words at the same times. A creator can't judge this, so it is
-   * never a setup step; it runs once the model is here and nothing else is running, and stops if a video starts.
+   * never a setup step; it runs once the model is here and no video is being made, and a video that starts stops it.
    */
   function checkInBackground(): Promise<void> {
     timing ??= (async () => {
-      if (!modelInstalled() || deps.busy() || (await checkDone())) return
-      const abort = new AbortController()
-      const watch = setInterval(() => deps.busy() && abort.abort(), 500)
+      if (!modelInstalled() || (await checkDone())) return
+      // Taken after the await above and spawned in the same tick, so a job that started meanwhile wins.
+      const run = deps.gate.runCheck((signal, exited) => runEngine('speech-check', ['--name', modelName()], undefined, signal, exited))
+      if (!run) return // a video is being made; try again on a later start
       try {
-        const r = (await runEngine('speech-check', ['--name', modelName()], undefined, abort.signal)) as {
+        const r = (await run) as {
           threads?: unknown
           runs?: unknown
           complete?: unknown
@@ -110,8 +112,6 @@ export function createModelManager(deps: ModelDeps) {
         await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
         deps.useThreads(null)
         set({ checkFailed: true })
-      } finally {
-        clearInterval(watch)
       }
     })()
       .catch((e) => log(`[model] speech check: ${String(e)}`))

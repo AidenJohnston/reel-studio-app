@@ -44,6 +44,7 @@ import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
+import { createWorkGate } from './work-gate'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
@@ -127,6 +128,8 @@ const feedback = createJobFeedback({
   notificationsOn: () => notificationsOn
 })
 if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedbackLog
+// Jobs and the listening model's background timing check never run at once (main/work-gate.ts).
+const workGate = createWorkGate()
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
 const speedHistoryFile = (): string => join(settingsDir(), 'speed-history.json')
 const jobs = createJobManager(
@@ -142,7 +145,8 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  workGate
 )
 const models = createModelManager({
   runEngine,
@@ -150,7 +154,7 @@ const models = createModelManager({
   loadCheck: async () => (await loadSettings()).speechCheck,
   saveCheck: async (speechCheck) => void (await saveSettings({ speechCheck })),
   useThreads: setAsrThreads,
-  busy: () => jobs.runningCount() > 0,
+  gate: workGate,
   log
 })
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
