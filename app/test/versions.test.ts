@@ -1,16 +1,16 @@
 // What made each version: recorded by the job that made it (main/jobs.ts), read by the version menu (shared/versions.ts).
 import { expect, it } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
 import { projectDir, readAppState } from '../src/main/store'
-import { versionChanges, type ProjectNote } from '../src/shared/versions'
+import { versionChanges } from '../src/shared/versions'
 import type { VersionInfo } from '../src/shared/api'
 import { setupPaths } from './helpers'
 
 const version = (n: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: '' })
 
-it('records what made a version once, when its final render made it, and the menu reads that record first', async () => {
+it('records what made a version when its final render made it, and the menu shows only that record', async () => {
   setupPaths()
   const slug = 'made'
   const finalRender = (n: number): void => {
@@ -41,13 +41,21 @@ it('records what made a version once, when its final render made it, and the men
     return { summary: 'Done.', version: 2, made: { by: 'note', summary: 'make it nicer' } }
   })
 
+  expect((await readAppState(slug)).versionsMade).toMatchObject([{ version: 2, by: 'hand', summary: 'bigger subtitles' }])
+  // Version 2 deleted, then a different Version 2 made from a note: its record replaces the old one
+  rmSync(join(projectDir(slug), 'versions', 'v2'), { recursive: true })
+  await run(slug, 'note', async (emit) => {
+    finalRender(2)
+    emit({ type: 'render', version: 2, draft: false })
+    return { summary: 'Done.', version: 2, made: { by: 'note', summary: 'music too loud' } }
+  })
+
   const made = (await readAppState(slug)).versionsMade ?? []
-  expect(made).toMatchObject([{ version: 2, by: 'hand', summary: 'bigger subtitles' }])
-  // The project.json copies alone would credit Version 2 to this note: tagged 2, missing from Version 2's copy.
-  const louder: ProjectNote = { version: 2, text: 'louder voice', applied: ['music'], at: 'a' }
-  expect([...versionChanges([1, 2, 3].map(version), made, [louder], { 1: [], 2: [], 3: [] })]).toEqual([
+  expect(made).toMatchObject([{ version: 2, by: 'note', summary: 'music too loud' }])
+  // Version 3 has no record (made before records existed, or by a failed run): nothing is guessed for it
+  expect([...versionChanges([1, 2, 3].map(version), made)]).toEqual([
     [1, 'First edit'],
-    [2, 'Bigger subtitles'],
+    [2, '“music too loud”'],
     [3, 'Changes not recorded']
   ])
 })
