@@ -122,9 +122,9 @@ export function suggestedModel(models: string[]): string | null {
 
 export interface ConnectionModelsOptions { fetch?: typeof fetch; timeoutMs?: number }
 
-/** The models the server reports (GET {base}/models for OpenAI-compatible, {base}/v1/models for Anthropic-compatible).
+/** The models the server reports, and whether it refused to list them for want of a key (GET {base}/models for OpenAI-compatible, {base}/v1/models for Anthropic-compatible).
  * Empty when the server does not answer that request: the person then types the model name. */
-export async function listConnectionModels(kind: ConnectionKind, baseURL: string, key: string | null, opts: ConnectionModelsOptions = {}): Promise<string[]> {
+export async function listConnectionModels(kind: ConnectionKind, baseURL: string, key: string | null, opts: ConnectionModelsOptions = {}): Promise<{ models: string[]; keyRefused: boolean }> {
   const base = normalizeBaseURL(baseURL);
   const url = kind === 'openai' ? `${base}/models` : `${base}/v1/models`;
   const headers: Record<string, string> = kind === 'openai'
@@ -132,12 +132,13 @@ export async function listConnectionModels(kind: ConnectionKind, baseURL: string
     : { 'anthropic-version': '2023-06-01', ...(key ? { 'x-api-key': key } : {}) };
   try {
     const res = await noRedirectFetch(opts.fetch)(url, { headers, signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000) });
-    if (!res.ok) return [];
+    // 401/403: the server wants a (different) key before it lists anything
+    if (!res.ok) return { models: [], keyRefused: res.status === 401 || res.status === 403 };
     const json: any = await res.json();
     const list: any[] = Array.isArray(json?.data) ? json.data : Array.isArray(json?.models) ? json.models : [];
     const ids = list.map((m) => (typeof m === 'string' ? m : m?.id ?? m?.slug ?? m?.name)).filter((x): x is string => typeof x === 'string' && x.length > 0);
-    return [...new Set(ids)];
+    return { models: [...new Set(ids)], keyRefused: false };
   } catch {
-    return [];
+    return { models: [], keyRefused: false };
   }
 }

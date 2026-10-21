@@ -101,6 +101,9 @@ test('add a connection to your own AI server from Settings', async () => {
 
     // a wrong key: the model list cannot load, and saving says what to fix
     await page.getByTestId('connection-address').fill(`${origin}/v1`)
+    // no key yet and the server wants one: ask for the key instead of blaming the server
+    await page.getByTestId('connection-address').blur()
+    await expect(page.getByTestId('connection-model-help')).toHaveText("Add the key to see this server's models.")
     await page.getByTestId('connection-key').fill('sk-wrong')
     await page.getByTestId('connection-key').blur()
     await expect(dialog.getByText('No models reported by this server yet.', { exact: false })).toBeVisible()

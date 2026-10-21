@@ -371,8 +371,8 @@ export interface ReelApi {
     saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
     removeConnection(id: string): Promise<void>
     /** Models the server reports (empty when it does not say: the person types one) and the one to preselect
-     * (null when none is a model Reel Studio knows: the person picks). */
-    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null }>
+     * (null when none is a model Reel Studio knows: the person picks). `needsKey`: the server wants a key to answer. */
+    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
     /** The AI editor after anything changed it (connected, picked, signed out, removed). Returns unsubscribe. */
     onChange(cb: (p: ProviderInfo) => void): () => void
   }

@@ -63,8 +63,9 @@ export interface ConnectionInput {
   /** a new key; empty or missing keeps the stored one when editing; null removes it */
   key?: string | null;
 }
-/** The models a server reports and the one to preselect (null: none Reel Studio knows, the person picks). */
-export interface ConnectionModels { models: string[]; suggested: string | null }
+/** The models a server reports, the one to preselect (null: none Reel Studio knows, the person picks), and whether
+ * it needs a key (Anthropic-compatible always does; an OpenAI-compatible one when it refused to list without one). */
+export interface ConnectionModels { models: string[]; suggested: string | null; needsKey: boolean }
 /** Which field the person should fix. */
 export type ConnectionField = 'label' | 'address' | 'key' | 'model';
 export interface SaveConnectionResult {
@@ -376,12 +377,12 @@ export function createAI(opts: CreateAIOptions) {
     });
   }
   async function connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<ConnectionModels> {
-    if (!(q.kind in CONNECTION_KINDS)) return { models: [], suggested: null };
+    if (!(q.kind in CONNECTION_KINDS)) return { models: [], suggested: null, needsKey: false };
     // a saved key only goes to the address it was saved for
     const saved = q.id ? (await settings()).connections?.find((c) => c.id === q.id) : undefined;
     const key = q.key?.trim() || (saved && sameOrigin(saved.baseURL, q.baseURL) ? await readSecret(connectionSecret(saved.id)) : null);
-    const models = await listConnectionModels(q.kind, q.baseURL, key, { fetch: opts.fetch }).catch(() => []);
-    return { models, suggested: suggestedModel(models) };
+    const { models, keyRefused } = await listConnectionModels(q.kind, q.baseURL, key, { fetch: opts.fetch }).catch(() => ({ models: [], keyRefused: false }));
+    return { models, suggested: suggestedModel(models), needsKey: q.kind === 'anthropic' || keyRefused };
   }
 
   return {

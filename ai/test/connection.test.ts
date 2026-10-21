@@ -225,12 +225,13 @@ describe('model list', () => {
   });
 
   it('reads GET /models when the server answers it, else nothing', async () => {
-    expect(await listConnectionModels('openai', `${mock.origin}/v1`, KEY)).toEqual(['mock-small', 'mock-large']);
+    expect(await listConnectionModels('openai', `${mock.origin}/v1`, KEY)).toEqual({ models: ['mock-small', 'mock-large'], keyRefused: false });
     expect(mock.requests.at(-1)!.headers.authorization).toBe(`Bearer ${KEY}`);
-    expect(await listConnectionModels('anthropic', mock.origin, KEY)).toEqual(['mock-small', 'mock-large']);
+    expect((await listConnectionModels('anthropic', mock.origin, KEY)).models).toEqual(['mock-small', 'mock-large']);
     expect(mock.requests.at(-1)!.headers['x-api-key']).toBe(KEY);
-    expect(await listConnectionModels('openai', `${mock.origin}/v1`, 'wrong')).toEqual([]);
-    expect(await listConnectionModels('openai', `${mock.origin}/nothing`, KEY)).toEqual([]);
+    // refused for the key, not missing: the form asks for the key instead of blaming the server
+    expect(await listConnectionModels('openai', `${mock.origin}/v1`, null)).toEqual({ models: [], keyRefused: true });
+    expect(await listConnectionModels('openai', `${mock.origin}/nothing`, KEY)).toEqual({ models: [], keyRefused: false });
   });
 });
 

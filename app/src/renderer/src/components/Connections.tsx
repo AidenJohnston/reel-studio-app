@@ -138,6 +138,7 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
   const [models, setModels] = useState<string[] | null>(null)
   // the model Reel Studio prefers among the server's (ai/src/providers/connection.ts PREFERRED_MODELS), or null
   const [suggested, setSuggested] = useState<string | null>(null)
+  const [needsKey, setNeedsKey] = useState(false)
   const [looking, setLooking] = useState(false)
   const [customModel, setCustomModel] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -168,6 +169,7 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
       if (lookedUp.current !== q) return
       setModels(found.models)
       setSuggested(found.suggested)
+      setNeedsKey(found.needsKey)
       // never the first one listed: server order says nothing about quality. No known model: the person picks.
       if (found.suggested && !modelNow.current.trim()) setModel(found.suggested)
     } catch {
@@ -397,7 +399,9 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
               ? 'Suggested: the newest model Reel Studio knows on this server.'
               : "Pick the newest, largest model. The first one listed is often an old, small one."
             : models && !models.length
-              ? "No models reported by this server yet. Type the model's name."
+              ? needsKey && !key.trim() && !storedKey
+                ? "Add the key to see this server's models."
+                : "No models reported by this server yet. Type the model's name."
               : "Type the model's name, or fill in the address to pick from a list."}
         </p>
       </div>

@@ -400,7 +400,7 @@ function registerIpc(): void {
     await ai.removeConnection(text(id))
   })
   handle('ai:connectionModels', async (_e, q: Record<string, unknown>) => {
-    if (!ai.connectionModels) return { models: [], suggested: null }
+    if (!ai.connectionModels) return { models: [], suggested: null, needsKey: false }
     const kind = q?.kind === 'anthropic' ? 'anthropic' : 'openai'
     return ai.connectionModels({ kind, baseURL: text(q?.baseURL), key: text(q?.key), ...(q?.id ? { id: text(q.id) } : {}) })
   })
