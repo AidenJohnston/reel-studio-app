@@ -4,7 +4,7 @@
 // any of that: it tells tools run by hand (the engine CLI, the AI dev CLI) that the app has the project
 // open, and they refuse while it exists (engine/reelengine/owner.py, ai/src/owner.ts).
 import { promises as fs } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { projectsDir } from './paths'
 import { writeJson } from './store'
@@ -25,9 +25,12 @@ export async function claimProject(dir: string): Promise<ProjectOwner> {
   return { token, release: () => fs.rm(lock, { force: true }) }
 }
 
-/** At startup, before any job: every lock file was left by an app that has quit or crashed, since
- * this one holds the single-instance lock. */
-export async function clearStaleLocks(): Promise<void> {
+/** At startup, after leftover engines are stopped (orphans.ts) and before any job: every lock file was
+ * left by an app that has quit or crashed, since this one holds the single-instance lock. `stillRunning`:
+ * projects where something of that app's could not be stopped; their locks stay. */
+export async function clearStaleLocks(stillRunning: string[]): Promise<void> {
+  const keep = new Set(stillRunning.map((dir) => resolve(dir)))
   const slugs = await fs.readdir(projectsDir()).catch(() => [] as string[])
-  await Promise.all(slugs.map((slug) => fs.rm(join(projectsDir(), slug, OWNER_LOCK), { force: true })))
+  await Promise.all(slugs.filter((slug) => !keep.has(resolve(projectsDir(), slug)))
+    .map((slug) => fs.rm(join(projectsDir(), slug, OWNER_LOCK), { force: true })))
 }

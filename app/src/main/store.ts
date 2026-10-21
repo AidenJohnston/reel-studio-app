@@ -308,7 +308,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
  * to pick up where it left off.
  */
-export async function recoverInterrupted(): Promise<string[]> {
+export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -322,6 +322,7 @@ export async function recoverInterrupted(): Promise<string[]> {
     } catch {
       continue
     }
+    if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
     if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
   }
   return recovered

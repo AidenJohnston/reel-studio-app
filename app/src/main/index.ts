@@ -90,7 +90,7 @@ const runEngine: RunEngine = createEngineRunner({
   env: engineEnv,
   cwd: engineDir,
   log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
+  onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
 
@@ -624,13 +624,19 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
+  const { stopped, stillRunning } = await pidRegistry.reap()
+  if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
+  // something there would not stop and may still be writing: the project stays closed, its lock kept
+  const closed = stillRunning.map((dir) => basename(dir))
+  for (const slug of closed) {
+    log(`[start] ${slug}: an engine process from the last run would not stop; the video stays closed`)
+    jobs.keepClosed(slug)
+  }
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
   await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  await clearStaleLocks().catch((e) => log(`[locks] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
+  await clearStaleLocks(stillRunning).catch((e) => log(`[locks] ${String(e)}`))
+  const recovered = await recoverInterrupted(closed).catch((e) => {
     log(`[recover] ${String(e)}`)
     return []
   })

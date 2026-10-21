@@ -1,52 +1,66 @@
 // Engine processes left running by a hard crash of the app (power cut, force quit) would keep
-// rendering into a project the next app instance is about to resume. We record engine pids in a
-// small file and, at startup, kill any that are still alive and are still our engine (command line).
+// rendering into a project the next app instance is about to resume. We record each engine's pid and
+// project in a small file, from its start until it and everything it started have exited, and at
+// startup stop whatever of ours is still running. A project with something we could not stop stays
+// closed, its lock file kept (owner.ts), until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { killTree } from './proctree'
+import { groupAlive, isAlive, killTree } from './proctree'
 
-export function createPidRegistry(dir: string) {
+/** `stop` ends a pid's process tree and reports whether all of it is gone (proctree killTree). */
+export function createPidRegistry(dir: string, stop: (pid: number) => Promise<boolean> = killTree) {
   const file = join(dir, 'engines.json')
-  const pids = new Set<number>()
+  const engines = new Map<number, string | null>()
   const save = (): void => {
     try {
-      writeFileSync(file, JSON.stringify([...pids]))
+      writeFileSync(file, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
     } catch {
       /* best effort */
     }
   }
   return {
-    add(pid: number): void {
-      pids.add(pid)
+    add(pid: number, project: string | null): void {
+      engines.set(pid, project)
       save()
     },
     remove(pid: number): void {
-      pids.delete(pid)
+      engines.delete(pid)
       save()
     },
-    /** Kills engines left over from a previous run. Returns how many were killed. */
-    async reap(): Promise<number> {
-      let old: number[] = []
+    /** Stops engines a previous run left behind. `stillRunning`: the projects of those that would not
+     * stop, which stay registered for the next start. */
+    async reap(): Promise<{ stopped: number; stillRunning: string[] }> {
+      let old: { pid: number; project: string | null }[] = []
       try {
-        old = JSON.parse(readFileSync(file, 'utf8'))
+        // a plain pid list was written by 0.1.x
+        old = JSON.parse(readFileSync(file, 'utf8')).map((e: number | { pid: number; project: string | null }) => (typeof e === 'number' ? { pid: e, project: null } : e))
       } catch {
-        return 0
+        return { stopped: 0, stillRunning: [] }
       }
-      let n = 0
-      for (const pid of old) {
-        if (typeof pid !== 'number' || pid <= 0) continue
-        // After a crash the pid may already belong to someone else's python (pid reuse is routine on
-        // Windows): only kill it if its command line is really our engine.
-        if (isOurEngine(await processCommandLine(pid))) {
-          await killTree(pid)
-          n++
+      let stopped = 0
+      const stillRunning: string[] = []
+      for (const { pid, project } of old) {
+        if (!(typeof pid === 'number' && pid > 0 && (await leftRunning(pid)))) continue
+        if (await stop(pid)) {
+          stopped++
+          continue
         }
+        engines.set(pid, project)
+        if (project) stillRunning.push(project)
       }
       save()
-      return n
+      return { stopped, stillRunning }
     }
   }
+}
+
+/** Something of ours still runs from this pid: the engine itself (after a crash the pid may belong to
+ * someone else's python, pid reuse is routine on Windows, so only a command line that is really our
+ * engine counts), or on macOS/Linux what is left in the process group of an engine that died. */
+async function leftRunning(pid: number): Promise<boolean> {
+  if (isAlive(pid)) return isOurEngine(await processCommandLine(pid))
+  return process.platform !== 'win32' && groupAlive(pid)
 }
 
 /** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */

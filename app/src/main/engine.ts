@@ -91,9 +91,9 @@ export interface RunnerConfig {
   env: () => NodeJS.ProcessEnv
   cwd?: () => string
   log?: (line: string) => void
-  /** Called with the engine's pid right after it starts (tests use this). */
-  onSpawn?: (pid: number) => void
-  /** Called when that engine process has exited. */
+  /** Called with the engine's pid and its `--project` right after it starts. */
+  onSpawn?: (pid: number, project: string | null) => void
+  /** Called once that engine and everything it started have exited; never for a group that would not die. */
   onExit?: (pid: number) => void
 }
 
@@ -148,10 +148,14 @@ export function createEngineRunner(cfg: RunnerConfig) {
         stdio: ['ignore', 'pipe', 'pipe']
       })
       running.add(child)
-      if (child.pid) cfg.onSpawn?.(child.pid)
+      if (child.pid) cfg.onSpawn?.(child.pid, args.includes('--project') ? args[args.indexOf('--project') + 1] : null)
 
       const gone = ended(child)
-      void gone.then(() => running.delete(child))
+      void gone.then((clean) => {
+        running.delete(child)
+        // a group that would not die stays registered, so the next start finds it (orphans.ts)
+        if (clean && child.pid) cfg.onExit?.(child.pid)
+      })
       const finish = (fn: () => void): void => {
         if (settled) return
         settled = true
@@ -198,7 +202,6 @@ export function createEngineRunner(cfg: RunnerConfig) {
         )
       })
       child.on('close', (code) => {
-        if (child.pid) cfg.onExit?.(child.pid)
         out.end()
         err.end()
         void gone.then((clean) => finish(() => {
