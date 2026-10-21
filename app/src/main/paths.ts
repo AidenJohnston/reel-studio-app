@@ -160,6 +160,12 @@ export function testAnimationDir(): string {
   return join(need().appDir, 'resources', 'test-animation')
 }
 
+let asrThreads: number | null = null
+/** The thread count the listening model's timing check chose for this computer (main/models.ts), or null. */
+export function setAsrThreads(n: number | null): void {
+  asrThreads = n
+}
+
 /** Environment for every engine process. */
 export function engineEnv(): NodeJS.ProcessEnv {
   const base = { ...env() }
@@ -183,5 +189,6 @@ export function engineEnv(): NodeJS.ProcessEnv {
   if (isAbsolute(ffprobePath())) out.REELENGINE_FFPROBE = ffprobePath()
   const fonts = fontsDir()
   if (fonts) out.REELENGINE_FONTS = fonts
+  if (asrThreads) out.REELENGINE_ASR_THREADS = String(asrThreads)
   return out
 }

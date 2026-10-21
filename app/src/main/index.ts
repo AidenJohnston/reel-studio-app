@@ -11,6 +11,7 @@ import {
   projectsDir,
   pythonExe,
   reelStudioRoot,
+  setAsrThreads,
   setRootOverride,
   settingsDir
 } from './paths'
@@ -42,7 +43,7 @@ import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
 import { captureWebsite } from './capture'
-import { createModelManager } from './models'
+import { createModelManager, modelInstalled } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
@@ -143,7 +144,14 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
 )
-const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
+const models = createModelManager({
+  runEngine,
+  onChange: (s) => broadcast('model:progress', s),
+  loadCheck: async () => (await loadSettings()).speechCheck,
+  saveCheck: async (speechCheck) => void (await saveSettings({ speechCheck })),
+  useThreads: setAsrThreads,
+  log
+})
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
 const updates = createUpdateService({
   active: !TEST,
@@ -390,7 +398,10 @@ function registerIpc(): void {
 
   handle('model:status', () => models.status())
   handle('model:download', () => models.download())
+  handle('model:find', () => models.find())
   handle('model:cancel', () => models.cancel())
+  handle('model:runCheck', () => models.runCheck())
+  handle('model:skipCheck', () => models.skipCheck())
 
   handle('ai:providers', () => ai.providers())
   handle('ai:active', () => ai.active())
@@ -731,9 +742,19 @@ app.whenReady().then(async () => {
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
+  setAsrThreads(await models.savedThreads()) // before any engine call can start
   registerIpc()
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower
+  // People who set up before the timing check existed (or skipped it) get it once, quietly: 30 s after start so it
+  // never slows launch, and only when no video is being made. It stops if one starts, and tries again next start.
+  if (settings.firstRunDone && !TEST)
+    setTimeout(() => {
+      void (async () => {
+        if (jobs.runningCount() || !modelInstalled() || (await models.checkDone())) return
+        await models.runCheck({ busy: () => jobs.runningCount() > 0 })
+      })().catch((e) => log(`[model] background speech check: ${String(e)}`))
+    }, 30_000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

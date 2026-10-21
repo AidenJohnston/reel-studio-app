@@ -374,47 +374,79 @@ export function DevProviders() {
   )
 }
 
-/** One-time speech model download with progress. */
-export function ModelDownload({ onReady }: { onReady?: () => void }) {
+/** Shown when a matching listening model was already on this computer (T3 Code's "Using your installed Codex"). */
+export const MODEL_FOUND = 'Found the listener on this computer. Using it, no download needed.'
+
+const mb = (bytes: number): number => Math.round(bytes / 1e6)
+
+/** "Downloading 120 of 486 MB", or the percent when the size is not known. */
+export function downloadLine(s: ModelStatus, verb: 'Downloading' | 'Paused at'): string {
+  return s.total > 0 ? `${verb} ${mb(s.bytes)} of ${mb(s.total)} MB` : `${verb} ${s.pct}%`
+}
+
+/**
+ * The listening model: looks for a matching copy already on this computer first (main/models.ts), else the one-time
+ * download with progress and Pause. First run's Listening stage, Settings and the "model missing" screen use it.
+ */
+export function ModelDownload() {
   const [s, setS] = useState<ModelStatus | null>(null)
   useEffect(() => {
-    reel.model.status().then(setS)
-    return reel.model.onProgress((m) => {
-      setS(m)
-      if (m.installed) onReady?.()
-    })
-  }, [onReady])
+    let alive = true
+    const off = reel.model.onProgress((m) => alive && setS(m))
+    reel.model
+      .status()
+      .then((m) => {
+        if (!alive) return
+        setS(m)
+        if (!m.installed && !m.downloading) return reel.model.find().then((f) => alive && setS(f))
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
   if (!s) return <Spinner />
-  if (s.installed)
+  if (s.installed) return <div className="banner good">{s.reused ? MODEL_FOUND : 'The listening model is ready.'}</div>
+  if (s.checking)
     return (
-      <div className="stack">
-        <div className="banner good">The listening model is ready.</div>
-        {onReady && (
-          <button className="btn primary big" onClick={onReady} data-testid="model-next">
-            Next
-          </button>
-        )}
+      <div className="stack" data-testid="model-checking">
+        <Progress pct={s.pct} label="Checking the listening model" />
+        <span className="muted">Checking the listener on this computer</span>
       </div>
     )
+  const paused = !s.downloading && s.pct > 0 && s.pct < 100
   return (
     <div className="stack">
-      {s.downloading ? (
+      {s.downloading || paused ? (
         <>
-          <Progress pct={s.pct} />
+          <Progress pct={s.pct} paused={!s.downloading} label="Downloading the listening model" />
           <div className="row">
-            <span className="muted">Downloading… {s.pct}%</span>
+            <span className="muted" data-testid="model-progress">
+              {downloadLine(s, s.downloading ? 'Downloading' : 'Paused at')}
+            </span>
             <span className="spacer" />
-            <button className="btn small ghost" onClick={() => reel.model.cancel()}>
-              Pause
-            </button>
+            {s.downloading ? (
+              <button className="btn small ghost" onClick={() => reel.model.cancel()} data-testid="pause-model">
+                Pause
+              </button>
+            ) : (
+              <button className="btn small" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
+                Keep downloading
+              </button>
+            )}
           </div>
         </>
       ) : (
         <button className="btn primary big" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
-          {s.pct > 0 && s.pct < 100 ? 'Keep downloading' : 'Download'}
+          Download
         </button>
       )}
-      {s.error && <div className="banner error">{s.error}</div>}
+      {s.error && (
+        <div className="banner error" role="alert" data-testid="model-error">
+          {s.error}
+        </div>
+      )}
     </div>
   )
 }

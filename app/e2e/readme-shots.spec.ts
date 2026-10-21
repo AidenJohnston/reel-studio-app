@@ -148,7 +148,7 @@ test('public: first-run connect screen and the script screen', async () => {
     await page.getByTestId('get-started').click()
     await passMacStage(page)
     const ready = page.getByTestId('model-next')
-    await expect(ready.or(page.getByTestId('download-model'))).toBeVisible()
+    await expect(ready.or(page.getByTestId('download-model'))).toBeVisible({ timeout: 15_000 })
     await ((await ready.isVisible()) ? ready : page.getByTestId('later')).click()
     await expect(page.getByTestId('skip')).toBeVisible()
     await snap(page, 'connect-ai')

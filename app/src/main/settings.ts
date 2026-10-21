@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import { settingsFile } from './paths'
 import { writeJson } from './store'
 import { UPDATE_DEFAULTS, type UpdateState } from './update-check'
+import type { SpeechCheckResult } from './models'
 
 export interface Settings extends UpdateState {
   firstRunDone: boolean
@@ -14,9 +15,19 @@ export interface Settings extends UpdateState {
   aiCarriedOver: boolean
   /** "Tell me when a video is ready". null = never chosen (main/permissions.ts notificationsWanted). */
   notifications: boolean | null
+  /** The listening model's timing check on this computer (main/models.ts runCheck). null = never run. */
+  speechCheck: SpeechCheckResult | null
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, notifications: null, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = {
+  firstRunDone: false,
+  root: null,
+  aiAutoPicked: false,
+  aiCarriedOver: false,
+  notifications: null,
+  speechCheck: null,
+  ...UPDATE_DEFAULTS
+}
 
 export async function loadSettings(): Promise<Settings> {
   try {

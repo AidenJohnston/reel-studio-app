@@ -189,7 +189,16 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet . The
 ### Speech model (downloaded on first run, not bundled)
 
 Whisper in the CTranslate2 conversion from Hugging Face (`Systran/faster-whisper-*`; the app offers `small.en` by
-default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en
+default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en .
+`small.en` is pinned to revision `d1d751a5f8271d482d14ca55d9e2deeebbae577f`, every file with its SHA-256
+(`engine/reelengine/models/speech-models.json`). If the same files are already in the computer's Hugging Face
+cache, setup copies them instead of downloading.
+
+### Speech check recording (bundled, public domain)
+
+`engine/reelengine/models/speech-check.wav`: 11 seconds of John F. Kennedy's inaugural address (1961), a work of
+the US federal government and in the public domain. The same recording as faster-whisper's `tests/data/jfk.flac`,
+converted to 16 kHz mono WAV. Setup transcribes it to time the speech model on the computer.
 
 ### Fonts (bundled, SIL OFL 1.1 or Apache-2.0)
 

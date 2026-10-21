@@ -11,12 +11,14 @@ MODEL_MISSING; `python -m reelengine download-model --name X` fetches one with p
 """
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import http.client
 import importlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import time
@@ -43,6 +45,9 @@ MODEL_REPOS = {
     "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
 }
 REQUIRED_FILES = ("model.bin", "config.json")
+# Models pinned to one Hugging Face revision, every file with its size and SHA-256
+# (models/README.md). The app reads the same file to reuse a matching copy already on the computer.
+PINNED_MODELS = json.loads((Path(__file__).parent / "models" / "speech-models.json").read_text("utf-8"))
 
 
 def model_dir(name: str) -> Path:
@@ -163,20 +168,8 @@ def _fetch_part(url: str, part: Path, size: int, on_bytes) -> None:
             time.sleep(wait)
 
 
-def download_model(name: str) -> dict:
-    """Fetch a CTranslate2 whisper model into REELENGINE_MODELS/<name>/. Resumable: each file is
-    downloaded to <file>.part with an HTTP Range request picking up where it stopped. Every file
-    is checked against the index's size AND its SHA-256 (`lfs.sha256`) before it is kept."""
-    repo = MODEL_REPOS.get(name)
-    if not repo:
-        raise EngineError("BAD_MODEL", f"unknown model {name!r}; known: {sorted(MODEL_REPOS)}",
-                          "That listening model isn't one Reel Studio knows about.")
-    dest = model_dir(name)
-    if model_present(name):
-        progress("download", 100, "The listening model is ready", force=True)
-        return {"model": name, "path": str(dest), "downloaded": False}
-    base = os.environ.get("REELENGINE_MODEL_MIRROR", "https://huggingface.co").rstrip("/")
-    progress("download", 0, "Getting ready to download", force=True)
+def _index_files(base: str, repo: str) -> list:
+    """(name, size, sha256 or None) for every model file in the repo's live index (unpinned models)."""
     try:
         info = _http_json(f"{base}/api/models/{repo}?blobs=true")
     except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -194,6 +187,33 @@ def download_model(name: str) -> dict:
         lfs = sib.get("lfs") or {}
         sha = str(lfs.get("sha256") or "").lower() or None
         files.append((fname, int(lfs.get("size") or sib.get("size") or 0), sha))
+    return files
+
+
+def download_model(name: str) -> dict:
+    """Fetch a CTranslate2 whisper model into REELENGINE_MODELS/<name>/. Resumable: each file is
+    downloaded to <file>.part with an HTTP Range request picking up where it stopped.
+
+    A pinned model (PINNED_MODELS) downloads its exact revision, and every file must match the pinned
+    size AND SHA-256 before it is kept. Any other model follows the repo's live index, checked
+    against the sizes and the SHA-256 it lists (LFS files only)."""
+    repo = MODEL_REPOS.get(name)
+    if not repo:
+        raise EngineError("BAD_MODEL", f"unknown model {name!r}; known: {sorted(MODEL_REPOS)}",
+                          "That listening model isn't one Reel Studio knows about.")
+    dest = model_dir(name)
+    if model_present(name):
+        progress("download", 100, "The listening model is ready", force=True)
+        return {"model": name, "path": str(dest), "downloaded": False}
+    base = os.environ.get("REELENGINE_MODEL_MIRROR", "https://huggingface.co").rstrip("/")
+    progress("download", 0, "Getting ready to download", force=True)
+    pin = PINNED_MODELS.get(name)
+    if pin:
+        repo, revision = pin["repo"], pin["revision"]
+        files = [(f["name"], int(f["size"]), f["sha256"]) for f in pin["files"]]
+    else:
+        revision = "main"
+        files = _index_files(base, repo)
     total = sum(sz for _, sz, _ in files) or 1
     dest.mkdir(parents=True, exist_ok=True)
     done_bytes = 0
@@ -205,7 +225,7 @@ def download_model(name: str) -> dict:
         part = target.with_name(target.name + ".part")
         if part.exists() and size and part.stat().st_size > size:
             part.unlink()                       # longer than the file can be: never resumable
-        url = f"{base}/{repo}/resolve/main/{fname}"
+        url = f"{base}/{repo}/resolve/{revision}/{fname}"
 
         def on_bytes(got, _done=done_bytes):
             progress("download", (_done + got) / total * 100,
@@ -309,6 +329,122 @@ def cuda_selftest(model_path: str, timeout: float = 180.0) -> bool:
     return ok
 
 
+# --- CPU threads --------------------------------------------------------------------------------
+#
+# More threads is not faster. Measured 2026-10-20 on an M4 Pro (8 performance + 4 efficiency
+# cores), small.en int8 on six talking-head clips: 4 threads 24.8 s, 8 threads 51.7 s, 12 threads
+# 155.5 s, with identical words and word times. The best count depends on the machine, so setup
+# measures it (speech_check) and the app passes the answer back in REELENGINE_ASR_THREADS.
+
+def default_threads() -> int:
+    """The rule from before the speech check, still used when the check has not run."""
+    return max(1, min(8, os.cpu_count() or 4))
+
+
+def cpu_threads() -> int:
+    raw = os.environ.get("REELENGINE_ASR_THREADS", "")
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    if raw:
+        log(f"# REELENGINE_ASR_THREADS={raw!r} is not a positive whole number; using {default_threads()}")
+    return default_threads()
+
+
+def _windows_fast_cores() -> Optional[int]:
+    """Physical cores of the highest efficiency class (the P-cores of a hybrid Intel chip; every core
+    otherwise), from GetLogicalProcessorInformationEx(RelationProcessorCore)."""
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    size = ctypes.c_ulong(0)                    # DWORD
+    k32.GetLogicalProcessorInformationEx(0, None, ctypes.byref(size))
+    buf = ctypes.create_string_buffer(size.value)
+    if not size.value or not k32.GetLogicalProcessorInformationEx(0, buf, ctypes.byref(size)):
+        return None
+    classes, off, raw = [], 0, buf.raw
+    while off + 10 <= size.value:
+        relationship, record = struct.unpack_from("<II", raw, off)
+        if record <= 0:
+            break
+        if relationship == 0:                   # RelationProcessorCore
+            classes.append(raw[off + 9])        # PROCESSOR_RELATIONSHIP.EfficiencyClass (after Flags)
+        off += record
+    return classes.count(max(classes)) if classes else None
+
+
+def fast_cores() -> Optional[int]:
+    """How many of this computer's fastest cores there are, or None when it can't tell."""
+    if sys.platform == "darwin":
+        for key in ("hw.perflevel0.physicalcpu", "hw.physicalcpu"):   # Apple silicon, then Intel
+            out = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, timeout=5)
+            if out.returncode == 0 and out.stdout.strip().isdigit():
+                return int(out.stdout.strip())
+    elif sys.platform == "win32":
+        try:   # not yet run on Windows; a wrong guess only means today's thread count is used
+            return _windows_fast_cores()
+        except (OSError, ValueError, struct.error) as exc:
+            log(f"# could not count fast cores: {type(exc).__name__}: {exc}")
+    return None
+
+
+SPEECH_CHECK_WAV = Path(__file__).parent / "models" / "speech-check.wav"
+SPEECH_CHECK_BUDGET = 15.0      # seconds; setup promises a short check, so no new count starts past this
+
+
+def thread_candidates(default: int, fast: Optional[int]) -> list:
+    """Today's rule first (every other count must reproduce its transcript), then the fast-core count
+    and half of it."""
+    fast = fast or default
+    out = [default]
+    for n in (fast, max(1, fast // 2)):
+        if n not in out:
+            out.append(n)
+    return out
+
+
+def choose_threads(runs: list) -> int:
+    """runs[0] is today's rule. The fastest run whose words and word times equal it exactly: a count
+    that hears anything differently is never chosen, however fast."""
+    same = [r for r in runs if r["words"] == runs[0]["words"]]
+    return min(same, key=lambda r: (r["seconds"], r["threads"]))["threads"]
+
+
+def speech_check(name: Optional[str] = None) -> dict:
+    """Transcribe the bundled sample at each candidate thread count and pick one (choose_threads).
+    Model loading is not timed. Returns {"threads": n or None, "default", "device", "runs"}."""
+    name = name or default_model()
+    path = str(require_model(name))
+    default = default_threads()
+    if cuda_available():
+        # The GPU ignores the CPU thread count; leave it to load_model's own GPU check.
+        return {"threads": None, "default": default, "device": "cuda", "runs": []}
+    from faster_whisper import WhisperModel
+    from faster_whisper.vad import get_vad_model
+    progress("speech-check", 0, "Getting the listener ready for this computer", force=True)
+    get_vad_model()              # loaded once, on first use: keep that out of the first count's time
+    duration = len(audio_env.read_wav(SPEECH_CHECK_WAV)) / 16000
+    cands = thread_candidates(default, fast_cores())
+    start, runs, last_cost = time.perf_counter(), [], 0.0
+    for i, n in enumerate(cands):
+        if runs and time.perf_counter() - start + last_cost > SPEECH_CHECK_BUDGET:
+            log(f"# speech check: no time left for {cands[i:]} thread(s)")
+            break
+        t_load = time.perf_counter()
+        model = WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=n)
+        t0 = time.perf_counter()
+        words, _, _ = _transcribe_one(model, SPEECH_CHECK_WAV, "en", None, duration, 0, 0)
+        seconds = time.perf_counter() - t0
+        last_cost = time.perf_counter() - t_load
+        del model
+        runs.append({"threads": n, "seconds": round(seconds, 3), "words": [(w["w"], w["s"], w["e"]) for w in words]})
+        log(f"# speech check: {n} thread(s) {seconds:.2f}s, {len(words)} words")
+        progress("speech-check", 100 * (i + 1) / len(cands), "Getting the listener ready for this computer")
+    if not runs[0]["words"]:
+        raise EngineError("SPEECH_CHECK_EMPTY", "the speech check sample produced no words",
+                          "The listener didn't hear the test recording. Reel Studio will keep its usual settings.")
+    return {"threads": choose_threads(runs), "default": default, "device": "cpu",
+            "runs": [{"threads": r["threads"], "seconds": r["seconds"], "sameWords": r["words"] == runs[0]["words"]}
+                     for r in runs]}
+
+
 def load_model(name: str, prefer: Optional[str] = None):
     """(WhisperModel, device, compute_type). The GPU is a speed choice, never a failure."""
     from faster_whisper import WhisperModel
@@ -323,7 +459,7 @@ def load_model(name: str, prefer: Optional[str] = None):
         if device == "cuda":
             add_cuda_dll_dirs()
         try:
-            threads = 0 if device == "cuda" else max(1, min(8, (os.cpu_count() or 4)))
+            threads = 0 if device == "cuda" else cpu_threads()
             model = WhisperModel(path, device=device, compute_type=compute, cpu_threads=threads)
             if device == "cuda":
                 # CUDA can load fine and still die at the first encode when a DLL is missing; prove it.

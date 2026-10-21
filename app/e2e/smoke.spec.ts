@@ -26,15 +26,16 @@ test('make a reel end to end', async () => {
   await passMacStage(page)
   // "One download" before the model is here, "Ready to listen" once it is (grandma3 #1).
   await expect(page.getByTestId('model-heading')).toHaveText(/One download, about 500 MB|Ready to listen/)
-  await expect(page.getByTestId('model-next').or(page.getByTestId('download-model'))).toBeVisible()
+  await expect(page.getByTestId('model-next').or(page.getByTestId('download-model'))).toBeVisible({ timeout: 15_000 })
   if (await page.getByTestId('model-next').isVisible()) await expect(page.getByTestId('model-heading')).toHaveText('Ready to listen')
   await shot(page, '02-firstrun-model')
   // Use an installed model if there is one; else "download" (instant with the stand-in engine).
   const next = page.getByTestId('model-next')
   const download = page.getByTestId('download-model')
   await expect(next.or(download)).toBeVisible()
-  if (await next.isVisible()) await next.click()
-  else await download.click()
+  if (!(await next.isVisible())) await download.click()
+  // after the download, the short timing check, then Next
+  await next.click({ timeout: 15_000 })
   await expect(page.getByText('Connect your AI editor')).toBeVisible()
   await shot(page, '03-firstrun-connect')
   await page.getByTestId('skip').click()
