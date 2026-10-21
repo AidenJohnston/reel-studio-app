@@ -5,12 +5,24 @@ import { existsSync, promises as fs } from 'node:fs'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { writeJson } from './store'
-import type { AgentEvent, AgentResult, AI, CreateAI, ProviderStatus, ScriptResult } from './ai-types'
+import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, ProviderStatus, ScriptResult } from './ai-types'
 import type { Phase } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
 const NOT_CONNECTED: ProviderStatus = { id: 'none', connected: true, label: 'No AI' }
+
+// The person's own Claude Code app, as tests want it (REELSTUDIO_MOCK_CLAUDE). Default: not on this computer.
+// `signs_in` starts signed out and becomes ready a moment after the sign-in window "opens" (no terminal opens in
+// mock mode), so the Connect screen's waiting and re-checking can be driven.
+const CLAUDE_LABEL = 'Claude (your Claude Code app)'
+const CLAUDE_REASONS: Record<ClaudeCodeStatus['state'], string | undefined> = {
+  missing: 'We could not find the Claude Code app on this computer.',
+  broken: 'We found the Claude Code app, but it did not start. Try installing it again.',
+  signed_out: 'Your Claude Code app is not signed in yet.',
+  ready: undefined
+}
+const MOCK_CLAUDE_BIN = process.platform === 'win32' ? 'C:\\Program Files\\Mock Claude\\claude.exe' : '/opt/mock claude/bin/claude'
 
 /** Maps an engine stage pct (0-100) into an overall window [lo, hi]. */
 const span = (lo: number, hi: number, pct: number): number => Math.round(lo + ((hi - lo) * pct) / 100)
@@ -46,18 +58,50 @@ export const createMockAI: CreateAI = ({ host }) => {
     return files.length ? `Library/Music/${files[0]}` : null
   }
 
+  const mode = process.env.REELSTUDIO_MOCK_CLAUDE ?? 'missing'
+  let claudeState: ClaudeCodeStatus['state'] =
+    mode === 'signs_in' ? 'signed_out' : (['missing', 'broken', 'signed_out', 'ready'] as const).find((s) => s === mode) ?? 'missing'
+  let claudeChosen = false
+  const claudeStatus = (): ClaudeCodeStatus => ({
+    state: claudeState,
+    ...(claudeState === 'missing' ? {} : { bin: MOCK_CLAUDE_BIN }),
+    ...(claudeState === 'signed_out' || claudeState === 'ready' ? { version: '2.1.0' } : {}),
+    ...(CLAUDE_REASONS[claudeState] ? { reason: CLAUDE_REASONS[claudeState] } : {})
+  })
+  const claudeProvider = (): ProviderStatus => {
+    const ready = claudeState === 'ready'
+    return {
+      id: 'claude-cli',
+      connected: ready,
+      label: CLAUDE_LABEL,
+      ...(ready ? {} : { error: { code: `claude_code_${claudeState}`, userMessage: CLAUDE_REASONS[claudeState]! } })
+    }
+  }
+
   const ai: AI = {
     async providers() {
       return [
         { id: 'chatgpt', connected: false, label: 'ChatGPT' },
         { id: 'claude', connected: false, label: 'Claude' },
+        claudeProvider(),
         NOT_CONNECTED
       ]
     },
     async active() {
-      return NOT_CONNECTED
+      return claudeChosen && claudeState === 'ready' ? claudeProvider() : NOT_CONNECTED
     },
-    async setActive() {},
+    async setActive(id) {
+      if (id === 'claude-cli') {
+        if (claudeState !== 'ready') throw { code: 'not_available', userMessage: CLAUDE_REASONS[claudeState] }
+        claudeChosen = true
+      } else claudeChosen = false
+    },
+    async claudeCodeStatus() {
+      return claudeStatus()
+    },
+    mockClaudeSignInOpened() {
+      if (mode === 'signs_in' && claudeState === 'signed_out') setTimeout(() => (claudeState = 'ready'), 1500)
+    },
     async signInChatGPT() {
       throw { code: 'NOT_READY', userMessage: 'Signing in with ChatGPT is not ready in this build yet. Your videos still work without it.' }
     },
@@ -120,7 +164,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
-    async applyNote(projectDir, note, onEvent): Promise<AgentResult> {
+    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
       const added: string[] = []
@@ -130,7 +174,8 @@ export const createMockAI: CreateAI = ({ host }) => {
         await writeRules(rules)
         added.push(note.trim())
       }
-      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString() }]
+      const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
+      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
       await writeProject(projectDir, p)
       onEvent({ type: 'status', message: 'Done', pct: 100 })
       return {

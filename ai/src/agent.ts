@@ -1,5 +1,5 @@
 // The provider-neutral agent loop: model -> tool calls -> results -> model ... until `finish`.
-import { AgentEvent, AIError, ChatMessage, ModelProvider, TokenUsage, ToolCall, ToolResultMsg } from './types';
+import { AgentEvent, AIError, ChatMessage, ImagePart, ModelProvider, TokenUsage, ToolCall, ToolResultMsg } from './types';
 import { executeTool, toolSchemas, ToolContext } from './tools';
 
 const STAGE: Record<string, { message: string; pct: number }> = {
@@ -49,6 +49,8 @@ export interface RunAgentOptions {
   maxMisses?: number;
   /** tool calls of the parallel-safe kind run at most this many at once (default PARALLEL_LIMIT) */
   parallel?: number;
+  /** images that go WITH the task in the first user message (a note's attached files, one still each) */
+  taskImages?: ImagePart[];
 }
 
 /** Runs the read-only `preload` tools and returns the text appended to the task. */
@@ -152,7 +154,8 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
   const maxSteps = o.maxSteps ?? 40;
   const tools = toolSchemas(o.tools);
   const pre = o.preload?.length ? await preloadText(o.ctx, o.preload) : '';
-  const messages: ChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: o.task + pre }] }];
+  const images = o.provider.supportsImages ? (o.taskImages ?? []) : [];
+  const messages: ChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: o.task + pre }, ...images] }];
   const retryDelays = o.retryDelays ?? [2000, 6000];
   let misses = 0; let steps = 0; let tokens = 0;
   let stoppedBy: RunAgentResult['stoppedBy'] = null;

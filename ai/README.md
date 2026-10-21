@@ -13,8 +13,7 @@ const ai = createAI({
   host,                                                    // your EngineHost (docs/architecture.md section 8)
   settingsDir: path.join(app.getPath('userData'), 'ai'),   // provider settings + encrypted tokens
   secretStore: safeStorage,                                // tokens + Claude key encrypted at rest
-  dev: process.env.REELSTUDIO_DEV === '1',                 // shows claude-cli / codex-cli / replay
-  allowLocalClaudeCode: LOCAL_CLAUDE_CODE_BUILD,                     // offer "Claude Code on this computer" (default false)
+  dev: process.env.REELSTUDIO_DEV === '1',                 // also shows codex-cli / replay
 });
 
 await ai.signInChatGPT((url) => shell.openExternal(url));  // system browser, loopback redirect
@@ -24,15 +23,24 @@ await ai.applyNote(projectDir, 'music too loud at the start', onEvent);
 ```
 
 Extra methods beyond docs/architecture.md section 8: `cancelSignInChatGPT()`, `chatgptModels()`, `setModel(which, model)`,
-`testConnection()`, `setReplayFixture(file)`. `ProviderStatus` may carry `detail` (email / model) and `error`
+`testConnection()`, `setReplayFixture(file)`, `claudeCodeStatus()`. `ProviderStatus` may carry `detail` (email / model) and `error`
 (`{code, userMessage, link?}`); `AgentResult` may carry `notice` (same shape). All errors thrown are `AIError`
 with a grandma-friendly `userMessage` and optional `link` (e.g. the ChatGPT usage page).
 
-`allowLocalClaudeCode: true` (a local Claude Code build; the public installers leave it false) lists `claude-cli`
-as **"Claude Code on this computer"** when a `claude` binary is found (PATH, `~/.local/bin`, `~/.claude/local`,
-`/opt/homebrew/bin`, `/usr/local/bin`) and answers `--version`. It is `connected` only when `claude auth status`
-reports `loggedIn: true` (signed out = listed with a "run claude and sign in" `error`, not selectable). With
-nothing else connected it becomes the active provider. Detection is cached for 60 s. Independent of `dev`.
+`claude-cli` is **"Claude (your Claude Code app)"**: the person's own Claude Code app (Anthropic's `claude` CLI),
+offered to everyone and always listed in its real state. `claudeCodeStatus()` is a fresh look and returns
+`{state: 'missing' | 'broken' | 'signed_out' | 'ready', installed, signedIn, bin?, version?, plan?, authMethod?, reason?}`.
+The binary is searched for on PATH, `~/.local/bin` (Anthropic's native installer), `~/.claude/local`, then on macOS
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`,
+`~/.bun/bin` and last the login shell (`$SHELL -ilc 'command -v claude'`, 5 s cap; a Finder-launched app has a
+bare PATH); on Windows also `%LOCALAPPDATA%\Microsoft\WinGet\Links`, WinGet `Packages\Anthropic.ClaudeCode_*` and the
+native `claude.exe` that npm installs under `%APPDATA%\npm\node_modules\@anthropic-ai\` (never the `.cmd` shim).
+Installed = `claude --version` exits 0; ready = `claude auth status` says `loggedIn: true`. No credential file is
+ever read: the answer is the CLI's own, and only the yes/no, the version and the plan kind are kept (never the
+e-mail or organization; `ProviderStatus.detail` is the version). `setActive('claude-cli')` refuses unless it is
+ready, and `active()` never falls back to it on its own: it spends the person's own Claude plan, so only their
+click turns it on. A saved `active: 'claude-cli'` keeps working. Detection is cached for 60 s. Children get
+`childEnv()` (no `ANTHROPIC_*`), so a stray API key variable never changes what the person's CLI reports or bills.
 
 Prompts are plain markdown in `ai/prompts/`, loaded at runtime. Packaged apps: ship the folder next to
 `dist/` (works inside asar) or at `<resources>/ai/prompts`; override with `REELSTUDIO_PROMPTS_DIR` or `promptsDir`.

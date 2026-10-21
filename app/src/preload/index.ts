@@ -41,18 +41,27 @@ const api: ReelApi = {
     signInChatGPT: () => call('ai:signInChatGPT'),
     cancelSignIn: () => call('ai:cancelSignIn'),
     signOutChatGPT: () => call('ai:signOutChatGPT'),
-    setClaudeKey: (k) => call('ai:setClaudeKey', k)
+    setClaudeKey: (k) => call('ai:setClaudeKey', k),
+    claudeCodeStatus: () => call('ai:claudeCodeStatus'),
+    openClaudeSignIn: () => call('ai:openClaudeSignIn')
   },
   projects: {
     list: () => call('projects:list'),
     get: (slug) => call('projects:get', slug),
     create: (files) => call('projects:create', files),
     resume: (slug) => call('projects:resume', slug),
-    note: (slug, text) => call('projects:note', slug, text),
+    note: (slug, text, attachments) => call('projects:note', slug, text, attachments),
     update: (slug, patch) => call('projects:update', slug, patch),
     rerender: (slug, change, label) => call('projects:rerender', slug, change, label),
     exportVersion: (slug, n) => call('projects:export', slug, n),
     remove: (slug) => call('projects:remove', slug)
+  },
+  notes: {
+    attachFiles: (slug, paths) => call('notes:attachFiles', slug, paths),
+    attachData: (slug, file) => call('notes:attachData', slug, file),
+    attachClipboard: (slug) => call('notes:attachClipboard', slug),
+    choose: (slug) => call('notes:chooseAttachment', slug),
+    remove: (slug, asset) => call('notes:removeAttachment', slug, asset)
   },
   jobs: {
     cancel: (id) => call('jobs:cancel', id),

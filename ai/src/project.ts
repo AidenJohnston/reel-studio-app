@@ -46,7 +46,11 @@ export interface Broll {
 export interface Zoom { anchor: WordAnchor; scale: number; [k: string]: unknown }
 export interface Cover { atSourceTime: number; source: string; text: string | null; [k: string]: unknown }
 export interface Post { caption: string; hashtags: string[]; keywords: string[]; [k: string]: unknown }
-export interface NoteEntry { version: number; text: string; applied: string[]; at: string }
+export interface NoteEntry {
+  version: number; text: string; applied: string[]; at: string;
+  /** files the user attached to this note (`work/assets/attach-*`), 0.1.2 */
+  attachments?: string[];
+}
 
 export interface Project {
   schemaVersion: 1;

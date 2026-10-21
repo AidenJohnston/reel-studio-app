@@ -6,7 +6,7 @@ import { reel } from '../api'
 export function FirstRun({ onDone }: { onDone: () => void; platform?: string }) {
   const [step, setStep] = useState(0)
   const next = useCallback(() => setStep((s) => Math.min(2, s + 1)), [])
-  // On the AI step: already connected (e.g. Claude Code found on this computer) shows "Continue", not "Skip".
+  // On the AI step: already connected (chosen earlier, or just now in the panel) shows "Continue", not "Skip".
   const [connected, setConnected] = useState(false)
   useEffect(() => {
     if (step !== 2) return
@@ -75,7 +75,7 @@ export function FirstRun({ onDone }: { onDone: () => void; platform?: string }) 
               <ConnectAI onConnected={onDone} />
             </div>
             {connected ? (
-              // already connected (e.g. Claude Code on this computer): "Skip" read like it would undo that (grandma 2)
+              // already connected: "Skip" read like it would undo that (grandma 2)
               <button className="btn primary big" onClick={onDone} data-testid="skip">
                 Continue
               </button>

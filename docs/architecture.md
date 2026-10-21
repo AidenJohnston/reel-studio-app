@@ -156,6 +156,7 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
 | `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |
 | `search-images`, `fetch-image`, `download-media` | find a freely licensed image, fetch one by URL, download a video or song from a link |
+| `attach --project <dir> <file> [--name N]` | a picture, GIF or short clip the user attached to a note -> `work/assets/attach-<id>-<stem>.<ext>` + sidecar `<asset>.attach.json` (name, kind, bytes, size, duration, sound, thumb) + a 320 px still in `work/thumbs/`. JPG/PNG copied; HEIC, still GIF/WebP, BMP -> PNG; animated GIF/WebP -> silent H.264 mp4 (looped to at least 3 s); clips copied. Limits: pictures 25 MB, clips and GIFs 200 MB and 60 s; anything else is refused with a plain message and nothing is written |
 | `doctor` | checks ffmpeg, the speech model, fonts, GPU; prints a human report |
 
 Everything must work with paths that contain spaces and non-ASCII characters, on macOS arm64 and Windows
@@ -219,10 +220,17 @@ Prompts are plain markdown in `ai/prompts/`.
 - **OpenAI via "Sign in with ChatGPT"**: users bill their own ChatGPT plan. OAuth in the system browser with a
   loopback redirect; tokens are stored with Electron `safeStorage`.
 - **Anthropic via a pasted API key** (Messages API with tool use).
-- **Local Claude Code** (opt-in build flag, off in the public installers): shells out to the `claude` CLI
-  already signed in on the computer.
-- **Developer providers** (behind a dev flag, never shown to users): `codex-cli`, `claude-cli`, and a
-  recorded-response replay provider used by tests.
+- **"Use Claude (your Claude Code app)"** (`claude-cli`, offered to everyone): runs the person's own Claude Code
+  app, Anthropic's `claude` CLI, so the edit uses their own Claude plan and its usage limits. Reel Studio never
+  sees, stores, reads or proxies a Claude credential. It finds the binary (PATH, Anthropic's native installer in
+  `~/.local/bin`, Homebrew, npm, nvm, Volta, Bun, WinGet, and on macOS the login shell, since a Finder-launched app
+  has a minimal PATH) and asks the CLI itself: `claude --version` (installed) and `claude auth status` (signed in).
+  Only the yes/no, the version and the plan kind are kept, never the e-mail or organization. Signing in happens
+  in a terminal window the app opens, running `claude auth login`: the person signs in to Anthropic there. The
+  Connect screen recommends what the person already has (a signed-in Claude Code app first, otherwise ChatGPT)
+  and never switches to it on its own. There is one installer per system; there is no build flag.
+- **Developer providers** (behind a dev flag, never shown to users): `codex-cli` and a recorded-response replay
+  provider used by tests.
 
 ## 7. B-roll treatments and animations
 
@@ -284,8 +292,10 @@ export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: bo
   signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>;
   signOutChatGPT(): Promise<void>;
   setClaudeKey(key: string | null): Promise<ProviderStatus>;   // validates the key with a tiny request
+  claudeCodeStatus(): Promise<{ state: 'missing' | 'broken' | 'signed_out' | 'ready'; version?: string; plan?: string }>; // the person's own Claude Code app, a fresh look
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>;
-  applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>;
+  applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal,
+            opts?: { attachments?: string[] }): Promise<AgentResult>;   // work/assets/attach-* refs, re-checked against their sidecars
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>;
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>;
   removeStyleRule(id: string): Promise<void>;

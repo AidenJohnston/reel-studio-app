@@ -171,9 +171,11 @@ describe('no AI connected', () => {
 
   it('provider list hides dev providers unless dev: true', async () => {
     const host = new FakeHost(tmpDir());
-    expect((await createAI({ host, settingsDir: tmpDir() }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'none']);
-    expect((await createAI({ host, settingsDir: tmpDir(), dev: true }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
-    await expect(createAI({ host, settingsDir: tmpDir() }).setActive('claude-cli')).rejects.toMatchObject({ code: 'not_available' });
+    const localClaude = { bin: null }; // no Claude Code app here (never runs the real one)
+    expect((await createAI({ host, settingsDir: tmpDir(), localClaude }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'none']);
+    expect((await createAI({ host, settingsDir: tmpDir(), dev: true, localClaude }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude }).setActive('claude-cli')).rejects.toMatchObject({ code: 'not_available' });
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude }).setActive('codex-cli')).rejects.toMatchObject({ code: 'not_available' });
   });
 });
 

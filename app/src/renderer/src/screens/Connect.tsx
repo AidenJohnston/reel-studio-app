@@ -1,5 +1,5 @@
 import type { Go } from '../nav'
-import { ConnectAI } from '../components/connect'
+import { ConnectAI, USING_CLAUDE_CODE } from '../components/connect'
 import { useNotify } from '../App'
 import { Icon } from '../components/icons'
 
@@ -19,7 +19,7 @@ export function Connect({ back, go }: { back?: { name: 'reel'; slug: string }; g
       <div className="panel">
         <ConnectAI
           onConnected={(p) => {
-            notify(p.id === 'claude-cli' ? 'Using Claude Code on this computer.' : `Connected to ${p.label}.`)
+            notify(p.id === 'claude-cli' ? USING_CLAUDE_CODE : `Connected to ${p.label}.`)
             leave()
           }}
         />

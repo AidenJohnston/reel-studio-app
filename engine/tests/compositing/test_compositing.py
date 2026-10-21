@@ -451,3 +451,21 @@ def test_text_pop_label_style_is_a_white_box_as_written(tmp_path, media):
     corner = img[int(h * 0.1), int(w * 0.03)]                            # inside the box, left of the text
     assert corner[3] == 255 and corner[:3].min() > 240                    # opaque white box
     assert (img[..., :3].max(axis=2) < 60).sum() > 500                   # dark type on it
+
+
+# --- a re-anchored clip gets a fresh layer (0.1.2: a meme widened from one word to five kept its 0.6 s cut) ---
+
+@pytest.mark.parametrize("treatment", ["full-frame", "side-card", "split-top"])
+def test_reanchored_clip_layer_matches_its_new_window(tmp_path, media, treatment):
+    ctx = _ctx(tmp_path, media["video"])
+    longest = 0.0
+    for t1 in (2.1, 5.0):                     # one word first, then a longer span, same b-roll id
+        fx.set_project(ctx, broll=[_item(ctx, 1, 2.0, t1, treatment, media["clip"])])
+        vids = [l for l in broll.build_layers(ctx) if l.kind == "video"]
+        assert vids, treatment
+        lay = vids[0]
+        got = float(subprocess.run([fx.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                    str(lay.path)], capture_output=True, text=True, check=True).stdout)
+        assert got == pytest.approx(lay.t1 - lay.t0, abs=0.1), (treatment, t1, got, lay.t0, lay.t1)
+        longest = max(longest, got)
+    assert longest > 2.0

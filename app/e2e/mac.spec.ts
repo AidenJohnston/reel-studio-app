@@ -1,23 +1,26 @@
 // The INSTALLED macOS app (a .app copied out of the sealed dmg), driven like a person on a Mac. Skipped unless asked for:
-//   REELSTUDIO_E2E_EXE=<.../Reel Studio.app/Contents/MacOS/Reel Studio>   REELSTUDIO_E2E_EXPECT=local|public
+//   REELSTUDIO_E2E_EXE=<.../Reel Studio.app/Contents/MacOS/Reel Studio>   REELSTUDIO_E2E_USE_CLAUDE=0 (no AI: skip the Claude pick + note)
 //   REELSTUDIO_E2E_PROFILE=<throwaway dir: user data, Reel Studio folder, engine cache>
 //   REELSTUDIO_E2E_MODELS=<speech models dir>   REELSTUDIO_E2E_TAKES_LIST=<take.mp4>;<take.mp4>   (read in place)
 //   REELSTUDIO_E2E_NOTES=<JSON array, one note per take>   REELSTUDIO_E2E_MUSIC=<song> (Library, first take)
-//   REELSTUDIO_E2E_OUT=<results folder>
+//   REELSTUDIO_E2E_OUT=<results folder>   REELSTUDIO_E2E_ATTACH=<meme file> (first take: "put this over my face", then the word)
 // NOT a test build: REELSTUDIO_TEST is unset, so the phone link binds the real LAN address, notifications are real and
-// "Show in Finder" really opens Finder. PATH is what Finder gives an app, so the local-Claude-Code build must find Claude Code
-// on its own. Verify uses the installed engine + ffmpeg exactly as the app spawns them.
+// "Show in Finder" really opens Finder. PATH is what Finder gives an app, so the app must find the Claude Code app on its own
+// (the run then clicks "Use Claude (your Claude Code app)": nothing picks it automatically). Verify uses the installed engine + ffmpeg exactly as the app spawns them.
 // Per take: drop -> first look -> first edit -> AI note -> manual yellow subtitles -> Export -> Send to my phone.
 // Plus the macOS chrome: the app menu, Edit > Paste into the Claude key, File > New Video, Settings, the title bar.
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { dropFiles } from './helpers'
+import { CLAUDE_CODE_MISNAMED, attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_EXE
-const EXPECT = process.env.REELSTUDIO_E2E_EXPECT ?? 'local'
+const USE_CLAUDE = process.env.REELSTUDIO_E2E_USE_CLAUDE !== '0'
+/** shot / result name prefix */
+const TAG = USE_CLAUDE ? 'claude' : 'no-ai'
 const PROFILE = process.env.REELSTUDIO_E2E_PROFILE ?? ''
+const ATTACH = process.env.REELSTUDIO_E2E_ATTACH
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
 const NOTES: string[] = process.env.REELSTUDIO_E2E_NOTES ? JSON.parse(process.env.REELSTUDIO_E2E_NOTES) : ['make the captions smaller']
 const OUT = process.env.REELSTUDIO_E2E_OUT ?? join(PROFILE, 'results')
@@ -70,20 +73,21 @@ async function firstRun(page: Page): Promise<Record<string, unknown>> {
   const welcome = page.getByTestId('get-started')
   await expect(welcome.or(page.getByText('Your videos'))).toBeVisible({ timeout: 60_000 })
   if (!(await welcome.isVisible())) return info
-  await snap(page, `${EXPECT}-00-welcome`)
+  await snap(page, `${TAG}-00-welcome`)
   await welcome.click()
   const connect = page.getByText('Connect your AI editor')
   const ready = page.getByTestId('model-next')
   await expect(connect.or(ready).or(page.getByTestId('download-model'))).toBeVisible()
   if (!(await connect.isVisible())) await ((await ready.isVisible()) ? ready : page.getByTestId('later')).click()
   await expect(connect).toBeVisible()
-  await page.waitForTimeout(2500) // the local-Claude-Code build auto-picks Claude Code a moment after start
-  await snap(page, `${EXPECT}-01-connect`)
-  const c = page.getByTestId('ai-connected')
-  info.connectAi = (await c.isVisible()) ? await c.innerText() : 'none'
+  await page.waitForTimeout(2500) // the Claude choice shows once the app has looked for the Claude Code app
+  await snap(page, `${TAG}-01-connect`)
   info.connectButtons = await page.locator('.first-card button').allInnerTexts()
   info.connectText = await page.locator('.first-card').innerText()
-  await page.getByTestId('skip').click()
+  info.claudeCode = await page.evaluate(() => (window as any).reel.ai.claudeCodeStatus())
+  const picked = USE_CLAUDE && (await chooseClaudeCode(page))
+  info.connectAi = picked ? (await page.evaluate(() => (window as any).reel.ai.active())).label : 'none'
+  if (!picked) await page.getByTestId('skip').click()
   await expect(page.getByText('Your videos')).toBeVisible()
   return info
 }
@@ -112,7 +116,7 @@ function osKeystroke(key: string): string {
   }
 }
 
-test(`${EXPECT}: first run + macOS chrome`, async () => {
+test(`${TAG}: first run + macOS chrome`, async () => {
   test.setTimeout(10 * 60_000)
   mkdirSync(OUT, { recursive: true })
   const { app, page } = await open()
@@ -133,7 +137,7 @@ test(`${EXPECT}: first run + macOS chrome`, async () => {
     info.settingsItem = await menuItem(app, 'Reel Studio', 'Settings…')
     await expect(page.getByTestId('root-display')).toBeVisible()
     info.rootDisplay = await page.getByTestId('root-display').innerText()
-    await snap(page, `${EXPECT}-02-settings-from-menu`)
+    await snap(page, `${TAG}-02-settings-from-menu`)
     info.newVideoItem = await menuItem(app, 'File', 'New Video')
     await expect(page.getByTestId('drop-zone')).toBeVisible()
     // the same two through real key presses, when this session may send them
@@ -174,7 +178,7 @@ test(`${EXPECT}: first run + macOS chrome`, async () => {
     info.osCmdV = osKeystroke('v')
     await page.waitForTimeout(800)
     info.osCmdVWorked = (await key.inputValue()) === fake
-    await snap(page, `${EXPECT}-03-key-pasted`)
+    await snap(page, `${TAG}-03-key-pasted`)
     await key.fill('') // never saved: the field is cleared and "Use this key" is not pressed
 
     // ---- the title bar: traffic lights vs the sidebar logo ----
@@ -187,11 +191,11 @@ test(`${EXPECT}: first run + macOS chrome`, async () => {
       const r = document.querySelector('.brand')!.getBoundingClientRect()
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
     })
-    await snap(page, `${EXPECT}-04-home`)
+    await snap(page, `${TAG}-04-home`)
     // the native window, buttons included (screencapture needs Screen Recording; recorded either way)
     const wid = String((info.trafficLights as { source: string }).source).split(':')[1]
     try {
-      execFileSync('screencapture', ['-x', '-o', `-l${wid}`, join(OUT, 'shots', `${EXPECT}-05-native-window.png`)], { timeout: 15_000, stdio: 'pipe' })
+      execFileSync('screencapture', ['-x', '-o', `-l${wid}`, join(OUT, 'shots', `${TAG}-05-native-window.png`)], { timeout: 15_000, stdio: 'pipe' })
       info.nativeShot = 'taken'
     } catch (e) {
       info.nativeShot = 'refused: ' + String((e as { stderr?: Buffer }).stderr ?? e).trim().slice(0, 160)
@@ -200,17 +204,13 @@ test(`${EXPECT}: first run + macOS chrome`, async () => {
     // the three buttons are 14 px tall at (x, y): the logo must start below them
     if (tl) expect((info.brand as { top: number }).top).toBeGreaterThanOrEqual(tl.y + 14 + 6)
 
-    // ---- what each build offers ----
-    if (EXPECT === 'local') {
-      expect(info.providers).toContain('claude-cli')
-      expect(String(info.connectAi)).toContain('Claude Code')
-    } else {
-      expect(info.providers).toEqual(['chatgpt', 'claude', 'none'])
-      expect(String(info.connectText)).not.toContain('Claude Code')
-      expect(info.connectAi).toBe('none')
-    }
+    // ---- what the one build offers ----
+    expect(info.providers).toEqual(['chatgpt', 'claude', 'claude-cli', 'none'])
+    expect(String(info.connectText)).not.toMatch(CLAUDE_CODE_MISNAMED)
+    if (USE_CLAUDE) expect(String(info.connectAi)).toBe('Claude (your Claude Code app)')
+    else expect(info.connectAi).toBe('none')
   } finally {
-    writeFileSync(join(OUT, `${EXPECT}-chrome.json`), JSON.stringify(info, null, 2))
+    writeFileSync(join(OUT, `${TAG}-chrome.json`), JSON.stringify(info, null, 2))
     await app.close().catch(() => {})
   }
 })
@@ -255,12 +255,12 @@ function encoderOf(file: string): string {
 }
 
 TAKES.forEach((take, i) => {
-  test(`${EXPECT} take ${i}: ${basename(take)}`, async () => {
+  test(`${TAG} take ${i}: ${basename(take)}`, async () => {
     test.setTimeout(90 * 60_000)
     const out = join(OUT, String(i))
     mkdirSync(out, { recursive: true })
     const timings: Record<string, number> = {}
-    const result: Record<string, unknown> = { take, build: EXPECT, timings }
+    const result: Record<string, unknown> = { take, ai: TAG, timings }
     const save = () => writeFileSync(join(out, 'result.json'), JSON.stringify(result, null, 2))
     const { app, page } = await open()
     // record every notification macOS is asked to show (and that showing it did not throw)
@@ -323,15 +323,15 @@ TAKES.forEach((take, i) => {
             const v = document.querySelector('[data-testid=first-look-video]') as HTMLVideoElement | null
             return v ? { src: v.currentSrc, readyState: v.readyState, t: v.currentTime, w: v.videoWidth, h: v.videoHeight } : null
           })
-          await snap(page, `${EXPECT}-${i}-01-first-look`)
+          await snap(page, `${TAG}-${i}-01-first-look`)
           save()
         }
-        if (n % 60 === 0) await snap(page, `${EXPECT}-${i}-01-working-${n / 60}`)
+        if (n % 60 === 0) await snap(page, `${TAG}-${i}-01-working-${n / 60}`)
         n++
         await page.waitForTimeout(1000)
       }
       timings.firstEditSec = Math.round((Date.now() - t0) / 1000)
-      await snap(page, `${EXPECT}-${i}-02-reel`)
+      await snap(page, `${TAG}-${i}-02-reel`)
       result.firstSummary = await page.locator('.bubble.editor:not(.working):not(.reply-pending)').last().innerText().catch(() => '')
       const project = newest(join(ROOT, 'Projects'), (f) => existsSync(join(ROOT, 'Projects', f, 'project.json')))!
       result.project = project
@@ -339,9 +339,9 @@ TAKES.forEach((take, i) => {
       result.firstLookEncoder = existsSync(live) ? encoderOf(live) : 'no first-look.mp4'
       save()
 
-      // ---- one AI note (local Claude Code build) ----
+      // ---- one AI note (Claude through the Claude Code app chosen at first run) ----
       const replies = page.locator('.bubble.editor:not(.working):not(.reply-pending)')
-      if (EXPECT === 'local') {
+      if (USE_CLAUDE) {
         const before = await replies.count()
         const t1 = Date.now()
         result.note = NOTES[i % NOTES.length]
@@ -352,7 +352,13 @@ TAKES.forEach((take, i) => {
         await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 10 * 60_000 })
         timings.noteSec = Math.round((Date.now() - t1) / 1000)
         result.noteReply = await replies.last().innerText()
-        await snap(page, `${EXPECT}-${i}-03-after-note`)
+        await snap(page, `${TAG}-${i}-03-after-note`)
+        save()
+      }
+
+      // ---- 0.1.2: a meme on a note, real AI: it asks when, then places it on the named word ----
+      if (USE_CLAUDE && ATTACH && i === 0) {
+        result.attach = await attachMemeFlow(page, project, ATTACH, (name) => snap(page, `${TAG}-${i}-${name}`))
         save()
       }
 
@@ -360,7 +366,7 @@ TAKES.forEach((take, i) => {
       await page.getByTestId('edit-myself').click()
       await page.getByTestId('tab-captions').click()
       await page.getByTestId('cap-look-yellow').click()
-      await snap(page, `${EXPECT}-${i}-04-yellow-picked`)
+      await snap(page, `${TAG}-${i}-04-yellow-picked`)
       const t3 = Date.now()
       await page.getByTestId('make-version').click()
       await expect(page.getByTestId('note-progress')).toContainText('Updating your subtitles')
@@ -379,7 +385,7 @@ TAKES.forEach((take, i) => {
       result.subtitleStyle = style
       expect(style.color).toBe('#FFD60A')
       result.yellowReply = await page.getByTestId('bubble-editor').last().innerText()
-      await snap(page, `${EXPECT}-${i}-05-yellow-done`)
+      await snap(page, `${TAG}-${i}-05-yellow-done`)
       save()
 
       // ---- Export ----
@@ -391,7 +397,7 @@ TAKES.forEach((take, i) => {
       result.exportDialog = dialog
       expect(dialog).toContain('Show in Finder')
       expect(dialog).not.toMatch(/Explorer|taskbar|Phone Link/)
-      await snap(page, `${EXPECT}-${i}-06-exported`)
+      await snap(page, `${TAG}-${i}-06-exported`)
 
       // ---- Send to my phone: the real LAN link, fetched from this Mac like a phone would ----
       await page.getByTestId('send-to-phone').click()
@@ -401,7 +407,7 @@ TAKES.forEach((take, i) => {
       result.phoneUrlShape = url.replace(/\/[A-Za-z0-9_-]{43}\/$/, '/<token>/')
       expect(url).toMatch(/^http:\/\/(10|172|192)\.\d+\.\d+\.\d+:\d+\/[A-Za-z0-9_-]{43}\/$/)
       await expect(page.getByTestId('phone-waiting')).toContainText('Waiting for your phone')
-      await snap(page, `${EXPECT}-${i}-07-phone-waiting`)
+      await snap(page, `${TAG}-${i}-07-phone-waiting`)
       const pageRes = await fetch(url, { headers: { 'User-Agent': IPHONE_UA } })
       expect(pageRes.status).toBe(200)
       expect(await pageRes.text()).toContain('video.mp4')
@@ -413,7 +419,7 @@ TAKES.forEach((take, i) => {
       const whole = await fetch(url + 'video.mp4', { headers: { 'User-Agent': IPHONE_UA } })
       result.phoneFullBytes = (await whole.arrayBuffer()).byteLength
       await expect(page.getByTestId('phone-sent')).toHaveText('Sent! Check your phone.')
-      await snap(page, `${EXPECT}-${i}-08-phone-sent`)
+      await snap(page, `${TAG}-${i}-08-phone-sent`)
       await page.keyboard.press('Escape')
       await expect.poll(() => fetch(url).then((r) => r.status, () => 'closed')).toBe('closed')
 
@@ -435,7 +441,7 @@ TAKES.forEach((take, i) => {
       result.error = String((e as Error)?.stack ?? e)
       save()
       appendFileSync(join(OUT, 'results.jsonl'), JSON.stringify(result) + '\n')
-      await snap(page, `${EXPECT}-${i}-99-failed`).catch(() => {})
+      await snap(page, `${TAG}-${i}-99-failed`).catch(() => {})
       throw e
     } finally {
       await app.close().catch(() => {})

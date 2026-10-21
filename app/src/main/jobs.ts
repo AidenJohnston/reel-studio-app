@@ -87,8 +87,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           tracker.setHistory(history)
         }
         status()
+        // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
+        const t0 = Date.now()
+        let logged = ''
         const res = await fn((e) => {
           if (e.type === 'status') {
+            if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
             // Raw: per-step percents restart at 0; `overall` (progress.ts) is the whole job.
             if (typeof e.pct === 'number') job.pct = Math.max(0, Math.min(100, e.pct))
@@ -102,6 +106,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             job.thinking = !!e.thinking
             status()
           } else if (e.type === 'tool') {
+            log(`[job ${kind}] tool ${e.name}`)
             job.thinking = false // the AI answered
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
@@ -123,6 +128,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           })
           if (!res.quiet) await addChat(slug, 'editor', res.summary, res.version)
         }
+        log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
         const err = toUserError(e)

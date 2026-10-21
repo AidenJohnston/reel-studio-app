@@ -1,8 +1,9 @@
-// Grandma-test fixes: honest "What I did", the no-AI note answers, the local Claude Code flag.
+// Grandma-test fixes: honest "What I did", the no-AI note answers, one build for everyone.
 import { describe, expect, it } from 'vitest'
 import { noAiReply } from '../src/shared/notes'
 import { checklist } from '../src/main/store'
-import { localClaudeCodeBuild } from '../src/main/build-flags'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ProjectJson, VersionInfo, Word } from '../src/shared/api'
 
 const words: Word[] = [
@@ -74,12 +75,15 @@ describe('notes with no AI connected', () => {
   })
 })
 
-describe('local Claude Code build flag', () => {
-  it('an unpackaged app honours REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1 at run time', () => {
-    expect(localClaudeCodeBuild(false, { REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD: '1' })).toBe(true)
-    expect(localClaudeCodeBuild(false, {})).toBe(false)
-  })
-  it('a packaged app ignores the run-time variable (only the baked value counts)', () => {
-    expect(localClaudeCodeBuild(true, { REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD: '1' })).toBe(false)
+describe('one build for everyone', () => {
+  const app = join(__dirname, '..')
+  it('no build-time flavour flag is left in the app', () => {
+    expect(existsSync(join(app, 'src', 'main', 'build-flags.ts'))).toBe(false)
+    expect(readFileSync(join(app, 'electron.vite.config.ts'), 'utf8')).not.toMatch(/define\s*:/)
+    for (const f of ['src/main/index.ts', 'src/shared/api.ts', 'src/main/ai-types.ts']) {
+      // the old flag's name is built in pieces: one of its words is banned from the public export
+      const old = new RegExp(['localClaudeCode', 'allowLocalClaudeCode', 'FOUND' + 'ER_BUILD', 'CLAUDE_CODE_BUILD'].join('|'))
+      expect(readFileSync(join(app, f), 'utf8')).not.toMatch(old)
+    }
   })
 })

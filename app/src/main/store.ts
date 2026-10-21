@@ -8,6 +8,7 @@ import { BIN_FOLDERS, binDir, projectsDir, libraryDir, reelStudioRoot } from './
 import type {
   ChatMessage,
   ChecklistItem,
+  NoteAttachment,
   ProjectDetail,
   ProjectJson,
   ProjectSummary,
@@ -190,10 +191,14 @@ export async function addChat(
   text: string,
   version?: number,
   actions?: ChatMessage['actions'],
-  suggestion?: string
+  suggestion?: string,
+  attachments?: ChatMessage['attachments']
 ): Promise<void> {
   await updateAppState(slug, (s) => {
-    s.chat.push({ id: randomUUID(), from, text, at: new Date().toISOString(), version, ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}) })
+    s.chat.push({
+      id: randomUUID(), from, text, at: new Date().toISOString(), version,
+      ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
+    })
   })
 }
 
@@ -490,6 +495,13 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
+    // an attached clip or GIF (work/assets/attach-*.mp4) shows the still `engine attach` made of it
+    const clip = /^work\/assets\/(attach-[a-f0-9]{8}-[a-z0-9-]+)\.(mp4|mov|m4v|webm)$/.exec(a)
+    if (clip) {
+      const t = join(dir, 'work', 'thumbs', `${clip[1]}.jpg`)
+      if (existsSync(t)) brollThumbs[b.id] = mediaUrl(t)
+      continue
+    }
     if (!/\.(png|jpe?g|webp|gif)$/i.test(a)) continue
     const p = a.startsWith('Library/') || isAbsolute(a) ? resolveRootPath(a) : join(dir, ...a.split('/'))
     if (existsSync(p)) brollThumbs[b.id] = mediaUrl(p)
@@ -506,11 +518,19 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     keptIds: kept,
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
-    chat: st.chat,
+    // a note's attached files get a URL for their still here (never stored: the root folder can move)
+    chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,
     job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false } : null,
     aiEdited: !!st.aiEdited
   }
+}
+
+function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {
+  const { thumbUrl: _old, ...rest } = a
+  if (typeof a.thumb !== 'string' || !/^work\/thumbs\/attach-[a-z0-9-]+\.jpg$/.test(a.thumb)) return rest
+  const p = join(dir, ...a.thumb.split('/'))
+  return existsSync(p) ? { ...rest, thumbUrl: mediaUrl(p) } : rest
 }
 
 /** Library paths in project.json are relative to the Reel Studio root (docs/architecture.md section 3). */

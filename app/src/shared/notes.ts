@@ -69,8 +69,16 @@ export interface NoAiReply {
   actions: ChatAction[]
 }
 
-export function noAiReply(note: string): NoAiReply {
+export function noAiReply(note: string, attached = 0): NoAiReply {
   const why = "I can't change the video from a note yet, because no AI editor is connected."
+  if (attached > 0) {
+    // a picture or clip on a note needs the AI to place it: say so, and that it is kept for later
+    const one = attached === 1
+    return {
+      text: `I can't put ${one ? 'your file' : 'your files'} in the video yet, because no AI editor is connected. I kept ${one ? 'it' : 'them'}. Connect ChatGPT, then tell me where ${one ? 'it' : 'they'} should go. Or add a picture yourself under "Open pictures".`,
+      actions: ['open-broll', 'connect']
+    }
+  }
   const hit = TOPICS.find((t) => t.re.test(note))
   if (hit) {
     return {

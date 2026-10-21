@@ -52,6 +52,34 @@ export interface ChatMessage {
   actions?: ChatAction[]
   /** A My style rule the AI suggested; saved only if the user answers Yes (remember-yes). */
   suggestion?: string
+  /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
+  attachments?: NoteAttachment[]
+}
+
+/** A file attached to a note: what `engine attach` wrote in its sidecar (shared/attachments.ts). */
+export interface NoteAttachment {
+  /** project-relative `work/assets/attach-*` */
+  asset: string
+  /** the original file name, for the user */
+  name: string
+  kind: 'image' | 'video'
+  bytes: number
+  width?: number
+  height?: number
+  duration?: number
+  hasAudio?: boolean
+  /** an animated GIF, turned into a silent clip */
+  fromGif?: boolean
+  /** project-relative 320 px still */
+  thumb?: string
+  /** reel-media URL of the still (filled by main when it goes to the page) */
+  thumbUrl?: string
+}
+
+/** What came of attaching: the files that made it, and a plain message for each one that did not. */
+export interface AttachResult {
+  attached: NoteAttachment[]
+  errors: string[]
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -198,8 +226,19 @@ export interface AppInfo {
   test: boolean
   /** REELSTUDIO_DEV=1: show the dev-only AI providers. */
   dev: boolean
-  /** Built with REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1: may offer Claude Code on this computer. */
-  localClaudeCode: boolean
+}
+
+/** The person's own Claude Code app: not found / found but will not start / not signed in / ready. */
+export type ClaudeCodeState = 'missing' | 'broken' | 'signed_out' | 'ready'
+
+/** What the page learns about it. Never the account (no e-mail, no organization), never a path. */
+export interface ClaudeCodeInfo {
+  state: ClaudeCodeState
+  version?: string
+  /** the plan kind, e.g. "pro" or "max" */
+  plan?: string
+  /** plain words when it is not ready */
+  reason?: string
 }
 
 export interface ModelStatus {
@@ -289,20 +328,37 @@ export interface ReelApi {
     cancelSignIn(): Promise<void>
     signOutChatGPT(): Promise<void>
     setClaudeKey(key: string | null): Promise<ProviderInfo>
+    /** A fresh look at the person's own Claude Code app. */
+    claudeCodeStatus(): Promise<ClaudeCodeInfo>
+    /** Opens a terminal window where the person signs in to their Claude Code app themselves. */
+    openClaudeSignIn(): Promise<void>
   }
   projects: {
     list(): Promise<ProjectSummary[]>
     get(slug: string): Promise<ProjectDetail>
     create(files: string[]): Promise<{ slug: string; jobId: string; skipped: DropResult[] }>
     resume(slug: string): Promise<{ jobId: string }>
-    /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs. */
-    note(slug: string, text: string): Promise<{ jobId: string | null }>
+    /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs.
+     * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one). */
+    note(slug: string, text: string, attachments?: string[]): Promise<{ jobId: string | null }>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
     rerender(slug: string, change?: string, label?: string): Promise<{ jobId: string }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
     remove(slug: string): Promise<void>
+  }
+  /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */
+  notes: {
+    attachFiles(slug: string, paths: string[]): Promise<AttachResult>
+    /** a pasted or dropped file with no path on disk (a screenshot, a picture copied from a browser) */
+    attachData(slug: string, file: { name: string; mime: string; bytes: Uint8Array }): Promise<AttachResult>
+    /** the picture on the system clipboard (a paste that had an image but no file the page could read) */
+    attachClipboard(slug: string): Promise<AttachResult>
+    /** the file picker; an empty result = cancelled */
+    choose(slug: string): Promise<AttachResult>
+    /** removes an attached file that is not in the video */
+    remove(slug: string, asset: string): Promise<void>
   }
   jobs: {
     cancel(jobId: string): Promise<void>

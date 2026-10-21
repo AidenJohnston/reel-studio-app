@@ -13,7 +13,7 @@ import { SiwcAuth } from './providers/siwc';
 import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
-import { detectLocalClaude, LocalClaude, Runner } from './providers/localClaude';
+import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import * as editor from './editor';
 
 export * from './types';
@@ -28,9 +28,12 @@ export { SiwcAuth, USAGE_URL } from './providers/siwc';
 export { OpenAIResponsesProvider, listChatGPTModels, mapResponsesError } from './providers/openai';
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 export { ReplayProvider, RecordingProvider } from './providers/replay';
-export { detectLocalClaude, findClaude } from './providers/localClaude';
-export type { LocalClaude } from './providers/localClaude';
+export { detectLocalClaude, findClaude, claudeCandidates, claudeFromLoginShell, CLAUDE_CODE_MESSAGES } from './providers/localClaude';
+export type { LocalClaude, ClaudeCodeState } from './providers/localClaude';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
+export type { ApplyNoteOptions } from './editor';
+export { ATTACHMENT_REF, MAX_ATTACHMENTS_PER_NOTE, readAttachment, listAttachments, validateAttachments, placedAssets } from './attachments';
+export type { AttachmentInfo } from './attachments';
 
 export interface AISettings {
   active?: ProviderId;
@@ -44,11 +47,8 @@ export interface CreateAIOptions {
   host: EngineHost;
   settingsDir: string;
   dev?: boolean;
-  /** Local Claude Code build: offer "Claude Code on this computer" (the logged-in `claude` CLI) when it is
-   * installed and signed in. Default false; the public build leaves it off. Independent of `dev`. */
-  allowLocalClaudeCode?: boolean;
-  /** test hook: how `claude` is found and run for detection */
-  localClaude?: { run?: Runner; bin?: string | null };
+  /** test hook: how the person's own Claude Code app (`claude`) is found and run for detection */
+  localClaude?: DetectOptions;
   /** Electron `safeStorage` (or compatible). Without it (or when it cannot encrypt) secrets are NOT
    * saved, unless allowPlaintextSecrets is set. */
   secretStore?: SecretStore;
@@ -70,16 +70,17 @@ export interface CreateAIOptions {
   maxSteps?: number;
 }
 
+// claude-cli = the person's own Claude Code app, offered to everyone. It is never called "Claude Code" on its own:
+// Reel Studio is not Claude Code, it uses the Claude Code app the person signed in to themselves.
+export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)';
 const LABELS: Record<ProviderId, string> = {
-  chatgpt: 'ChatGPT', claude: 'Claude', 'codex-cli': 'Codex CLI (dev)', 'claude-cli': 'Claude CLI (dev)', replay: 'Replay (dev)', none: 'No AI',
+  chatgpt: 'ChatGPT', claude: 'Claude', 'codex-cli': 'Codex CLI (dev)', 'claude-cli': CLAUDE_CODE_LABEL, replay: 'Replay (dev)', none: 'No AI',
 };
+const PEOPLE_PROVIDERS: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', 'none'];
 
-const LOCAL_CLAUDE_LABEL = 'Claude Code on this computer';
 const LOCAL_CLAUDE_TTL_MS = 60_000;
 
 export function createAI(opts: CreateAIOptions) {
-  // claude-cli is selectable in dev builds, or (labelled for people) when local Claude Code is allowed
-  const cliClaudeAllowed = (): boolean => !!opts.dev || !!opts.allowLocalClaudeCode;
   let localCache: { at: number; v: LocalClaude } | null = null;
   async function localClaude(fresh = false): Promise<LocalClaude> {
     if (!fresh && localCache && Date.now() - localCache.at < LOCAL_CLAUDE_TTL_MS) return localCache.v;
@@ -144,11 +145,11 @@ export function createAI(opts: CreateAIOptions) {
       }
       case 'claude': return { id, connected: !!(await claudeKey()), label: LABELS.claude, detail: s.claudeModel ?? DEFAULT_CLAUDE_MODEL };
       case 'claude-cli': {
-        if (!opts.allowLocalClaudeCode) return { id, connected: true, label: LABELS['claude-cli'], detail: s.cliModel ?? 'sonnet' };
+        // detail is the CLI version at most: never the account (no e-mail, no organization)
         const lc = await localClaude();
         return {
-          id, connected: lc.installed && lc.loggedIn, label: LOCAL_CLAUDE_LABEL, detail: lc.account ?? lc.version,
-          ...(lc.installed && lc.loggedIn ? {} : { error: { code: lc.installed ? 'claude_code_signed_out' : 'claude_code_missing', userMessage: lc.reason ?? 'Claude Code is not ready.' } }),
+          id, connected: lc.state === 'ready', label: LABELS['claude-cli'], ...(lc.version ? { detail: lc.version } : {}),
+          ...(lc.state === 'ready' ? {} : { error: { code: `claude_code_${lc.state}`, userMessage: lc.reason ?? 'Your Claude Code app is not ready.' } }),
         };
       }
       case 'codex-cli': return { id, connected: true, label: LABELS['codex-cli'], detail: s.cliModel };
@@ -161,29 +162,23 @@ export function createAI(opts: CreateAIOptions) {
   }
 
   async function providers(): Promise<ProviderStatus[]> {
-    let ids: ProviderId[] = ['chatgpt', 'claude', ...(opts.dev ? (['claude-cli', 'codex-cli', 'replay'] as ProviderId[]) : []), 'none'];
-    if (opts.allowLocalClaudeCode && !opts.dev) {
-      // only offered when Claude Code is actually installed here (signed out: listed, with how to fix it)
-      const lc = await localClaude(true);
-      if (lc.installed) ids = ['chatgpt', 'claude', 'claude-cli', 'none'];
-    }
+    // claude-cli is always listed, in its real state (the Connect screen shows how to get it ready)
+    const ids: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', ...(opts.dev ? (['codex-cli', 'replay'] as ProviderId[]) : []), 'none'];
+    await localClaude(true);
     return Promise.all(ids.map(statusOf));
   }
 
   async function active(): Promise<ProviderStatus> {
     const s = await settings();
-    if (s.active && s.active !== 'none' && (opts.dev || ['chatgpt', 'claude'].includes(s.active) || (s.active === 'claude-cli' && cliClaudeAllowed()))) {
+    if (s.active && s.active !== 'none' && (opts.dev || PEOPLE_PROVIDERS.includes(s.active))) {
       const st = await statusOf(s.active);
       if (st.connected) return st;
     }
     if (s.active === 'none') return statusOf('none');
     // Several connected and none chosen: Claude first (the provider that measured best in testing).
+    // Never falls back to claude-cli: it spends the person's own Claude plan, so only their click turns it on.
     for (const id of ['claude', 'chatgpt'] as ProviderId[]) {
       const st = await statusOf(id);
-      if (st.connected) return st;
-    }
-    if (opts.allowLocalClaudeCode) {          // nothing else connected: use Claude Code if it is ready
-      const st = await statusOf('claude-cli');
       if (st.connected) return st;
     }
     return statusOf('none');
@@ -205,7 +200,7 @@ export function createAI(opts: CreateAIOptions) {
       case 'chatgpt': return new OpenAIResponsesProvider({ auth: siwc, model: await chatgptModel(), baseURL: opts.openaiBaseURL, fetch: opts.fetch });
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: s.claudeModel, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
-        const bin = opts.allowLocalClaudeCode ? (await localClaude()).bin : undefined;
+        const bin = (await localClaude()).bin;
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
         return new ClaudeCliProvider({ model: s.cliModel, session: true, ...(bin ? { bin } : {}) });
       }
@@ -219,10 +214,10 @@ export function createAI(opts: CreateAIOptions) {
     providers,
     active,
     async setActive(id: ProviderId): Promise<void> {
-      if (id === 'claude-cli' && opts.allowLocalClaudeCode && !opts.dev) {
+      if (id === 'claude-cli') {
         const lc = await localClaude(true);
-        if (!lc.installed || !lc.loggedIn) throw new AIError('not_available', lc.reason ?? 'Claude Code is not ready on this computer.');
-      } else if (!opts.dev && !['chatgpt', 'claude', 'none'].includes(id)) {
+        if (lc.state !== 'ready') throw new AIError('not_available', lc.reason ?? 'Your Claude Code app is not ready.');
+      } else if (!opts.dev && !PEOPLE_PROVIDERS.includes(id)) {
         throw new AIError('not_available', 'That option is not available.');
       }
       await saveSettings({ active: id });
@@ -238,6 +233,9 @@ export function createAI(opts: CreateAIOptions) {
       return statusOf('chatgpt');
     },
     cancelSignInChatGPT(): void { siwc.cancelSignIn(); },
+    /** A fresh look at the person's own Claude Code app: state, version, plan kind and the binary path (for the
+     * app's sign-in window). Never an e-mail, organization or token. */
+    async claudeCodeStatus(): Promise<LocalClaude> { return localClaude(true); },
     async signOutChatGPT(): Promise<void> {
       await siwc.signOut();
       const s = await settings();
@@ -283,8 +281,8 @@ export function createAI(opts: CreateAIOptions) {
     async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult & { notice?: any }> {
       return exclusive(projectDir, async () => editor.firstEdit(deps(), await modelProvider(), projectDir, onEvent, signal));
     },
-    async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult> {
-      return exclusive(projectDir, async () => editor.applyNote(deps(), await modelProvider(), projectDir, note, onEvent, signal));
+    async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: editor.ApplyNoteOptions): Promise<AgentResult> {
+      return exclusive(projectDir, async () => editor.applyNote(deps(), await modelProvider(), projectDir, note, onEvent, signal, opts));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);

@@ -5,6 +5,8 @@
 //   REELSTUDIO_E2E_NOTES=<JSON array, one note per take>   REELSTUDIO_E2E_MUSIC=<song>;<song> (Library, first take)
 //   REELSTUDIO_E2E_OUT=<results folder>   REELSTUDIO_E2E_EXPECT_AI=claude-cli|none (none also skips the note)
 //   REELSTUDIO_E2E_MANUAL=1   after the note: "Edit it myself" > Subtitles > yellow > make a version (render only)
+//   REELSTUDIO_E2E_ATTACH=<picture/GIF/clip>   first take, after the note: drop it on the note box with "put this over my face"
+//     (the AI must ask when), then name a kept word in a second note (it must place the file there), read back from project.json
 //   REELSTUDIO_E2E_PHONE=1    after Export: "Send to my phone", fetch the page + video like a phone, expect "Sent!"
 //     (the installed app is not a test build, so the link binds to the real Wi-Fi address: a firewall prompt
 //     may appear; a desktop screenshot is taken right after the panel opens)
@@ -18,7 +20,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { dropFiles } from './helpers'
+import { attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_INSTALLED
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
@@ -26,6 +28,7 @@ const NOTES: string[] = process.env.REELSTUDIO_E2E_NOTES ? JSON.parse(process.en
 const OUT = process.env.REELSTUDIO_E2E_OUT ?? join(homedir(), 'rs-installed-e2e')
 const EXPECT_AI = process.env.REELSTUDIO_E2E_EXPECT_AI ?? 'claude-cli'
 const PROFILE = process.env.REELSTUDIO_E2E_PROFILE
+const ATTACH = process.env.REELSTUDIO_E2E_ATTACH
 const ROOT = PROFILE ? join(PROFILE, 'Reel Studio') : join(homedir(), 'Documents', 'Reel Studio')
 
 test.skip(!EXE, 'set REELSTUDIO_E2E_INSTALLED to run')
@@ -116,10 +119,12 @@ test('first run: speech model + AI', async () => {
       info.modelSec = Math.round((Date.now() - t0) / 1000)
       await page.waitForTimeout(2000)
       await snap(page, '02-connect')
-      const c = page.getByTestId('ai-connected')
-      info.connectAi = (await c.isVisible()) ? await c.innerText() : 'none'
       info.connectButtons = await page.locator('.first-card button').allInnerTexts()
-      await page.getByTestId('skip').click()
+      // Nothing picks the Claude Code app on its own: this run chooses it, like a person would.
+      const picked = EXPECT_AI === 'claude-cli' && (await chooseClaudeCode(page))
+      const c = page.getByTestId('ai-connected')
+      info.connectAi = picked ? 'claude-cli' : (await c.isVisible()) ? await c.innerText() : 'none'
+      if (!picked) await page.getByTestId('skip').click()
     }
     await expect(page.getByText('Your videos')).toBeVisible()
     await page.getByTestId('nav-settings').click()
@@ -130,7 +135,7 @@ test('first run: speech model + AI', async () => {
     info.about = await page.locator('.panel', { has: page.locator('h2', { hasText: /^About$/ }) }).innerText()
     await snap(page, '03-settings')
     writeFileSync(join(OUT, 'firstrun.json'), JSON.stringify(info, null, 2))
-    if (EXPECT_AI === 'claude-cli') expect(String(info.settingsAi)).toContain('Claude Code')
+    if (EXPECT_AI === 'claude-cli') expect(String(info.settingsAi)).toContain('your Claude Code app')
     else expect(String(info.settingsAi)).toBe('none')
   } finally {
     await app.close().catch(() => {})
@@ -200,6 +205,13 @@ TAKES.forEach((take, i) => {
         timings.noteSec = Math.round((Date.now() - t1) / 1000)
         result.noteReply = await replies.last().innerText()
         await snap(page, `${i}-03-after-note`)
+        save()
+      }
+
+      if (ATTACH && EXPECT_AI !== 'none' && i === 0) {
+        const projects = join(ROOT, 'Projects')
+        const newest = readdirSync(projects).filter((s) => !s.startsWith('.')).sort((a, b) => statSync(join(projects, b)).mtimeMs - statSync(join(projects, a)).mtimeMs)[0]
+        result.attach = await attachMemeFlow(page, join(projects, newest), ATTACH, (name) => snap(page, `${i}-${name}`))
         save()
       }
 

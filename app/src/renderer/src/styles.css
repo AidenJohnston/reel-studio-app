@@ -287,6 +287,25 @@ a { color: inherit; }
 .composer > .btn { min-height: 46px; }
 .bubble-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .bubble-actions .btn.small { min-height: 36px; }
+/* pictures, GIFs and clips on a note (components/NoteAttachments.tsx) */
+.note-drop { position: relative; border-radius: var(--radius); }
+.note-drop.over { outline: 3px dashed var(--ink); outline-offset: 6px; }
+.note-drop-hint { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; background: rgba(247,245,241,.92); border-radius: var(--radius); font-weight: 650; pointer-events: none; }
+.composer > .attach-btn { width: 46px; padding: 0; justify-content: center; flex: none; }
+.att-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.att-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; padding: 4px 4px 4px 4px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); font-size: 13.5px; }
+.att-chip.busy { padding: 6px 12px; color: var(--ink-2); }
+.att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.att-remove { flex: none; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); display: inline-grid; place-items: center; cursor: pointer; }
+.att-remove:hover { background: var(--soft); color: var(--ink); }
+.att-thumb { position: relative; flex: none; display: inline-grid; place-items: center; overflow: hidden; background: var(--soft); color: var(--ink-3); }
+.att-thumb.chip { width: 40px; height: 40px; border-radius: 7px; }
+.att-thumb.bubble { width: 64px; height: 64px; border-radius: 8px; }
+.att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att-badge { position: absolute; left: 3px; bottom: 3px; padding: 0 4px; border-radius: 4px; background: rgba(0,0,0,.72); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 15px; }
+.bubble-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.bubble-attachments:only-child { margin-bottom: 0; }
+.drop-overlay.light { background: rgba(247,245,241,.55); }
 .job-progress { background: var(--soft); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
 .export-wait { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); text-align: center; }
 .seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line-2); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); }

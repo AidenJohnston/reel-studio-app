@@ -67,7 +67,14 @@ export interface AI {
   signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  applyNote(
+    projectDir: string,
+    note: string,
+    onEvent: (e: AgentEvent) => void,
+    signal?: AbortSignal,
+    opts?: { attachments?: string[] }
+  ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
   removeStyleRule(id: string): Promise<void>
@@ -75,6 +82,18 @@ export interface AI {
   addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
   /** Optional extras from @reelstudio/ai. */
   cancelSignInChatGPT?(): void | Promise<void>
+  /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
+  claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
+  mockClaudeSignInOpened?(): void
+}
+
+export interface ClaudeCodeStatus {
+  state: 'missing' | 'broken' | 'signed_out' | 'ready'
+  bin?: string
+  version?: string
+  plan?: string
+  reason?: string
 }
 
 export interface CreateAIOptions {
@@ -82,8 +101,6 @@ export interface CreateAIOptions {
   settingsDir: string
   dev?: boolean
   secretStore?: SecretStore
-  /** Local Claude Code build only: offer the Claude Code signed in on this computer (provider `claude-cli`). */
-  allowLocalClaudeCode?: boolean
 }
 
 export type CreateAI = (opts: CreateAIOptions) => AI

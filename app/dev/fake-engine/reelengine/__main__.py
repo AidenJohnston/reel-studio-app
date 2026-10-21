@@ -307,6 +307,33 @@ def cmd_download_model(args: list[str]) -> dict:
     return {"model": name, "path": str(dest), "downloaded": True}
 
 
+def cmd_attach(args: list[str]) -> dict:
+    """A small stand-in for the real `attach` (engine/reelengine/attach.py): JPG/PNG pictures only,
+    copied with a sidecar and a 320 px still, so the app's note attachments can be driven end to end."""
+    proj = Path(take(args, "--project"))
+    name = take(args, "--name")
+    src = Path([a for a in args if not a.startswith("--")][0])
+    name = name or src.name
+    ext = Path(name).suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg"):
+        raise Fail("ATTACH_TYPE", "That file type isn't supported. Use a picture (JPG, PNG, GIF, HEIC) or a short video (MP4, MOV).")
+    stem = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", Path(name).stem.lower())).strip("-")[:40] or "file"
+    stem = f"attach-{uuid.uuid4().hex[:8]}-{stem}"
+    out_ext = ".jpg" if ext == ".jpeg" else ext
+    assets, thumbs = proj / "work" / "assets", proj / "work" / "thumbs"
+    assets.mkdir(parents=True, exist_ok=True)
+    thumbs.mkdir(parents=True, exist_ok=True)
+    out = assets / f"{stem}{out_ext}"
+    shutil.copyfile(src, out)
+    thumb = thumbs / f"{stem}.jpg"
+    subprocess.run([FFMPEG, "-y", "-v", "error", "-i", str(out), "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                    "-frames:v", "1", str(thumb)], check=True, stdin=subprocess.DEVNULL)
+    rec = {"asset": f"work/assets/{out.name}", "name": name, "kind": "image", "bytes": out.stat().st_size,
+           "width": 0, "height": 0, "thumb": f"work/thumbs/{thumb.name}", "createdAt": now()}
+    (assets / f"{out.name}.attach.json").write_text(json.dumps(rec), "utf-8")
+    return rec
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -314,7 +341,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model,
+    "download-model": cmd_download_model, "attach": cmd_attach,
 }
 
 

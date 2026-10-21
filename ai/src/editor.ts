@@ -7,6 +7,7 @@ import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
+import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
   snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
@@ -286,9 +287,22 @@ ${summary}
 
 // ---------------------------------------------------------------- apply a note
 
-export async function applyNote(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<EditResult> {
+export interface ApplyNoteOptions {
+  /** files attached to this note: `work/assets/attach-*` refs (re-checked against the project's sidecars) */
+  attachments?: string[];
+}
+
+/** What a note says in notes.md: its words, or what was attached when it has none. */
+function noteLabel(note: string, attached: AttachmentInfo[]): string {
+  if (note.trim()) return note.trim();
+  return attached.length === 1 ? `(attached ${attached[0].name})` : `(attached ${attached.length} files)`;
+}
+
+export async function applyNote(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: ApplyNoteOptions = {}): Promise<EditResult> {
   if (!provider) throw new AIError('no_ai', 'Connect ChatGPT or a Claude key in Settings so I can make changes from your notes.');
-  if (!note.trim()) throw new AIError('empty_note', 'Type what you would like me to change.');
+  const attached = await validateAttachments(projectDir, opts.attachments);
+  if (!note.trim() && !attached.length) throw new AIError('empty_note', 'Type what you would like me to change.');
+  const refs = attached.map((a) => a.asset);
   let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
   const { p: p0 } = await load(ctx);
   // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
@@ -297,7 +311,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const assetsBefore = await listAssets(projectDir);
   const mediaSec = mediaSeconds(p0);
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
-  const fast = deps.fastNotes === false ? null : planFastNote(note, p0);
+  const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
   if (fast) {
     onEvent({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
     let ok = true;
@@ -327,8 +341,15 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await load(ctx);
   }
   onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
+  // the attached files (and earlier ones still not in the video): listed in the task, one still each
+  const earlier = await earlierUnplaced(projectDir, ctx.project ?? p0, attached);
+  const { images, stills } = await attachmentStills(projectDir, [...attached, ...earlier]);
+  const files = attachmentsSection(attached, earlier, provider.supportsImages ? stills : new Map());
+  const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
+  const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
+  const label = noteLabel(note, attached);
   try {
-    const r = await runAgent({ provider, system: await systemPrompt(deps), task: deps.prompts.render('applyNote', { note: note.trim() }), ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+    const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
       // nothing to render: a proposed rule still goes back to the app to ask about
       return {
@@ -340,9 +361,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const version = await finalize(deps, ctx, onEvent);
     const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
     const p = await loadProject(projectDir);
-    p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString() }];
+    // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
+    const placedNow = placedAssets(p);
+    const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
+    p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
     await saveProject(projectDir, p);
-    await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${summary}\n`);
+    await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {

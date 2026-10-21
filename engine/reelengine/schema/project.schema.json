@@ -176,7 +176,13 @@
           "version": { "type": "integer" },
           "text": { "type": "string" },
           "applied": { "type": "array", "items": { "type": "string" } },
-          "at": { "type": "string" }
+          "at": { "type": "string" },
+          "attachments": {
+            "type": "array",
+            "maxItems": 4,
+            "description": "files the user attached to this note (work/assets/attach-*), placed by the AI with add_broll",
+            "items": { "$ref": "#/$defs/relPath" }
+          }
         }
       }
     }

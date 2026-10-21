@@ -17,3 +17,11 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   (silent runs inside the word). `s`/`e` are the MEASURED edges every module should use.
   It also has `segments[{source,s,e,text,from,to}]` and `nextId`.
 - Unknown extra fields anywhere are allowed (the schema does not set `additionalProperties: false`).
+
+## 2026-10-20 (0.1.2 F2, note attachments)
+
+- `notes[].attachments` (array of project-relative paths, at most 4): the files the user attached to that
+  note, each a `work/assets/attach-<8 hex>-<stem>.<ext>` written by engine `attach`, with a sidecar
+  `<asset>.attach.json` next to it (`asset`, `name`, `kind` image|video, `bytes`, `width`, `height`,
+  `duration`, `hasAudio`, `fromGif`, `thumb`, `createdAt`). The sidecar is not part of project.json. A note
+  may have empty `text` when it has attachments.

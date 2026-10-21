@@ -4,14 +4,14 @@
 //   REELSTUDIO_ENGINE_DIR=<engine folder with .venv>   REELSTUDIO_MODELS_DIR=<speech models>
 //   REELSTUDIO_E2E_MUSIC=<song>;<song>   songs dropped on the Library first (read in place)
 //   REELSTUDIO_E2E_ONLY=0,2              optional: only these take indexes
-// Build the app first with REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1 so it picks the Claude Code on this computer.
+// The AI is the Claude Code app signed in on this computer: the run clicks "Use Claude (your Claude Code app)".
 // Per take: drop -> first edit -> one note -> Export, then e2e/tools/check_export.py (verify,
 // frames + contact sheet, music level in the gaps). Results: <BASE>/takes/<i>/result.json + results.jsonl.
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { APP_DIR, BASE, ROOT, SHOTS, dropFiles, launch, passFirstRun, shot } from './helpers'
+import { APP_DIR, BASE, ROOT, SHOTS, chooseClaudeCode, dropFiles, launch, passFirstRun, shot } from './helpers'
 
 const TESTSET = process.env.REELSTUDIO_E2E_TAKES
 const takes: { file: string; path: string }[] = TESTSET ? JSON.parse(readFileSync(TESTSET, 'utf8')).takes : []
@@ -66,8 +66,9 @@ takes.forEach((take, i) => {
       await passFirstRun(page)
       await logJobs(page, join(out, 'events.log'))
 
-      // Which AI is in use (local Claude Code build: Claude Code on this computer, picked automatically).
+      // Which AI is in use: the Claude Code app on this computer, chosen here (nothing picks it on its own).
       await page.getByTestId('nav-settings').click()
+      await chooseClaudeCode(page, 10_000)
       const connected = page.getByTestId('ai-connected')
       await connected.waitFor({ timeout: 10_000 }).catch(() => {})
       result.ai = (await connected.isVisible()) ? await connected.innerText() : 'none'

@@ -7,16 +7,17 @@
 //   REELSTUDIO_README_PHASE=make|shoot|public
 //   REELSTUDIO_ENGINE_DIR / REELSTUDIO_PYTHON / REELSTUDIO_MODELS_DIR / REELENGINE_CACHE_DIR as in takes.spec.ts
 //
-// make   : drop the clip, let the real engine + the local Claude Code build edit it, send one note.
-//          (needs REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1 and REELSTUDIO_E2E_AI=package, bills one or two AI runs)
-// shoot  : relaunch on that finished project WITHOUT the Claude Code option; the sidebar says a public
-//          provider is connected (stubbed), and take the Reel / drawer / export / home pictures.
-// public : first-run connect screen and the script screen with the public flavour only.
+// make   : drop the clip, let the real engine + the Claude Code app signed in on this computer edit it (the run
+//          clicks "Use Claude (your Claude Code app)"), send one note.
+//          (needs REELSTUDIO_E2E_AI=package, bills one or two AI runs on that Claude plan)
+// shoot  : relaunch on that finished project; the sidebar says ChatGPT is connected (stubbed), and take the
+//          Reel / drawer / export / home pictures.
+// public : first-run connect screen and the script screen on a fresh profile (mock AI: no Claude Code app found).
 // Output: app/e2e/screenshots/readme/*.png (gitignored); copy the ones you want into docs/images/.
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { dropFiles, launch, passFirstRun, SHOTS } from './helpers'
+import { chooseClaudeCode, dropFiles, launch, passFirstRun, SHOTS } from './helpers'
 
 const DIR = process.env.REELSTUDIO_README_DIR
 const VIDEO = process.env.REELSTUDIO_README_VIDEO
@@ -38,7 +39,7 @@ async function snap(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(OUT, `${name}.png`) })
 }
 
-/** The public build's sidebar: an AI editor connected through a provider every user has. */
+/** The sidebar with an AI editor connected (ChatGPT, stubbed). */
 async function stubConnected(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ ipcMain }) => {
     const p = { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' }
@@ -67,9 +68,11 @@ async function seek(page: Page, t: number): Promise<void> {
 test('make: one real reel from the presenter clip', async () => {
   test.skip(PHASE !== 'make')
   test.setTimeout(90 * 60_000)
-  const { app, page } = await launch({ ...env(), REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD: '1', REELSTUDIO_DEV: '0' })
+  const { app, page } = await launch({ ...env(), REELSTUDIO_DEV: '0' })
   try {
     await passFirstRun(page)
+    await page.getByTestId('nav-settings').click()
+    expect(await chooseClaudeCode(page)).toBe(true)
     await page.getByTestId('nav-library').click()
     await page.getByTestId('file-input').setInputFiles([SONG!])
     await expect(page.getByTestId('bin-music')).toContainText('Sunny Loop', { timeout: 60_000 })

@@ -44,19 +44,19 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
-import { localClaudeCodeBuild } from './build-flags'
+import { openSignInWindow, publicInfo } from './claude-signin'
+import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
+import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
-// Baked at build time; an unpackaged app (npm run dev) also honours REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1 at run time.
-const LOCAL_CLAUDE_CODE_BUILD = localClaudeCodeBuild(app.isPackaged)
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
 
 registerMediaScheme()
@@ -187,8 +187,7 @@ async function appInfo(): Promise<AppInfo> {
     engine: { mode: engineMode(), dir: engineDir(), python: pythonExe() },
     ai: aiSource,
     test: TEST,
-    dev: DEV_PROVIDERS,
-    localClaudeCode: LOCAL_CLAUDE_CODE_BUILD
+    dev: DEV_PROVIDERS
   }
 }
 
@@ -340,6 +339,29 @@ function registerIpc(): void {
   })
 
   registerPhoneIpc({ handle, roots: () => [reelStudioRoot(), projectsDir()], send: broadcast, log, test: TEST })
+  // pictures, GIFs and clips on a note (main/attachments.ts)
+  registerAttachmentIpc({
+    handle,
+    runEngine,
+    log,
+    projectDir,
+    readProject,
+    busy: (slug) => !!jobs.forSlug(slug),
+    clipboardImage: async () => {
+      // Electron's async clipboard: the first item that carries a picture, as bytes
+      for (const item of await clipboard.read()) {
+        const type = pickClipboardType(item.types)
+        if (!type) continue
+        const blob = await item.getType(type)
+        if (blob instanceof Blob) return { mime: type, bytes: new Uint8Array(await blob.arrayBuffer()) }
+      }
+      return null
+    },
+    choose: async (filters) => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Attach a picture or a clip', properties: ['openFile', 'multiSelections'], filters })
+      return r.canceled ? null : r.filePaths
+    }
+  })
 
   handle('model:status', () => models.status())
   handle('model:download', () => models.download())
@@ -352,6 +374,15 @@ function registerIpc(): void {
   handle('ai:cancelSignIn', () => ai.cancelSignInChatGPT?.())
   handle('ai:signOutChatGPT', () => ai.signOutChatGPT())
   handle('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
+  // The person's own Claude Code app: the page gets the state only; the sign-in happens in Anthropic's CLI.
+  const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
+  handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
+  handle('ai:openClaudeSignIn', async () => {
+    const st = await claudeCode()
+    if (st.state === 'ready') return
+    const open = aiSource === 'mock' ? async () => (ai.mockClaudeSignInOpened?.(), '') : (f: string) => shell.openPath(f)
+    await openSignInWindow(st.bin, { dir: join(settingsDir(), 'claude-sign-in'), platform: process.platform, open })
+  })
 
   handle('projects:list', () => listProjects())
   handle('projects:get', async (_e, slug: string) => {
@@ -399,17 +430,19 @@ function registerIpc(): void {
     }
     return { jobId: startFirstEdit(slug, null) }
   })
-  handle('projects:note', async (_e, slug: string, text: string) => {
+  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
     const note = String(text ?? '').trim()
-    if (!note) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     const dir = projectDir(slug)
+    // never trust the page: every attached ref is re-read from THIS project's own sidecars
+    const files = await checkNoteAttachments(dir, attachments)
+    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    await addChat(slug, 'you', note)
+    await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
       // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      const reply = noAiReply(note)
+      const reply = noAiReply(note, files.length)
       await addChat(slug, 'editor', reply.text, undefined, reply.actions)
       return { jobId: null }
     }
@@ -417,11 +450,12 @@ function registerIpc(): void {
       slug,
       'note',
       async (emit, signal) => {
-        const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal)
+        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
+        const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(slug, r, r.summary + extra)
       },
-      { note }
+      { note: note || files.map((f) => f.name).join(', ') }
     )
     return { jobId }
   })
@@ -534,24 +568,23 @@ function registerIpc(): void {
   })
 }
 
-/**
- * Local Claude Code build: the first time the app starts, use the Claude Code already signed in on this
- * computer, if it is there and no other AI was chosen. Runs once, so "Use no AI" sticks.
- */
-async function autoPickLocalClaudeCode(alreadyDone: boolean): Promise<void> {
-  if (alreadyDone) return
-  const active = await ai.active()
-  if (active.id === 'none') {
-    const local = (await ai.providers()).find((p) => p.id === 'claude-cli')
-    if (local?.connected) {
-      await ai.setActive('claude-cli')
-      log('[ai] local Claude Code build: using Claude Code on this computer')
-    } else {
-      log('[ai] local Claude Code build: Claude Code not found on this computer')
-      return // try again next start, in case it gets installed
-    }
+/** Old local-Claude-Code installs used Claude Code without a saved choice; keep it for them, once (ai-carryover.ts). */
+async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedOver: boolean }): Promise<void> {
+  const decision = carryOverDecision({
+    aiAutoPicked: settings.aiAutoPicked,
+    carriedOver: settings.aiCarriedOver,
+    choiceSaved: await aiChoiceSaved(join(settingsDir(), 'ai')),
+    activeId: (await ai.active()).id,
+    claudeCodeReady: settings.aiAutoPicked && !settings.aiCarriedOver ? (await ai.claudeCodeStatus?.())?.state === 'ready' : false
+  })
+  if (decision === 'nothing-to-do') {
+    if (settings.aiAutoPicked && !settings.aiCarriedOver) await saveSettings({ aiCarriedOver: true })
+    return
   }
-  await saveSettings({ aiAutoPicked: true })
+  if (decision === 'not-ready-yet') return // try again next start: their Claude Code app may be signed out right now
+  await ai.setActive('claude-cli')
+  await saveSettings({ aiCarriedOver: true })
+  log('[ai] kept Claude (your Claude Code app), which this install used before 0.1.2')
 }
 
 // ---- window -------------------------------------------------------------------------------------
@@ -600,14 +633,13 @@ app.whenReady().then(async () => {
       host,
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
-      secretStore: safeStorage,
-      allowLocalClaudeCode: LOCAL_CLAUDE_CODE_BUILD
+      secretStore: safeStorage
     },
     log
   )
   ai = loaded.ai
   aiSource = loaded.source
-  if (LOCAL_CLAUDE_CODE_BUILD) await autoPickLocalClaudeCode(settings.aiAutoPicked).catch((e) => log(`[ai] auto-pick: ${String(e)}`))
+  await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()

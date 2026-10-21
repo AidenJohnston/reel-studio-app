@@ -566,6 +566,8 @@ def _video_card(ctx, src: Path, cin: float, dur: float, chrome, screen_xy, mask,
     """Masked video inside a static chrome PNG -> alpha .mov (qtrle) the size of the chrome."""
     _, _, fps = fmt_of(ctx)
     d = layers_dir(ctx)
+    # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut
+    stem = f"{stem}-{_key(round(cin, 3), round(dur, 3))}"
     out = d / f"{stem}.mov"
     if out.exists():
         return out
@@ -591,7 +593,8 @@ def _video_full(ctx, src: Path, cin: float, dur: float, fit: str, bg: str, stem:
                 fx: float = 0.5, fy: float = 0.5) -> Path:
     W, H, fps = fmt_of(ctx)
     d = layers_dir(ctx)
-    out = d / f"{stem}.mp4"
+    # the clip's window is part of the name: a b-roll re-anchored to a longer span must not reuse the old cut
+    out = d / f"{stem}-{_key(round(cin, 3), round(dur, 3))}.mp4"
     if out.exists():
         return out
     if fit == "contain":
@@ -601,7 +604,7 @@ def _video_full(ctx, src: Path, cin: float, dur: float, fit: str, bg: str, stem:
     else:
         vf = (f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=increase,"
               f"crop={W}:{H}:(iw-{W})*{fx:.3f}:(ih-{H})*{fy:.3f},setsar=1")
-    tmp = d / f"{stem}.part.mp4"
+    tmp = out.with_name(out.stem + ".part.mp4")
     run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin", "-ss", f"{cin:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
          "-vf", vf, "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(tmp)], timeout=max(120, dur * 30), what="full-frame clip")
     tmp.replace(out)
@@ -639,7 +642,8 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     """Full-frame video: the asset in the top part, the speaker (same cut, unzoomed) below it."""
     W, H, fps = fmt_of(ctx)
     d = layers_dir(ctx)
-    out = d / f"{stem}.mp4"
+    # the window is part of the name: the speaker half is cut from t0..t1, so a re-anchored split must not reuse it
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3))}.mp4"
     if out.exists():
         return out
     dur = t1 - t0
@@ -676,7 +680,7 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     else:
         raise EngineError("SPLIT_BAD_ASSET", "split-top needs an image or video", "This b-roll needs a picture or a clip.")
     chains.append(f"[top][spk]vstack=inputs=2,format=yuv420p[out]")
-    tmp = d / f"{stem}.part.mp4"
+    tmp = out.with_name(out.stem + ".part.mp4")
     run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin", *args, "-filter_complex", ";".join(chains),
          "-map", "[out]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(tmp)], timeout=max(180, dur * 40),
         what="split-top")

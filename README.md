@@ -3,7 +3,8 @@
 Turn a raw talking-head video into a finished, postable 9:16 Reel. Drop in your takes, retakes and
 fumbles included. Reel Studio listens, picks your best take of every line, cuts the pauses, adds captions,
 puts your own music under your voice, adds b-roll and a cover, and writes the post caption. Then you type
-notes in plain English ("music too loud at the start") and get a new version.
+notes in plain English ("music too loud at the start") and get a new version. Paste, drop or attach a picture,
+GIF or short clip to a note ("put this over my face when I say 'the ick'") and it goes on those words.
 
 It is a free, open source desktop app for **macOS (Apple silicon)** and **Windows 10/11 (64-bit)**.
 No accounts, no telemetry, no subscription.
@@ -52,9 +53,9 @@ Get the latest installer from the [Releases page](https://github.com/AidenJohnst
 | Windows 10/11, 64-bit | `Reel-Studio-Setup-<version>-x64.exe` | [Install on Windows](docs/install-windows.md) |
 | macOS 14+, Apple silicon | `Reel-Studio-<version>-arm64.dmg` | [Install on a Mac](docs/install-mac.md) |
 
-The installers are not signed with a paid certificate yet, so Windows SmartScreen and macOS Gatekeeper
-warn the first time you open the app. Both guides show the two extra clicks. The first time you open
-the app it downloads its speech model (about 500 MB, once).
+The Mac app is signed and notarized by Apple, so it opens with a double-click. The Windows installer is not
+signed with a paid certificate yet, so Windows SmartScreen warns the first time you open it; the Windows guide
+shows the two extra clicks. The first time you open the app it downloads its speech model (about 500 MB, once).
 
 ## How the AI works
 
@@ -64,13 +65,18 @@ starts, adds captions, mixes in the song you choose, and makes a cover.
 With an AI connected, it also picks your best takes, finds pictures and builds simple animation cards, writes
 your post caption, and handles your notes. You choose one of:
 
+* **Use Claude (your Claude Code app).** If you have Anthropic's Claude Code app and a paid Claude plan (Pro or
+  Max), Reel Studio can use it. You sign in inside Anthropic's own app, in a window Reel Studio opens for you.
+  Reel Studio never sees that sign-in, your password or any token. The edits run on your own Claude plan and
+  count toward its usage limits. If the app is already signed in on your computer, this is the first choice
+  offered; nothing switches to it until you click it.
 * **Sign in with ChatGPT.** Uses your own ChatGPT plan through OpenAI's "Sign in with ChatGPT" flow. The
   sign-in happens in your browser; Reel Studio never sees your password, and the token is stored encrypted
   with your operating system's secure storage.
 * **A Claude API key.** Paste a key from the Anthropic Console. It is stored encrypted the same way.
 
 <p align="center">
-  <img src="docs/images/connect-ai.png" alt="Connect your AI editor: sign in with ChatGPT, or use an Anthropic API key, or skip it" width="560">
+  <img src="docs/images/connect-ai.png" alt="Connect your AI editor: use Claude through your own Claude Code app, sign in with ChatGPT, or use an Anthropic API key, or skip it" width="560">
 </p>
 
 The AI does not write code or ffmpeg commands. It reads the transcript and the project, then changes a
@@ -88,7 +94,13 @@ its job:
 * the **transcript text** with word timings, and the retake and pause analysis of it;
 * the **project file** (cut, caption, music and b-roll settings, titles, and the file names in your Library);
 * a **few still frames** (at most six at a time) from a preview of your edit, so it can check its own work;
-* your **notes** and your saved **style rules**.
+* your **notes** and your saved **style rules**;
+* for each picture, GIF or clip you **attach to a note**: one small still of it, plus its file name, size and
+  length. The file itself stays on your computer.
+
+With "Use Claude (your Claude Code app)", the same things go to Anthropic through the Claude Code app you signed
+in to, on your own Claude plan. Reel Studio starts that app on your computer and asks it whether you are signed
+in; it never reads, stores or passes on your Claude sign-in.
 
 Nothing else is sent. With no AI connected, nothing is sent at all.
 
@@ -145,10 +157,6 @@ packaging/build-mac.sh
 
 Packaging details, signing and notarizing: [packaging/README.md](packaging/README.md) and
 [docs/signing-mac.md](docs/signing-mac.md).
-
-The "Claude Code on this computer" option (the `claude` CLI you are already signed in to) is off in
-public installers. To get it in your own build, set `REELSTUDIO_LOCAL_CLAUDE_CODE_BUILD=1` when building,
-or when running `npm run dev`.
 
 ## Project layout
 

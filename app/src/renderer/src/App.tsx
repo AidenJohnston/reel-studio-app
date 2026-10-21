@@ -23,6 +23,9 @@ type Notify = (text: string, kind?: 'error' | 'info') => void
 const NotifyCtx = createContext<Notify>(() => {})
 export const useNotify = (): Notify => useContext(NotifyCtx)
 
+/** Fired on window when the note box took a drop itself (Reel.tsx): the window overlay goes away. */
+export const NOTE_DROP_DONE = 'reel:note-drop-done'
+
 /** Fired on window by Cmd/Ctrl+E or the File menu; the Reel screen listens. */
 export const EXPORT_EVENT = 'reel:export'
 
@@ -41,6 +44,7 @@ export function App() {
   const [toast, setToast] = useState<{ text: string; kind?: 'error' | 'info'; id: number } | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [overNote, setOverNote] = useState(false) // a drag over the note box (Reel.tsx): it attaches, no overlay
   const [libraryTick, setLibraryTick] = useState(0)
   const notify = useCallback<Notify>((text, kind) => setToast({ text, kind, id: Date.now() }), [])
   const closeToast = useCallback(() => setToast(null), [])
@@ -102,17 +106,29 @@ export function App() {
       setDragging(true)
     }
     const over = (e: DragEvent) => {
+      // the note box (Reel.tsx) sets its own drop effect: a file dropped there is attached to the note
+      setOverNote(!!(e.target as Element | null)?.closest?.('[data-note-drop]'))
+      if (e.defaultPrevented) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = firstRunDone && hasFiles(e) ? 'copy' : 'none'
     }
+    const noteDropDone = () => {
+      depth = 0
+      setDragging(false)
+      setOverNote(false)
+    }
     const leave = () => {
       depth = Math.max(0, depth - 1)
-      if (!depth) setDragging(false)
+      if (!depth) {
+        setDragging(false)
+        setOverNote(false)
+      }
     }
     const drop = (e: DragEvent) => {
       e.preventDefault()
       depth = 0
       setDragging(false)
+      setOverNote(false)
       if (draggingOut()) {
         ;(window as { __rsDraggingOut?: boolean }).__rsDraggingOut = false
         return
@@ -134,7 +150,9 @@ export function App() {
     window.addEventListener('dragover', over)
     window.addEventListener('dragleave', leave)
     window.addEventListener('drop', drop)
+    window.addEventListener(NOTE_DROP_DONE, noteDropDone)
     return () => {
+      window.removeEventListener(NOTE_DROP_DONE, noteDropDone)
       window.removeEventListener('dragenter', enter)
       window.removeEventListener('dragover', over)
       window.removeEventListener('dragleave', leave)
@@ -202,7 +220,7 @@ export function App() {
             {provider &&
               (aiOn ? (
                 <span className="ai-on">
-                  <span className="dot-on" aria-hidden /> AI editor: {provider.id === 'claude-cli' ? 'Claude Code' : provider.label}
+                  <span className="dot-on" aria-hidden /> AI editor: {provider.id === 'claude-cli' ? 'Claude (your Claude Code app)' : provider.label}
                 </span>
               ) : (
                 <>
@@ -228,11 +246,15 @@ export function App() {
           </ErrorBoundary>
         </main>
       </div>
-      {dragging && (
-        <div className="drop-overlay" data-testid="drop-overlay">
+      {dragging && !overNote && (
+        <div className={`drop-overlay${screen.name === 'reel' ? ' light' : ''}`} data-testid="drop-overlay">
           <div>
             <Icon name="upload" size={28} />
-            {screen.name === 'library' ? 'Drop to add to your Library' : 'Drop to make a reel'}
+            {screen.name === 'library'
+              ? 'Drop to add to your Library'
+              : screen.name === 'reel'
+                ? 'Drop on your note to attach it, or here to make a new reel'
+                : 'Drop to make a reel'}
           </div>
         </div>
       )}

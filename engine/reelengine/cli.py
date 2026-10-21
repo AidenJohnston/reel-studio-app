@@ -282,6 +282,12 @@ def cmd_anim_context(args):
     return broll.anim_context(ctx, args.word_from, args.word_to, args.duration)
 
 
+def cmd_attach(args):
+    """A picture, GIF or short clip attached to a note -> <project>/work/assets/attach-* + sidecar."""
+    from . import attach
+    return attach.run(_project(args), Path(args.file), name=args.name)
+
+
 def cmd_doctor(args):
     from . import doctor
     return doctor.run()
@@ -369,6 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", dest="word_to", required=True)
     sp.add_argument("--duration", type=float)
     sp.add_argument("--root")
+    sp = add("attach", cmd_attach, "add a picture, GIF or short clip attached to a note")
+    sp.add_argument("file")
+    sp.add_argument("--name", help="the file's original name (shown to the user)")
     sp = add("analyze-music", cmd_analyze_music, "tempo, energy and a good start point of a song")
     sp.add_argument("file", nargs="?")
     sp.add_argument("--track")

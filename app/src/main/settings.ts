@@ -8,11 +8,13 @@ import { UPDATE_DEFAULTS, type UpdateState } from './update-check'
 export interface Settings extends UpdateState {
   firstRunDone: boolean
   root: string | null
-  /** Local Claude Code build: the one-time "use Claude Code on this computer" pick has happened. */
+  /** Written by the 0.1.0/0.1.1 local-Claude-Code builds (a one-time automatic AI pick); read once by ai-carryover.ts. */
   aiAutoPicked: boolean
+  /** ai-carryover.ts already ran (it kept, or left alone, what an old local-Claude-Code install was using) */
+  aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS }
 
 export async function loadSettings(): Promise<Settings> {
   try {
