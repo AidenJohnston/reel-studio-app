@@ -54,6 +54,37 @@ export interface ChatMessage {
   suggestion?: string
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
+  /** Where a note asked "Just here" points: shown as a muted "0:08" before the words and placed as a mark (shared/moments.ts). */
+  moment?: NoteMoment
+  /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
+  jobId?: string
+  outcome?: NoteOutcome
+}
+
+/** done: the note made a new version. failed: an error, or nothing changed. stopped: Stop, or the app quit. */
+export type NoteOutcome = 'done' | 'failed' | 'stopped'
+
+/** A note's moment: the time in the version watched, and the words on screen then. */
+export interface NoteMoment {
+  /** seconds into `version` (0 = the Preview) */
+  at: number
+  version: number
+  /** transcript word ids, in the order they play */
+  words: string[]
+  /** those words as said, for people */
+  quote: string
+}
+
+/** A word on screen at a moment of a render. */
+export interface MomentWord {
+  id: string
+  w: string
+}
+
+/** A word where a render plays it: `s`/`e` in seconds on that render's output clock (projects.timeline). */
+export interface PlacedWord extends MomentWord {
+  s: number
+  e: number
 }
 
 /** A file attached to a note: what `engine attach` wrote in its sidecar (shared/attachments.ts). */
@@ -339,8 +370,12 @@ export interface ReelApi {
     create(files: string[]): Promise<{ slug: string; jobId: string; skipped: DropResult[] }>
     resume(slug: string): Promise<{ jobId: string }>
     /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs.
-     * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one). */
-    note(slug: string, text: string, attachments?: string[]): Promise<{ jobId: string | null }>
+     * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one).
+     * `moment`: a "Just here" note's place; main writes it into the text the AI reads. */
+    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment): Promise<{ jobId: string | null }>
+    /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
+     * fresh from that render's manifest each call. null when the render left no timeline to read. */
+    timeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */

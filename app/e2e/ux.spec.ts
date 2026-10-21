@@ -33,7 +33,7 @@ function projectJson(): any {
   return JSON.parse(readFileSync(join(dir, slug, 'project.json'), 'utf8'))
 }
 
-test('no AI: honest checklist, note -> button, caption controls, add song + picture, export', async () => {
+test('no AI: honest checklist, one connect prompt, caption controls, add song + picture, export', async () => {
   test.setTimeout(20 * 60_000)
   const media = makeMedia()
   const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data') })
@@ -70,22 +70,14 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await expect(page.getByTestId('did-post')).toContainText('Your post caption')
   expect(projectJson().post.caption).toBe('Why mornings make me a better editor')
 
-  // ---- 3. a note with no AI: my bubble, a plain answer, the matching button + Connect ----
-  const send = page.getByTestId('send')
-  await page.getByTestId('note-input').fill('Make the captions bigger please')
-  await expect(send).toHaveClass(/primary/) // looks clickable once there is text
-  await shot(page, 'ux-03-note-typed')
-  await send.click()
-  await expect(page.getByTestId('bubble-you').last()).toHaveText('Make the captions bigger please')
-  const reply = page.getByTestId('bubble-editor').last()
-  await expect(reply).toContainText('no AI editor is connected')
-  await expect(reply.getByTestId('action-open-captions')).toHaveText('Open subtitle settings')
-  await expect(reply.getByTestId('action-connect')).toHaveText('Connect ChatGPT')
-  await expect(page.getByTestId('note-progress')).toHaveCount(0) // nothing pretends to run
-  await shot(page, 'ux-04-note-reply')
-
-  // "Connect ChatGPT" goes straight to the simple connect screen.
-  await reply.getByTestId('action-connect').click()
+  // ---- 3. no AI: nothing offers an AI change; one line in the Notes panel is the way to connect ----
+  await expect(page.getByTestId('change-at')).toHaveCount(0)
+  await expect(page.getByTestId('note-input')).toHaveCount(0)
+  await page.keyboard.press('n') // the shortcut opens nothing either
+  await expect(page.getByTestId('change-pop')).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-connect')).toHaveCount(0)
+  await shot(page, 'ux-03-no-ai-connect')
+  await page.getByTestId('composer-connect').click()
   await expect(page.getByTestId('connect-screen')).toBeVisible()
   await expect(page.getByTestId('signin-chatgpt')).toBeVisible()
   await expect(page.getByTestId('claude-key-toggle')).toHaveText('Use an Anthropic API key (advanced)')
@@ -97,8 +89,8 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await page.getByText('Back to my video').click()
   await expect(page.getByTestId('player')).toBeVisible()
 
-  // ---- 4. caption controls, opened from the reply's button ----
-  await page.getByTestId('bubble-editor').last().getByTestId('action-open-captions').click()
+  // ---- 4. caption controls, opened from "What I did" ----
+  await page.getByTestId('change-captions').click()
   await expect(page.getByTestId('caption-controls')).toBeVisible()
   await expect(page.getByTestId('cap-size-medium')).toHaveAttribute('aria-checked', 'true') // 105 px default
   await expect(page.getByTestId('cap-pos-lower')).toHaveAttribute('aria-checked', 'true')

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { clock } from '../../../shared/progress'
+import { groupMarks, type NoteMark } from '../../../shared/moments'
 import { Icon } from './icons'
 import { reel } from '../api'
 
@@ -83,6 +84,8 @@ function useWidth(ref: React.RefObject<HTMLElement | null>): number {
   return w
 }
 
+const MARK_STATE: Record<NoteMark['state'], string> = { making: 'Being made', done: 'Done', failed: "Didn't work", stopped: 'Stopped' }
+
 const typing = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable || el.tagName === 'BUTTON')
@@ -105,6 +108,9 @@ export function PhonePlayer({
   still,
   onDuration,
   dragFile,
+  marks,
+  asking,
+  onTime,
   className,
   testid = 'player',
   children
@@ -126,6 +132,12 @@ export function PhonePlayer({
   onDuration?: (seconds: number) => void
   /** The file on disk: drag the phone out of the window to put the reel on the desktop or in an upload box. */
   dragFile?: string | null
+  /** Notes asked at a moment (the change button), drawn on the scrub bar. */
+  marks?: NoteMark[]
+  /** A change is being asked for at the playhead: hold the frame there and keep the scrub bar in sight. */
+  asking?: boolean
+  /** The playhead, as the video plays or is scrubbed. */
+  onTime?: (seconds: number) => void
   className?: string
   /** The video's test id. The Working screen's first look uses its own, so "player" means the Reel screen. */
   testid?: string
@@ -135,6 +147,8 @@ export function PhonePlayer({
   const video = useRef<HTMLVideoElement>(null)
   const raw = useRef<HTMLVideoElement>(null)
   const width = useWidth(screenRef)
+  const trackRef = useRef<HTMLSpanElement>(null)
+  const trackWidth = useWidth(trackRef)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(!!autoPlayMuted)
   const [t, setT] = useState(0)
@@ -163,6 +177,10 @@ export function PhonePlayer({
     video.current.muted = true
     void video.current.play().catch(() => {})
   }, [autoPlayMuted, src])
+
+  useEffect(() => {
+    if (asking) video.current?.pause()
+  }, [asking])
 
   // Hold "Original": play the raw footage from the start over the reel, then go back.
   useEffect(() => {
@@ -208,7 +226,10 @@ export function PhonePlayer({
               }}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
-              onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+              onTimeUpdate={(e) => {
+                setT(e.currentTarget.currentTime)
+                onTime?.(e.currentTarget.currentTime)
+              }}
               onLoadedMetadata={(e) => {
                 setDur(e.currentTarget.duration || 0)
                 onDuration?.(e.currentTarget.duration || 0)
@@ -250,10 +271,11 @@ export function PhonePlayer({
                 <Icon name="mute" size={16} /> Tap for sound
               </button>
             )}
-            <div className={`scrub${started ? ' shown' : ''}`}>
+            <div className={`scrub${started || marks?.length ? ' shown' : ''}${asking || marks?.some((m) => m.state === 'making') ? ' pinned' : ''}`}>
               <button className="scrub-btn" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
                 <Icon name={playing ? 'pause' : 'play'} size={16} stroke={2} />
               </button>
+              <span className="scrub-track" ref={trackRef}>
               <input
                 type="range"
                 min={0}
@@ -266,8 +288,38 @@ export function PhonePlayer({
                   const v = video.current
                   if (v) v.currentTime = Number(e.target.value)
                   setT(Number(e.target.value))
+                  onTime?.(Number(e.target.value))
                 }}
               />
+              {dur > 0 &&
+                !!marks?.length &&
+                groupMarks(marks, dur, trackWidth).map((g) => {
+                  const pct = Math.min(g.at, dur) / dur
+                  return (
+                    <button
+                      key={g.items[0].id}
+                      className={`scrub-mark ${g.state}${pct < 0.3 ? ' tip-start' : pct > 0.7 ? ' tip-end' : ''}`}
+                      style={{ left: `calc(6px + (100% - 12px) * ${pct})` }}
+                      // "Stopped, 0:11: cut this part; Done, 0:12: zoom in here": state, then time and request
+                      aria-label={g.items.map((m) => `${MARK_STATE[m.state]}, ${clock(m.at)}: ${m.text}`).join('; ')}
+                      onClick={() => {
+                        const v = video.current
+                        if (v) v.currentTime = Math.min(g.at, dur)
+                      }}
+                      data-testid="scrub-mark"
+                      data-state={g.state}
+                    >
+                      <span className="scrub-mark-tip" aria-hidden>
+                        {g.items.map((m) => (
+                          <span key={m.id}>
+                            <b>{MARK_STATE[m.state]}</b> {m.text}
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  )
+                })}
+              </span>
               <span className="scrub-time">{clock(dur ? dur - t : 0)}</span>
               <button
                 className="scrub-btn"

@@ -280,6 +280,10 @@ def cmd_render(args: list[str]) -> dict:
                     "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
                     str(vdir / "cover.png")], check=False, capture_output=True)
     (vdir / "verify.json").write_text(json.dumps({"ok": True, "duration": dur}), "utf-8")
+    # The render's timeline, as the real engine writes it (docs/versions.md). This stand-in plays the
+    # source straight through, so it is one segment.
+    timeline = {"duration": dur, "segmentsDetail": [{"source": src["id"], "src_start": 0.0, "src_end": dur, "out_start": 0.0}]}
+    (vdir / ("render_draft.json" if draft else "render.json")).write_text(json.dumps(timeline), "utf-8")
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
     if not draft:
