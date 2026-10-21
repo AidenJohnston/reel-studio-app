@@ -111,7 +111,7 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await expect(page.getByTestId('change-pop')).toHaveCount(0)
   const bubble = page.getByTestId('bubble-you').last()
   // the person sees the time and their words; the AI reads the words on screen by id
-  await expect(bubble).toContainText(/^0:00 · Put this here"[^"]+"$/)
+  await expect(bubble).toContainText(/^0:00 Put this here"[^"]+"$/)
   await expect(bubble).not.toContainText('w0')
   // the moment is stored with the word ids main read off this render (the AI's text is built from it)
   const sent = JSON.parse(readFileSync(join(ROOT, 'Projects', slug, 'app.json'), 'utf8')).chat.filter((m: { from: string }) => m.from === 'you').at(-1)

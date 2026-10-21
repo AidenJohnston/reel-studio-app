@@ -1,6 +1,6 @@
 // A note asked "Just here" (the change button under the player) carries its moment beside its text:
 // the time, and the transcript word ids on screen then, read from the render being watched (wordsAt).
-// The person sees "0:08 · cut this part". The AI reads the moment written into the note text
+// The person sees "0:08 cut this part", the time muted. The AI reads the moment written into the note text
 // (aiNoteText), because the project anchors everything on word ids. The marks on the scrub bar go
 // the other way: each note's word ids, placed on the render on screen. No Node or DOM imports.
 import type { ChatMessage, MomentWord, NoteMoment, NoteOutcome, PlacedWord, Word } from './api'

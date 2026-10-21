@@ -54,7 +54,7 @@ export interface ChatMessage {
   suggestion?: string
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
-  /** Where a note asked "Just here" points: shown as "0:08 ·" and placed as a mark (shared/moments.ts). */
+  /** Where a note asked "Just here" points: shown as a muted "0:08" before the words and placed as a mark (shared/moments.ts). */
   moment?: NoteMoment
   /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
   jobId?: string

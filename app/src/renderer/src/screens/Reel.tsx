@@ -559,7 +559,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                       ))}
                     </div>
                   ) : null}
-                  {m.moment && !typedMoment(m.text) && <span className="bubble-moment">{clock(m.moment.at)} · </span>}
+                  {m.moment && !typedMoment(m.text) && <><span className="bubble-moment">{clock(m.moment.at)}</span> </>}
                   {m.text}
                   {m.moment && <span className="bubble-quote" title={m.moment.quote}>"{m.moment.quote}"</span>}
                   {/* "Connect" is the change button under the player, once; not in every old reply */}
