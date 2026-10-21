@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ProjectSummary } from '../../../shared/api'
 import { niceDate, reel } from '../api'
 import type { Go } from '../nav'
@@ -22,6 +22,8 @@ function middle(title: string, max = 34): string {
 export function Home({ go }: { go: Go }) {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
 
+  const opening = useRef<string | null>(null)
+
   useEffect(() => {
     let live = true
     const load = () => reel.projects.list().then((p) => live && setProjects(p))
@@ -31,13 +33,21 @@ export function Home({ go }: { go: Go }) {
     })
     return () => {
       live = false
+      opening.current = null
       off()
     }
   }, [])
 
   const open = (p: ProjectSummary) => {
+    opening.current = p.slug
+    const show = (name: 'reel' | 'working') => {
+      if (opening.current === p.slug) go({ name, slug: p.slug })
+    }
     if (p.status === 'ready') go({ name: 'reel', slug: p.slug })
-    else go({ name: 'working', slug: p.slug })
+    else void reel.projects.get(p.slug).then(
+      (d) => show(d.job?.kind === 'note' || d.job?.kind === 'rerender' ? 'reel' : 'working'),
+      () => show('working')
+    )
   }
 
   return (
