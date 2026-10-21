@@ -200,7 +200,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
           } satisfies EngineError)
         )
       })
-      child.on('close', (code) => {
+      child.on('close', (code, exitSignal) => {
         running.delete(child)
         markExited()
         if (child.pid) cfg.onExit?.(child.pid)
@@ -209,8 +209,10 @@ export function createEngineRunner(cfg: RunnerConfig) {
         if (signal?.aborted) return
         finish(() => {
           const r = result as typeof result
-          if (r?.ok === true && code === 0) resolvePromise(r.value)
-          else if (r?.ok === false) rejectPromise(r.err)
+          if (r?.ok === true) {
+            if (code !== 0) log(`[engine ${command}] completed before abnormal shutdown: exit ${code}, signal ${exitSignal ?? 'none'}`)
+            resolvePromise(r.value)
+          } else if (r?.ok === false) rejectPromise(r.err)
           else
             rejectPromise({
               code: 'ENGINE_CRASHED',

@@ -1,4 +1,3 @@
-import { withProjectLock } from '@reelstudio/ai'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -35,10 +34,10 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
-import { createLiveVideos } from './live-video'
+import { createLiveVideos, createNoteVideos } from './live-video'
 import { rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
-import { loadAI } from './ai'
+import { loadAI, withProjectLock } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
 import { captureWebsite } from './capture'
@@ -132,6 +131,8 @@ const feedback = createJobFeedback({
 if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedbackLog
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
 const speedHistoryFile = (): string => join(settingsDir(), 'speed-history.json')
+const noteVideos = createNoteVideos()
+const liveVideos = createLiveVideos()
 const jobs = createJobManager(
   (e: JobEvent) => {
     broadcast('job:event', e)
@@ -144,8 +145,9 @@ const jobs = createJobManager(
     mediaSeconds: async (slug) =>
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
-  // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  (slug, e, job) => job.kind === 'note' && e.draft
+    ? noteVideos.video(job.id, e)
+    : liveVideos(projectDir(slug), e)
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
@@ -462,8 +464,11 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal) => {
-        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
+      async (emit, signal, id) => {
+        const opts = {
+          attachments: files.map((f) => f.asset),
+          onStaging: (stage: string | null) => noteVideos.set(id, dir, stage)
+        }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(slug, r, r.summary + extra)
@@ -656,7 +661,7 @@ app.whenReady().then(async () => {
   aiSource = loaded.source
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir()], noteVideos.roots)
   registerIpc()
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower

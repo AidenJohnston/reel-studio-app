@@ -121,9 +121,9 @@ describe('attachments: the AI sees them', () => {
     const imgs = firstImages(req);
     expect(imgs).toHaveLength(2);
     expect(imgs.every((i: any) => i.mime === 'image/jpeg' && i.base64.length > 10)).toBe(true);
-    // No edit was made, so the reply says that explicitly and nothing is recorded.
+    // No edit was made; keep the placement question and record no change.
     expect(r.changed).toEqual([]);
-    expect(r.summary).toMatch(/not changed your video/);
+    expect(r.summary).toBe('Which words should it show on?');
     expect((await loadProject(dir)).notes).toEqual([]);
     // the prompt tells it what to do with attached files
     expect(text).toMatch(/Never search the web or the library for something the user attached/);

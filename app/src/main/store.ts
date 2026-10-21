@@ -1,7 +1,7 @@
 // Project store: folders on disk under <Reel Studio>/Projects (docs/architecture.md section 3).
 // project.json belongs to the engine and the AI. The app keeps its own small state
 // (chat history, running job, last error) in app.json next to it.
-import { recoverNoteStaging } from '@reelstudio/ai'
+import { recoverNoteStaging } from './ai'
 import { existsSync, promises as fs } from 'node:fs'
 import { join, basename, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'

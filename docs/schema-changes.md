@@ -31,3 +31,6 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 - `notes[].txnId` is an optional string identifying the staged note that published
   this version. Older note entries remain valid. The version snapshot contains it
   before publication; the live note list receives it after the project commit.
+- `render.json` gains optional `reuseInputs` metadata, outside the project schema.
+  It records render dependency identities so a post-only note can reuse a completed
+  export. Older manifests still work and require the timestamp compatibility check.

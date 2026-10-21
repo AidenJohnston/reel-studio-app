@@ -101,7 +101,17 @@ describe('engine runner (against the stand-in engine)', () => {
     await expect(run('doctor', [])).rejects.toMatchObject({ code: 'ENGINE_MISSING' })
   })
 
-  it('cancel settles only after the engine and everything it started have exited', async () => {
+  it('accepts terminal done after waiting for an abnormal child exit', async () => {
+    setupPaths()
+    let pid = 0
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => { exited = true })
+    await expect(run('done-then-crash', [])).resolves.toEqual({ version: 2 })
+    expect(exited).toBe(true)
+    expect(isAlive(pid)).toBe(false)
+  })
+
+  it('cancel wins over terminal done and settles only after the engine and everything it started have exited', async () => {
     setupPaths()
     let pid = 0
     let grandchild = 0
@@ -109,7 +119,7 @@ describe('engine runner (against the stand-in engine)', () => {
     const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => { exited = true })
     const ac = new AbortController()
     const t0 = Date.now()
-    const p = run('sleep', [], (pr) => {
+    const p = run('done-then-sleep', [], (pr) => {
       grandchild = Number(pr.message)
       ac.abort()
     }, ac.signal)

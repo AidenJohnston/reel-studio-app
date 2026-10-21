@@ -18,9 +18,9 @@ export interface ProgressDeps {
   tickMs?: number
 }
 
-/** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
-export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
-export type JobFn = (emit: Emit, signal: AbortSignal) => Promise<{ summary: string; version?: number; quiet?: boolean }>
+/** Turns a finished render into a playable URL scoped to its job (index.ts). */
+export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>, job: { id: string; kind: JobKind }) => Promise<string | null>
+export type JobFn = (emit: Emit, signal: AbortSignal, jobId: string) => Promise<{ summary: string; version?: number; quiet?: boolean }>
 
 interface Running {
   id: string
@@ -92,7 +92,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         let logged = ''
         if (abort.signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
         const res = await fn((e) => {
-          if (abort.signal.aborted || (kind === 'note' && e.type === 'render' && e.draft)) return
+          if (abort.signal.aborted) return
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
@@ -113,11 +113,13 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
             const r = e
-            const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            const video = slug && toVideo ? toVideo(slug, r, { id, kind }).catch(() => null) : Promise.resolve(null)
+            pending.push(video.then((v) => {
+              if (!abort.signal.aborted) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })
+            }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal)
+        }, abort.signal, id)
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
@@ -133,6 +135,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        await Promise.all(pending) // no delayed draft event after the terminal event clears the player
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)

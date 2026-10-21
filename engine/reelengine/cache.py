@@ -1,5 +1,8 @@
-"""Stable identities for render inputs copied between project and note folders."""
+"""Stable input identities and private cache copies for staged engine work."""
 import hashlib
+import json
+import os
+import re
 from pathlib import Path
 
 
@@ -9,6 +12,45 @@ def file_digest(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def seed_private_cache(destination: Path) -> None:
+    """Copy completed shared cache JSON into private work before redirecting engine writes."""
+    from . import assets, tools
+
+    destination = Path(destination)
+
+    def copy_json(source: Path, relative: Path) -> None:
+        target = destination / relative
+        try:
+            if target.exists():
+                return
+            stamp = source.stat()
+            data = source.read_bytes()
+            json.loads(data)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        except (OSError, ValueError):
+            pass  # Optional or incomplete caches can be rebuilt privately.
+
+    shared = assets.cache_dir()
+    for name in ("simple-icons.json", "wikidata.json", "search-credits.json"):
+        copy_json(shared / name, Path(name))
+    for source in (shared / "music-analysis").glob("*.json"):
+        if re.fullmatch(r"[a-f0-9]{32}\.json", source.name):
+            copy_json(source, Path("music-analysis") / source.name)
+    copy_json(tools.probe_cache_file(), Path("encoder-probe.json"))
+    # yt-dlp stores completed JSON one namespace deep, with temporary files ending in .tmp.
+    # Its default root differs from Reel Studio's unless assets supplies an explicit cachedir.
+    if os.environ.get("REELENGINE_CACHE_DIR"):
+        downloads = shared / "yt-dlp"
+    else:
+        default = os.path.join(os.environ.get("XDG_CACHE_HOME", "~/.cache"), "yt-dlp")
+        downloads = Path(os.path.expandvars(os.path.expanduser(default)))
+    for source in downloads.glob("*/*.json"):
+        if re.fullmatch(r"[\w.-]+", source.parent.name):
+            copy_json(source, Path("yt-dlp") / source.relative_to(downloads))
 
 
 def cache_input_identity(path: Path, ctx=None) -> list:

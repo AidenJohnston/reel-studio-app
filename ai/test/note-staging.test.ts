@@ -2,9 +2,10 @@ import { afterEach, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { beginNote, recoverNoteStaging, PublishStep } from '../src/note-staging';
 import { createAI, loadProject, saveProject, AgentEvent } from '../src';
-import { FakeHost, ScriptedModel, makeProject } from './helpers';
+import { FakeHost, ScriptedModel, call, makeProject } from './helpers';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
@@ -22,6 +23,81 @@ async function setup() {
 }
 
 const note = { text: 'quieter music', applied: ['music'], at: '2026-10-21T00:00:00Z' };
+
+it('streams distinct staged drafts while keeping final success behind publication and revoking playback before cleanup', async () => {
+  const { dir, root, before } = await setup();
+  const host = new FakeHost(root);
+  const run = host.runEngine.bind(host);
+  const draftFiles: string[] = [];
+  const lifecycle: (string | null)[] = [];
+  const events: AgentEvent[] = [];
+  host.runEngine = async (command, args, progress) => {
+    if (command !== 'render') return run(command, args, progress);
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    const result = await run(command, args, progress);
+    const out = args[args.indexOf('--out') + 1];
+    const file = path.join(out, args.includes('--draft') ? 'draft.mp4' : 'export.mp4');
+    if (args.includes('--draft')) {
+      await fs.writeFile(file, `draft ${draftFiles.length + 1}`);
+      draftFiles.push(file);
+      if (draftFiles.length === 2) expect(await fs.readFile(draftFiles[0], 'utf8')).toBe('draft 1');
+    }
+    return { ...result, file };
+  };
+  const provider = new ScriptedModel([
+    { toolCalls: [call('set_caption_style', { size: 90 }), call('render_draft')] },
+    { toolCalls: [call('set_caption_style', { size: 85 }), call('render_draft')] },
+    { toolCalls: [call('finish', { summary_for_user: 'I made your captions smaller.' })] },
+  ]);
+  const ai = createAI({ host, settingsDir: path.join(root, 'settings'), providerOverride: provider });
+  const result = await ai.applyNote(dir, 'Please adjust the caption size', (event) => {
+    events.push(event);
+    if (event.type !== 'render' && event.type !== 'reply') return;
+    if (event.type === 'render' && event.draft) {
+      expect(lifecycle).toHaveLength(1);
+      expect(event.file).toBe(draftFiles.at(-1));
+      expect(readFileSync(path.join(dir, 'project.json'))).toEqual(before);
+    } else {
+      expect(JSON.parse(readFileSync(path.join(dir, 'project.json'), 'utf8')).version).toBe(2);
+      expect(existsSync(path.join(dir, 'versions', 'v2', 'export.mp4'))).toBe(true);
+    }
+  }, undefined, { onStaging(stage) {
+    if (stage === null) expect(existsSync(String(lifecycle[0]))).toBe(true);
+    else expect(existsSync(stage)).toBe(true);
+    lifecycle.push(stage);
+  } });
+  expect(result.version).toBe(2);
+  expect(new Set(draftFiles).size).toBe(2);
+  expect(events.filter((event) => event.type === 'render').map((event) => event.draft)).toEqual([true, true, false]);
+  expect(events.some((event) => event.type === 'tool' && event.name === 'set_caption_style')).toBe(true);
+  expect(events.filter((event) => event.type === 'status').map((event) => event.message)).toEqual(expect.arrayContaining(['Reading your note', 'Making the new version']));
+  expect(lifecycle).toEqual([expect.any(String), null]);
+  expect(existsSync(String(lifecycle[0]))).toBe(false);
+});
+
+it('returns a playable draft-only result without publishing the proposed edit', async () => {
+  const { dir, root, before } = await setup();
+  const host = new FakeHost(root);
+  const run = host.runEngine.bind(host);
+  host.runEngine = async (command, args, progress) => {
+    const result = await run(command, args, progress);
+    if (command === 'render') {
+      expect(args).toContain('--draft');
+      return { ...result, file: path.join(args[args.indexOf('--out') + 1], 'draft.mp4') };
+    }
+    return result;
+  };
+  const ai = createAI({ host, settingsDir: path.join(root, 'settings'), providerOverride: new ScriptedModel([]) });
+  const result = await ai.applyNote(dir, 'smaller captions', () => {}, undefined, { previewOnly: true });
+  expect(result.previewFile).toBeDefined();
+  roots.push(path.dirname(result.previewFile!));
+  expect(await fs.readFile(result.previewFile!, 'utf8')).toBe('fake');
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  expect(await fs.readdir(path.join(dir, 'versions'))).toEqual(['v1']);
+  expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
+  expect(result.summary).toContain('Your video has not changed');
+  expect(result.changed).toEqual([]);
+});
 
 it('stages a relative project path starting with a dash', async () => {
   const root = await fs.mkdtemp('-dash-project-');
@@ -68,13 +144,16 @@ it('a failed final render leaves project bytes and the published video unchanged
     return run(command, args, progress);
   };
   const events: AgentEvent[] = [];
+  const lifecycle: (string | null)[] = [];
   const ai = createAI({ host, settingsDir: path.join(root, 'settings'), providerOverride: new ScriptedModel([]) });
-  await expect(ai.applyNote(dir, 'smaller captions', (e) => events.push(e))).rejects.toMatchObject({ code: 'RENDER_FAILED' });
+  await expect(ai.applyNote(dir, 'smaller captions', (e) => events.push(e), undefined,
+    { onStaging: (stage) => lifecycle.push(stage) })).rejects.toMatchObject({ code: 'RENDER_FAILED' });
   expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
   expect(await fs.readFile(path.join(dir, 'versions', 'v1', 'export.mp4'), 'utf8')).toBe('old video');
   expect(await fs.readFile(path.join(dir, 'work/render/voice.wav'), 'utf8')).toBe('voice');
   expect(events.some((e) => e.type === 'reply' || e.type === 'render')).toBe(false);
   expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
+  expect(lifecycle).toEqual([expect.any(String), null]);
 });
 
 it('a crash at each publish boundary exposes the old project or a complete new version', async () => {
@@ -129,7 +208,9 @@ it('Stop during render waits for the in-flight render before deleting staging an
   };
   const ai = createAI({ host, settingsDir: path.join(root, 'settings'), providerOverride: new ScriptedModel([]) });
   let settled = false;
-  const result = ai.applyNote(dir, 'smaller captions', () => {}, controller.signal).finally(() => { settled = true; });
+  const lifecycle: (string | null)[] = [];
+  const result = ai.applyNote(dir, 'smaller captions', () => {}, controller.signal,
+    { onStaging: (stage) => lifecycle.push(stage) }).finally(() => { settled = true; });
   const rejected = expect(result).rejects.toMatchObject({ code: 'cancelled' });
   await rendering;
   controller.abort();
@@ -140,6 +221,7 @@ it('Stop during render waits for the in-flight render before deleting staging an
   await rejected;
   expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
   expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
+  expect(lifecycle).toEqual([expect.any(String), null]);
 });
 
 it('a stale base refuses to publish without overwriting the newer manual edit', async () => {

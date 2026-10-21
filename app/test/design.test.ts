@@ -1,6 +1,7 @@
 // Design critique helpers: progress + time left, "Version 3: bigger yellow subtitles", friendly
 // folder names, and the Library summary line.
 import { describe, expect, it } from 'vitest'
+import { animationName } from '../src/shared/animation-label'
 import { STAGES, clock, estimateSecondsLeft, overallProgress, stageIndex, timeLeftText } from '../src/shared/progress'
 import { describeChange, describeSorted, versionMessage } from '../src/shared/describe'
 import { displayPath } from '../src/shared/display-path'
@@ -96,4 +97,9 @@ describe('Library summary', () => {
     expect(describeSorted([r('a.mp3', 'music'), r('b.mp3', 'music'), r('c.mov', 'broll')])).toBe('Added 2 songs and 1 extra clip to your Library.')
     expect(describeSorted([r('stuff', null, 'This is a folder. Open it and drop the files inside.')])).toBe('Skipped stuff (a folder).')
   })
+})
+
+it('keeps a note-made animation label after its transaction and asset prefixes are added', () => {
+  expect(animationName('work/assets/79b7ec4a-2f9a-4a44-9d37-b43bd627a302-62165599-0547-494b-bfef-f20d46dc1e2c-anim-big-quote-2.mov')).toBe('Moving big quote')
+  expect(animationName('work/assets/anim-big-quote-2.mov')).toBe('Moving big quote')
 })

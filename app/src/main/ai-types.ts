@@ -73,7 +73,7 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; onStaging?: (dir: string | null) => void }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>

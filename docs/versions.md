@@ -14,16 +14,34 @@ rules in memory until publication. Rules that still need consent return as sugge
 
 Final rendering writes `.staging/<txnId>/version/`. Drafts, frame grabs, cover
 candidates, animation files, thumbnails, and all caches stay under the same transaction.
-The app keeps playing the published video while the note runs. A post-text-only edit
-also renders a new version; this implementation does not reuse encoded media.
+Each draft gets its own filename. The app grants the running job access to that
+transaction and plays the draft with the existing "Here's your change" message.
+It revokes access before deleting staging. Publication selects the new version;
+failure or Stop returns to the original. Notes never copy drafts into `work/live`.
+
+A post-only note copies the current final video and cover when the saved edit,
+media fingerprints, render inputs, and full-quality manifest still match. Otherwise
+it renders normally. Either path creates a complete new version without changing
+an older version. Main also re-encoded post-only AI notes, but this avoids that work.
+
+CLI `apply-note --draft-only` returns `previewFile`, a playable temporary file outside
+the project. It does not publish the edit, save style rules, or make a version.
+The caller owns that temporary file; staging is still removed when the note ends.
 
 At the start of a note, completed voice, music-mix, b-roll, and cover caches are
-cloned from live `work/`. macOS uses `/bin/cp -c` because Node/libuv 1.52.1 does not
+cloned from the current published version's `.cache/work/`, or live `work/` for
+older versions without that snapshot. macOS uses `/bin/cp -c` because Node/libuv 1.52.1 does not
 implement `COPYFILE_FICLONE_FORCE` there and silently copies for `COPYFILE_FICLONE`.
 Other platforms use `COPYFILE_FICLONE`. APFS shares the file data until a write;
 filesystems without cloning fall back to a separate copy. No hard links are used.
 The clones retain timestamps for freshness checks, and partial files are skipped.
-Notes write only their clones and never refresh the live caches. Cache keys use
+During a note, only the clones are written. Before publication, completed caches
+move into the new version's hidden `.cache/work/` snapshot. After the project and
+note record commit, new cache keys are promoted into live `work/` by atomic rename.
+Existing keys are never replaced. Manual renders can also read the matching voice
+cache from the published snapshot when their old `voice.wav` describes another cut.
+Search, music analysis, and encoder JSON caches are seeded from read-only shared
+caches into staged work. New shared-cache data stays in the project's cache. Cache keys use
 project-relative input names or content hashes, so moving work into staging does
 not invalidate it. Generated voice audio uses a content hash because restoring a
 timestamp through Node can lose nanosecond precision. Existing voice, music, and
@@ -74,11 +92,15 @@ old edit still reads its original files.
 
 ## Stop, failure, and startup
 
-A failed tool aborts the note and stops scheduling further tools, including queued
-parallel calls. Stop waits for the engine child and process-tree cleanup and for
+Invalid arguments and unavailable lookups return to the model as tool results so
+it can correct them. Image lookup retains its retry and fallback behavior. A fatal
+render or project-write failure aborts the note and stops scheduling further tools,
+including queued parallel calls. Stop waits for the engine child and process-tree cleanup and for
 in-flight tools. After at most ten seconds, the note discards staging. A late worker
 can only write into its old staging folder and cannot publish an aborted transaction.
-Stop after the project rename leaves the committed version in place.
+Stop after the project rename leaves the committed version in place. A step limit
+can still publish a valid partial edit with main's explanation that the note was
+not finished. A no-change answer retains the model's explanation or question.
 
 Startup kills recorded orphan engines before accepting jobs, removes every
 `.staging/*` folder, and removes version folders newer than `project.json.version`.

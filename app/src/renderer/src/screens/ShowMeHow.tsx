@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryFile, ProjectDetail, ProjectJson, VersionInfo, Word } from '../../../shared/api'
 import { rangesKeepingOrder } from '../../../shared/cut'
 import { describeChange } from '../../../shared/describe'
+import { animationName } from '../../../shared/animation-label'
 import { reel, userMessage } from '../api'
 import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
@@ -27,13 +28,6 @@ const TREATMENTS: Record<string, string> = {
   'post-wall': 'Wall of pictures',
   'icon-wall': 'Wall of icons',
   'split-top': 'Top half'
-}
-
-/** "anim-big-quote-2.mov" -> "Moving big quote"; never a computer file name (grandma 2). */
-function animationName(asset: string): string | null {
-  const m = /(?:^|[\/])anim-([a-z0-9-]+?)(?:-\d+)?\.(?:mov|webm|mp4)$/i.exec(asset)
-  if (!m) return null
-  return `Moving ${m[1].replace(/-/g, ' ')}`
 }
 
 function brollDetail(b: NonNullable<ProjectJson['broll']>[number]): string {
