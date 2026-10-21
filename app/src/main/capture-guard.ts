@@ -66,16 +66,20 @@ export function normaliseCaptureUrl(raw: string): URL {
 }
 
 /** Every address the host resolves to must be public (no localhost, no home network). */
-export async function hostIsPublic(host: string, lookup: LookupFn = defaultLookup): Promise<boolean> {
+export async function publicHostAddress(host: string, lookup: LookupFn = defaultLookup): Promise<string | null> {
   const h = host.replace(/^\[|\]$/g, '')
-  if (net.isIP(h)) return !isBlockedAddress(h)
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || !h.includes('.')) return false
+  if (net.isIP(h)) return isBlockedAddress(h) ? null : h
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || !h.includes('.')) return null
   try {
     const addrs = await lookup(h)
-    return addrs.length > 0 && !addrs.some(isBlockedAddress)
+    return addrs.length > 0 && !addrs.some(isBlockedAddress) ? addrs[0] : null
   } catch {
-    return false
+    return null
   }
+}
+
+export async function hostIsPublic(host: string, lookup: LookupFn = defaultLookup): Promise<boolean> {
+  return (await publicHostAddress(host, lookup)) !== null
 }
 
 export async function assertCapturable(raw: string, lookup: LookupFn = defaultLookup): Promise<URL> {
