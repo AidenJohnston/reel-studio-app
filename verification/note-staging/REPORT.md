@@ -34,6 +34,8 @@ A process crash is not a machine power loss. Directory fsync and filesystem dura
 
 - BeginLock through BeginReturn map to beginNote. Project, input, and cache copies have partial states. cloneFile uses isolated copies or copy-on-write clones. One input and cache file represent the repeated copy loops.
 - WorkCache, StageWrite, and the render/notes program counters represent applyStagedNote and staged runEngine calls. Existing live inputs are reads.
+- GrantPreview, PreviewCopy, RevokePreview, and PreviewNeverPublishes represent the staging hook, draft-only copy outside the project, and cleanup revocation.
+- SnapshotCache, PromoteSelect, PromoteCopy, and PromoteRename represent completed cache moves into the private version, the locked absent-key check, the interruptible private clone, and the atomic live rename after the project and note commit.
 - PublishLock and CheckBase map to the publish lock and hash guard. PrepareAtomic models the snapshot and metadata temp writes followed by rename. One metadata file stands for render and verify metadata.
 - Prune represents removeUnpublished on an initially clean version directory. Recovery separately models deletion of a version left by this note. Pre-existing orphan versions and a second publish reusing their number are not in this baseline.
 - AssetRename moves one asset or thumbnail per atomic action. CreditsWrite has partial bytes in a live temporary file, followed by CreditsRename.
@@ -41,6 +43,7 @@ A process crash is not a machine power loss. Directory fsync and filesystem dura
 - The style action, AppendWrite, and AppendRename keep the later project append separate. Preference writes are outside the disk projection.
 - Stop, ToolFailure, AbortAtCheck, TimeoutRemove, MissingStaged, and LateStageWrite represent applyNote cleanup and its ten-second timeout. Cleanup deletes individual staged files while in-flight actions may run. Missing inputs after cleanup can terminate the operation without committing.
 - WriterAcquire through WriterRename model projects:update and lock-using jobs. store.ts's per-file queue alone would not exclude the note publisher. jobs.ts admits one job synchronously and retains it until cleanup completes.
+- The source mapping also covers app/src/main/ai.ts and project-engine.ts for the shared lock, staging-media.ts and media.ts for preview grants, live-video.ts for draft copies, and cli.ts for previewOnly.
 - Crash, Restart, and recovery actions map to startup after orphan engines are reaped. Recovery removes staged files individually, reads the live version, then removes each file of an unpublished newer version. The idempotence check compares the disk after the second complete pass with the first. A crash during recovery restarts that sequence.
 
 Directory creation without new observable contents, locked reads, access checks, fsync, close, and promise bookkeeping stutter. None merges two live byte-changing filesystem calls into one atomic action. Recursive directory metadata, timestamps, permissions, and private temp filenames are abstracted.
