@@ -307,6 +307,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   if (!note.trim() && !attached.length) throw new AIError('empty_note', 'Type what you would like me to change.');
   const refs = attached.map((a) => a.asset);
   const id = opts.id ?? randomUUID();
+  if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', 'Something went wrong starting your note. Try again.', { detail: `note id ${JSON.stringify(id)}` });
   const dir = path.join(projectDir, 'work', 'notes', id);
   const base = await fsp.readFile(path.join(projectDir, PROJECT_FILE));
   const baseVersion = withDefaults(JSON.parse(base.toString('utf8'))).version;
@@ -346,12 +347,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
-      return {
-        summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
-        version: baseVersion, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
-      };
+    const { styleRulesAdded, styleSuggestions } = ctx.state;
+    if (!ctx.state.changed.size) {
+      // the video did not change: nothing to render or save in the project; a rule still goes back
+      // to the app to ask about (or, without asking, into My style now)
+      if (opts.saveStyleRules !== false) for (const rule of styleRulesAdded) await deps.style.add(rule);
+      const summary = styleRulesAdded.length ? withStyleEcho(r.finished || 'I saved your preference.', ctx.state)
+        : r.finished || 'I looked, but I was not sure what to change. Could you say it another way?';
+      return { summary, version: baseVersion, styleRulesAdded, styleSuggestions, changed: [] };
     }
     if (r.stoppedBy !== 'finish') throw unfinished(ctx.state);
     const summary = withStyleEcho(r.finished || 'I saved your preference.', ctx.state);
@@ -399,9 +402,13 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     }
     if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
   });
-  if (saveStyle) for (const rule of styleRulesAdded) await deps.style.add(rule).catch(() => undefined);
-  ctx.emit(renderEvent(final));
-  ctx.emit({ type: 'status', message: 'Done', pct: 100 });
+  try {
+    if (saveStyle) for (const rule of styleRulesAdded) await deps.style.add(rule);
+    ctx.emit(renderEvent(final));
+    ctx.emit({ type: 'status', message: 'Done', pct: 100 });
+  } catch {
+    // the note is saved: a My style write or a listener that fails now must not report it as failed
+  }
   return { summary: n.summary, version: final.version, styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed] };
 }
 

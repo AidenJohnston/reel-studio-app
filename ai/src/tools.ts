@@ -127,14 +127,15 @@ const EXT: Record<string, string[]> = {
   exports: ['.mp4'],
 };
 
-/** Pictures and clips already in this edit, and files the user attached. A download from a note that
+/** Pictures and clips already in this edit, and files the user attached (they have an engine `attach`
+ * sidecar). A download from a note that
  * was not saved stays on disk but is never offered as "already fetched". */
 async function projectAssets(ctx: ToolContext): Promise<string[]> {
   const { p } = await load(ctx);
   const used = new Set<string>();
   for (const b of p.broll) assetRefs(b, used);
   const files = await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0);
-  return files.filter((f) => used.has(path.basename(f)) || path.basename(f).startsWith('attach-'));
+  return files.filter((f) => used.has(path.basename(f)) || fs.existsSync(path.join(ctx.projectDir, `${f}.attach.json`)));
 }
 
 async function listFiles(dir: string, exts: string[], prefix: string, depth = 2): Promise<string[]> {

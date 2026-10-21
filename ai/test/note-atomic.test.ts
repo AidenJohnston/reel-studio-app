@@ -104,6 +104,22 @@ describe('a note that does not finish leaves the project as it was', () => {
   });
 });
 
+describe('a note that changes nothing in the video', () => {
+  it('"from now on..." alone renders nothing and goes back to the app as a question', async () => {
+    const { root, dir, host, settingsDir, read, before } = await setup();
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Got it.' })] },
+    ]);
+    const r = await createAI({ host, settingsDir, providerOverride: m })
+      .applyNote(dir, 'from now on keep music quieter', () => undefined, undefined, { saveStyleRules: false });
+    expect(r.styleRulesAdded).toEqual(['Keep music quieter under talking.']);
+    expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
+    expect(await read()).toBe(before);
+    expect(await new StyleStore(() => root).list()).toEqual([]);
+  });
+});
+
 describe('a note that finishes is saved in one write', () => {
   it('the note, its reply and the rule to ask about are in project.json and its version, and My style waits for the app', async () => {
     const { root, dir, host, settingsDir, read } = await setup();

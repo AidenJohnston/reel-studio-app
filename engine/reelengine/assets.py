@@ -1014,7 +1014,8 @@ def credit_for(url: str) -> Optional[dict]:
 
 def _add_credit(saved: Path, entry: dict) -> None:
     """One entry in <folder>/credits.json under the saved file's name. A book that cannot be read is
-    left alone: rewriting it as empty would drop every other picture's credit."""
+    left alone (rewriting it as empty would drop every other picture's credit) and the picture is
+    refused: it must not reach a caption without its credit."""
     book_path = saved.parent / "credits.json"
     try:
         with _FileLock(book_path):
@@ -1027,7 +1028,8 @@ def _add_credit(saved: Path, entry: dict) -> None:
             book[saved.name] = entry
             _write_json(book_path, book)
     except (OSError, ValueError) as e:
-        log(f"credit not written for {saved.name}: {e}")
+        raise EngineError("CREDIT_NOT_SAVED", f"credit not written for {saved.name}: {e}",
+                          "I couldn't note who made that picture, so I didn't keep it. Try another one.") from None
 
 
 def _write_credit(saved: Path, url: str) -> Optional[dict]:
