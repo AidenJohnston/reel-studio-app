@@ -111,12 +111,13 @@ test('make a reel end to end', async () => {
   await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 120_000 })
   await shot(page, '11-reel-v2')
 
-  // ---- a note with no AI connected: shown as my bubble, a plain answer, the matching button ----
-  await page.getByTestId('note-input').fill('Always use big captions')
-  await page.keyboard.press('Enter')
-  await expect(page.locator('.bubble.you + .bubble.editor')).toBeVisible({ timeout: 120_000 })
-  if (aiSource === 'mock') await expect(page.getByTestId('action-open-captions').last()).toBeVisible()
-  await shot(page, '12-reel-note')
+  // ---- no AI connected: no way to ask for a change, one way to connect ----
+  if (aiSource === 'mock') {
+    await expect(page.getByTestId('change-connect')).toHaveText('Connect an editor to make changes')
+    await expect(page.getByTestId('change-at')).toHaveCount(0)
+    await expect(page.getByTestId('sidebar-connect')).toHaveCount(0)
+  }
+  await shot(page, '12-reel-no-ai')
 
   // ---- export ----
   await page.getByTestId('export').click()

@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, SHOTS, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, SHOTS, launch, makeMedia, passFirstRun, shot, writeNote } from './helpers'
 
 const PROVIDER = process.env.REELSTUDIO_E2E_LIVE_AI
 
@@ -50,7 +50,7 @@ test('first edit and a note with a live AI provider', async () => {
 
   const replies = page.locator('.bubble.editor:not(.working):not(.reply-pending)')
   const bubbles = await replies.count()
-  await page.getByTestId('note-input').fill('Make the music a bit quieter')
+  await writeNote(page, 'Make the music a bit quieter')
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('note-progress')).toBeVisible()
   await shot(page, 'live/06-note-working')

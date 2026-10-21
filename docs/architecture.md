@@ -11,7 +11,8 @@ This document describes how the pieces fit together. Section numbers are referen
    user's own files, images found online, or generated animation cards), makes a cover, and writes a post
    caption with 5 hashtags.
 3. The user watches the result and types **notes** in plain English ("music too loud at the start", "put the
-   price on 'twenty bucks'"). Each note makes a new version (v1, v2, v3...). Notes that are lasting
+   price on 'twenty bucks'"), from the button under the player. A note about the moment on screen carries its
+   time in its text ("At 0:14: cut this part"); the AI is told the words said then. Each note makes a new version (v1, v2, v3...). Notes that are lasting
    preferences are saved to **My style** and apply to every future video.
 4. **Export** writes the finished mp4, the cover and the caption text to a folder.
 

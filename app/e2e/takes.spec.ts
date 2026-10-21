@@ -11,7 +11,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { APP_DIR, BASE, ROOT, SHOTS, chooseClaudeCode, dropFiles, launch, passFirstRun, shot } from './helpers'
+import { APP_DIR, BASE, ROOT, SHOTS, chooseClaudeCode, dropFiles, launch, passFirstRun, shot, writeNote } from './helpers'
 
 const TESTSET = process.env.REELSTUDIO_E2E_TAKES
 const takes: { file: string; path: string }[] = TESTSET ? JSON.parse(readFileSync(TESTSET, 'utf8')).takes : []
@@ -126,7 +126,7 @@ takes.forEach((take, i) => {
       const replies = page.locator('.bubble.editor:not(.working):not(.reply-pending)')
       const before = await replies.count()
       const t1 = Date.now()
-      await page.getByTestId('note-input').fill(String(result.note))
+      await writeNote(page, String(result.note))
       await page.keyboard.press('Enter')
       // a fast note shows its reply at once (before its render); the note progress shows time left
       const noteSeen = { timeLeft: new Set<string>() }

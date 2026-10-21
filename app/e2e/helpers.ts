@@ -146,6 +146,13 @@ export function pickKeptWord(projectDir: string): { id: string; word: string; in
   return { id: words[i].id, word: clean(words[i].w), index: i }
 }
 
+/** Types a note about the whole reel into the change pop-up under the player (Enter sends it). */
+export async function writeNote(page: Page, text: string): Promise<void> {
+  if (!(await page.getByTestId('change-pop').isVisible())) await page.getByTestId('change-at').click()
+  await page.getByTestId('scope-whole').check()
+  await page.getByTestId('change-input').fill(text)
+}
+
 /**
  * The 0.1.2 meme flow with a REAL AI: drop a meme on the note box with "put this over my face" and no moment
  * (the editor must ASK, not guess), then name the moment in a second note with no file (the editor must place the
@@ -157,7 +164,7 @@ export async function attachMemeFlow(page: Page, projectDir: string, file: strin
   const send = async (text: string): Promise<{ reply: string; sec: number }> => {
     const before = await replies.count()
     const t = Date.now()
-    await page.getByTestId('note-input').fill(text)
+    await writeNote(page, text)
     await page.keyboard.press('Enter')
     // a note can add more than one bubble (what was done, then "remember this?"): wait for at least one
     await expect.poll(() => replies.count(), { timeout: 30 * 60_000, intervals: [1000] }).toBeGreaterThan(before)
@@ -166,7 +173,8 @@ export async function attachMemeFlow(page: Page, projectDir: string, file: strin
     return { reply: all.slice(before).join(' | '), sec: Math.round((Date.now() - t) / 1000) }
   }
   const out: Record<string, unknown> = {}
-  await dropFiles(page, 'note-drop', [file])
+  await page.getByTestId('change-at').click()
+  await dropFiles(page, 'change-pop', [file])
   await expect(page.getByTestId('note-attachment')).toHaveCount(1, { timeout: 120_000 })
   await snapAs('attach-01-chip')
   const sidecars = readdirSync(join(projectDir, 'work', 'assets')).filter((f) => f.startsWith('attach-') && f.endsWith('.attach.json'))

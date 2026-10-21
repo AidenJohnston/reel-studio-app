@@ -112,10 +112,6 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.mouse.up()
   await expect(page.getByTestId('original-video')).not.toHaveClass(/on/)
 
-  // The banner can be put away, for this video.
-  await page.getByTestId('banner-close').click()
-  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
-
   // ---- drawer: Esc closes, Ctrl/Cmd+Z undoes ----
   await page.getByTestId('edit-myself').click()
   await expect(page.getByTestId('tab-cut')).toBeFocused() // not Close
@@ -180,8 +176,7 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.getByTestId('project-card').first().click()
   await expect(page.getByTestId('player')).toBeVisible()
   await expect(page.getByTestId('did-cut')).toContainText('Kept your best takes')
-  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
-  await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')
+  await expect(page.getByTestId('change-at')).toContainText('Change something at')
   await shot(page, 'd-12-reel-with-ai')
 
   // ---- Library: a drop anywhere on the window lands in the Library ----

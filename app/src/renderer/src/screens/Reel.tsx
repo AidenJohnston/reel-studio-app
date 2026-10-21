@@ -9,9 +9,11 @@ import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinkin
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
-import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
+import { EXPORT_EVENT, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
-import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
+import { AttachmentThumb } from '../components/NoteAttachments'
+import { ChangeAt } from '../components/ChangeAt'
+import { noteMarks } from '../../../shared/moments'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -35,14 +37,12 @@ const CHANGE_LABEL: Record<Tab, string> = {
 
 const INSTAGRAM_URL = 'https://www.instagram.com/'
 const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p
-const bannerKey = (slug: string): string => `rs.banner-dismissed.${slug}`
 const IG_KEY = 'rs.instagram-overlay'
 
 export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolean }) {
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
-  const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
   const [drawer, setDrawer] = useState<Tab | null>(null)
@@ -52,17 +52,14 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
-  // pictures, GIFs and clips on the note being written (components/NoteAttachments.tsx)
-  const att = useNoteAttachments(slug, notify)
-  const [noteDrop, setNoteDrop] = useState(false)
-  const noteDropDepth = useRef(0)
+  const [playhead, setPlayhead] = useState(0)
+  const [asking, setAsking] = useState(false)
 
   const load = useCallback(
     async (selectLatest = false) => {
@@ -104,13 +101,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     const box = chatEnd.current?.parentElement
     if (box) box.scrollTop = box.scrollHeight
   }, [d?.chat.length, job])
-  // While a version is being made, keep its progress and the note box in view, where the person
-  // just typed (the page scrolls on small windows).
+  // While a version is being made, keep its progress in view (the page scrolls on small windows).
   const progressRef = useRef<HTMLDivElement>(null)
-  const composerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!job?.jobId) return
-    composerRef.current?.scrollIntoView({ block: 'nearest' })
     progressRef.current?.scrollIntoView({ block: 'nearest' })
   }, [job?.jobId, d?.chat.length])
 
@@ -144,54 +138,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
   for (const m of d.chat) if (m.from === 'editor' && m.version) versionNote.set(m.version, m.text)
-
-  const send = async () => {
-    const text = note.trim()
-    const files = att.chips
-    if ((!text && !files.length) || att.busy) return
-    setNote('')
-    att.clear()
-    try {
-      const r = await reel.projects.note(slug, text, files.length ? files.map((f) => f.asset) : undefined)
-      // null = no AI editor: the note and a plain answer are in the chat, nothing is running.
-      if (r.jobId) setJob((cur) => (cur?.jobId === r.jobId ? cur : { ...EMPTY_LIVE, jobId: r.jobId, message: 'Reading your note' }))
-      await load()
-    } catch (e) {
-      setNote(text)
-      att.restore(files)
-      notify(userMessage(e), 'error')
-    }
-  }
-  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy
-  // Files dropped on the note box are attached to the note. The window-wide drop (App.tsx: a video makes
-  // a new reel) must not see them, so the drop stops here; App clears its overlay on NOTE_DROP_DONE.
-  const noteDropProps = {
-    'data-note-drop': true,
-    onDragEnter: (e: React.DragEvent) => {
-      if (!Array.from(e.dataTransfer.types).includes('Files')) return
-      e.preventDefault()
-      noteDropDepth.current++
-      setNoteDrop(true)
-    },
-    onDragOver: (e: React.DragEvent) => {
-      if (!Array.from(e.dataTransfer.types).includes('Files')) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = job ? 'none' : 'copy'
-    },
-    onDragLeave: () => {
-      noteDropDepth.current = Math.max(0, noteDropDepth.current - 1)
-      if (!noteDropDepth.current) setNoteDrop(false)
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      noteDropDepth.current = 0
-      setNoteDrop(false)
-      window.dispatchEvent(new Event(NOTE_DROP_DONE))
-      if (job) return
-      att.onDropFiles(e.dataTransfer)
-    }
-  }
 
   const rename = async () => {
     const t = (renaming ?? '').trim()
@@ -243,6 +189,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       notify(userMessage(e), 'error')
       return false
     }
+  }
+
+  const marks = noteMarks(d.chat, !!job)
+  const sent = async (jobId: string | null) => {
+    if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
+    await load()
   }
 
   const runAction = (a: ChatAction, messageId: string) => {
@@ -309,7 +261,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             holdingOriginal={holding}
             onDuration={setDuration}
             dragFile={version && !version.draft ? version.videoPath : null}
+            marks={marks}
+            asking={asking}
+            onTime={setPlayhead}
           />
+          <ChangeAt slug={slug} at={playhead} aiOn={!aiOff} busy={!!job} onConnect={connect} onOpenChange={setAsking} onSent={(id) => void sent(id)} />
           {changePreview && (
             <p className="muted-sm center" data-testid="change-preview">Here's your change. I'm making the full-quality version.</p>
           )}
@@ -415,27 +371,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             />
           </div>
 
-          {aiOff && !bannerHidden && (
-            <div className="banner" data-testid="ai-banner">
-              <span>No AI editor yet, so I made a simple cut. Connect one and I can pick your best takes, add pictures and change the video from your notes.</span>
-              <button className="btn small" onClick={connect} data-testid="banner-connect">
-                Connect
-              </button>
-              <button
-                className="icon-btn"
-                aria-label="Hide this"
-                title="Hide this"
-                onClick={() => {
-                  localStorage.setItem(bannerKey(slug), '1')
-                  setBannerHidden(true)
-                }}
-                data-testid="banner-close"
-              >
-                <Icon name="x" />
-              </button>
-            </div>
-          )}
-
           <section className="panel did" data-testid="what-i-did">
             <h2>What I did</h2>
             <ul className="checklist two">
@@ -457,16 +392,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && (
-              <div className="extras" data-testid="extras">
-                <span className="muted-sm">Optional extras:</span>
-                {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
-                    <Icon name="plus" size={14} stroke={2} /> {x.label}
-                  </button>
-                ))}
-              </div>
-            )}
             {postDraft !== null && (
               <div className="stack" style={{ marginTop: 14 }} data-testid="post-editor">
                 <label className="muted-sm" htmlFor="post-draft">
@@ -501,11 +426,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           </section>
 
           <section className="panel notes-panel">
-            <h2>Notes for your editor</h2>
+            <h2>Your notes</h2>
             <div className="chat" data-testid="chat">
-              {d.chat.length === 0 && !job && (
-                <p className="muted-sm">Watch your reel, then tell me what to change. For example: "music too loud at the start".</p>
-              )}
+              {d.chat.length === 0 && !job && <p className="muted-sm">Changes you ask for show up here.</p>}
               {d.chat.map((m) => (
                 <div key={m.id} className={`bubble ${m.from}`} data-testid={`bubble-${m.from}`}>
                   {m.attachments?.length ? (
@@ -516,14 +439,15 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     </div>
                   ) : null}
                   {m.text}
-                  {m.from === 'editor' && m.actions?.length ? (
+                  {/* "Connect" is the change button under the player, once; not in every old reply */}
+                  {m.from === 'editor' && m.actions?.some((a) => a !== 'connect') ? (
                     <div className="bubble-actions">
-                      {m.actions.map((a) => (
+                      {m.actions.filter((a) => a !== 'connect').map((a) => (
                         <button
                           key={a}
-                          className={`btn small${a === 'connect' ? '' : ' primary'}`}
+                          className="bubble-link"
                           onClick={() => runAction(a, m.id)}
-                          disabled={!!job && a !== 'connect'}
+                          disabled={!!job}
                           data-testid={`action-${a}`}
                         >
                           {ACTION_LABELS[a]}
@@ -545,7 +469,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               // Outside the scrolling chat, so the progress can never be scrolled or cut out of sight.
               <div className="job-progress" ref={progressRef} data-testid="note-progress">
                 <div className="row" style={{ marginBottom: 8 }}>
-                  {job.thinking ? <Thinking /> : <Spinner />} <span>{job.message}</span>
+                  {job.thinking ? <Thinking /> : <Spinner />} <span className="job-message">{job.message}</span>
                   <span className="spacer" />
                   <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? ''}</span>
                   <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId)} style={{ padding: 0, marginLeft: 12 }}>
@@ -555,49 +479,15 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <Progress pct={job.overall} label={job.message} />
               </div>
             )}
-            <div className={`note-drop${noteDrop ? ' over' : ''}`} {...noteDropProps} data-testid="note-drop">
-            {noteDrop && <div className="note-drop-hint">Drop to attach it to your note</div>}
-            <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
-            <div className={`composer${aiOff ? ' no-ai' : ''}`} ref={composerRef}>
-              <button
-                className="btn attach-btn"
-                onClick={att.choose}
-                disabled={!!job}
-                aria-label="Attach a picture or a clip"
-                title="Attach a picture or a clip"
-                data-testid="note-attach"
-              >
-                <Icon name="paperclip" size={18} />
-              </button>
-              <div className="composer-box">
-              <textarea
-                className="input composer-input"
-                rows={1}
-                placeholder={aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'}
-                aria-label="Note for your editor"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                onPaste={att.onPaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    void send()
-                  }
-                }}
-                disabled={!!job}
-                data-testid="note-input"
-              />
-              {aiOff && !note.trim() && (
-                <button className="btn small in-box" onClick={connect} data-testid="composer-connect">
-                  Connect
-                </button>
-              )}
+            {extras.length > 0 && !job && (
+              <div className="extras" data-testid="extras">
+                {extras.map((x) => (
+                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                    <Icon name="plus" size={14} stroke={2} /> {x.label}
+                  </button>
+                ))}
               </div>
-              <button className={`btn${canSend ? ' primary' : ''}`} onClick={() => void send()} disabled={!canSend} data-testid="send" aria-label="Send">
-                <Icon name="send" size={16} /> Send
-              </button>
-            </div>
-            </div>
+            )}
           </section>
         </div>
       </div>

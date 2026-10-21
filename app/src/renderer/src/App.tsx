@@ -225,9 +225,12 @@ export function App() {
               ) : (
                 <>
                   <div className="muted-sm">No AI editor connected.</div>
-                  <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect' })} data-testid="sidebar-connect">
-                    Connect one
-                  </button>
+                  {/* the Reel screen has its own, on the change button under the player */}
+                  {screen.name !== 'reel' && (
+                    <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect' })} data-testid="sidebar-connect">
+                      Connect one
+                    </button>
+                  )}
                 </>
               ))}
           </div>

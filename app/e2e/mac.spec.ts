@@ -13,7 +13,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { CLAUDE_CODE_MISNAMED, attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
+import { CLAUDE_CODE_MISNAMED, attachMemeFlow, chooseClaudeCode, dropFiles, writeNote } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_EXE
 const USE_CLAUDE = process.env.REELSTUDIO_E2E_USE_CLAUDE !== '0'
@@ -345,7 +345,7 @@ TAKES.forEach((take, i) => {
         const before = await replies.count()
         const t1 = Date.now()
         result.note = NOTES[i % NOTES.length]
-        await page.getByTestId('note-input').fill(String(result.note))
+        await writeNote(page, String(result.note))
         await page.keyboard.press('Enter')
         // a note can add more than one bubble (a quick reply, then what was done): wait for at least one
         await expect.poll(() => replies.count(), { timeout: 40 * 60_000, intervals: [1000] }).toBeGreaterThan(before)
