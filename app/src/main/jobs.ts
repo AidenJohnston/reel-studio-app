@@ -2,7 +2,8 @@
 // goes to the renderer; app.json records the running job so a crash can be recovered at startup.
 import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
-import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
+import { addChat, cleanPartialVersions, projectDir, stamp, updateAppState } from './store'
+import type { ChatLine } from './style-consent'
 import { toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
 
@@ -20,7 +21,9 @@ export interface ProgressDeps {
 
 /** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
-export type JobFn = (emit: Emit, signal: AbortSignal) => Promise<{ summary: string; version?: number; quiet?: boolean }>
+/** `id` is the job's id: a note is saved in project.json under it (store.ts recoverInterrupted).
+ * `chat`: the lines to post when the job ends (default: the summary). */
+export type JobFn = (emit: Emit, signal: AbortSignal, id: string) => Promise<{ summary: string; version?: number; chat?: ChatLine[] }>
 
 interface Running {
   id: string
@@ -39,14 +42,16 @@ interface Running {
 export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
   const jobs = new Map<string, Running>()
 
+  /** Projects a manual edit is writing right now: no job may start on them meanwhile. */
+  const held = new Set<string>()
+  const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+
   function forSlug(slug: string): Running | undefined {
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
-    if (slug && forSlug(slug)) {
-      throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    }
+    if (slug && (forSlug(slug) || held.has(slug))) throw BUSY
     const id = randomUUID()
     const abort = new AbortController()
     const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
@@ -56,6 +61,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
+    // after a failure or Stop, a render still being copied is never shown
+    let open = true
     const tracker = new ProgressTracker(kind, 0, history)
     let phase: Phase | undefined
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
@@ -112,25 +119,28 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           } else if (e.type === 'render') {
             const r = e
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal)
+        }, abort.signal, id)
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
           await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
         }
+        // The work is saved: bookkeeping that fails now is logged, never reported as a failed job.
         if (slug) {
           await updateAppState(slug, (s) => {
             s.job = null
             s.status = 'ready'
-          })
-          if (!res.quiet) await addChat(slug, 'editor', res.summary, res.version)
+            s.chat.push(...(res.chat ?? [{ from: 'editor', text: res.summary, version: res.version }]).map(stamp))
+          }).catch((e) => log(`[job ${kind}] saved, but app.json was not updated: ${String(e)}`))
         }
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        open = false
+        await Promise.allSettled(pending)
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
@@ -152,8 +162,21 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     return id
   }
 
+  /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
+   * on it, and no job can start on it until `fn` is done. */
+  async function hold<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+    if (forSlug(slug) || held.has(slug)) throw BUSY
+    held.add(slug)
+    try {
+      return await fn()
+    } finally {
+      held.delete(slug)
+    }
+  }
+
   return {
     start,
+    hold,
     forSlug,
     get: (id: string) => jobs.get(id),
     cancel(id: string): void {

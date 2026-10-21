@@ -18,6 +18,7 @@ import type {
   JobKind
 } from '../shared/api'
 import { mediaUrl } from './media-url'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import { keptIds } from '../shared/cut'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
@@ -195,12 +196,14 @@ export async function addChat(
   attachments?: ChatMessage['attachments']
 ): Promise<void> {
   await updateAppState(slug, (s) => {
-    s.chat.push({
-      id: randomUUID(), from, text, at: new Date().toISOString(), version,
+    s.chat.push(stamp({
+      from, text, version,
       ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
-    })
+    }))
   })
 }
+
+export const stamp = (line: ChatLine): ChatMessage => ({ id: randomUUID(), at: new Date().toISOString(), ...line })
 
 // ---- versions ---------------------------------------------------------------------------------
 
@@ -209,12 +212,15 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
   let names: string[] = []
+  let saved: number
   try {
     names = await fs.readdir(vdir)
+    saved = Number(JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')).version) || 0
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
+  // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
+  // (a higher one is a note that was never saved). Drafts live in `versions/preview/`
   // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
@@ -232,7 +238,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > saved) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
@@ -317,9 +323,14 @@ export async function recoverInterrupted(): Promise<string[]> {
     const s = await readAppState(slug)
     if (!s.job) continue
     await cleanPartialVersions(dir)
+    const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
     await updateAppState(slug, (st) => {
       st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
-      if (st.status === 'ready' && st.job?.kind !== 'export') {
+      if (saved) {
+        // the app closed right after the note was saved: say what it did, once (the job is cleared in this same write)
+        const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
+        st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
+      } else if (st.status === 'ready' && st.job?.kind !== 'export') {
         st.chat.push({
           id: randomUUID(),
           from: 'editor',
@@ -332,6 +343,18 @@ export async function recoverInterrupted(): Promise<string[]> {
     recovered.push(slug)
   }
   return recovered
+}
+
+interface SavedNote { id?: string; version: number; reply?: string; styleRulesAdded?: string[]; styleSuggestions?: string[] }
+
+/** The note a job saved in project.json (ai/src/editor.ts applyNote), if it got that far. */
+async function savedNote(dir: string, jobId: string): Promise<SavedNote | null> {
+  try {
+    const p = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')) as { notes?: SavedNote[] }
+    return p.notes?.find((n) => n.id === jobId) ?? null
+  } catch {
+    return null
+  }
 }
 
 // ---- transcript and cut ------------------------------------------------------------------------

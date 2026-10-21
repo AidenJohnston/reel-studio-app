@@ -67,13 +67,14 @@ export interface AI {
   signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again).
+   * `opts.id`: the job id the note is saved under. `opts.saveStyleRules: false`: return rules, the app asks. */
   applyNote(
     projectDir: string,
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>

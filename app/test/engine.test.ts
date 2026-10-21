@@ -100,7 +100,7 @@ describe('engine runner (against the stand-in engine)', () => {
     await expect(run('doctor', [])).rejects.toMatchObject({ code: 'ENGINE_MISSING' })
   })
 
-  it('cancel kills the engine and everything it started', async () => {
+  it('cancel settles only after the engine and everything it started have exited', async () => {
     setupPaths()
     let pid = 0
     let grandchild = 0
@@ -115,8 +115,6 @@ describe('engine runner (against the stand-in engine)', () => {
     expect(Date.now() - t0).toBeLessThan(15000)
     expect(pid).toBeGreaterThan(0)
     expect(grandchild).toBeGreaterThan(0)
-    // taskkill /T /F (or the process group kill) takes a moment.
-    for (let i = 0; i < 40 && (isAlive(pid) || isAlive(grandchild)); i++) await new Promise((r) => setTimeout(r, 100))
     expect(isAlive(pid)).toBe(false)
     expect(isAlive(grandchild)).toBe(false)
   }, 30000)

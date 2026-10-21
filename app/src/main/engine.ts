@@ -104,6 +104,14 @@ export async function killAllEngines(): Promise<void> {
   await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
 }
 
+/** Settles once the process has exited and closed its output (its ffmpeg children included). */
+function exited(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve()
+    else child.once('close', () => resolve())
+  })
+}
+
 export function createEngineRunner(cfg: RunnerConfig) {
   return function runEngine(
     command: string,
@@ -139,17 +147,22 @@ export function createEngineRunner(cfg: RunnerConfig) {
       running.add(child)
       if (child.pid) cfg.onSpawn?.(child.pid)
 
+      const gone = exited(child)
+      void gone.then(() => running.delete(child))
       const finish = (fn: () => void): void => {
         if (settled) return
         settled = true
-        running.delete(child)
         signal?.removeEventListener('abort', onAbort)
         fn()
       }
 
+      // Stop settles only once the engine and everything it started have exited: whoever runs next
+      // on this project (a new note, a cleanup) must never share its files with a dying render.
       const onAbort = (): void => {
-        if (child.pid) void killTree(child.pid)
-        finish(() => rejectPromise(cancelled()))
+        if (settled) return
+        settled = true
+        signal?.removeEventListener('abort', onAbort)
+        void Promise.all([child.pid ? killTree(child.pid) : undefined, gone]).then(() => rejectPromise(cancelled()))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
 

@@ -35,7 +35,7 @@ import {
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
 import { createLiveVideos } from './live-video'
-import { rememberQuestion, styleConsent } from './style-consent'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -229,21 +229,19 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
-    return replyAskingAboutStyle(slug, r, r.summary)
+    return replyAskingAboutStyle(r, r.summary)
   })
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
-async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
+async function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version: number; chat: ChatLine[] }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
     for (const rule of rules) if (c.undo.includes(rule.text)) await ai.removeStyleRule(rule.id).catch(() => undefined)
   }
-  await addChat(slug, 'editor', c.summary, r.version)
-  for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
-  return { summary: c.summary, version: r.version, quiet: true }
+  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version) }
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -272,7 +270,7 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
       )
       const version = Number(r?.version ?? 0)
       emit({ type: 'render', version, draft: false })
-      return { summary: '', version, quiet: true }
+      return { summary: '', version, chat: [] }
     })
     await jobs.forSlug(slug)?.done
     versions = await listVersions(dir)
@@ -449,27 +447,28 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal) => {
-        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
+      async (emit, signal, id) => {
+        // the note is saved under the job's id; the app asks before anything goes into My style
+        const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(slug, r, r.summary + extra)
+        return replyAskingAboutStyle(r, r.summary + extra)
       },
       { note: note || files.map((f) => f.name).join(', ') }
     )
     return { jobId }
   })
-  handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const p = await readProject(slug)
-    for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
-      if (!EDITABLE.includes(k)) continue
-      ;(p as any)[k] = (patch as any)[k]
-    }
-    await writeProject(slug, p)
-    const d = await detail(slug)
-    return d
-  })
+  handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
+    jobs.hold(slug, async () => {
+      const p = await readProject(slug)
+      for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        if (!EDITABLE.includes(k)) continue
+        ;(p as any)[k] = (patch as any)[k]
+      }
+      await writeProject(slug, p)
+      return detail(slug)
+    })
+  )
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's
   // own step names like "Adding pictures"), and fast to SEE: a half-size preview first (the Reel screen plays
