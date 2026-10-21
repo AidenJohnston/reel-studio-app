@@ -129,6 +129,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       live = false
     }
   }, [slug, shownN, shownVideo, notify])
+  // The player starts over at 0:00 on every new video (it is keyed on it): so does the change button.
+  const playerSrc = changePreview ?? shownVideo ?? 'none'
+  useEffect(() => {
+    setPlayhead(0)
+  }, [playerSrc])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -209,7 +214,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
-  const marks = timeline && timeline.video === version?.video ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
+  // none over a change's quick preview: it is cut differently from the saved version they are placed on
+  const marks = !changePreview && timeline && timeline.video === version?.video ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
   const sent = async (jobId: string | null) => {
     if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
     await load()
@@ -267,7 +273,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       <div className="reel">
         <div className="reel-left">
           <PhonePlayer
-            key={changePreview ?? version?.video ?? 'none'}
+            key={playerSrc}
             src={changePreview ?? version?.video ?? null}
             poster={version?.cover}
             autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
