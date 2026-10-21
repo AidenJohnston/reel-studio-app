@@ -188,6 +188,11 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
+    // this stand-in has no fast path: every note goes through applyNote above
+    async wholeReelSetting() {
+      return false
+    },
+
     async writeScript(): Promise<ScriptResult> {
       throw { code: 'NO_AI', userMessage: 'Connect ChatGPT or Claude in Settings and I can help you write a script.' }
     },

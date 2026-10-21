@@ -51,6 +51,7 @@ const api: ReelApi = {
     create: (files) => call('projects:create', files),
     resume: (slug) => call('projects:resume', slug),
     note: (slug, text, attachments, moment) => call('projects:note', slug, text, attachments, moment),
+    wholeReelSetting: (slug, text) => call('projects:wholeReelSetting', slug, text),
     timeline: (slug, n) => call('projects:timeline', slug, n),
     update: (slug, patch) => call('projects:update', slug, patch),
     rerender: (slug, change, label) => call('projects:rerender', slug, change, label),

@@ -66,7 +66,13 @@ export function ChangeAt({
   const [found, setFound] = useState<{ n: number; at: number; lookup: Lookup } | undefined>(undefined)
   const [alert, setAlert] = useState<string | null>(null)
   const [text, setText] = useState('')
-  const [scope, setScope] = useState<Scope>('here')
+  const [scope, setScopeState] = useState<Scope>('here')
+  // set when the words typed made it Whole reel, so other words can make it Just here again
+  const autoWhole = useRef(false)
+  const setScope = (v: Scope): void => {
+    autoWhole.current = false
+    setScopeState(v)
+  }
   const [sending, setSending] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   const dropDepth = useRef(0)
@@ -148,6 +154,28 @@ export function ChangeAt({
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   })
+
+  // Words that are a setting for the whole reel ("smaller captions") make it Whole reel as they are
+  // typed, by the same check the editor uses to do them at once; other words put Just here back.
+  useEffect(() => {
+    if (!isOpen || noWords || typedMoment(text) || (scope === 'whole' && !autoWhole.current)) return
+    const words = text.trim()
+    let live = true
+    const t = window.setTimeout(() => {
+      const ask = words ? reel.projects.wholeReelSetting(slug, words) : Promise.resolve(false)
+      ask
+        .then((setting) => {
+          if (!live || setting === (scope === 'whole')) return
+          setScopeState(setting ? 'whole' : 'here')
+          autoWhole.current = setting
+        })
+        .catch((e) => notify(userMessage(e), 'error'))
+    }, 200)
+    return () => {
+      live = false
+      window.clearTimeout(t)
+    }
+  }, [isOpen, noWords, text, scope, slug, notify])
 
   // A click or focus anywhere else puts it away (the words typed stay for next time). Closing an error
   // toast about an attached file is not "anywhere else".

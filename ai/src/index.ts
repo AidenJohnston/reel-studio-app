@@ -7,7 +7,8 @@ import {
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
-import { writeFileAtomic } from './project';
+import { loadProject, writeFileAtomic } from './project';
+import { planFastNote } from './fastnote';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 import { SiwcAuth } from './providers/siwc';
 import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
@@ -283,6 +284,11 @@ export function createAI(opts: CreateAIOptions) {
     },
     async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: editor.ApplyNoteOptions): Promise<AgentResult> {
       return exclusive(projectDir, async () => editor.applyNote(deps(), await modelProvider(), projectDir, note, onEvent, signal, opts));
+    },
+    /** True when applyNote would take the no-model fast path for these words ("smaller captions"):
+     * a setting for the whole reel. The app asks before adding a moment, which would hide it. */
+    async wholeReelSetting(projectDir: string, note: string): Promise<boolean> {
+      return !!planFastNote(note, await loadProject(projectDir));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);

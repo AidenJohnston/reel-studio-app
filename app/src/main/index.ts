@@ -467,8 +467,10 @@ function registerIpc(): void {
       if ('wholeReel' in c) wholeReel = c.wholeReel
       else moment = c.moment
     }
+    // A whole-reel setting ("smaller captions") goes without its moment: the moment in the AI's text
+    // would hide it from applyNote's no-model fast path. The pop-up already shows it as Whole reel.
+    if (moment && !files.length && (await ai.wholeReelSetting(dir, note))) moment = undefined
     const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat), moment)
-    if (wholeReel) await addChat(slug, 'editor', wholeReel)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
@@ -477,6 +479,8 @@ function registerIpc(): void {
       await addChat(slug, 'editor', reply.text, undefined, reply.actions)
       return { jobId: null }
     }
+    // only now that a change will really be made
+    if (wholeReel) await addChat(slug, 'editor', wholeReel)
     const before = (await readProject(slug)).version ?? 0
     const jobId = jobs.start(
       slug,
@@ -498,6 +502,7 @@ function registerIpc(): void {
     })
     return { jobId }
   })
+  handle('projects:wholeReelSetting', async (_e, slug: string, text: string) => ai.wholeReelSetting(projectDir(slug), String(text ?? '').trim()))
   handle('projects:timeline', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of your video first.' }
     return readTimeline(slug, n)
