@@ -8,6 +8,8 @@ import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, timeLeftWords, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
+import { ProgressTracker, learn } from '../src/main/progress'
+import note1 from './fixtures/live-note1-progress.json'
 import { pathFromMediaUrl } from '../src/main/media-url'
 import { projectDir } from '../src/main/store'
 import { setupPaths } from './helpers'
@@ -31,6 +33,29 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(timeLeftWords(measured)).toBe('1 minute left')
     // the AI answered with a tool call: no longer thinking
     expect(fold([{ ...J, type: 'tool', name: 'set_captions', summary: 'Added subtitles' }], s)).toMatchObject({ thinking: false, tools: ['Added subtitles'] })
+  })
+
+  it('keeps neutral wording after a numeric estimate overruns', () => {
+    const shown = fold([status({ secondsLeft: 12, approximate: true })])
+    expect(timeLeftWords(shown)).toBe('About 12 seconds left')
+    const overrun = fold([status({ secondsLeft: null, approximate: true, overdue: false })], shown)
+    expect(timeLeftWords(overrun)).toBe('Still working')
+  })
+
+  it('shows note history when available and neutral text when it is not', () => {
+    let now = 0
+    const first = new ProgressTracker('note', note1.mediaSeconds, { v: 1, phases: {} }, () => now)
+    first.update('edit', 0)
+    for (const sample of note1.samples) {
+      now = sample.t * 1000
+      const snap = first.snapshot()
+      expect(timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })).toBe('Still working')
+    }
+    const history = learn({ v: 1, phases: {} }, 'note', 39, { edit: 30, final: 16 })
+    const tracker = new ProgressTracker('note', 39, history, () => 0)
+    tracker.update('edit', 0)
+    const snap = tracker.snapshot()
+    expect(timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })).toBe('46 seconds left')
   })
 
   it('first look plays, then the AI draft replaces it, never the other way round', () => {

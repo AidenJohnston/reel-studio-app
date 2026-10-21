@@ -62,15 +62,15 @@ describe('honest progress', () => {
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: false })
   })
 
-  it('recalibrates: a slow first step makes every later estimate longer', () => {
+  it('recalibrates remaining engine defaults from a slow first step', () => {
     let now = 0
-    const onTime = new ProgressTracker('first-edit', 60, empty(), () => now)
+    const onTime = new ProgressTracker('first-edit-basic', 60, empty(), () => now)
     onTime.update('listen', 0)
     now += onTime.estimate('listen') * 1000
     onTime.update('analyze', 0)
     const a = onTime.snapshot().etaSec!
     now = 0
-    const slow = new ProgressTracker('first-edit', 60, empty(), () => now)
+    const slow = new ProgressTracker('first-edit-basic', 60, empty(), () => now)
     slow.update('listen', 0)
     now += slow.estimate('listen') * 2 * 1000
     slow.update('analyze', 0)
@@ -221,5 +221,35 @@ describe('honest progress', () => {
       date.mockRestore()
       clock.mockRestore()
     }
+  })
+
+  it('anchors an unmeasured AI range on the live run and widens it during editing', () => {
+    let now = 0
+    const tracker = new ProgressTracker('first-edit', 39, empty(), () => now)
+    tracker.update('listen', 0)
+    now = 10_000; tracker.update('edit', 0)
+    const first = tracker.snapshot()
+    expect(first.etaSec).toBeGreaterThanOrEqual(128)
+    now += 100_000
+    const later = tracker.snapshot()
+    expect(later.etaSec).toBeGreaterThanOrEqual(first.etaSec!)
+    expect(later.etaMaxSec).toBeGreaterThan(first.etaMaxSec!)
+    const history = learn(empty(), 'first-edit', 39, { edit: 128 })
+    expect(new ProgressTracker('first-edit', 39, history).estimate('edit')).toBeCloseTo(128, 1)
+  })
+
+  it('continues advancing during the observed 100-second AI stretch', () => {
+    let now = 0
+    const tracker = new ProgressTracker('first-edit', 39, empty(), () => now)
+    tracker.update('listen', 0)
+    now = 10_000; tracker.update('analyze', 0)
+    now += 300; tracker.update('edit', 0)
+    now = 41_000
+    const before = tracker.snapshot().overall
+    now = 141_000
+    expect(tracker.snapshot().overall - before).toBeGreaterThan(10)
+    const last = tracker.snapshot().overall
+    now += 1000
+    expect(tracker.snapshot().overall).toBeGreaterThan(last)
   })
 })

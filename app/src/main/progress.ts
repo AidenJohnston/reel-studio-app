@@ -13,7 +13,9 @@ export interface SpeedHistory { v: 1; phases: Partial<Record<string, PhaseModel>
 export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
   'first-edit:listen': { base: 6, perMin: 8 },
   'first-edit:analyze': { base: 2, perMin: 4 },
-  'first-edit:edit': { base: 45, perMin: 12 },
+  // 2026-10-21 live-test: Claude Sonnet via CLIProxyAPI took 128 s on IMG_7303, 39 s.
+  // AI latency is not proportional to clip length or local engine throughput.
+  'first-edit:edit': { base: 128, perMin: 0 },
   'first-edit:final': { base: 8, perMin: 25 },
   // Basic edits skip AI drafts. Checked against Aiden 5.41 s and IMG_7303 23.13 s finals
   // at 10.77 s and 39.23 s of video in the M4 Pro stage suite.
@@ -90,7 +92,8 @@ export class ProgressTracker {
   }
 
   private phaseEstimate(phase: Timed): number {
-    return this.local(phase) ? this.estimate(phase) : this.default(phase) * (this.factor() ?? 1)
+    if (this.local(phase)) return this.estimate(phase)
+    return this.default(phase) * (phase === 'edit' ? 1 : this.factor() ?? 1)
   }
 
   /** Phase transitions record elapsed wall time. Substep percentages never finish a phase. */
@@ -112,7 +115,9 @@ export class ProgressTracker {
   private fraction(): number {
     if (this.cur < 0) return 0
     const x = (this.now() - this.phaseStart) / 1000 / this.phaseEstimate(this.phases[this.cur])
-    const byTime = x <= 1 ? 0.9 * x : 1 - 0.1 / x
+    const byTime = this.phases[this.cur] === 'edit'
+      ? 0.95 * (1 - Math.exp(-x))
+      : x <= 1 ? 0.9 * x : 1 - 0.1 / x
     return Math.max(0, byTime)
   }
 
@@ -132,11 +137,18 @@ export class ProgressTracker {
     const out = { overall: this.best, approximate }
     if (!(this.mediaSec > 0)) return { ...out, etaSec: null, overdue: false }
     const observed = this.factor() !== undefined
+    const unknownEdit = remainingPhases.includes('edit') && !this.local('edit')
+    // An unmeasured AI step has a remaining-time budget, not a countdown to a known deadline.
+    if (unknownEdit && observed) {
+      const ai = this.phaseEstimate('edit')
+      const aiElapsed = this.phases[this.cur] === 'edit' ? elapsed : 0
+      const other = this.phases[this.cur] === 'edit' ? later : remaining - ai
+      return { ...out, etaSec: ai + other, etaMaxSec: 2 * ai + aiElapsed + other, overdue: false }
+    }
     // Use the existing 30-second near-completion cutoff only with local history for all work left.
     if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
     if (approximate && !observed) return { ...out, etaSec: null, overdue: false }
-    const unknownEdit = remainingPhases.includes('edit') && !this.local('edit')
-    return { ...out, etaSec: Math.max(1, remaining), ...(unknownEdit ? { etaMaxSec: Math.max(1, remaining * 2) } : {}), overdue: false }
+    return { ...out, etaSec: Math.max(1, remaining), overdue: false }
   }
 
   private recordPhase(t: number): void {

@@ -96,11 +96,12 @@ export function liveFromDetail(job: { id: string; message: string; overall: numb
   return { ...EMPTY_LIVE, jobId: job.id, message: job.message, overall: job.overall, secondsLeft: job.secondsLeft, secondsMaxLeft: job.secondsMaxLeft, approximate: job.approximate, overdue: job.overdue, thinking: job.thinking }
 }
 
-/** The time-left words for a running job: honest, or none. */
+/** The time-left words for a running job, with neutral copy when a duration is unknown. */
 export function timeLeftWords(s: Pick<LiveState, 'secondsLeft' | 'secondsMaxLeft' | 'approximate' | 'overdue'>): string | null {
   if (s.overdue) return STILL_WORKING
+  if (s.secondsLeft === null) return NEUTRAL_WORKING
   if (s.approximate === undefined) return timeLeftText(s.secondsLeft)
-  if (s.secondsLeft === null || !Number.isFinite(s.secondsLeft) || s.secondsLeft < 0) return null
+  if (!Number.isFinite(s.secondsLeft) || s.secondsLeft < 0) return null
   const unit = s.secondsLeft < 60 && (s.secondsMaxLeft ?? 0) < 60 ? 'seconds' : 'minutes'
   const divisor = unit === 'seconds' ? 1 : 60
   const low = Math.max(1, Math.round(s.secondsLeft / divisor))
@@ -110,4 +111,5 @@ export function timeLeftWords(s: Pick<LiveState, 'secondsLeft' | 'secondsMaxLeft
   return `${s.approximate ? 'About ' : ''}${low} ${word} left`
 }
 
+export const NEUTRAL_WORKING = 'Still working'
 export const STILL_WORKING = 'Still working, almost there'
