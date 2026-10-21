@@ -6,17 +6,18 @@ import { isAlive } from '../src/main/proctree'
 import { APP_DIR, FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
 import { engineEnv, initPaths } from '../src/main/paths'
 
-it('keeps the engine cache in the app userData folder', () => {
+it('applies engine cache precedence', () => {
   const userDataDir = join(APP_DIR, 'isolated user data')
-  initPaths({
-    isPackaged: false,
-    resourcesPath: '',
-    documentsDir: APP_DIR,
-    userDataDir,
-    appDir: APP_DIR,
-    env: { REELSTUDIO_USER_DATA: userDataDir, REELENGINE_CACHE: '/stale/cache' }
-  })
+  const base = { isPackaged: false, resourcesPath: '', documentsDir: APP_DIR, userDataDir, appDir: APP_DIR }
+
+  initPaths({ ...base, env: { REELENGINE_CACHE: '/explicit/cache' } })
+  expect(engineEnv().REELENGINE_CACHE).toBe('/explicit/cache')
+
+  initPaths({ ...base, env: { REELSTUDIO_USER_DATA: userDataDir } })
   expect(engineEnv().REELENGINE_CACHE).toBe(userDataDir)
+
+  initPaths({ ...base, env: {} })
+  expect(engineEnv().REELENGINE_CACHE).toBeUndefined()
 })
 
 describe('LineSplitter', () => {
