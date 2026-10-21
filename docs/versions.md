@@ -82,8 +82,9 @@ by manual updates and live engine renders:
 5. Rename the synced temporary project file over live `project.json`. This is the
    commit point. Its bytes match the version snapshot, including the note record and
    `notes[].txnId`; there is no later project-file append. Sync the project directory
-   after this rename. Unsupported directory syncs warn and continue. Other sync
-   errors abort before commit, but only warn after commit because the version is live.
+   after this rename. Only `EINVAL` or `ENOTSUP` from the directory fsync itself
+   warn and continue. Open, close and all other fsync errors abort before commit,
+   but only warn after commit because the version is live.
 6. Save requested style rules. The immutable version contains `style-rules.json` with
    the rules and their destination root. If the app closes before this finishes,
    startup replays the rules before deleting staging. Equivalent rules are not added twice.

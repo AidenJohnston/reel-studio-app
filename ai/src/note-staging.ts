@@ -189,13 +189,14 @@ async function unlinkRecoveredFile(root: string, rel: string): Promise<void> {
 }
 
 async function syncDirectory(dir: string): Promise<void> {
+  const handle = await fs.open(dir, 'r');
   try {
-    const handle = await fs.open(dir, 'r');
-    try { await handle.sync(); } finally { await handle.close(); }
-  } catch (e: any) {
-    if (!['EINVAL', 'ENOTSUP', 'EPERM'].includes(e.code)) throw e;
-    console.warn(`[note publish] directory sync unsupported for ${dir}: ${e.code}`);
-  }
+    try { await handle.sync(); }
+    catch (e: any) {
+      if (!['EINVAL', 'ENOTSUP'].includes(e.code)) throw e;
+      console.warn(`[note publish] directory sync unsupported for ${dir}: ${e.code}`);
+    }
+  } finally { await handle.close(); }
 }
 
 async function readOptional<T>(file: string): Promise<T | undefined> {

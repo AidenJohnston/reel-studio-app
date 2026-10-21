@@ -474,3 +474,30 @@ it('returns committed success when directory sync reports EINVAL after the proje
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('directory sync'));
   } finally { openSpy.mockRestore(); syncBuiltinESMExports(); warn.mockRestore(); }
 });
+
+it('aborts before live writes when opening the staging directory for sync fails with EPERM', async () => {
+  const { dir, before } = await setup();
+  const txn = await beginNote(dir);
+  const project = await loadProject(txn.dir);
+  project.music.level = 'quiet';
+  await saveProject(txn.dir, project);
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  const asset = `${txn.txnId}-image.png`;
+  await fs.writeFile(path.join(txn.dir, 'work/assets', asset), 'new image');
+  const open = fs.open;
+  const error = Object.assign(new Error('directory open denied'), { code: 'EPERM' });
+  const openSpy = vi.spyOn(mutableFs, 'open').mockImplementation(async (...args) => {
+    if (args[0] === txn.dir && args[1] === 'r') throw error;
+    return open(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    await expect(txn.publish(note, [])).rejects.toBe(error);
+    expect(txn.published).toBe(false);
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(await fs.readdir(path.join(dir, 'versions'))).toEqual(['v1']);
+    expect(await fs.readFile(path.join(dir, 'versions/v1/export.mp4'), 'utf8')).toBe('old video');
+    expect(existsSync(path.join(dir, 'work/assets', asset))).toBe(false);
+  } finally { openSpy.mockRestore(); syncBuiltinESMExports(); }
+});
