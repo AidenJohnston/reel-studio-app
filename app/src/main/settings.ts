@@ -3,9 +3,10 @@ import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
 import { settingsFile } from './paths'
 import { writeJson } from './store'
-import { UPDATE_DEFAULTS, type UpdateState } from './update-check'
 
-export interface Settings extends UpdateState {
+export interface Settings {
+  /** Settings > "Check for updates": automatic update checks (main/updater.ts). Default on. */
+  checkUpdates: boolean
   firstRunDone: boolean
   root: string | null
   /** Written by the 0.1.0/0.1.1 local-Claude-Code builds (a one-time automatic AI pick); read once by ai-carryover.ts. */
@@ -14,7 +15,7 @@ export interface Settings extends UpdateState {
   aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true }
 
 export async function loadSettings(): Promise<Settings> {
   try {
@@ -24,8 +25,8 @@ export async function loadSettings(): Promise<Settings> {
   }
 }
 
-// One save at a time: each is read-modify-write, and the update check (main/update-check.ts) saves in the
-// background, so two overlapping saves must not drop each other's change (e.g. firstRunDone).
+// One save at a time: each is read-modify-write, and saves from different places can overlap (start-up
+// bookkeeping, a Settings toggle), so two overlapping saves must not drop each other's change (e.g. firstRunDone).
 let queue: Promise<unknown> = Promise.resolve()
 
 export function saveSettings(patch: Partial<Settings>): Promise<Settings> {

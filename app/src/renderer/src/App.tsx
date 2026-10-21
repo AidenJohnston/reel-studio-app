@@ -2,11 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { AppCommand, AppInfo, ProviderInfo } from '../../shared/api'
 import { reel, userMessage } from './api'
 import type { Screen } from './nav'
-import { IS_MAC, Toast } from './components/ui'
+import { IS_MAC, Toast, type ToastExtra } from './components/ui'
 import { draggingOut } from './components/Player'
 import { Icon, type IconName } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { UpdateNotice } from './components/UpdateNotice'
+import { UpdateButton } from './components/UpdateButton'
 import { Home } from './screens/Home'
 import { NewVideo } from './screens/NewVideo'
 import { Working } from './screens/Working'
@@ -19,7 +19,7 @@ import { Script } from './screens/Script'
 import { Connect } from './screens/Connect'
 import { createFromFiles, describeSorted } from './screens/create'
 
-type Notify = (text: string, kind?: 'error' | 'info') => void
+type Notify = (text: string, kind?: 'error' | 'info', extra?: ToastExtra) => void
 const NotifyCtx = createContext<Notify>(() => {})
 export const useNotify = (): Notify => useContext(NotifyCtx)
 
@@ -41,12 +41,12 @@ const hasFiles = (e: DragEvent): boolean => !!e.dataTransfer && Array.from(e.dat
 export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [screen, setScreen] = useState<Screen>({ name: 'home' })
-  const [toast, setToast] = useState<{ text: string; kind?: 'error' | 'info'; id: number } | null>(null)
+  const [toast, setToast] = useState<{ text: string; kind?: 'error' | 'info'; extra?: ToastExtra; id: number } | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [dragging, setDragging] = useState(false)
   const [overNote, setOverNote] = useState(false) // a drag over the note box (Reel.tsx): it attaches, no overlay
   const [libraryTick, setLibraryTick] = useState(0)
-  const notify = useCallback<Notify>((text, kind) => setToast({ text, kind, id: Date.now() }), [])
+  const notify = useCallback<Notify>((text, kind, extra) => setToast({ text, kind, extra, id: Date.now() }), [])
   const closeToast = useCallback(() => setToast(null), [])
   // A toast belongs to the screen it was said on: every screen change clears it (critique 1.1).
   const go = useCallback((s: Screen) => {
@@ -162,7 +162,7 @@ export function App() {
 
   if (!info) return null
   const platform = `platform-${info.platform}`
-  const toastEl = toast && <Toast key={toast.id} text={toast.text} kind={toast.kind} onClose={closeToast} />
+  const toastEl = toast && <Toast key={toast.id} text={toast.text} kind={toast.kind} extra={toast.extra} onClose={closeToast} />
 
   if (!info.firstRunDone) {
     return (
@@ -215,7 +215,7 @@ export function App() {
               </button>
             ))}
           </nav>
-          <UpdateNotice />
+          <UpdateButton />
           <div className="sidebar-foot" data-testid="ai-status">
             {provider &&
               (aiOn ? (

@@ -66,8 +66,30 @@ packaging/build-mac.sh          # builds the unsigned app (about 5 minutes the f
 packaging/sign-mac.sh           # signs everything, notarizes, staples, builds the signed .dmg
 ```
 
-When it ends it prints `DONE.` and the path to the finished installer:
-`app/release/signed/Reel-Studio-<version>-arm64.dmg`. That file is what you give to people.
+When it ends it prints `DONE.` and three files in `app/release/signed/`:
+
+| File | What it is for |
+|---|---|
+| `Reel-Studio-<version>-arm64.dmg` | The installer you give to people. |
+| `Reel-Studio-<version>-arm64-mac.zip` | The same signed, stapled app, zipped: what installed copies download to update themselves. |
+| `latest-mac.yml` | Tells installed copies the new version number and the zip's checksum and size. |
+
+### Release: upload all three
+
+Attach the `.dmg`, the `-mac.zip` and `latest-mac.yml` from `app/release/signed/` to the GitHub release, next to
+the Windows installer and the GPL source files. Use those three exactly as the script wrote them: the yml holds
+the zip's checksum, so a zip from any other run (or re-zipped by hand) makes every update fail its check. Do not
+upload `app/release/latest-mac.yml` if electron-builder left one there; it describes the unsigned build.
+
+Then:
+
+* Publish it as a normal release, not a pre-release, with the tag `v<version>` (for example `v0.1.3`). The
+  update check follows GitHub's "Latest release", which skips pre-releases and drafts.
+* When you publish anything else on this repository (an `ffmpeg-...` source release, for example), untick
+  "Set as the latest release". If a release without `latest-mac.yml` becomes "Latest", installed copies cannot
+  find their update and say so in Settings until the next app release is Latest again.
+* Check it: `curl -sL https://github.com/AidenJohnston/reel-studio-app/releases/latest/download/latest-mac.yml`
+  prints the new version.
 
 Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh --spike` then
 `packaging/sign-mac.sh --spike`.
@@ -82,9 +104,12 @@ Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh
 3. `codesign --verify --deep --strict`.
 4. Zips the app, sends it to Apple with `xcrun notarytool submit --wait`, then `xcrun stapler staple`
    attaches the approval ticket to the app so it also works offline.
-5. Builds the `.dmg`, signs it, notarizes it, staples it.
+5. Builds the `.dmg`, signs it, notarizes it, staples it. Zips the stapled app with `ditto` (which keeps the
+   bundle exactly as signed) into `Reel-Studio-<version>-arm64-mac.zip` and writes `latest-mac.yml` with that
+   zip's sha512 and size (`packaging/latest-mac.js`).
 6. Final checks: `codesign --verify --deep --strict`, `spctl -a -vv` (must say `accepted` and
-   `source=Notarized Developer ID`), `xcrun stapler validate`.
+   `source=Notarized Developer ID`), `xcrun stapler validate`; then unzips the update zip and checks that the
+   app inside is still validly signed, stapled, and carries `app-update.yml` (where it looks for updates).
 
 Any problem stops the script with a plain message.
 

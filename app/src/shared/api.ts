@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { UpdateActionResult, UpdateBusy, UpdateState } from './update'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -393,28 +394,21 @@ export interface ReelApi {
     /** Test builds only. `template` defaults to the bundled self-test template. */
     renderTestAnimation(outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>): Promise<string>
   }
-  /** "Update available" notice (main/update-check.ts). Tells, never installs. */
+  /** Updates (main/updater.ts). Downloads and installs only when the person clicks. */
   update: {
-    status(): Promise<UpdateStatus>
-    /** Settings > "Check for updates". Turning it on checks at once (still at most once a day). */
-    setEnabled(on: boolean): Promise<UpdateStatus>
-    /** Open the release page in the browser. Main opens only our GitHub releases pages. */
-    open(url: string): Promise<void>
-    /** "Not now": hide it until a newer version comes out, or until tomorrow. */
-    dismiss(version: string): Promise<void>
-    /** A notice to show, or null to hide it (checks switched off). */
-    onChange(cb: (n: UpdateNotice | null) => void): () => void
+    state(): Promise<UpdateState>
+    onState(cb: (s: UpdateState) => void): () => void
+    /** A check the person asked for; checked=false when it could not run (updates off, or busy). */
+    check(): Promise<{ checked: boolean; state: UpdateState }>
+    download(): Promise<UpdateActionResult>
+    /** Restart into the downloaded version. Refused (refused: 'exporting') while an export writes its file. */
+    install(): Promise<UpdateActionResult>
+    /** Open the available version's release page in the browser (only our GitHub releases). */
+    openRelease(): Promise<void>
+    /** What restarting now would interrupt. */
+    busy(): Promise<UpdateBusy>
+    /** Settings > "Check for updates": `enabled` = automatic checks on. */
+    status(): Promise<{ enabled: boolean }>
+    setEnabled(on: boolean): Promise<{ enabled: boolean }>
   }
-}
-
-/** A newer Reel Studio is out. `url` is its release page on GitHub. */
-export interface UpdateNotice {
-  version: string
-  url: string
-}
-
-export interface UpdateStatus {
-  enabled: boolean
-  /** What to show now; null = nothing (up to date, not checked yet, off, or "Not now"). */
-  notice: UpdateNotice | null
 }

@@ -87,6 +87,15 @@ extraResources:
   - from: ${env.RS_REPO_ROOT}/packaging/licenses/yunet-MIT.txt
     to: engine/reelengine/models/LICENSE-YuNet-MIT.txt
 
+# Where the installed app looks for updates (main/updater.ts). electron-builder writes this into the app as
+# resources/app-update.yml even with --publish never; nothing is uploaded by the build. The Mac update zip and
+# latest-mac.yml come from packaging/sign-mac.sh, after signing (docs/signing-mac.md, "Release").
+publish:
+  provider: github
+  owner: AidenJohnston
+  repo: reel-studio-app
+  releaseType: release
+
 # afterPack (packaging/after-pack.js: compiles .pyc for python/ and engine/ BEFORE signing, so the bundle is
 # never written to at runtime and engine start-up stays fast) is appended by make-config.js.
 

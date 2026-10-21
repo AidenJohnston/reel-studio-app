@@ -14,7 +14,8 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `after-pack.js` | electron-builder hook: pre-compiles Python bytecode inside the packed app before signing. |
 | `build-win.ps1` / `build-mac.sh` | One command each: fetch runtime, build the app JS, package. `-Spike` / `--spike` packages the spike instead of `app/`. |
 | `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls. |
-| `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
+| `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg, plus the update zip and `latest-mac.yml`. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
+| `latest-mac.js` | Writes `latest-mac.yml` (version, zip name, sha512, size) for the signed update zip. Called by `sign-mac.sh`. |
 | `entitlements.main.plist` / `entitlements.inherit.plist` | Hardened-runtime entitlements: `allow-jit` only, for the Electron main process and its helper apps. Python, ffmpeg and every dylib are signed with none. |
 | `spike/` | Minimal Electron app with `--self-test` that proves the bundled Python/ffmpeg/model/transcribe chain works from an INSTALLED copy. |
 
@@ -31,6 +32,16 @@ packaging/build-mac.sh            # or --spike
 #   -> <app>/release/Reel-Studio-<version>-arm64.dmg   (+ release/mac-arm64/<Product>.app)
 packaging/sign-mac.sh             # run in a GUI session: sign + notarize + staple
 ```
+
+### Updates
+
+The `publish` block in `electron-builder.yml` makes electron-builder write `resources/app-update.yml` into the
+app (even with `--publish never`; nothing is uploaded by a build). The installed app reads it to find new
+releases on GitHub (`app/src/main/updater.ts`). On macOS each release needs three files from
+`release/signed/`: the `.dmg`, `Reel-Studio-<version>-arm64-mac.zip` and `latest-mac.yml`
+(`docs/signing-mac.md`, "Release"). Windows does not update itself yet: electron-updater checks a Windows
+installer's signature only when the build is signed, so until then the app only opens the download page
+(`app/src/main/update-machine.ts`, `updateMode`).
 
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.

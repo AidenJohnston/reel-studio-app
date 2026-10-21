@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths } from '../api'
 import { Icon } from './icons'
 
@@ -25,20 +25,35 @@ export function Thinking() {
   )
 }
 
+/** A toast's optional heading and one link-style action ("Update downloaded" / "Read more"). */
+export interface ToastExtra {
+  title?: string
+  action?: { label: string; run: () => void }
+}
+
 /**
- * Toasts: a success line goes away by itself after 4 s and has no button to press. An error stays
- * until it is closed or the screen changes (App clears toasts on every screen change).
+ * Toasts: a success line goes away by itself after 4 s and has no button to press. An error, or a toast with
+ * an action to reach, stays until it is closed or the screen changes (App clears toasts on every screen change).
  */
-export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 'info'; onClose: () => void }) {
+export function Toast({ text, kind, extra, onClose }: { text: string; kind?: 'error' | 'info'; extra?: ToastExtra; onClose: () => void }) {
+  const stays = kind === 'error' || !!extra?.action
   useEffect(() => {
-    if (kind === 'error') return
+    if (stays) return
     const t = setTimeout(onClose, 4000)
     return () => clearTimeout(t)
-  }, [text, kind, onClose])
+  }, [text, stays, onClose])
   return (
-    <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast">
-      <span>{text}</span>
-      {kind === 'error' && (
+    <div className={`toast${kind === 'error' ? ' error' : ''}${stays ? ' closable' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast">
+      <span>
+        {extra?.title && <strong className="toast-title">{extra.title}</strong>}
+        {text}
+        {extra?.action && (
+          <button className="toast-action" onClick={extra.action.run} data-testid="toast-action">
+            {extra.action.label}
+          </button>
+        )}
+      </span>
+      {stays && (
         <button className="icon-btn on-dark" onClick={onClose} aria-label="Close" title="Close">
           <Icon name="x" />
         </button>
@@ -48,7 +63,7 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
 }
 
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
-export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
+export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
@@ -69,7 +84,7 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
+      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal aria-labelledby={labelledBy} data-testid={testid}>
         {children}
       </div>
     </div>
@@ -78,9 +93,10 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
 
 /** "Are you sure?" with the safe choice in focus. */
 export function Confirm(props: { title: string; body: string; yes: string; no: string; danger?: boolean; onYes: () => void; onNo: () => void }) {
+  const titleId = useId()
   return (
-    <Modal onClose={props.onNo} testid="confirm">
-      <h2>{props.title}</h2>
+    <Modal onClose={props.onNo} testid="confirm" labelledBy={titleId}>
+      <h2 id={titleId}>{props.title}</h2>
       <p className="muted">{props.body}</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn ghost" onClick={props.onNo} data-autofocus data-testid="confirm-no">

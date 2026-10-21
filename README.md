@@ -109,10 +109,16 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-One request happens without you asking: at most once a day it asks GitHub's public releases list
-(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`) whether a newer version is out, sending only a
-generic `User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so;
-nothing is downloaded or installed. Turn it off in Settings with "Check for updates".
+One request happens without you asking: 15 seconds after it opens and then every 4 hours, Reel Studio asks GitHub
+whether a newer version is out. On a Mac that is the repository's public release feed on `github.com`
+(`/AidenJohnston/reel-studio-app/releases.atom`, `/releases/latest` and the newest release's `latest-mac.yml`);
+on Windows it is GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`).
+Nothing about you or your videos is sent: no cookies, account or ID. (The update library normally adds a random
+ID per computer to these requests; Reel Studio replaces it with the same all-zero value for everyone.) If there
+is a newer version, an update button appears in the sidebar. Nothing is downloaded until you click it; on a Mac
+it then downloads the update from the GitHub release and installs it when you choose to restart. On Windows the
+button opens the download page until the installer is signed. Turn the automatic check off in Settings with
+"Check for updates".
 
 ## Build from source
 

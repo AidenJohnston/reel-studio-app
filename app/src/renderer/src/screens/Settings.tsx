@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { AppInfo } from '../../../shared/api'
-import { RELEASES_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { ConnectAI, DevProviders, ModelDownload, USING_CLAUDE_CODE } from '../components/connect'
 import { FOLDER_APP } from '../components/ui'
 import { Icon } from '../components/icons'
+import { UpdateSettingsRow } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
@@ -95,16 +95,11 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
               Check for updates
             </label>
             <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
-              Once a day, Reel Studio asks GitHub if there is a newer version. Nothing about you or your videos is sent.
+              Every few hours, Reel Studio asks GitHub if there is a newer version. It downloads one only when you click. Nothing about you or your videos is sent.
             </p>
           </>
         )}
-        <div className="row" style={{ marginTop: 12 }}>
-          {/* Opens the releases page in the browser (window open handler). The automatic check is main/update-check.ts. */}
-          <a className="btn ghost" href={RELEASES_URL} target="_blank" rel="noreferrer">
-            <Icon name="external" size={16} /> Check for a newer version
-          </a>
-        </div>
+        <UpdateSettingsRow />
         {info.engine.mode === 'fake' && (
           <p className="muted-sm" style={{ marginTop: 6 }}>
             Test engine in use.
