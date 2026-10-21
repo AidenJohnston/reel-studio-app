@@ -4,7 +4,20 @@ import { join } from 'node:path'
 import { createEngineRunner, LineSplitter, parseEngineLine, type EngineError } from '../src/main/engine'
 import { isAlive } from '../src/main/proctree'
 import { APP_DIR, FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
-import { engineEnv } from '../src/main/paths'
+import { engineEnv, initPaths } from '../src/main/paths'
+
+it('keeps the engine cache in the app userData folder', () => {
+  const userDataDir = join(APP_DIR, 'isolated user data')
+  initPaths({
+    isPackaged: false,
+    resourcesPath: '',
+    documentsDir: APP_DIR,
+    userDataDir,
+    appDir: APP_DIR,
+    env: { REELSTUDIO_USER_DATA: userDataDir, REELENGINE_CACHE: '/stale/cache' }
+  })
+  expect(engineEnv().REELENGINE_CACHE).toBe(userDataDir)
+})
 
 describe('LineSplitter', () => {
   it('joins lines split across chunks, including a split UTF-8 character and CRLF', () => {

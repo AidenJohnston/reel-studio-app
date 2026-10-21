@@ -172,6 +172,10 @@ export function engineEnv(): NodeJS.ProcessEnv {
     REELENGINE_MODELS: modelsDir(),
     REELENGINE_ROOT: reelStudioRoot()
   }
+  delete out.REELENGINE_CACHE
+  // Linux's default engine cache is ~/.local/share/reel-studio, not Electron's userData.
+  // Keep it there unless this run explicitly isolates userData.
+  if (need().platform !== 'linux' || env().REELSTUDIO_USER_DATA) out.REELENGINE_CACHE = settingsDir()
   // Only absolute paths: a bare name means "not found", and the engine does its own PATH search.
   if (isAbsolute(ffmpegPath())) out.REELENGINE_FFMPEG = ffmpegPath()
   if (isAbsolute(ffprobePath())) out.REELENGINE_FFPROBE = ffprobePath()
