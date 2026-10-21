@@ -1,31 +1,30 @@
 // The version menu's "what changed" line for each version (src/shared/versions.ts).
 import { expect, it } from 'vitest'
 import { versionChanges } from '../src/shared/versions'
-import type { ChatMessage } from '../src/shared/api'
+import type { ChatMessage, ProjectJson, VersionInfo } from '../src/shared/api'
 
-let id = 0
-const you = (text: string): ChatMessage => ({ id: String(id++), from: 'you', text, at: '' })
-const editor = (text: string, version?: number): ChatMessage => ({ id: String(id++), from: 'editor', text, at: '', ...(version ? { version } : {}) })
+const at = (minute: number): string => new Date(Date.UTC(2026, 9, 21, 9, minute)).toISOString()
+const version = (n: number, minute: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: at(minute) })
+const editor = (text: string, v: number, minute: number): ChatMessage => ({ id: `${v}-${minute}`, from: 'editor', text, at: at(minute), version: v })
+type Note = NonNullable<ProjectJson['notes']>[number]
+const note = (text: string, v: number, minute: number, applied = ['captions']): Note => ({ version: v, text, applied, at: at(minute) })
 
-it('credits each version to the note that made it, else to what the editor said, and never to a note that made none or was stopped', () => {
+it('takes a line only from what was recorded once the final render made that version', () => {
+  const versions = [version(1, 0), version(2, 20), version(3, 30), version(4, 40)]
   const chat = [
-    editor('Your video is ready. I cut out the pauses and added subtitles.', 1),
-    you('Make the captions bigger please'),
-    editor('There is no AI editor connected, so I cannot change that from a note.'),
-    editor('Version 2: bigger yellow subtitles, moved up.', 2),
-    you('music too loud at the start'),
-    editor('I made the music quieter for the first ten seconds.', 3),
-    you('thanks'),
-    editor('I saved your note.', 3),
-    editor('Version 4 is ready.', 4),
-    you('make it blue'), // stopped: no reply
-    editor('Version 5: new cover.', 5)
+    editor('Your video is ready.', 1, 1),
+    // a note whose final render failed: its reply and note entry carry the number the edit would have got
+    editor('I made your subtitles pop.', 2, 10),
+    editor('I made the music quieter.', 2, 21),
+    editor('Version 3: new cover.', 3, 31),
+    // no announcement for Version 4, only a later reply that changed nothing
+    editor('I looked, but I was not sure what to change.', 4, 45)
   ]
-  expect([...versionChanges(chat)]).toEqual([
+  const notes = [note('make the subtitles pop', 2, 10), note('music too loud', 2, 21, ['music']), note('thanks', 4, 45, [])]
+  expect([...versionChanges(versions, chat, notes)]).toEqual([
     [1, 'First edit'],
-    [2, 'Bigger yellow subtitles, moved up'],
-    [3, '“music too loud at the start”'],
-    [4, ''],
-    [5, 'New cover']
+    [2, '“music too loud”'],
+    [3, 'New cover'],
+    [4, 'Changes not recorded']
   ])
 })

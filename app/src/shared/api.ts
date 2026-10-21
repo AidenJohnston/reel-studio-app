@@ -90,6 +90,9 @@ export interface ProjectDetail extends ProjectSummary {
   words: Word[]
   keptIds: string[]
   checklist: ChecklistItem[]
+  /** "What I did" for each older version (number -> list), from the project.json its final render saved.
+   * A version with no readable snapshot is missing. The latest version uses `checklist`. */
+  versionChecklists: Record<number, ChecklistItem[]>
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
   job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null

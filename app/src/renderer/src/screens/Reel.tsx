@@ -44,8 +44,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
-  // The version the person last picked in the switcher. Every pick (ask) starts it playing, with sound.
-  const [picked, setPicked] = useState<{ n: number; ask: number } | null>(null)
+  // A version picked in the switcher plays with sound. The player clears the request once it has
+  // started, so a later remount (a preview that ends, a stopped render) never replays it.
+  const [playRequest, setPlayRequest] = useState<{ n: number; ask: number } | null>(null)
+  const playAsks = useRef(0)
+  // Arriving from Working, the latest version plays muted, until the person picks a version.
+  const [freshPlay, setFreshPlay] = useState(!!fresh)
   const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
@@ -288,7 +292,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'post') extras.push({ key: c.key, label: 'Write a post caption', run: () => setPostDraft(d.project.post?.caption ?? ''), testid: 'write-post' })
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
-  const done = d.checklist.filter((c) => c.done)
+  // An older version on screen: "What I did" describes it, from its own project.json, and hides the
+  // Change links and extras, which would edit the latest version. Without that file the card says it
+  // describes the latest version.
+  const olderShown = !!version && version.n !== d.versions[d.versions.length - 1]?.n
+  const olderList = olderShown && version ? d.versionChecklists[version.n] : undefined
+  const done = (olderList ?? d.checklist).filter((c) => c.done)
 
   const many = d.versions.length > 1
   const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
@@ -301,8 +310,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             key={changePreview ?? version?.video ?? 'none'}
             src={changePreview ?? version?.video ?? null}
             poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && !picked && version?.n === d.versions[d.versions.length - 1]?.n)}
-            playRequest={!changePreview && picked && picked.n === version?.n ? picked.ask : undefined}
+            autoPlayMuted={!!changePreview || (freshPlay && version?.n === d.versions[d.versions.length - 1]?.n)}
+            playRequest={!changePreview && playRequest?.n === version?.n ? playRequest?.ask : undefined}
+            onPlayRequestHandled={() => setPlayRequest(null)}
             subtitle={drawer === 'captions' && preview ? preview : null}
             still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
             instagram={igOverlay}
@@ -392,10 +402,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <VersionSwitch
                   versions={d.versions}
                   shown={version.n}
-                  changes={versionChanges(d.chat)}
+                  changes={versionChanges(d.versions, d.chat, d.project.notes)}
                   onPick={(n) => {
                     setSelected(n)
-                    setPicked((p) => ({ n, ask: (p?.ask ?? 0) + 1 }))
+                    setFreshPlay(false)
+                    // while a change's preview is showing, the picked version is not on screen to play
+                    if (!changePreview) setPlayRequest({ n, ask: ++playAsks.current })
                   }}
                 />
               )}
@@ -434,7 +446,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           )}
 
           <section className="panel did" data-testid="what-i-did">
-            <h2>What I did</h2>
+            <h2>
+              {olderList && version ? `What I did in Version ${version.n}` : 'What I did'}
+              {olderShown && !olderList && <span className="muted-sm did-scope"> In the latest version</span>}
+            </h2>
             <ul className="checklist two">
               {done.map((c) => {
                 const line = doneLine(c)
@@ -444,7 +459,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     <div style={{ minWidth: 0 }}>
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
-                      {line.act && !job && (
+                      {line.act && !job && !olderList && (
                         <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
@@ -454,7 +469,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && (
+            {extras.length > 0 && !job && !olderList && (
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (

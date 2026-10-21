@@ -492,6 +492,11 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
+  const versionChecklists: Record<number, ChecklistItem[]> = {}
+  for (const v of versions.slice(0, -1)) {
+    const snap = await readJson<ProjectJson | null>(join(dir, 'versions', `v${v.n}`, 'project.json'), null)
+    if (snap) versionChecklists[v.n] = checklist(snap, words, keptIds(words, snap.cut?.keep), [v], !!st.aiEdited)
+  }
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
@@ -518,6 +523,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     keptIds: kept,
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
+    versionChecklists,
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,

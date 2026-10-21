@@ -282,6 +282,7 @@ a { color: inherit; }
 /* Under ~1080 px the title column is too narrow for the step arrows beside "Edit it myself"; the menu and the
    arrow keys still switch versions. */
 @media (max-width: 1080px) { .vswitch-step { display: none; } .vswitch { margin-left: 0; } }
+.did-scope { font-weight: 500; letter-spacing: 0; }
 .vswitch-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .vmenu {
   position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: 340px; max-height: min(420px, 60vh); overflow-y: auto;
