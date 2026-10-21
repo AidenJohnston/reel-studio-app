@@ -25,6 +25,7 @@ describe('fast notes (no model turns)', () => {
     expect(kind('bigger subtitles please')).toBe('captions-bigger');
     expect(kind('move the captions up')).toBe('captions-up');
     expect(kind('no captions')).toBe('captions-off');
+    expect(kind('no music')).toBe('music-off');
     expect(kind('the music is too loud')).toBe('music-quieter');
     expect(kind('quieter music')).toBe('music-quieter');
     expect(kind('remove the music')).toBe('music-off');
@@ -33,11 +34,28 @@ describe('fast notes (no model turns)', () => {
       'always use smaller captions', 'captions smaller when I say twenty bucks', 'can the music be quieter?',
       'different music', 'add a picture of my dog', 'cut the part where I say B-flat', 'make it better',
       'captions say Oregon but I said Oregano']) expect(kind(n)).toBeNull();
+    for (const note of ["Don't make captions smaller", 'don’t remove captions',
+      'cannot remove captions', 'keep captions smaller', 'not too loud music']) {
+      expect(planFastNote(note, p), note).toBeNull();
+    }
     // already at the floor: the AI explains instead of a no-op
     p.captions.style = { ...(p.captions.style as any), size: 80 };
     expect(planFastNote('smaller captions', p)).toBeNull();
     p.music.level = 'quiet';
     expect(planFastNote('quieter music', p)).toBeNull();
+  });
+
+  it('fails if the negation guard sends the cannot-hear complaint to the model', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const p = await loadProject(dir);
+    p.music.level = 'quiet';
+    await saveProject(dir, p);
+    const model = new ScriptedModel([new Error('the model must not be called')]);
+    const ai = createAI({ host, settingsDir, providerOverride: model });
+    const result = await ai.applyNote(dir, "can't hear the music", () => undefined);
+    expect(model.requests).toHaveLength(0);
+    expect(result.fast).toBe('music-louder');
+    expect((await loadProject(dir)).music.level).toBe('under-voice');
   });
 
   it('applies a simple note with one direct change and one final render, no model', async () => {

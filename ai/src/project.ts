@@ -17,7 +17,7 @@ export interface Transcript { words: Word[]; language?: string; [k: string]: unk
 
 export interface CaptionStyle {
   preset?: string; font?: string; size?: number; maxWords?: number;
-  case?: 'upper' | 'lower' | 'sentence' | 'as-is' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
+  case?: 'upper' | 'lower' | 'as-is' | 'title' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
   [k: string]: unknown;
 }
 export interface CaptionCorrection { from: string; to: string }
@@ -304,6 +304,30 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
+
+/** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
+export function hasCaptionPhrase(kept: readonly Word[], phrase: string, replacement: string): boolean {
+  const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
+  const words: string[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const word = kept[i].w;
+    const next = kept[i + 1]?.w;
+    if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
+      words.push(word.trim() + next.trim());
+      i++;
+    } else words.push(word);
+  }
+  if (!phrase.trim()) return false;
+  const target = phrase.trim().split(/\s+/).map(bare);
+  if (target.length === 1 && replacement.trim() && replacement.trim().split(/\s+/).length === 1) {
+    return words.some((word) => {
+      // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
+      const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word)?.[1].toLowerCase();
+      return core === target[0] || core?.split(/['’]/)[0] === target[0];
+    });
+  }
+  return words.some((_word, i) => target.every((word, k) => words[i + k] !== undefined && bare(words[i + k]) === word));
+}
 
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */
 export function findPhrase(t: Transcript, phrase: string, keep?: WordAnchor[]): WordAnchor | null {
