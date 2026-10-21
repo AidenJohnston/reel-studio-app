@@ -1,9 +1,9 @@
 // Watching the reel full screen from the Reel screen: the window goes full screen and the reel fills
 // its height at 9:16, playback carries over both ways, Space plays and pauses, Esc and the Exit
 // button close it and focus goes back to "Full screen". Then: Esc straight after opening, Space
-// while closing, an export dialog opened from the menu while watching, the smallest window, a window
-// already in macOS full screen (it must stay there, and opening again after leaving it must work),
-// and reduced motion.
+// while closing, exporting from the menu while watching (the view closes for the dialog), the
+// smallest window, a window already in macOS full screen (it must stay there, and opening again after
+// leaving it must work), and reduced motion.
 //
 // Run: npx playwright test e2e/fullscreen.spec.ts (after npm run build).
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
@@ -122,7 +122,7 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
   await expect.poll(async () => (await media(page, 'fullscreen-video')).paused).toBe(false)
   await page.getByTestId('exit-fullscreen').click()
   await closed(page, app)
-  expect((await media(page, 'player')).paused).toBe(false)
+  await expect.poll(async () => (await media(page, 'player')).paused).toBe(false)
   await player.evaluate((v: HTMLVideoElement) => v.pause())
 
   // ---- Esc straight after opening: the opening reverses and the window comes back ----
@@ -139,18 +139,18 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
   expect((await media(page, 'player')).paused).toBe(false)
   await player.evaluate((v: HTMLVideoElement) => v.pause())
 
-  // ---- Cmd+E while watching: the export dialog waits behind, Esc closes only the full-screen view,
-  // and focus goes to the dialog ----
+  // ---- Cmd+E / File > Export while watching: the view closes and the export dialog shows at once,
+  // as it does without the view ----
   await open(page)
+  await expect.poll(() => winFull(app), { timeout: 10_000 }).toBe(true)
   await page.evaluate(() => window.dispatchEvent(new Event('reel:export')))
-  await expect(page.getByText('Saved to your computer')).toHaveCount(1, { timeout: 120_000 })
-  await page.keyboard.press('Escape')
   await expect(page.getByTestId('fullscreen')).toHaveCount(0)
   await expect(page.getByTestId('export-dialog')).toBeVisible()
-  await expect(page.getByTestId('export-dialog').locator(':focus')).toHaveCount(1)
+  expect(await page.evaluate(() => document.getElementById('root')!.inert)).toBe(false)
+  await expect.poll(() => settledFull(app), { timeout: 15_000 }).toBe(false)
+  await expect(page.getByTestId('export-saved')).toBeVisible({ timeout: 120_000 })
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('export-dialog')).toHaveCount(0)
-  await expect.poll(() => settledFull(app), { timeout: 15_000 }).toBe(false)
 
   // ---- the smallest window the app allows (1024 x 700): the view still fills the screen at 9:16 ----
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 700))
