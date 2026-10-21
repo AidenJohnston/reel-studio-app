@@ -1,24 +1,26 @@
 {
-  "syncCommit": "b2f302508c549de26f7871ec74667325256ee55d",
+  "syncCommit": "152e91318640523c1c8beb08e5b7eec7281c8388",
   "files": {
-    "ai/src/note-staging.ts": "b424862c86d44d8265b24748190c2078ce94f2f1bb8c27b5acb1e91ef661fa68",
+    "ai/src/note-staging.ts": "2ae673b002e6dbbea37fd1f1b6eb566ed9c59c81a0c9593f7f08d5f536fae26b",
     "ai/src/project.ts": "9f6313213cc9ea73c19d6cb90a8ea6e855ee33a97961aa55a85efcf26ee4332f",
     "ai/src/editor.ts": "722d3118aa82d507766cdde9baef433f63897bf4d812c6c8f86208fd0e6f9ff7",
     "ai/src/tools.ts": "380e277b7db6e72d7273986838059f0b32b20a354f263d554e136512c345c7d9",
     "ai/src/index.ts": "43603654ea097dfcf6b07c350c177e02a65420c22e8f0db6d1f4a22f30018737",
     "app/src/main/index.ts": "b5f0ffda2a480e2569b73dd45321c051058a511ac22c3f4ca5838c4f67ddfa9f",
-    "app/src/main/store.ts": "df63868853aafd2c2eb363d388f829fda1c07275caf21f4b2e6dc8840607d07a",
+    "app/src/main/store.ts": "7b197de9f225d5e0a1d9a2b64304eba4c790260d1608939ef022d2da13c17a87",
     "app/src/main/jobs.ts": "5e354728ab79653dd945fc0d394a6f1a3b95261a6fd2b22a244d978db9fe69de",
     "engine/reelengine/render.py": "d8960cd114b73ff21c94eda13c4bac15d27f09b8df150fb784a731757e94b5d0",
-    "docs/versions.md": "c80a754de25519fe9873ba00e8f08f999f08abad6685c505d01dcde1a7511f87",
+    "docs/versions.md": "29adc6730d3468afb44f3f843da5ac16573f17da0e5701122eeb42a9b2d716c1",
     "ai/src/cli.ts": "cb5ecc6fbcedeb8533ab8224bb0483fb55c38752d11c5da82b522b6200fbb5d1",
-    "app/src/main/ai.ts": "7192cc466d7179aab465be079d87495bd833d325d0fa41e216828a4256e617c7",
+    "app/src/main/ai.ts": "7557f2f814ae18c0be3b207a5fdff45b72f08e5e2d4c167d2361fec9f7e82a25",
     "app/src/main/project-engine.ts": "b6b3f94b0a492ea604532a26f3e0456538ec56d6f737fbbb9064cc946380073c",
     "app/src/main/engine.ts": "a6001cfc2cd7b10a3e1f8ede3cdb92e3b329ce773482a25b85b4838cebb923ce",
-    "app/src/main/media.ts": "066028c66505d8446dfbd487e67f2235a9d0085959d942fa029be954fa3aaea1",
+    "app/src/main/media.ts": "11f82a074e3cb5a475e526f65d8cce7c9634a5172004ccc34c1ebca298bf2831",
     "app/src/main/staging-media.ts": "777cd3fbec7044068f5f83dce924c2e890c370d2a28ab6d9e3a0bf7edc75d9ac",
-    "app/src/main/live-video.ts": "0fa198ffd529bd348d9252a786804ab64ad08475666d75760a3b2e24d34e68c7",
-    "engine/reelengine/cache.py": "10ff00b6581f55772ac2af3d0f6313373ea7f7db68f3f8b85231a83020355f57",
-    "engine/reelengine/cli.py": "bbc5b834bfcef3057cd33229932fd08a18b6bedad3d800f2e46bc979e37b4d1e"
+    "app/src/main/live-video.ts": "5a2ad011c234d5ce1efc94713b9c8dbe86a8201da208189c2fec21dbd754b0ee",
+    "engine/reelengine/cache.py": "f4279c7d5f5b8fe088544cc5231c6864fb752322333f898c796be2e687c0a7a9",
+    "engine/reelengine/cli.py": "bbc5b834bfcef3057cd33229932fd08a18b6bedad3d800f2e46bc979e37b4d1e",
+    "ai/src/style.ts": "b372c90c385b2e6199560322b826574ab7962402558597e0255c2cf665fd3d00",
+    "engine/reelengine/assets.py": "1119618064916a8d271dc97f87ddd0aa06eecf02dc1307d38695bcf720261d53"
   }
 }

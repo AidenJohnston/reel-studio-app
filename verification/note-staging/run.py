@@ -84,6 +84,7 @@ def main():
                         help="Exit 0 if expected results reproduce; current findings remain FAIL")
     parser.add_argument("--source-only", action="store_true")
     args = parser.parse_args()
+    os.environ.pop("CLIPROXY_API_KEY", None)
     commit = source_check()
     print("Source/model sync: " + commit, flush=True)
     if args.source_only:

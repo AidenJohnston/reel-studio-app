@@ -5,8 +5,9 @@ CONSTANTS Mutation, Writer, MaxCrashes, PreviewOnly
 ASSUME Mutation \in {"none", "project-first", "no-hash", "no-lock",
                      "cache-alias", "cache-overwrite", "cache-copy-live",
                      "no-lock-writer-first", "preview-publish", "preview-grant",
-                     "rewrite-version", "recovery-drains-one"}
-ASSUME Writer \in {"none", "manual", "legacy-cover"}
+                     "rewrite-version", "recovery-drains-one", "no-manifest",
+                     "append-after-commit", "no-credits-restore", "restore-newer-credits"}
+ASSUME Writer \in {"none", "manual", "legacy-cover", "external-credits"}
 ASSUME MaxCrashes \in 0..2
 ASSUME PreviewOnly \in BOOLEAN
 
@@ -14,8 +15,9 @@ Assets == {"asset", "thumb"}
 CacheKeys == {"existing", "new"}
 VersionFiles == {"export", "snapshot", "metadata", "notes",
                  "cache-existing", "cache-new"}
+PreparedFiles == {"snapshot", "metadata", "commit", "merged-credits", "manifest"}
 StageFiles == Assets \cup VersionFiles \cup
-              {"project", "input", "cache", "work-new", "credits", "temp", "promotion-temp"}
+              {"project", "input", "cache", "work-new", "credits", "temp", "promotion-temp", "commit", "merged-credits", "manifest", "restore"}
 EmptyStage == [f \in StageFiles |-> 0]
 EmptyVersion == {}
 OldVersion == VersionFiles
@@ -24,19 +26,20 @@ vars == <<s>>
 
 Live(d) == <<d.project, d.assets, d.credits, d.oldVersion, d.version,
              d.liveCache, d.appendTemp>>
-Disk(d) == <<Live(d), d.stage, d.stageDir, d.creditsTemp>>
+Disk(d) == <<Live(d), d.stage, d.stageDir, d.creditsTemp, d.prepared>>
 InitialDisk ==
-  [project |-> "old", assets |-> {}, credits |-> FALSE,
+  [project |-> "old", assets |-> {}, credits |-> "old",
    oldVersion |-> OldVersion, version |-> EmptyVersion,
    liveCache |-> [k \in CacheKeys |-> IF k = "existing" THEN 2 ELSE 0], appendTemp |-> 0, creditsTemp |-> 0,
-   stage |-> EmptyStage, stageDir |-> FALSE]
+   stage |-> EmptyStage, stageDir |-> FALSE,
+   prepared |-> [f \in PreparedFiles |-> 0]]
 Committed(d) == d.project \in {"committed", "new"}
 StagePresent == {f \in StageFiles : s.disk.stage[f] > 0}
 PublishPCs ==
-  {"hash", "cache-snapshot", "snapshot", "normalize-notes", "metadata", "prune", "assets-check", "assets",
+  {"hash", "cache-snapshot", "prepare", "staging-sync", "prune", "assets-check", "assets",
    "credits-check", "credits-write", "credits-rename", "version-check",
    "version-rename", "project-write", "project-check", "project-rename",
-   "set-published", "style", "append-write", "append-rename",
+   "set-published", "project-sync", "style", "append-write", "append-rename",
    "promote-select", "promote-copy", "promote-rename", "release"}
 Checks == {"begin-read", "begin-return", "work-check", "publish-lock",
            "cache-snapshot", "assets-check", "credits-check", "version-check", "project-check", "preview-check"}
@@ -51,7 +54,9 @@ Init ==
        published |-> FALSE, staleCommit |-> FALSE,
        overlap |-> FALSE, rewritten |-> FALSE, cacheWrite |-> FALSE,
        lateWrite |-> FALSE, cleaning |-> FALSE, previewGrant |-> FALSE,
-       cacheTodo |-> CacheKeys, cacheKey |-> "existing", previewCopy |-> 0]
+       cacheTodo |-> CacheKeys, cacheKey |-> "existing", previewCopy |-> 0,
+       rollbackAssets |-> {}, rollbackVersion |-> {}, restorePhase |-> 0,
+       externalCreditsWritten |-> FALSE]
 
 \* Each write/copy can be interrupted after an arbitrary proper prefix (1),
 \* or after all bytes (2). This is not a claim that writeFile/copyFile is atomic.
@@ -111,7 +116,7 @@ SnapshotCache ==
 SnapshotDone ==
   /\ s.pc = "cache-snapshot" /\ ~s.abort
   /\ \A k \in CacheKeys : s.disk.stage["cache-" \o k] = 2
-  /\ s' = [s EXCEPT !.pc = "snapshot"]
+  /\ s' = [s EXCEPT !.pc = "prepare"]
 
 \* The absence check is protected by the publish lock. Copying to private
 \* scratch is interruptible; only the final rename makes a complete key live.
@@ -141,18 +146,36 @@ PreviewCopy ==
   /\ s' = [s EXCEPT !.previewCopy = @ + 1,
                      !.pc = IF s.previewCopy = 1 THEN "preview-check" ELSE @]
 RevokePreview ==
-  /\ s.pc = "discard"
+  /\ s.pc = "discard" /\ s.owner \in {"free", "note"}
   /\ s' = [s EXCEPT !.previewGrant = IF Mutation = "preview-grant" THEN @ ELSE FALSE,
-                     !.pc = "discard-files"]
+                     !.owner = "note", !.pc = "repair",
+                     !.cleaning = TRUE, !.recoveryPC = "inspect"]
 
-\* writeFileAtomic prepares a private temp, then renames it. Its intermediate
-\* temp contents use stage.temp; fsync/close do not change this process-crash model.
-PrepareAtomic(pc, target, next) ==
-  /\ s.pc = pc
-  /\ IF s.disk.stage["temp"] < 2
-        THEN s' = [s EXCEPT !.disk.stage["temp"] = @ + 1]
-        ELSE s' = [s EXCEPT !.disk.stage["temp"] = 0,
-                            !.disk.stage[target] = 2, !.pc = next]
+\* Concurrent Promise.allSettled preparation. Each file has its own partial
+\* write (1), complete bytes (2), fsync (3), and same-volume rename (4).
+\* Read-only awaits and close stutter. The metadata class represents repeated
+\* version-side files; no prepared file becomes live before every task settles.
+PrepareWrite ==
+  /\ s.pc = "prepare"
+  /\ \E f \in PreparedFiles :
+       /\ s.disk.prepared[f] < 2
+       /\ s' = [s EXCEPT !.disk.prepared[f] = @ + 1]
+PrepareSync ==
+  /\ s.pc = "prepare"
+  /\ \E f \in PreparedFiles :
+       /\ s.disk.prepared[f] = 2
+       /\ s' = [s EXCEPT !.disk.prepared[f] = 3]
+PrepareRename ==
+  /\ s.pc = "prepare"
+  /\ \E f \in PreparedFiles :
+       /\ s.disk.prepared[f] = 3
+       /\ s' = [s EXCEPT !.disk.prepared[f] = 4,
+                          !.disk.stage[f] = IF f = "manifest" /\ Mutation = "no-manifest"
+                                             THEN 0 ELSE 2]
+Prepared ==
+  /\ s.pc = "prepare"
+  /\ \A f \in PreparedFiles : s.disk.prepared[f] = 4
+  /\ s' = [s EXCEPT !.pc = "staging-sync"]
 Prune ==
   /\ s.pc = "prune"
   /\ s.disk.version = {}
@@ -167,13 +190,9 @@ AssetRename ==
        /\ s' = [s EXCEPT !.disk.assets = @ \cup {a}, !.disk.stage[a] = 0,
                           !.pc = IF s.disk.assets \cup {a} = Assets
                                     THEN "credits-check" ELSE "assets"]
-CreditsWrite ==
-  /\ s.pc = "credits-write" /\ s.disk.creditsTemp < 2
-  /\ s' = [s EXCEPT !.disk.creditsTemp = @ + 1,
-                     !.pc = IF s.disk.creditsTemp = 1 THEN "credits-rename" ELSE @]
 CreditsRename ==
-  /\ s.pc = "credits-rename" /\ s.disk.creditsTemp = 2
-  /\ s' = [s EXCEPT !.disk.credits = TRUE, !.disk.creditsTemp = 0,
+  /\ s.pc = "credits-rename" /\ s.disk.stage["merged-credits"] = 2
+  /\ s' = [s EXCEPT !.disk.credits = "merged", !.disk.stage["merged-credits"] = 0,
                      !.pc = "version-check"]
 VersionRename ==
   /\ s.pc = "version-rename"
@@ -182,16 +201,17 @@ VersionRename ==
                      !.disk.stage = [f \in StageFiles |->
                          IF f \in VersionFiles THEN 0 ELSE s.disk.stage[f]],
                      !.pc = IF Mutation = "project-first"
-                               THEN "set-published" ELSE "project-write"]
+                               THEN "set-published" ELSE "project-check"]
 ProjectRename ==
-  /\ s.pc = "project-rename" /\ s.disk.stage["temp"] = 2
-  /\ s' = [s EXCEPT !.disk.project = "committed", !.disk.stage["temp"] = 0,
+  /\ s.pc = "project-rename" /\ s.disk.stage["commit"] = 2
+  /\ s' = [s EXCEPT !.disk.project = IF Mutation = "append-after-commit" THEN "committed" ELSE "new",
+                     !.disk.stage["commit"] = 0,
                      !.staleCommit = s.base # s.disk.project,
                      !.pc = IF Mutation = "project-first"
                                THEN "version-rename" ELSE "set-published"]
 SetPublished ==
   /\ s.pc = "set-published"
-  /\ s' = [s EXCEPT !.published = TRUE, !.pc = "style"]
+  /\ s' = [s EXCEPT !.published = TRUE, !.pc = "project-sync"]
 AppendWrite ==
   /\ s.pc = "append-write" /\ s.disk.appendTemp < 2
   /\ s' = [s EXCEPT !.disk.appendTemp = @ + 1,
@@ -202,14 +222,6 @@ AppendRename ==
 Release ==
   /\ s.pc = "release"
   /\ s' = [s EXCEPT !.owner = "free", !.pc = "discard"]
-DiscardOne ==
-  /\ s.pc = "discard-files" /\ StagePresent # {}
-  /\ \E f \in StagePresent : s' = [s EXCEPT !.disk.stage[f] = 0]
-DiscardDone ==
-  /\ s.pc = "discard-files" /\ StagePresent = {}
-  /\ s' = [s EXCEPT !.disk.stageDir = FALSE, !.pc = "done",
-                     !.owner = IF s.owner = "note" THEN "free" ELSE @]
-
 \* Failures are tool/engine failures, not injected I/O faults. The await points
 \* in publish after the work phase therefore have Stop and Crash, not ToolFailure.
 Stop ==
@@ -222,30 +234,16 @@ ToolFailure ==
 AbortAtCheck ==
   /\ s.abort /\ s.pc \in Checks
   /\ s' = [s EXCEPT !.pc = "discard"]
-\* Ten-second timeout permits discard before pending tools settle. A late
-\* worker gets one representative write into staging after discard.
+\* Timeout requests cleanup. It cannot delete under a publisher that owns
+\* withProjectLock; publish first observes abort at a check and repairs in-lock.
 Timeout ==
-  /\ s.abort /\ ~s.published /\ ~Committed(s.disk) /\ ~s.cleaning
-  /\ s.pc \notin {"begin-lock", "begin-read", "begin-mkdir", "begin-project",
-                  "begin-input", "begin-cache", "begin-return", "grant", "done"}
-  /\ s' = [s EXCEPT !.cleaning = TRUE,
-                     !.previewGrant = IF Mutation = "preview-grant" THEN @ ELSE FALSE]
-TimeoutRemove ==
-  /\ s.cleaning /\ StagePresent # {}
-  /\ \E f \in StagePresent : s' = [s EXCEPT !.disk.stage[f] = 0]
-TimeoutRemoveDir ==
-  /\ s.cleaning /\ StagePresent = {} /\ s.disk.stageDir
-  /\ s' = [s EXCEPT !.disk.stageDir = FALSE]
-MissingStaged ==
-  /\ s.cleaning
-  /\ (s.pc = "project-rename" /\ s.disk.stage["temp"] # 2)
-     \/ (s.pc = "promote-rename" /\ s.disk.stage["promotion-temp"] # 2)
-     \/ (s.pc = "version-rename" /\ \E f \in VersionFiles : s.disk.stage[f] # 2)
-     \/ (s.pc = "assets" /\ \E f \in Assets \ s.disk.assets : s.disk.stage[f] # 2)
+  /\ s.abort /\ s.owner = "free" /\ ~s.cleaning
+  /\ s.pc \in {"work-check", "work-cache", "work-new", "work-asset",
+                "work-thumb", "work-credits", "render", "notes", "preview-copy", "preview-check", "publish-lock"}
   /\ s' = [s EXCEPT !.pc = "discard"]
 
 LateStageWrite ==
-  /\ s.abort /\ s.pc \in {"discard", "discard-files", "done"} /\ ~s.lateWrite
+  /\ s.abort /\ s.pc \in {"discard", "repair", "done"} /\ ~s.lateWrite
   /\ s' = [s EXCEPT !.disk.stage["cache"] = 1, !.disk.stageDir = TRUE,
                      !.lateWrite = TRUE]
 
@@ -253,7 +251,7 @@ LateStageWrite ==
 \* partial temp, full temp, and rename. The UI job guard only reduces these
 \* schedules; it is not required for the modeled mutual exclusion.
 WriterAcquire ==
-  /\ Writer # "none" /\ s.writerPC = "idle"
+  /\ Writer \in {"manual", "legacy-cover"} /\ s.writerPC = "idle"
   /\ (Mutation = "no-lock-writer-first" => s.pc = "publish-lock")
   /\ s.owner = "free" \/ Mutation \in {"no-lock", "no-lock-writer-first"}
   /\ s' = [s EXCEPT !.writerPC = "read",
@@ -286,31 +284,101 @@ Crash ==
   /\ s' = [s EXCEPT !.mode = "down", !.crashes = @ + 1,
                      !.owner = "free", !.pc = "dead", !.writerPC = "dead",
                      !.previewGrant = FALSE]
+\* One completed external write after a crash, before recovery resumes.
+\* The model does not admit an external writer between the hash read and rename.
+ExternalCreditsWrite ==
+  /\ Writer = "external-credits" /\ s.mode = "down"
+  /\ ~s.externalCreditsWritten /\ s.recoveryRuns = 0
+  /\ s' = [s EXCEPT !.disk.credits = "external", !.externalCreditsWritten = TRUE]
 Restart ==
   /\ s.mode = "down"
-  /\ s' = [s EXCEPT !.mode = "recovery", !.recoveryPC = "staging",
+  /\ s' = [s EXCEPT !.mode = "recovery", !.recoveryPC = "inspect",
                      !.owner = "recovery"]
+RecoveryInspect ==
+  /\ s.recoveryPC = "inspect"
+  /\ s' = [s EXCEPT !.recoveryPC = IF s.disk.project = "new" THEN "replay-style"
+                                  ELSE IF s.disk.stage["manifest"] = 2 THEN "assets" ELSE "staging",
+                     !.rollbackAssets = Assets, !.restorePhase = 0]
+RecoveryAsset ==
+  /\ s.recoveryPC = "assets" /\ s.rollbackAssets # {}
+  /\ \E f \in s.rollbackAssets :
+       s' = [s EXCEPT !.disk.assets = @ \ {f}, !.rollbackAssets = @ \ {f}]
+RecoveryCreditsStart ==
+  /\ s.recoveryPC = "assets" /\ s.rollbackAssets = {}
+  /\ s' = [s EXCEPT !.recoveryPC = IF s.disk.credits = "merged" \/ Mutation = "restore-newer-credits"
+                                    THEN "restore-write" ELSE "rollback-version",
+                     !.rollbackVersion = IF Committed(s.disk) THEN {} ELSE s.disk.version]
+\* The original credits byte string is opaque. Restoration writes a private
+\* temp, syncs it, renames it to restored-credits, then renames over live credits.
+RecoveryCreditsWrite ==
+  /\ s.recoveryPC = "restore-write" /\ s.restorePhase < 2
+  /\ s' = [s EXCEPT !.restorePhase = @ + 1, !.disk.stage["restore"] = s.restorePhase + 1]
+RecoveryCreditsSync ==
+  /\ s.recoveryPC = "restore-write" /\ s.restorePhase = 2
+  /\ s' = [s EXCEPT !.restorePhase = 3]
+RecoveryCreditsPrepare ==
+  /\ s.recoveryPC = "restore-write" /\ s.restorePhase = 3
+  /\ s' = [s EXCEPT !.restorePhase = 4]
+RecoveryCreditsRename ==
+  /\ s.recoveryPC = "restore-write" /\ s.restorePhase = 4
+  /\ s' = [s EXCEPT !.disk.credits = IF Mutation = "no-credits-restore" THEN @ ELSE "old",
+                     !.disk.stage["restore"] = 0, !.recoveryPC = "rollback-version",
+                     !.rollbackVersion = IF Committed(s.disk) THEN {} ELSE s.disk.version]
+RecoveryVersion ==
+  /\ s.recoveryPC = "rollback-version" /\ s.rollbackVersion # {}
+  /\ \E f \in s.rollbackVersion :
+       s' = [s EXCEPT !.disk.version = @ \ {f}, !.rollbackVersion = @ \ {f},
+                      !.recoveryPC = IF Mutation = "recovery-drains-one" THEN "finish" ELSE @]
+RecoveryVersionDone ==
+  /\ s.recoveryPC = "rollback-version" /\ s.rollbackVersion = {}
+  /\ s' = [s EXCEPT !.recoveryPC = "staging"]
+RecoveryStyle ==
+  /\ s.recoveryPC = "replay-style"
+  /\ s' = [s EXCEPT !.recoveryPC = "staging"]
+\* Private deletion order does not affect live bytes after repairs finish.
+\* A fixed order removes equivalent permutations, including temporary files.
+FileOrder == <<"asset", "thumb", "export", "snapshot", "metadata", "notes",
+               "cache-existing", "cache-new", "project", "input", "cache",
+               "work-new", "credits", "temp", "promotion-temp", "commit",
+               "merged-credits", "manifest", "restore">>
+FirstPresent == FileOrder[CHOOSE i \in 1..Len(FileOrder) :
+                         FileOrder[i] \in StagePresent /\
+                         \A j \in 1..(i-1) : FileOrder[j] \notin StagePresent]
 RecoveryStaging ==
   /\ s.recoveryPC = "staging" /\ StagePresent # {}
-  /\ \E f \in StagePresent : s' = [s EXCEPT !.disk.stage[f] = 0]
+  /\ s' = [s EXCEPT !.disk.stage[FirstPresent] = 0]
+RecoveryPrepared ==
+  /\ s.recoveryPC = "staging" /\ StagePresent = {}
+  /\ \E f \in PreparedFiles :
+       /\ s.disk.prepared[f] \in 1..3
+       /\ s' = [s EXCEPT !.disk.prepared[f] = 0]
 RecoveryRead ==
   /\ s.recoveryPC = "staging" /\ StagePresent = {}
-  /\ s' = [s EXCEPT !.disk.stageDir = FALSE, !.recoveryPC = "versions",
+  /\ \A f \in PreparedFiles : s.disk.prepared[f] \in {0, 4}
+  /\ s' = [s EXCEPT !.disk.stageDir = FALSE,
+                     !.disk.prepared = [f \in PreparedFiles |-> 0],
+                     !.recoveryPC = IF s.mode = "running" THEN "finish" ELSE "versions",
                      !.removeSet = IF Committed(s.disk) THEN {} ELSE s.disk.version]
 RecoveryRemove ==
   /\ s.recoveryPC = "versions" /\ s.removeSet # {}
   /\ \E f \in s.removeSet :
        s' = [s EXCEPT !.disk.version = @ \ {f}, !.removeSet = @ \ {f},
-                      !.recoveryPC = IF Mutation = "recovery-drains-one"
-                                       THEN "finish" ELSE @]
+                      !.recoveryPC = IF Mutation = "recovery-drains-one" THEN "finish" ELSE @]
 RecoveryFinish ==
   /\ (s.recoveryPC = "versions" /\ s.removeSet = {}) \/ s.recoveryPC = "finish"
-  /\ s' = [s EXCEPT !.recoveryRuns = @ + 1,
+  /\ IF s.mode = "running"
+       THEN s' = [s EXCEPT !.pc = "done", !.owner = "free", !.recoveryPC = "idle"]
+       ELSE s' = [s EXCEPT !.recoveryRuns = @ + 1,
                      !.firstRecovery = IF s.recoveryRuns = 0 THEN Disk(s.disk) ELSE @,
                      !.recoveryBad = s.recoveryRuns = 1 /\ s.firstRecovery # Disk(s.disk),
-                     !.recoveryPC = IF s.recoveryRuns = 0 THEN "staging" ELSE "done",
+                     !.recoveryPC = IF s.recoveryRuns = 0 THEN "inspect" ELSE "done",
                      !.mode = IF s.recoveryRuns = 0 THEN "recovery" ELSE "finished",
                      !.owner = IF s.recoveryRuns = 0 THEN "recovery" ELSE "free"]
+RecoveryStep == RecoveryInspect \/ RecoveryAsset \/ RecoveryCreditsStart
+             \/ RecoveryCreditsWrite \/ RecoveryCreditsSync \/ RecoveryCreditsPrepare
+             \/ RecoveryCreditsRename \/ RecoveryVersion \/ RecoveryVersionDone
+             \/ RecoveryStyle \/ RecoveryStaging \/ RecoveryPrepared
+             \/ RecoveryRead \/ RecoveryRemove \/ RecoveryFinish
 
 NoteStep ==
   \/ BeginLock \/ BeginRead \/ BeginMkdir
@@ -326,35 +394,36 @@ NoteStep ==
           IF PreviewOnly /\ Mutation # "preview-publish" THEN "preview-copy" ELSE "notes")
   \/ StageWrite("notes", "notes", "publish-lock")
   \/ PublishLock \/ CheckBase \/ SnapshotCache \/ SnapshotDone
-  \/ PrepareAtomic("snapshot", "snapshot", "normalize-notes")
-  \/ PrepareAtomic("normalize-notes", "notes", "metadata")
-  \/ PrepareAtomic("metadata", "metadata", "prune")
+  \/ PrepareWrite \/ PrepareSync \/ PrepareRename \/ Prepared
+  \/ MovePC("staging-sync", "prune")
   \/ Prune \/ CheckAbort("assets-check", "assets") \/ AssetRename
-  \/ CheckAbort("credits-check", "credits-write") \/ CreditsWrite \/ CreditsRename
+  \/ CheckAbort("credits-check", "credits-rename") \/ CreditsRename
   \/ CheckAbort("version-check",
-          IF Mutation = "project-first" THEN "project-write" ELSE "version-rename")
-  \/ VersionRename \/ StageWrite("project-write", "temp", "project-check")
+          IF Mutation = "project-first" THEN "project-check" ELSE "version-rename")
+  \/ VersionRename
   \/ CheckAbort("project-check", "project-rename") \/ ProjectRename \/ SetPublished
-  \/ MovePC("style", "append-write") \/ AppendWrite \/ AppendRename
+  \/ MovePC("project-sync", "style")
+  \/ MovePC("style", IF Mutation = "append-after-commit" THEN "append-write" ELSE "promote-select") \/ AppendWrite \/ AppendRename
   \/ PromoteSelect \/ PromoteCopy \/ PromoteRename \/ Release
   \/ PreviewCopy \/ CheckAbort("preview-check", "discard") \/ RevokePreview
-  \/ DiscardOne \/ DiscardDone \/ Stop \/ ToolFailure \/ AbortAtCheck \/ Timeout
-  \/ TimeoutRemove \/ TimeoutRemoveDir \/ MissingStaged \/ LateStageWrite \/ RewriteVersion
+  \/ Stop \/ ToolFailure \/ AbortAtCheck \/ Timeout
+  \/ (s.pc = "repair" /\ RecoveryStep) \/ LateStageWrite \/ RewriteVersion
 
 Next ==
   \/ (s.mode = "running" /\ (NoteStep \/ WriterAcquire \/ WriterRead
                                           \/ WriterWrite \/ WriterRename))
-  \/ Crash \/ Restart
-  \/ (s.mode = "recovery" /\ (RecoveryStaging \/ RecoveryRead
-                              \/ RecoveryRemove \/ RecoveryFinish))
+  \/ Crash \/ ExternalCreditsWrite \/ Restart
+  \/ (s.mode = "recovery" /\ RecoveryStep)
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
   /\ s.disk.project \in {"old", "manual", "committed", "new"}
+  /\ s.disk.credits \in {"old", "merged", "external"}
   /\ s.disk.assets \subseteq Assets
   /\ s.disk.oldVersion \subseteq VersionFiles
   /\ s.disk.version \subseteq VersionFiles
   /\ s.disk.stage \in [StageFiles -> 0..2]
+  /\ s.disk.prepared \in [PreparedFiles -> 0..4]
   /\ s.disk.liveCache \in [CacheKeys -> 0..2]
   /\ s.disk.creditsTemp \in 0..2 /\ s.disk.appendTemp \in 0..2
   /\ s.recoveryRuns \in 0..2 /\ s.crashes \in 0..MaxCrashes
@@ -368,24 +437,34 @@ CachePublicationSafe ==
   /\ (s.disk.liveCache["new"] # 0 => Committed(s.disk))
 PreviewNeverPublishes == PreviewOnly => ~Committed(s.disk)
 CleanupRevokesPreview ==
-  (s.cleaning \/ s.pc \in {"discard-files", "done"} \/ s.mode # "running") => ~s.previewGrant
+  (s.cleaning \/ s.pc \in {"repair", "done"} \/ s.mode # "running") => ~s.previewGrant
 StaleNeverPublishes == ~s.staleCommit
 PublishExclusive ==
   /\ ~s.overlap
   /\ ~(s.pc \in PublishPCs /\ s.writerPC \in {"read", "write", "rename"})
 RecoveryIdempotent == ~s.recoveryBad
+ExternalCreditsPreserved == s.externalCreditsWritten => s.disk.credits = "external"
 
 \* These retain the literal requested equality, separately from ReferencesExist.
 OldBytes == Live(s.disk) = Live(InitialDisk)
 NewBytes ==
-  /\ s.disk.project = "new" /\ s.disk.assets = Assets /\ s.disk.credits
+  /\ s.disk.project = "new" /\ s.disk.assets = Assets /\ s.disk.credits = "merged"
   /\ s.disk.version = VersionFiles /\ s.disk.oldVersion = OldVersion
   /\ s.disk.liveCache = [k \in CacheKeys |-> 2] /\ s.disk.appendTemp = 0
 AtRest == s.mode \in {"down", "finished"} \/ s.pc = "done"
 OldOrCompleteNew == AtRest => OldBytes \/ NewBytes
 ProjectOldOrCompleteNew == AtRest => s.disk.project \in {"old", "manual", "new"}
+\* Cache additions are optional postcommit work under revised property 3.
+\* This projection covers edit bytes, distinct from literal whole-tree equality.
+Edit(d) == <<d.project, d.assets, d.credits, d.oldVersion, d.version>>
+RecoveredOldOrCompleteNew ==
+  (s.mode = "finished" \/ s.pc = "done") =>
+    Edit(s.disk) = Edit(InitialDisk) \/
+    (s.disk.project = "new" /\ s.disk.assets = Assets /\ s.disk.credits = "merged" /\
+     s.disk.oldVersion = OldVersion /\ s.disk.version = VersionFiles)
 
 \* Reachability witnesses: TLC must refute each for a non-vacuous baseline run.
+NeverExternalCredits == ~s.externalCreditsWritten
 NeverPromoted == s.disk.liveCache["new"] = 0
 NeverPreviewed == s.previewCopy < 2
 NeverCommitted == ~Committed(s.disk)
