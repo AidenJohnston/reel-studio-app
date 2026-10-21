@@ -63,7 +63,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
-  const [duration, setDuration] = useState<number | null>(null)
+  // Each video's length as the player reported it, by its URL. "What I did" describes the newest version, so
+  // while an older one plays it shows the newest version's length, not the length of the video on screen.
+  const [lengths, setLengths] = useState<Record<string, number>>({})
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
@@ -262,6 +264,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     else setDrawer(ACTION_TAB[a] ?? 'cut')
   }
 
+  const lengthOf = older ? d.versions[d.versions.length - 1]?.video : (changePreview ?? version?.video)
+  const cardLength = lengthOf ? lengths[lengthOf] : undefined
   // "What I did": what is done (filled checks, each with a way to change it), then optional extras
   // as plain links. No empty circles that read like unfinished homework (critique 1.3).
   const doneLine = (c: ChecklistItem): { label: string; detail?: string; act?: { label: string; run: () => void; testid: string } } => {
@@ -269,7 +273,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       case 'cut':
         return {
           label: d.aiEdited ? 'Kept your best takes' : 'Cut the pauses and repeated starts',
-          detail: duration ? `${clock(duration)} long` : undefined,
+          detail: cardLength ? `${clock(cardLength)} long` : undefined,
           act: { label: 'See what I cut', run: () => setDrawer('cut'), testid: 'check-cut' }
         }
       case 'captions':
@@ -322,7 +326,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             caption={d.project.post?.caption}
             original={d.sourceVideo}
             holdingOriginal={holding}
-            onDuration={setDuration}
+            onDuration={(s) => {
+              const src = changePreview ?? version?.video
+              if (src) setLengths((m) => ({ ...m, [src]: s }))
+            }}
             dragFile={version && !version.draft ? version.videoPath : null}
           />
           {changePreview && (
