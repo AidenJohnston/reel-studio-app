@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process'
-import { createReadStream, readdirSync, lstatSync, statfsSync } from 'node:fs'
+import { createReadStream, readdirSync, lstatSync, statfsSync, mkdtempSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -8,6 +8,10 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 export const exec = promisify(execFile)
 export const GiB = 1024 ** 3
+
+export function createScratch() {
+  return realpathSync(mkdtempSync('/tmp/rs-perf-build-'))
+}
 
 export async function fileHash(file) {
   const hash = createHash('sha256')

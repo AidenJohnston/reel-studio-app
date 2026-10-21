@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, linkSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, linkSync, rmSync, statSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import { diskBytes, trialLoad, waitForTrialLoad, requireAdmission, parseSwapUsage } from './resources.mjs'
+import { diskBytes, trialLoad, waitForTrialLoad, requireAdmission, parseSwapUsage, createScratch } from './resources.mjs'
 
 test('disk accounting counts a hard-linked inode once', () => {
   const scratch = mkdtempSync('/tmp/rs-perf-disk-test-')
@@ -33,4 +33,11 @@ test('admission refuses a busy host before setup and swap occupancy is contextua
   const accepted = requireAdmission({ ...options, readLoad: () => trialLoad(4, swap) })
   assert.equal(accepted.accepted, true)
   assert.deepEqual(recorded.map((load) => load.accepted), [false, true])
+})
+
+test('scratch creation returns its canonical filesystem path', () => {
+  const scratch = createScratch()
+  try {
+    assert.equal(scratch, realpathSync(scratch))
+  } finally { rmSync(scratch, { recursive: true, force: true }) }
 })

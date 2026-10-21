@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, openSync, closeSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cpus, homedir, platform, release, arch, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
 import { aggregate, compare, report } from './metrics.mjs'
 import { cleanupEngines } from './processes.mjs'
-import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad, requireAdmission } from './resources.mjs'
+import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad, requireAdmission, createScratch } from './resources.mjs'
 import { drive } from './drive.mjs'
 import { noteFixture } from './fixtures.mjs'
 
@@ -139,7 +139,7 @@ async function main() {
       record: (load) => { result.loadChecks.push({ phase: 'before_build', ...load }); save() } })
     result.ffmpeg = { sha256: await sha256(join(ffmpegDir, 'ffmpeg')), version: execFileSync(join(ffmpegDir, 'ffmpeg'), ['-version'], { encoding: 'utf8' }).split('\n')[0] }
     result.model = { path: modelDir, sha256: await sha256(join(modelDir, 'model.bin')) }
-    scratch = mkdtempSync('/tmp/rs-perf-build-')
+    scratch = createScratch()
     checkout = join(scratch, 'source')
     await command('git', ['worktree', 'add', '--detach', checkout, sha], repo)
     added = true
