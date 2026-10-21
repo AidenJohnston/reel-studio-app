@@ -275,9 +275,9 @@ a { color: inherit; }
 .vswitch-step:disabled { opacity: .35; cursor: default; }
 .vswitch-current { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; }
 .vswitch-name { font-weight: 650; color: var(--ink); }
-.vswitch-sep, .vswitch-current .icon { color: var(--ink-3); }
+.vswitch-state, .vswitch-current .icon { color: var(--ink-3); }
 .vswitch.older .vswitch-current { background: var(--amber-soft); color: var(--amber-ink); }
-.vswitch.older .vswitch-current :is(.vswitch-name, .vswitch-sep, .icon) { color: inherit; }
+.vswitch.older .vswitch-current :is(.vswitch-name, .vswitch-state, .icon) { color: inherit; }
 .vswitch-back { font-size: 13.5px; padding: 0 4px; margin-left: 4px; }
 /* Under ~1080 px the title column is too narrow for the step arrows beside "Edit it myself"; the menu and the
    arrow keys still switch versions. */
