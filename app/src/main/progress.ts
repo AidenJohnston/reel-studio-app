@@ -146,7 +146,8 @@ export class ProgressTracker {
       ? (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct - (this.now() - this.jobStart) / 1000
       : undefined
     const total = done + elapsed + Math.max(0, aggregateLeft ?? displayRemaining)
-    const phaseEnd = (done + phaseBudget * 0.99) / (done + phaseBudget + later) * 100
+    // Leave a gap below the phase ceiling, shrinking it as an overrun continues.
+    const phaseEnd = (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
     const overall = Math.min(99, aggregateLeft === undefined ? phaseEnd : 99, (done + elapsed) / total * 100)
     this.best = Math.max(this.best, overall, Math.min(99, this.aggregate?.pct ?? 0))
     const remainingPhases = this.phases.slice(this.cur)

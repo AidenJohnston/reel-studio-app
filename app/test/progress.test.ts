@@ -49,13 +49,18 @@ describe('honest progress', () => {
     for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1])
   })
 
-  it('keeps an unmeasured final overrun neutral', () => {
+  it('fails if a long final overrun freezes the bar or claims completion', () => {
     let now = 0
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 5)
     expect(t.snapshot()).toMatchObject({ etaSec: 28, overdue: false })
-    now += 10 * 60_000
+    const budget = t.snapshot().etaSec! * 1000
+    now = 2 * budget
+    const earlier = t.snapshot().overall
+    now = 10 * budget
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(t.snapshot().overall).toBeGreaterThan(earlier)
+    expect(t.snapshot().overall).toBeLessThan(99)
   })
 
   it('recalibrates remaining engine defaults from a slow first step', () => {
