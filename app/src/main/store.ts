@@ -296,7 +296,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
-const INTERRUPTED_CHANGE = 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
+export const INTERRUPTED_CHANGE = 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
 
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is

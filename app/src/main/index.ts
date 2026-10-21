@@ -672,7 +672,7 @@ app.on('before-quit', (e) => {
   e.preventDefault()
   quitting = true
   void jobs
-    .cancelAll()
+    .cancelAll('quit')
     .then(() => killAllEngines())
     .finally(() => app.quit())
 })

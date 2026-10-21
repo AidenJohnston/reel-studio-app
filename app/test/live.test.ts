@@ -11,7 +11,7 @@ import { protocol } from 'electron'
 import { handleMediaProtocol } from '../src/main/media'
 import { createJobManager } from '../src/main/jobs'
 import { mediaUrl, pathFromMediaUrl } from '../src/main/media-url'
-import { projectDir } from '../src/main/store'
+import { projectDir, readAppState } from '../src/main/store'
 import { setupPaths } from './helpers'
 
 vi.mock('electron', () => ({ protocol: { handle: vi.fn() } }))
@@ -108,6 +108,32 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('records an interrupted note on quit while preserving a real Stop', async () => {
+    setupPaths()
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const startNote = (slug: string) => {
+      mkdirSync(projectDir(slug), { recursive: true })
+      let started!: () => void
+      const ready = new Promise<void>((resolve) => { started = resolve })
+      const id = jobs.start(slug, 'note', (_emit, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' }), { once: true })
+        started()
+      }))
+      return { id, ready }
+    }
+    const stopped = startNote('user-stop')
+    const interrupted = startNote('app-quit')
+    await Promise.all([stopped.ready, interrupted.ready])
+    jobs.cancel(stopped.id)
+    await jobs.cancelAll('quit')
+    expect((await readAppState('app-quit')).chat.map((message) => message.text)).toEqual([
+      'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
+    ])
+    expect((await readAppState('user-stop')).chat.map((message) => message.text)).toEqual([
+      'Stopped. Your video has not changed.'
+    ])
+  })
+
   it('keeps inactive staging private through an alias in an allowed media folder', async () => {
     const { home } = setupPaths()
     const stage = join(home, '.staging', 'stopped')

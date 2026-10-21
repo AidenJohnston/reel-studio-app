@@ -2,7 +2,7 @@
 // goes to the renderer; app.json records the running job so a crash can be recovered at startup.
 import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
-import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
+import { addChat, cleanPartialVersions, INTERRUPTED_CHANGE, projectDir, updateAppState } from './store'
 import { ENGINE_STOP_TIMEOUT_MS, toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
 
@@ -147,7 +147,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
           if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
-          if (cancelled && kind === 'note') await addChat(slug, 'editor', 'Stopped. Your video has not changed.').catch(() => {})
+          if (cancelled && kind === 'note') {
+            const message = abort.signal.reason === 'quit' ? INTERRUPTED_CHANGE : 'Stopped. Your video has not changed.'
+            await addChat(slug, 'editor', message).catch(() => {})
+          }
         }
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
@@ -165,9 +168,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     cancel(id: string): void {
       jobs.get(id)?.abort.abort()
     },
-    async cancelAll(): Promise<void> {
+    async cancelAll(reason: 'stop' | 'quit' = 'stop'): Promise<void> {
       const all = [...jobs.values()]
-      all.forEach((j) => j.abort.abort())
+      all.forEach((j) => j.abort.abort(reason))
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         await Promise.race([
