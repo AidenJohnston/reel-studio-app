@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
 import { projectDir, readAppState } from '../src/main/store'
 import { versionChanges } from '../src/shared/versions'
-import type { JobEvent, VersionInfo } from '../src/shared/api'
+import type { VersionInfo } from '../src/shared/api'
 import { setupPaths } from './helpers'
 
 const version = (n: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: '' })
@@ -58,53 +58,4 @@ it('records what made a version when its final render made it, and the menu show
     [2, '“music too loud”'],
     [3, 'Changes not recorded']
   ])
-})
-
-it('a Stop after the final render has finished does not stop the job: it records the version and reports done', async () => {
-  setupPaths()
-  const slug = 'late-stop'
-  mkdirSync(join(projectDir(slug), 'versions', 'v2'), { recursive: true })
-  const events: JobEvent[] = []
-  let videoReady = (): void => undefined
-  let rendered = false
-  // the final render's video is still being prepared when Stop arrives
-  const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, () => new Promise((r) => (videoReady = () => r(null))))
-  const id = jobs.start(slug, 'rerender', async (emit) => {
-    writeFileSync(join(projectDir(slug), 'versions', 'v2', 'export.mp4'), 'x')
-    emit({ type: 'render', version: 2, draft: false })
-    rendered = true
-    return { summary: 'Version 2: new cover.', version: 2, made: { by: 'hand', summary: 'new cover' } }
-  })
-  await expect.poll(() => rendered).toBe(true)
-  jobs.cancel(id)
-  videoReady()
-  await jobs.forSlug(slug)?.done
-  expect((await readAppState(slug)).versionsMade).toMatchObject([{ version: 2, by: 'hand', summary: 'new cover' }])
-  expect(events.map((e) => e.type)).toContain('done')
-  expect(events.map((e) => e.type)).not.toContain('cancelled')
-})
-
-it('deleting the project after the final render reports no success, and waits for the video being prepared', async () => {
-  setupPaths()
-  const slug = 'deleted'
-  mkdirSync(join(projectDir(slug), 'versions', 'v2'), { recursive: true })
-  const events: JobEvent[] = []
-  let videoReady = (): void => undefined
-  let prepared = false
-  const toVideo = (): Promise<null> => new Promise((r) => (videoReady = () => ((prepared = true), r(null))))
-  const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, toVideo)
-  let rendered = false
-  const id = jobs.start(slug, 'rerender', async (emit) => {
-    writeFileSync(join(projectDir(slug), 'versions', 'v2', 'export.mp4'), 'x')
-    emit({ type: 'render', version: 2, draft: false })
-    rendered = true
-    return { summary: 'Version 2: new cover.', version: 2, made: { by: 'hand', summary: 'new cover' } }
-  })
-  await expect.poll(() => rendered).toBe(true)
-  jobs.abandon(id)
-  const done = jobs.forSlug(slug)!.done.then(() => prepared)
-  videoReady()
-  expect(await done).toBe(true)
-  expect((await readAppState(slug)).versionsMade ?? []).toEqual([])
-  expect(events.map((e) => e.type)).not.toContain('done')
 })

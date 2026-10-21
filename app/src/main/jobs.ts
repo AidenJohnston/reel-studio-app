@@ -37,8 +37,6 @@ interface Running {
   secondsLeft: number | null
   overdue: boolean
   thinking: boolean
-  /** The final full-quality render has finished: the new version exists, so Stop no longer applies (see cancel). */
-  committed: boolean
   done: Promise<void>
 }
 
@@ -55,7 +53,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     }
     const id = randomUUID()
     const abort = new AbortController()
-    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, committed: false, done: Promise.resolve() }
+    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
     jobs.set(id, job)
     const send = (e: JobEvent): void => broadcast(e)
     let history: SpeedHistory = { v: 1, phases: {} }
@@ -96,7 +94,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
         const t0 = Date.now()
         let logged = ''
-        // What made a version is recorded once, when it is made: only if this job's final render produced it
+        // What made a version is recorded where success is announced, only if this job's final render produced it
         // and it did not exist before (an unchanged edit re-renders, and so reuses, the current version).
         const existed = new Set(slug ? (await listVersions(projectDir(slug))).filter((v) => !v.draft).map((v) => v.n) : [])
         const finals = new Set<number>()
@@ -121,18 +119,13 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
             const r = e
-            if (!r.draft) {
-              finals.add(r.version)
-              job.committed = true
-            }
+            if (!r.draft) finals.add(r.version)
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
             pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
         await Promise.all(pending) // a render's event before `done`, never after
-        // Stop pressed before the final render finished (after it, cancel does nothing): nothing below may count as success.
-        if (abort.signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
           await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
@@ -151,8 +144,6 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
-        // a video still being prepared finishes first: `done` settling means nothing more touches the project
-        await Promise.all(pending)
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
@@ -178,14 +169,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     start,
     forSlug,
     get: (id: string) => jobs.get(id),
-    /** Stop, unless the final render has finished: from then on the job completes and reports its new version. */
     cancel(id: string): void {
-      const j = jobs.get(id)
-      if (j && !j.committed) j.abort.abort()
-    },
-    /** For deleting the project: stops the job even after its final render, so it reports no success (no record,
-     * `done`, chat message or notification) for a video being removed. Wait for its `done` before deleting files. */
-    abandon(id: string): void {
       jobs.get(id)?.abort.abort()
     },
     async cancelAll(): Promise<void> {
