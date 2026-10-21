@@ -306,12 +306,12 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
 
 /** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
-export function hasCaptionPhrase(t: Transcript, phrase: string, replacement: string): boolean {
+export function hasCaptionPhrase(kept: readonly Word[], phrase: string, replacement: string): boolean {
   const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
   const words: string[] = [];
-  for (let i = 0; i < t.words.length; i++) {
-    const word = t.words[i].w;
-    const next = t.words[i + 1]?.w;
+  for (let i = 0; i < kept.length; i++) {
+    const word = kept[i].w;
+    const next = kept[i + 1]?.w;
     if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
       words.push(word.trim() + next.trim());
       i++;

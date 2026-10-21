@@ -174,6 +174,11 @@ function requireAsset(ctx: ToolContext, ref: string): { ref: string; abs: string
   return resolved;
 }
 
+function checkBrollAssets(ctx: ToolContext, b: Broll): void {
+  if (b.asset) requireAsset(ctx, b.asset);
+  for (const asset of b.assets ?? []) requireAsset(ctx, asset);
+}
+
 /** Transcript words and web text are DATA. They are fenced, and anything that looks like a fence
  * or a tag inside them is neutralised, so a spoken "ignore your instructions" stays a quote. */
 export function asData(text: string): string {
@@ -799,7 +804,7 @@ const tools: ToolDef[] = [
     parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p, t) => {
-        if (!hasCaptionPhrase(t, args.from, args.to)) return `phrase not found in the transcript: "${args.from}"`;
+        if (!hasCaptionPhrase(keptWords(t, p.cut.keep), args.from, args.to)) return `phrase not found in the transcript: "${args.from}"`;
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
         c.push({ from: args.from, to: args.to });
         p.captions.corrections = c;
@@ -942,12 +947,12 @@ const tools: ToolDef[] = [
       } else if (args.treatment !== 'text-pop') {
         throw new ToolInputError('give asset, search, or animation (only text-pop works with text alone)');
       }
-      if (asset) asset = requireAsset(ctx, asset).ref;
       if (args.treatment === 'text-pop' && !asset && !args.params?.text) throw new ToolInputError('text-pop needs params.text');
       let id = '';
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
         const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        checkBrollAssets(ctx, b);
         p.broll.push(b);
       });
       const says = quote(t, args.anchor);
@@ -987,6 +992,7 @@ const tools: ToolDef[] = [
         const wantFull = args.treatment === 'full-frame' ? true : args.treatment === 'animation' ? false : anim.layout === 'full';
         const anchor = args.anchor ? { from: args.anchor.from, to: args.anchor.to } : existing!.anchor;
         if (wantFull === (anim.layout === 'full') && !args.anchor) {
+          checkBrollAssets(ctx, existing!);
           return { content: { ok: true, unchanged: true, layout: anim.layout, placement: ANIMATION_PLACEMENT } };
         }
         const made = await makeAnimation(ctx, anim.template, anim.params, anchor, wantFull ? { fullScreen: true } : { topOnly: true });
@@ -994,6 +1000,7 @@ const tools: ToolDef[] = [
         await mutate(ctx, 'broll', (pp) => {
           const b = pp.broll.find((x) => x.id === args.id)!;
           b.anchor = anchor; b.asset = requireAsset(ctx, made.asset).ref; b.treatment = 'animation';
+          checkBrollAssets(ctx, b);
           says = quote(t, b.anchor);
         });
         const summary = wantFull !== (anim.layout === 'full')
@@ -1009,6 +1016,7 @@ const tools: ToolDef[] = [
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
         if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        checkBrollAssets(ctx, b);
         says = quote(t, b.anchor);
       });
       return { content: { ok: true }, summary: `Adjusted the visual on "${says}"` };

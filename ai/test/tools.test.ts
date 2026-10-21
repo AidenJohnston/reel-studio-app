@@ -73,6 +73,7 @@ describe('tool implementations', () => {
     const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
     transcript.words[0].w = "Claude’s";
     await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w56' }] });
     const result = await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' });
     expect(result.isError).toBe(false);
     expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'Claude', to: 'Claud' }]);
@@ -130,6 +131,34 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, name, args)).isError).toBe(false);
   });
 
+  it('rejects an update when that b-roll item has a missing asset', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll = [{ id: 'b1', anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card', asset: 'work/missing.png', params: {} }];
+    await saveProject(dir, p);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const result = await executeTool(ctx, 'update_broll', { id: 'b1', params: { tilt: 2 } });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('asset not found');
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(ctx.state.summaries).toEqual([]);
+  });
+
+  it('matches corrections against kept words in output order', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    ['type', 'uh', 'script'].forEach((word, i) => { transcript.words[i].w = word; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w0' }, { from: 'w2', to: 'w2' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'type script', to: 'TypeScript' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'type script', to: 'TypeScript' }]);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'uh', to: 'um' })).isError).toBe(true);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  });
+
   it('removes missing b-roll assets one after another', async () => {
     const { ctx, dir } = await ctxFor();
     const p = await loadProject(dir);
@@ -151,6 +180,7 @@ describe('tool implementations', () => {
     transcript.words[0].w = '3';
     transcript.words[1].w = ',000';
     await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w56' }] });
     const result = await executeTool(ctx, 'add_caption_correction', { from: '3,000', to: 'three thousand' });
     expect(result.isError).toBe(false);
     expect((await loadProject(dir)).captions.corrections).toEqual([{ from: '3,000', to: 'three thousand' }]);
@@ -171,13 +201,14 @@ describe('tool implementations', () => {
 
   it('rejects a caption correction absent from the transcript without saving', async () => {
     const { ctx, dir } = await ctxFor();
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w56' }] });
     const before = await fsp.readFile(path.join(dir, 'project.json'));
     const result = await executeTool(ctx, 'add_caption_correction', { from: 'five thousand dollars', to: '$5000' });
     expect(result.isError).toBe(true);
     expect(result.content).toContain('five thousand dollars');
     expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
-    expect([...ctx.state.changed]).toEqual([]);
-    expect(ctx.state.summaries).toEqual([]);
+    expect([...ctx.state.changed]).toEqual(['cut']);
+    expect(ctx.state.summaries).toEqual(['Picked your best takes']);
     const valid = await executeTool(ctx, 'add_caption_correction', { from: 'FANCY FLOUR', to: 'fancy flower' });
     expect(valid.isError).toBe(false);
     expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'FANCY FLOUR', to: 'fancy flower' }]);
