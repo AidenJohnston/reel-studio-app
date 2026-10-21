@@ -6,7 +6,7 @@ export type { Phase } from '../shared/api'
 type Timed = Exclude<Phase, 'firstLook'>
 export type ProgressKind = JobKind | 'first-edit-basic'
 
-export interface PhaseModel { base: number; perMin: number; n: number }
+export interface PhaseModel { base: number; perMin: number; n: number; approximate?: true }
 export interface SpeedHistory { v: 1; phases: Partial<Record<string, PhaseModel>> }
 
 /** Seconds = base + perMin x minutes of raw video. */
@@ -34,11 +34,25 @@ const PLAN: Record<string, Timed[]> = {
 
 export { timeLeftText as formatEta } from '../shared/progress'
 
+/** Preserve a legacy estimate at this video's duration, then persist only the rate. */
+export function migrateHistory(history: SpeedHistory, mediaSec: number): SpeedHistory {
+  if (!(mediaSec > 0)) return history
+  let out = history
+  for (const [key, model] of Object.entries(history.phases)) {
+    if (!model || model.n <= 0 || !(model.base > 0) || !Number.isFinite(model.base + model.perMin)) continue
+    if (out === history) out = { v: 1, phases: { ...history.phases } }
+    out.phases[key] = { base: 0, perMin: model.perMin + model.base / (mediaSec / 60), n: model.n, approximate: true }
+  }
+  return out
+}
+
 export class ProgressTracker {
   private phases: Timed[]
   private cur = -1
   private phaseStart = 0
   private best = 0
+  private jobStart: number | undefined
+  private aggregate: { pct: number; at: number } | undefined
   private readonly spent: Partial<Record<Timed, number>> = {}
 
   constructor(
@@ -97,7 +111,12 @@ export class ProgressTracker {
   }
 
   /** Phase transitions record elapsed wall time. Substep percentages never finish a phase. */
-  update(phase: Phase | undefined, _pct: number | undefined): void {
+  update(phase: Phase | undefined, pct: number | undefined, aggregate = false): void {
+    const t = this.now()
+    if (aggregate && pct !== undefined && Number.isFinite(pct)) {
+      this.jobStart ??= t
+      if (!this.aggregate || pct > this.aggregate.pct) this.aggregate = { pct: Math.max(0, Math.min(100, pct)), at: t }
+    }
     if (!phase || phase === 'firstLook') return
     let i = this.phases.indexOf(phase)
     if (i < 0) {
@@ -105,7 +124,7 @@ export class ProgressTracker {
       i = this.phases.length - 1
     }
     if (i <= this.cur) return
-    const t = this.now()
+    this.jobStart ??= t
     this.recordPhase(t)
     for (let k = Math.max(0, this.cur + 1); k < i; k++) this.spent[this.phases[k]] = 0
     this.cur = i
@@ -131,11 +150,17 @@ export class ProgressTracker {
     const later = estimates.slice(this.cur + 1).reduce((a, b) => a + b, 0)
     const remaining = Math.max(0, current - elapsed) + later
     const overall = Math.min(99, ((done + this.fraction() * current) / total) * 100)
-    this.best = Math.max(this.best, overall)
+    this.best = Math.max(this.best, overall, Math.min(99, this.aggregate?.pct ?? 0))
     const remainingPhases = this.phases.slice(this.cur)
-    const approximate = remainingPhases.some((p) => !this.local(p))
+    const approximate = remainingPhases.some((p) => !this.local(p) || this.local(p)?.approximate)
     const out = { overall: this.best, approximate }
     if (!(this.mediaSec > 0)) return { ...out, etaSec: null, overdue: false }
+    // Only explicitly whole-job percentages can estimate throughput across render substeps.
+    if (this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart) {
+      const duration = (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct
+      const left = duration - (this.now() - this.jobStart) / 1000
+      return { ...out, approximate: true, etaSec: left > 0 ? Math.max(1, left) : null, overdue: false }
+    }
     const observed = this.factor() !== undefined
     const unknownEdit = remainingPhases.includes('edit') && !this.local('edit')
     // An unmeasured AI step has a remaining-time budget, not a countdown to a known deadline.
@@ -147,7 +172,8 @@ export class ProgressTracker {
     }
     // Use the existing 30-second near-completion cutoff only with local history for all work left.
     if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
-    if (approximate && !observed) return { ...out, etaSec: null, overdue: false }
+    // Preserve main's approximate defaults for notes and rerenders without local samples.
+    if (approximate && !observed && this.kind !== 'note' && this.kind !== 'rerender') return { ...out, etaSec: null, overdue: false }
     return { ...out, etaSec: Math.max(1, remaining), overdue: false }
   }
 
@@ -173,8 +199,8 @@ export function learn(history: SpeedHistory, kind: ProgressKind, mediaSec: numbe
     const key = `${kind}:${phase}`
     const prev = out.phases[key]
     const measured = sec / min
-    // Older history retained a fixed default base; replace it on the first new observation.
-    const a = prev && prev.base === 0 && prev.n > 0 ? 0.3 : 1
+    // A migrated fixed base stays approximate until a new local observation replaces it.
+    const a = prev && prev.base === 0 && prev.n > 0 && !prev.approximate ? 0.3 : 1
     out.phases[key] = { base: 0, perMin: Math.round(((prev?.perMin ?? measured) * (1 - a) + measured * a) * 100) / 100, n: (prev?.n ?? 0) + 1 }
   }
   return out

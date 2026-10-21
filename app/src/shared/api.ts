@@ -151,8 +151,8 @@ export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
  * itself. ONE contract; `shared/live.ts` is the only reader on the renderer side.
  */
 export type JobUpdate =
-  /** pct = this step's own percent (restarts per step). thinking = waiting on the AI's answer. */
-  | { type: 'status'; message: string; pct?: number; phase?: Phase; thinking?: boolean }
+  /** pct restarts per step unless aggregate marks whole-job progress. thinking = waiting on AI. */
+  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean }
   | { type: 'tool'; name: string; summary: string }
   /** A render finished. firstLook = the quick no-AI preview made while the AI still edits (not a version).
    * file = the engine's output path (absolute); main turns it into `video` for the renderer. */

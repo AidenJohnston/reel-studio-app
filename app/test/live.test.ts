@@ -42,15 +42,17 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(timeLeftWords(overrun)).toBe('Still working')
   })
 
-  it('shows note history when available and neutral text when it is not', () => {
+  it('shows approximate note defaults, local history, and neutral overruns', () => {
     let now = 0
     const first = new ProgressTracker('note', note1.mediaSeconds, { v: 1, phases: {} }, () => now)
     first.update('edit', 0)
-    for (const sample of note1.samples) {
+    const words = note1.samples.map((sample) => {
       now = sample.t * 1000
       const snap = first.snapshot()
-      expect(timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })).toBe('Still working')
-    }
+      return timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })
+    })
+    expect(words[0]).toBe('About 42 seconds left')
+    expect(words.at(-1)).toBe('Still working')
     const history = learn({ v: 1, phases: {} }, 'note', 39, { edit: 30, final: 16 })
     const tracker = new ProgressTracker('note', 39, history, () => 0)
     tracker.update('edit', 0)

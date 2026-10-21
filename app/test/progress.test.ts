@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { performance } from 'node:perf_hooks'
-import { DEFAULTS, ProgressTracker, learn, type SpeedHistory } from '../src/main/progress'
+import { DEFAULTS, ProgressTracker, learn, migrateHistory, type SpeedHistory } from '../src/main/progress'
 import { timeLeftText as formatEta } from '../src/shared/progress'
 import { createJobManager } from '../src/main/jobs'
 
@@ -57,7 +57,7 @@ describe('honest progress', () => {
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 5)
     expect(t.snapshot()).toMatchObject({ overdue: false })
-    expect(t.snapshot().etaSec).toBeNull()
+    expect(t.snapshot()).toMatchObject({ etaSec: 28, approximate: true })
     now += 10 * 60_000
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: false })
   })
@@ -83,8 +83,8 @@ describe('honest progress', () => {
     fast.update('final', 10)
     const full = new ProgressTracker('note', 60, empty(), () => now)
     full.update('edit', 5)
-    expect(fast.snapshot().etaSec).toBeNull()
-    expect(full.snapshot().etaSec).toBeNull()
+    expect(fast.snapshot().etaSec).toBe(28)
+    expect(full.snapshot().etaSec).toBe(52)
     expect(fast.estimate('final')).toBeLessThan(full.estimate('edit') + full.estimate('final'))
   })
 
@@ -190,7 +190,7 @@ describe('honest progress', () => {
     note.update('edit', 0)
     now = 300_000
     note.update('final', 0)
-    expect(note.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(note.snapshot()).toMatchObject({ etaSec: 28, approximate: true, overdue: false })
     const history = learn(empty(), 'note', 60, { final: 28 })
     const known = new ProgressTracker('note', 60, history, () => now)
     known.update('edit', 0)
@@ -251,5 +251,37 @@ describe('honest progress', () => {
     const last = tracker.snapshot().overall
     now += 1000
     expect(tracker.snapshot().overall).toBeGreaterThan(last)
+  })
+
+  it('keeps approximate estimates for notes, rerenders, and legacy history', () => {
+    for (const kind of ['note', 'rerender'] as const) {
+      const tracker = new ProgressTracker(kind, 120, empty(), () => 0)
+      tracker.update(kind === 'note' ? 'edit' : 'final', 0)
+      expect(tracker.snapshot().etaSec).toBeGreaterThan(0)
+      expect(tracker.snapshot()).toMatchObject({ approximate: true, overdue: false })
+    }
+    const legacy: SpeedHistory = { v: 1, phases: { 'rerender:final': { base: 6, perMin: 22, n: 3 } } }
+    const migrated = migrateHistory(legacy, 120)
+    expect(migrated.phases['rerender:final']).toMatchObject({ base: 0, perMin: 25, n: 3 })
+    expect(migrateHistory(migrated, 60)).toBe(migrated)
+    let now = 0
+    const tracker = new ProgressTracker('rerender', 120, migrated, () => now)
+    tracker.update('final', 0)
+    expect(tracker.snapshot()).toMatchObject({ etaSec: 50, approximate: true })
+    now = 60_000
+    expect(tracker.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(learn(migrated, 'rerender', 120, { final: 40 }).phases['rerender:final']).toEqual({ base: 0, perMin: 20, n: 4 })
+  })
+
+  it('uses explicitly aggregate percentages for the bar and ETA without accepting substep resets', () => {
+    let now = 0
+    const tracker = new ProgressTracker('rerender', 60, empty(), () => now)
+    tracker.update('final', 0, true)
+    now = 10_000
+    tracker.update('final', 50, true)
+    expect(tracker.snapshot()).toMatchObject({ overall: 50, etaSec: 10, approximate: true })
+    tracker.update('final', 100)
+    tracker.update('final', 5)
+    expect(tracker.snapshot()).toMatchObject({ overall: 50, etaSec: 10 })
   })
 })

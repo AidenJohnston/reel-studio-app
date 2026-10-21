@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
 import { toUserError } from './engine'
-import { learn, ProgressTracker, type ProgressKind, type SpeedHistory } from './progress'
+import { learn, migrateHistory, ProgressTracker, type ProgressKind, type SpeedHistory } from './progress'
 
 /** A job reports with the shared contract. A render's `file` becomes a playable `video` via `toVideo`. */
 export type Emit = (e: JobUpdate) => void
@@ -69,7 +69,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       job.secondsMaxLeft = snap.etaMaxSec
       job.approximate = snap.approximate
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
-      // later: wait for duration and the tracker's first completed phase.
+      // later: wait for duration before showing a number.
       job.secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
       job.overdue = snap.overdue
       send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, ...(snap.etaMaxSec ? { secondsMaxLeft: snap.etaMaxSec } : {}), approximate: snap.approximate, overdue: job.overdue, thinking: job.thinking })
@@ -106,9 +106,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             if (e.phase && slug && progress && !mediaAsked) {
               mediaAsked = true
               // project.json exists once a phase starts (after init): the estimate scales with it
-              void progress.mediaSeconds(slug).then((s) => { mediaSec = s; tracker.setMedia(s) }).catch(() => undefined)
+              pending.push(progress.mediaSeconds(slug).then(async (s) => {
+                mediaSec = s
+                const migrated = migrateHistory(history, s)
+                const changed = migrated !== history
+                history = migrated
+                tracker.setHistory(history)
+                tracker.setMedia(s)
+                if (changed) await progress.saveHistory(history)
+              }).catch(() => undefined))
             }
-            tracker.update(e.phase, e.phase ? e.pct : undefined)
+            tracker.update(e.phase, e.pct, e.aggregate === true)
             if (e.phase) phase = e.phase
             job.thinking = !!e.thinking
             status()
