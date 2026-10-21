@@ -138,5 +138,35 @@
     "name": "witness-external-credits",
     "expect": "witness",
     "invariant": "NeverExternalCredits"
+  },
+  {
+    "name": "mixed-orphans",
+    "module": "OrphanRecovery",
+    "expect": "pass",
+    "invariant": null
+  },
+  {
+    "name": "broken-orphan-return",
+    "module": "OrphanRecovery",
+    "expect": "mutation",
+    "invariant": "ValidRecovered"
+  },
+  {
+    "name": "broken-orphan-delete",
+    "module": "OrphanRecovery",
+    "expect": "mutation",
+    "invariant": "InvalidPreserved"
+  },
+  {
+    "name": "witness-orphan-recovery",
+    "module": "OrphanRecovery",
+    "expect": "witness",
+    "invariant": "NeverCompleted"
+  },
+  {
+    "name": "broken-orphan-sweep",
+    "module": "OrphanRecovery",
+    "expect": "mutation",
+    "invariant": "InvalidPreserved"
   }
 ]

@@ -21,7 +21,7 @@ TLC logs and a machine-readable summary go into verification/note-staging/result
 
 ## Confirm the source mapping before accepting results
 
-Last confirmed source commit: 152e91318640523c1c8beb08e5b7eec7281c8388. coverage.json records SHA-256 digests for the covered paths. The runner refuses any drift, including uncommitted edits.
+Last confirmed source commit: cf379c5404e4c3cfb1156991f3b97959c43d2ed7. coverage.json records SHA-256 digests for the covered paths. The runner refuses any drift, including uncommitted edits.
 
 - ai/src/note-staging.ts: withProjectLock, cloneFile, transferCompletedCaches, promoteCompletedCaches, beginNote, NoteTransaction.publish, discardLocked, parseManifest, syncDirectory, recoverTransaction, removeUnpublished, and recoverNoteStaging.
 - ai/src/style.ts: idempotent rule replay from the immutable version.
@@ -38,7 +38,7 @@ Last confirmed source commit: 152e91318640523c1c8beb08e5b7eec7281c8388. coverage
 - engine/reelengine/render.py: staged output contract and the legacy cover writer used by the global-immutability counterexample.
 - docs/versions.md: protocol and threat-model claims.
 
-When a covered file changes, compare it with the sync commit. Inspect every changed write destination, await boundary, guard, lock lifetime, and recovery action. Read REPORT.md, update the model to describe the implementation, preserve the separate literal-byte and reference checks, refresh coverage.json and advance the sync commit here only after confirming correspondence, then rerun the full command and source rehearsal. For wider maintenance, use /maintain-formal-verification-skill.
+When a covered file changes, compare it with the sync commit. Inspect every changed write destination, await boundary, guard, lock lifetime, and recovery action. Read REPORT.md, update the model to describe the implementation, preserve the separate literal-byte, reference, and mixed-orphan checks, refresh coverage.json and advance the sync commit here only after confirming correspondence, then rerun the full command and source rehearsal. For wider maintenance, use /maintain-formal-verification-skill.
 
 ## Interpret a counterexample
 
@@ -50,12 +50,14 @@ Property 3 uses the revised requirement: a note cannot write live caches before 
 
 Property 1 requires the live project after recovery to be byte-identical to before the note or the complete new version, with no missing references at any step. Recovered edit equality and reference consistency pass within the documented projection and bounds. The separate property "Immediate byte equality before recovery" is expected to fail between an asset move and recovery. Preserve both checks when updating this model. The `cover_only` immutability failure is the accepted legacy exception, not a note defect.
 
-The external-credit case permits one completed write while the process is down, before recovery resumes. It checks that conditional rollback preserves those bytes. It does not permit an external writer during the recovery hash-read/rename interval. Valid publisher-generated manifests are assumed in TLC. Malformed manifests and symlink refusal are checked by `ai/test/note-staging.test.ts`. Run those tests when changing validation. App notice tests cover the 50-ID retention limit separately.
+The external-credit case permits one completed write while the process is down, before recovery resumes. It checks that conditional rollback preserves those bytes. It does not permit an external writer during the recovery hash-read/rename interval. The publication model assumes valid publisher-generated manifests. `OrphanRecovery.tla` separately checks one valid and one invalid orphan in both scan orders, including preservation of refused files and skipping the general version sweep. Malformed manifests and symlink refusal are checked by `ai/test/note-staging.test.ts`. Run those tests when changing validation. App notice tests cover 51 pending folders across three startups, retaining each ID until its folder disappears.
 
 ## Rehearse against actual source
 
 Run `env -u CLIPROXY_API_KEY node verification/note-staging/source-probes.cjs`. Install repository dependencies with `npm ci --ignore-scripts --no-audit --no-fund` if TypeScript is missing. The full runner includes this rehearsal.
 
-The probe compiles copies of the real TypeScript modules in an owned temporary directory. It checks stale refusal, exact credits rollback, committed-note bytes, external-credit preservation, and the two-orphan notice retry. Scratch mutants omit the manifest, append the note after commit, remove the credits hash guard, restore the old notice dedupe, and remove the base-hash guard. Each must trigger its behavioral assertion. Tracked product files remain untouched.
+The probe compiles copies of the real TypeScript modules in an owned temporary directory. It checks stale refusal, exact credits rollback, committed-note bytes, external-credit preservation, the two-orphan notice retry, mixed valid/invalid orphan recovery, and nine directory-sync error cases. Scratch mutants omit the manifest, append the note after commit, remove the credits hash guard, restore the old notice dedupe, remove the base-hash guard, return early at an invalid transaction, delete refused staging, and sweep unknown versions despite refusal. Each must trigger its behavioral assertion. Tracked product files remain untouched.
 
 Also run `env -u CLIPROXY_API_KEY python3 verification/note-staging/run.py --case broken-hash`. TLC must fail StaleNeverPublishes. An unexpected result requires a source/model review before committing verification changes.
+
+For the app store tests, build the AI package first with `npm run build -w ai`. Without `ai/dist`, recovery uses the optional-package fallback and cannot exercise the installed recovery protocol. The two-orphan model does not admit concurrent symlink swaps. Treat parent validation as a separate read before deletion, not an atomic check-and-delete.

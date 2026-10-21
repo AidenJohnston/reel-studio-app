@@ -21,6 +21,21 @@ async function compileSource(dir, mutations = {}) {
       assert.equal(source.split(guard).length, 2, 'The credits-guard mutation needs a new source mapping');
       source = source.replace(guard, 'if (current) {');
     }
+    if (name === 'note-staging' && mutations.returnOnInvalid) {
+      const guard = "if (!await recoverTransaction(dir, path.join(dir, '.staging', txn))) allRecovered = false;";
+      assert.equal(source.split(guard).length, 2, 'The orphan-loop mutation needs a new source mapping');
+      source = source.replace(guard, guard.replace('allRecovered = false;', 'return;'));
+    }
+    if (name === 'note-staging' && mutations.deleteInvalid) {
+      const guard = 'if (!allRecovered) return;';
+      assert.equal(source.split(guard).length, 2, 'The refused-cleanup mutation needs a new source mapping');
+      source = source.replace(guard, "if (!allRecovered) { await fs.rm(path.join(dir, '.staging'), { recursive: true, force: true }); return; }");
+    }
+    if (name === 'note-staging' && mutations.sweepInvalid) {
+      const guard = 'if (!allRecovered) return;';
+      assert.equal(source.split(guard).length, 2, 'The refused-sweep mutation needs a new source mapping');
+      source = source.replace(guard, '');
+    }
     if (name === 'note-staging' && mutations.removeManifest) {
       const manifestWrite = "      files.push([path.join(this.dir, 'publication.json'), JSON.stringify(manifest) + '\\n']);";
       assert.equal(source.split(manifestWrite).length, 2, 'The publication-manifest mutation needs a new source mapping');
@@ -127,9 +142,11 @@ async function recoveryNoticeProbe(parent, api, mutations = {}) {
   try {
     await assert.rejects(store.recoverInterrupted(), /crash during recursive cleanup/);
   } finally { api.recoverNoteStaging = recover; }
+  assert.equal((await store.readAppState('interrupted')).chat[0].id, 'interrupted-note:A,B');
   await store.recoverInterrupted();
   const ids = (await store.readAppState('interrupted')).chat.map(message => message.id);
-  assert.deepEqual(ids, ['interrupted-note:A,B'], 'Recovery duplicated an interruption notice');
+  assert.equal(ids.length, 1, 'Recovery duplicated an interruption notice');
+  assert.equal(ids[0].startsWith('interrupted-note:'), false, 'Recovery retained IDs for removed staging folders');
   const once = await fs.readFile(path.join(dir, 'app.json'));
   await store.recoverInterrupted();
   assert.deepEqual(await fs.readFile(path.join(dir, 'app.json')), once);
@@ -188,6 +205,64 @@ async function externalCreditsProbe(parent, api) {
   assert.equal(await fs.readFile(credits, 'utf8'), newer, 'Repeated recovery overwrote external credits');
 }
 
+async function mixedOrphansProbe(parent, api) {
+  const { dir, txn } = await fixture(parent, api);
+  await txn.discard();
+  const invalid = '00000000-0000-4000-8000-000000000001';
+  const valid = '00000000-0000-4000-8000-000000000002';
+  const invalidManifest = JSON.stringify({ version: 2, assets: ['project.json'], createdDirectories: [] });
+  for (const id of [invalid, valid]) {
+    const stage = path.join(dir, '.staging', id);
+    await fs.mkdir(stage, { recursive: true });
+    await fs.writeFile(path.join(stage, 'publication.json'), id === invalid ? invalidManifest
+      : JSON.stringify({ version: 2, assets: [`work/assets/${id}-image.png`], createdDirectories: [] }));
+    await fs.writeFile(path.join(dir, 'work/assets', `${id}-image.png`), 'orphan asset');
+  }
+  const preserved = path.join(dir, '.staging', invalid, 'publication.json');
+  const unknownVersion = path.join(dir, 'versions/v3/export.mp4');
+  await fs.mkdir(path.dirname(unknownVersion), { recursive: true });
+  await fs.writeFile(unknownVersion, 'unknown publication');
+  for (let run = 0; run < 2; run++) {
+    await api.recoverNoteStaging(dir);
+    assert.equal(await fs.readFile(preserved, 'utf8').catch(() => null), invalidManifest, 'Recovery deleted the invalid transaction');
+    assert.equal(await fs.readFile(unknownVersion, 'utf8').catch(() => null), 'unknown publication', 'Recovery swept an unknown publication');
+    assert.equal(await fs.readFile(path.join(dir, 'work/assets', `${invalid}-image.png`), 'utf8'), 'orphan asset');
+    await assert.rejects(fs.access(path.join(dir, 'work/assets', `${valid}-image.png`)), { code: 'ENOENT' }, 'Valid orphan asset survived');
+    await assert.rejects(fs.access(path.join(dir, '.staging', valid)), { code: 'ENOENT' });
+  }
+}
+
+async function directorySyncProbe(parent, api) {
+  const scenarios = [
+    ['pre', 'sync', 'EINVAL'], ['pre', 'sync', 'ENOTSUP'], ['pre', 'sync', 'EIO'],
+    ['pre', 'open', 'EINVAL'], ['pre', 'open', 'EPERM'], ['pre', 'close', 'ENOTSUP'],
+    ['post', 'sync', 'EIO'], ['post', 'open', 'EPERM'], ['post', 'close', 'EIO'],
+  ];
+  for (const [phase, operation, code] of scenarios) {
+    const { dir, txn, before } = await fixture(parent, api);
+    const target = phase === 'pre' ? txn.dir : dir;
+    const open = fs.open;
+    const error = Object.assign(new Error(`injected directory ${operation} failure`), { code });
+    fs.open = async (...args) => {
+      if (args[0] !== target || args[1] !== 'r') return open(...args);
+      if (operation === 'open') throw error;
+      const handle = await open(...args);
+      return {
+        async sync() { if (operation === 'sync') throw error; await handle.sync(); },
+        async close() { await handle.close(); if (operation === 'close') throw error; },
+      };
+    };
+    const succeeds = phase === 'post' || (operation === 'sync' && ['EINVAL', 'ENOTSUP'].includes(code));
+    try {
+      if (succeeds) assert.equal(await txn.publish(entry), 2);
+      else await assert.rejects(txn.publish(entry), candidate => candidate === error);
+      assert.equal(txn.published, succeeds);
+      if (!succeeds) assert.deepEqual(await fs.readFile(path.join(dir, 'project.json')), before);
+    } finally { fs.open = open; }
+    await txn.discard();
+  }
+}
+
 async function main() {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'note-staging-source-'));
   try {
@@ -204,6 +279,25 @@ async function main() {
     console.log('PASS actual source: recovery preserves a completed external credits write');
 
     await recoveryNoticeProbe(temp, api);
+    await mixedOrphansProbe(temp, api);
+    console.log('PASS actual source: invalid orphan stays intact while valid orphan recovers, twice');
+    await directorySyncProbe(temp, api);
+    console.log('PASS actual source: directory sync errors follow precommit and postcommit rules');
+
+    const orphanMutations = {
+      returnOnInvalid: /Valid orphan asset survived/,
+      deleteInvalid: /Recovery deleted the invalid transaction/,
+      sweepInvalid: /Recovery swept an unknown publication/,
+    };
+    for (const [mutation, message] of Object.entries(orphanMutations)) {
+      const mutantDir = path.join(temp, mutation);
+      await fs.mkdir(mutantDir);
+      const mutant = await compileSource(mutantDir, { [mutation]: true });
+      await assert.rejects(mixedOrphansProbe(mutantDir, mutant), {
+        code: 'ERR_ASSERTION', message,
+      });
+    }
+    console.log('PASS rehearsal: mixed-orphan assertions catch early return, invalid deletion, and unsafe version sweep');
 
     const noManifestDir = path.join(temp, 'no-manifest');
     await fs.mkdir(noManifestDir);

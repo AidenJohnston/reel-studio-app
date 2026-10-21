@@ -54,7 +54,7 @@ def check_case(java, case, results):
         command = [java, "-XX:+UseParallelGC", "-Xmx1g", "-cp", str(JAR), "tlc2.TLC",
                    "-workers", "1", "-fp", "0", "-seed", "1", "-noGenerateSpecTE",
                    "-metadir", temp, "-config", str(HERE / (case["name"] + ".cfg")),
-                   str(HERE / "NoteStaging.tla")]
+                   str(HERE / (case.get("module", "NoteStaging") + ".tla"))]
         result = subprocess.run(command, cwd=ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     log = result.stdout
