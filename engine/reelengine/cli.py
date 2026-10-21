@@ -426,6 +426,8 @@ def main(argv=None) -> int:
         old_cache = {key: os.environ.get(key) for key in ("REELENGINE_CACHE_DIR", "REELENGINE_CACHE")}
         try:
             if cache_dir is not None:
+                from .cache import seed_private_cache
+                seed_private_cache(cache_dir)
                 for key in old_cache:
                     os.environ[key] = str(cache_dir)
             result = args.fn(args)

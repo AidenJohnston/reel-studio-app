@@ -1,16 +1,26 @@
 // The job event contract (shared/api.ts JobUpdate -> JobEvent) end to end without Electron: what a job
 // emits, what main adds (overall, secondsLeft, thinking kept across ticks, a playable `video` for every
 // render), and how the renderer folds it (shared/live.ts).
-import { describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
-import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
+import { createLiveVideos, createNoteVideos, LIVE_DIR } from '../src/main/live-video'
+import { protocol } from 'electron'
+import { handleMediaProtocol } from '../src/main/media'
 import { createJobManager } from '../src/main/jobs'
-import { pathFromMediaUrl } from '../src/main/media-url'
-import { projectDir } from '../src/main/store'
+import { mediaUrl, pathFromMediaUrl } from '../src/main/media-url'
+import { projectDir, readAppState } from '../src/main/store'
 import { setupPaths } from './helpers'
+
+vi.mock('electron', () => ({ protocol: { handle: vi.fn() } }))
+
+function serveMedia(req: Request, roots: () => string[], stagingRoots: () => string[] = () => []): Promise<Response> {
+  handleMediaProtocol(roots, stagingRoots)
+  const handler = vi.mocked(protocol.handle).mock.calls.at(-1)![1]
+  return Promise.resolve(handler(req))
+}
 
 const J = { jobId: 'j1', slug: 's' }
 const status = (over: Partial<Extract<JobEvent, { type: 'status' }>> = {}): JobEvent => ({
@@ -98,23 +108,92 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
-  it('does not copy or show staged note drafts', async () => {
+  it('records an interrupted note on quit while preserving a real Stop', async () => {
     setupPaths()
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const startNote = (slug: string) => {
+      mkdirSync(projectDir(slug), { recursive: true })
+      let started!: () => void
+      const ready = new Promise<void>((resolve) => { started = resolve })
+      const id = jobs.start(slug, 'note', (_emit, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' }), { once: true })
+        started()
+      }))
+      return { id, ready }
+    }
+    const stopped = startNote('user-stop')
+    const interrupted = startNote('app-quit')
+    await Promise.all([stopped.ready, interrupted.ready])
+    jobs.cancel(stopped.id)
+    await jobs.cancelAll('quit')
+    expect((await readAppState('app-quit')).chat.map((message) => message.text)).toEqual([
+      'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
+    ])
+    expect((await readAppState('user-stop')).chat.map((message) => message.text)).toEqual([
+      'Stopped. Your video has not changed.'
+    ])
+  })
+
+  it('keeps inactive staging private through an alias in an allowed media folder', async () => {
+    const { home } = setupPaths()
+    const stage = join(home, '.staging', 'stopped')
+    mkdirSync(stage, { recursive: true })
+    writeFileSync(join(stage, 'draft.mp4'), 'private draft')
+    const alias = join(home, 'draft.mp4')
+    symlinkSync(join(stage, 'draft.mp4'), alias)
+    const response = await serveMedia(new Request(mediaUrl(alias)), () => [home])
+    expect(response.status).toBe(403)
+  })
+
+  it('serves a note draft only for its active staging job and revokes it before cleanup', async () => {
+    const { root } = setupPaths()
     const slug = 'staged-note'
     const dir = projectDir(slug)
-    const stage = join(dir, '.staging', 'note', 'version')
+    const stage = join(dir, '.staging', 'note')
     mkdirSync(stage, { recursive: true })
     const draft = join(stage, 'draft.mp4')
     writeFileSync(draft, 'staged preview')
+    const original = join(dir, 'versions', 'v1', 'export.mp4')
+    mkdirSync(join(dir, 'versions', 'v1'), { recursive: true })
+    writeFileSync(original, 'published video')
     const events: JobEvent[] = []
-    const live = createLiveVideos()
-    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, (s, e) => live(projectDir(s), e))
-    jobs.start(slug, 'note', async (emit) => {
-      emit({ type: 'render', version: 2, draft: true, file: draft })
-      throw { code: 'RENDER_FAILED', userMessage: 'Send your note again.' }
+    const videos = createNoteVideos()
+    const request = (url: string) => serveMedia(new Request(url, { headers: { Range: 'bytes=0-5' } }), () => [root], videos.roots)
+    expect((await request(mediaUrl(draft))).status).toBe(403)
+    let shown!: (e: Extract<JobEvent, { type: 'render' }>) => void
+    const preview = new Promise<Extract<JobEvent, { type: 'render' }>>((resolve) => { shown = resolve })
+    let finish!: () => void
+    const rendering = new Promise<void>((resolve) => { finish = resolve })
+    const jobs = createJobManager((e) => {
+      events.push(e)
+      if (e.type === 'render') shown(e)
+    }, () => undefined, undefined, (_s, e, job) => videos.video(job.id, e))
+    jobs.start(slug, 'note', async (emit, _signal, id) => {
+      videos.set(id, dir, stage)
+      try {
+        emit({ type: 'render', version: 2, draft: true, file: draft })
+        await rendering
+        throw { code: 'RENDER_FAILED', userMessage: 'Send your note again.' }
+      } finally {
+        videos.set(id, dir, null)
+        expect((await request(mediaUrl(draft))).status).toBe(403)
+        rmSync(stage, { recursive: true })
+      }
     })
+    const event = await preview
+    try {
+      expect(pathFromMediaUrl(event.video!)).toBe(draft)
+      const response = await request(event.video!)
+      expect(response.status).toBe(206)
+      expect(await response.text()).toBe('staged')
+      expect(await videos.video('another-job', { type: 'render', version: 2, draft: true, file: draft })).toBeNull()
+      expect(existsSync(join(dir, LIVE_DIR))).toBe(false)
+    } finally { finish() }
     await jobs.forSlug(slug)?.done
-    expect(events.some((e) => e.type === 'render')).toBe(false)
+    expect(events.at(-1)?.type).toBe('error')
+    expect((await request(event.video!)).status).toBe(403)
+    expect(videos.roots()).toEqual([])
+    expect(readFileSync(original, 'utf8')).toBe('published video')
     expect(existsSync(join(dir, LIVE_DIR))).toBe(false)
   })
 

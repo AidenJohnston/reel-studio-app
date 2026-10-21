@@ -17,6 +17,7 @@ of decoded frames waiting for a later segment.
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import math
 import os
@@ -94,6 +95,93 @@ def pick_version(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
             except (ValueError, OSError):
                 pass
     return cur + 1
+
+
+def render_inputs(project_dir: Path, proj: dict, staged_dir: Optional[Path] = None,
+                  root: Optional[Path] = None) -> tuple:
+    """Small input hashes and resource stats, plus the latest dependency timestamp for old exports."""
+    here = Path(__file__).parent
+    resources = list(here.glob("*.py")) + list((here / "templates").rglob("*.json"))
+    resources += [p for d in tools.font_dirs() for p in d.rglob("*") if p.is_file()]
+    resources += [p for p in (here / "models").rglob("*") if p.is_file()]
+    resources += [Path(tools.ffmpeg()), Path(tools.ffprobe())]
+    stats = {str(p): [p.stat().st_size, p.stat().st_mtime_ns] for p in resources}
+    newest = max((v[1] for v in stats.values()), default=0)
+    inputs = {}
+    names = ["transcript.json", "face.json"] + [f"face-{s['id']}.json" for s in proj["sources"]]
+    for base in [project_dir] + ([staged_dir] if staged_dir is not None else []):
+        for name in names:
+            p = base / "work" / name
+            if p.exists():
+                newest = max(newest, p.stat().st_mtime_ns)
+                # Live and staged copies may have different timestamp precision after cloning.
+                inputs[f"{'live' if base == project_dir else 'staged'}/{name}"] = hashlib.sha256(p.read_bytes()).hexdigest()
+    # Missing staged copies read the same live input. Record identical keys before/after publication.
+    for name in names:
+        inputs.setdefault(f"staged/{name}", inputs.get(f"live/{name}"))
+    for b in proj.get("broll") or []:
+        asset = b.get("asset")
+        if asset:
+            p = safepath.resolve_input(project_dir, asset, root=root, staged_dir=staged_dir).with_suffix(".anim.json")
+            inputs[f"sidecar/{asset}"] = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+            if p.exists():
+                newest = max(newest, p.stat().st_mtime_ns)
+    return {"resources": stats, "inputs": inputs}, newest
+
+
+def reuse_staged_render(project_dir: Path, proj: dict, project_file: Path, vdir: Path,
+                        root: Path, version: int, inputs: dict, newest: int,
+                        t_start: float) -> Optional[dict]:
+    """Copy a proven final into a note's private output; published files are only read."""
+    staged_dir = project_file.parent
+    current = int(projmod.load(project_dir).get("version") or 0)
+    source = project_dir / "versions" / f"v{current}"
+    required = ("export.mp4", "cover.png", "project.json", "render.json", "verify.json", "assets.json")
+    if (current <= 0 or int(proj.get("version") or 0) != current
+            or not staged_dir.is_relative_to(project_dir / ".staging") or not vdir.is_relative_to(staged_dir)):
+        return None
+    try:
+        if (source / ".rendering").exists() or any(not (source / n).is_file() or (source / n).stat().st_size == 0 for n in required):
+            return None
+        manifest = projmod.read_json(source / "render.json")
+        if (manifest.get("draft") is not False or manifest.get("preview") is not False
+                or manifest.get("window") is not None or manifest.get("encoder") != "libx264"
+                or manifest.get("version") != current
+                or manifest.get("size") != [proj["format"]["width"], proj["format"]["height"]]):
+            return None
+        if projmod.edit_signature(projmod.read_json(source / "project.json")) != projmod.edit_signature(proj):
+            return None
+        assets = asset_fingerprint(project_dir, proj, root, staged_dir=staged_dir)
+        if any(v is None or v[0] <= 0 for v in assets.values()) or projmod.read_json(source / "assets.json") != assets:
+            return None
+        saved = manifest.get("reuseInputs")
+        if saved is not None and saved != inputs:
+            return None
+        if saved is None and newest > (source / "export.mp4").stat().st_mtime_ns:
+            return None
+        report = projmod.read_json(source / "verify.json")
+        if not isinstance(report.get("ok"), bool) or not isinstance(report.get("fails"), list) or not isinstance(report.get("warns"), list):
+            return None
+    except (EngineError, OSError, ValueError, TypeError, AttributeError):
+        return None
+
+    for name in ("export.mp4", "cover.png", "cover.json"):
+        if (source / name).is_file():
+            shutil.copy2(source / name, vdir / name)
+    result = {k: v for k, v in manifest.items() if k not in ("segmentsDetail", "reuseInputs")}
+    result.update(version=version, versionDir=str(vdir), file=str(vdir / "export.mp4"),
+                  cover=str(vdir / "cover.png"), timings={"reuse": round(time.time() - t_start, 2),
+                                                         "total": round(time.time() - t_start, 2)})
+    report["file"] = result["file"]
+    projmod.write_json(vdir / "verify.json", report)
+    projmod.write_json(vdir / "assets.json", assets)
+    projmod.write_json(vdir / "project.json", dict(proj, version=version))
+    projmod.write_json(vdir / "render.json", dict(result, segmentsDetail=manifest.get("segmentsDetail", []), reuseInputs=inputs))
+    fresh = projmod.load(project_dir, file=project_file)
+    fresh["version"] = version
+    projmod.save(project_dir, fresh, file=project_file)
+    progress(STAGE, 100, "Your video is ready", force=True)
+    return result
 
 
 PREVIEW_DIR = "preview"
@@ -290,6 +378,22 @@ def render_voice(ctx: RenderCtx, segments: list, src_paths: dict, out: Path) -> 
                 return out
     except OSError:
         pass
+    # A note may publish a new cut while live work still holds the previous cut's voice.
+    # Copy only a matching completed pair; the published cache remains immutable.
+    if getattr(ctx, "staged_dir", None) is None:
+        version = int(ctx.project.get("version") or 0)
+        cached = Path(ctx.project_dir) / "versions" / f"v{version}" / ".cache/work/render/voice.wav"
+        try:
+            if cached.stat().st_size > 0 and cached.with_suffix(".sig").read_text(encoding="utf-8").strip() == sig:
+                tmp = out.with_name(out.stem + ".part.wav")
+                shutil.copy2(cached, tmp)
+                tmp.replace(out)
+                tmp_sig = sig_file.with_suffix(".sig.part")
+                tmp_sig.write_text(sig, encoding="utf-8")
+                tmp_sig.replace(sig_file)
+                return out
+        except OSError:
+            pass
     sig_file.unlink(missing_ok=True)
     lanes = plan_lanes(segments)
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
@@ -747,6 +851,17 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     vdir = Path(out).resolve() if explicit_output else (
         preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}")
     vdir.mkdir(parents=True, exist_ok=True)
+    reuse_inputs = None
+    if not preview:
+        try:
+            reuse_inputs, newest = render_inputs(project_dir, proj, staged_dir, root)
+        except (EngineError, OSError):
+            pass  # Missing proof disables media reuse, not the normal renderer.
+        if explicit_output and project_file is not None and reuse_inputs is not None:
+            reused = reuse_staged_render(project_dir, proj, project_file, vdir, root, version,
+                                         reuse_inputs, newest, t_start)
+            if reused is not None:
+                return reused
     if win:     # one scratch window at a time: older window slices go
         for old in vdir.glob("window_*"):
             try:
@@ -938,6 +1053,11 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             snap["version"] = version
         projmod.write_json(vdir / "project.json", snap)
         manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
+        if not preview and reuse_inputs is not None:
+            try:
+                manifest["reuseInputs"], _ = render_inputs(project_dir, proj, staged_dir, root)
+            except (EngineError, OSError):
+                pass
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
         if not preview:
             projmod.write_json(vdir / "assets.json", asset_fingerprint(project_dir, proj, root, staged_dir=staged_dir))

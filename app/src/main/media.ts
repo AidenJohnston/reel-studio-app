@@ -1,4 +1,5 @@
 // The reel-media: protocol. Streams files with HTTP range support so <video> can seek.
+import { allowStagingMedia } from './staging-media'
 import { protocol } from 'electron'
 import { createReadStream, promises as fs } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
@@ -27,11 +28,12 @@ export function registerMediaScheme(): void {
   ])
 }
 
-export function handleMediaProtocol(allowedRoots: () => string[]): void {
+export function handleMediaProtocol(allowedRoots: () => string[], stagingRoots: () => string[] = () => []): void {
   protocol.handle(MEDIA_SCHEME, async (req) => {
     let file: string
     try {
       file = resolve(pathFromMediaUrl(req.url))
+      if (!(await allowStagingMedia(file, stagingRoots))) return new Response('forbidden', { status: 403 })
     } catch {
       return new Response('bad url', { status: 400 })
     }
@@ -46,6 +48,7 @@ export function handleMediaProtocol(allowedRoots: () => string[]): void {
     } catch {
       return new Response('not found', { status: 404 })
     }
+    if (!(await allowStagingMedia(file, stagingRoots))) return new Response('forbidden', { status: 403 })
     const type = TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream'
     const range = req.headers.get('range')
     const m = range && /bytes=(\d*)-(\d*)/.exec(range)

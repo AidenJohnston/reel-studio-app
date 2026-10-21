@@ -39,17 +39,32 @@ async function cloneFile(src: string, dest: string): Promise<void> {
   await fs.utimes(dest, stat.atimeMs / 1000, stat.mtimeMs / 1000);
 }
 
-async function seedRenderCache(liveDir: string, dir: string, signal?: AbortSignal): Promise<void> {
+async function transferCompletedCaches(sourceDir: string, dir: string, mode: 'clone' | 'move', signal?: AbortSignal): Promise<void> {
+  await forCompletedCache(sourceDir, async (rel) => {
+    const source = path.join(sourceDir, rel);
+    const destination = path.join(dir, rel);
+    if (mode === 'clone') await cloneFile(source, destination);
+    else {
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.rename(source, destination);
+    }
+  }, signal);
+}
+
+async function forCompletedCache(sourceDir: string, transfer: (rel: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
   const copy = async (rel: string) => {
     if (signal?.aborted) throw cancelled();
-    await cloneFile(path.join(liveDir, rel), path.join(dir, rel));
+    await transfer(rel);
   };
-  const render = path.join(liveDir, 'work', 'render');
-  for (const name of await names(path.join(liveDir, 'work'))) {
+  const json = async (rel: string) => {
+    try { JSON.parse(await fs.readFile(path.join(sourceDir, rel), 'utf8')); }
+    catch (e: any) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return; throw e; }
+    await copy(rel);
+  };
+  const render = path.join(sourceDir, 'work', 'render');
+  for (const name of await names(path.join(sourceDir, 'work'))) {
     if (!/^face-.+\.json$/.test(name)) continue;
-    try { JSON.parse(await fs.readFile(path.join(liveDir, 'work', name), 'utf8')); }
-    catch (e) { if (e instanceof SyntaxError) continue; throw e; }
-    await copy(`work/${name}`);
+    await json(`work/${name}`);
   }
   try {
     if (/^[a-f0-9]{40}$/.test((await fs.readFile(path.join(render, 'voice.sig'), 'utf8')).trim())) {
@@ -60,17 +75,47 @@ async function seedRenderCache(liveDir: string, dir: string, signal?: AbortSigna
   // Final cache media are renamed into place by the engine. Never seed partial files or
   // the directly-written chrome/mask scratch images used to construct video treatments.
   for (const folder of ['layers', 'render/cover-cache']) {
-    for (const name of await names(path.join(liveDir, 'work', folder))) {
+    for (const name of await names(path.join(sourceDir, 'work', folder))) {
       if (!/\.(png|mp4|mov|json)$/.test(name) || /\.part\.|-(chrome|mask)\.png$/.test(name) || name === 'layers.json') continue;
       await copy(`work/${folder}/${name}`);
     }
   }
-  const audio = path.join(liveDir, 'work', 'audio');
+  for (const name of ['simple-icons.json', 'wikidata.json', 'search-credits.json', 'encoder-probe.json']) {
+    await json(`work/cache/${name}`);
+  }
+  for (const name of await names(path.join(sourceDir, 'work/cache/music-analysis'))) {
+    if (/^[a-f0-9]{32}\.json$/.test(name)) await json(`work/cache/music-analysis/${name}`);
+  }
+  const downloads = path.join(sourceDir, 'work/cache/yt-dlp');
+  for (const section of await names(downloads)) {
+    if (!/^[\w.-]+$/.test(section) || !(await fs.stat(path.join(downloads, section))).isDirectory()) continue;
+    for (const name of await names(path.join(downloads, section))) {
+      if (name.endsWith('.json')) await json(`work/cache/yt-dlp/${section}/${name}`);
+    }
+  }
+  const audio = path.join(sourceDir, 'work', 'audio');
   try { JSON.parse(await fs.readFile(path.join(audio, 'mix.json'), 'utf8')); }
   catch (e: any) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return; throw e; }
   for (const name of await names(audio)) {
     if (/^mix-[a-f0-9]+\.wav$/.test(name) || name === 'mix.json') await copy(`work/audio/${name}`);
   }
+}
+
+async function promoteCompletedCaches(sourceDir: string, liveDir: string, scratchDir: string): Promise<void> {
+  const render = new Set(await names(path.join(liveDir, 'work/render')));
+  // The voice and signature describe one result. Installing only half could validate old audio.
+  const hasVoice = render.has('voice.wav') || render.has('voice.sig');
+  await forCompletedCache(sourceDir, async (rel) => {
+    if (hasVoice && (rel === 'work/render/voice.wav' || rel === 'work/render/voice.sig')) return;
+    const destination = path.join(liveDir, rel);
+    try { await fs.lstat(destination); return; }
+    catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+    const temporary = path.join(scratchDir, rel);
+    await cloneFile(path.join(sourceDir, rel), temporary);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    // Publication holds the same-app project lock across this absence check and rename.
+    await fs.rename(temporary, destination);
+  });
 }
 
 async function removeUnpublished(dir: string, version: number): Promise<void> {
@@ -96,17 +141,26 @@ export type PublishStep = 'base' | 'assets' | 'credits' | 'version' | 'project' 
 export class NoteTransaction {
   readonly versionDir: string;
   published = false;
+  private discardNotified = false;
   constructor(
     readonly liveDir: string,
     readonly dir: string,
     readonly txnId: string,
     private readonly base: string,
     private readonly signal?: AbortSignal,
+    private readonly onDiscard?: () => void,
   ) { this.versionDir = path.join(dir, 'version'); }
 
   private check(): void { if (this.signal?.aborted) throw cancelled(); }
 
-  async discard(): Promise<void> { await fs.rm(this.dir, { recursive: true, force: true }); }
+  async discard(): Promise<void> {
+    try {
+      if (!this.discardNotified) {
+        this.discardNotified = true;
+        this.onDiscard?.();
+      }
+    } finally { await fs.rm(this.dir, { recursive: true, force: true }); }
+  }
 
   /** Only this function publishes a note. The project rename makes the complete version visible. */
   async publish(entry: Omit<NoteEntry, 'version' | 'txnId'>, rules: string[] = [], style?: StyleStore,
@@ -127,7 +181,16 @@ export class NoteTransaction {
       const note: NoteEntry = { ...entry, version, txnId: this.txnId };
       // Prepare every version file before it is moved; published folders are never edited.
       await fs.access(path.join(this.versionDir, 'export.mp4'));
+      // Preserve completed work for the next note without copying generated media again.
+      const cache = path.join(this.versionDir, '.cache');
+      await fs.mkdir(cache, { recursive: true });
+      await transferCompletedCaches(this.dir, cache, 'move', this.signal);
       await writeFileAtomic(path.join(this.versionDir, 'project.json'), JSON.stringify({ ...p, notes: [...p.notes, note] }, null, 2) + '\n');
+      const notesFile = path.join(this.versionDir, 'notes.md');
+      try {
+        const notes = await fs.readFile(notesFile, 'utf8');
+        await writeFileAtomic(notesFile, `# v${version}\n\n${notes.replace(/^# v\d+\r?\n(?:\r?\n)?/, '')}`);
+      } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       // Engine metadata must point at the published files after staging is removed.
       for (const name of ['render.json', 'verify.json']) {
         const metadataFile = path.join(this.versionDir, name);
@@ -187,12 +250,15 @@ export class NoteTransaction {
       p.notes = [...p.notes, note];
       await writeFileAtomic(file, JSON.stringify(p, null, 2) + '\n');
       afterStep?.('append');
+      // Cache additions are optional work after the complete note has committed. Existing
+      // keys remain untouched, including singleton metadata describing an older live render.
+      await promoteCompletedCaches(path.join(destination, '.cache'), this.liveDir, path.join(this.dir, 'cache-promotion'));
       return version;
     });
   }
 }
 
-export async function beginNote(liveDir: string, signal?: AbortSignal): Promise<NoteTransaction> {
+export async function beginNote(liveDir: string, signal?: AbortSignal, onDiscard?: () => void): Promise<NoteTransaction> {
   return withProjectLock(liveDir, async () => {
     if (signal?.aborted) throw cancelled();
     const bytes = await fs.readFile(path.join(liveDir, 'project.json'));
@@ -206,9 +272,13 @@ export async function beginNote(liveDir: string, signal?: AbortSignal): Promise<
         try { await cloneFile(path.join(liveDir, rel), path.join(dir, rel)); }
         catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       }
-      await seedRenderCache(liveDir, dir, signal);
+      const version = JSON.parse(bytes.toString('utf8')).version ?? 0;
+      let cache = path.join(liveDir, 'versions', `v${version}`, '.cache');
+      try { await fs.access(cache); }
+      catch (e: any) { if (e.code !== 'ENOENT') throw e; cache = liveDir; }
+      await transferCompletedCaches(cache, dir, 'clone', signal);
       if (signal?.aborted) throw cancelled();
-      return new NoteTransaction(liveDir, dir, txnId, hash(bytes), signal);
+      return new NoteTransaction(liveDir, dir, txnId, hash(bytes), signal, onDiscard);
     } catch (e) {
       await fs.rm(dir, { recursive: true, force: true });
       throw e;

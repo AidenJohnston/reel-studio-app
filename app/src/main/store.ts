@@ -1,7 +1,7 @@
 // Project store: folders on disk under <Reel Studio>/Projects (docs/architecture.md section 3).
 // project.json belongs to the engine and the AI. The app keeps its own small state
 // (chat history, running job, last error) in app.json next to it.
-import { recoverNoteStaging } from '@reelstudio/ai'
+import { recoverNoteStaging } from './ai'
 import { existsSync, promises as fs } from 'node:fs'
 import { join, basename, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -296,6 +296,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+export const INTERRUPTED_CHANGE = 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
@@ -317,6 +319,37 @@ export async function recoverInterrupted(): Promise<string[]> {
       continue
     }
     if (!(await fs.stat(dir)).isDirectory()) continue
+    const staging = join(dir, '.staging')
+    const entries = await fs.readdir(staging).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return []
+      throw e
+    })
+    if (entries.length) {
+      const project = await readProject(slug)
+      // The version snapshot contains txnId even if the app closed before the live note append.
+      const snapshot = await readJson<{ notes?: { txnId?: string }[] }>(join(dir, 'versions', `v${project.version}`, 'project.json'), {})
+      const published = new Set(snapshot.notes?.map((note) => note.txnId))
+      const unfinished = entries.filter((id) => !published.has(id)).sort()
+      if (unfinished.length) {
+        const id = `interrupted-note:${unfinished.join(',')}`
+        // Save the notice before deleting its evidence; the stable id prevents a second notice on retry.
+        await updateAppState(slug, (st) => {
+          if (!st.chat.some((message) => message.id === id)) {
+            st.chat.push({ id, from: 'editor', text: INTERRUPTED_CHANGE, at: new Date().toISOString() })
+          }
+          st.job = null
+          st.status = 'ready'
+        })
+        recovered.push(slug)
+      } else if (existsSync(join(dir, 'app.json'))) {
+        await updateAppState(slug, (st) => {
+          if (st.job?.kind === 'note') {
+            st.job = null
+            st.status = 'ready'
+          }
+        })
+      }
+    }
     await recoverNoteStaging(dir)
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
@@ -328,7 +361,7 @@ export async function recoverInterrupted(): Promise<string[]> {
         st.chat.push({
           id: randomUUID(),
           from: 'editor',
-          text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.',
+          text: INTERRUPTED_CHANGE,
           at: new Date().toISOString()
         })
       }

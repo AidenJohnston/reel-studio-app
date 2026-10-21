@@ -243,9 +243,10 @@ describe('My style: the AI proposes, the user decides (novice test grandma2 #10)
 
   it('a note that only yields a proposal still returns it (no new version needed)', async () => {
     const { dir, host, settingsDir } = await setup();
-    const model = new ScriptedModel([{ toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' }), call('finish', { summary_for_user: 'Got it.' })] }]);
+    const model = new ScriptedModel([{ toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' }), call('finish', { summary_for_user: 'Would you like to keep quieter music as a preference?' })] }]);
     const r = await createAI({ host, settingsDir, providerOverride: model, finalRender: false }).applyNote(dir, 'I like quiet music', () => undefined);
     expect(r.changed).toEqual([]);
     expect(r.styleSuggestions).toEqual(['Keep music quieter under talking.']);
+    expect(r.summary).toBe('Would you like to keep quieter music as a preference?');
   });
 });

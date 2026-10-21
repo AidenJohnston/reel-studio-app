@@ -86,7 +86,7 @@ async function main() {
     const ai = createAI({ host, settingsDir, dev: true, providerOverride: provider, finalRender: !flags['draft-only'] });
     let result: unknown;
     if (cmd === 'first-edit') result = await ai.firstEdit(String(flags.project), log);
-    else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log);
+    else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log, undefined, { previewOnly: !!flags['draft-only'] });
     else result = await ai.writeScript(String(flags.idea ?? ''), log);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return;
@@ -118,7 +118,7 @@ async function main() {
   process.stdout.write(`reelstudio-ai <command>
   pick-takes   --provider claude-cli|codex-cli|claude|replay [--model M] --in transcript.json --out cut.json [--record session.json]
   first-edit   --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record session.json] [--draft-only]
-  apply-note   --project DIR --note TEXT --provider P [...]
+  apply-note   --project DIR --note TEXT --provider P [...] [--draft-only]
   write-script --idea TEXT --provider P [...]
   chatgpt-signin  [--settings DIR] --insecure-plaintext
                   sign in with ChatGPT in your browser, then list models. The CLI has no OS keychain,

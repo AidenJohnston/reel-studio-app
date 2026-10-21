@@ -14,6 +14,8 @@ export type AgentEvent =
 
 export interface AgentResult {
   summary: string; version: number;
+  /** An isolated CLI preview; the live project has not changed. Caller owns this temporary file. */
+  previewFile?: string;
   /** rules saved to My style because the user's note asked for it ("always...", "from now on...") */
   styleRulesAdded: string[];
   /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */

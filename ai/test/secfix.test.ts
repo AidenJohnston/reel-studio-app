@@ -207,14 +207,16 @@ describe('finding 13: transcript and web text are data, style rules are visible 
 });
 
 describe('finding 14: no "I made that change" when the agent ran out of steps', () => {
-  it('step cap discards the staged change and reports that the note did not finish', async () => {
+  it('step cap publishes the valid partial change and reports that the note did not finish', async () => {
     const { dir, host, settingsDir } = await setup();
     const loop = Array.from({ length: 10 }, () => ({ toolCalls: [call('get_project')] }));
     const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, ...loop]);
-    const before = await fsp.readFile(path.join(dir, 'project.json'));
-    await expect(createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 })
-      .applyNote(dir, 'slower and add music', () => undefined)).rejects.toMatchObject({ code: 'note_incomplete' });
-    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    const result = await createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 })
+      .applyNote(dir, 'slower and add music', () => undefined);
+    expect(result.summary).toMatch(/ran out of time before I finished this note/);
+    expect(result.changed).toEqual(['cut']);
+    expect((await loadProject(dir)).cut.gapCap).toBe(0.4);
+    await expect(fsp.access(path.join(dir, 'versions', `v${result.version}`, 'export.mp4'))).resolves.toBeUndefined();
   });
 
   it('firstEdit without finish does not claim a finished edit', async () => {

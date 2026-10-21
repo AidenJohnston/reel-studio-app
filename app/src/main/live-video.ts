@@ -3,9 +3,10 @@
 // while the Working screen may still be streaming it by HTTP ranges (a fresh file read per range),
 // so a draft is played from a COPY in work/live/: the first look keeps its own file, the AI's drafts
 // alternate between two, so the copy being written is never the one on screen. A final version
-// (versions/vN/export.mp4) is never overwritten and plays in place.
+// (versions/vN/export.mp4) plays in place. Note drafts already have unique staging paths and
+// need only a temporary playback grant.
 import { existsSync, promises as fs } from 'node:fs'
-import { join, relative, isAbsolute } from 'node:path'
+import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import type { JobUpdate } from '../shared/api'
 import { mediaUrl } from './media-url'
 
@@ -16,6 +17,27 @@ export const LIVE_DIR = join('work', 'live')
 function inside(dir: string, file: string): boolean {
   const r = relative(dir, file)
   return !!r && !r.startsWith('..') && !isAbsolute(r)
+}
+
+/** Note drafts have unique staged filenames and are playable only for their owning job. */
+export function createNoteVideos() {
+  const roots = new Map<string, string>()
+  return {
+    set(jobId: string, projectDir: string, stage: string | null): void {
+      if (stage === null) { roots.delete(jobId); return }
+      const root = resolve(stage)
+      if (dirname(root) !== resolve(projectDir, '.staging')) throw new Error('Note preview must be inside its transaction')
+      roots.set(jobId, root)
+    },
+    roots: (): string[] => [...roots.values()],
+    async video(jobId: string, e: Render): Promise<string | null> {
+      const root = roots.get(jobId)
+      if (!root || !e.draft || !e.file || !inside(root, e.file)) return null
+      const stat = await fs.stat(e.file)
+      // Cleanup may revoke the grant while stat is in flight.
+      return roots.get(jobId) === root ? mediaUrl(resolve(e.file), stat.mtimeMs) : null
+    }
+  }
 }
 
 export function createLiveVideos(): (projectDir: string, e: Render) => Promise<string | null> {

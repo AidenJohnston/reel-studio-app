@@ -59,6 +59,20 @@ def test_render_caches_survive_staging_root_and_cloned_voice_mtime(tmp_path, mon
 
     monkeypatch.setattr(render.tools, "text_run", unexpected_voice)
     assert render.render_voice(stage_ctx, spans, {"s1": staged / "media" / "take.mp4"}, cloned_voice) == cloned_voice
+    # A published note's voice can replace stale manual scratch without modifying its snapshot.
+    project["version"] = 2
+    published_voice = live / "versions" / "v2" / ".cache" / "work" / "render" / "voice.wav"
+    published_voice.parent.mkdir(parents=True)
+    shutil.copy2(cloned_voice, published_voice)
+    shutil.copy2(cloned_voice.with_suffix(".sig"), published_voice.with_suffix(".sig"))
+    published_before = (published_voice.read_bytes(), published_voice.with_suffix(".sig").read_bytes(),
+                        published_voice.stat().st_mtime_ns)
+    voice.write_bytes(b"older cut voice")
+    voice.with_suffix(".sig").write_text("stale")
+    assert render.render_voice(live_ctx, spans, {"s1": source}, voice) == voice
+    assert voice.read_bytes() == cloned_voice.read_bytes()
+    assert (published_voice.read_bytes(), published_voice.with_suffix(".sig").read_bytes(),
+            published_voice.stat().st_mtime_ns) == published_before
     assert broll._asset_sig(source, live_ctx) == broll._asset_sig(staged / "media" / "take.mp4", stage_ctx)
     monkeypatch.setattr(music, "normalize", unexpected_mix)
     reused = music.build_audio(stage_ctx, cloned_voice)

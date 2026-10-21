@@ -197,10 +197,11 @@ describe('project store', () => {
     expect(await recoverInterrupted()).toEqual([])
   })
 
-  it('recovers unpublished notes even without app.json', async () => {
+  it('explains an interrupted staged note once even without a saved job, and removes staging', async () => {
     setupPaths()
     await ensureRoot()
     const dir = fakeProject('orphan', { versions: [1] })
+    const original = readFileSync(join(dir, 'project.json'))
     const staging = join(dir, '.staging', 'interrupted')
     mkdirSync(staging, { recursive: true })
     writeFileSync(join(staging, 'project.json'), 'staged')
@@ -210,7 +211,14 @@ describe('project store', () => {
     await recoverInterrupted()
     expect(existsSync(staging)).toBe(false)
     expect(existsSync(join(dir, 'versions', 'v2'))).toBe(false)
-    expect(existsSync(join(dir, 'app.json'))).toBe(false)
+    expect(existsSync(join(dir, '.staging'))).toBe(false)
+    const state = await readAppState('orphan')
+    expect(state.chat.map((message) => message.text)).toEqual([
+      'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
+    ])
+    expect(await recoverInterrupted()).toEqual([])
+    expect((await readAppState('orphan')).chat).toEqual(state.chat)
+    expect(readFileSync(join(dir, 'project.json'))).toEqual(original)
   })
 
   it('writes json atomically (no temp files left behind)', async () => {

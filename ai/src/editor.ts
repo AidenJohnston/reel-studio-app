@@ -1,5 +1,7 @@
 // High-level editor tasks: firstEdit, applyNote, writeScript, pickTakes, and the no-AI path.
 import * as path from 'node:path';
+import { tmpdir } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Phase, ScriptResult, UserFacingError } from './types';
 import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
@@ -276,12 +278,21 @@ ${summary}
 export interface ApplyNoteOptions {
   /** files attached to this note: `work/assets/attach-*` refs (re-checked against the project's sidecars) */
   attachments?: string[];
+  /** Grant draft playback access while staging exists; null revokes access before cleanup. */
+  onStaging?: (dir: string | null) => void;
+  /** CLI preview: return a temporary playable file without publishing the proposed edit. */
+  previewOnly?: boolean;
 }
 
 /** What a note says in notes.md: its words, or what was attached when it has none. */
 function noteLabel(note: string, attached: AttachmentInfo[]): string {
   if (note.trim()) return note.trim();
   return attached.length === 1 ? `(attached ${attached[0].name})` : `(attached ${attached.length} files)`;
+}
+
+/** Compare edit content, including post text and unknown fields, without publication bookkeeping. */
+function noteContent({ version, notes, txnId, createdAt, updatedAt, ...content }: Project) {
+  return content;
 }
 
 export async function applyNote(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: ApplyNoteOptions = {}): Promise<EditResult> {
@@ -306,17 +317,21 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
   try {
-    txn = await beginNote(projectDir, controller.signal);
+    if (!controller.signal.aborted) onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
+    txn = await beginNote(projectDir, controller.signal, () => opts.onStaging?.(null));
+    opts.onStaging?.(txn.dir);
     const transaction = txn;
     const emit = (event: AgentEvent) => {
-      if (controller.signal.aborted || event.type !== 'status') return;
+      if (controller.signal.aborted) return;
+      if (event.type === 'tool' || (event.type === 'render' && event.draft)) { onEvent(event); return; }
+      if (event.type !== 'status') return;
       onEvent({ ...event, pct: event.pct === undefined ? undefined : Math.min(99, event.pct),
         message: /ready|done|saved/i.test(event.message) ? 'Working on your note' : event.message });
     };
     const ctx: ToolContext = { ...newCtx(deps, txn.dir, provider, emit, controller.signal, 2), userNote: note,
       note: { txnId: txn.txnId, liveDir: projectDir, versionDir: txn.versionDir, pending, styleRules: [],
         fail(error: unknown) { failure ??= error; controller.abort(); } } };
-    const work = applyStagedNote(deps, provider, transaction, note, attached, ctx, emit);
+    const work = applyStagedNote(deps, provider, transaction, note, attached, ctx, emit, opts.previewOnly);
     const result = await Promise.race([work, stopped]);
     // A proposed rule without an edit has nothing to publish and cannot claim it changed the video.
     if (txn.published) {
@@ -344,17 +359,26 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
 }
 
 async function applyStagedNote(deps: EditorDeps, provider: ModelProvider, txn: NoteTransaction, note: string,
-  attached: AttachmentInfo[], ctx: ToolContext, emit: (e: AgentEvent) => void): Promise<EditResult> {
+  attached: AttachmentInfo[], ctx: ToolContext, emit: (e: AgentEvent) => void, previewOnly = false): Promise<EditResult> {
   const { p: before } = await load(ctx);
   const earlier = await earlierUnplaced(txn.liveDir, before, attached);
-  const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, before);
+  let fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, before);
   let summary: string;
   if (fast) {
     emit({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
     for (const call of fast.calls) {
       const result = await executeTool(ctx, call.name, call.args);
-      if (result.isError) throw new AIError('note_failed', 'I could not apply that change.');
+      if (result.isError) {
+        // The direct tools only edit project.json. Restore it before the model tries another way.
+        await saveProject(txn.dir, before);
+        ctx.state = newToolState();
+        ctx.project = before;
+        fast = null;
+        break;
+      }
     }
+  }
+  if (fast) {
     summary = fast.summary;
   } else {
     const { images, stills } = await attachmentStills(txn.liveDir, [...attached, ...earlier]);
@@ -362,19 +386,40 @@ async function applyStagedNote(deps: EditorDeps, provider: ModelProvider, txn: N
     const task = deps.prompts.render('applyNote', { note: note.trim() || '(no words: the user only attached the file(s) below)' }) + (files ? `\n\n${files}` : '');
     const run = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent: emit,
       signal: ctx.signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-    if (!run.finished) throw new AIError('note_incomplete', 'I ran out of time before finishing your note.');
-    summary = cleanSummary(run.finished);
+    summary = cleanSummary(honestSummary(run, ctx.state, 'note')
+      ?? (ctx.note!.styleRules.length ? 'I saved your preference.' : 'I looked, but I was not sure what to change. Could you say it another way?'));
   }
   if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
-  if (!ctx.state.changed.size && !ctx.note!.styleRules.length) {
-    return { summary: 'I have not changed your video. Tell me what you would like changed.', version: before.version,
+  const noChange = (): EditResult => ({
+    // Setter summaries describe attempted writes; they cannot establish that anything changed.
+    summary: ctx.state.changed.size || ctx.note!.styleRules.length ? 'Your video has not changed.' : summary,
+    version: before.version, styleRulesAdded: [], changed: [],
+    // A preference alone must not manufacture a video version. Keep it available for consent.
+    styleSuggestions: [...new Set([...ctx.state.styleSuggestions, ...ctx.note!.styleRules])],
+  });
+  const unchanged = (p: Project) => isDeepStrictEqual(noteContent(before), noteContent(p));
+  if (unchanged(await loadProject(txn.dir))) return noChange();
+  await refreshCredits(ctx);
+  if (previewOnly) {
+    const rendered = await doRender(ctx, true);
+    const folder = await fsp.mkdtemp(path.join(tmpdir(), 'reelstudio-note-preview-'));
+    const previewFile = path.join(folder, 'draft.mp4');
+    try {
+      await fsp.copyFile(rendered.result.file, previewFile);
+      if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
+    } catch (error) {
+      await fsp.rm(folder, { recursive: true, force: true });
+      throw error;
+    }
+    return { summary: 'I made a preview. Your video has not changed.', previewFile, version: before.version,
       styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [] };
   }
-  await refreshCredits(ctx);
-  // A note always needs a final export. Preview fallback and finalRender=false apply only to first edits.
+  emit({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
+  // Publication always needs a final export, even if an earlier preview succeeded.
   await doRender(ctx, false);
   if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
   const p = await loadProject(txn.dir);
+  if (unchanged(p)) return noChange();
   const refs = attached.map((a) => a.asset);
   const placed = placedAssets(p);
   const recorded = [...refs, ...earlier.map((a) => a.asset).filter((ref) => placed.has(ref) && !refs.includes(ref))];
