@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall, OWNER_LOCK } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -74,6 +74,12 @@ export function tinyPng(rgb: [number, number, number] = [200, 30, 30]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** engine/reelengine/project.py edit_signature: what changes the rendered video. */
+function editSignature(p: Record<string, unknown>): string {
+  const { updatedAt: _u, version: _v, notes: _n, post: _p, createdAt: _c, ...edit } = p;
+  return JSON.stringify(edit);
+}
+
 /** Fake engine: enough of docs/architecture.md section 4 for the AI layer. Records every call. */
 export class FakeHost implements EngineHost {
   calls: { command: string; args: string[] }[] = [];
@@ -96,6 +102,11 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
+    // like engine/reelengine/owner.py: with a lock on the project, a command must join its owner
+    const lock = await fsp.readFile(path.join(dir, OWNER_LOCK), 'utf8').catch(() => null);
+    if (lock !== null && (!args.includes('--owner') || args[args.indexOf('--owner') + 1] !== lock.trim())) {
+      throw { code: 'NOT_OWNER', userMessage: 'This video is being edited somewhere else right now.' };
+    }
     const pj = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
@@ -117,6 +128,10 @@ export class FakeHost implements EngineHost {
         // version; a final starts v(N+1) afresh, snapshots the edit, then patches `version` into the
         // project file it rendered
         const draft = args.includes('--draft');
+        const saved = path.join(dir, 'versions', `v${p.version}`);
+        if (!draft && p.version && editSignature(JSON.parse(await fsp.readFile(path.join(saved, 'project.json'), 'utf8'))) === editSignature(p)) {
+          return { version: p.version, preview: false, draft: false, file: path.join(saved, 'export.mp4'), reused: true };
+        }
         const v = (p.version ?? 0) + 1;
         const vd = draft ? (args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', 'preview')) : path.join(dir, 'versions', `v${v}`);
         if (!draft) await fsp.rm(vd, { recursive: true, force: true });

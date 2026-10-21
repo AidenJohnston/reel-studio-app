@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { delimiter } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
-import { killTree } from './proctree'
+import { groupAlive, killTree } from './proctree'
 
 export interface EngineProgress {
   stage: string
@@ -104,11 +104,14 @@ export async function killAllEngines(): Promise<void> {
   await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
 }
 
-/** Settles once the process has exited and closed its output (its ffmpeg children included). */
-function exited(child: ChildProcess): Promise<void> {
-  return new Promise((resolve) => {
+/** Settles once the engine has exited and nothing it started is left in its process group: an
+ * engine that died early must not leave an ffmpeg writing into a project its job has let go of. */
+function ended(child: ChildProcess): Promise<void> {
+  return new Promise<void>((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) resolve()
     else child.once('close', () => resolve())
+  }).then(async () => {
+    if (child.pid && process.platform !== 'win32' && groupAlive(child.pid)) await killTree(child.pid)
   })
 }
 
@@ -147,7 +150,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
       running.add(child)
       if (child.pid) cfg.onSpawn?.(child.pid)
 
-      const gone = exited(child)
+      const gone = ended(child)
       void gone.then(() => running.delete(child))
       const finish = (fn: () => void): void => {
         if (settled) return
@@ -156,8 +159,8 @@ export function createEngineRunner(cfg: RunnerConfig) {
         fn()
       }
 
-      // Stop settles only once the engine and everything it started have exited: whoever runs next
-      // on this project (a new note, a cleanup) must never share its files with a dying render.
+      // Every outcome settles only once the engine and everything it started have exited: whoever runs
+      // next on this project (a new note, a cleanup) must never share its files with a dying render.
       const onAbort = (): void => {
         if (settled) return
         settled = true
@@ -197,7 +200,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
         if (child.pid) cfg.onExit?.(child.pid)
         out.end()
         err.end()
-        finish(() => {
+        void gone.then(() => finish(() => {
           const r = result as typeof result
           if (r?.ok === true && code === 0) resolvePromise(r.value)
           else if (r?.ok === false) rejectPromise(r.err)
@@ -208,7 +211,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
               userMessage: GENERIC_ERROR,
               message: `exit ${code}: ${stderrTail.slice(-8).join('\n')}`
             } satisfies EngineError)
-        })
+        }))
       })
     })
   }

@@ -150,7 +150,7 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { o.provider.dispose?.(); }
+  try { return await agentLoop(o); } finally { await o.provider.dispose?.(); }
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {

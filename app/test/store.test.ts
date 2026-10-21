@@ -22,7 +22,7 @@ import {
 } from '../src/main/store'
 import { classifyByExtension } from '../src/main/library'
 import { binDir, projectsDir, reelStudioRoot } from '../src/main/paths'
-import { setupPaths } from './helpers'
+import { setupPaths, unlocked } from './helpers'
 import type { Word } from '../src/shared/api'
 
 function fakeProject(slug: string, opts: { versions?: number[]; partial?: number[] } = {}): string {
@@ -183,7 +183,7 @@ describe('project store', () => {
       s.job = { id: 'j2', kind: 'first-edit', startedAt: new Date().toISOString() }
       s.status = 'working'
     })
-    expect(await recoverInterrupted()).toEqual(expect.arrayContaining(['gamma', 'delta']))
+    expect(await recoverInterrupted(unlocked)).toEqual(expect.arrayContaining(['gamma', 'delta']))
     const g = await readAppState('gamma')
     expect(g.job).toBeNull()
     expect(g.status).toBe('ready')
@@ -193,7 +193,7 @@ describe('project store', () => {
     expect(d.status).toBe('interrupted')
     expect(existsSync(firstOnly)).toBe(true)
     // Running it again finds nothing to do.
-    expect(await recoverInterrupted()).toEqual([])
+    expect(await recoverInterrupted(unlocked)).toEqual([])
   })
 
   it('a note that never got saved is not a version, before or after the app restarts', async () => {
@@ -206,12 +206,12 @@ describe('project store', () => {
     await updateAppState('zeta', (s) => {
       s.job = { id: 'j5', kind: 'note', startedAt: new Date().toISOString() }
     })
-    await recoverInterrupted()
+    await recoverInterrupted(unlocked)
     expect((await readAppState('zeta')).chat.at(-1)?.text).toMatch(/closed before I finished/)
     expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
   })
 
-  it('the app closed right after a note was saved: its reply and its question are posted once', async () => {
+  it('the app closed right after a note was saved: once project.json can be read, its reply and question are posted once', async () => {
     setupPaths()
     await ensureRoot()
     const dir = fakeProject('eta', { versions: [1, 2] })
@@ -219,17 +219,22 @@ describe('project store', () => {
     p.notes = [{ id: 'j6', version: 2, text: 'from now on more room', applied: ['cut'], at: p.updatedAt,
       reply: 'I gave the pauses more room. I also saved this to My style for your future videos: "Leave more room." You can remove it in Settings.',
       styleRulesAdded: ['Leave more room.'] }]
-    writeFileSync(join(dir, 'project.json'), JSON.stringify(p))
     await updateAppState('eta', (s) => {
       s.job = { id: 'j6', kind: 'note', startedAt: new Date().toISOString() }
     })
-    await recoverInterrupted()
+    // unreadable for now (another program is writing it): the note may be saved, so nothing is said yet
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(p).slice(0, 80))
+    expect(await recoverInterrupted(unlocked)).toEqual([])
+    expect((await readAppState('eta')).job?.id).toBe('j6')
+    expect((await readAppState('eta')).chat).toEqual([])
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(p))
+    await recoverInterrupted(unlocked)
     const chat = (await readAppState('eta')).chat
     expect(chat.map((m) => [m.text, m.version, m.suggestion])).toEqual([
       ['I gave the pauses more room.', 2, undefined],
       ['Remember this for next time? "Leave more room."', undefined, 'Leave more room.']
     ])
-    expect(await recoverInterrupted()).toEqual([])
+    expect(await recoverInterrupted(unlocked)).toEqual([])
     expect((await readAppState('eta')).chat).toHaveLength(2)
   })
 

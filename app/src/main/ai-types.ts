@@ -59,6 +59,14 @@ export interface SecretStore {
   decryptString(b: Buffer): string
 }
 
+/** The project's single writer (ai owner.ts). `token: null`: no lock file is held, so each engine
+ * command takes the project for itself while it runs. */
+export interface ProjectOwner {
+  token: string | null
+  release(): Promise<void>
+}
+export type OwnProject = (slug: string) => Promise<ProjectOwner>
+
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
@@ -66,15 +74,16 @@ export interface AI {
   signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>
   signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
-  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
+  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<AgentResult>
   /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again).
-   * `opts.id`: the job id the note is saved under. `opts.saveStyleRules: false`: return rules, the app asks. */
+   * `opts.id`: the job id the note is saved under. `opts.saveStyleRules: false`: return rules, the app asks.
+   * `opts.owner`: the job's owner token, which the note joins instead of taking the project. */
   applyNote(
     projectDir: string,
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>

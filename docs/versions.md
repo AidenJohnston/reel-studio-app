@@ -70,3 +70,17 @@ Rules:
   that `project.json` is still what the note started from and Stop was not pressed. A note that fails,
   is stopped, hits its step limit, or whose final render fails changes nothing the user can see; its
   downloads stay in `work/assets` but are not offered again.
+
+## One writer per project
+
+`<project>/work/.owner.lock` holds the token of the project's single writer (`ai/src/owner.ts`,
+`engine/reelengine/owner.py`). The app's job lane takes it for every job and manual edit and passes the
+token on: the AI edit joins it, and every engine command the job runs gets `--owner <token>`. An
+engine command run by hand without a token takes the project for itself while it runs, and refuses
+("This project is open in Reel Studio") while another owner is alive. `attach` and commands that
+change nothing in the project run beside the owner.
+
+The owner touches the lock file every 5 s; a lock untouched for 30 s has no live owner and can be taken
+over. The timestamp is the liveness signal because Node has no OS file lock, a PID can be reused, and
+`os.kill(pid, 0)` sends Ctrl-C on Windows. A note checks it still owns the project right before it
+replaces `project.json`, so a note whose lock was taken over fails instead of saving.

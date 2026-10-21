@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULTS, ProgressTracker, learn, type SpeedHistory } from '../src/main/progress'
 import { timeLeftText as formatEta } from '../src/shared/progress'
 import { createJobManager } from '../src/main/jobs'
+import { unlocked } from './helpers'
 
 const empty = (): SpeedHistory => ({ v: 1, phases: {} })
 
@@ -109,7 +110,7 @@ describe('honest progress', () => {
   it('the job manager adds overall + secondsLeft, re-broadcasts while idle, and saves what it measured', async () => {
     const events: any[] = []
     let saved: SpeedHistory | null = null
-    const jobs = createJobManager((e) => events.push(e), () => undefined, {
+    const jobs = createJobManager((e) => events.push(e), () => undefined, unlocked, {
       loadHistory: async () => empty(),
       saveHistory: async (h) => { saved = h },
       mediaSeconds: async () => 60,

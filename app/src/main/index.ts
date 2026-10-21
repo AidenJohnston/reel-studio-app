@@ -38,7 +38,7 @@ import { createLiveVideos } from './live-video'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
-import type { AI, EngineHost } from './ai-types'
+import type { AI, EngineHost, ProjectOwner } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
@@ -101,6 +101,7 @@ const host: EngineHost = {
 }
 
 let ai: AI
+let ownProject: (projectDir: string) => Promise<ProjectOwner>
 let aiSource: 'package' | 'mock' = 'mock'
 let win: BrowserWindow | null = null
 
@@ -125,6 +126,7 @@ const jobs = createJobManager(
     feedback.onJobEvent(e)
   },
   log,
+  (slug) => ownProject(projectDir(slug)),
   {
     loadHistory: async () => JSON.parse(await fs.readFile(speedHistoryFile(), 'utf8')),
     saveHistory: (h) => writeJson(speedHistoryFile(), h),
@@ -191,14 +193,19 @@ async function appInfo(): Promise<AppInfo> {
   }
 }
 
+/** Engine arguments for a command a job runs: it joins the job's ownership of the project. */
+function owned(args: string[], owner: string | null): string[] {
+  return owner ? [...args, '--owner', owner] : args
+}
+
 function startFirstEdit(slug: string, initArgs: { title: string; files: string[] } | null): string {
   const dir = projectDir(slug)
-  return jobs.start(slug, 'first-edit', async (emit, signal) => {
+  return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
+        owned(['--project', dir, '--title', initArgs.title, '--slug', slug], owner).concat(initArgs.files),
         (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
       )
@@ -220,7 +227,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
             .catch(() => undefined)
         }
       },
-      signal
+      signal,
+      owner ? { owner } : undefined
     )
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
@@ -260,11 +268,11 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
-    jobs.start(slug, 'rerender', async (emit, signal) => {
+    jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (pr) => emit({ type: 'status', message: pr.message || 'Making the full-quality video', pct: pr.pct, phase: 'final' }),
         signal
       )
@@ -447,9 +455,9 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal, id) => {
+      async (emit, signal, { id, owner }) => {
         // the note is saved under the job's id; the app asks before anything goes into My style
-        const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false }
+        const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(r, r.summary + extra)
@@ -476,18 +484,18 @@ function registerIpc(): void {
   handle('projects:rerender', async (_e, slug: string, change?: string, label?: string) => {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
-    const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
+    const jobId = jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: words, pct: 1, phase: 'final' })
       const look: any = await runEngine(
         'render',
-        ['--project', dir, '--draft', '--no-cover'],
+        owned(['--project', dir, '--draft', '--no-cover'], owner),
         (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
         signal
       )
@@ -622,11 +630,6 @@ app.whenReady().then(async () => {
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
   await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
   const loaded = await loadAI(
     {
       host,
@@ -638,6 +641,12 @@ app.whenReady().then(async () => {
   )
   ai = loaded.ai
   aiSource = loaded.source
+  ownProject = loaded.ownProject
+  const recovered = await recoverInterrupted((slug) => ownProject(projectDir(slug))).catch((e) => {
+    log(`[recover] ${String(e)}`)
+    return []
+  })
+  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])

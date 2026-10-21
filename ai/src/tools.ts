@@ -3,6 +3,7 @@
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
@@ -127,15 +128,30 @@ const EXT: Record<string, string[]> = {
   exports: ['.mp4'],
 };
 
-/** Pictures and clips already in this edit, and files the user attached (they have an engine `attach`
- * sidecar). A download from a note that
- * was not saved stays on disk but is never offered as "already fetched". */
+/** Every file a note adds to work/assets starts with this: "n" and 8 hex of its id. The id is in the
+ * note's project.json entry once the note is saved, so the name alone says whether it was. */
+export function notePrefix(noteId: string): string {
+  return `n${createHash('sha1').update(noteId).digest('hex').slice(0, 8)}-`;
+}
+
+/** A name for a file this task adds to work/assets (a slug follows). */
+function assetName(ctx: ToolContext, hint: string): string {
+  return ctx.note ? `${notePrefix(ctx.note.id)}${hint}` : hint;
+}
+
+/** Files already in work/assets the editor may reuse: everything except a download from a note that
+ * was never saved (and a half-written `.part` file). Files from first edits and older projects carry
+ * no note prefix and are always offered. */
 async function projectAssets(ctx: ToolContext): Promise<string[]> {
   const { p } = await load(ctx);
-  const used = new Set<string>();
-  for (const b of p.broll) assetRefs(b, used);
+  const ok = new Set((p.notes ?? []).flatMap((n) => (n.id ? [notePrefix(n.id)] : [])));
+  if (ctx.note) ok.add(notePrefix(ctx.note.id));
   const files = await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0);
-  return files.filter((f) => used.has(path.basename(f)) || fs.existsSync(path.join(ctx.projectDir, `${f}.attach.json`)));
+  return files.filter((f) => {
+    const name = path.basename(f);
+    const note = /^n[0-9a-f]{8}-/.exec(name)?.[0];
+    return !name.includes('.part.') && (!note || ok.has(note));
+  });
 }
 
 async function listFiles(dir: string, exts: string[], prefix: string, depth = 2): Promise<string[]> {
@@ -481,7 +497,7 @@ async function downloadImage(ctx: ToolContext, url: string, nameHint?: string): 
   const ext = sniffImage(buf);
   if (!ext) throw new ToolInputError(`that link is not an image (${res.headers.get('content-type') ?? 'unknown type'})`);
   const urlPath = new URL(got.url).pathname;
-  const base = slugName(nameHint ?? path.basename(urlPath, path.extname(urlPath)));
+  const base = slugName(nameHint ?? assetName(ctx, path.basename(urlPath, path.extname(urlPath))));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   // claim the name with the write itself: fetch_image runs in parallel
@@ -547,7 +563,7 @@ async function captureSite(ctx: ToolContext, url: string, layout: 'phone' | 'des
   if (!ctx.host.captureWebsite) throw new ToolInputError('website screenshots only work in the Reel Studio app; use search_images or a text-pop with the name');
   let host = '';
   try { host = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) ? url.trim() : `https://${url.trim()}`).hostname.replace(/^www\./i, ''); } catch { /* the host refuses it below */ }
-  const base = slugName(nameHint || `${host || 'website'}-screen`);
+  const base = slugName(assetName(ctx, nameHint || `${host || 'website'}-screen`));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let name = `${base}.png`; let n = 2;
@@ -576,7 +592,9 @@ async function fetchImage(ctx: ToolContext, url: string, nameHint?: string): Pro
 async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: string): Promise<{ asset: string; thumb?: string }> {
   if (!/^https?:\/\//i.test(url)) throw new ToolInputError('url must start with http:// or https://');
   // the name is a slug before it reaches the engine's argv; the engine slugs too
-  const name = nameHint ? slugName(nameHint) : undefined;
+  const urlPath = new URL(url).pathname;
+  const hint = nameHint ?? (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : undefined);
+  const name = hint ? slugName(assetName(ctx, hint)) : undefined;
   try {
     const r = await engine(ctx, 'fetch-image', ['--url', url, ...(name ? ['--name', name] : [])], 'Downloading the picture');
     const asset = r?.asset;
@@ -710,8 +728,9 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let n = 1;
-  while (fs.existsSync(path.join(dir, `anim-${template}-${n}.mov`)) || fs.existsSync(path.join(dir, `anim-${template}-${n}.webm`))) n++;
-  const out = path.join(dir, `anim-${template}-${n}.mov`);      // qtrle .mov + .anim.json sidecar
+  const stem = assetName(ctx, `anim-${template}`);
+  while (fs.existsSync(path.join(dir, `${stem}-${n}.mov`)) || fs.existsSync(path.join(dir, `${stem}-${n}.webm`))) n++;
+  const out = path.join(dir, `${stem}-${n}.mov`);      // qtrle .mov + .anim.json sidecar
   ctx.emit({ type: 'status', message: 'Making an animation' });
   const written = await ctx.host.renderAnimation(template, params, out);
   const abs = written && path.isAbsolute(written) ? written : out;

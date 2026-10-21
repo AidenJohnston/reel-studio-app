@@ -19,6 +19,7 @@ import type {
 } from '../shared/api'
 import { mediaUrl } from './media-url'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
+import type { OwnProject } from './ai-types'
 import { keptIds } from '../shared/cut'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
@@ -304,7 +305,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
  * to pick up where it left off.
  */
-export async function recoverInterrupted(): Promise<string[]> {
+export async function recoverInterrupted(own: OwnProject): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -319,42 +320,56 @@ export async function recoverInterrupted(): Promise<string[]> {
     } catch {
       continue
     }
-    if (!existsSync(join(dir, 'app.json'))) continue
-    const s = await readAppState(slug)
-    if (!s.job) continue
-    await cleanPartialVersions(dir)
-    const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
-    await updateAppState(slug, (st) => {
-      st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
-      if (saved) {
-        // the app closed right after the note was saved: say what it did, once (the job is cleared in this same write)
-        const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
-        st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
-      } else if (st.status === 'ready' && st.job?.kind !== 'export') {
-        st.chat.push({
-          id: randomUUID(),
-          from: 'editor',
-          text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.',
-          at: new Date().toISOString()
-        })
-      }
-      st.job = null
-    })
-    recovered.push(slug)
+    if (!existsSync(join(dir, 'app.json')) || !(await readAppState(slug)).job) continue
+    // another writer (the dev CLI) has it now: the next job on it settles it instead
+    const owner = await own(slug).catch(() => null)
+    if (!owner) continue
+    try {
+      if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
+    } finally {
+      await owner.release()
+    }
   }
   return recovered
 }
 
-interface SavedNote { id?: string; version: number; reply?: string; styleRulesAdded?: string[]; styleSuggestions?: string[] }
+/**
+ * Ends a job app.json still records but nothing is running: the app quit or crashed during it, or the
+ * write that ends it failed. The caller owns the project. Runs at startup and before the next job on
+ * that project, so a new job
+ * never replaces a marker whose note may already be saved. A note found saved in project.json (by its
+ * job id) gets its reply and questions; one that is not gets "send it again". While project.json
+ * cannot be read the marker stays for the next try: the note may be saved, and telling the creator
+ * to send it again would apply it twice.
+ */
+export async function settleInterrupted(slug: string): Promise<'settled' | 'unreadable' | 'nothing'> {
+  const dir = projectDir(slug)
+  if (!existsSync(join(dir, 'app.json'))) return 'nothing'
+  const s = await readAppState(slug)
+  if (!s.job) return 'nothing'
+  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
+  if (saved === UNREADABLE) return 'unreadable'
+  await cleanPartialVersions(dir)
+  await updateAppState(slug, (st) => {
+    st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
+    if (saved) {
+      const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
+      st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
+    } else if (st.status === 'ready' && st.job?.kind !== 'export') {
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.' }))
+    }
+    st.job = null
+  })
+  return 'settled'
+}
 
-/** The note a job saved in project.json (ai/src/editor.ts applyNote), if it got that far. */
-async function savedNote(dir: string, jobId: string): Promise<SavedNote | null> {
-  try {
-    const p = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')) as { notes?: SavedNote[] }
-    return p.notes?.find((n) => n.id === jobId) ?? null
-  } catch {
-    return null
-  }
+interface SavedNote { id?: string; version: number; reply?: string; styleRulesAdded?: string[]; styleSuggestions?: string[] }
+const UNREADABLE = Symbol('unreadable')
+
+/** The note a job saved in project.json (ai/src/editor.ts applyNote), null when it is not there. */
+async function savedNote(dir: string, jobId: string): Promise<SavedNote | null | typeof UNREADABLE> {
+  const p = await readJson<{ notes?: SavedNote[] } | typeof UNREADABLE>(join(dir, 'project.json'), UNREADABLE)
+  return p === UNREADABLE ? p : (p.notes?.find((n) => n.id === jobId) ?? null)
 }
 
 // ---- transcript and cut ------------------------------------------------------------------------

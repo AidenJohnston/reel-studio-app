@@ -119,6 +119,16 @@ describe('engine runner (against the stand-in engine)', () => {
     expect(isAlive(grandchild)).toBe(false)
   }, 30000)
 
+  // Windows has no process groups: a child orphaned by a crashed engine cannot be found there
+  it.skipIf(process.platform === 'win32')('an engine that dies early settles only after what it started has been stopped', async () => {
+    setupPaths()
+    let grandchild = 0
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'))
+    await expect(run('crash', [], (pr) => (grandchild = Number(pr.message)))).rejects.toMatchObject({ code: 'ENGINE_CRASHED' })
+    expect(grandchild).toBeGreaterThan(0)
+    expect(isAlive(grandchild)).toBe(false)
+  }, 30000)
+
   it('an already-aborted signal never starts the engine', async () => {
     setupPaths()
     let started = false

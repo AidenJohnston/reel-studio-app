@@ -105,6 +105,7 @@ export interface ModelProvider {
   readonly model?: string;
   readonly supportsImages: boolean;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
-  /** Release anything kept between turns (a live CLI session). Called when an agent run ends. */
-  dispose?(): void;
+  /** Release anything kept between turns (a live CLI session). Called when an agent run ends; the run
+   * ends only once the returned promise settles (its processes have exited). */
+  dispose?(): void | Promise<void>;
 }

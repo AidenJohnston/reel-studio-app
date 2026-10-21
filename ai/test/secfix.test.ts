@@ -10,7 +10,7 @@ import {
 } from '../src';
 import { DATA_BOUNDARY } from '../src/editor';
 import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
-import { withEditLock } from '../src/index';
+import { ownProject, OWNER_LOCK } from '../src/index';
 import { childEnv, devSettingsDir, isBlockedAddress, safeResolve } from '../src/safety';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
 
@@ -334,13 +334,16 @@ describe('finding 35: a note is rolled back on ANY failure, including the final 
 });
 
 describe('finding 36: cross-process edit lock, serialised style writes', () => {
-  it('a lock held by another live process refuses; a dead holder is taken over', async () => {
+  it('a project another owner keeps alive refuses; one whose owner stopped touching it is taken over', async () => {
     const { dir } = await makeProject();
-    const lock = path.join(dir, 'work', '.ai-edit.lock');
-    await fsp.writeFile(lock, JSON.stringify({ pid: process.ppid, at: Date.now() }));
-    await expect(withEditLock(dir, async () => 1)).rejects.toMatchObject({ code: 'busy' });
-    await fsp.writeFile(lock, JSON.stringify({ pid: 2 ** 22 + 12345, at: Date.now() }));
-    expect(await withEditLock(dir, async () => 2)).toBe(2);
+    const lock = path.join(dir, OWNER_LOCK);
+    await fsp.writeFile(lock, 'the app');
+    await expect(ownProject(dir)).rejects.toMatchObject({ code: 'busy' });
+    const gone = new Date(Date.now() - 60_000);
+    await fsp.utimes(lock, gone, gone);
+    const own = await ownProject(dir);
+    expect(await fsp.readFile(lock, 'utf8')).toBe(own.token);
+    await own.release();
     expect(fs.existsSync(lock)).toBe(false);
   });
 

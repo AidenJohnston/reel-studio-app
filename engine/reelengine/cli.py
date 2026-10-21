@@ -308,6 +308,12 @@ def cmd_doctor(args):
     return doctor.run()
 
 
+# Commands that change nothing in the project, and `attach`, which only adds its own uniquely named
+# file: they run beside whoever owns the project. Every other command given --project needs the project.
+NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
+                      "classify", "attach"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = _Parser(prog="reelengine", description="Reel Studio media engine")
     sub = p.add_subparsers(dest="command", parser_class=_Parser)
@@ -316,6 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
         sp.set_defaults(fn=fn)
         sp.add_argument("--project", help="project folder")
+        sp.add_argument("--owner", help="token of the Reel Studio job that owns the project (owner.py)")
         return sp
 
     sp = add("probe", cmd_probe, "describe a media file")
@@ -415,7 +422,12 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
-        result = args.fn(args)
+        if args.project and args.command not in NOT_PROJECT_WRITES:
+            from . import owner
+            with owner.owned(Path(args.project), args.owner):
+                result = args.fn(args)
+        else:
+            result = args.fn(args)
         proto.done(result)
         return 0
     except EngineError as exc:

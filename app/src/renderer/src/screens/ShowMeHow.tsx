@@ -29,9 +29,10 @@ const TREATMENTS: Record<string, string> = {
   'split-top': 'Top half'
 }
 
-/** "anim-big-quote-2.mov" -> "Moving big quote"; never a computer file name (grandma 2). */
+/** "anim-big-quote-2.mov" (or "n1a2b3c4d-anim-..." from a note) -> "Moving big quote"; never a
+ * computer file name (grandma 2). */
 function animationName(asset: string): string | null {
-  const m = /(?:^|[\/])anim-([a-z0-9-]+?)(?:-\d+)?\.(?:mov|webm|mp4)$/i.exec(asset)
+  const m = /(?:^|[\/])(?:n[0-9a-f]{8}-)?anim-([a-z0-9-]+?)(?:-\d+)?\.(?:mov|webm|mp4)$/i.exec(asset)
   if (!m) return null
   return `Moving ${m[1].replace(/-/g, ' ')}`
 }

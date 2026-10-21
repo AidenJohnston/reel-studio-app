@@ -10,7 +10,8 @@ import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
 import { projectDir } from '../src/main/store'
-import { setupPaths } from './helpers'
+import { ownProject } from '@reelstudio/ai'
+import { setupPaths, unlocked } from './helpers'
 
 const J = { jobId: 'j1', slug: 's' }
 const status = (over: Partial<Extract<JobEvent, { type: 'status' }>> = {}): JobEvent => ({
@@ -106,6 +107,7 @@ describe('job manager (main): the contract on the wire', () => {
     const jobs = createJobManager(
       (e) => events.push(e),
       () => undefined,
+      unlocked,
       { loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined, mediaSeconds: async () => 30, tickMs: 15 },
       async (s, e) => (e.firstLook ? `reel-media://f/${s}/look` : null)
     )
@@ -143,9 +145,13 @@ describe('job manager (main): the contract on the wire', () => {
     setupPaths()
     const slug = 'one-lane'
     mkdirSync(projectDir(slug), { recursive: true })
-    const jobs = createJobManager(() => undefined, () => undefined)
+    const jobs = createJobManager(() => undefined, () => undefined, (s) => ownProject(projectDir(s)))
     let release!: () => void
-    const editing = jobs.hold(slug, () => new Promise<void>((r) => (release = r)))
+    let saving!: () => void
+    const inside = new Promise<void>((r) => (saving = r))
+    const editing = jobs.hold(slug, () => { saving(); return new Promise<void>((r) => (release = r)) })
+    await inside
+    expect(readFileSync(join(projectDir(slug), 'work', '.owner.lock'), 'utf8')).toBeTruthy()
     expect(() => jobs.start(slug, 'note', async () => ({ summary: 'ok' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
     release()
     await editing

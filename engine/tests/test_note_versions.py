@@ -13,11 +13,15 @@ ENGINE = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 
 
-def engine(project: Path, *args: str) -> dict:
+def last_event(project: Path, *args: str) -> dict:
     env = dict(os.environ, REELENGINE_ROOT=str(project.parent / "root"), REELENGINE_CACHE=str(project.parent / "cache"))
     r = subprocess.run([sys.executable, "-m", "reelengine", *args, "--project", str(project)],
                        cwd=ENGINE, env=env, capture_output=True, text=True, timeout=300)
-    last = json.loads(r.stdout.strip().splitlines()[-1])
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def engine(project: Path, *args: str) -> dict:
+    last = last_event(project, *args)
     assert last["event"] == "done", last
     return last["result"]
 
@@ -78,3 +82,15 @@ def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(proj
     assert json.loads((note / "edit.json").read_text())["version"] == 1
     assert (project / "project.json").read_bytes() == root_before
     assert (project / "versions" / "preview" / "draft.mp4").read_bytes() == b"the creator's preview"
+
+
+def test_a_render_run_by_hand_waits_for_the_app_that_owns_the_project(project):
+    lock = project / "work" / ".owner.lock"
+    lock.write_text("the app's note")        # a fresh lock: Reel Studio is editing this video
+    refused = last_event(project, "render")
+    assert refused["event"] == "error" and refused["code"] == "PROJECT_BUSY"
+    assert "open in Reel Studio" in refused["userMessage"]
+    assert not (project / "versions" / "v1").exists()
+
+    assert engine(project, "render", "--owner", "the app's note")["version"] == 1
+    assert lock.read_text() == "the app's note"
