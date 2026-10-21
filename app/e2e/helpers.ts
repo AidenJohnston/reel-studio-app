@@ -1,13 +1,17 @@
 // Shared helpers for the Electron end-to-end tests.
 import { expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 export const APP_DIR = resolve(__dirname, '..')
 export const SHOTS = join(APP_DIR, 'e2e', 'screenshots')
 export const BASE = mkdtempSync(join(tmpdir(), 'rs-e2e-'))
+// Tests close and relaunch the app to check recovery, so keep their files until the worker exits.
+process.once('exit', () => {
+  if (process.env.KEEP_E2E_TMP !== '1') rmSync(BASE, { recursive: true, force: true })
+})
 // Spaces and non-ASCII on purpose: real users have them.
 export const HOME = join(BASE, 'Zoë Müller', 'Documents')
 export const ROOT = join(HOME, 'Reel Studio')
