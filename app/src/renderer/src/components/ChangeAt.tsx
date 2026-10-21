@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { clock } from '../../../shared/progress'
-import { momentNote, typedMoment, wordsAt } from '../../../shared/moments'
-import type { MomentWord } from '../../../shared/api'
+import { noteMoment, typedMoment, wordsAt } from '../../../shared/moments'
+import type { MomentWord, NoteMoment } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { NOTE_DROP_DONE, useNotify } from '../App'
 import { Icon } from './icons'
@@ -185,20 +185,20 @@ export function ChangeAt({
     const files = att.chips
     setSending(true)
     try {
-      let note = asked
+      let at: NoteMoment | undefined
       if (scope === 'here') {
         const r = found && found.n === shown?.n && found.at === when ? found.lookup : await lookup(when)
         if (r && when > r.duration) {
           setAlert(`There's no ${clock(when)} in this video. It's ${clock(r.duration)} long.`)
           return
         }
-        if (!r || !r.words.length) {
+        if (!r || !r.words.length || !shown) {
           setAlert(`I can't tell which words play at ${clock(when)}. Pick a moment where you're talking, or choose Whole reel.`)
           return
         }
-        note = momentNote(when, r.words, asked)
+        at = noteMoment(when, shown.n, r.words)
       }
-      const r = await reel.projects.note(slug, note, files.length ? files.map((f) => f.asset) : undefined)
+      const r = await reel.projects.note(slug, asked, files.length ? files.map((f) => f.asset) : undefined, at)
       setText('')
       att.clear()
       close(byKey)

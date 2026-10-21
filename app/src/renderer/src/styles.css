@@ -361,10 +361,14 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 /* the notes asked at a moment, on the scrub bar */
 .scrub-track { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
 .scrub.pinned { opacity: 1; }
-.scrub-mark { position: absolute; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; padding: 0; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; cursor: pointer; }
-.scrub-mark::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
-.scrub-mark.making::before { box-shadow: inset 0 0 0 2px #fff; animation: breathe 1.8s ease-in-out infinite; }
-.scrub-mark.done::before { background: var(--green); box-shadow: 0 0 0 2px #fff; }
+/* Marks sit just above the track, so the thumb never covers one (the 24 px target ends 2 px above
+   the track's middle). Each dot has a dark edge so it reads on a light frame too. */
+.scrub-mark { position: absolute; top: 50%; width: 24px; height: 24px; margin: -26px 0 0 -12px; padding: 0; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; cursor: pointer; }
+.scrub-mark::before { content: ''; grid-area: 1 / 1; width: 8px; height: 8px; border-radius: 50%; }
+/* being made: a solid dot in a breathing ring (opacity and scale only) */
+.scrub-mark.making::before { background: #fff; box-shadow: 0 0 0 1.5px rgba(0,0,0,.5); }
+.scrub-mark.making::after { content: ''; grid-area: 1 / 1; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; animation: breathe 1.8s ease-in-out infinite; }
+.scrub-mark.done::before { background: var(--green); box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.35); }
 .scrub-mark.failed::before { width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg); background: var(--red-soft); box-shadow: 0 0 0 2px var(--red-ink); }
 /* stopped on purpose: not an error, so grey and square */
 .scrub-mark.stopped::before { width: 7px; height: 7px; border-radius: 1px; background: rgba(255,255,255,.7); box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
@@ -381,6 +385,8 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 }
 /* Notes history: long words wrap inside the bubble, and its buttons are plain links, never pills in a bubble. */
 .notes-panel .bubble { overflow-wrap: anywhere; }
+.bubble-moment { font-variant-numeric: tabular-nums; opacity: .7; }
+.bubble-quote { display: block; margin-top: 4px; font-size: 13px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bubble-link { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 14px; font-weight: 600; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-align: left; cursor: pointer; }
 .bubble-link:disabled { opacity: .5; cursor: default; }
 .job-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

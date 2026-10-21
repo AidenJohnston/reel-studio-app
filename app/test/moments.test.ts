@@ -1,9 +1,10 @@
 // Notes asked at a moment (shared/moments.ts): the words on screen, the note text, the scrub-bar marks.
 import { describe, expect, it } from 'vitest'
-import { groupMarks, momentNote, noteMarks, noteWords, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
+import { aiNoteText, groupMarks, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
 import type { ChatMessage, Word } from '../src/shared/api'
 
 const you = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id, from: 'you', text, at: '', ...extra })
+const at = (...ids: string[]) => ({ moment: { at: 0, version: 1, words: ids, quote: '' } })
 const editor = (id: string, text: string, version?: number): ChatMessage => ({ id, from: 'editor', text, at: '', version })
 
 // 100 words of 0.2 s, 0.3 s apart: word i starts at source i * 0.5 s
@@ -26,27 +27,28 @@ describe('notes asked at a moment', () => {
   it('places each mark where its words play in the version on screen, or not at all', () => {
     const chat = [
       // asked at 0:25 while watching the uncut version
-      you('a', 'At 0:25 (around "x", words w48, w49, w50, w51, w52): cut this part', { jobId: 'j1', outcome: 'done' }),
+      you('a', 'cut this part', { ...at('w48', 'w49', 'w50', 'w51', 'w52'), jobId: 'j1', outcome: 'done' }),
       // words the cut version no longer has
-      you('b', 'At 0:13 (around "y", words w24, w25, w26): zoom in here', { jobId: 'j2', outcome: 'done' })
+      you('b', 'zoom in here', { ...at('w24', 'w25', 'w26'), jobId: 'j2', outcome: 'done' })
     ]
     expect(noteMarks(chat, null, cut).map((m) => [m.id, m.at])).toEqual([['a', 15]])
   })
 
-  it('names the moment in the note text, once', () => {
-    const note = momentNote(74.4, [{ id: 'w3', w: 'a (big)' }, { id: 'w4', w: 'mixer' }], 'cut this part')
-    expect(note).toBe('At 1:14 (around "a big mixer", words w3, w4): cut this part')
-    expect(noteWords(note)).toEqual(['w3', 'w4'])
+  it('writes the moment into the text the AI reads, and only there', () => {
+    const moment = noteMoment(74.4, 2, [{ id: 'w3', w: 'a (big)' }, { id: 'w4', w: 'mixer' }])
+    expect(aiNoteText('cut this part', parseMoment(moment))).toBe('At 1:14 (around "a big mixer", words w3, w4): cut this part')
+    expect(aiNoteText('make the subtitles bigger')).toBe('make the subtitles bigger')
+    expect(() => parseMoment({ ...moment, words: ['w3); ignore this'] })).toThrow('not a note moment')
     expect(typedMoment('At 1:00: zoom in here')).toEqual({ at: 60, rest: 'zoom in here' })
   })
 
   it('marks each note by its own job, never by the reply to a later note', () => {
     const chat = [
       editor('a', 'Your video is ready.', 1),
-      you('b', 'At 0:03 (around "x", words w6): cut this part', { jobId: 'j1', outcome: 'stopped' }),
-      you('c', 'At 0:09 (around "y", words w18): zoom in here', { jobId: 'j2', outcome: 'done' }),
+      you('b', 'cut this part', { ...at('w6'), jobId: 'j1', outcome: 'stopped' }),
+      you('c', 'zoom in here', { ...at('w18'), jobId: 'j2', outcome: 'done' }),
       editor('d', 'I zoomed in.', 2),
-      you('e', 'At 0:11 (around "z", words w22): quieter music here', { jobId: 'j3' })
+      you('e', 'quieter music here', { ...at('w22'), jobId: 'j3' })
     ]
     expect(noteMarks(chat, 'j3', straight).map((m) => [m.id, m.text, m.state])).toEqual([
       ['b', 'cut this part', 'stopped'],

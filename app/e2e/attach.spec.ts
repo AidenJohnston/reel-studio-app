@@ -103,7 +103,12 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await page.getByTestId('change-send').click()
   await expect(page.getByTestId('change-pop')).toHaveCount(0)
   const bubble = page.getByTestId('bubble-you').last()
-  await expect(bubble).toContainText(/^At 0:00 \(around "[^"]+", words w0, w1, w2\): Put this here$/)
+  // the person sees the time and their words; the AI reads the words on screen by id
+  await expect(bubble).toContainText(/^0:00 · Put this here"[^"]+"$/)
+  await expect(bubble).not.toContainText('w0')
+  await expect
+    .poll(() => JSON.parse(readFileSync(join(ROOT, 'Projects', slug, 'project.json'), 'utf8')).notes?.at(-1)?.text)
+    .toMatch(/^At 0:00 \(around "[^"]+", words w0, w1, w2\): Put this here$/)
   await expect(bubble.getByTestId('bubble-attachments').locator('img')).toHaveCount(3)
   await expect(page.getByTestId('bubble-editor').last()).toContainText('I saved your note')
   // the stand-in AI makes no new version, so the note did not change the video

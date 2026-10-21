@@ -48,9 +48,9 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
-import { placeWords, type RenderSegment } from '../shared/moments'
+import { aiNoteText, parseMoment, placeWords, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
@@ -433,14 +433,20 @@ function registerIpc(): void {
     }
     return { jobId: startFirstEdit(slug, null) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
+  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown) => {
     const note = String(text ?? '').trim()
     const dir = projectDir(slug)
     // never trust the page: every attached ref is re-read from THIS project's own sidecars
     const files = await checkNoteAttachments(dir, attachments)
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
+    let moment: NoteMoment | undefined
+    try {
+      moment = at === undefined ? undefined : parseMoment(at)
+    } catch (e) {
+      throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
+    }
+    const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat), moment)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
@@ -455,7 +461,8 @@ function registerIpc(): void {
       'note',
       async (emit, signal) => {
         const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
-        const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
+        // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part"
+        const r: AgentResult = await ai.applyNote(dir, aiNoteText(note, moment), (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         const reply = await replyAskingAboutStyle(slug, r, r.summary + extra)
         return { ...reply, outcome: r.version > before ? 'done' : 'failed' }

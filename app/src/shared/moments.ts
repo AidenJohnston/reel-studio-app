@@ -1,10 +1,9 @@
-// A note asked "at a moment" (the change button under the player) names the moment in its own text:
-// `At 0:14 (around "you don't need a mixer", words w80, w81, w82): cut this part`. The note path has
-// no time field, and the project anchors everything on transcript word ids, so the words are resolved
-// when the note is sent, from the render on screen (wordsAt), and the AI reads them as written.
-// The marks on the scrub bar go the other way: each note's word ids, placed on the render on screen.
-// No Node or DOM imports (unit-tested).
-import type { ChatMessage, MomentWord, NoteOutcome, PlacedWord, Word } from './api'
+// A note asked "Just here" (the change button under the player) carries its moment beside its text:
+// the time, and the transcript word ids on screen then, read from the render being watched (wordsAt).
+// The person sees "0:08 · cut this part". The AI reads the moment written into the note text
+// (aiNoteText), because the project anchors everything on word ids. The marks on the scrub bar go
+// the other way: each note's word ids, placed on the render on screen. No Node or DOM imports.
+import type { ChatMessage, MomentWord, NoteMoment, NoteOutcome, PlacedWord, Word } from './api'
 import { clock } from './progress'
 
 /** One kept span of a source on a render's output clock: an entry of `segmentsDetail` in the
@@ -45,20 +44,29 @@ export function wordsAt(placed: PlacedWord[], t: number, radius = 1.1): MomentWo
   return out
 }
 
-// The quoted words never carry the parentheses or quotes that delimit them in the note.
-const quoted = (words: MomentWord[]): string => words.map((x) => x.w.replace(/["()]/g, '')).join(' ')
+// The quote never carries the parentheses or quotes that delimit it in the AI's note text.
+const unquote = (w: string): string => w.replace(/["()]/g, '')
 
-export function momentNote(seconds: number, words: MomentWord[], text: string): string {
-  return `At ${clock(seconds)} (around "${quoted(words)}", words ${words.map((x) => x.id).join(', ')}): ${text}`
+export function noteMoment(at: number, version: number, words: MomentWord[]): NoteMoment {
+  return { at, version, words: words.map((x) => x.id), quote: words.map((x) => unquote(x.w)).join(' ') }
 }
 
-// The quote has no quotes or parentheses of its own (quoted above), so the prefix reads back exactly.
-const MOMENT = /^At \d+:[0-5]\d \(around "[^"]*", words ([^()]*)\): /
+/** What the AI reads for a note: `At 0:14 (around "you don't need a mixer", words w80, w81): cut this part`. */
+export function aiNoteText(text: string, moment?: NoteMoment): string {
+  return moment ? `At ${clock(moment.at)} (around "${unquote(moment.quote)}", words ${moment.words.join(', ')}): ${text}` : text
+}
 
-/** The word ids a note was asked at, or null for a note about the whole reel. */
-export function noteWords(text: string): string[] | null {
-  const m = MOMENT.exec(text)
-  return m ? m[1].split(', ') : null
+/** A moment from the page, checked before it reaches the chat or the AI. Throws on anything else. */
+export function parseMoment(x: unknown): NoteMoment {
+  const m = (x ?? {}) as Partial<Record<keyof NoteMoment, unknown>>
+  const ok =
+    typeof m.at === 'number' && Number.isFinite(m.at) && m.at >= 0 &&
+    Number.isInteger(m.version) && (m.version as number) >= 0 &&
+    Array.isArray(m.words) && m.words.length > 0 && m.words.length <= 200 &&
+    m.words.every((w) => typeof w === 'string' && /^[\w.-]{1,40}$/.test(w)) &&
+    typeof m.quote === 'string' && m.quote.length <= 2000
+  if (!ok) throw new Error(`not a note moment: ${JSON.stringify(x)?.slice(0, 200)}`)
+  return { at: m.at as number, version: m.version as number, words: m.words as string[], quote: m.quote as string }
 }
 
 /** "At 1:00: zoom in" typed into the box: that time wins over the playhead, and is taken off the text. */
@@ -73,7 +81,7 @@ export interface NoteMark {
   id: string
   /** where the note's words play in the render on screen */
   at: number
-  /** what was asked, without the "At 0:14 (...): " prefix */
+  /** what was asked */
   text: string
   state: MarkState
 }
@@ -91,10 +99,10 @@ export function noteMarks(chat: ChatMessage[], runningJobId: string | null, plac
   const marks: NoteMark[] = []
   for (const m of chat) {
     if (m.from !== 'you') continue
-    const times = (noteWords(m.text) ?? []).flatMap((id) => plays.get(id) ?? [])
+    const times = (m.moment?.words ?? []).flatMap((id) => plays.get(id) ?? [])
     if (!times.length) continue
     const state: MarkState = !m.jobId ? 'failed' : m.jobId === runningJobId ? 'making' : (m.outcome ?? 'stopped')
-    marks.push({ id: m.id, at: times[Math.floor(times.length / 2)], text: m.text.replace(MOMENT, ''), state })
+    marks.push({ id: m.id, at: times[Math.floor(times.length / 2)], text: m.text, state })
   }
   return marks
 }
