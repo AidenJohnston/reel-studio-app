@@ -17,7 +17,7 @@ describe('orphaned engine reaper', () => {
       expect((await processName(child.pid!))?.toLowerCase()).toContain('python')
       expect(await processName(999999)).toBeNull()
     } finally {
-      if (child.pid) {
+      if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit')
         child.kill()
         await exited
