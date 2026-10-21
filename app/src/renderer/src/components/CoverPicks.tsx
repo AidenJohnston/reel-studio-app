@@ -79,7 +79,7 @@ export function CoverPicks({
           {picks.map((c, i) => {
             const on = isChosen(c)
             const tabbable = on || (i === 0 && !picks.some(isChosen))
-            const why = coverReason(c)
+            const why = coverReason(c.reasons)
             return (
               <button
                 key={c.atSourceTime}

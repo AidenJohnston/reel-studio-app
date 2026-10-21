@@ -23,6 +23,7 @@ from . import placement
 SEARCH_HALF = 1.5        # seconds either side of atSourceTime
 EXACT_HALF = 0.2         # cover.exact: the AI LOOKED at this frame (cover-candidates); stay on it
 CANDIDATE_HALF = 0.6     # cover-candidates searches this far either side of each moment
+MIN_REASON_FRAMES = 3    # with fewer faces than this near a moment, no signal can be said to stand out
 DETECT_W = 480
 
 
@@ -110,7 +111,30 @@ def score_frames(ctx, sid: str, times: list[float]) -> list[dict]:
         # between words = mouth closed or relaxed, never a mid-word smear
         r["score"] = round(r["det"] * (0.35 * r["sharpN"] + 0.35 * r["eyesN"] + 0.10 * r["stillN"]
                                        + 0.20 * (1.0 if r["between"] else 0.0)), 4)
+    _mark_reasons(good)
     return rows
+
+
+def _mark_reasons(good: list[dict]) -> None:
+    """r["reasons"]: the signals that make each frame stand out from the other faces near the same
+    moment, in the score's weight order, for the app to put in words. Read from the raw values, not
+    the capped 0-1 ones: a signal counts when it reaches the 90th percentile (the score's own top
+    mark) AND beats the median, so a flat signal, a tie across most frames or too few frames to
+    compare names nothing. Being between words counts only when some neighbour was mid-word."""
+    if len(good) < MIN_REASON_FRAMES:
+        for r in good:
+            r["reasons"] = []
+        return
+    marks = {}
+    for key in ("eyes", "sharp", "still"):
+        vals = np.array([r[key] for r in good], dtype=float)
+        marks[key] = (float(np.percentile(vals, 90)), float(np.median(vals)))
+    some_mid_word = not all(r["between"] for r in good)
+    for r in good:
+        top = {key: r[key] >= hi and r[key] > med for key, (hi, med) in marks.items()}
+        r["reasons"] = [name for name, on in (("eyesOpen", top["eyes"]), ("sharp", top["sharp"]),
+                                              ("betweenWords", r["between"] and some_mid_word),
+                                              ("still", top["still"])) if on]
 
 
 def _fit_frame(bgr: np.ndarray, W: int, H: int, rect=None):
@@ -138,12 +162,16 @@ def render(ctx, out_png) -> Path:
     if source_path(ctx, sid) is None:
         sid = sources[0]["id"]
     at = cov.get("atSourceTime")
-    times = candidate_times(ctx, sid, at, EXACT_HALF if cov.get("exact") and at is not None else None)
-    rows = score_frames(ctx, sid, times)
-    best = max(rows, key=lambda r: r.get("score", 0.0)) if rows else {"t": at or 0.0}
-    if not best.get("score"):
-        best = {"t": at if at is not None else times[len(times) // 2]}
-        log("cover: no face found near the chosen time; using the frame as is")
+    if cov.get("manual") and at is not None:
+        # the person clicked this frame in the app's cover picker: that frame, never a search around it
+        rows, best = [], {"t": float(at)}
+    else:
+        times = candidate_times(ctx, sid, at, EXACT_HALF if cov.get("exact") and at is not None else None)
+        rows = score_frames(ctx, sid, times)
+        best = max(rows, key=lambda r: r.get("score", 0.0)) if rows else {"t": at or 0.0}
+        if not best.get("score"):
+            best = {"t": at if at is not None else times[len(times) // 2]}
+            log("cover: no face found near the chosen time; using the frame as is")
     W, H, _ = fmt_of(ctx)
     frame = grab_frame(source_path(ctx, sid), best["t"], ctx)
     rect = reframe_rect(ctx, sid)
@@ -168,9 +196,8 @@ def render(ctx, out_png) -> Path:
 def candidates(ctx, sid: str, moments: list[float], out_dir, width: int = 360) -> list[dict]:
     """The best cover frame near each moment (raw-take seconds), for the AI to LOOK at before it
     picks and for the app's cover picker: faces scored as for the cover (detector confidence,
-    sharpness, eyes open, a still frame, between words), each saved as a small still fitted like the
-    video. eyesOpen / sharp / still are 0-1 against the other frames near the same moment, so the app
-    can say why this frame won. Sorted by score, best first."""
+    sharpness, eyes open, between words), each saved as a small still fitted like the video, with
+    the signals it stands out on (`reasons`, see _mark_reasons). Sorted by score, best first."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     W, H, _ = fmt_of(ctx)
@@ -189,8 +216,8 @@ def candidates(ctx, sid: str, moments: list[float], out_dir, width: int = 360) -
         img.save(f, "JPEG", quality=85)
         out.append({"moment": float(m), "atSourceTime": round(float(best["t"]), 3), "score": best["score"],
                     "eyesOpen": round(float(best.get("eyesN", 0.0)), 2), "sharp": round(float(best.get("sharpN", 0.0)), 2),
-                    "still": round(float(best.get("stillN", 0.0)), 2),
-                    "betweenWords": bool(best.get("between")), "file": str(f)})
+                    "betweenWords": bool(best.get("between")), "reasons": list(best.get("reasons", [])),
+                    "file": str(f)})
     out.sort(key=lambda r: -r["score"])
     return out
 

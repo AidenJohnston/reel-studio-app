@@ -2,15 +2,16 @@
 // engine's cover scorer (engine/reelengine/cover.py score_frames) picked each frame.
 import type { Word } from './api'
 
-/** One frame from `cover-candidates`. eyesOpen / sharp / still are 0-1 against the other frames near the
- * same moment (1 = in the top tenth of them); betweenWords = no word was being said at that instant. */
+/** A signal the cover scorer found this frame standing out on, against the other faces near the same
+ * moment (engine cover._mark_reasons). Listed in the scorer's weight order. */
+export type CoverSignal = 'eyesOpen' | 'sharp' | 'betweenWords' | 'still'
+export const COVER_SIGNALS: readonly CoverSignal[] = ['eyesOpen', 'sharp', 'betweenWords', 'still']
+
+/** One frame from `cover-candidates --picker`. */
 export interface CoverCandidate {
   atSourceTime: number
   source: string
-  eyesOpen: number
-  sharp: number
-  still: number
-  betweenWords: boolean
+  reasons: CoverSignal[]
   /** reel-media: URL of the still */
   image: string
 }
@@ -31,16 +32,16 @@ export function coverMoments(words: Word[], kept: Set<string>, source: string, n
   return out
 }
 
-/** Why the scorer picked this frame, strongest signal first, in the order the scorer weighs them
- * (eyes 0.35, sharpness 0.35, between words 0.20, stillness 0.10). A signal counts only when the frame
- * is at the top of its neighbours for it, so the words never claim more than the numbers show. */
-export function coverReason(c: Pick<CoverCandidate, 'eyesOpen' | 'sharp' | 'still' | 'betweenWords'>): string {
-  const parts = [
-    c.eyesOpen >= 1 && 'eyes open',
-    c.sharp >= 1 && 'face in focus',
-    c.betweenWords && 'between words',
-    c.still >= 1 && 'holding still'
-  ].filter((p): p is string => !!p)
-  const text = parts.slice(0, 2).join(', ') || 'clearest face nearby'
+const SAY: Record<CoverSignal, string> = {
+  eyesOpen: 'eyes open',
+  sharp: 'face in focus',
+  betweenWords: 'between words',
+  still: 'holding still'
+}
+
+/** Why the scorer picked this frame, in words: the first two signals it stood out on. With none (flat
+ * signals, too few faces nearby to compare) it still won on the combined score. */
+export function coverReason(reasons: CoverSignal[]): string {
+  const text = reasons.slice(0, 2).map((r) => SAY[r]).join(', ') || 'clearest face nearby'
   return text[0].toUpperCase() + text.slice(1)
 }

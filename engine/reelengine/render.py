@@ -1008,9 +1008,12 @@ def render_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png: Path, warni
     return fallback_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png)
 
 
-def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None) -> dict:
+def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None,
+                     picker: bool = False) -> dict:
     """`cover-candidates --at t1,t2,...`: the best cover frame near each raw-take moment, as small
-    stills the AI looks at before choosing (cover.candidates)."""
+    stills the AI looks at before choosing (cover.candidates). `--picker` writes the app's cover
+    picker stills to their own folder: every call empties its folder first, and the AI may be
+    reading its own stills at the same time."""
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
     tl = projmod.timeline(project_dir, proj)
@@ -1018,7 +1021,7 @@ def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = N
                    project_dir / "work" / "render")
     cover = _opt_module("cover")
     sid = source or (ctx.out_timeline[0].source if ctx.out_timeline else proj["sources"][0]["id"])
-    out_dir = project_dir / "work" / "cover-candidates"
+    out_dir = project_dir / "work" / ("cover-picker" if picker else "cover-candidates")
     for f in out_dir.glob("cover_*.jpg") if out_dir.exists() else []:
         f.unlink(missing_ok=True)
     progress("cover", 10, "Looking for a cover", force=True)

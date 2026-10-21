@@ -137,8 +137,9 @@ export interface ProjectJson {
     params?: Record<string, unknown>
   }[]
   zooms?: unknown[]
-  /** exact: stay on this frame (it was picked from the cover suggestions); else the engine searches around it */
-  cover?: { atSourceTime: number; source: string; text: string | null; exact?: boolean | null }
+  /** manual: the person picked this exact frame in the app (rendered as is). exact: the AI looked at this frame
+   * (the engine searches 0.2 s around it). Neither: the engine searches 1.5 s around atSourceTime. */
+  cover?: { atSourceTime: number; source: string; text: string | null; exact?: boolean | null; manual?: boolean | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
   notes?: { version: number; text: string; applied: string[]; at: string }[]
   [k: string]: unknown
@@ -349,8 +350,11 @@ export interface ReelApi {
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
     rerender(slug: string, change?: string, label?: string): Promise<{ jobId: string }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
-    /** The best cover frame near each raw-take moment, best first (engine cover-candidates). */
+    /** The best cover frame near each raw-take moment, best first (engine cover-candidates). One look per
+     * project at a time: asking again while one runs gets that one's answer. */
     coverCandidates(slug: string, moments: number[], source: string): Promise<CoverCandidate[]>
+    /** Stops the look, if one runs; resolves once the engine has exited. */
+    stopCoverCandidates(slug: string): Promise<void>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */

@@ -291,15 +291,15 @@ def cmd_render(args: list[str]) -> dict:
 
 
 def cmd_cover_candidates(args: list[str]) -> dict:
-    """The real engine scores faces; this one takes the frame at each moment and gives fixed signals that
-    vary from frame to frame, so every reason the app can say shows up."""
+    """The real engine scores faces; this one takes the frame at each moment and gives it fixed reasons
+    that vary from frame to frame, so every way the app can word a reason shows up."""
     proj = Path(take(args, "--project"))
     data = load(proj)
     src = data["sources"][0]
-    out_dir = proj / "work" / "cover-candidates"
+    out_dir = proj / "work" / ("cover-picker" if "--picker" in args else "cover-candidates")
     out_dir.mkdir(parents=True, exist_ok=True)
-    signals = [(1.0, 1.0, 0.8, False), (0.7, 1.0, 1.0, True), (1.0, 0.6, 0.5, True), (0.6, 0.8, 1.0, False),
-               (0.8, 0.7, 0.6, False), (1.0, 0.9, 1.0, True)]
+    reasons = [["eyesOpen", "sharp"], ["sharp", "betweenWords"], ["eyesOpen", "betweenWords"], ["still"], [],
+               ["eyesOpen", "betweenWords", "still"]]
     rows = []
     for i, t in enumerate(float(x) for x in (take(args, "--at") or "").split(",") if x.strip()):
         t = min(t, max(0.0, float(src["duration"]) - 0.1))
@@ -307,9 +307,8 @@ def cmd_cover_candidates(args: list[str]) -> dict:
         subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(proj / src["path"]), "-frames:v", "1",
                         "-vf", "scale=360:640:force_original_aspect_ratio=increase,crop=360:640", str(f)],
                        check=False, capture_output=True)
-        eyes, sharp, still, between = signals[i % len(signals)]
-        rows.append({"moment": t, "atSourceTime": round(t, 3), "score": round(0.9 - i * 0.05, 4), "eyesOpen": eyes,
-                     "sharp": sharp, "still": still, "betweenWords": between, "file": str(f)})
+        rows.append({"moment": t, "atSourceTime": round(t, 3), "score": round(0.9 - i * 0.05, 4),
+                     "reasons": reasons[i % len(reasons)], "file": str(f)})
     return {"source": src.get("id", "s1"), "candidates": rows}
 
 

@@ -9,7 +9,7 @@ import { BASE, launch, makeMedia, passFirstRun } from './helpers'
 const MINE = mkdtempSync(join(BASE, 'cover-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
 
-test('cover suggestions say when and why, mark the chosen frame, and save it exactly', async () => {
+test('cover suggestions say when and why, mark the chosen frame, and save it as the frame to render', async () => {
   test.setTimeout(10 * 60_000)
   const media = makeMedia()
   const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data') })
@@ -37,7 +37,7 @@ test('cover suggestions say when and why, mark the chosen frame, and save it exa
   await expect(page.getByTestId('drawer')).toHaveCount(0)
   const dir = join(ROOT, 'Projects', readdirSync(join(ROOT, 'Projects'))[0])
   const cover = JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')).cover
-  expect(cover.exact).toBe(true)
+  expect(cover.manual).toBe(true) // the engine renders this frame, no search around it
   expect(label.startsWith(`${clock(cover.atSourceTime)},`)).toBe(true)
   await app.close()
 })

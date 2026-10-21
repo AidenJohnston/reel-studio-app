@@ -1131,7 +1131,8 @@ const tools: ToolDef[] = [
         if (p.sources.length && !p.sources.some((s) => s.id === src)) return `unknown source ${src}`;
         // a frame the model LOOKED at stays put; a blind time lets the engine search ~1.5 s around it
         const seen = (ctx.state.coverCandidates ?? []).some((c) => Math.abs(c - args.atSourceTime) < 0.01);
-        p.cover = { ...p.cover, atSourceTime: args.atSourceTime, source: src, text: args.text ?? null, exact: seen ? true : null };
+        // manual: null, since a frame the person once picked in the app is not the AI's pick
+        p.cover = { ...p.cover, atSourceTime: args.atSourceTime, source: src, text: args.text ?? null, exact: seen ? true : null, manual: null };
       });
       return { content: { ok: true }, summary: 'Picked a cover' };
     },
