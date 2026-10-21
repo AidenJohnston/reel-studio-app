@@ -37,7 +37,8 @@ describe('fast notes (no model turns)', () => {
     const before = await fsp.readFile(path.join(dir, 'project.json'));
     const original = structuredClone(p);
     for (const note of ["Don't remove the captions", "Don't make captions smaller", 'dont remove captions',
-      'do not remove captions', 'not smaller captions', 'never remove music', 'no longer smaller captions',
+      'cannot remove captions', 'can not remove captions', 'do not remove captions', 'not smaller captions',
+      'never remove music', 'no longer smaller captions',
       'keep captions smaller', 'leave captions smaller', 'stop shrinking captions',
       'without changing captions make them smaller', "captions aren't too big", 'don’t remove captions']) {
       expect(planFastNote(note, p), note).toBeNull();

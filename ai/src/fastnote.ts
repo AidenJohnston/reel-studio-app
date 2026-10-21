@@ -12,7 +12,7 @@ export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
 const NOT_FAST = /\b(when|where|while|whenever|start|starting|beginning|begin|intro|end|ending|middle|part|parts|after|before|during|first|last|second|seconds|minute|word|words|say|says|said|saying|line|always|every|everywhere|from now|next time|remember|future|and|but|also|plus|then|instead|except|picture|photo|image|cover|zoom|cut|font|color|colour|hashtag|post|song|track|different|change|another|why)\b|\d|["“”?]/;
 
 // Negation and preservation requests need the full editor to interpret the note.
-const NEGATED = /\b(not|dont|don['’]t|never|no longer|keep|leave|stop|without changing)\b|\b\w+n['’]t\b/;
+const NEGATED = /\b(not|cannot|can not|dont|don['’]t|never|no longer|keep|leave|stop|without changing)\b|\b\w+n['’]t\b/;
 
 const CAPTIONS = /\b(captions?|subtitles?|subs|words on screen|text)\b/;
 const MUSIC = /\b(music|background music|beat)\b/;
