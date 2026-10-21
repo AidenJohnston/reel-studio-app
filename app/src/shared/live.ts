@@ -20,7 +20,7 @@ export interface LiveState {
   secondsLeft: number | null
   secondsMaxLeft?: number
   approximate?: boolean
-  /** The current phase ran past its estimate: say "Still working, almost there", no number. */
+  /** Measured work is nearly done, but the current phase ran past its estimate: say "Still working, almost there", no number. */
   overdue: boolean
   /** Waiting on the AI's answer: show "thinking", not "stuck". */
   thinking: boolean

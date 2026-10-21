@@ -1,4 +1,5 @@
 // Phase wall times learned on this computer drive ETA. Defaults keep the bar moving before history exists.
+import { performance } from 'node:perf_hooks'
 import type { JobKind, Phase } from '../shared/api'
 
 export type { Phase } from '../shared/api'
@@ -42,7 +43,7 @@ export class ProgressTracker {
     private readonly kind: ProgressKind,
     private mediaSec: number,
     private history: SpeedHistory,
-    private readonly now: () => number = Date.now
+    private readonly now: () => number = () => performance.now()
   ) {
     this.phases = [...(PLAN[kind] ?? ['final'])]
   }
@@ -71,23 +72,25 @@ export class ProgressTracker {
     return h ? Math.max(0.01, h.perMin * (this.mediaSec / 60)) : this.default(phase)
   }
 
-  private factor(): number {
+  private factor(): number | undefined {
     const factors = this.phases
       .slice(0, this.cur)
+      // AI response latency does not measure engine throughput.
+      .filter((p) => p !== 'edit')
       .map((p) => {
         const sec = this.spent[p]
         const d = this.default(p)
-        return sec && d > 0 ? sec / d : null
+        return sec !== undefined && sec > 0 && Number.isFinite(sec) ? sec / d : null
       })
       .filter((x): x is number => x !== null && Number.isFinite(x))
       .sort((a, b) => a - b)
-    if (!factors.length) return 1
+    if (!factors.length) return undefined
     const middle = Math.floor(factors.length / 2)
     return factors.length % 2 ? factors[middle] : (factors[middle - 1] + factors[middle]) / 2
   }
 
   private phaseEstimate(phase: Timed): number {
-    return this.local(phase) ? this.estimate(phase) : this.default(phase) * this.factor()
+    return this.local(phase) ? this.estimate(phase) : this.default(phase) * (this.factor() ?? 1)
   }
 
   /** Phase transitions record elapsed wall time. Substep percentages never finish a phase. */
@@ -100,7 +103,7 @@ export class ProgressTracker {
     }
     if (i <= this.cur) return
     const t = this.now()
-    if (this.cur >= 0) this.spent[this.phases[this.cur]] = (t - this.phaseStart) / 1000
+    this.recordPhase(t)
     for (let k = Math.max(0, this.cur + 1); k < i; k++) this.spent[this.phases[k]] = 0
     this.cur = i
     this.phaseStart = t
@@ -127,15 +130,23 @@ export class ProgressTracker {
     const remainingPhases = this.phases.slice(this.cur)
     const approximate = remainingPhases.some((p) => !this.local(p))
     const out = { overall: this.best, approximate }
-    const observed = Object.values(this.spent).some((s) => s && s > 0)
-    if (elapsed > current) return { ...out, etaSec: null, overdue: true }
+    if (!(this.mediaSec > 0)) return { ...out, etaSec: null, overdue: false }
+    const observed = this.factor() !== undefined
+    // Use the existing 30-second near-completion cutoff only with local history for all work left.
+    if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
     if (approximate && !observed) return { ...out, etaSec: null, overdue: false }
     const unknownEdit = remainingPhases.includes('edit') && !this.local('edit')
     return { ...out, etaSec: Math.max(1, remaining), ...(unknownEdit ? { etaMaxSec: Math.max(1, remaining * 2) } : {}), overdue: false }
   }
 
+  private recordPhase(t: number): void {
+    if (this.cur < 0) return
+    const sec = (t - this.phaseStart) / 1000
+    if (sec > 0 && Number.isFinite(sec)) this.spent[this.phases[this.cur]] = sec
+  }
+
   finish(): Partial<Record<Timed, number>> {
-    if (this.cur >= 0 && this.spent[this.phases[this.cur]] === undefined) this.spent[this.phases[this.cur]] = (this.now() - this.phaseStart) / 1000
+    if (this.cur >= 0 && this.spent[this.phases[this.cur]] === undefined) this.recordPhase(this.now())
     return { ...this.spent }
   }
 }

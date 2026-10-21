@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { performance } from 'node:perf_hooks'
 import { DEFAULTS, ProgressTracker, learn, type SpeedHistory } from '../src/main/progress'
 import { timeLeftText as formatEta } from '../src/shared/progress'
 import { createJobManager } from '../src/main/jobs'
@@ -51,14 +52,14 @@ describe('honest progress', () => {
     for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1])
   })
 
-  it('past the estimate on the last step: no number, "almost there" (grandma 2: "less than a minute" for 3.5 min)', () => {
+  it('keeps an unmeasured final overrun neutral', () => {
     let now = 0
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 5)
     expect(t.snapshot()).toMatchObject({ overdue: false })
     expect(t.snapshot().etaSec).toBeNull()
     now += 10 * 60_000
-    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: false })
   })
 
   it('recalibrates: a slow first step makes every later estimate longer', () => {
@@ -169,5 +170,56 @@ describe('honest progress', () => {
     basic.update('listen', 0); ai.update('listen', 0); now += 14_000; basic.update('analyze', 0); ai.update('analyze', 0)
     expect(basic.snapshot().etaSec).toBeLessThan(ai.snapshot().etaSec!)
     expect(ai.snapshot().etaMaxSec).toBeGreaterThan(ai.snapshot().etaSec!)
+  })
+
+  it('keeps overruns neutral without measured near-completion or known media length', () => {
+    let now = 0
+    const first = new ProgressTracker('first-edit', 60, empty(), () => now)
+    const unknown = new ProgressTracker('rerender', 0, empty(), () => now)
+    const measured = new ProgressTracker('rerender', 60, learn(empty(), 'rerender', 60, { final: 10 }), () => now)
+    first.update('listen', 0); unknown.update('final', 0); measured.update('final', 0)
+    now = 15_000
+    expect(first.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(unknown.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(measured.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+  })
+
+  it('does not use AI note latency to estimate rendering without engine history', () => {
+    let now = 0
+    const note = new ProgressTracker('note', 60, empty(), () => now)
+    note.update('edit', 0)
+    now = 300_000
+    note.update('final', 0)
+    expect(note.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    const history = learn(empty(), 'note', 60, { final: 28 })
+    const known = new ProgressTracker('note', 60, history, () => now)
+    known.update('edit', 0)
+    now += 300_000
+    known.update('final', 0)
+    expect(known.snapshot()).toMatchObject({ etaSec: 28, approximate: false, overdue: false })
+  })
+
+  it('times phases monotonically and rejects nonpositive clock samples', () => {
+    let wall = 30_000
+    let monotonic = 0
+    const date = vi.spyOn(Date, 'now').mockImplementation(() => wall)
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => monotonic)
+    try {
+      const tracker = new ProgressTracker('first-edit-basic', 60, empty())
+      tracker.update('listen', 0)
+      wall -= 30_000; monotonic += 10_000
+      tracker.update('analyze', 0)
+      expect(tracker.finish().listen).toBe(10)
+      let invalid = 30_000
+      const injected = new ProgressTracker('first-edit-basic', 60, empty(), () => invalid)
+      injected.update('listen', 0)
+      invalid -= 30_000
+      injected.update('analyze', 0)
+      expect(injected.finish().listen).toBeUndefined()
+      expect(injected.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    } finally {
+      date.mockRestore()
+      clock.mockRestore()
+    }
   })
 })

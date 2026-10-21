@@ -171,7 +171,7 @@ export type JobEvent = Ids &
     /** overall = honest 0-99 for the whole job, never backwards; secondsLeft = from this computer's measured
      * history (main/progress.ts), null = too early to say. Status repeats about once a second while a job
      * runs (thinking kept), so a bar fed by `overall` never freezes. */
-    /** overdue = the current phase ran past its estimate: show "Still working, almost there", no number. */
+    /** overdue = measured work is nearly done, but the current phase ran past its estimate: show "Still working, almost there", no number. */
     | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; secondsMaxLeft?: number; approximate?: boolean; overdue: boolean; thinking: boolean }
     | { type: 'tool'; name: string; summary: string }
     /** video = a playable reel-media URL of a stable copy (never the file the engine overwrites next). */
