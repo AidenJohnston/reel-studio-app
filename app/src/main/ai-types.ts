@@ -59,6 +59,7 @@ export interface ConnectionInfo {
   kind: 'anthropic' | 'openai'
   baseURL: string
   model: string
+  supportsImages: boolean
   hasKey: boolean
   active: boolean
 }
@@ -84,6 +85,7 @@ export interface SecretStore {
   isEncryptionAvailable(): boolean
   encryptString(s: string): Buffer
   decryptString(b: Buffer): string
+  getSelectedStorageBackend?(): string
 }
 
 export interface AI {
@@ -115,6 +117,7 @@ export interface AI {
   connections?(): Promise<ConnectionInfo[]>
   saveConnection?(input: ConnectionInput): Promise<SaveConnectionResult>
   removeConnection?(id: string): Promise<void>
+  setConnectionImages?(id: string, supportsImages: boolean): Promise<void>
   connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void

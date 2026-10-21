@@ -234,9 +234,10 @@ Prompts are plain markdown in `ai/prompts/`.
   OpenAI-compatible one (Chat Completions, `ai/src/providers/openaiCompatible.ts`, because most compatible servers
   implement that endpoint). Label, kind, address and model live in `ai-settings.json`; each key is its own file
   encrypted with `safeStorage` (`connection-<id>.bin`), never returned to the page, never sent after a redirect,
-  and only sent to the server (origin) it was saved for. Saving makes one small request first and, if it fails,
-  says which field to fix. That request is text only: it shows the server answers, not that the model handles
-  tools and pictures.
+  and only sent to the server (origin) it was saved for. On Linux without a keyring (`safeStorage`'s `basic_text`
+  backend) no key is saved. Saving makes one small text request first and, if it fails, says which field to fix.
+  A second request carries a 1×1 picture; if the server refuses it, the connection is saved with pictures off and
+  the AI editor sends it none. The person can switch pictures on or off on the saved connection.
 - **Developer providers** (behind a dev flag, never shown to users): `codex-cli` and a recorded-response replay
   provider used by tests.
 
@@ -304,6 +305,7 @@ export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: bo
   saveConnection(c: { id?: string; label: string; kind: 'anthropic' | 'openai'; baseURL: string; model: string; key?: string }):
     Promise<{ status: ProviderStatus; connection?: ConnectionInfo; error?: UserFacingError & { field?: 'label' | 'address' | 'key' | 'model' } }>; // checks first
   removeConnection(id: string): Promise<void>;
+  setConnectionImages(id: string, supportsImages: boolean): Promise<void>;
   connectionModels(q: { kind: 'anthropic' | 'openai'; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>; // suggested: first of PREFERRED_MODELS the server lists, never just its first
   claudeCodeStatus(): Promise<{ state: 'missing' | 'broken' | 'signed_out' | 'ready'; version?: string; plan?: string }>; // the person's own Claude Code app, a fresh look
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>;

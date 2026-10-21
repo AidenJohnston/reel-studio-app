@@ -421,6 +421,9 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .conn-kinds { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .conn-kinds legend { padding: 0; margin-bottom: 8px; }
 .conn-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-images { gap: 8px; font-size: 13.5px; font-weight: 600; min-height: 28px; flex-wrap: wrap; }
+.conn-images input { width: 16px; height: 16px; }
+.conn-images .muted-sm { font-weight: 400; }
 .input[aria-invalid="true"] { border-color: var(--red-ink); }
 .input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(142,42,28,.16); }
 .field-error { color: var(--red-ink); }

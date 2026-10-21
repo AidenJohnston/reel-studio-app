@@ -12,6 +12,7 @@ export interface OpenAICompatibleOptions {
   model: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  supportsImages: boolean;
 }
 
 const imageUrl = (mime: string, base64: string) => ({ type: 'image_url', image_url: { url: `data:${mime};base64,${base64}` } });
@@ -84,11 +85,12 @@ function fromChatCompletion(json: any): CompletionResponse {
 
 export class OpenAICompatibleProvider implements ModelProvider {
   readonly id = 'custom' as const;
-  readonly supportsImages = true;
+  readonly supportsImages: boolean;
   readonly model: string;
   private readonly url: string;
   constructor(private readonly o: OpenAICompatibleOptions) {
     this.model = o.model;
+    this.supportsImages = o.supportsImages;
     this.url = `${o.baseURL.replace(/\/+$/, '')}/chat/completions`;
   }
 

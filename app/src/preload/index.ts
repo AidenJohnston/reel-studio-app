@@ -47,6 +47,7 @@ const api: ReelApi = {
     connections: () => call('ai:connections'),
     saveConnection: (input) => call('ai:saveConnection', input),
     removeConnection: (id) => call('ai:removeConnection', id),
+    setConnectionImages: (id, on) => call('ai:setConnectionImages', id, on),
     connectionModels: (q) => call('ai:connectionModels', q),
     onChange: (cb) => on<ProviderInfo>('ai:change', cb)
   },

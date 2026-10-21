@@ -8,6 +8,8 @@ export interface MockCompatibleOptions {
   models?: string[];
   /** answer GET .../models with 404 */
   noModelList?: boolean;
+  /** answer a chat request that carries a picture with 400, like a text-only model */
+  rejectImages?: boolean;
 }
 
 export class MockCompatible {
@@ -50,6 +52,7 @@ export class MockCompatible {
     if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
       if (this.key && bearer !== this.key) return this.json(res, 401, { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } });
       if (!this.models.includes(body?.model)) return this.json(res, 404, { error: { message: `The model \`${body?.model}\` does not exist or you do not have access to it.`, type: 'invalid_request_error', code: 'model_not_found' } });
+      if (this.opts.rejectImages && hasImage(body)) return this.json(res, 400, { error: { message: 'This model does not support image input.', type: 'invalid_request_error' } });
       const h = this.chatHandlers.shift();
       if (h) return h(body, res);
       return this.json(res, 200, { id: 'chatcmpl-1', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 9, completion_tokens: 1 } });
@@ -61,6 +64,10 @@ export class MockCompatible {
     }
     res.writeHead(404, { 'content-type': 'text/plain' }).end('404 page not found');
   }
+}
+
+export function hasImage(body: any): boolean {
+  return (body?.messages ?? []).some((m: any) => Array.isArray(m.content) && m.content.some((p: any) => p?.type === 'image_url'));
 }
 
 /** An Anthropic Messages stream that answers `text`. */

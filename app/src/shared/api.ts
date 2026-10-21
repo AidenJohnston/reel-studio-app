@@ -224,6 +224,8 @@ export interface ConnectionInfo {
   kind: ConnectionKind
   baseURL: string
   model: string
+  /** false: the AI editor is never sent pictures through this server */
+  supportsImages: boolean
   hasKey: boolean
   active: boolean
 }
@@ -365,6 +367,7 @@ export interface ReelApi {
     connections(): Promise<ConnectionInfo[]>
     saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
     removeConnection(id: string): Promise<void>
+    setConnectionImages(id: string, supportsImages: boolean): Promise<void>
     /** `suggested` is null when no listed model is one Reel Studio knows: the person picks. */
     connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
     /** Returns unsubscribe. */

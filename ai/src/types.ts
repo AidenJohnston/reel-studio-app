@@ -45,6 +45,8 @@ export interface SecretStore {
   isEncryptionAvailable(): boolean;
   encryptString(plain: string): Buffer;
   decryptString(encrypted: Buffer): string;
+  /** Linux only in Electron */
+  getSelectedStorageBackend?(): string;
 }
 
 export interface UserFacingError { code: string; userMessage: string; link?: string; retryable?: boolean }

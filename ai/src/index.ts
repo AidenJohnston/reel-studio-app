@@ -4,7 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
-  AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
+  AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
@@ -51,7 +51,11 @@ export interface AISettings {
   activeConnection?: string;
 }
 
-export interface CustomConnection { id: string; label: string; kind: ConnectionKind; baseURL: string; model: string }
+export interface CustomConnection {
+  id: string; label: string; kind: ConnectionKind; baseURL: string; model: string;
+  /** set by the picture sent with the check on save; the person can change it */
+  supportsImages: boolean;
+}
 export interface ConnectionInfo extends CustomConnection { hasKey: boolean; active: boolean }
 export interface ConnectionInput {
   id?: string;
@@ -72,6 +76,8 @@ function sameOrigin(a: string, b: string): boolean {
   try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
 }
 const CHECK_TIMEOUT_MS = 30_000;
+const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const WEAK_STORE_MESSAGE = 'This computer has no password store Reel Studio can use (such as GNOME Keyring or KWallet), so other apps could read the key. I did not save it. Turn on your password store, then try again.';
 const FIELD_OF: Record<string, ConnectionField> = {
   connection_bad_address: 'address', connection_unreachable: 'address', connection_wrong_address: 'address', connection_timeout: 'address',
   connection_bad_key: 'key', no_secure_storage: 'key', connection_model: 'model',
@@ -164,13 +170,15 @@ export function createAI(opts: CreateAIOptions) {
   async function writeSecret(name: string, value: string | null, noStorageMessage: string): Promise<void> {
     const f = secretFiles(name);
     if (!value) { await fsp.rm(f.enc, { force: true }); await fsp.rm(f.plain, { force: true }); return; }
-    if (opts.secretStore?.isEncryptionAvailable()) {
+    // Linux without a keyring: Electron's 'basic_text' encrypts with a password built into Chromium, which protects nothing
+    const weak = opts.secretStore?.getSelectedStorageBackend?.() === 'basic_text';
+    if (opts.secretStore?.isEncryptionAvailable() && !weak) {
       await writeFileAtomic(f.enc, opts.secretStore.encryptString(value), 0o600);
       await fsp.rm(f.plain, { force: true });
     } else if (opts.allowPlaintextSecrets) {
       await writeFileAtomic(f.plain, value, 0o600);
       await fsp.rm(f.enc, { force: true });
-    } else throw new AIError('no_secure_storage', noStorageMessage);
+    } else throw new AIError('no_secure_storage', weak ? WEAK_STORE_MESSAGE : noStorageMessage);
   }
 
   // ---- Claude key (secret)
@@ -183,7 +191,7 @@ export function createAI(opts: CreateAIOptions) {
     return `connection-${id}`;
   };
   const connectionInfo = (c: CustomConnection, s: AISettings): ConnectionInfo => ({
-    id: c.id, label: c.label, kind: c.kind, baseURL: c.baseURL, model: c.model,
+    id: c.id, label: c.label, kind: c.kind, baseURL: c.baseURL, model: c.model, supportsImages: c.supportsImages,
     hasKey: hasSecret(connectionSecret(c.id)), active: s.active === 'custom' && activeConnection(s)?.id === c.id,
   });
   // Connection changes run one at a time: a save that is still checking must not undo a later edit (and leave a
@@ -201,20 +209,25 @@ export function createAI(opts: CreateAIOptions) {
   function connectionProvider(c: CustomConnection, key: string | null, check = false): ModelProvider {
     if (c.kind === 'anthropic') {
       return new AnthropicProvider({
-        id: 'custom', apiKey: key!, model: c.model, baseURL: c.baseURL, fetch: noRedirectFetch(opts.fetch),
+        id: 'custom', apiKey: key!, model: c.model, baseURL: c.baseURL, fetch: noRedirectFetch(opts.fetch), supportsImages: c.supportsImages,
         ...(check ? { maxRetries: 0, timeoutMs: CHECK_TIMEOUT_MS, maxTokens: 64 } : {}),
       });
     }
-    return new OpenAICompatibleProvider({ baseURL: c.baseURL, apiKey: key, model: c.model, fetch: opts.fetch, ...(check ? { timeoutMs: CHECK_TIMEOUT_MS } : {}) });
+    return new OpenAICompatibleProvider({ baseURL: c.baseURL, apiKey: key, model: c.model, fetch: opts.fetch, supportsImages: c.supportsImages, ...(check ? { timeoutMs: CHECK_TIMEOUT_MS } : {}) });
   }
-  async function checkConnection(c: CustomConnection, key: string | null): Promise<void> {
-    try {
-      await connectionProvider(c, key, true).complete({ system: 'Reply with exactly the word OK.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Say OK.' }] }], tools: [], jsonOnly: true });
-    } catch (e: any) {
-      // it answered and ran out of room on a one-word reply: the address, key and model all work
-      if (e instanceof AIError && e.code === 'connection_truncated') return;
-      throw e;
-    }
+  /** Throws the plain-words AIError when the server does not answer; returns whether it took a picture. A cut-off
+   * reply (connection_truncated) counts as an answer. So does busy or out of quota (connection_busy), which proves
+   * the address, key and model are real; the picture is then not tried and counts as refused. */
+  async function checkConnection(c: CustomConnection, key: string | null): Promise<boolean> {
+    const ask = (content: Part[]) => connectionProvider(c, key, true)
+      .complete({ system: 'Reply with exactly the word OK.', messages: [{ role: 'user', content }], tools: [], jsonOnly: true })
+      .then(() => 'answered' as const, (e) => {
+        if (e instanceof AIError && e.code === 'connection_truncated') return 'answered' as const;
+        if (e instanceof AIError && e.code === 'connection_busy') return 'busy' as const;
+        throw e;
+      });
+    if ((await ask([{ type: 'text', text: 'Say OK.' }])) === 'busy') return false;
+    return (await ask([{ type: 'text', text: 'Say OK.' }, { type: 'image', mime: 'image/png', base64: PIXEL_PNG }]).catch(() => 'refused')) === 'answered';
   }
 
   async function statusOf(id: ProviderId): Promise<ProviderStatus> {
@@ -341,11 +354,8 @@ export function createAI(opts: CreateAIOptions) {
     if (input.kind === 'anthropic' && !key) {
       return field('key', 'connection_no_key', 'Paste the key for this server. Anthropic-compatible servers always need one.');
     }
-    const conn: CustomConnection = { id, label, kind: input.kind, baseURL, model };
-    try { await checkConnection(conn, key); } catch (e: any) {
-      // busy / out of quota still proves the address, key and model are real: keep it
-      if (!(e instanceof AIError && e.code === 'connection_busy')) return fail(e);
-    }
+    const conn: CustomConnection = { id, label, kind: input.kind, baseURL, model, supportsImages: false };
+    try { conn.supportsImages = await checkConnection(conn, key); } catch (e) { return fail(e); }
     if (typed) {
       try { await writeSecret(secret, key, 'This computer has no safe place to keep that key, so I did not save it.'); } catch (e) { return fail(e); }
     }
@@ -447,6 +457,13 @@ export function createAI(opts: CreateAIOptions) {
     },
     removeConnection(id: string): Promise<void> {
       return oneAtATime(() => removeConnection(id));
+    },
+    setConnectionImages(id: string, supportsImages: boolean): Promise<void> {
+      return oneAtATime(async () => {
+        const s = await settings();
+        if (!s.connections?.some((c) => c.id === id)) throw new AIError('connection_gone', 'That connection is no longer saved.');
+        await saveSettings({ connections: s.connections.map((c) => (c.id === id ? { ...c, supportsImages } : c)) });
+      });
     },
     /** `key` empty with `id` set uses that connection's stored key, which never leaves this process. */
     connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<ConnectionModels> {

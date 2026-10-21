@@ -398,6 +398,10 @@ function registerIpc(): void {
     if (!ai.removeConnection) throw connectionsNotReady
     await ai.removeConnection(text(id))
   })
+  handle('ai:setConnectionImages', async (_e, id: unknown, on: unknown) => {
+    if (!ai.setConnectionImages) throw connectionsNotReady
+    await ai.setConnectionImages(text(id), on === true)
+  })
   handle('ai:connectionModels', async (_e, q: Record<string, unknown>) => {
     if (!ai.connectionModels) return { models: [], suggested: null, needsKey: false }
     const kind = q?.kind === 'anthropic' ? 'anthropic' : 'openai'

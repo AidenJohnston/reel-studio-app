@@ -5,8 +5,9 @@ import * as http from 'node:http';
 import { AIError, createAI, OpenAICompatibleProvider, SecretStore } from '../src';
 import { AnthropicProvider } from '../src/providers/anthropic';
 import { listConnectionModels, mapConnectionError, normalizeBaseURL, suggestedModel } from '../src/providers/connection';
-import { MockCompatible } from './mockCompatible';
-import { FakeHost, tmpDir } from './helpers';
+import * as fsp from 'node:fs/promises';
+import { MockCompatible, hasImage } from './mockCompatible';
+import { FakeHost, makeProject, tinyPng, tmpDir } from './helpers';
 
 /** Reversible fake of Electron safeStorage: the file on disk must never hold the key in clear text. */
 const fakeSafeStorage: SecretStore = {
@@ -153,16 +154,18 @@ describe('what reaches the person\'s server, and what comes back', () => {
   it('no credential from the environment rides along with the key', async () => {
     const saved = { token: process.env.ANTHROPIC_AUTH_TOKEN, headers: process.env.ANTHROPIC_CUSTOM_HEADERS };
     process.env.ANTHROPIC_AUTH_TOKEN = 'env-token-should-stay-home';
-    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key';
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key\nX-Leak: env-secret';
     try {
       const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null } });
       expect((await ai.saveConnection({ label: 'P', kind: 'anthropic', baseURL: mock.origin, model: 'mock-small', key: KEY })).error).toBeUndefined();
       const h = mock.requests.at(-1)!.headers;
       expect(h['x-api-key']).toBe(KEY);
       expect(h.authorization).toBeUndefined();
+      expect(h['x-leak']).toBeUndefined();
       // the Claude key path drops the env token too (it is still sent to Anthropic's own host otherwise)
       await new AnthropicProvider({ apiKey: KEY, baseURL: mock.origin, model: 'mock-small', maxRetries: 0 }).complete(sayOk);
       expect(mock.requests.at(-1)!.headers.authorization ?? '').not.toContain('env-token');
+      expect(mock.requests.at(-1)!.headers['x-leak']).toBeUndefined();
     } finally {
       for (const [k, v] of [['ANTHROPIC_AUTH_TOKEN', saved.token], ['ANTHROPIC_CUSTOM_HEADERS', saved.headers]] as const) {
         if (v === undefined) delete process.env[k]; else process.env[k] = v;
@@ -251,7 +254,7 @@ describe('saved connections (createAI)', () => {
     expect(fakeSafeStorage.decryptString(fs.readFileSync(path.join(settingsDir, `connection-${r.connection!.id}.bin`)))).toBe(KEY);
     // what the app gets back holds no key
     const list = await ai.connections();
-    expect(list).toEqual([{ id: r.connection!.id, label: 'Work', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-small', hasKey: true, active: true }]);
+    expect(list).toEqual([{ id: r.connection!.id, label: 'Work', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-small', supportsImages: true, hasKey: true, active: true }]);
     expect(JSON.stringify([r, list, await ai.providers(), await ai.active()])).not.toContain(KEY);
 
     // it is now the AI editor, and its requests carry the key
@@ -337,6 +340,38 @@ describe('saved connections (createAI)', () => {
     const fast = ai.saveConnection({ id: connection!.id, label: 'Two', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-large' });
     await Promise.all([slow, fast]);
     expect(await ai.connections()).toMatchObject([{ label: 'Two', model: 'mock-large' }]);
+  });
+
+  it('a Linux computer without a keyring (basic_text) does not save the key', async () => {
+    const { ai, settingsDir } = make({ ...fakeSafeStorage, getSelectedStorageBackend: () => 'basic_text' });
+    const r = await ai.saveConnection({ label: 'Work', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-small', key: KEY });
+    expect(r.error).toMatchObject({ code: 'no_secure_storage', field: 'key' });
+    expect(r.error!.userMessage).toMatch(/password store/);
+    expect(fs.readdirSync(settingsDir)).toEqual([]);
+  });
+
+  it('a server that refuses a picture on save gets none during an edit', async () => {
+    await mock.stop(); mock = new MockCompatible({ rejectImages: true }); await mock.start();
+    const { root, dir } = await makeProject();
+    const asset = 'work/assets/attach-1a2b3c4d-face.png';
+    await fsp.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
+    await fsp.mkdir(path.join(dir, 'work', 'thumbs'), { recursive: true });
+    await fsp.writeFile(path.join(dir, asset), tinyPng());
+    await fsp.writeFile(path.join(dir, 'work', 'thumbs', 'attach-1a2b3c4d-face.jpg'), tinyPng());
+    await fsp.writeFile(path.join(dir, `${asset}.attach.json`), JSON.stringify({ asset, name: 'face.png', kind: 'image', bytes: 2048, width: 8, height: 8, thumb: 'work/thumbs/attach-1a2b3c4d-face.jpg', createdAt: new Date().toISOString() }));
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null }, finalRender: false });
+
+    const saved = await ai.saveConnection({ label: 'Text only', kind: 'openai', baseURL: `${mock.origin}/v1`, model: 'mock-small', key: KEY });
+    expect(saved.connection).toMatchObject({ supportsImages: false });
+    const afterSave = mock.requests.length;
+    mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: null, tool_calls: [
+      { id: 'c1', type: 'function', function: { name: 'finish', arguments: '{"summary_for_user":"Where should it go?"}' } },
+    ] }, finish_reason: 'tool_calls' }] })));
+    const r = await ai.applyNote(dir, 'put this over my face', () => undefined, undefined, { attachments: [asset] });
+    expect(r.summary).toBe('Where should it go?');
+    const edit = mock.requests.slice(afterSave).filter((q) => q.path === '/v1/chat/completions');
+    expect(edit.length).toBeGreaterThan(0);
+    expect(edit.some((q) => hasImage(q.body))).toBe(false);
   });
 
   it('a failed key replacement keeps the key that works', async () => {

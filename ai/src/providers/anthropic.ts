@@ -16,6 +16,7 @@ export interface AnthropicOptions {
   id?: 'claude' | 'custom';
   maxRetries?: number;
   timeoutMs?: number;
+  supportsImages?: boolean;
 }
 
 /** Converts provider-neutral messages to Anthropic content blocks (tool results carry images). */
@@ -104,6 +105,8 @@ export function mapAnthropicError(err: any): AIError {
   return new AIError('claude_error', 'Something went wrong talking to Claude. Try again.', { status, detail: err?.message });
 }
 
+const SENT_HEADERS = ['accept', 'content-type', 'anthropic-version'];
+
 const STREAM_ERROR_STATUS: Record<string, number> = {
   invalid_request_error: 400, authentication_error: 401, permission_error: 403, not_found_error: 404,
   rate_limit_error: 429, api_error: 500, overloaded_error: 529,
@@ -123,7 +126,7 @@ function mapAnthropicConnectionError(err: any, model: string): AIError {
 
 export class AnthropicProvider implements ModelProvider {
   readonly id: 'claude' | 'custom';
-  readonly supportsImages = true;
+  readonly supportsImages: boolean;
   readonly model: string;
   private client: Anthropic;
   private maxTokens: number;
@@ -131,18 +134,22 @@ export class AnthropicProvider implements ModelProvider {
 
   constructor(opts: AnthropicOptions) {
     this.id = opts.id ?? 'claude';
+    this.supportsImages = opts.supportsImages ?? true;
     this.model = opts.model || DEFAULT_CLAUDE_MODEL;
     this.maxTokens = opts.maxTokens ?? 16000;
     this.apiKey = opts.apiKey;
     // Everything explicit, because the SDK reads the environment: ANTHROPIC_BASE_URL (could send the key to another
-    // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (can replace x-api-key or add
-    // credentials), ANTHROPIC_LOG (debug logs print error bodies that may echo the key), and with no key it looks
-    // for credentials on disk. The fetch below sends exactly this key and no other credential header.
+    // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (any header, on every request),
+    // ANTHROPIC_LOG (debug logs print error bodies that may echo the key), and with no key it looks for credentials
+    // on disk. The fetch below sends this key and only the headers a Messages request needs.
     const base = opts.fetch ?? fetch;
     const onlyThisKey = ((input: any, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      for (const h of ['authorization', 'proxy-authorization', 'cookie']) headers.delete(h);
-      headers.set('x-api-key', opts.apiKey);
+      const built = new Headers(init?.headers);
+      const headers = new Headers({ 'x-api-key': opts.apiKey });
+      for (const h of SENT_HEADERS) {
+        const v = built.get(h);
+        if (v) headers.set(h, v);
+      }
       return base(input, { ...init, headers });
     }) as typeof fetch;
     this.client = new Anthropic({

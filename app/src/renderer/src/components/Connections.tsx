@@ -36,6 +36,15 @@ export function Connections({ onConnected }: { onConnected: (p: ProviderInfo) =>
       setError(userMessage(e))
     }
   }
+  const setImages = async (c: ConnectionInfo, on: boolean) => {
+    setError(null)
+    try {
+      await reel.ai.setConnectionImages(c.id, on)
+    } catch (e) {
+      setError(userMessage(e))
+    }
+    await load()
+  }
   const remove = async (c: ConnectionInfo) => {
     setRemoving(null)
     try {
@@ -63,6 +72,11 @@ export function Connections({ onConnected }: { onConnected: (p: ProviderInfo) =>
                   <span className="muted-sm conn-line" title={`${c.model} · ${c.baseURL}`}>
                     {c.model} · {c.baseURL}
                   </span>
+                  <label className="toggle conn-images">
+                    <input type="checkbox" checked={c.supportsImages} onChange={(e) => void setImages(c, e.target.checked)} data-testid="connection-images" />
+                    Can see pictures
+                    {!c.supportsImages && <span className="muted-sm">It edits without looking at your video.</span>}
+                  </label>
                 </div>
                 {!c.active && (
                   <button className="btn small" onClick={() => void use(c)} data-testid="connection-use">
