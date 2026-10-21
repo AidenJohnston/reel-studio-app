@@ -83,11 +83,11 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await app.evaluate(({ dialog }, f) => {
     ;(dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: f })
   }, [pics[2], pics[0]])
-  await page.getByTestId('note-attach').click()
+  await page.getByTestId('change-attach').click()
   await expect(page.getByTestId('note-attachment')).toHaveCount(4)
   await shot(page, 'attach-01-chips')
   // a fifth does not fit
-  await page.getByTestId('note-attach').click()
+  await page.getByTestId('change-attach').click()
   await expect(page.getByTestId('toast')).toContainText('up to 4 files')
   await expect(page.getByTestId('note-attachment')).toHaveCount(4)
   await page.getByTestId('toast').getByRole('button', { name: 'Close' }).click()

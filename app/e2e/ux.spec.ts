@@ -70,13 +70,14 @@ test('no AI: honest checklist, one connect prompt, caption controls, add song + 
   await expect(page.getByTestId('did-post')).toContainText('Your post caption')
   expect(projectJson().post.caption).toBe('Why mornings make me a better editor')
 
-  // ---- 3. no AI: nothing offers an AI change; the change button is the one way to connect ----
+  // ---- 3. no AI: nothing offers an AI change; one line in the Notes panel is the way to connect ----
   await expect(page.getByTestId('change-at')).toHaveCount(0)
+  await expect(page.getByTestId('note-input')).toHaveCount(0)
   await page.keyboard.press('n') // the shortcut opens nothing either
   await expect(page.getByTestId('change-pop')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-connect')).toHaveCount(0)
   await shot(page, 'ux-03-no-ai-connect')
-  await page.getByTestId('change-connect').click()
+  await page.getByTestId('composer-connect').click()
   await expect(page.getByTestId('connect-screen')).toBeVisible()
   await expect(page.getByTestId('signin-chatgpt')).toBeVisible()
   await expect(page.getByTestId('claude-key-toggle')).toHaveText('Use an Anthropic API key (advanced)')

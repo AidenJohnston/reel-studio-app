@@ -30,8 +30,9 @@ const typing = (t: EventTarget | null): boolean => {
 }
 
 /**
- * The one way to ask for a change: a button under the player that names the playhead time, and a
- * small pop-up next to it. With no AI editor it is the one "connect" prompt on the Reel screen.
+ * Asking for a change at the moment on screen: a button under the player that names the playhead time,
+ * and a small pop-up next to it. The note box in the Notes panel stays the way to write any note; both
+ * share one job. With no AI editor this shows nothing.
  */
 export function ChangeAt({
   slug,
@@ -40,7 +41,6 @@ export function ChangeAt({
   aiOn,
   checking,
   busy,
-  onConnect,
   onOpenChange,
   onSent
 }: {
@@ -54,7 +54,6 @@ export function ChangeAt({
   checking: boolean
   /** a change is being made: wait for it */
   busy: boolean
-  onConnect: () => void
   onOpenChange: (open: boolean) => void
   onSent: (jobId: string | null) => void
 }) {
@@ -167,12 +166,8 @@ export function ChangeAt({
         <Icon name="pencil" size={16} /> Checking for your AI editor…
       </button>
     )
-  if (!aiOn)
-    return (
-      <button className="btn change-btn" onClick={onConnect} data-testid="change-connect">
-        <Icon name="sparkles" size={18} /> Connect an AI editor to ask for changes
-      </button>
-    )
+  // no AI editor: nothing to ask here; the Notes panel has the one way to connect
+  if (!aiOn) return null
 
   const quickText = QUICK.some((q) => q.text === text.trim())
   const pick = (q: (typeof QUICK)[number]) => {
@@ -325,7 +320,7 @@ export function ChangeAt({
                 {q.label}
               </button>
             ))}
-            <button className="pill" onClick={att.choose} title="Attach a picture or a clip of your own" data-testid="note-attach">
+            <button className="pill" onClick={att.choose} title="Attach a picture or a clip of your own" data-testid="change-attach">
               <Icon name="paperclip" size={14} stroke={2} /> Attach a file
             </button>
           </div>

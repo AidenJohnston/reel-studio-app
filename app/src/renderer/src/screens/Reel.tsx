@@ -9,9 +9,9 @@ import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinkin
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
-import { EXPORT_EVENT, useNotify } from '../App'
+import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
-import { AttachmentThumb } from '../components/NoteAttachments'
+import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { ChangeAt } from '../components/ChangeAt'
 import { noteMarks, typedMoment } from '../../../shared/moments'
 
@@ -44,6 +44,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
+  const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
   const [drawer, setDrawer] = useState<Tab | null>(null)
@@ -61,6 +62,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
+  // pictures, GIFs and clips on the note being written (components/NoteAttachments.tsx)
+  const att = useNoteAttachments(slug, notify)
+  const [noteDrop, setNoteDrop] = useState(false)
+  const noteDropDepth = useRef(0)
   const [playhead, setPlayhead] = useState(0)
   const [asking, setAsking] = useState(false)
 
@@ -108,10 +113,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     const box = chatEnd.current?.parentElement
     if (box) box.scrollTop = box.scrollHeight
   }, [d?.chat.length, job])
-  // While a version is being made, keep its progress in view (the page scrolls on small windows).
+  // While a version is being made, keep its progress and the note box in view, where the person
+  // just typed (the page scrolls on small windows).
   const progressRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!job?.jobId) return
+    composerRef.current?.scrollIntoView({ block: 'nearest' })
     progressRef.current?.scrollIntoView({ block: 'nearest' })
   }, [job?.jobId, d?.chat.length])
 
@@ -170,6 +178,55 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
   for (const m of d.chat) if (m.from === 'editor' && m.version) versionNote.set(m.version, m.text)
+
+  const send = async () => {
+    const text = note.trim()
+    const files = att.chips
+    if ((!text && !files.length) || att.busy) return
+    setNote('')
+    att.clear()
+    try {
+      const r = await reel.projects.note(slug, text, files.length ? files.map((f) => f.asset) : undefined)
+      // null = no AI editor: the note and a plain answer are in the chat, nothing is running.
+      if (r.jobId) setJob((cur) => (cur?.jobId === r.jobId ? cur : { ...EMPTY_LIVE, jobId: r.jobId, message: 'Reading your note' }))
+      await load()
+    } catch (e) {
+      setNote(text)
+      att.restore(files)
+      notify(userMessage(e), 'error')
+    }
+  }
+  // the AI check must answer first: until then a note could go out as if no editor were connected
+  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy && providerChecked
+  // Files dropped on the note box are attached to the note. The window-wide drop (App.tsx: a video makes
+  // a new reel) must not see them, so the drop stops here; App clears its overlay on NOTE_DROP_DONE.
+  const noteDropProps = {
+    'data-note-drop': true,
+    onDragEnter: (e: React.DragEvent) => {
+      if (!Array.from(e.dataTransfer.types).includes('Files')) return
+      e.preventDefault()
+      noteDropDepth.current++
+      setNoteDrop(true)
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (!Array.from(e.dataTransfer.types).includes('Files')) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = job ? 'none' : 'copy'
+    },
+    onDragLeave: () => {
+      noteDropDepth.current = Math.max(0, noteDropDepth.current - 1)
+      if (!noteDropDepth.current) setNoteDrop(false)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      noteDropDepth.current = 0
+      setNoteDrop(false)
+      window.dispatchEvent(new Event(NOTE_DROP_DONE))
+      if (job) return
+      att.onDropFiles(e.dataTransfer)
+    }
+  }
 
   const rename = async () => {
     const t = (renaming ?? '').trim()
@@ -308,7 +365,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             aiOn={!aiOff}
             checking={!providerChecked}
             busy={!!job}
-            onConnect={connect}
             onOpenChange={setAsking}
             onSent={(id) => void sent(id)}
           />
@@ -554,6 +610,51 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   </button>
                 ))}
               </div>
+            )}
+            {aiOff ? (
+              // the one connect prompt on this screen: notes go to an AI editor (Sam), none is connected
+              <button className="link left" onClick={connect} data-testid="composer-connect">
+                Connect an AI editor to ask for changes
+              </button>
+            ) : (
+            <div className={`note-drop${noteDrop ? ' over' : ''}`} {...noteDropProps} data-testid="note-drop">
+            {noteDrop && <div className="note-drop-hint">Drop to attach it to your note</div>}
+            <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
+            <div className="composer" ref={composerRef}>
+              <button
+                className="btn attach-btn"
+                onClick={att.choose}
+                disabled={!!job}
+                aria-label="Attach a picture or a clip"
+                title="Attach a picture or a clip"
+                data-testid="note-attach"
+              >
+                <Icon name="paperclip" size={18} />
+              </button>
+              <div className="composer-box">
+              <textarea
+                className="input composer-input"
+                rows={1}
+                placeholder={providerChecked ? 'Tell your editor what to change…' : 'Checking for your AI editor…'}
+                aria-label="Note for your editor"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                onPaste={att.onPaste}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void send()
+                  }
+                }}
+                disabled={!!job || !providerChecked}
+                data-testid="note-input"
+              />
+              </div>
+              <button className={`btn${canSend ? ' primary' : ''}`} onClick={() => void send()} disabled={!canSend} data-testid="send" aria-label="Send">
+                <Icon name="send" size={16} /> Send
+              </button>
+            </div>
+            </div>
             )}
           </section>
         </div>

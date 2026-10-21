@@ -131,13 +131,17 @@ export function useNoteAttachments(slug: string, notify: Notify) {
     [slug, notify]
   )
 
-  /** After the note is sent: its chips went with it. */
+  /** After Send: the chips go with the note (restore them if sending failed). */
   const clear = useCallback(() => {
     chipsRef.current = []
     setChips([])
   }, [])
+  const restore = useCallback((list: NoteAttachment[]) => {
+    chipsRef.current = list
+    setChips(list)
+  }, [])
 
-  return { chips, busy, onPaste, onDropFiles, choose, remove, clear }
+  return { chips, busy, onPaste, onDropFiles, choose, remove, clear, restore }
 }
 
 /** Small thumbnail of one attached file: the still, plus "GIF" or the clip's length. */

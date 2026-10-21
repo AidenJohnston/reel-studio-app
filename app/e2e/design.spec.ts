@@ -191,13 +191,15 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('player')).toBeVisible()
   await expect(page.getByTestId('change-checking')).toBeDisabled()
   await expect(page.getByTestId('change-checking')).toHaveText('Checking for your AI editor…')
-  await expect(page.getByTestId('change-connect')).toHaveCount(0)
+  await expect(page.getByTestId('note-input')).toBeDisabled()
+  await expect(page.getByTestId('composer-connect')).toHaveCount(0)
   await expect(page.getByTestId('ai-banner')).toHaveCount(0)
   await app.evaluate(() => {
     for (const answer of (globalThis as { __aiWaiting?: ((v: unknown) => void)[] }).__aiWaiting ?? [])
       answer({ ok: true, value: { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' } })
   })
   await expect(page.getByTestId('change-at')).toBeEnabled()
+  await expect(page.getByTestId('note-input')).toBeEnabled()
   await stubConnected(app)
 
   // ---- Library: a drop anywhere on the window lands in the Library ----

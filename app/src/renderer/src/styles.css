@@ -278,9 +278,17 @@ a { color: inherit; }
 .bubble { max-width: 86%; padding: 10px 14px; border-radius: 14px; line-height: 1.4; user-select: text; white-space: pre-wrap; }
 .bubble.editor { background: var(--soft); align-self: flex-start; border-bottom-left-radius: 4px; }
 .bubble.you { background: var(--ink); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+.composer { display: flex; gap: 10px; align-items: flex-end; position: relative; }
+.composer-input { resize: none; min-height: 46px; max-height: 120px; field-sizing: content; line-height: 1.4; }
+.composer-box { flex: 1; min-width: 0; position: relative; display: flex; }
+.composer .btn:disabled { opacity: 1; color: var(--ink-3); background: var(--panel); border-color: var(--line-2); }
+.composer > .btn { min-height: 46px; }
 .bubble-actions { display: flex; gap: 4px 16px; flex-wrap: wrap; margin-top: 6px; }
 /* pictures, GIFs and clips on a note (components/NoteAttachments.tsx) */
+.note-drop { position: relative; border-radius: var(--radius); }
+.note-drop.over { outline: 3px dashed var(--ink); outline-offset: 6px; }
 .note-drop-hint { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; background: rgba(247,245,241,.92); border-radius: var(--radius); font-weight: 650; pointer-events: none; }
+.composer > .attach-btn { width: 46px; padding: 0; justify-content: center; flex: none; }
 .att-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .att-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; padding: 4px 4px 4px 4px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); font-size: 13.5px; }
 .att-chip.busy { padding: 6px 12px; color: var(--ink-2); }

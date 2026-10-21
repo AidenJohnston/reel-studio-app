@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { attachMemeFlow, chooseClaudeCode, dropFiles, writeNote } from './helpers'
+import { attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_INSTALLED
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
@@ -193,7 +193,7 @@ TAKES.forEach((take, i) => {
         const replies = page.locator('.bubble.editor:not(.working):not(.reply-pending)')
         const before = await replies.count()
         const t1 = Date.now()
-        await writeNote(page, String(result.note))
+        await page.getByTestId('note-input').fill(String(result.note))
         await page.keyboard.press('Enter')
         if (await page.getByTestId('note-progress').waitFor({ timeout: 30_000 }).then(() => true, () => false)) {
           await page.waitForTimeout(1500)
