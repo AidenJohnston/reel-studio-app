@@ -2,7 +2,8 @@
 
     python check_export.py --project <project dir> --export <Library/Exports/x.mp4> --out <dir>
 
-1. `python -m reelengine verify` on the exported file.
+1. `python -m reelengine verify` on the saved version the export was copied from (its caption,
+   layer and mix reports live beside it).
 2. Frames at a spread of times (plus the middle of the first b-roll layers) -> PNGs + one contact
    sheet, so a person (or an agent) can look at captions, b-roll placement and the face.
 3. Music presence: the export's level where the cut voice (work/render/voice.wav) is silent, i.e.
@@ -51,6 +52,11 @@ def db_windows(x: np.ndarray) -> np.ndarray:
     return 20 * np.log10(np.maximum(rms, 1e-6))
 
 
+def saved_version(project: Path) -> Path:
+    v = json.loads((project / "project.json").read_text("utf-8"))["version"]
+    return project / "versions" / f"v{v}"
+
+
 def verify(project: Path, export: Path) -> dict:
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     r = run([sys.executable, "-m", "reelengine", "verify", "--project", str(project), str(export)], env=env)
@@ -66,7 +72,7 @@ def verify(project: Path, export: Path) -> dict:
 
 
 def layer_times(project: Path) -> list[float]:
-    f = project / "work" / "layers" / "layers.json"
+    f = saved_version(project) / "layers.json"
     try:
         items = json.loads(f.read_text("utf-8"))
     except (OSError, ValueError):
@@ -114,7 +120,7 @@ def main() -> None:
     a.out.mkdir(parents=True, exist_ok=True)
 
     res: dict = {"export": str(a.export)}
-    res["verify"] = verify(a.project, a.export)
+    res["verify"] = verify(a.project, saved_version(a.project) / "export.mp4")
     dur = duration(a.export)
     res["duration"] = dur
 
@@ -148,7 +154,7 @@ def main() -> None:
         if quiet.sum() and talk.sum():
             music["voiceOverMusicDb"] = round(music["talkingMedianDb"] - music["musicOnlyMedianDb"], 1)
         music["present"] = bool(quiet.sum() and music["musicOnlyMedianDb"] > -55)
-    mixjson = a.project / "work" / "audio" / "mix.json"
+    mixjson = saved_version(a.project) / "mix.json"
     if mixjson.exists():
         try:
             mj = json.loads(mixjson.read_text("utf-8"))

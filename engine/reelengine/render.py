@@ -103,16 +103,12 @@ def preview_dir(project_dir: Path) -> Path:
     return Path(project_dir) / "versions" / PREVIEW_DIR
 
 
-def latest_render(project_dir: Path) -> Optional[Path]:
-    vroot = Path(project_dir) / "versions"
-    best = None
-    if vroot.exists():
-        for f in vroot.glob("*/*.mp4"):
-            if f.name.startswith("window_"):      # a preview slice has its own clock
-                continue
-            if best is None or f.stat().st_mtime > best.stat().st_mtime:
-                best = f
-    return best
+def latest_render(project_dir: Path, proj: dict) -> Optional[Path]:
+    """The video the project shows: its current version, or the preview while it has none. A folder
+    above `version` is an unfinished attempt and a newer file there is not the edit (docs/versions.md)."""
+    v = int(proj.get("version") or 0)
+    f = Path(project_dir) / "versions" / f"v{v}" / "export.mp4" if v else preview_dir(project_dir) / "draft.mp4"
+    return f if f.exists() else None
 
 
 # --- geometry -----------------------------------------------------------------------------------
@@ -706,10 +702,11 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
+        out: Optional[Path] = None) -> dict:
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    proj = projmod.load(project_dir, file=project_file)
     if first_look:
         draft = True
         proj = first_look_project(project_dir, proj, music)
@@ -723,9 +720,17 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if win:
         draft = True        # a window is a preview: always the fast encoder
 
+    committed = int(proj.get("version") or 0)
     version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
-    vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
+    vdir = (Path(out) if out else preview_dir(project_dir)) if preview else project_dir / "versions" / f"v{version}"
+    if not preview and version == committed and (vdir / "export.mp4").exists() and (vdir / "render.json").exists():
+        # a saved version is never rewritten: the same edit gets its video back
+        made = projmod.read_json(vdir / "render.json")
+        made.pop("segmentsDetail", None)
+        return dict(made, file=str(vdir / "export.mp4"), versionDir=str(vdir), reused=True)
+    if not preview and version > committed and vdir.exists():
+        shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
     vdir.mkdir(parents=True, exist_ok=True)
     if win:     # one scratch window at a time: older window slices go
         for old in vdir.glob("window_*"):
@@ -760,6 +765,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     # 2. b-roll layers + zooms (A2)
     t = time.time()
     layers, zooms = [], []
+    layers_report = project_dir / "work" / "layers" / "layers.json"
+    layers_report.unlink(missing_ok=True)       # read below and by the AI: only this render's
     broll = _opt_module("broll")
     if broll is not None and proj.get("broll"):
         progress(STAGE, 12, "Placing your pictures", force=True)
@@ -812,8 +819,6 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             shutil.rmtree(fonts, ignore_errors=True)
         fonts.mkdir(parents=True, exist_ok=True)
         shutil.copy2(font_path, fonts / Path(font_path).name)
-        if not win:
-            projmod.write_json(project_dir / "work" / "captions.json", {"cues": cap_report})
 
     # 4. the picture
     if win:
@@ -909,6 +914,11 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     timings["total"] = round(time.time() - t_start, 2)
     result["timings"] = timings
     if not win:
+        # the reports that describe THIS video live beside it (verify, the AI's frame checks, e2e)
+        projmod.write_json(vdir / "captions.json", {"cues": cap_report})
+        for report, name in ((layers_report, "layers.json"), (Path(audio).with_suffix(".json"), "mix.json")):
+            if report.exists():
+                shutil.copyfile(report, vdir / name)
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
         manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
@@ -918,9 +928,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         if not preview and int(proj.get("version") or 0) != version:
             # Re-read: an edit saved during this 1-2 minute render must survive. Patch the one field
             # render owns instead of writing back the dict loaded at the start.
-            fresh = projmod.load(project_dir)
+            fresh = projmod.load(project_dir, file=project_file)
             fresh["version"] = version          # project.version = the last FINAL version
-            projmod.save(project_dir, fresh)
+            projmod.save(project_dir, fresh, file=project_file)
     progress(STAGE, 100, "Your video is ready", force=True)
     return result
 
@@ -941,6 +951,7 @@ def cover_key(ctx, proj: dict) -> str:
     data = {"cover": proj.get("cover"), "sources": proj.get("sources"), "format": proj.get("format"),
             "cut": proj.get("cut"), "draft": bool(ctx.draft),
             "files": [mt(pdir / "work" / "transcript.json"), mt(pdir / "work" / "face.json"),
+                      *(mt(f) for f in sorted((pdir / "work").glob("face-*.json"))),
                       mt(here / "cover.py"), mt(here / "placement.py"), mt(Path(__file__))]}
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
 
@@ -975,10 +986,13 @@ class CoverJob:
                     for old in sorted(cache.glob("*.png"), key=lambda f: f.stat().st_mtime)[:-8]:
                         old.unlink(missing_ok=True)
                         old.with_suffix(".json").unlink(missing_ok=True)
-                    shutil.copy2(self._res, hit)
+                    # the .png is the hit: it lands last and whole, so a killed copy is never reused
                     cj = Path(ctx.work) / "cover.json"
-                    if cj.exists():
-                        shutil.copy2(cj, cache / f"{key}.json")
+                    for src, dst in ((cj, cache / f"{key}.json"), (self._res, hit)):
+                        if src.exists():
+                            part = dst.with_name(dst.name + ".part")
+                            shutil.copy2(src, part)
+                            os.replace(part, dst)
                 except OSError:
                     pass
             except BaseException as exc:   # noqa: BLE001 -- re-raised in result()
@@ -1008,11 +1022,12 @@ def render_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png: Path, warni
     return fallback_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png)
 
 
-def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None) -> dict:
+def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None,
+                     project_file: Optional[Path] = None) -> dict:
     """`cover-candidates --at t1,t2,...`: the best cover frame near each raw-take moment, as small
     stills the AI looks at before choosing (cover.candidates)."""
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    proj = projmod.load(project_dir, file=project_file)
     tl = projmod.timeline(project_dir, proj)
     ctx = make_ctx(project_dir, proj, tl, True, tools.root_dir(str(root) if root else None),
                    project_dir / "work" / "render")
@@ -1032,9 +1047,7 @@ def cover_only(project_dir: Path, root: Optional[Path] = None) -> dict:
     proj = projmod.load(project_dir)
     tl = projmod.timeline(project_dir, proj)
     version = max(1, pick_version(project_dir, proj, tools.root_dir(str(root) if root else None)))
-    vdir = project_dir / "versions" / f"v{version}"
-    if not (vdir / "export.mp4").exists():      # the edit has no final yet: the cover is a preview too
-        vdir = preview_dir(project_dir)
+    vdir = preview_dir(project_dir)      # a saved version's cover is never rewritten
     vdir.mkdir(parents=True, exist_ok=True)
     ctx = make_ctx(project_dir, proj, tl, False, tools.root_dir(str(root) if root else None),
                    project_dir / "work" / "render")
@@ -1045,4 +1058,4 @@ def cover_only(project_dir: Path, root: Optional[Path] = None) -> dict:
     p = render_cover(ctx, proj, tl, src_meta, src_paths, source_faces(project_dir, proj),
                      vdir / "cover.png", warnings)
     progress("cover", 100, "Your cover is ready", force=True)
-    return {"file": str(p), "version": version, "preview": vdir.name == PREVIEW_DIR, "warnings": warnings}
+    return {"file": str(p), "version": version, "preview": True, "warnings": warnings}

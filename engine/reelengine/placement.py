@@ -205,7 +205,9 @@ def detect_faces(video_path, out_json=None, fps: float = SAMPLE_FPS, ctx=None) -
     }
     if out_json:
         Path(out_json).parent.mkdir(parents=True, exist_ok=True)
-        Path(out_json).write_text(json.dumps(track, indent=1), encoding="utf-8")
+        part = Path(out_json).with_suffix(".part.json")
+        part.write_text(json.dumps(track, indent=1), encoding="utf-8")
+        part.replace(out_json)          # a killed detector never leaves half a track to reuse
     return track
 
 
