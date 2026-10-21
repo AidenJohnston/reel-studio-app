@@ -20,6 +20,7 @@ import type {
 import { mediaUrl } from './media-url'
 import { keptIds } from '../shared/cut'
 import { readCaptionLines } from '../shared/subtitle-lines'
+import { readNotes, type ProjectNote } from '../shared/versions'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
 export interface AppState {
@@ -345,6 +346,21 @@ export async function readWords(dir: string, project: ProjectJson): Promise<Word
 
 // ---- summaries ----------------------------------------------------------------------------------
 
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
+const optional = (x: unknown, ok: (y: unknown) => boolean): boolean => x === undefined || x === null || ok(x)
+const isString = (x: unknown): boolean => typeof x === 'string'
+
+/** The fields `checklist` reads, in the types it expects: a version's project.json copy is checked before use. */
+function checklistReadable(p: Record<string, unknown>): p is ProjectJson {
+  return (
+    optional(p.post, (x) => isRecord(x) && optional(x.caption, isString)) &&
+    optional(p.captions, (x) => isRecord(x) && optional(x.enabled, (y) => typeof y === 'boolean')) &&
+    optional(p.cut, (x) => isRecord(x) && optional(x.keep, (k) => Array.isArray(k) && k.every((r) => isRecord(r) && isString(r.from) && isString(r.to)))) &&
+    optional(p.music, (x) => isRecord(x) && optional(x.track, isString)) &&
+    optional(p.broll, (x) => Array.isArray(x) && x.every((b) => isRecord(b) && optional(b.asset, isString) && optional(b.treatment, isString)))
+  )
+}
+
 /**
  * "What I did". Honest about who did what: without an AI editor nothing picked the best takes or
  * wrote the post caption, so those lines say what really happened (grandma test, findings 7 + 12).
@@ -494,10 +510,21 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
   const captionLines = readCaptionLines(await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  // Each version's own project.json copy (docs/versions.md): its notes for the version menu, and "What I
+  // did" for the older ones. A damaged copy only costs that version its line and list.
+  const versionNotes: Record<number, ProjectNote[]> = {}
   const versionChecklists: Record<number, ChecklistItem[]> = {}
-  for (const v of versions.slice(0, -1)) {
-    const snap = await readJson<ProjectJson | null>(join(dir, 'versions', `v${v.n}`, 'project.json'), null)
-    if (snap) versionChecklists[v.n] = checklist(snap, words, keptIds(words, snap.cut?.keep), [v], !!st.aiEdited)
+  for (const v of versions) {
+    const copy = await readJson<unknown>(join(dir, 'versions', `v${v.n}`, 'project.json'), null)
+    if (!isRecord(copy)) continue
+    const notes = readNotes(copy.notes)
+    if (notes) versionNotes[v.n] = notes
+    if (v === versions[versions.length - 1] || !checklistReadable(copy)) continue
+    try {
+      versionChecklists[v.n] = checklist(copy, words, keptIds(words, copy.cut?.keep), [v], !!st.aiEdited)
+    } catch (e) {
+      console.warn(`[store] skipped "What I did" for ${slug} v${v.n}: ${String(e)}`)
+    }
   }
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
@@ -527,6 +554,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     versionChecklists,
+    versionNotes,
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,
