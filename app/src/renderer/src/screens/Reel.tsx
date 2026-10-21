@@ -127,19 +127,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const changePreview = job?.preview?.video ?? null
   const latestN = d?.versions[d.versions.length - 1]?.n
   const older = version && version.n !== latestN ? version : null
-  // "What I did" for an older version on screen, loaded only then (store.ts versionChecklist), and kept with
-  // the video it describes: a new render of that version asks again.
-  const [olderLoaded, setOlderLoaded] = useState<{ video: string; list: ChecklistItem[] | null } | null>(null)
-  useEffect(() => {
-    if (!older) return
-    let live = true
-    const settle = (list: ChecklistItem[] | null) => live && setOlderLoaded({ video: older.video, list })
-    reel.projects.versionChecklist(slug, older.n).then(settle, () => settle(null))
-    return () => {
-      live = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one load per version and video, not per detail refresh
-  }, [slug, older?.n, older?.video])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -307,11 +294,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'post') extras.push({ key: c.key, label: 'Write a post caption', run: () => setPostDraft(d.project.post?.caption ?? ''), testid: 'write-post' })
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
-  // An older version on screen: "What I did" describes it once its list has loaded (until then the card stays
-  // as it was; without a readable copy it says it describes the latest version).
-  const loaded = older && olderLoaded?.video === older.video ? olderLoaded : null
-  const olderList = loaded?.list ?? undefined
-  const done = (olderList ?? d.checklist).filter((c) => c.done)
+  const done = d.checklist.filter((c) => c.done)
   // The Change links, extras and "Edit it myself" change the newest version: with an older one on screen,
   // switch to the newest first, so what changes is what is shown.
   const onLatest = (run: () => void) => () => {
@@ -467,8 +450,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
           <section className="panel did" data-testid="what-i-did">
             <h2>
-              {older && olderList ? `What I did in Version ${older.n}` : 'What I did'}
-              {loaded && !loaded.list && <span className="muted-sm did-scope"> In the latest version</span>}
+              What I did
+              {/* the list describes the project as it is now, which is the newest version */}
+              {older && <span className="muted-sm did-scope"> In the latest version</span>}
             </h2>
             <ul className="checklist two">
               {done.map((c) => {

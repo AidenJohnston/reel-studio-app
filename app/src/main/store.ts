@@ -357,21 +357,6 @@ export async function readWords(dir: string, project: ProjectJson): Promise<Word
 
 // ---- summaries ----------------------------------------------------------------------------------
 
-const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
-const optional = (x: unknown, ok: (y: unknown) => boolean): boolean => x === undefined || x === null || ok(x)
-const isString = (x: unknown): boolean => typeof x === 'string'
-
-/** The fields `checklist` reads, in the types it expects: a version's project.json copy is checked before use. */
-function checklistReadable(p: Record<string, unknown>): p is ProjectJson {
-  return (
-    optional(p.post, (x) => isRecord(x) && optional(x.caption, isString)) &&
-    optional(p.captions, (x) => isRecord(x) && optional(x.enabled, (y) => typeof y === 'boolean')) &&
-    optional(p.cut, (x) => isRecord(x) && optional(x.keep, (k) => Array.isArray(k) && k.every((r) => isRecord(r) && isString(r.from) && isString(r.to)))) &&
-    optional(p.music, (x) => isRecord(x) && optional(x.track, isString)) &&
-    optional(p.broll, (x) => Array.isArray(x) && x.every((b) => isRecord(b) && optional(b.asset, isString) && optional(b.treatment, isString)))
-  )
-}
-
 /**
  * "What I did". Honest about who did what: without an AI editor nothing picked the best takes or
  * wrote the post caption, so those lines say what really happened (grandma test, findings 7 + 12).
@@ -509,35 +494,6 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     if (s) out.push(s)
   }
   return out.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-}
-
-// "What I did" for an older version, read from its own project.json copy (docs/versions.md) only when that
-// version is on screen. Keyed by the copy's path, mtime and size, so a copy written again is read again.
-const versionChecklistCache = new Map<string, ChecklistItem[] | null>()
-
-/** "What I did" for version `n`; null when its copy is missing or damaged (that only costs this version its list). */
-export async function versionChecklist(slug: string, n: number): Promise<ChecklistItem[] | null> {
-  if (!Number.isInteger(n) || n < 1) return null
-  const dir = projectDir(slug)
-  const file = join(dir, 'versions', `v${n}`, 'project.json')
-  const st = await fs.stat(file).catch(() => null)
-  if (!st) return null
-  const key = `${file}\n${st.mtimeMs}\n${st.size}`
-  const cached = versionChecklistCache.get(key)
-  if (cached !== undefined) return cached
-  let list: ChecklistItem[] | null = null
-  const v = (await listVersions(dir)).find((x) => x.n === n)
-  const copy = await readJson<unknown>(file, null)
-  if (v && isRecord(copy) && checklistReadable(copy)) {
-    try {
-      const words = await readWords(dir, copy)
-      list = checklist(copy, words, keptIds(words, copy.cut?.keep), [v], !!(await readAppState(slug)).aiEdited)
-    } catch (e) {
-      console.warn(`[store] skipped "What I did" for ${slug} v${n}: ${String(e)}`)
-    }
-  }
-  versionChecklistCache.set(key, list)
-  return list
 }
 
 export async function detail(slug: string): Promise<ProjectDetail> {

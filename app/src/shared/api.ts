@@ -359,9 +359,6 @@ export interface ReelApi {
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
     rerender(slug: string, change?: string, label?: string): Promise<{ jobId: string }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
-    /** "What I did" for an older version, from the project.json its final render saved; null when that copy is
-     * missing or damaged. The latest version's list is `ProjectDetail.checklist`. */
-    versionChecklist(slug: string, version: number): Promise<ChecklistItem[] | null>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */

@@ -54,7 +54,6 @@ const api: ReelApi = {
     update: (slug, patch) => call('projects:update', slug, patch),
     rerender: (slug, change, label) => call('projects:rerender', slug, change, label),
     exportVersion: (slug, n) => call('projects:export', slug, n),
-    versionChecklist: (slug, n) => call('projects:versionChecklist', slug, n),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {

@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
-import { detail, projectDir, readAppState, versionChecklist } from '../src/main/store'
+import { projectDir, readAppState } from '../src/main/store'
 import { versionChanges } from '../src/shared/versions'
 import type { ProjectJson, VersionInfo } from '../src/shared/api'
 import { setupPaths } from './helpers'
@@ -61,24 +61,4 @@ it('records what made a version when its final render made it, and the menu show
     [2, '“music too loud”'],
     [3, 'Changes not recorded']
   ])
-})
-
-it("the project detail carries no older version's \"What I did\": it is read when that version is asked for", async () => {
-  setupPaths()
-  const slug = 'older'
-  const project = (version: number, subtitles: boolean): ProjectJson => ({
-    schemaVersion: 1, id: slug, title: 'Older', slug, createdAt: '2026-10-21T09:00:00.000Z', updatedAt: '2026-10-21T09:00:00.000Z', version,
-    captions: { enabled: subtitles }
-  })
-  for (const n of [1, 2]) {
-    mkdirSync(join(projectDir(slug), 'versions', `v${n}`), { recursive: true })
-    writeFileSync(join(projectDir(slug), 'versions', `v${n}`, 'export.mp4'), 'x')
-    writeFileSync(join(projectDir(slug), 'versions', `v${n}`, 'project.json'), JSON.stringify(project(n, n === 2)))
-  }
-  writeFileSync(join(projectDir(slug), 'project.json'), JSON.stringify(project(2, true)))
-
-  const d = await detail(slug)
-  expect(d).not.toHaveProperty('versionChecklists')
-  expect(d.checklist.find((c) => c.key === 'captions')?.label).toBe('Added subtitles')
-  expect((await versionChecklist(slug, 1))?.find((c) => c.key === 'captions')?.label).toBe('No subtitles')
 })
