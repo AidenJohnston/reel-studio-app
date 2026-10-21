@@ -26,7 +26,8 @@
 #   3. codesign --verify --deep --strict
 #   4. zip -> xcrun notarytool submit --wait -> xcrun stapler staple (the .app)
 #   5. build the .dmg from the signed+stapled app (packaging/dmg/make-dmg.sh: the designed Finder window, laid out by
-#      Finder itself, so this needs a GUI session and lets Terminal control Finder), sign it, notarize it, staple it
+#      Finder itself; without a GUI session or Finder control it builds the plain window and says why), sign it,
+#      notarize it, staple it
 #   6. final checks: codesign --verify, spctl -a -vv (app and dmg), stapler validate
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
@@ -70,10 +71,11 @@ DMG_VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/
 # The disk's name is the Finder window title. "Installer" says it is not where the app lives, and a new name per
 # version stops Finder showing a cached window from an older disk.
 DMG_VOLUME="$PRODUCT $DMG_VER Installer"
-[ ! -e "/Volumes/$DMG_VOLUME" ] || die "A disk called \"$DMG_VOLUME\" is open. Eject it in Finder first."
-# Step 5 lays out the disk window through Finder. Ask for that permission now, not after notarizing the app.
-osascript -e 'tell application "Finder" to get name of startup disk' >/dev/null \
-  || die "This script needs to control Finder to lay out the disk window. Allow it in System Settings > Privacy & Security > Automation, then run it again."
+# Step 5 lays out the disk window through Finder. Ask for that permission now, while someone is at the keyboard,
+# not after notarizing the app. Without it step 5 builds the plain window and says why.
+DMG_PLAIN_REASON="$(bash "$HERE/dmg/make-dmg.sh" --why-plain)"
+[ -n "$DMG_PLAIN_REASON" ] || [ ! -e "/Volumes/$DMG_VOLUME" ] \
+  || die "A disk called \"$DMG_VOLUME\" is open. Eject it in Finder first."
 
 # ---------- signing identity ----------
 if [ "$ADHOC" = 1 ]; then
@@ -186,7 +188,7 @@ fi
 
 # ---------- 5. dmg ----------
 say "5/6 Build the .dmg from the signed app"
-bash "$HERE/dmg/make-dmg.sh" "$SIGNED" "$DMG" "$DMG_VOLUME"
+RS_DMG_PLAIN_REASON="$DMG_PLAIN_REASON" bash "$HERE/dmg/make-dmg.sh" "$SIGNED" "$DMG" "$DMG_VOLUME"
 if [ "$ADHOC" = 0 ]; then
   codesign --force --sign "$IDENTITY" ${TS_FLAG[@]+"${TS_FLAG[@]}"} "$DMG"
   if [ "$SKIP_NOTARIZE" = 0 ]; then

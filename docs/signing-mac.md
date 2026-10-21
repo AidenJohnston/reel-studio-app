@@ -87,6 +87,9 @@ Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh
    right. Finder itself saves that layout, so the script asks to control Finder: the first time, macOS asks
    "Terminal wants to control Finder". Click **OK**. The script asks at the start, before anything slow runs.
    `packaging/dmg/check_layout.py` then reads the layout back from the finished `.dmg` and stops the script if it is wrong.
+   Over SSH, in CI, or if you click **Don't Allow**, the script still finishes: it prints
+   `Plain disk window, without the art: <why>.` and builds the plain window older versions had. For a release, run it
+   at the Mac and allow Finder control so people get the designed window.
 6. Final checks: `codesign --verify --deep --strict`, `spctl -a -vv` (must say `accepted` and
    `source=Notarized Developer ID`), `xcrun stapler validate`.
 
