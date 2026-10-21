@@ -55,7 +55,7 @@ export function Script({ go }: { go: Go }) {
           {aiOff && (
             <p className="muted-sm" data-testid="script-needs-ai">
               Script help needs an AI editor.{' '}
-              <button className="link inline" onClick={() => go({ name: 'connect' })}>
+              <button className="link inline" onClick={() => go({ name: 'connect', back: { name: 'script' } })}>
                 Connect one
               </button>
             </p>

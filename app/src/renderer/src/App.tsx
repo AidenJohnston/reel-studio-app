@@ -184,12 +184,9 @@ export function App() {
     )
   }
 
-  const section =
-    screen.name === 'new' || screen.name === 'working' || screen.name === 'reel' || screen.name === 'script'
-      ? 'home'
-      : screen.name === 'connect'
-        ? 'settings'
-        : screen.name
+  // The Connect screen sits under the section the person came from, so the sidebar and its back link agree.
+  const shown = screen.name === 'connect' ? (screen.back ?? { name: 'home' }) : screen
+  const section = shown.name === 'new' || shown.name === 'working' || shown.name === 'reel' || shown.name === 'script' ? 'home' : shown.name
   const aiOn = !!provider && provider.connected && provider.id !== 'none'
 
   return (
@@ -227,7 +224,7 @@ export function App() {
               ) : (
                 <>
                   <div className="muted-sm">No AI editor connected.</div>
-                  <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect' })} data-testid="sidebar-connect">
+                  <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect', back: shown.name === 'reel' ? { name: 'reel', slug: shown.slug } : shown })} data-testid="sidebar-connect">
                     Connect one
                   </button>
                 </>

@@ -61,7 +61,21 @@ test('add a connection to your own AI server from Settings', async () => {
   const { app, page } = await launch({ REELSTUDIO_MOCK_AI: '0' })
   try {
     await passFirstRun(page)
+    // "Connect one" from My style: the sidebar keeps My style, and the back link says and goes there
+    await page.getByTestId('nav-style').click()
+    const styleLeft = await page.locator('.page').first().evaluate((el) => el.getBoundingClientRect().left)
+    await page.getByTestId('sidebar-connect').click()
+    await expect(page.getByTestId('nav-style')).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByTestId('connect-back')).toHaveText('My style')
+    await page.getByTestId('connect-back').click()
+    await expect(page.getByTestId('nav-style')).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByTestId('connect-screen')).toHaveCount(0)
+
     await page.getByTestId('nav-settings').click()
+    // Settings scrolls and My style does not; both columns start at the same x
+    expect(await page.locator('.page').first().evaluate((el) => el.getBoundingClientRect().left)).toBe(styleLeft)
+    // one primary button on Settings: the AI editor choice, not the listening model's Download
+    await expect(page.getByTestId('download-model')).not.toHaveClass(/primary/)
     const toggle = page.getByTestId('own-server-toggle')
     await expect(toggle).toBeVisible()
     await snap(page, '01-settings-link')

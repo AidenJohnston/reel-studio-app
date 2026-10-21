@@ -22,7 +22,7 @@ const WAIT_FOR_MS = 10 * 60_000
 /**
  * Connect your AI editor, for normal people. Whatever the person already has comes first: a signed-in Claude Code
  * app makes "Use Claude (your Claude Code app)" the big button; otherwise "Sign in with ChatGPT" is, with the
- * Claude choice below it in its real state (sign in, or how to install it). "Use an Anthropic API key" and "Use
+ * Claude choice below it in its real state (sign in, or how to install it). "Use a Claude key" and "Use
  * your own AI server" stay the quiet advanced choices. Used by the Connect screen, Settings and First run.
  *
  * Reel Studio never sees the Claude sign-in: it happens in Anthropic's own app, in a terminal window, and the app
@@ -303,7 +303,7 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
       )}
       {!choices ? null : !showKey ? (
         <button className="link center" onClick={() => setShowKey(true)} data-testid="claude-key-toggle">
-          Use an Anthropic API key (advanced)
+          Use a Claude key (advanced)
         </button>
       ) : (
         <>
@@ -312,8 +312,8 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
               className="input"
               type="password"
               autoFocus
-              placeholder="Paste your Anthropic API key"
-              aria-label="Anthropic API key"
+              placeholder="Paste your Claude key"
+              aria-label="Claude key"
               value={key}
               onChange={(e) => setKey(e.target.value)}
               onKeyDown={(e) => {
@@ -330,7 +330,7 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
             <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
               Get one here
             </a>
-            . An API key is billed by Anthropic as you use it, separate from a Claude subscription.
+            . A Claude key is billed by Anthropic as you use it, separate from a Claude subscription.
           </p>
         </>
       )}
@@ -395,8 +395,9 @@ export function DevProviders() {
   )
 }
 
-/** One-time speech model download with progress. */
-export function ModelDownload({ onReady }: { onReady?: () => void }) {
+/** One-time speech model download with progress. `secondary`: not the screen's main action (Settings, where the AI
+ * editor choice is; the Working screen offers the download again when a video needs it). */
+export function ModelDownload({ onReady, secondary }: { onReady?: () => void; secondary?: boolean }) {
   const [s, setS] = useState<ModelStatus | null>(null)
   useEffect(() => {
     reel.model.status().then(setS)
@@ -431,7 +432,7 @@ export function ModelDownload({ onReady }: { onReady?: () => void }) {
           </div>
         </>
       ) : (
-        <button className="btn primary big" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
+        <button className={`btn big${secondary ? '' : ' primary'}`} onClick={() => reel.model.download().then(setS)} data-testid="download-model">
           {s.pct > 0 && s.pct < 100 ? 'Keep downloading' : 'Download'}
         </button>
       )}
