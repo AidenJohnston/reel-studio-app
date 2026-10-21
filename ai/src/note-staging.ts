@@ -119,9 +119,11 @@ async function promoteCompletedCaches(sourceDir: string, liveDir: string, scratc
 }
 
 async function removeUnpublished(dir: string, version: number): Promise<void> {
-  await rejectSymlinks(await fs.realpath(dir), 'versions');
+  const root = await fs.realpath(dir);
+  await rejectSymlinks(root, 'versions');
   for (const name of await names(path.join(dir, 'versions'))) {
     if (/^v\d+$/.test(name) && Number(name.slice(1)) > version) {
+      await rejectSymlinks(root, 'versions');
       await fs.rm(path.join(dir, 'versions', name), { recursive: true, force: true });
     }
   }
@@ -180,9 +182,21 @@ async function rejectSymlinks(root: string, rel: string): Promise<void> {
   }
 }
 
+async function unlinkRecoveredFile(root: string, rel: string): Promise<void> {
+  await rejectSymlinks(root, path.dirname(rel));
+  try { await fs.unlink(path.join(root, rel)); }
+  catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+}
+
 async function syncDirectory(dir: string): Promise<void> {
   const handle = await fs.open(dir, 'r');
-  try { await handle.sync(); } finally { await handle.close(); }
+  try {
+    try { await handle.sync(); }
+    catch (e: any) {
+      if (!['EINVAL', 'ENOTSUP'].includes(e.code)) throw e;
+      console.warn(`[note publish] directory sync unsupported for ${dir}: ${e.code}`);
+    }
+  } finally { await handle.close(); }
 }
 
 async function readOptional<T>(file: string): Promise<T | undefined> {
@@ -200,9 +214,10 @@ async function replayStyle(versionDir: string, store?: StyleStore): Promise<void
 /** Keep the manifest until all repairs finish, so another crash can repeat them safely. */
 async function recoverTransaction(liveDir: string, dir: string, style?: StyleStore): Promise<boolean> {
   let manifest: PublicationManifest | undefined;
+  let root: string;
   try {
     // Resolve the project-root alias, but reject links within it before reading or deleting.
-    const root = await fs.realpath(liveDir);
+    root = await fs.realpath(liveDir);
     await rejectSymlinks(root, `.staging/${path.basename(dir)}/publication.json`);
     const raw = await readOptional<unknown>(path.join(dir, 'publication.json'));
     if (raw !== undefined) {
@@ -219,27 +234,33 @@ async function recoverTransaction(liveDir: string, dir: string, style?: StyleSto
   if (committed) {
     await replayStyle(path.join(liveDir, 'versions', `v${committed.version}`), style);
   } else if (manifest) {
-    for (const rel of manifest.assets) await fs.rm(path.join(liveDir, rel), { force: true });
+    for (const rel of manifest.assets) await unlinkRecoveredFile(root, rel);
     const credits = path.join(liveDir, 'work/assets/credits.json');
     if (manifest.credits !== undefined) {
       let current: Buffer | undefined;
       try { current = await fs.readFile(credits); }
       catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       if (current && hash(current) === manifest.creditsHash) {
-        if (manifest.credits === null) await fs.rm(credits, { force: true });
+        if (manifest.credits === null) await unlinkRecoveredFile(root, 'work/assets/credits.json');
         else {
           const restored = path.join(dir, 'restored-credits.json');
           await writeFileAtomic(restored, Buffer.from(manifest.credits, 'base64'));
+          await rejectSymlinks(root, 'work/assets');
           await fs.rename(restored, credits);
         }
       } else console.warn(`[note recovery] credits do not match ${path.basename(dir)}; leaving them unchanged`);
     }
     for (const rel of manifest.createdDirectories) {
+      await rejectSymlinks(root, path.dirname(rel));
       try { await fs.rmdir(path.join(liveDir, rel)); }
       catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
     }
-    if (manifest.version > p.version) await fs.rm(path.join(liveDir, 'versions', `v${manifest.version}`), { recursive: true, force: true });
+    if (manifest.version > p.version) {
+      await rejectSymlinks(root, 'versions');
+      await fs.rm(path.join(liveDir, 'versions', `v${manifest.version}`), { recursive: true, force: true });
+    }
   }
+  await rejectSymlinks(root, '.staging');
   await fs.rm(dir, { recursive: true, force: true });
   return true;
 }
@@ -255,10 +276,15 @@ export async function recoverNoteStaging(dir: string): Promise<void> {
       console.warn(`[note recovery] refused cleanup: ${error instanceof Error ? error.message : 'invalid recovery path'}`);
       return;
     }
+    let allRecovered = true;
     for (const txn of await names(path.join(dir, '.staging'))) {
-      if (!await recoverTransaction(dir, path.join(dir, '.staging', txn))) return;
+      if (!await recoverTransaction(dir, path.join(dir, '.staging', txn))) allRecovered = false;
     }
-    await fs.rm(path.join(dir, '.staging'), { recursive: true, force: true });
+    // Leave refused transactions and their unknown publication artifacts for inspection.
+    if (!allRecovered) return;
+    await rejectSymlinks(await fs.realpath(dir), '.staging');
+    try { await fs.rmdir(path.join(dir, '.staging')); }
+    catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
     let p;
     try { p = await loadProject(dir); } catch { return; }
     await removeUnpublished(dir, p.version);
@@ -412,7 +438,10 @@ export class NoteTransaction {
       await this.check();
       await fs.rename(tmp, file);
       this.published = true;
-      await syncDirectory(this.liveDir);
+      try { await syncDirectory(this.liveDir); }
+      catch (error) {
+        console.warn(`[note publish] committed version ${version}, but directory sync failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       afterStep?.('project');
       // The note record committed with the edit. StyleStore.add deduplicates replayed rules.
       for (const rule of rules) await style?.add(rule);

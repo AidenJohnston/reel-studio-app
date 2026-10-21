@@ -2,7 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, promises as mutableFs } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { beginNote, recoverNoteStaging, withProjectLock, PublishStep } from '../src/note-staging';
 import { createAI, loadProject, saveProject, AgentEvent } from '../src';
 import { StyleStore } from '../src/style';
@@ -422,4 +423,81 @@ it('refuses symlinked version cleanup even when there is no publication manifest
     expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused cleanup'));
   } finally { warn.mockRestore(); }
+});
+
+it('recovers valid transactions on both sides of an invalid manifest and accepts another note', async () => {
+  const { dir, before } = await setup();
+  const ids = [1, 2, 3].map((n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`);
+  await fs.mkdir(path.join(dir, 'work/assets'), { recursive: true });
+  for (const [i, id] of ids.entries()) {
+    const stage = path.join(dir, '.staging', id);
+    await fs.mkdir(stage, { recursive: true });
+    const asset = `work/assets/${id}-image.png`;
+    await fs.writeFile(path.join(dir, asset), 'new asset');
+    await fs.writeFile(path.join(stage, 'publication.json'), JSON.stringify({
+      version: 2, assets: i === 1 ? ['project.json'] : [asset], createdDirectories: [],
+    }));
+  }
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await recoverNoteStaging(dir);
+    expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([ids[1]]);
+    expect(await fs.readdir(path.join(dir, 'work/assets'))).toEqual([`${ids[1]}-image.png`]);
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`refused ${ids[1]}`));
+    const next = await beginNote(dir);
+    await next.discard();
+    expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([ids[1]]);
+  } finally { warn.mockRestore(); }
+});
+
+it('returns committed success when directory sync reports EINVAL after the project rename', async () => {
+  const { dir } = await setup();
+  const txn = await beginNote(dir);
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  const open = fs.open;
+  const openSpy = vi.spyOn(mutableFs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === dir && args[1] === 'r') {
+      vi.spyOn(handle, 'sync').mockRejectedValue(Object.assign(new Error('directory sync unsupported'), { code: 'EINVAL' }));
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await expect(txn.publish(note, [])).resolves.toBe(2);
+    expect(txn.published).toBe(true);
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(await fs.readFile(path.join(dir, 'versions/v2/project.json')));
+    expect((await loadProject(dir)).notes.at(-1)?.txnId).toBe(txn.txnId);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('directory sync'));
+  } finally { openSpy.mockRestore(); syncBuiltinESMExports(); warn.mockRestore(); }
+});
+
+it('aborts before live writes when opening the staging directory for sync fails with EPERM', async () => {
+  const { dir, before } = await setup();
+  const txn = await beginNote(dir);
+  const project = await loadProject(txn.dir);
+  project.music.level = 'quiet';
+  await saveProject(txn.dir, project);
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  const asset = `${txn.txnId}-image.png`;
+  await fs.writeFile(path.join(txn.dir, 'work/assets', asset), 'new image');
+  const open = fs.open;
+  const error = Object.assign(new Error('directory open denied'), { code: 'EPERM' });
+  const openSpy = vi.spyOn(mutableFs, 'open').mockImplementation(async (...args) => {
+    if (args[0] === txn.dir && args[1] === 'r') throw error;
+    return open(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    await expect(txn.publish(note, [])).rejects.toBe(error);
+    expect(txn.published).toBe(false);
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(await fs.readdir(path.join(dir, 'versions'))).toEqual(['v1']);
+    expect(await fs.readFile(path.join(dir, 'versions/v1/export.mp4'), 'utf8')).toBe('old video');
+    expect(existsSync(path.join(dir, 'work/assets', asset))).toBe(false);
+  } finally { openSpy.mockRestore(); syncBuiltinESMExports(); }
 });

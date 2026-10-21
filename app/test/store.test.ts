@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -217,29 +217,40 @@ describe('project store', () => {
     expect(state.chat.map((message) => message.text)).toEqual([
       'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
     ])
-    // Simulate a crash during deletion: only one already-announced orphan remains.
-    mkdirSync(join(dir, '.staging', 'second'), { recursive: true })
     await recoverInterrupted()
     expect((await readAppState('orphan')).chat).toEqual(state.chat)
     expect(readFileSync(join(dir, 'project.json'))).toEqual(original)
   })
 
-  it('keeps only the latest 50 interrupted-note IDs while preserving chat messages', async () => {
+  it('announces 51 pending folders once across three startups and forgets IDs only after cleanup', async () => {
     setupPaths()
     await ensureRoot()
-    const dir = fakeProject('bounded-orphans', { versions: [1] })
-    await updateAppState('bounded-orphans', (state) => {
-      state.chat = Array.from({ length: 51 }, (_, i) => ({
-        id: `interrupted-note:old-${i}`, from: 'editor', text: `Notice ${i}`, at: '2026-10-21T00:00:00Z'
-      }))
-    })
-    mkdirSync(join(dir, '.staging', 'latest'), { recursive: true })
-    await recoverInterrupted()
-    const state = await readAppState('bounded-orphans')
-    const ids = state.chat.filter((message) => message.id.startsWith('interrupted-note:')).flatMap((message) =>
-      message.id.slice('interrupted-note:'.length).split(','))
-    expect(ids).toEqual([...Array.from({ length: 49 }, (_, i) => `old-${i + 2}`), 'latest'])
-    expect(state.chat.slice(0, 51).map((message) => message.text)).toEqual(Array.from({ length: 51 }, (_, i) => `Notice ${i}`))
+    const dir = fakeProject('pending-orphans', { versions: [1] })
+    const ids = Array.from({ length: 51 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
+    for (const id of ids) {
+      mkdirSync(join(dir, '.staging', id), { recursive: true })
+      writeFileSync(join(dir, '.staging', id, 'publication.json'), '{}')
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await recoverInterrupted()
+      const first = await readAppState('pending-orphans')
+      expect(first.chat).toHaveLength(1)
+      expect(first.chat[0].id).toBe(`interrupted-note:${ids.join(',')}`)
+      // Some folders become recoverable before each restart; the rest retain their IDs.
+      for (const id of ids.slice(0, 17)) await fs.unlink(join(dir, '.staging', id, 'publication.json'))
+      await recoverInterrupted()
+      const second = await readAppState('pending-orphans')
+      expect(second.chat).toHaveLength(1)
+      expect(second.chat[0].id).toBe(`interrupted-note:${ids.slice(17).join(',')}`)
+      expect(await fs.readdir(join(dir, '.staging'))).toEqual(ids.slice(17))
+      for (const id of ids.slice(17)) await fs.unlink(join(dir, '.staging', id, 'publication.json'))
+      await recoverInterrupted()
+      const third = await readAppState('pending-orphans')
+      expect(third.chat.map((message) => message.text)).toEqual(first.chat.map((message) => message.text))
+      expect(third.chat[0].id.startsWith('interrupted-note:')).toBe(false)
+      expect(existsSync(join(dir, '.staging'))).toBe(false)
+    } finally { warn.mockRestore() }
   })
 
   it('writes json atomically (no temp files left behind)', async () => {

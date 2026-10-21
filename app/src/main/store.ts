@@ -339,14 +339,6 @@ export async function recoverInterrupted(): Promise<string[]> {
           if (pending.length) {
             st.chat.push({ id: `interrupted-note:${pending.join(',')}`, from: 'editor', text: INTERRUPTED_CHANGE, at: new Date().toISOString() })
           }
-          // Keep only the most recent 50 recovery IDs, without removing their chat messages.
-          let remaining = 50
-          for (const message of [...st.chat].reverse()) {
-            if (!message.id.startsWith('interrupted-note:')) continue
-            const ids = remaining ? message.id.slice('interrupted-note:'.length).split(',').slice(-remaining) : []
-            message.id = ids.length ? `interrupted-note:${ids.join(',')}` : randomUUID()
-            remaining -= ids.length
-          }
           st.job = null
           st.status = 'ready'
         })
@@ -363,6 +355,20 @@ export async function recoverInterrupted(): Promise<string[]> {
     await recoverNoteStaging(dir)
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
+    if (s.chat.some((message) => message.id.startsWith('interrupted-note:'))) {
+      const remaining = new Set(await fs.readdir(staging).catch((e: NodeJS.ErrnoException) => {
+        if (e.code === 'ENOENT') return []
+        throw e
+      }))
+      // Keep the notice while its folder can recur on startup; release it after cleanup.
+      await updateAppState(slug, (st) => {
+        for (const message of st.chat) {
+          if (!message.id.startsWith('interrupted-note:')) continue
+          const ids = message.id.slice('interrupted-note:'.length).split(',').filter((id) => remaining.has(id))
+          message.id = ids.length ? `interrupted-note:${ids.join(',')}` : randomUUID()
+        }
+      })
+    }
     if (!s.job) continue
     await cleanPartialVersions(dir)
     await updateAppState(slug, (st) => {
