@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -342,4 +342,84 @@ import sys
 from reelengine import project, render
 live = Path(sys.argv[1])
 print(render.pick_version(live, project.load(live)))`)).toBe('2');
+});
+
+it('refuses the entire recovery manifest for unrelated paths, traversal or a symlinked assets directory', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    for (const invalid of ['project.json', '../x', 'symlink']) {
+      const { dir, root, before } = await setup();
+      const txn = await beginNote(dir);
+      const name = `${txn.txnId}-image.png`;
+      const assets = path.join(dir, 'work/assets');
+      const outside = path.join(root, 'outside');
+      await fs.mkdir(outside);
+      await fs.writeFile(path.resolve(dir, '../x'), 'unrelated');
+      if (invalid === 'symlink') await fs.symlink(outside, assets, 'junction');
+      else await fs.mkdir(assets, { recursive: true });
+      await fs.writeFile(path.join(assets, name), 'keep this too');
+      await fs.writeFile(path.join(txn.dir, 'publication.json'), JSON.stringify({
+        version: 2, assets: [`work/assets/${name}`, ...(invalid === 'symlink' ? [] : [invalid])], createdDirectories: [],
+      }));
+      await recoverNoteStaging(dir);
+      expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+      expect(await fs.readFile(path.resolve(dir, '../x'), 'utf8')).toBe('unrelated');
+      expect(await fs.readFile(path.join(assets, name), 'utf8')).toBe('keep this too');
+      expect(existsSync(path.join(txn.dir, 'publication.json'))).toBe(true);
+    }
+    expect(warn).toHaveBeenCalledTimes(3);
+  } finally { warn.mockRestore(); }
+});
+
+async function crashAfterCredits() {
+  const { dir } = await setup();
+  const credits = path.join(dir, 'work/assets/credits.json');
+  await fs.mkdir(path.dirname(credits), { recursive: true });
+  const original = '{ "old.png": {} }\n';
+  await fs.writeFile(credits, original);
+  const txn = await beginNote(dir);
+  const asset = `${txn.txnId}-image.png`;
+  await fs.writeFile(path.join(txn.dir, 'work/assets', asset), 'new image');
+  await fs.writeFile(path.join(txn.dir, 'work/assets/credits.json'), JSON.stringify({ [asset]: {} }));
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  await expect(txn.publish(note, [], undefined, (step) => {
+    if (step === 'credits') throw new Error('simulated process crash');
+  })).rejects.toThrow('simulated process crash');
+  return { dir, credits, original };
+}
+
+it('restores the original credit bytes when the merged credits still belong to the interrupted note', async () => {
+  const { dir, credits, original } = await crashAfterCredits();
+  expect(await fs.readFile(credits, 'utf8')).not.toBe(original);
+  await recoverNoteStaging(dir);
+  expect(await fs.readFile(credits, 'utf8')).toBe(original);
+});
+
+it('preserves and logs newer credits instead of restoring an interrupted note over them', async () => {
+  const { dir, credits } = await crashAfterCredits();
+  const newer = '{ "newer.png": {"attribution":"User"} }\n';
+  await fs.writeFile(credits, newer);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await recoverNoteStaging(dir);
+    expect(await fs.readFile(credits, 'utf8')).toBe(newer);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('credits do not match'));
+  } finally { warn.mockRestore(); }
+});
+
+it('refuses symlinked version cleanup even when there is no publication manifest', async () => {
+  const { dir, root, before } = await setup();
+  const outside = path.join(root, 'outside-versions');
+  await fs.mkdir(path.join(outside, 'v2'), { recursive: true });
+  await fs.writeFile(path.join(outside, 'v2/export.mp4'), 'unrelated video');
+  await fs.rename(path.join(dir, 'versions'), path.join(dir, 'original-versions'));
+  await fs.symlink(outside, path.join(dir, 'versions'), 'junction');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await recoverNoteStaging(dir);
+    expect(await fs.readFile(path.join(outside, 'v2/export.mp4'), 'utf8')).toBe('unrelated video');
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused cleanup'));
+  } finally { warn.mockRestore(); }
 });
