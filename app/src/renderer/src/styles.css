@@ -484,7 +484,6 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
   .perm-end { flex-basis: 100%; justify-content: flex-start; padding-left: 50px; }
 }
 .perm-wait { color: var(--ink-2); }
-.perm-footnote { margin-top: 12px; display: flex; align-items: center; gap: 8px; padding: 0 2px; font-size: 13.5px; color: var(--ink-3); }
 /* Same height as the checklist it waits for, so the card does not jump when the status arrives. */
 .stage-loading { min-height: 132px; display: grid; place-items: center; }
 

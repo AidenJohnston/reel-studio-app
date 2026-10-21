@@ -110,9 +110,9 @@ mac:
   identity: null
   extendInfo:
     NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
-    # Shown in the macOS questions. First run explains each one before it is asked (app/src/main/permissions.ts).
+    # Shown in the macOS Documents question; first run explains it before it is asked (app/src/main/permissions.ts).
+    # No NSLocalNetworkUsageDescription: Send to my phone only listens, which macOS never asks about (phone-share.ts).
     NSDocumentsFolderUsageDescription: "Reel Studio keeps your videos, music and pictures in a Reel Studio folder in Documents."
-    NSLocalNetworkUsageDescription: "Reel Studio uses your Wi-Fi to send a finished video to your phone when you choose Send to my phone."
 
 dmg:
   title: Reel Studio

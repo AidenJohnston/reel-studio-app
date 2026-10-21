@@ -80,7 +80,6 @@ test('a fresh first run walks every stage, and the folder waits for Allow', asyn
       await expect(page.getByTestId('stage-mac')).toHaveText('Get your Mac ready')
       await expect(page.getByTestId('stage-mac')).toBeFocused() // a screen reader starts at the new stage
       await expect(page.getByTestId('perm-folder')).toContainText('Documents › Reel Studio')
-      await expect(page.getByTestId('perm-network')).toContainText('local network')
       await expect(page.getByTestId('mac-continue')).toBeDisabled()
       // The checklist re-checks every 1.5 s; none of those checks may touch the folder before Allow.
       await page.waitForTimeout(3200)

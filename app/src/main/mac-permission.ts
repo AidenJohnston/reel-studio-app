@@ -12,7 +12,7 @@ export const MAC_PERMISSION_HELPER_CHANNEL = 'mac-permission-helper'
 
 /**
  * How a System Settings list takes an app. `drag`: Full Disk Access, Accessibility and Screen Recording, where an
- * app is added by dragging it in. `toggle`: Files and Folders, Local Network and Notifications, which list an app
+ * app is added by dragging it in. `toggle`: Files and Folders and Notifications, which list an app
  * once it has asked; dragging does nothing there, the person turns on its switch. Reel Studio needs only toggle
  * panes, and asks for nothing it has no use for just to offer the drag.
  */
@@ -34,8 +34,7 @@ export const MAC_PANES: Record<SettingsPane, MacPane> = {
     title: 'Notifications',
     kind: 'toggle',
     readable: false
-  },
-  network: { url: 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork', title: 'Local Network', kind: 'toggle', readable: false }
+  }
 }
 
 /**

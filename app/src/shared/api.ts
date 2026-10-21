@@ -424,18 +424,15 @@ export interface ReelApi {
 export type FolderAccess = 'not-asked' | 'allowed' | 'denied' | 'unusable'
 /** `asking` = turned on, and macOS has not said yes or no yet. */
 export type NotifyAccess = 'off' | 'asking' | 'on' | 'blocked' | 'unsupported'
-/** Local Network has no status API on macOS, so all Reel Studio knows is whether it has asked yet. */
-export type NetworkAccess = 'not-asked' | 'asked'
 
 export interface PermissionStatus {
   folder: FolderAccess
   /** Where the videos go, in friendly words ("Documents › Reel Studio"). */
   folderDisplay: string
   notifications: NotifyAccess
-  network: NetworkAccess
 }
 
-export type SettingsPane = 'folder' | 'notifications' | 'network'
+export type SettingsPane = 'folder' | 'notifications'
 
 /** A newer Reel Studio is out. `url` is its release page on GitHub. */
 export interface UpdateNotice {

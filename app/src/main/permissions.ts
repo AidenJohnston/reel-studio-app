@@ -1,6 +1,7 @@
-// macOS privacy questions (Documents, notifications, Local Network), each asked right after the app has said why:
-// the first-run "Your Mac" stage, Settings, and "Send to my phone". When macOS has said no, the answer is changed
-// in System Settings, so Reel Studio opens that exact page with the helper beside it (main/mac-permission-helper.ts).
+// macOS privacy questions (Documents, notifications), each asked right after the app has said why: the first-run
+// "Your Mac" stage and Settings. When macOS has said no, the answer is changed in System Settings, so Reel Studio
+// opens that exact page with the helper beside it (main/mac-permission-helper.ts). There is no Local Network
+// question: Send to my phone only listens, which needs none (main/phone-share.ts).
 // Never imports electron: index.ts passes in what it needs, and test/permissions.test.ts drives it with fakes.
 import { constants, promises as fs } from 'node:fs'
 import type { FolderAccess, NotifyAccess, PermissionStatus, SettingsPane } from '../shared/api'
@@ -81,7 +82,7 @@ export interface PermissionDeps {
   /** The folder was touched already (an existing install), so probing it cannot be what makes macOS ask. */
   touched: boolean
   ensureRoot(): Promise<void>
-  load(): Promise<{ notifications: boolean | null; firstRunDone: boolean; phoneNetworkAsked: boolean }>
+  load(): Promise<{ notifications: boolean | null; firstRunDone: boolean }>
   save(patch: { notifications: boolean }): Promise<unknown>
   notificationsSupported(): boolean
   /** Show "Notifications are on". On macOS the first one is what asks. */
@@ -149,8 +150,7 @@ export function createPermissions(d: PermissionDeps) {
     return {
       folder: await folder(),
       folderDisplay: d.rootDisplay(),
-      notifications: notifyAccess({ supported: d.notificationsSupported(), wanted: notificationsWanted(s, d.platform), result: lastNotify }),
-      network: s.phoneNetworkAsked ? 'asked' : 'not-asked'
+      notifications: notifyAccess({ supported: d.notificationsSupported(), wanted: notificationsWanted(s, d.platform), result: lastNotify })
     }
   }
 

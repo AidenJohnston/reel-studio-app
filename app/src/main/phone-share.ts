@@ -246,6 +246,10 @@ export async function startShare(opts: ShareOptions): Promise<ShareServer> {
     s.on('close', () => sockets.delete(s))
   })
 
+  // Only listening: the phone connects in, this computer never connects out to the home network, and nothing
+  // advertises or broadcasts. macOS asks about Local Network only for outgoing traffic; "Listening for and accepting
+  // incoming TCP connections" needs no local network access (Apple TN3179, Understanding local network privacy).
+  // So Reel Studio never asks that question and has no NSLocalNetworkUsageDescription.
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen({ host: opts.host, port: 0, exclusive: true }, () => {

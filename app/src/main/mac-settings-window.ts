@@ -47,7 +47,7 @@ function run() {
 }`
 
 /** One JSON line from the script, checked field by field; anything else throws. */
-export function decodeSettingsWindow(line: string): SettingsWindow {
+function decodeSettingsWindow(line: string): SettingsWindow {
   const v: unknown = JSON.parse(line)
   if (v === null) return null
   const o = v as Record<string, unknown>

@@ -14,11 +14,9 @@ export interface Settings extends UpdateState {
   aiCarriedOver: boolean
   /** "Tell me when a video is ready". null = never chosen (main/permissions.ts notificationsWanted). */
   notifications: boolean | null
-  /** "Send to my phone" has opened a link once, so macOS has asked about the local network. */
-  phoneNetworkAsked: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, notifications: null, phoneNetworkAsked: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, notifications: null, ...UPDATE_DEFAULTS }
 
 export async function loadSettings(): Promise<Settings> {
   try {

@@ -1,6 +1,6 @@
 // "Your Mac": the folder for videos (needed) and notifications (optional), each asked right after its row says
 // what it is for. After a "no", Allow opens the exact System Settings page with the helper beside it
-// (main/permissions.ts, main/mac-permission-helper.ts). The local network is asked later, by Send to my phone.
+// (main/permissions.ts, main/mac-permission-helper.ts).
 import { useEffect, useRef, useState } from 'react'
 import type { PermissionStatus } from '../../../../shared/api'
 import { PermissionChecklist, usePermissionStatus, type PermissionItem } from '../../components/permissions'
@@ -114,9 +114,6 @@ export function MacStage({ onNext }: { onNext: () => void }) {
       {status ? (
         <div ref={nextAllow}>
           <PermissionChecklist items={items.filter((i): i is PermissionItem => !!i)} busy={busy !== null} />
-          <p className="perm-footnote" data-testid="perm-network">
-            <Icon name="phone" size={15} /> Send to my phone asks about your local network the first time you use it.
-          </p>
         </div>
       ) : (
         <div className="stage-loading">

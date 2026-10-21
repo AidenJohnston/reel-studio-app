@@ -363,15 +363,7 @@ function registerIpc(): void {
   })
   handle('perm:openSettings', (_e, pane: unknown) => perms.openSettings(pane))
 
-  registerPhoneIpc({
-    handle,
-    roots: () => [reelStudioRoot(), projectsDir()],
-    send: broadcast,
-    log,
-    test: TEST,
-    // The first link is when macOS asks about the local network; SendToPhone explains it before that once.
-    onStart: () => void saveSettings({ phoneNetworkAsked: true }).catch(() => undefined)
-  })
+  registerPhoneIpc({ handle, roots: () => [reelStudioRoot(), projectsDir()], send: broadcast, log, test: TEST })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
     handle,
