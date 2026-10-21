@@ -2,8 +2,9 @@
 // `At 0:14 (around "you don't need a mixer", words w80, w81, w82): cut this part`. The note path has
 // no time field, and the project anchors everything on transcript word ids, so the words are resolved
 // when the note is sent, from the render on screen (wordsAt), and the AI reads them as written.
-// The marks on the scrub bar are read back from the chat. No Node or DOM imports (unit-tested).
-import type { ChatMessage, MomentWord, NoteOutcome, Word } from './api'
+// The marks on the scrub bar go the other way: each note's word ids, placed on the render on screen.
+// No Node or DOM imports (unit-tested).
+import type { ChatMessage, MomentWord, NoteOutcome, PlacedWord, Word } from './api'
 import { clock } from './progress'
 
 /** One kept span of a source on a render's output clock: an entry of `segmentsDetail` in the
@@ -16,31 +17,30 @@ export interface RenderSegment {
 }
 
 /**
- * The words that play within `radius` seconds of output time `t` in a render, in the order they
- * play. Each word lands where the render's own segments put its source time, so cuts, kept pauses
- * and versions all line up with the frame on screen. Empty when nothing is said near `t`.
+ * Every word a render plays, on that render's output clock, in the order it plays. Each word lands
+ * where the render's own segments put its source time, so cuts, kept pauses and versions all line
+ * up with the frame on screen. A word kept twice (a repeated take) is listed twice.
  */
-export function wordsAt(segments: RenderSegment[], words: Word[], t: number, radius = 1.1): MomentWord[] {
-  const lo = t - radius
-  const hi = t + radius
-  const hits: { id: string; w: string; s: number }[] = []
+export function placeWords(segments: RenderSegment[], words: Word[]): PlacedWord[] {
+  const out: PlacedWord[] = []
   for (const seg of segments) {
     const shift = seg.out_start - seg.src_start
     for (const w of words) {
       if ((w.source ?? seg.source) !== seg.source || w.e <= seg.src_start || w.s >= seg.src_end) continue
-      const s = Math.max(w.s, seg.src_start) + shift
-      const e = Math.min(w.e, seg.src_end) + shift
-      if (s < hi && e > lo) hits.push({ id: w.id, w: w.w, s })
+      out.push({ id: w.id, w: w.w.trim(), s: Math.max(w.s, seg.src_start) + shift, e: Math.min(w.e, seg.src_end) + shift })
     }
   }
-  hits.sort((a, b) => a.s - b.s)
-  // a word kept twice (a repeated take) is named once, where it first plays
+  return out.sort((a, b) => a.s - b.s)
+}
+
+/** The words that play within `radius` seconds of output time `t`, each named once, where it first plays. */
+export function wordsAt(placed: PlacedWord[], t: number, radius = 1.1): MomentWord[] {
   const out: MomentWord[] = []
   const seen = new Set<string>()
-  for (const h of hits) {
-    if (seen.has(h.id)) continue
-    seen.add(h.id)
-    out.push({ id: h.id, w: h.w.trim() })
+  for (const p of placed) {
+    if (p.s >= t + radius || p.e <= t - radius || seen.has(p.id)) continue
+    seen.add(p.id)
+    out.push({ id: p.id, w: p.w })
   }
   return out
 }
@@ -52,12 +52,13 @@ export function momentNote(seconds: number, words: MomentWord[], text: string): 
   return `At ${clock(seconds)} (around "${quoted(words)}", words ${words.map((x) => x.id).join(', ')}): ${text}`
 }
 
-const MOMENT = /^At (\d+):([0-5]\d)(?: \([^()]*\))?: /
+// The quote has no quotes or parentheses of its own (quoted above), so the prefix reads back exactly.
+const MOMENT = /^At \d+:[0-5]\d \(around "[^"]*", words ([^()]*)\): /
 
-/** Seconds into the reel a note points at, or null for a note about the whole reel. */
-export function noteMoment(text: string): number | null {
+/** The word ids a note was asked at, or null for a note about the whole reel. */
+export function noteWords(text: string): string[] | null {
   const m = MOMENT.exec(text)
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+  return m ? m[1].split(', ') : null
 }
 
 /** "At 1:00: zoom in" typed into the box: that time wins over the playhead, and is taken off the text. */
@@ -70,6 +71,7 @@ export type MarkState = 'making' | NoteOutcome
 
 export interface NoteMark {
   id: string
+  /** where the note's words play in the render on screen */
   at: number
   /** what was asked, without the "At 0:14 (...): " prefix */
   text: string
@@ -77,27 +79,23 @@ export interface NoteMark {
 }
 
 /**
- * One mark per moment note, from the note's own job: being made while that job runs, else the
- * outcome the job recorded on the note. A note whose job ended without one (the app quit mid-change)
- * was stopped. Notes from before outcomes were recorded read the reply right after them, never one
- * that came after a later note.
+ * One mark per moment note whose words play in the render on screen (`placed`), at the middle one of
+ * them that does. A note whose words were all cut from this render has no mark here: its old time
+ * would point at other words. State comes from the note's own job: being made while that job runs,
+ * else the outcome the job recorded; a job that ended without one (the app quit mid-change) was
+ * stopped, and a note that started no job (no AI editor) changed nothing.
  */
-export function noteMarks(chat: ChatMessage[], runningJobId: string | null): NoteMark[] {
+export function noteMarks(chat: ChatMessage[], runningJobId: string | null, placed: PlacedWord[]): NoteMark[] {
+  const plays = new Map<string, number>()
+  for (const p of placed) if (!plays.has(p.id)) plays.set(p.id, p.s)
   const marks: NoteMark[] = []
-  let newest = 0
-  chat.forEach((m, i) => {
-    if (m.from === 'editor') newest = Math.max(newest, m.version ?? 0)
-    if (m.from !== 'you') return
-    const at = noteMoment(m.text)
-    if (at === null) return
-    let state: MarkState
-    if (m.jobId) state = m.jobId === runningJobId ? 'making' : (m.outcome ?? 'stopped')
-    else {
-      const next = chat.slice(i + 1).find((r) => r.from === 'you' || r.from === 'editor')
-      state = next?.from === 'editor' && (next.version ?? 0) > newest ? 'done' : 'failed'
-    }
-    marks.push({ id: m.id, at, text: m.text.replace(MOMENT, ''), state })
-  })
+  for (const m of chat) {
+    if (m.from !== 'you') continue
+    const times = (noteWords(m.text) ?? []).flatMap((id) => plays.get(id) ?? [])
+    if (!times.length) continue
+    const state: MarkState = !m.jobId ? 'failed' : m.jobId === runningJobId ? 'making' : (m.outcome ?? 'stopped')
+    marks.push({ id: m.id, at: times[Math.floor(times.length / 2)], text: m.text.replace(MOMENT, ''), state })
+  }
   return marks
 }
 

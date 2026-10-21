@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { clock } from '../../../shared/progress'
-import { momentNote, typedMoment } from '../../../shared/moments'
+import { momentNote, typedMoment, wordsAt } from '../../../shared/moments'
 import type { MomentWord } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { NOTE_DROP_DONE, useNotify } from '../App'
@@ -61,7 +61,8 @@ export function ChangeAt({
   const [phase, setPhase] = useState<'closed' | 'open' | 'closing'>('closed')
   const [instant, setInstant] = useState(false)
   const [moment, setMoment] = useState(0)
-  // the words on screen at `moment` in version `n`, read from that render (undefined while asking main)
+  // the words on screen at `moment` in version `n`, read from that render when the pop-up opened
+  // (undefined while asking main)
   const [found, setFound] = useState<{ n: number; at: number; lookup: Lookup } | undefined>(undefined)
   const [alert, setAlert] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -73,13 +74,17 @@ export function ChangeAt({
   const trigger = useRef<HTMLButtonElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
   const exitTimer = useRef<number>(0)
-  const lookingAt = useRef('')
+  const request = useRef(0)
   const mounted = phase !== 'closed'
   const isOpen = phase === 'open'
   // nothing to anchor "here" to in this render: the change can only be for the whole reel
   const noWords = !!found && found.n === shown?.n && (!found.lookup || !found.lookup.words.length)
 
-  const lookup = (seconds: number): Promise<Lookup> => (shown ? reel.projects.moment(slug, shown.n, seconds) : Promise.resolve(null))
+  // Read fresh every time: a note can replace the Preview's render without changing its number.
+  const lookup = async (seconds: number): Promise<Lookup> => {
+    const tl = shown ? await reel.projects.timeline(slug, shown.n) : null
+    return tl && { duration: tl.duration, words: wordsAt(tl.words, seconds) }
+  }
 
   // Motion only for the pointer: opened or closed from the keyboard (N, Enter, Escape, Tab) it is instant.
   const open = (byKey: boolean) => {
@@ -87,15 +92,14 @@ export function ChangeAt({
     window.clearTimeout(exitTimer.current)
     setInstant(byKey)
     const n = shown.n
-    if (phase === 'closed' && (found?.n !== n || found.at !== at)) {
+    if (phase === 'closed') {
+      if (found?.n !== n || moment !== at) setScope('here') // a new moment: Just here again
       setMoment(at)
       setFound(undefined)
-      setScope('here')
-      const key = `${n}@${at}`
-      lookingAt.current = key
+      const mine = ++request.current
       lookup(at)
         .then((r) => {
-          if (lookingAt.current !== key) return // opened again since, at another moment or version
+          if (request.current !== mine) return // opened again since
           setFound({ n, at, lookup: r })
           if (!r || !r.words.length) setScope('whole')
         })

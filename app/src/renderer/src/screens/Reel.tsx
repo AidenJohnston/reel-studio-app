@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
+import type { ChatAction, ChecklistItem, ExportResult, PlacedWord, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
@@ -111,6 +111,24 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
+  // Where the shown version plays each word, for the marks. Keyed on its video URL, which changes
+  // with every render of it (the file's mtime is in the URL).
+  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[] } | null>(null)
+  const shownN = version?.n
+  const shownVideo = version?.video
+  useEffect(() => {
+    if (shownN === undefined || !shownVideo) return
+    let live = true
+    reel.projects
+      .timeline(slug, shownN)
+      .then((t) => {
+        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [] })
+      })
+      .catch((e) => notify(userMessage(e), 'error'))
+    return () => {
+      live = false
+    }
+  }, [slug, shownN, shownVideo, notify])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -191,7 +209,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
-  const marks = noteMarks(d.chat, job?.jobId ?? null)
+  const marks = timeline && timeline.video === version?.video ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
   const sent = async (jobId: string | null) => {
     if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
     await load()

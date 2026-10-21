@@ -62,10 +62,16 @@ export interface ChatMessage {
 /** done: the note made a new version. failed: an error, or nothing changed. stopped: Stop, or the app quit. */
 export type NoteOutcome = 'done' | 'failed' | 'stopped'
 
-/** A word on screen at a moment of a render (projects.moment). */
+/** A word on screen at a moment of a render. */
 export interface MomentWord {
   id: string
   w: string
+}
+
+/** A word where a render plays it: `s`/`e` in seconds on that render's output clock (projects.timeline). */
+export interface PlacedWord extends MomentWord {
+  s: number
+  e: number
 }
 
 /** A file attached to a note: what `engine attach` wrote in its sidecar (shared/attachments.ts). */
@@ -353,9 +359,9 @@ export interface ReelApi {
     /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs.
      * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one). */
     note(slug: string, text: string, attachments?: string[]): Promise<{ jobId: string | null }>
-    /** The words playing around `seconds` in version `n` (0 = the Preview), from that render's own
-     * timeline, and that render's length. null when the render left no timeline to read. */
-    moment(slug: string, n: number, seconds: number): Promise<{ duration: number; words: MomentWord[] } | null>
+    /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
+     * fresh from that render's manifest each call. null when the render left no timeline to read. */
+    timeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */

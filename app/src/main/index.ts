@@ -50,7 +50,7 @@ import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
-import { wordsAt, type RenderSegment } from '../shared/moments'
+import { placeWords, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
@@ -469,16 +469,16 @@ function registerIpc(): void {
     })
     return { jobId }
   })
-  // The words on screen around `seconds` in version `n` (0 = the Preview), read from that render's own
-  // timeline: the segments the engine cut it from (render.json segmentsDetail, docs/versions.md).
-  handle('projects:moment', async (_e, slug: string, n: number, seconds: number) => {
-    if (!Number.isInteger(n) || n < 0 || !Number.isFinite(seconds)) throw { code: 'BAD_MOMENT', userMessage: 'Pick a moment in your video first.' }
+  // Every word version `n` (0 = the Preview) plays, placed by that render's own timeline: the segments
+  // the engine cut it from (render.json segmentsDetail, docs/versions.md).
+  handle('projects:timeline', async (_e, slug: string, n: number) => {
+    if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of your video first.' }
     const dir = projectDir(slug)
     const file = n === 0 ? join(dir, 'versions', PREVIEW_DIR, 'render_draft.json') : join(dir, 'versions', `v${n}`, 'render.json')
     const r = await readJson<{ duration?: number; segmentsDetail?: RenderSegment[] }>(file, {})
     if (typeof r.duration !== 'number' || !r.segmentsDetail?.length) return null
     const words = await readWords(dir, await readProject(slug))
-    return { duration: r.duration, words: wordsAt(r.segmentsDetail, words, seconds) }
+    return { duration: r.duration, words: placeWords(r.segmentsDetail, words) }
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
