@@ -11,6 +11,9 @@ export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
 /** Words that mean "a specific place", "more than one thing", or "remember this": never fast. */
 const NOT_FAST = /\b(when|where|while|whenever|start|starting|beginning|begin|intro|end|ending|middle|part|parts|after|before|during|first|last|second|seconds|minute|word|words|say|says|said|saying|line|always|every|everywhere|from now|next time|remember|future|and|but|also|plus|then|instead|except|picture|photo|image|cover|zoom|cut|font|color|colour|hashtag|post|song|track|different|change|another|why)\b|\d|["“”?]/;
 
+// Negation and preservation requests need the full editor to interpret the note.
+const NEGATED = /\b(not|dont|don['’]t|never|no longer|keep|leave|stop|without changing)\b|\b\w+n['’]t\b/;
+
 const CAPTIONS = /\b(captions?|subtitles?|subs|words on screen|text)\b/;
 const MUSIC = /\b(music|background music|beat)\b/;
 
@@ -18,7 +21,7 @@ function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, 
 
 export function planFastNote(note: string, p: Project): FastPlan | null {
   const n = note.toLowerCase().replace(/[.!,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!n || n.length > 60 || NOT_FAST.test(n)) return null;
+  if (!n || n.length > 60 || NOT_FAST.test(n) || NEGATED.test(n)) return null;
   const caps = CAPTIONS.test(n); const music = MUSIC.test(n);
   if (caps === music) return null;                 // neither, or both: let the AI read it
 

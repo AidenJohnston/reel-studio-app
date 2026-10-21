@@ -25,6 +25,7 @@ describe('fast notes (no model turns)', () => {
     expect(kind('bigger subtitles please')).toBe('captions-bigger');
     expect(kind('move the captions up')).toBe('captions-up');
     expect(kind('no captions')).toBe('captions-off');
+    expect(kind('no music')).toBe('music-off');
     expect(kind('the music is too loud')).toBe('music-quieter');
     expect(kind('quieter music')).toBe('music-quieter');
     expect(kind('remove the music')).toBe('music-off');
@@ -33,6 +34,16 @@ describe('fast notes (no model turns)', () => {
       'always use smaller captions', 'captions smaller when I say twenty bucks', 'can the music be quieter?',
       'different music', 'add a picture of my dog', 'cut the part where I say B-flat', 'make it better',
       'captions say Oregon but I said Oregano']) expect(kind(n)).toBeNull();
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const original = structuredClone(p);
+    for (const note of ["Don't remove the captions", "Don't make captions smaller", 'dont remove captions',
+      'do not remove captions', 'not smaller captions', 'never remove music', 'no longer smaller captions',
+      'keep captions smaller', 'leave captions smaller', 'stop shrinking captions',
+      'without changing captions make them smaller', "captions aren't too big", 'don’t remove captions']) {
+      expect(planFastNote(note, p), note).toBeNull();
+      expect(p).toEqual(original);
+    }
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
     // already at the floor: the AI explains instead of a no-op
     p.captions.style = { ...(p.captions.style as any), size: 80 };
     expect(planFastNote('smaller captions', p)).toBeNull();

@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
+  nextBrollId, normalizeKeep, findPhrase, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -86,6 +86,12 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   const { p, t } = await load(ctx);
   const problem = fn(p, t);
   if (typeof problem === 'string') throw new ToolInputError(problem);
+  if (field === 'broll') {
+    for (const b of p.broll) {
+      if (b.asset) b.asset = requireAsset(ctx, b.asset).ref;
+      if (b.assets) b.assets = b.assets.map((asset) => requireAsset(ctx, asset).ref);
+    }
+  }
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
   await saveProject(ctx.projectDir, p);
@@ -107,9 +113,13 @@ const quote = (t: Transcript, a: WordAnchor, max = 6) => {
   return words.length > max ? `${words.slice(0, max).join(' ')}...` : words.join(' ');
 };
 
+// Hand-mirrored from engine/reelengine/schema/project.schema.json; schema-parity.test checks drift.
+const WORD_ID = { pattern: '^w[0-9]+$' };
+const BROLL_ID = { pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' };
+
 const ANCHOR = S.obj({
-  from: S.str('first word id, e.g. "w44"'),
-  to: S.str('last word id (inclusive)'),
+  from: S.str('first word id, e.g. "w44"', WORD_ID),
+  to: S.str('last word id (inclusive)', WORD_ID),
 });
 
 function libraryDir(ctx: ToolContext, kind: LibraryKind): string {
@@ -162,6 +172,12 @@ export function resolveAsset(ctx: ToolContext, ref: string): { ref: string; abs:
     if (fs.existsSync(r.abs)) return r;
   }
   return null;
+}
+
+function requireAsset(ctx: ToolContext, ref: string): { ref: string; abs: string } {
+  const resolved = resolveAsset(ctx, ref);
+  if (!resolved) throw new ToolInputError(`asset not found: ${ref}`);
+  return resolved;
 }
 
 /** Transcript words and web text are DATA. They are fenced, and anything that looks like a fence
@@ -755,7 +771,7 @@ const tools: ToolDef[] = [
   {
     name: 'set_gap_cap',
     description: 'Longest pause (seconds) kept between words. ~0.12 tight, 0.25-0.4 for slow heartfelt delivery.',
-    parameters: S.obj({ seconds: S.num('0.05 to 1.0', { minimum: 0.02, maximum: 2 }) }),
+    parameters: S.obj({ seconds: S.num('seconds, 0 to 5', { minimum: 0, maximum: 5 }) }),
     async run(ctx, args) {
       await mutate(ctx, 'cut', (p) => { p.cut.gapCap = args.seconds; });
       return { content: { ok: true, gapCap: args.seconds }, summary: args.seconds <= 0.2 ? 'Tightened the pauses' : 'Gave the pauses a little more room' };
@@ -767,10 +783,10 @@ const tools: ToolDef[] = [
     parameters: S.obj({
       enabled: S.opt(S.bool()),
       preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
-      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80')),
-      maxWords: S.opt(S.int('words per caption chunk, 1-4')),
-      case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
-      color: S.opt(S.str('hex color like #FFFFFF')),
+      size: S.opt(S.num('font size in px at 1080 wide, 10-300. Default 105; prefer at least 80 for phone readability', { minimum: 10, maximum: 300 })),
+      maxWords: S.opt(S.int('words per caption chunk, 1-12', { minimum: 1, maximum: 12 })),
+      case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
+      color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
     }),
     async run(ctx, args) {
@@ -786,9 +802,10 @@ const tools: ToolDef[] = [
   {
     name: 'add_caption_correction',
     description: 'Fix a misheard word or phrase in the captions (e.g. from "cloud" to "Claude"). from = exactly as transcribed. A single word is replaced EVERYWHERE it appears, so when the same word is right elsewhere ("script"), give the whole misheard phrase instead ("type script" -> "TypeScript"). One correction per mistake.',
-    parameters: S.obj({ from: S.str('the wrong text as transcribed'), to: S.str('the correct text') }),
+    parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
     async run(ctx, args) {
-      await mutate(ctx, 'captions', (p) => {
+      await mutate(ctx, 'captions', (p, t) => {
+        if (!findPhrase(t, args.from)) return `phrase not found in the transcript: "${args.from}"`;
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
         c.push({ from: args.from, to: args.to });
         p.captions.corrections = c;
@@ -857,6 +874,9 @@ const tools: ToolDef[] = [
       const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
+      if (startAt !== undefined && validate(S.num(undefined, { minimum: 0 }), startAt).length) {
+        throw new ToolInputError('music startAt must be a finite number >= 0');
+      }
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
@@ -877,7 +897,7 @@ const tools: ToolDef[] = [
     name: 'set_music_automation',
     description: 'Replace music volume changes, each over a word range: gainDb relative to the level (e.g. -6 quieter, +3 swell). Empty list = none.',
     parameters: S.obj({
-      automation: S.arr(S.obj({ fromWord: S.str(), toWord: S.str(), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
+      automation: S.arr(S.obj({ fromWord: S.str(undefined, WORD_ID), toWord: S.str(undefined, WORD_ID), gainDb: S.num('-60 to +24', { minimum: -60, maximum: 24 }) })),
     }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -918,7 +938,11 @@ const tools: ToolDef[] = [
         const results = await searchImages(ctx, args.search).catch((e) => { throw new ToolInputError(`image search is not available (${e?.userMessage ?? e?.message}); use text-pop or make_animation`); });
         let lastErr = '';
         for (const r of results.slice(0, 3)) {
-          try { asset = r.path ? r.path : await fetchImage(ctx, r.url, args.search); break; } catch (e: any) { lastErr = e.message; }
+          try {
+            const candidate = r.path ? r.path : await fetchImage(ctx, r.url, args.search);
+            asset = requireAsset(ctx, candidate).ref;
+            break;
+          } catch (e: any) { lastErr = e.message; }
         }
         if (!asset) throw new ToolInputError(`no usable image found for "${args.search}"${lastErr ? ` (${lastErr})` : ''}; try another search, text-pop, or make_animation`);
       } else if (args.treatment !== 'text-pop') {
@@ -940,7 +964,7 @@ const tools: ToolDef[] = [
     name: 'update_broll',
     description: 'Change an existing b-roll by id. Pass null for anything you are not changing.',
     parameters: S.obj({
-      id: S.str(),
+      id: S.str(undefined, BROLL_ID),
       anchor: S.opt(ANCHOR),
       treatment: S.opt(S.enum(TREATMENTS)),
       asset: S.opt(S.str()),
@@ -998,7 +1022,7 @@ const tools: ToolDef[] = [
   {
     name: 'remove_broll',
     description: 'Remove a b-roll by id.',
-    parameters: S.obj({ id: S.str() }),
+    parameters: S.obj({ id: S.str(undefined, BROLL_ID) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       let says = '';
@@ -1076,7 +1100,7 @@ const tools: ToolDef[] = [
   {
     name: 'set_zoom',
     description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
-    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
+    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-3.0', { minimum: 1, maximum: 3 }) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
@@ -1316,6 +1340,17 @@ function stripNulls<T extends Record<string, any>>(o: T): T {
   return Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v !== null && v !== undefined)) as T;
 }
 
+// Direct ToolDef callers must pass the same checks as model calls through executeTool.
+for (const tool of tools) {
+  const run = tool.run;
+  tool.run = async (ctx, rawArgs) => {
+    const args = fillNulls(tool.parameters, rawArgs ?? {});
+    const problems = validate(tool.parameters, args);
+    if (problems.length) throw new ToolInputError(`invalid arguments: ${problems.join('; ')}`);
+    return run(ctx, args);
+  };
+}
+
 export const TOOLS: ToolDef[] = tools;
 export const TOOL_NAMES = tools.map((t) => t.name);
 export function toolByName(name: string): ToolDef | undefined {
@@ -1332,11 +1367,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   ctx.state.toolCalls++;
   const tool = toolByName(name);
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
-  const args = fillNulls(tool.parameters as JSONSchema, rawArgs ?? {});
-  const problems = validate(tool.parameters as JSONSchema, args);
-  if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
   try {
-    const out = await tool.run(ctx, args);
+    const out = await tool.run(ctx, rawArgs);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
     const content = typeof out.content === 'string' ? out.content : JSON.stringify(out.content);
     return { content, images: out.images, isError: false, summary: out.summary };

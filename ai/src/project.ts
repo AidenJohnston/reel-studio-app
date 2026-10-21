@@ -17,7 +17,7 @@ export interface Transcript { words: Word[]; language?: string; [k: string]: unk
 
 export interface CaptionStyle {
   preset?: string; font?: string; size?: number; maxWords?: number;
-  case?: 'upper' | 'lower' | 'sentence' | 'as-is' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
+  case?: 'upper' | 'lower' | 'as-is' | 'title' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
   [k: string]: unknown;
 }
 export interface CaptionCorrection { from: string; to: string }
