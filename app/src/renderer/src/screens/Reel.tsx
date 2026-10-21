@@ -12,6 +12,8 @@ import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
+import { VersionSwitch } from '../components/VersionSwitch'
+import { versionChanges } from '../../../shared/versions'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -42,6 +44,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
+  // The version the person last picked in the switcher. Every pick (ask) starts it playing, with sound.
+  const [picked, setPicked] = useState<{ n: number; ask: number } | null>(null)
   const [note, setNote] = useState('')
   // The running job (a note, a re-render), folded from its events (shared/live.ts). null = nothing running.
   const [job, setJob] = useState<LiveState | null>(null)
@@ -141,9 +145,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   const aiOff = !provider || !provider.connected || provider.id === 'none'
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
-  // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
-  const versionNote = new Map<number, string>()
-  for (const m of d.chat) if (m.from === 'editor' && m.version) versionNote.set(m.version, m.text)
 
   const send = async () => {
     const text = note.trim()
@@ -300,7 +301,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             key={changePreview ?? version?.video ?? 'none'}
             src={changePreview ?? version?.video ?? null}
             poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
+            autoPlayMuted={!!changePreview || (fresh && !picked && version?.n === d.versions[d.versions.length - 1]?.n)}
+            playRequest={!changePreview && picked && picked.n === version?.n ? picked.ask : undefined}
             subtitle={drawer === 'captions' && preview ? preview : null}
             still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
             instagram={igOverlay}
@@ -341,22 +343,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               </button>
             )}
           </div>
-          {d.versions.length > 0 && (
-            <div className="chips" data-testid="versions" role="radiogroup" aria-label="Versions">
-              {d.versions.map((v) => (
-                <button
-                  key={v.n}
-                  role="radio"
-                  aria-checked={v.n === version?.n}
-                  className={`chip${v.n === version?.n ? ' active' : ''}`}
-                  onClick={() => setSelected(v.n)}
-                  title={versionNote.get(v.n)}
-                >
-                  {v.n === 0 ? 'Preview' : `Version ${v.n}`}
-                </button>
-              ))}
-            </div>
-          )}
           {job && (
             // Right above the greyed buttons, so the reason is next to what it explains (grandma3 #10).
             <p className="export-wait" data-testid="export-wait">
@@ -378,12 +364,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <Icon name="back" size={16} /> My videos
               </button>
               {renaming === null ? (
-                <div className="row" style={{ gap: 4 }}>
+                <div className="row" style={{ gap: 2 }}>
                   <h1 className="reel-title" title="Click to rename" onClick={() => setRenaming(d.title)} data-testid="title">
                     {d.title}
                   </h1>
-                  <button className="btn small ghost" onClick={() => setRenaming(d.title)} data-testid="rename">
-                    Rename
+                  <button className="icon-btn rename-btn" onClick={() => setRenaming(d.title)} aria-label="Rename" title="Rename" data-testid="rename">
+                    <Icon name="pencil" size={16} />
                   </button>
                 </div>
               ) : (
@@ -400,6 +386,17 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     if (e.key === 'Escape') setRenaming(null)
                   }}
                   data-testid="title-input"
+                />
+              )}
+              {version && (
+                <VersionSwitch
+                  versions={d.versions}
+                  shown={version.n}
+                  changes={versionChanges(d.chat)}
+                  onPick={(n) => {
+                    setSelected(n)
+                    setPicked((p) => ({ n, ask: (p?.ask ?? 0) + 1 }))
+                  }}
                 />
               )}
             </div>

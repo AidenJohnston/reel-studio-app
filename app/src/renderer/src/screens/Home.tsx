@@ -73,7 +73,7 @@ export function Home({ go }: { go: Go }) {
                 <div className="card-title">{middle(p.title)}</div>
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
                   <span className={`badge ${p.status}`} data-testid="card-status">
-                    {p.status === 'ready' && p.version ? `Ready · Version ${p.version}` : STATUS[p.status]}
+                    {STATUS[p.status]}
                   </span>
                 </div>
                 <div className="muted-sm" style={{ marginTop: 6 }}>{niceDate(p.updatedAt)}</div>
