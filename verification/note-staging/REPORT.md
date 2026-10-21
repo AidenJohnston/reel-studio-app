@@ -88,6 +88,8 @@ Seven inverse properties establish reachable commit, stale refusal, two recovery
 
 ## Evidence and reproduction
 
+See the [maintainer guide](README.md) for prerequisites, source-digest review, and model updates.
+
 The full 33-case suite matched all recorded outcomes against `cf379c5`. The baseline explored 1,141,266 generated states and 819,662 distinct states to depth 101. Recovered equality explored 404,449 distinct states. External-credit preservation explored 804,336 distinct states. Mixed-orphan recovery explored 521 distinct states. All 18 mutants produced their named counterexamples, and all seven reachability witnesses were reached. The expected immediate-equality failure and accepted legacy exception reproduced.
 
 From the repository root:

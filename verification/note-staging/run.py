@@ -31,7 +31,7 @@ def source_check():
     if changed:
         raise RuntimeError("Source/model review required since " + coverage["syncCommit"]
                            + ":\n" + "\n".join(changed)
-                           + "\nFollow .claude/skills/verify-note-staging/SKILL.md.")
+                           + "\nFollow verification/note-staging/README.md.")
     return coverage["syncCommit"]
 
 
