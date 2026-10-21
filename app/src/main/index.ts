@@ -1,6 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { assertIpcSender, validateIpcArgs } from './ipc-guard'
 import {
   binDir,
   engineDir,
@@ -57,6 +59,9 @@ import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDra
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
+const rendererUrl = !app.isPackaged && process.env.ELECTRON_RENDERER_URL
+  ? process.env.ELECTRON_RENDERER_URL
+  : pathToFileURL(join(__dirname, '../renderer/index.html')).href
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
 
 registerMediaScheme()
@@ -155,6 +160,8 @@ type Handler = (e: IpcMainInvokeEvent, ...args: any[]) => unknown
 function handle(channel: string, fn: Handler): void {
   ipcMain.handle(channel, async (e, ...args) => {
     try {
+      assertIpcSender(e, win?.webContents, rendererUrl)
+      validateIpcArgs(channel, args)
       return { ok: true, value: await fn(e, ...args) }
     } catch (err) {
       const u = toUserError(err)
@@ -319,6 +326,8 @@ function registerIpc(): void {
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
   ipcMain.on('app:startDrag', (e, file: string) => {
     try {
+      assertIpcSender(e, win?.webContents, rendererUrl)
+      validateIpcArgs('app:startDrag', [file])
       startDragOut(e.sender, file, [reelStudioRoot(), projectsDir()])
     } catch (err) {
       log(`[drag] ${String(err)}`)
