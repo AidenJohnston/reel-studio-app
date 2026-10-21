@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
 import { projectDir, readAppState } from '../src/main/store'
 import { versionChanges } from '../src/shared/versions'
-import type { VersionInfo } from '../src/shared/api'
+import type { ProjectJson, VersionInfo } from '../src/shared/api'
 import { setupPaths } from './helpers'
 
 const version = (n: number): VersionInfo => ({ n, video: '', videoPath: '', draft: false, cover: null, createdAt: '' })
@@ -13,11 +13,14 @@ const version = (n: number): VersionInfo => ({ n, video: '', videoPath: '', draf
 it('records what made a version when its final render made it, and the menu shows only that record', async () => {
   setupPaths()
   const slug = 'made'
+  // what a final render leaves behind: versions/vN/export.mp4, and project.json's `version` set to N
   const finalRender = (n: number): void => {
     mkdirSync(join(projectDir(slug), 'versions', `v${n}`), { recursive: true })
     writeFileSync(join(projectDir(slug), 'versions', `v${n}`, 'export.mp4'), 'x')
+    const project: ProjectJson = { schemaVersion: 1, id: slug, title: 'Made', slug, createdAt: '2026-10-21T09:00:00.000Z', updatedAt: '2026-10-21T09:00:00.000Z', version: n }
+    writeFileSync(join(projectDir(slug), 'project.json'), JSON.stringify(project, null, 2))
   }
-  mkdirSync(projectDir(slug), { recursive: true })
+  finalRender(1) // the first edit
   const jobs = createJobManager(() => undefined, () => undefined)
   const run = async (...args: Parameters<typeof jobs.start>): Promise<void> => {
     jobs.start(...args)
