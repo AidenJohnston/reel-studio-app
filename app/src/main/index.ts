@@ -50,7 +50,7 @@ import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, PlacedWord, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
-import { aiNoteText, checkMoment, parseMoment, placeWords, type RenderSegment } from '../shared/moments'
+import { aiNoteText, checkMoment, momentRoute, parseMoment, placeWords, typedMoment, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
@@ -446,11 +446,15 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown) => {
-    const note = String(text ?? '').trim()
+    const typedText = String(text ?? '').trim()
+    // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
+    const typed = at !== undefined ? typedMoment(typedText) : null
+    let note = typed ? typed.rest : typedText
     const dir = projectDir(slug)
     // never trust the page: every attached ref is re-read from THIS project's own sidecars
     const files = await checkNoteAttachments(dir, attachments)
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+    if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     let moment: NoteMoment | undefined
     if (at !== undefined) {
@@ -460,16 +464,17 @@ function registerIpc(): void {
       } catch (e) {
         throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
       }
+      if (typed) asked = { ...asked, at: typed.at }
       // checked against the render it names, the one the pop-up read its words from; its words and
       // quote come from that render, never from the page
       const c = checkMoment(asked, await readTimeline(slug, asked.version))
       if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
       moment = c.moment
       if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
+      // A setting global by nature ("smaller captions") goes without its moment, which would hide it
+      // from applyNote's no-model fast path; the chat shows the words as typed.
+      if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
     }
-    // A whole-reel setting ("smaller captions") goes without its moment: the moment in the AI's text
-    // would hide it from applyNote's no-model fast path. The pop-up already shows it as Whole reel.
-    if (moment && !files.length && (await ai.wholeReelSetting(dir, note))) moment = undefined
     const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat), moment)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -500,7 +505,6 @@ function registerIpc(): void {
     })
     return { jobId }
   })
-  handle('projects:wholeReelSetting', async (_e, slug: string, text: string) => ai.wholeReelSetting(projectDir(slug), String(text ?? '').trim()))
   handle('projects:timeline', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of your video first.' }
     return readTimeline(slug, n)

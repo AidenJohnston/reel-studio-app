@@ -78,6 +78,22 @@ export function typedMoment(text: string): { at: number; rest: string } | null {
   return m ? { at: Number(m[1]) * 60 + Number(m[2]), rest: text.trim().slice(m[0].length) } : null
 }
 
+// Words that point at a place in the video: the note is about that place, even when the rest of it
+// reads like a whole-reel setting ("smaller captions here").
+const LOCAL = /\b(here|this part|this bit|at this|right now|this moment|in this section)\b/i
+
+/**
+ * How a "Just here" note goes, from the person's words as typed. A typed time ("At 0:05: ...") or a
+ * word for a place keeps the moment for the full editor. Otherwise a setting that is global by
+ * nature ("smaller captions", "quieter music": `isSetting`, the AI package's own fast-note check)
+ * goes without the moment, so the editor does it at once as it does on main. Anything else keeps
+ * the moment.
+ */
+export async function momentRoute(typed: string, isSetting: (words: string) => Promise<boolean>): Promise<'fast' | 'moment'> {
+  if (typedMoment(typed) || LOCAL.test(typed)) return 'moment'
+  return (await isSetting(typed.trim())) ? 'fast' : 'moment'
+}
+
 export const NO_TIMELINE = "I can't tell which words play here in this version. Choose Whole reel, or switch to your newest version."
 export const noSpeech = (at: number): string => `I can't tell which words play at ${clock(at)}. Pick a moment where you're talking, or choose Whole reel.`
 

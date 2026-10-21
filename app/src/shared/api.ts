@@ -375,8 +375,6 @@ export interface ReelApi {
     note(slug: string, text: string, attachments?: string[], moment?: NoteMoment): Promise<{ jobId: string | null }>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
      * fresh from that render's manifest each call. null when the render left no timeline to read. */
-    /** The words are a setting for the whole reel ("smaller captions") that the editor does at once. */
-    wholeReelSetting(slug: string, text: string): Promise<boolean>
     timeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.

@@ -61,15 +61,6 @@ describe('fast notes (no model turns)', () => {
     expect((await loadProject(dir)).notes).toEqual([expect.objectContaining({ text: 'make the captions smaller', applied: ['captions'] })]);
   });
 
-  it('tells the app which words are a whole-reel setting, before a moment would hide them', async () => {
-    const { dir, host, settingsDir } = await setup();
-    const ai = createAI({ host, settingsDir });
-    expect(await ai.wholeReelSetting(dir, 'smaller captions')).toBe(true);
-    expect(await ai.wholeReelSetting(dir, 'cut this part')).toBe(false);
-    // the text the AI reads for a "Just here" note: the fast path never sees it as a setting
-    expect(await ai.wholeReelSetting(dir, 'At 0:05 (around "hi", words w3): smaller captions')).toBe(false);
-  });
-
   it('a note the fast path cannot express goes to the AI, with the project preloaded', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([

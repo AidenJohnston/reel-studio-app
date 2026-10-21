@@ -1,6 +1,8 @@
 // Notes asked at a moment (shared/moments.ts): the words on screen, the note text, the scrub-bar marks.
 import { describe, expect, it } from 'vitest'
-import { aiNoteText, checkMoment, groupMarks, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
+import { planFastNote } from '../../ai/src/fastnote'
+import { withDefaults } from '../../ai/src/project'
+import { aiNoteText, checkMoment, groupMarks, momentRoute, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
 import type { ChatMessage, Word } from '../src/shared/api'
 
 const you = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id, from: 'you', text, at: '', ...extra })
@@ -62,6 +64,21 @@ describe('notes asked at a moment', () => {
     })
     expect(checkMoment({ ...sent, at: Number.MAX_VALUE }, render)).toHaveProperty('refuse')
     expect(checkMoment({ ...sent, at: 51 }, render)).toEqual({ refuse: "There's no 0:51 in this video. It's 0:50 long." })
+  })
+
+  it('sends a Just here note to the fast path only for a setting global by nature, with no place in it', async () => {
+    // the AI package's own fast-note check, on a project with captions and a song
+    const p = withDefaults({})
+    p.music = { ...p.music, enabled: true, track: 'Library/Music/a.mp3', level: 'under-voice' }
+    const isSetting = async (words: string) => !!planFastNote(words, p)
+    const table: [string, 'fast' | 'moment'][] = [
+      ['smaller captions', 'fast'],
+      ['smaller captions here', 'moment'],
+      ['At 0:05: smaller captions', 'moment'],
+      ['quieter music here', 'moment'],
+      ['cut this', 'moment']
+    ]
+    for (const [typed, route] of table) expect([typed, await momentRoute(typed, isSetting)]).toEqual([typed, route])
   })
 
   it('marks each note by its own job, never by the reply to a later note', () => {
