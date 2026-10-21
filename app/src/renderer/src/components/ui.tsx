@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths } from '../api'
 import { Icon } from './icons'
 
-export function Progress({ pct, done, label }: { pct: number; done?: boolean; label?: string }) {
+export function Progress({ pct, done, paused, label }: { pct: number; done?: boolean; paused?: boolean; label?: string }) {
   return (
-    <div className={`progress${done ? ' done' : ''}`} role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <div className={`progress${done ? ' done' : ''}${paused ? ' paused' : ''}`} role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       <div style={{ width: `${Math.max(3, Math.min(100, pct))}%` }} />
     </div>
   )

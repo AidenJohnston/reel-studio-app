@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, ROOT, SHOTS, dropFiles, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, ROOT, SHOTS, dropFiles, launch, listeningState, makeMedia, passFirstRun, passMacStage, shot } from './helpers'
 
 test.beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true })
@@ -23,17 +23,13 @@ test('make a reel end to end', async () => {
   await expect(page.getByText('Welcome to Reel Studio')).toBeVisible()
   await shot(page, '01-firstrun-welcome')
   await page.getByTestId('get-started').click()
+  await passMacStage(page)
   // "One download" before the model is here, "Ready to listen" once it is (grandma3 #1).
   await expect(page.getByTestId('model-heading')).toHaveText(/One download, about 500 MB|Ready to listen/)
-  await expect(page.getByTestId('model-next').or(page.getByTestId('download-model'))).toBeVisible()
-  if (await page.getByTestId('model-next').isVisible()) await expect(page.getByTestId('model-heading')).toHaveText('Ready to listen')
+  // Use an installed model if there is one; else "download" (instant with the stand-in engine), which moves on by itself.
+  const state = await listeningState(page)
   await shot(page, '02-firstrun-model')
-  // Use an installed model if there is one; else "download" (instant with the stand-in engine).
-  const next = page.getByTestId('model-next')
-  const download = page.getByTestId('download-model')
-  await expect(next.or(download)).toBeVisible()
-  if (await next.isVisible()) await next.click()
-  else await download.click()
+  await page.getByTestId(state === 'download' ? 'download-model' : 'model-next').click()
   await expect(page.getByText('Connect your AI editor')).toBeVisible()
   await shot(page, '03-firstrun-connect')
   await page.getByTestId('skip').click()

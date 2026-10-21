@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppInfo } from '../../../shared/api'
+import type { AppInfo, NotifyAccess } from '../../../shared/api'
 import { RELEASES_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
@@ -24,6 +24,29 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
     } catch (e) {
       setCheckUpdates(!on)
       notify(userMessage(e), 'error')
+    }
+  }
+
+  // For anyone who skipped "Tell me when a video is ready" in setup.
+  const [alerts, setAlerts] = useState<NotifyAccess | null>(null)
+  // Only while a request is out. "asking" can also mean macOS never answered; the switch stays usable then.
+  const [requesting, setRequesting] = useState(false)
+  useEffect(() => {
+    reel.perm
+      .status()
+      .then((st) => setAlerts(st.notifications))
+      .catch(() => {})
+  }, [])
+  const toggleAlerts = async (on: boolean) => {
+    setAlerts(on ? 'asking' : 'off')
+    setRequesting(true)
+    try {
+      setAlerts((await reel.perm.setNotifications(on)).notifications)
+    } catch (e) {
+      setAlerts(on ? 'off' : 'on')
+      notify(userMessage(e), 'error')
+    } finally {
+      setRequesting(false)
     }
   }
 
@@ -74,6 +97,43 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
           </button>
         </div>
       </section>
+
+      {alerts !== null && alerts !== 'unsupported' && (
+        <section className="panel">
+          <h2>When a video is ready</h2>
+          <label className="toggle" style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={alerts !== 'off'}
+              disabled={requesting}
+              onChange={(e) => void toggleAlerts(e.target.checked)}
+              data-testid="notifications-toggle"
+            />
+            Tell me with a notification
+          </label>
+          <p className="muted-sm" style={{ margin: '2px 0 0 30px' }} data-testid="notifications-note">
+            {alerts === 'asking'
+              ? 'Your Mac asks in the top-right corner of the screen. Choose Allow.'
+              : alerts === 'blocked'
+                ? 'Notifications are off for Reel Studio on this computer. Turn them on in your system settings, then press Try again.'
+                : 'So you can do other things while your video is being made.'}
+          </p>
+          {alerts === 'asking' && !requesting && (
+            <div className="row" style={{ marginTop: 10, marginLeft: 30 }}>
+              <button className="btn small ghost" onClick={() => void toggleAlerts(true)}>
+                Ask again
+              </button>
+            </div>
+          )}
+          {alerts === 'blocked' && (
+            <div className="row" style={{ marginTop: 10, marginLeft: 30 }}>
+              <button className="btn small" onClick={() => void toggleAlerts(true)}>
+                Try again
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       {info.dev && (
         <section className="panel">

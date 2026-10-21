@@ -5,6 +5,7 @@ import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
 import { toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
+import type { WorkGate } from './work-gate'
 
 /** A job reports with the shared contract. A render's `file` becomes a playable `video` via `toVideo`. */
 export type Emit = (e: JobUpdate) => void
@@ -36,7 +37,13 @@ interface Running {
   done: Promise<void>
 }
 
-export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
+export function createJobManager(
+  broadcast: (e: JobEvent) => void,
+  log: (s: string) => void,
+  progress?: ProgressDeps,
+  toVideo?: ToVideo,
+  gate?: WorkGate
+) {
   const jobs = new Map<string, Running>()
 
   function forSlug(slug: string): Running | undefined {
@@ -73,6 +80,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     tick.unref?.()
 
     job.done = (async () => {
+      const leaveGate = await gate?.enterJob()
       try {
         // Inside the try: if even this fails, the user gets an error instead of a job that never ends.
         if (slug) {
@@ -147,6 +155,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       } finally {
         clearInterval(tick)
         jobs.delete(id)
+        leaveGate?.()
       }
     })()
     return id

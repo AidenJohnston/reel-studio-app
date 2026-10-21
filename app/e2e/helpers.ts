@@ -38,6 +38,8 @@ export async function launch(extraEnv: Record<string, string> = {}): Promise<{ a
     REELSTUDIO_USER_DATA: USER_DATA,
     REELSTUDIO_ROOT: ROOT,
     REELSTUDIO_MODELS_DIR: process.env.REELSTUDIO_MODELS_DIR ?? join(BASE, 'models'),
+    // An empty Hugging Face cache: a listening model on this computer must never be reused into a test profile.
+    HF_HUB_CACHE: join(BASE, 'hf-cache'),
     // REELSTUDIO_E2E_AI=package runs against the installed @reelstudio/ai instead of the mock.
     REELSTUDIO_MOCK_AI: process.env.REELSTUDIO_E2E_AI === 'package' ? '0' : '1',
     FAKE_ENGINE_SLOW: '3'
@@ -65,17 +67,37 @@ export async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) })
 }
 
+/** Other systems skip the "Your Mac" stage. */
+export async function passMacStage(page: Page): Promise<void> {
+  const mac = page.getByTestId('stage-mac')
+  await expect(mac.or(page.getByTestId('model-heading'))).toBeVisible()
+  if (!(await mac.isVisible())) return
+  await page.getByTestId('perm-folder-allow').click()
+  await expect(page.getByTestId('perm-folder')).toHaveAttribute('data-state', 'allowed')
+  await page.getByTestId('mac-continue').click()
+  await expect(page.getByTestId('model-heading')).toBeVisible()
+}
+
+/** Waits for the Listening stage to settle. */
+export async function listeningState(page: Page): Promise<'download' | 'here'> {
+  const download = page.getByTestId('download-model')
+  await expect(download.or(page.getByTestId('model-next'))).toBeVisible({ timeout: 30_000 })
+  return (await download.isVisible()) ? 'download' : 'here'
+}
+
+export async function passListeningStage(page: Page): Promise<void> {
+  await page.getByTestId((await listeningState(page)) === 'download' ? 'later' : 'model-next').click()
+  await expect(page.getByText('Connect your AI editor')).toBeVisible()
+}
+
 /** Gets past the first-run screens if this is a fresh profile. */
 export async function passFirstRun(page: Page): Promise<void> {
   const welcome = page.getByTestId('get-started')
   await expect(welcome.or(page.getByText('Your videos'))).toBeVisible()
   if (await welcome.isVisible()) {
     await welcome.click()
-    // A model already on this computer shows "Next"; otherwise "Do this later".
-    // Wait for the model box to know (it hides "Do this later" once the model is found).
-    const ready = page.getByTestId('model-next')
-    await expect(ready.or(page.getByTestId('download-model'))).toBeVisible()
-    await ((await ready.isVisible()) ? ready : page.getByTestId('later')).click()
+    await passMacStage(page)
+    await passListeningStage(page)
     await page.getByTestId('skip').click()
   }
   await expect(page.getByText('Your videos')).toBeVisible()
