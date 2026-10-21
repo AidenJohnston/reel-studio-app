@@ -284,12 +284,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
-  // none over a change's quick preview: it is cut differently from the saved version they are placed on
-  const marks = !changePreview && timeline && timeline.video === shownVideo ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
+  // only on the saved version on screen: a change's quick preview (a separate draft file) is cut differently
+  const marks = timeline && timeline.video === shownVideo ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
   // Hold for original shows the raw take at the moment on screen, by the shown version's own segments (same
   // rule as the marks). Without them, the player starts the first take from 0:00 as it used to.
   const originalAt = (t: number) => {
-    if (changePreview || !timeline || timeline.video !== shownVideo) return null
+    if (!timeline || timeline.video !== shownVideo) return null
     const at = sourceAt(timeline.segments, t)
     const src = at && d.sourceVideos[at.source]
     return src ? { src, at: at.at } : null

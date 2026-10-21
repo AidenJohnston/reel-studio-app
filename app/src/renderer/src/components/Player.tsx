@@ -377,15 +377,14 @@ export function PhonePlayer({
     r.currentTime = at?.at ?? 0
     void r.play().catch(() => {})
     const show = () => setHold('on')
-    if (r.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !r.seeking) {
-      show()
-      return
-    }
-    setHold('loading')
-    // a different take's file: before its metadata the time waits, and it shows once it plays
-    r.addEventListener('seeked', show, { once: true })
-    r.addEventListener('playing', show, { once: true })
     r.addEventListener('error', fail, { once: true })
+    if (r.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !r.seeking) show()
+    else {
+      setHold('loading')
+      // a different take's file: before its metadata the time waits, and it shows once it plays
+      r.addEventListener('seeked', show, { once: true })
+      r.addEventListener('playing', show, { once: true })
+    }
     return () => {
       r.removeEventListener('seeked', show)
       r.removeEventListener('playing', show)
@@ -401,6 +400,8 @@ export function PhonePlayer({
     const timer = window.setTimeout(() => setHold(hold === 'loading' ? 'slow' : 'off'), hold === 'loading' ? 250 : 2000)
     return () => window.clearTimeout(timer)
   }, [hold])
+
+  const holdTag = hold === 'on' ? 'Original' : hold === 'slow' ? 'Loading the original' : hold === 'failed' ? "Couldn't load the original" : null
 
   return (
     <div
@@ -481,11 +482,10 @@ export function PhonePlayer({
             {still && subtitle && !holdingOriginal && (
               <Video className="raw-video on" key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
-            {(hold === 'on' || hold === 'slow' || hold === 'failed') && (
-              <div className="phone-tag" role="status" data-testid="original-tag">
-                {hold === 'on' ? 'Original' : hold === 'slow' ? 'Loading the original' : "Couldn't load the original"}
-              </div>
-            )}
+            {/* always on the page, so a screen reader announces each change of its words */}
+            <div className={holdTag ? 'phone-tag' : undefined} role="status" data-testid="original-tag">
+              {holdTag}
+            </div>
             {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={width} testid="sub-preview" />}
             {instagram && !holdingOriginal && <InstagramOverlay caption={caption} />}
             {!playing && !holdingOriginal && !(still && subtitle) && (
