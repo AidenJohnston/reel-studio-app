@@ -11,6 +11,17 @@ import { useNotify } from '../App'
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
   const notify = useNotify()
   const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null)
+  const [savingExports, setSavingExports] = useState(false)
+  const toggleExports = async (on: boolean) => {
+    setSavingExports(true)
+    try {
+      onInfo(await reel.app.setFasterExports(on))
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    } finally {
+      setSavingExports(false)
+    }
+  }
   useEffect(() => {
     reel.update
       .status()
@@ -58,6 +69,18 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
           Turns your voice into words. About 500 MB, one time only.
         </p>
         <ModelDownload />
+      </section>
+
+      <section className="panel">
+        <h2>Exports</h2>
+        <label className="toggle" style={{ minHeight: 44 }}>
+          <input type="checkbox" checked={info.fasterExports} disabled={savingExports}
+            onChange={(e) => void toggleExports(e.target.checked)} aria-describedby="export-rate-help" data-testid="faster-exports" />
+          Faster exports (30 fps)
+        </label>
+        <p id="export-rate-help" className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
+          For new videos. Leave off to keep smoother motion from 60 fps footage.
+        </p>
       </section>
 
       <section className="panel">

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from fractions import Fraction
 from pathlib import Path
 
 from . import tools
@@ -15,16 +16,19 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".aif", "
 HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}
 
 
+def _rate(raw) -> float:
+    try:
+        val = float(Fraction(raw or "0/0"))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+    return round(val, 3) if 0 < val < 1000 else 0.0
+
+
 def _fps(stream) -> float:
     for key in ("avg_frame_rate", "r_frame_rate"):
-        raw = stream.get(key) or "0/0"
-        num, _, den = raw.partition("/")
-        try:
-            val = float(num) / float(den or 1)
-        except (ValueError, ZeroDivisionError):
-            val = 0.0
-        if 0 < val < 1000:
-            return round(val, 3)
+        val = _rate(stream.get(key))
+        if val:
+            return val
     return 0.0
 
 
@@ -69,6 +73,8 @@ def probe(path: Path, quick: bool = False) -> dict:
     v = next((s for s in streams if s.get("codec_type") == "video"
               and not (s.get("disposition") or {}).get("attached_pic")), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    nominal_rate = _rate(v.get("r_frame_rate")) if v else 0.0
+    average_rate = _rate(v.get("avg_frame_rate")) if v else 0.0
     duration = float(fmt.get("duration") or 0.0)
     out = {
         "path": str(path),
@@ -76,6 +82,7 @@ def probe(path: Path, quick: bool = False) -> dict:
         "hasVideo": v is not None,
         "hasAudio": a is not None,
         "fps": _fps(v) if v else 0.0,
+        "variableFrameRate": bool(v) and (not nominal_rate or not average_rate or nominal_rate != average_rate),
         "width": int(v.get("width") or 0) if v else 0,
         "height": int(v.get("height") or 0) if v else 0,
         "rotation": _rotation(v) if v else 0,

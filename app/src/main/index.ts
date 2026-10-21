@@ -95,7 +95,7 @@ const runEngine: RunEngine = createEngineRunner({
 
 const host: EngineHost = {
   runEngine,
-  renderAnimation: (template, params, outPath) => renderAnimation(template, params, outPath),
+  renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
   reelStudioRoot
 }
@@ -184,6 +184,7 @@ async function appInfo(): Promise<AppInfo> {
       process.platform
     ),
     firstRunDone: s.firstRunDone,
+    fasterExports: s.fasterExports,
     engine: { mode: engineMode(), dir: engineDir(), python: pythonExe() },
     ai: aiSource,
     test: TEST,
@@ -195,10 +196,11 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   const dir = projectDir(slug)
   return jobs.start(slug, 'first-edit', async (emit, signal) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
+      const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
+        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...initArgs.files],
         (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
       )
@@ -307,6 +309,11 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:setFasterExports', async (_e, on: boolean) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'Choose whether to use faster exports.' }
+    await saveSettings({ fasterExports: on })
+    return appInfo()
+  })
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
