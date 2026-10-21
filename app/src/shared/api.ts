@@ -207,11 +207,41 @@ export interface DropResult {
 }
 
 export interface ProviderInfo {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none'
+  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string
   error?: UserError
+  connectionId?: string
+}
+
+export type ConnectionKind = 'anthropic' | 'openai'
+
+/** The key never comes back to the page, only `hasKey`. */
+export interface ConnectionInfo {
+  id: string
+  label: string
+  kind: ConnectionKind
+  baseURL: string
+  model: string
+  hasKey: boolean
+  active: boolean
+}
+
+export interface ConnectionInput {
+  id?: string
+  label: string
+  kind: ConnectionKind
+  baseURL: string
+  model: string
+  /** empty keeps the stored key when editing */
+  key?: string
+}
+
+export interface SaveConnectionResult {
+  status: ProviderInfo
+  connection?: ConnectionInfo
+  error?: UserError & { field?: 'label' | 'address' | 'key' | 'model' }
 }
 
 export interface AppInfo {
@@ -323,7 +353,7 @@ export interface ReelApi {
   ai: {
     providers(): Promise<ProviderInfo[]>
     active(): Promise<ProviderInfo>
-    setActive(id: ProviderInfo['id']): Promise<void>
+    setActive(id: ProviderInfo['id'], connectionId?: string): Promise<void>
     signInChatGPT(): Promise<ProviderInfo>
     cancelSignIn(): Promise<void>
     signOutChatGPT(): Promise<void>
@@ -332,6 +362,13 @@ export interface ReelApi {
     claudeCodeStatus(): Promise<ClaudeCodeInfo>
     /** Opens a terminal window where the person signs in to their Claude Code app themselves. */
     openClaudeSignIn(): Promise<void>
+    connections(): Promise<ConnectionInfo[]>
+    saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
+    removeConnection(id: string): Promise<void>
+    /** `suggested` is null when no listed model is one Reel Studio knows: the person picks. */
+    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
+    /** Returns unsubscribe. */
+    onChange(cb: (p: ProviderInfo) => void): () => void
   }
   projects: {
     list(): Promise<ProjectSummary[]>

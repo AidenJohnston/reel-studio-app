@@ -3,6 +3,7 @@ import type { ClaudeCodeInfo, ModelStatus, ProviderInfo } from '../../../shared/
 import { reel, userMessage } from '../api'
 import { Progress, Spinner } from './ui'
 import { Icon } from './icons'
+import { Connections } from './Connections'
 
 /** What works with no AI at all. One honest line, shown wherever we ask people to connect. */
 export const WITHOUT_AI =
@@ -21,8 +22,8 @@ const WAIT_FOR_MS = 10 * 60_000
 /**
  * Connect your AI editor, for normal people. Whatever the person already has comes first: a signed-in Claude Code
  * app makes "Use Claude (your Claude Code app)" the big button; otherwise "Sign in with ChatGPT" is, with the
- * Claude choice below it in its real state (sign in, or how to install it). "Use an Anthropic API key" stays the
- * quiet advanced choice. Used by the Connect screen, Settings and First run.
+ * Claude choice below it in its real state (sign in, or how to install it). "Use an Anthropic API key" and "Use
+ * your own AI server" stay the quiet advanced choices. Used by the Connect screen, Settings and First run.
  *
  * Reel Studio never sees the Claude sign-in: it happens in Anthropic's own app, in a terminal window, and the app
  * only asks that app "signed in or not?".
@@ -326,6 +327,7 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
           </p>
         </>
       )}
+      {choices && <Connections onConnected={done} />}
       {active?.error && !error && <div className="banner error">{active.error.userMessage}</div>}
       {error && (
         <div className="banner error">
@@ -374,8 +376,8 @@ export function DevProviders() {
   )
 }
 
-/** One-time speech model download with progress. */
-export function ModelDownload({ onReady }: { onReady?: () => void }) {
+/** One-time speech model download with progress. `secondary` on Settings, where the AI editor is the main action. */
+export function ModelDownload({ onReady, secondary }: { onReady?: () => void; secondary?: boolean }) {
   const [s, setS] = useState<ModelStatus | null>(null)
   useEffect(() => {
     reel.model.status().then(setS)
@@ -410,7 +412,7 @@ export function ModelDownload({ onReady }: { onReady?: () => void }) {
           </div>
         </>
       ) : (
-        <button className="btn primary big" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
+        <button className={`btn big${secondary ? '' : ' primary'}`} onClick={() => reel.model.download().then(setS)} data-testid="download-model">
           {s.pct > 0 && s.pct < 100 ? 'Keep downloading' : 'Download'}
         </button>
       )}

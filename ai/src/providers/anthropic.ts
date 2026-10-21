@@ -1,6 +1,7 @@
 // Claude via a pasted API key: Anthropic Messages API, tool use, streaming (official SDK).
 import Anthropic from '@anthropic-ai/sdk';
 import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvider, ToolSchema } from '../types';
+import { mapConnectionError, tookTooLong, unreachable, withoutSecret, wrongAddress } from './connection';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 
@@ -8,9 +9,13 @@ export interface AnthropicOptions {
   apiKey: string;
   model?: string;
   maxTokens?: number;
-  /** test hook: base URL of a mock server */
+  /** a mock server in tests, or the person's own Anthropic-compatible server */
   baseURL?: string;
   fetch?: typeof fetch;
+  /** 'custom': errors are worded for the person's own server, not for Claude's Console */
+  id?: 'claude' | 'custom';
+  maxRetries?: number;
+  timeoutMs?: number;
 }
 
 /** Converts provider-neutral messages to Anthropic content blocks (tool results carry images). */
@@ -99,19 +104,55 @@ export function mapAnthropicError(err: any): AIError {
   return new AIError('claude_error', 'Something went wrong talking to Claude. Try again.', { status, detail: err?.message });
 }
 
+const STREAM_ERROR_STATUS: Record<string, number> = {
+  invalid_request_error: 400, authentication_error: 401, permission_error: 403, not_found_error: 404,
+  rate_limit_error: 429, api_error: 500, overloaded_error: 529,
+};
+
+function mapAnthropicConnectionError(err: any, model: string): AIError {
+  const ctx = { kind: 'anthropic' as const, model };
+  if (err?.name === 'APIConnectionTimeoutError') return tookTooLong(err?.message);
+  if (err?.name === 'APIConnectionError') return unreachable(`${err?.message ?? ''} ${err?.cause?.message ?? ''}`.trim());
+  if (typeof err?.status === 'number') return mapConnectionError(err.status, err.error, ctx, err?.message);
+  // an error event inside the stream has a type but no HTTP status
+  const type: string | undefined = err?.error?.error?.type ?? err?.error?.type;
+  if (type && STREAM_ERROR_STATUS[type]) return mapConnectionError(STREAM_ERROR_STATUS[type], err.error, ctx, err?.message);
+  // an answer that is not a Messages stream at all
+  return wrongAddress(ctx, err?.message);
+}
+
 export class AnthropicProvider implements ModelProvider {
-  readonly id = 'claude' as const;
+  readonly id: 'claude' | 'custom';
   readonly supportsImages = true;
   readonly model: string;
   private client: Anthropic;
   private maxTokens: number;
+  private apiKey: string;
 
   constructor(opts: AnthropicOptions) {
+    this.id = opts.id ?? 'claude';
     this.model = opts.model || DEFAULT_CLAUDE_MODEL;
     this.maxTokens = opts.maxTokens ?? 16000;
-    // baseURL explicit: the SDK otherwise honours ANTHROPIC_BASE_URL, so an env var could send the
-    // user's key to another host
-    this.client = new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseURL ?? 'https://api.anthropic.com', fetch: opts.fetch as any, maxRetries: 2 });
+    this.apiKey = opts.apiKey;
+    // Everything explicit, because the SDK reads the environment: ANTHROPIC_BASE_URL (could send the key to another
+    // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (can replace x-api-key or add
+    // credentials), ANTHROPIC_LOG (debug logs print error bodies that may echo the key), and with no key it looks
+    // for credentials on disk. The fetch below sends exactly this key and no other credential header.
+    const base = opts.fetch ?? fetch;
+    const onlyThisKey = ((input: any, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      for (const h of ['authorization', 'proxy-authorization', 'cookie']) headers.delete(h);
+      headers.set('x-api-key', opts.apiKey);
+      return base(input, { ...init, headers });
+    }) as typeof fetch;
+    this.client = new Anthropic({
+      apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? 'https://api.anthropic.com', fetch: onlyThisKey as any,
+      logLevel: 'off', maxRetries: opts.maxRetries ?? 2, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    });
+  }
+
+  private mapError(err: any): AIError {
+    return withoutSecret(this.id === 'custom' ? mapAnthropicConnectionError(err, this.model) : mapAnthropicError(err), this.apiKey);
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
@@ -130,7 +171,7 @@ export class AnthropicProvider implements ModelProvider {
         .filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
         .map((b) => ({ id: b.id, name: b.name, args: (b.input ?? {}) as Record<string, unknown> }));
       if (msg.stop_reason === 'max_tokens' && !toolCalls.length) {
-        throw new AIError('claude_truncated', 'Claude ran out of room on that step. Try again.', { retryable: true });
+        throw new AIError(this.id === 'custom' ? 'connection_truncated' : 'claude_truncated', `${this.id === 'custom' ? 'The AI' : 'Claude'} ran out of room on that step. Try again.`, { retryable: true });
       }
       const u: any = msg.usage ?? {};
       return { text, toolCalls, raw: { stop_reason: msg.stop_reason }, usage: {
@@ -139,7 +180,7 @@ export class AnthropicProvider implements ModelProvider {
     } catch (err: any) {
       if (err instanceof AIError) throw err;
       if (req.signal?.aborted || err?.name === 'APIUserAbortError') throw new AIError('cancelled', 'Stopped.');
-      throw mapAnthropicError(err);
+      throw this.mapError(err);
     }
   }
 
@@ -148,7 +189,7 @@ export class AnthropicProvider implements ModelProvider {
     try {
       await this.client.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] });
     } catch (err: any) {
-      throw mapAnthropicError(err);
+      throw this.mapError(err);
     }
   }
 }
