@@ -37,6 +37,7 @@ const CHANGE_LABEL: Record<Tab, string> = {
 
 const INSTAGRAM_URL = 'https://www.instagram.com/'
 const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p
+const bannerKey = (slug: string): string => `rs.banner-dismissed.${slug}`
 const IG_KEY = 'rs.instagram-overlay'
 
 export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolean }) {
@@ -52,6 +53,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
@@ -403,6 +405,25 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               ]}
             />
           </div>
+
+          {aiOff && !bannerHidden && (
+            // Why the reel is simpler, and that nothing is locked. The way to connect is the button under the player.
+            <div className="banner" data-testid="ai-banner">
+              <span>No AI editor yet, so I made a simple cut. You can still change anything under Edit it myself.</span>
+              <button
+                className="icon-btn"
+                aria-label="Hide this"
+                title="Hide this"
+                onClick={() => {
+                  localStorage.setItem(bannerKey(slug), '1')
+                  setBannerHidden(true)
+                }}
+                data-testid="banner-close"
+              >
+                <Icon name="x" />
+              </button>
+            </div>
+          )}
 
           <section className="panel did" data-testid="what-i-did">
             <h2>What I did</h2>

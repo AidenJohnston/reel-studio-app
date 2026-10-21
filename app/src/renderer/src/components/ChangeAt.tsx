@@ -192,7 +192,7 @@ export function ChangeAt({
   if (!aiOn)
     return (
       <button className="btn change-btn" onClick={onConnect} data-testid="change-connect">
-        <Icon name="sparkles" size={18} /> Connect an editor to make changes
+        <Icon name="sparkles" size={18} /> Connect an AI editor to ask for changes
       </button>
     )
 

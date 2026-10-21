@@ -113,7 +113,8 @@ test('make a reel end to end', async () => {
 
   // ---- no AI connected: no way to ask for a change, one way to connect ----
   if (aiSource === 'mock') {
-    await expect(page.getByTestId('change-connect')).toHaveText('Connect an editor to make changes')
+    await expect(page.getByTestId('change-connect')).toHaveText('Connect an AI editor to ask for changes')
+    await expect(page.getByTestId('ai-banner')).toContainText('You can still change anything under Edit it myself')
     await expect(page.getByTestId('change-at')).toHaveCount(0)
     await expect(page.getByTestId('sidebar-connect')).toHaveCount(0)
   }
