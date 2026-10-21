@@ -8,10 +8,21 @@
 # together and Finder picks the sharp one on a Retina screen. electron-builder gets the same TIFF.
 set -euo pipefail
 OUT="${1:?usage: render-background.sh OUT_DIR}"
-SVG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/background.svg"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$OUT"
-sips -s format png -z 432 640 "$SVG" --out "$OUT/background.png" >/dev/null
-sips -s format png -z 864 1280 "$SVG" --out "$OUT/background@2x.png" >/dev/null
+# sips draws an <image> only from a data: URL, not from a file path, so inline each image file the SVG names.
+python3 - "$DIR/background.svg" "$OUT/background.svg" <<'PY'
+import base64, re, sys
+from pathlib import Path
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+def inline(m):
+    f = src.parent / m.group(1)
+    return f'href="data:{types[f.suffix.lower()]};base64,{base64.b64encode(f.read_bytes()).decode()}"'
+dst.write_text(re.sub(r'href="([^":]+\.(?:png|jpe?g))"', inline, src.read_text()))
+PY
+sips -s format png -z 432 640 "$OUT/background.svg" --out "$OUT/background.png" >/dev/null
+sips -s format png -z 864 1280 "$OUT/background.svg" --out "$OUT/background@2x.png" >/dev/null
 # tiffutil only pairs the images as 1x/2x when the big one says 144 dpi.
 sips -s dpiWidth 144 -s dpiHeight 144 "$OUT/background@2x.png" >/dev/null
 tiffutil -cathidpicheck "$OUT/background.png" "$OUT/background@2x.png" -out "$OUT/background.tiff" >/dev/null 2>&1

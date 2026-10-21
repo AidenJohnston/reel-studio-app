@@ -1,25 +1,12 @@
 <?xml version="1.0"?>
-<!-- Reel Studio disk image window, 640 x 432 (Finder's title bar covers the bottom 32). Colours are the app's tokens
-     (app/src/renderer/src/styles.css) plus the coral of packaging/icons/icon.svg. Finder draws the app icon at
-     (166, 214) and Applications at (474, 214) on top of this. The two lines of copy are outlines from
-     text-to-path.swift: "Drag Reel Studio into Applications." and "Once copied, open it from Applications." -->
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="864" viewBox="0 0 640 432">
-  <defs>
-    <linearGradient id="veil" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="#e6e1d9" stop-opacity="0"/>
-      <stop offset=".55" stop-color="#e6e1d9" stop-opacity=".45"/>
-      <stop offset="1" stop-color="#efebe4" stop-opacity=".7"/>
-    </linearGradient>
-    <linearGradient id="silk" x1="0" y1="0" x2="1" y2="0">
-      <stop stop-color="#ebe6de"/>
-      <stop offset=".5" stop-color="#f2efe9"/>
-      <stop offset="1" stop-color="#e6e1d9"/>
-    </linearGradient>
-  </defs>
-  <rect width="640" height="432" fill="#f7f5f1"/>
-  <path d="M-60 293C95 220 214 304 362 256S559 191 707 257" stroke="url(#veil)" stroke-width="146" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M-60 306C113 252 223 298 367 272S553 242 707 280" stroke="url(#silk)" stroke-width="86" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M-60 266C113 212 223 258 367 232S553 202 707 240" stroke="#ffffff" stroke-width="0.8" fill="none" opacity="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- Reel Studio disk image window, 640 x 432 (Finder's title bar covers the bottom 32). Bottom layer: background-art.png,
+     generated artwork (see CREDITS.md). On top, in vector: the mark, the two lines of copy and the arrow, in the app's
+     tokens (app/src/renderer/src/styles.css) and the coral of packaging/icons/icon.svg. Finder draws the app icon at
+     (166, 214) and Applications at (474, 214) over this. The copy is outlines from text-to-path.swift:
+     "Drag Reel Studio into Applications." and "Once copied, open it from Applications."
+     render-background.sh inlines background-art.png, because sips only draws images given as data: URLs. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="864" viewBox="0 0 640 432">
+  <image xlink:href="background-art.png" x="0" y="0" width="640" height="432"/>
   <!-- Mark: the app icon's reel frame and play triangle, as in the sidebar's brand mark. -->
   <rect x="32" y="22" width="22" height="22" rx="6.5" fill="#1d1b18"/>
   <path d="M40.6 28.6L40.6 37.4L47.6 33Z" fill="#e8603c" stroke="#e8603c" stroke-width="1.6" stroke-linejoin="round"/>
