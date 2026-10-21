@@ -53,6 +53,7 @@ import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
+import { offerMoveToApplications } from './move-to-applications'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -617,6 +618,24 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(async () => {
+  if (gotLock) {
+    const move = await offerMoveToApplications(
+      {
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        test: TEST,
+        inApplications: process.platform === 'darwin' && app.isInApplicationsFolder(),
+        exePath: process.execPath
+      },
+      {
+        ask: async (q) => (await dialog.showMessageBox(q)).response,
+        askNow: (q) => dialog.showMessageBoxSync(q),
+        move: (options) => app.moveToApplicationsFolder(options),
+        log
+      }
+    )
+    if (move === 'moving') return // this copy quits; the one in Applications opens
+  }
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
   if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
