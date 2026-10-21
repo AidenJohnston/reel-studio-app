@@ -34,10 +34,10 @@ export function placeWords(segments: RenderSegment[], words: Word[]): PlacedWord
 
 /**
  * Where output time `t` comes from: the source and the time in it, by the render's own segments.
- * null in a gap between segments or past the end, where no source frame plays.
+ * A segment's last instant counts, so the end of the reel still maps. null in a gap or past the end.
  */
 export function sourceAt(segments: RenderSegment[], t: number): { source: string; at: number } | null {
-  const seg = segments.find((s) => t >= s.out_start && t < s.out_start + (s.src_end - s.src_start))
+  const seg = segments.find((s) => t >= s.out_start && t <= s.out_start + (s.src_end - s.src_start))
   return seg ? { source: seg.source, at: seg.src_start + (t - seg.out_start) } : null
 }
 

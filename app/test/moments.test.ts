@@ -33,7 +33,7 @@ describe('notes asked at a moment', () => {
     ]
     expect(sourceAt(segs, 4)).toEqual({ source: 's1', at: 4 })
     expect(sourceAt(segs, 15)).toEqual({ source: 's2', at: 25 })
-    expect(sourceAt(segs, 40)).toBeNull() // past the end
+    expect(sourceAt(segs, 41)).toBeNull() // past the end
   })
 
   it('places each mark where its words play in the version on screen, or not at all', () => {

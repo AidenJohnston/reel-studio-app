@@ -177,6 +177,7 @@ export function PhonePlayer({
   caption,
   original,
   originalAt,
+  originalReady = true,
   warmOriginal,
   holdingOriginal,
   still,
@@ -186,6 +187,7 @@ export function PhonePlayer({
   asking,
   playhead,
   onShown,
+  onFailed,
   className,
   testid = 'player',
   children
@@ -201,8 +203,11 @@ export function PhonePlayer({
   caption?: string
   /** The raw footage, shown while "Original" is held down. */
   original?: string | null
-  /** The raw take and the time in it that the reel plays at `seconds`, or null to start `original` from 0:00. */
-  originalAt?: (seconds: number) => { src: string; at: number } | null
+  /** Where Hold for original starts for the reel's `seconds`: a take and the time in it, 'start' for the first take
+   * from 0:00 (labeled so), or null when it cannot be found. Without it, the first take from 0:00. */
+  originalAt?: (seconds: number) => { src: string; at: number } | 'start' | null
+  /** False while what `originalAt` needs is still loading: a hold waits, saying so, instead of guessing. */
+  originalReady?: boolean
   /** The pointer or focus is on the hold button: load the raw footage now, so the hold is instant. */
   warmOriginal?: boolean
   holdingOriginal?: boolean
@@ -219,6 +224,8 @@ export function PhonePlayer({
   playhead?: Playhead
   /** The source actually on screen. A new `src` plays only once it has loaded, so this lags it during a switch. */
   onShown?: (src: string | null) => void
+  /** A new `src` would not play. The video before it stays on screen and stays the one reported. */
+  onFailed?: () => void
   className?: string
   /** The video's test id. The Working screen's first look uses its own, so "player" means the Reel screen. */
   testid?: string
@@ -345,7 +352,9 @@ export function PhonePlayer({
   // where it was. Both are stacked, so only opacity changes; only the one on screen plays. The raw footage
   // and its "Original" tag show once its seek lands, so the reel is never labeled as the original.
   const resumeAfterHold = useRef(false)
-  const [hold, setHold] = useState<'off' | 'loading' | 'slow' | 'on' | 'failed'>('off')
+  const holdStarted = useRef(false)
+  // 'start': the first take from 0:00, not the moment on screen, and labeled so
+  const [hold, setHold] = useState<'off' | 'loading' | 'slow' | 'on' | 'start' | 'failed'>('off')
   const backToReel = () => {
     if (resumeAfterHold.current) void video.current?.play().catch(() => {})
     resumeAfterHold.current = false
@@ -355,28 +364,42 @@ export function PhonePlayer({
     const v = video.current
     if (!r) return
     if (!holdingOriginal) {
+      holdStarted.current = false
       r.pause()
       setHold((h) => (h === 'failed' ? h : 'off'))
       backToReel()
       return
     }
-    resumeAfterHold.current = !!v && !v.paused
-    v?.pause()
-    const at = v ? originalAt?.(v.currentTime) : null
-    const src = at?.src ?? original
-    const moved = !!src && r.getAttribute('src') !== src
-    if (moved) r.src = src
+    // runs again when what the mapping needs arrives during the hold: the reel was paused the first time
+    if (!holdStarted.current) {
+      holdStarted.current = true
+      resumeAfterHold.current = !!v && !v.paused
+      v?.pause()
+    }
+    if (!originalReady) {
+      setHold('loading')
+      return
+    }
     const fail = () => {
       setHold('failed')
       backToReel()
     }
+    const at = originalAt && v ? originalAt(v.currentTime) : 'start'
+    if (!at) {
+      fail()
+      return
+    }
+    const synced = at !== 'start'
+    const src = synced ? at.src : original
+    const moved = !!src && r.getAttribute('src') !== src
+    if (moved) r.src = src
     if (r.error && !moved) {
       fail()
       return
     }
-    r.currentTime = at?.at ?? 0
+    r.currentTime = synced ? at.at : 0
     void r.play().catch(() => {})
-    const show = () => setHold('on')
+    const show = () => setHold(synced ? 'on' : 'start')
     r.addEventListener('error', fail, { once: true })
     if (r.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !r.seeking) show()
     else {
@@ -390,8 +413,8 @@ export function PhonePlayer({
       r.removeEventListener('playing', show)
       r.removeEventListener('error', fail)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- read at the press, not followed while held
-  }, [holdingOriginal])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read at the press (or once ready), not followed while held
+  }, [holdingOriginal, originalReady])
   // Say it is loading only when that is noticeable, so a quick hold never flashes the words. Neither
   // delay was measured: 250 ms is about when a wait starts to feel like nothing happened, and 2 s is
   // long enough to read the failure line.
@@ -401,7 +424,7 @@ export function PhonePlayer({
     return () => window.clearTimeout(timer)
   }, [hold])
 
-  const holdTag = hold === 'on' ? 'Original' : hold === 'slow' ? 'Loading the original' : hold === 'failed' ? "Couldn't load the original" : null
+  const holdTag = { off: null, loading: null, slow: 'Loading the original', on: 'Original', start: 'Original (from the start)', failed: "Couldn't load the original" }[hold]
 
   return (
     <div
@@ -461,8 +484,10 @@ export function PhonePlayer({
                         onLoadedData: (e: React.SyntheticEvent<HTMLVideoElement>) => {
                           void frameReady(e.currentTarget, l.poster).then(() => dispatch({ type: 'ready', id: l.id }))
                         },
-                        // a file that will not play still replaces the old one, as it always did
-                        onError: () => dispatch({ type: 'ready', id: l.id })
+                        onError: () => {
+                          dispatch({ type: 'failed', id: l.id })
+                          onFailed?.()
+                        }
                       })}
                 />
               )
@@ -470,7 +495,7 @@ export function PhonePlayer({
             {original && (
               <Video
                 el={(v) => (raw.current = v)}
-                className={`raw-video${hold === 'on' ? ' on' : ''}`}
+                className={`raw-video${hold === 'on' || hold === 'start' ? ' on' : ''}`}
                 src={original}
                 preload={warmOriginal || holdingOriginal ? 'auto' : 'metadata'}
                 playsInline

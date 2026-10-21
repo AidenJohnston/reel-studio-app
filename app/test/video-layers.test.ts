@@ -12,6 +12,11 @@ describe('player source switching', () => {
     expect(run(want('v1'), want('v2'), want('v3'), { type: 'ready', id: 2 }, { type: 'ready', id: 3 }).shown?.src).toBe('v3')
   })
 
+  it('a picked video that will not play is dropped, and the one on screen stays', () => {
+    const s = run(want('v1'), want('v2'), { type: 'failed', id: 2 }, { type: 'ready', id: 2 })
+    expect([s.shown?.src, s.next, s.leaving]).toEqual(['v1', null, null])
+  })
+
   it('while a picked version loads, the marks, change pop-up and original read the version still on screen', () => {
     const versions = [
       { n: 1, video: 'v1' },

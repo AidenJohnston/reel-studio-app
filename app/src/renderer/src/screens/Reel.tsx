@@ -135,7 +135,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const changePreview = job?.preview?.video ?? null
   // Where the shown version plays each word, for the marks. Keyed on its video URL, which changes
   // with every render of it (the file's mtime is in the URL).
-  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] } | null>(null)
+  // segments null: no timeline to read for that version (none written, or reading it failed)
+  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] | null } | null>(null)
   // The marks, the change pop-up and Hold for original act on what is on screen, not on what was just picked.
   const onScreen = d ? versionOnScreen(d.versions, shownSrc) : null
   const shownN = onScreen?.n
@@ -146,9 +147,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     reel.projects
       .timeline(slug, shownN)
       .then((t) => {
-        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [], segments: t?.segments ?? [] })
+        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [], segments: t?.segments ?? null })
       })
-      .catch((e) => notify(userMessage(e), 'error'))
+      .catch((e) => {
+        if (live) setTimeline({ video: shownVideo, words: [], segments: null })
+        notify(userMessage(e), 'error')
+      })
     return () => {
       live = false
     }
@@ -287,9 +291,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // only on the saved version on screen: a change's quick preview (a separate draft file) is cut differently
   const marks = timeline && timeline.video === shownVideo ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
   // Hold for original shows the raw take at the moment on screen, by the shown version's own segments (same
-  // rule as the marks). Without them, the player starts the first take from 0:00 as it used to.
+  // rule as the marks), and waits while they load. Over a change's quick preview (a draft, no saved version on
+  // screen), or for a version with no timeline, it plays the first take from 0:00 and says so.
+  const originalReady = !shownVideo || timeline?.video === shownVideo
   const originalAt = (t: number) => {
-    if (!timeline || timeline.video !== shownVideo) return null
+    if (!shownVideo) return 'start' as const
+    if (timeline?.video !== shownVideo) return null
+    if (!timeline.segments) return 'start' as const
     const at = sourceAt(timeline.segments, t)
     const src = at && d.sourceVideos[at.source]
     return src ? { src, at: at.at } : null
@@ -362,6 +370,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               caption={d.project.post?.caption}
               original={d.sourceVideo}
               originalAt={originalAt}
+              originalReady={originalReady}
               warmOriginal={warmOriginal}
               holdingOriginal={holding}
               onDuration={setDuration}
@@ -370,6 +379,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               asking={asking}
               playhead={playhead}
               onShown={setShownSrc}
+              onFailed={() => {
+                // main's words for a missing video; the version on screen stays picked, so its chip can be tried again
+                notify('I could not find that video. It may have been moved or deleted.', 'error')
+                if (onScreen) setSelected(onScreen.n)
+              }}
             />
           </div>
           <ChangeAt

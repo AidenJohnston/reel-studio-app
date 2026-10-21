@@ -24,6 +24,8 @@ export type LayerEvent =
   | { type: 'want'; src: string | null; poster: string | null }
   /** layer `id` has a decoded frame */
   | { type: 'ready'; id: number }
+  /** layer `id` will not play */
+  | { type: 'failed'; id: number }
   /** layer `id` has finished fading out */
   | { type: 'gone'; id: number }
 
@@ -45,6 +47,9 @@ export function layersReducer(s: Layers, e: LayerEvent): Layers {
       // a load for a source asked for before the current one never takes the screen
       if (s.next?.id !== e.id) return s
       return { ...s, shown: s.next, next: null, leaving: s.shown }
+    // the one on screen stays, and stays the one reported: nothing points at a video that cannot play
+    case 'failed':
+      return s.next?.id === e.id ? { ...s, next: null } : s
     case 'gone':
       return s.leaving?.id === e.id ? { ...s, leaving: null } : s
   }
