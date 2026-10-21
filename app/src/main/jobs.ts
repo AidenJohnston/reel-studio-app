@@ -4,14 +4,15 @@ import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
 import { toUserError } from './engine'
-import { learn, ProgressTracker, type SpeedHistory } from './progress'
+import { learn, parseHistory, ProgressTracker, type ProgressKind, type SpeedHistory } from './progress'
 
 /** A job reports with the shared contract. A render's `file` becomes a playable `video` via `toVideo`. */
 export type Emit = (e: JobUpdate) => void
 
 /** Where measured phase times live, and how long the video is (for the time estimate). */
 export interface ProgressDeps {
-  loadHistory(): Promise<SpeedHistory>
+  profile?(kind: JobKind): Promise<ProgressKind>
+  loadHistory(): Promise<unknown>
   saveHistory(h: SpeedHistory): Promise<void>
   mediaSeconds(slug: string): Promise<number>
   /** ms between progress re-broadcasts while nothing else happens (default 1000) */
@@ -56,15 +57,18 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
-    const tracker = new ProgressTracker(kind, 0, history)
+    let progressKind: ProgressKind = kind
+    let tracker = new ProgressTracker(progressKind, 0, history)
     let phase: Phase | undefined
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
     const status = (): void => {
       const snap = tracker.snapshot()
       job.overall = snap.overall
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
-      // later ("about a minute" -> "about 4 minutes"): say nothing yet (the screen uses its own guess).
-      job.secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
+      // later: wait for duration before showing a number.
+      const secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
+      // Project-detail hydration must retain the same estimate as an already-open screen.
+      if (secondsLeft !== null) job.secondsLeft = secondsLeft
       job.overdue = snap.overdue
       send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking })
     }
@@ -83,8 +87,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           })
         }
         if (progress) {
-          history = await progress.loadHistory().catch(() => history)
-          tracker.setHistory(history)
+          history = parseHistory(await progress.loadHistory().catch(() => history))
+          progressKind = await progress.profile?.(kind) ?? kind
+          tracker = new ProgressTracker(progressKind, 0, history)
         }
         status()
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
@@ -99,9 +104,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             if (e.phase && slug && progress && !mediaAsked) {
               mediaAsked = true
               // project.json exists once a phase starts (after init): the estimate scales with it
-              void progress.mediaSeconds(slug).then((s) => { mediaSec = s; tracker.setMedia(s) }).catch(() => undefined)
+              pending.push(progress.mediaSeconds(slug).then((s) => {
+                mediaSec = s
+                tracker.setMedia(s)
+              }).catch(() => undefined))
             }
-            tracker.update(e.phase, e.phase ? e.pct : undefined)
+            tracker.update(e.phase, e.pct, e.aggregate === true)
             if (e.phase) phase = e.phase
             job.thinking = !!e.thinking
             status()
@@ -119,7 +127,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
-          await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
+          await progress.saveHistory(learn(history, progressKind, mediaSec, tracker.finish())).catch(() => undefined)
         }
         if (slug) {
           await updateAppState(slug, (s) => {

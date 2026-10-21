@@ -126,6 +126,11 @@ const jobs = createJobManager(
   },
   log,
   {
+    profile: async (kind) => {
+      if (kind !== 'first-edit') return kind
+      const provider = await ai.active().catch(() => null)
+      return provider?.connected && provider.id !== 'none' ? kind : 'first-edit-basic'
+    },
     loadHistory: async () => JSON.parse(await fs.readFile(speedHistoryFile(), 'utf8')),
     saveHistory: (h) => writeJson(speedHistoryFile(), h),
     mediaSeconds: async (slug) =>
@@ -478,18 +483,22 @@ function registerIpc(): void {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
     const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
-      emit({ type: 'status', message: words, pct: 1, phase: 'final' })
+      emit({ type: 'status', message: words, pct: 1, phase: 'final', aggregate: true })
       const look: any = await runEngine(
         'render',
         ['--project', dir, '--draft', '--no-cover'],
-        (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
+        (p) => {
+          if (p.stage === 'render') emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final', aggregate: true })
+        },
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
         ['--project', dir],
-        (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
+        (p) => {
+          if (p.stage === 'render') emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final', aggregate: true })
+        },
         signal
       )
       const version = Number(r?.version ?? (await readProject(slug)).version)

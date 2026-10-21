@@ -18,7 +18,7 @@ export interface LiveState {
   overall: number
   /** Seconds left for the whole job. null = too early to say. */
   secondsLeft: number | null
-  /** Past every estimate on the last step: say "Still working, almost there", no number. */
+  /** The current phase outlasted its usable estimate: say "Still working, almost there", no number. */
   overdue: boolean
   /** Waiting on the AI's answer: show "thinking", not "stuck". */
   thinking: boolean
@@ -63,7 +63,7 @@ export function reduceLive(s: LiveState, e: JobEvent): LiveState {
         ...base,
         message: e.message || base.message,
         overall: Math.max(base.overall, e.overall),
-        secondsLeft: e.secondsLeft,
+        secondsLeft: e.secondsLeft ?? base.secondsLeft,
         overdue: e.overdue,
         thinking: e.thinking
       }

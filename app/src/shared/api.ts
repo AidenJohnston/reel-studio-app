@@ -151,8 +151,8 @@ export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
  * itself. ONE contract; `shared/live.ts` is the only reader on the renderer side.
  */
 export type JobUpdate =
-  /** pct = this step's own percent (restarts per step). thinking = waiting on the AI's answer. */
-  | { type: 'status'; message: string; pct?: number; phase?: Phase; thinking?: boolean }
+  /** pct restarts per step unless aggregate marks whole-job progress. thinking = waiting on AI. */
+  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean }
   | { type: 'tool'; name: string; summary: string }
   /** A render finished. firstLook = the quick no-AI preview made while the AI still edits (not a version).
    * file = the engine's output path (absolute); main turns it into `video` for the renderer. */
@@ -171,7 +171,7 @@ export type JobEvent = Ids &
     /** overall = honest 0-99 for the whole job, never backwards; secondsLeft = from this computer's measured
      * history (main/progress.ts), null = too early to say. Status repeats about once a second while a job
      * runs (thinking kept), so a bar fed by `overall` never freezes. */
-    /** overdue = past every estimate on the last step: show "Still working, almost there", no number. */
+    /** overdue = the current phase outlasted its usable estimate: show "Still working, almost there", no number. */
     | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean }
     | { type: 'tool'; name: string; summary: string }
     /** video = a playable reel-media URL of a stable copy (never the file the engine overwrites next). */
