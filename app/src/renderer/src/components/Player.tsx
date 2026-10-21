@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { clock } from '../../../shared/progress'
 import { groupMarks, type NoteMark } from '../../../shared/moments'
 import { Icon } from './icons'
 import { reel } from '../api'
+import { createPlayhead, usePlayhead, type Playhead } from './playhead'
+import { NO_LAYERS, layersReducer, type Layer } from './videoLayers'
 
 /**
  * While our own reel is being dragged out, the window must not treat it as a new video dropped in.
@@ -84,6 +86,75 @@ function useWidth(ref: React.RefObject<HTMLElement | null>): number {
   return w
 }
 
+/** Lets go of the decoder and the open file now. Chromium otherwise holds both until the element is garbage collected. */
+function release(v: HTMLVideoElement): void {
+  v.pause()
+  v.removeAttribute('src')
+  v.load()
+}
+
+/** A <video> that releases its decoder when it leaves the page. `el` hears it arrive and leave. */
+function Video({ el, ...props }: ComponentProps<'video'> & { el?: (v: HTMLVideoElement | null) => void }) {
+  const own = useRef<HTMLVideoElement>(null)
+  const onEl = useRef(el)
+  onEl.current = el
+  useLayoutEffect(() => {
+    const v = own.current!
+    // StrictMode's rehearsal unmount released it in development: give it its source back
+    if (props.src && !v.hasAttribute('src')) v.src = props.src
+    onEl.current?.(v)
+    return () => {
+      onEl.current?.(null)
+      release(v)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per element; a new source is a new element
+  }, [])
+  return <video ref={own} {...props} />
+}
+
+/**
+ * Resolves when a loaded, still hidden video can show a frame: its cover decoded, and its next frame
+ * presented where Chromium reports frames. The wait is capped because a paused video showing its
+ * cover presents no frame. The 100 ms cap is a guess with no measurement behind it.
+ */
+function frameReady(v: HTMLVideoElement, poster: string | null): Promise<void> {
+  const frame = new Promise<void>((done) => {
+    window.setTimeout(done, 100)
+    if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(() => done())
+    else requestAnimationFrame(() => done())
+  })
+  if (!poster) return frame
+  const cover = new Image()
+  cover.src = poster
+  return Promise.all([frame, cover.decode().catch(() => {})]).then(() => {})
+}
+
+// Matches the opacity transition on .phone-screen > video.layer.
+const FADE_MS = 140
+
+/** Follows the playhead every frame, so it re-renders on its own and the player does not. */
+function ScrubRange({ playhead, dur, onSeek }: { playhead: Playhead; dur: number; onSeek: (seconds: number) => void }) {
+  const t = usePlayhead(playhead, (s) => s)
+  return (
+    <input
+      type="range"
+      min={0}
+      max={dur || 1}
+      step={0.01}
+      value={Math.min(t, dur || 1)}
+      aria-label="Position in the video"
+      aria-keyshortcuts="ArrowLeft ArrowRight J L Home End"
+      style={{ ['--pct' as string]: `${dur ? (t / dur) * 100 : 0}%` }}
+      onChange={(e) => onSeek(Number(e.target.value))}
+    />
+  )
+}
+
+/** Time left, which changes once a second. */
+function ScrubTime({ playhead, dur }: { playhead: Playhead; dur: number }) {
+  return <span className="scrub-time">{usePlayhead(playhead, (s) => clock(dur ? dur - s : 0))}</span>
+}
+
 const MARK_STATE: Record<NoteMark['state'], string> = { making: 'Being made', done: 'Done', failed: "Didn't work", stopped: 'Stopped' }
 
 const typing = (t: EventTarget | null): boolean => {
@@ -94,7 +165,9 @@ const typing = (t: EventTarget | null): boolean => {
 /**
  * The phone-shaped player: a cover frame until you press play, one big play button and a thin
  * scrub bar instead of the browser's controls (no download, speed or picture-in-picture menu).
- * Space plays and pauses (when you are not typing).
+ * Space plays and pauses (when you are not typing). With the player or its controls focused, K also
+ * plays and pauses, J and L skip 5 s, the arrows 1 s, 0 to 9 jump to that tenth, Home and End go to
+ * the ends and M mutes.
  */
 export function PhonePlayer({
   src,
@@ -110,7 +183,7 @@ export function PhonePlayer({
   dragFile,
   marks,
   asking,
-  onTime,
+  playhead,
   className,
   testid = 'player',
   children
@@ -136,22 +209,26 @@ export function PhonePlayer({
   marks?: NoteMark[]
   /** A change is being asked for at the playhead: hold the frame there and keep the scrub bar in sight. */
   asking?: boolean
-  /** The playhead, as the video plays or is scrubbed. */
-  onTime?: (seconds: number) => void
+  /** Where the video is, for whoever else shows it. The player keeps its own when not given. */
+  playhead?: Playhead
   className?: string
   /** The video's test id. The Working screen's first look uses its own, so "player" means the Reel screen. */
   testid?: string
   children?: ReactNode
 }) {
   const screenRef = useRef<HTMLDivElement>(null)
-  const video = useRef<HTMLVideoElement>(null)
-  const raw = useRef<HTMLVideoElement>(null)
+  // the video on screen; a new source loads invisible over it and fades in once it has a frame
+  const video = useRef<HTMLVideoElement | null>(null)
+  const raw = useRef<HTMLVideoElement | null>(null)
+  const els = useRef(new Map<number, HTMLVideoElement>())
+  const [layers, dispatch] = useReducer(layersReducer, null, () => layersReducer(NO_LAYERS, { type: 'want', src, poster: poster ?? null }))
+  const [ownPlayhead] = useState(createPlayhead)
+  const ph = playhead ?? ownPlayhead
   const width = useWidth(screenRef)
   const trackRef = useRef<HTMLSpanElement>(null)
   const trackWidth = useWidth(trackRef)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(!!autoPlayMuted)
-  const [t, setT] = useState(0)
   const [dur, setDur] = useState(0)
   const [started, setStarted] = useState(false)
 
@@ -162,9 +239,25 @@ export function PhonePlayer({
     else v.pause()
   }, [])
 
+  const seek = useCallback(
+    (seconds: number) => {
+      const v = video.current
+      if (!v) return
+      v.currentTime = Math.max(0, Math.min(seconds, v.duration || seconds))
+      ph.set(v.currentTime)
+    },
+    [ph]
+  )
+
+  const toggleMute = () => {
+    setMuted((m) => !m)
+    if (video.current) video.current.muted = !muted
+  }
+
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || typing(e.target) || document.querySelector('.modal-backdrop')) return
+      // defaultPrevented: the player's own keys already took it
+      if (e.code !== 'Space' || e.defaultPrevented || typing(e.target) || document.querySelector('.modal-backdrop')) return
       e.preventDefault()
       toggle()
     }
@@ -172,25 +265,102 @@ export function PhonePlayer({
     return () => window.removeEventListener('keydown', key)
   }, [toggle])
 
+  // Keys while the player or one of its controls has focus. Buttons keep Space and Enter for themselves;
+  // N belongs to the change pop-up and the version chips sit outside the player.
+  const onKey = (e: React.KeyboardEvent) => {
+    const v = video.current
+    const el = e.target as HTMLElement
+    const field = el.isContentEditable || el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type !== 'range')
+    if (!v || field || holdingOriginal || e.metaKey || e.ctrlKey || e.altKey) return
+    const k = e.key.toLowerCase()
+    const d = v.duration || 0
+    if ((k === ' ' && el.tagName !== 'BUTTON') || k === 'k') {
+      if (!e.repeat) toggle()
+    } else if (k === 'j' || k === 'l') seek(v.currentTime + (k === 'j' ? -5 : 5))
+    else if (k === 'arrowleft' || k === 'arrowright') seek(v.currentTime + (k === 'arrowleft' ? -1 : 1))
+    else if (k === 'home' || k === 'end') seek(k === 'home' ? 0 : d)
+    else if (/^[0-9]$/.test(k)) seek((d * Number(k)) / 10)
+    else if (k === 'm') {
+      if (!e.repeat) toggleMute()
+    } else return
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  useEffect(() => {
+    dispatch({ type: 'want', src, poster: poster ?? null })
+  }, [src, poster])
+
+  // A new video took the screen: start it over like a fresh player, and let the old one fade out under it.
+  const shownId = layers.shown?.id ?? 0
+  const firstShown = useRef(true)
+  useLayoutEffect(() => {
+    const v = (video.current = layers.shown ? (els.current.get(layers.shown.id) ?? null) : null)
+    if (layers.leaving) els.current.get(layers.leaving.id)?.pause()
+    if (!v) return
+    ph.set(v.currentTime)
+    if (v.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      setDur(v.duration || 0)
+      onDuration?.(v.duration || 0)
+    }
+    if (firstShown.current) {
+      firstShown.current = false
+      return
+    }
+    setPlaying(false)
+    setStarted(false)
+    setMuted(!!autoPlayMuted)
+    v.muted = !!autoPlayMuted
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a different video takes the screen
+  }, [shownId])
+
+  const leavingId = layers.leaving?.id
+  useEffect(() => {
+    if (!leavingId) return
+    const timer = window.setTimeout(() => dispatch({ type: 'gone', id: leavingId }), FADE_MS + 60)
+    return () => window.clearTimeout(timer)
+  }, [leavingId])
+
   useEffect(() => {
     if (!autoPlayMuted || !video.current) return
     video.current.muted = true
     void video.current.play().catch(() => {})
-  }, [autoPlayMuted, src])
+  }, [autoPlayMuted, shownId])
+
+  // While playing, move the playhead every frame (timeupdate fires only about four times a second).
+  useEffect(() => {
+    const v = video.current
+    if (!playing || !v) return
+    let frame = 0
+    const tick = () => {
+      ph.set(v.currentTime)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [playing, shownId, ph])
 
   useEffect(() => {
     if (asking) video.current?.pause()
   }, [asking])
 
-  // Hold "Original": play the raw footage from the start over the reel, then go back.
+  // Hold "Original": play the raw footage from the start over the reel, then go back to the reel where it was.
+  // Both are loaded and stacked, so only opacity changes; only the one on screen plays.
+  const resumeAfterHold = useRef(false)
   useEffect(() => {
     const r = raw.current
+    const v = video.current
     if (!r) return
     if (holdingOriginal) {
-      video.current?.pause()
+      resumeAfterHold.current = !!v && !v.paused
+      v?.pause()
       r.currentTime = 0
       void r.play().catch(() => {})
-    } else r.pause()
+    } else {
+      r.pause()
+      if (resumeAfterHold.current) void v?.play().catch(() => {})
+      resumeAfterHold.current = false
+    }
   }, [holdingOriginal])
 
   return (
@@ -206,42 +376,63 @@ export function PhonePlayer({
       }}
       data-testid="phone"
     >
-      <div className="phone-screen" ref={screenRef}>
+      {/* tabIndex -1: a click on the video focuses the player, so its keys work without a Tab stop of its own */}
+      <div className="phone-screen" ref={screenRef} tabIndex={src ? -1 : undefined} onKeyDown={src ? onKey : undefined}>
         {src ? (
           <>
-            <video
-              ref={video}
-              key={src}
-              src={src}
-              poster={poster ?? undefined}
-              preload="metadata"
-              playsInline
-              disablePictureInPicture
-              controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
-              muted={muted}
-              onClick={toggle}
-              onPlay={() => {
-                setPlaying(true)
-                setStarted(true)
-              }}
-              onPause={() => setPlaying(false)}
-              onEnded={() => setPlaying(false)}
-              onTimeUpdate={(e) => {
-                setT(e.currentTarget.currentTime)
-                onTime?.(e.currentTarget.currentTime)
-              }}
-              onLoadedMetadata={(e) => {
-                setDur(e.currentTarget.duration || 0)
-                onDuration?.(e.currentTarget.duration || 0)
-              }}
-              data-testid={testid}
-            />
+            {[layers.leaving, layers.shown, layers.next].map((l: Layer | null) => {
+              if (!l) return null
+              const on = l === layers.shown
+              const loading = l === layers.next
+              const onTime = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+                if (e.currentTarget.paused) ph.set(e.currentTarget.currentTime)
+              }
+              return (
+                <Video
+                  key={l.id}
+                  el={(v) => (v ? els.current.set(l.id, v) : els.current.delete(l.id))}
+                  className={`layer${loading ? ' loading' : ''}`}
+                  src={l.src}
+                  poster={l.poster ?? undefined}
+                  preload="auto"
+                  playsInline
+                  disablePictureInPicture
+                  controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+                  muted={muted}
+                  aria-hidden={on ? undefined : true}
+                  {...(on
+                    ? {
+                        onClick: toggle,
+                        onPlay: () => {
+                          setPlaying(true)
+                          setStarted(true)
+                        },
+                        onPause: () => setPlaying(false),
+                        onEnded: () => setPlaying(false),
+                        onTimeUpdate: onTime,
+                        onSeeked: onTime,
+                        onLoadedMetadata: (e: React.SyntheticEvent<HTMLVideoElement>) => {
+                          setDur(e.currentTarget.duration || 0)
+                          onDuration?.(e.currentTarget.duration || 0)
+                        },
+                        'data-testid': testid
+                      }
+                    : loading && {
+                        onLoadedData: (e: React.SyntheticEvent<HTMLVideoElement>) => {
+                          void frameReady(e.currentTarget, l.poster).then(() => dispatch({ type: 'ready', id: l.id }))
+                        },
+                        // a file that will not play still replaces the old one, as it always did
+                        onError: () => dispatch({ type: 'ready', id: l.id })
+                      })}
+                />
+              )
+            })}
             {original && (
-              <video
-                ref={raw}
+              <Video
+                el={(v) => (raw.current = v)}
                 className={`raw-video${holdingOriginal ? ' on' : ''}`}
                 src={original}
-                preload="metadata"
+                preload="auto"
                 playsInline
                 muted={muted}
                 disablePictureInPicture
@@ -249,7 +440,7 @@ export function PhonePlayer({
               />
             )}
             {still && subtitle && !holdingOriginal && (
-              <video className="raw-video on" key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
+              <Video className="raw-video on" key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
             {holdingOriginal && <div className="phone-tag">Original</div>}
             {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={width} testid="sub-preview" />}
@@ -276,21 +467,7 @@ export function PhonePlayer({
                 <Icon name={playing ? 'pause' : 'play'} size={16} stroke={2} />
               </button>
               <span className="scrub-track" ref={trackRef}>
-              <input
-                type="range"
-                min={0}
-                max={dur || 1}
-                step={0.01}
-                value={Math.min(t, dur || 1)}
-                aria-label="Position in the video"
-                style={{ ['--pct' as string]: `${dur ? (t / dur) * 100 : 0}%` }}
-                onChange={(e) => {
-                  const v = video.current
-                  if (v) v.currentTime = Number(e.target.value)
-                  setT(Number(e.target.value))
-                  onTime?.(Number(e.target.value))
-                }}
-              />
+              <ScrubRange playhead={ph} dur={dur} onSeek={seek} />
               {dur > 0 &&
                 !!marks?.length &&
                 groupMarks(marks, dur, trackWidth).map((g) => {
@@ -302,10 +479,7 @@ export function PhonePlayer({
                       style={{ left: `calc(6px + (100% - 12px) * ${pct})` }}
                       // "Stopped, 0:11: cut this part; Done, 0:12: zoom in here": state, then time and request
                       aria-label={g.items.map((m) => `${MARK_STATE[m.state]}, ${clock(m.at)}: ${m.text}`).join('; ')}
-                      onClick={() => {
-                        const v = video.current
-                        if (v) v.currentTime = Math.min(g.at, dur)
-                      }}
+                      onClick={() => seek(Math.min(g.at, dur))}
                       data-testid="scrub-mark"
                       data-state={g.state}
                     >
@@ -320,13 +494,10 @@ export function PhonePlayer({
                   )
                 })}
               </span>
-              <span className="scrub-time">{clock(dur ? dur - t : 0)}</span>
+              <ScrubTime playhead={ph} dur={dur} />
               <button
                 className="scrub-btn"
-                onClick={() => {
-                  setMuted((m) => !m)
-                  if (video.current) video.current.muted = !muted
-                }}
+                onClick={toggleMute}
                 aria-label={muted ? 'Sound on' : 'Sound off'}
               >
                 <Icon name={muted ? 'mute' : 'volume'} size={16} stroke={2} />

@@ -9,6 +9,7 @@ import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinkin
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
+import { createPlayhead } from '../components/playhead'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
@@ -66,7 +67,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const att = useNoteAttachments(slug, notify)
   const [noteDrop, setNoteDrop] = useState(false)
   const noteDropDepth = useRef(0)
-  const [playhead, setPlayhead] = useState(0)
+  // Read by the player and the change button only, so playback does not re-render this screen.
+  const [playhead] = useState(createPlayhead)
   const [asking, setAsking] = useState(false)
 
   const load = useCallback(
@@ -144,11 +146,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       live = false
     }
   }, [slug, shownN, shownVideo, notify])
-  // The player starts over at 0:00 on every new video (it is keyed on it): so does the change button.
-  const playerSrc = changePreview ?? shownVideo ?? 'none'
-  useEffect(() => {
-    setPlayhead(0)
-  }, [playerSrc])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -341,7 +338,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           {/* the phone gets the height the rows under it leave (styles.css .phone-slot) */}
           <div className="phone-slot">
             <PhonePlayer
-              key={playerSrc}
               src={changePreview ?? version?.video ?? null}
               poster={version?.cover}
               autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
@@ -355,12 +351,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               dragFile={version && !version.draft ? version.videoPath : null}
               marks={marks}
               asking={asking}
-              onTime={setPlayhead}
+              playhead={playhead}
             />
           </div>
           <ChangeAt
             slug={slug}
-            at={playhead}
+            playhead={playhead}
             shown={version ? { n: version.n, latest: version.n === d.versions[d.versions.length - 1].n } : null}
             aiOn={!aiOff}
             checking={!providerChecked}

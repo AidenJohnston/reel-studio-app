@@ -5,6 +5,7 @@ import type { MomentWord, NoteMoment } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { NOTE_DROP_DONE, useNotify } from '../App'
 import { Icon } from './icons'
+import { usePlayhead, type Playhead } from './playhead'
 import { AttachmentChips, useNoteAttachments } from './NoteAttachments'
 
 type Scope = 'here' | 'whole'
@@ -36,7 +37,7 @@ const typing = (t: EventTarget | null): boolean => {
  */
 export function ChangeAt({
   slug,
-  at,
+  playhead,
   shown,
   aiOn,
   checking,
@@ -45,8 +46,8 @@ export function ChangeAt({
   onSent
 }: {
   slug: string
-  /** the playhead, in seconds */
-  at: number
+  /** where the video is; the button's time follows it once a second */
+  playhead: Playhead
   /** the version on screen (0 = the Preview), and whether it is the newest */
   shown: { n: number; latest: boolean } | null
   aiOn: boolean
@@ -58,6 +59,7 @@ export function ChangeAt({
   onSent: (jobId: string | null) => void
 }) {
   const notify = useNotify()
+  const second = usePlayhead(playhead, Math.round)
   const att = useNoteAttachments(slug, notify)
   // 'open' | 'closing' while on the page; `instant` when the N key opened it (no motion on a shortcut)
   const [phase, setPhase] = useState<'closed' | 'open' | 'closing'>('closed')
@@ -92,6 +94,7 @@ export function ChangeAt({
     window.clearTimeout(exitTimer.current)
     setInstant(byKey)
     const n = shown.n
+    const at = playhead.get()
     if (phase === 'closed') {
       if (found?.n !== n || moment !== at) setScope('here') // a new moment: Just here again
       setMoment(at)
@@ -246,7 +249,7 @@ export function ChangeAt({
     }
   }
 
-  const time = clock(mounted ? when : at)
+  const time = clock(mounted ? when : second)
   const heard = scope === 'here' && !typed && found?.n === shown?.n && found?.at === moment ? found.lookup?.words : undefined
   const title = scope === 'here' ? `What should change at ${time}?` : 'What should change in your reel?'
   return (
