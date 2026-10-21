@@ -306,7 +306,7 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
 
 /** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
-export function hasCaptionPhrase(kept: readonly Word[], phrase: string, replacement: string): boolean {
+export function captionCorrectionProblem(kept: readonly Word[], corrections: CaptionCorrection[], proposed: CaptionCorrection): string | null {
   const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
   const words: string[] = [];
   for (let i = 0; i < kept.length; i++) {
@@ -317,16 +317,40 @@ export function hasCaptionPhrase(kept: readonly Word[], phrase: string, replacem
       i++;
     } else words.push(word);
   }
-  if (!phrase.trim()) return false;
-  const target = phrase.trim().split(/\s+/).map(bare);
-  if (target.length === 1 && replacement.trim() && replacement.trim().split(/\s+/).length === 1) {
-    return words.some((word) => {
-      // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
-      const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word)?.[1].toLowerCase();
-      return core === target[0] || core?.split(/['’]/)[0] === target[0];
-    });
+  const tokens = (text: string) => text.trim().split(/\s+/).filter(Boolean);
+  const single = new Map<string, CaptionCorrection>();
+  const spans: { correction: CaptionCorrection; from: string[]; to: string[] }[] = [];
+  for (const correction of corrections) {
+    const from = tokens(correction.from).map(bare);
+    const to = tokens(correction.to);
+    if (!from.length) continue;
+    if (from.length === 1 && to.length === 1) single.set(from[0], correction);
+    else spans.push({ correction, from, to });
   }
-  return words.some((_word, i) => target.every((word, k) => words[i + k] !== undefined && bare(words[i + k]) === word));
+  const remaining = words.map((w) => ({ w, fixed: false }));
+  const applied = new Set<string>();
+  for (let i = 0; i < remaining.length; i++) {
+    for (const span of spans) {
+      if (!span.from.every((word, k) => remaining[i + k] && bare(remaining[i + k].w) === word)) continue;
+      if (span.correction === proposed) return null;
+      applied.add(span.correction.from);
+      remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, fixed: true })));
+      i += Math.max(0, span.to.length - 1);
+      break;
+    }
+  }
+  for (const word of remaining) {
+    if (word.fixed) continue;
+    // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
+    const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word.w)?.[1].toLowerCase();
+    if (!core) continue;
+    const correction = single.get(core) ?? single.get(core.split(/['’]/)[0]);
+    if (correction === proposed) return null;
+    if (correction) applied.add(correction.from);
+  }
+  return applied.size
+    ? `correction "${proposed.from}" has no matches after existing corrections: ${[...applied].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
+    : `phrase not found in the transcript: "${proposed.from}"`;
 }
 
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */

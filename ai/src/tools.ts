@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, hasCaptionPhrase, saveProject, validateProject, wordIndex, anchorProblem,
+  nextBrollId, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -804,9 +804,11 @@ const tools: ToolDef[] = [
     parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p, t) => {
-        if (!hasCaptionPhrase(keptWords(t, p.cut.keep), args.from, args.to)) return `phrase not found in the transcript: "${args.from}"`;
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
-        c.push({ from: args.from, to: args.to });
+        const proposed = { from: args.from, to: args.to };
+        c.push(proposed);
+        const problem = captionCorrectionProblem(keptWords(t, p.cut.keep), c, proposed);
+        if (problem) return problem;
         p.captions.corrections = c;
       });
       return { content: { ok: true }, summary: `Fixed the caption "${args.to}"` };
@@ -1343,16 +1345,6 @@ function stripNulls<T extends Record<string, any>>(o: T): T {
   return Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v !== null && v !== undefined)) as T;
 }
 
-for (const tool of tools) {
-  const run = tool.run;
-  tool.run = async (ctx, rawArgs) => {
-    const args = fillNulls(tool.parameters, rawArgs ?? {});
-    const problems = validate(tool.parameters, args);
-    if (problems.length) throw new ToolInputError(`invalid arguments: ${problems.join('; ')}`);
-    return run(ctx, args);
-  };
-}
-
 export const TOOLS: ToolDef[] = tools;
 export const TOOL_NAMES = tools.map((t) => t.name);
 export function toolByName(name: string): ToolDef | undefined {
@@ -1369,8 +1361,11 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   ctx.state.toolCalls++;
   const tool = toolByName(name);
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
+  const args = fillNulls(tool.parameters, rawArgs ?? {});
+  const problems = validate(tool.parameters, args);
+  if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
   try {
-    const out = await tool.run(ctx, rawArgs);
+    const out = await tool.run(ctx, args);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
     const content = typeof out.content === 'string' ? out.content : JSON.stringify(out.content);
     return { content, images: out.images, isError: false, summary: out.summary };
