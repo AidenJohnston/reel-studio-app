@@ -51,5 +51,9 @@ describe('reel-media: protocol', () => {
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('mp3')
     expect((await serve(new Request(mediaUrl(join(outside, 'other.mp3'))))).status).toBe(403)
+
+    // the person deletes the link: its old target is outside again
+    rmSync(join(root, 'Library', 'Music', 'song.mp3'))
+    expect((await serve(new Request(mediaUrl(join(outside, 'song.mp3'))))).status).toBe(403)
   })
 })

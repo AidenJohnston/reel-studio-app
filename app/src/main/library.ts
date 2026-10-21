@@ -54,7 +54,7 @@ export async function listLibrary(): Promise<LibraryBin[]> {
 export async function libraryMediaUrl(p: string, bust?: number): Promise<string> {
   if (binForFolder(p) !== null && (await fs.lstat(p).catch(() => null))?.isSymbolicLink()) {
     const target = await fs.realpath(p).catch(() => null)
-    if (target) allowLinkedMedia(target)
+    if (target) allowLinkedMedia(p, target)
   }
   return mediaUrl(p, bust)
 }
