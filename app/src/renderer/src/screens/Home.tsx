@@ -45,7 +45,7 @@ export function Home({ go }: { go: Go }) {
     }
     if (p.status === 'ready') go({ name: 'reel', slug: p.slug })
     else void reel.projects.get(p.slug).then(
-      (d) => show(d.job?.kind === 'note' || d.job?.kind === 'rerender' ? 'reel' : 'working'),
+      (d) => show(d.job?.kind === 'note' || d.job?.kind === 'rerender' || (!d.job && d.versions.length > 0) ? 'reel' : 'working'),
       () => show('working')
     )
   }

@@ -36,6 +36,20 @@ test('Home reopens a running note or rerender on the Reel screen', async () => {
       await expect(page.getByText('Making your reel', { exact: true })).toHaveCount(0)
     }
 
+    // Home can still have a working summary after the note has finished.
+    await app.evaluate(({ ipcMain }, d) => {
+      let gets = 0
+      ipcMain.removeHandler('projects:get')
+      ipcMain.handle('projects:get', () => {
+        if (++gets > 2) throw new Error('Home opened Working before Reel')
+        return { ok: true, value: d }
+      })
+    }, detail)
+    await page.getByTestId('nav-home').click()
+    await page.getByTestId('project-card').click()
+    await expect(page.getByTestId('export')).toBeEnabled()
+    await expect(page.getByText('Making your reel', { exact: true })).toHaveCount(0)
+
     await app.evaluate(({ ipcMain }, d) => {
       ipcMain.removeHandler('projects:get')
       ipcMain.handle('projects:get', async () => {
