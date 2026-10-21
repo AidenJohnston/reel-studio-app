@@ -15,10 +15,28 @@ def source(tmp_path):
     return path
 
 
-def test_fails_if_stable_60fps_source_creates_30fps_project(tmp_path, source):
+def test_fails_if_stable_source_rate_is_not_preserved(tmp_path, source):
     directory = tmp_path / "reel"
     init.run(directory, "Phone reel", [source])
-    assert project.load(directory)["format"]["fps"] == 60
+    assert project.load(directory)["format"]["fps"] == pytest.approx(60000 / 1001)
+
+
+def test_fails_if_constant_5994_on_coarse_timebase_becomes_30(tmp_path, source):
+    coarse = tmp_path / "coarse.mp4"
+    subprocess.run([tools.ffmpeg(), "-v", "error", "-i", str(source), "-c", "copy",
+                    "-video_track_timescale", "600", str(coarse)], check=True)
+    directory = tmp_path / "reel"
+    init.run(directory, "Phone reel", [coarse])
+    assert project.load(directory)["format"]["fps"] == pytest.approx(60000 / 1001)
+
+
+def test_fails_if_stable_50fps_source_becomes_30(tmp_path, source):
+    fast = tmp_path / "50fps.mp4"
+    subprocess.run([tools.ffmpeg(), "-v", "error", "-i", str(source), "-vf", "fps=50",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", str(fast)], check=True)
+    directory = tmp_path / "reel"
+    init.run(directory, "Phone reel", [fast])
+    assert project.load(directory)["format"]["fps"] == 50
 
 
 def test_fails_if_vfr_source_is_not_normalized(tmp_path, source):

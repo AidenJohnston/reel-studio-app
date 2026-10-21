@@ -14,6 +14,7 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".avif"
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".aif", ".aiff"}
 
 HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}
+STANDARD_FPS = (24000 / 1001, 24.0, 25.0, 30000 / 1001, 30.0, 48.0, 50.0, 60000 / 1001, 60.0)
 
 
 def _rate(raw) -> float:
@@ -30,6 +31,41 @@ def _fps(stream) -> float:
         if val:
             return val
     return 0.0
+
+
+def _sample_frame_cadence(path: Path, stream: dict) -> tuple[float, bool]:
+    """Demux at most 240 packets; allow one tick of container timestamp rounding."""
+    proc = tools.text_run([
+        tools.ffprobe(), "-v", "error", "-select_streams", str(stream["index"]),
+        "-read_intervals", "%+#240", "-show_entries", "packet=pts,dts", "-of", "json", str(path)
+    ], 30, f"sample frame cadence for {path.name}", check=False)
+    if proc.returncode:
+        return 0.0, True
+    packets = json.loads(proc.stdout or "{}").get("packets", [])
+    if any("pts" not in packet for packet in packets):
+        return 0.0, True
+    timestamps = sorted(packet["pts"] for packet in packets)
+    # Future packets can still fill presentation-time gaps after the last sampled decode time.
+    if stream.get("has_b_frames"):
+        decode_times = [packet["dts"] for packet in packets if "dts" in packet]
+        if not decode_times:
+            return 0.0, True
+        last_decode_time = max(decode_times)
+        timestamps = [pts for pts in timestamps if pts <= last_decode_time]
+    if len(timestamps) < 5:
+        return 0.0, True
+    cadence = (timestamps[-1] - timestamps[0]) / (len(timestamps) - 1)
+    if cadence <= 0:
+        return 0.0, True
+    tolerance = max(1.0, cadence * 0.01)
+    if any(b <= a or abs(b - a - cadence) > tolerance for a, b in zip(timestamps, timestamps[1:])):
+        return 0.0, True
+    timebase = Fraction(stream.get("time_base") or "0/1")
+    if timebase <= 0:
+        return 0.0, True
+    rate = 1 / (cadence * float(timebase))
+    standard = min(STANDARD_FPS, key=lambda candidate: abs(candidate - rate))
+    return (standard if abs(standard - rate) / rate < 0.01 else rate), False
 
 
 def _rotation(stream) -> int:
@@ -73,16 +109,15 @@ def probe(path: Path, quick: bool = False) -> dict:
     v = next((s for s in streams if s.get("codec_type") == "video"
               and not (s.get("disposition") or {}).get("attached_pic")), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
-    nominal_rate = _rate(v.get("r_frame_rate")) if v else 0.0
-    average_rate = _rate(v.get("avg_frame_rate")) if v else 0.0
+    cadence_fps, sampled_vfr = _sample_frame_cadence(path, v) if v and ext not in IMAGE_EXT else (0.0, False)
     duration = float(fmt.get("duration") or 0.0)
     out = {
         "path": str(path),
         "duration": round(duration, 3),
         "hasVideo": v is not None,
         "hasAudio": a is not None,
-        "fps": _fps(v) if v else 0.0,
-        "variableFrameRate": bool(v) and (not nominal_rate or not average_rate or nominal_rate != average_rate),
+        "fps": cadence_fps or (_fps(v) if v else 0.0),
+        "variableFrameRate": sampled_vfr,
         "width": int(v.get("width") or 0) if v else 0,
         "height": int(v.get("height") or 0) if v else 0,
         "rotation": _rotation(v) if v else 0,

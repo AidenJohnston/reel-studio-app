@@ -36,8 +36,8 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
 
     proj = projmod.new_project(title, slug=slug or projmod.slugify(project_dir.name, projmod.slugify(title)))
     normalize = any(info["variableFrameRate"] for _, info in infos) or len({info["fps"] for _, info in infos}) > 1
-    if not faster_exports and not normalize and all(59.9 <= info["fps"] <= 60 for _, info in infos):
-        proj["format"]["fps"] = 60
+    if not faster_exports and not normalize and 0 < infos[0][1]["fps"] <= 60:
+        proj["format"]["fps"] = infos[0][1]["fps"]
     media = project_dir / "media"
     (project_dir / "work").mkdir(parents=True, exist_ok=True)
     (project_dir / "versions").mkdir(parents=True, exist_ok=True)
