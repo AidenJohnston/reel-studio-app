@@ -151,6 +151,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        // a video still being prepared finishes first: `done` settling means nothing more touches the project
+        await Promise.all(pending)
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
@@ -180,6 +182,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     cancel(id: string): void {
       const j = jobs.get(id)
       if (j && !j.committed) j.abort.abort()
+    },
+    /** For deleting the project: stops the job even after its final render, so it reports no success (no record,
+     * `done`, chat message or notification) for a video being removed. Wait for its `done` before deleting files. */
+    abandon(id: string): void {
+      jobs.get(id)?.abort.abort()
     },
     async cancelAll(): Promise<void> {
       const all = [...jobs.values()]
