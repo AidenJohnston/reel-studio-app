@@ -1,11 +1,18 @@
 // electron-updater as an UpdateBackend (main/updater.ts). Configured like T3 Code's desktop app: never
-// downloads or installs on its own (autoDownload and autoInstallOnAppQuit off), stable releases only.
+// downloads or installs on its own (autoDownload and autoInstallOnAppQuit off).
 //
-// Where it asks: the feed in resources/app-update.yml, which electron-builder writes from the `publish`
-// block in packaging/electron-builder.yml (GitHub, AidenJohnston/reel-studio-app). A check is two GETs to
-// github.com (the releases.atom feed and /releases/latest) plus latest-mac.yml from the release; a download
-// is the Mac zip named in latest-mac.yml, checked against its sha512 before Squirrel.Mac installs it.
+// Which release: main's rule, not electron-updater's (main/update-check.ts newestRelease): the highest vX.Y.Z
+// tag among published releases, GitHub pre-releases included, other tags such as ffmpeg-7.1.1-rs2 ignored.
+// electron-updater's GitHub provider follows /releases/latest, which skips pre-releases; with allowPrerelease
+// it takes the newest release of any tag instead, so an ffmpeg source release published after an app release
+// would make every check fail. So each check reads GitHub's releases list once (the same request the old
+// update note made), then points electron-updater at that release's folder, where it reads latest-mac.yml
+// and later downloads the zip it names, checked against its sha512 before Squirrel.Mac installs it.
+//
+// resources/app-update.yml (electron-builder writes it from the `publish` block) still has to exist:
+// electron-updater reads its download cache folder name from it.
 import { autoUpdater, type ProgressInfo } from 'electron-updater'
+import { newerRelease, type FetchLike } from './update-check'
 import type { UpdateBackend } from './updater'
 
 /**
@@ -17,8 +24,14 @@ import type { UpdateBackend } from './updater'
 export const SAME_FOR_EVERYONE = { 'x-user-staging-id': '00000000-0000-0000-0000-000000000000' }
 
 export function electronUpdaterBackend(opts: {
+  version: string
+  fetch: FetchLike
+  /** GitHub's releases list (a local server in the update e2e). */
+  releasesApi: string
+  /** The folder holding a release's files, e.g. https://github.com/<repo>/releases/download/v0.1.3 */
+  releaseFolder(tag: string): string
   log(line: string): void
-  /** Test runs only: a dev-app-update.yml pointing at a local server (app/e2e/update.spec.ts). */
+  /** Test runs only: a dev-app-update.yml (app/e2e/update.spec.ts). */
   devFeedFile?: string
   /** Errors electron-updater reports by event, not by promise (Squirrel.Mac's install). */
   onError(e: unknown): void
@@ -31,9 +44,7 @@ export function electronUpdaterBackend(opts: {
   }
   u.autoDownload = false
   u.autoInstallOnAppQuit = false
-  u.allowPrerelease = false
   u.allowDowngrade = false
-  u.fullChangelog = false
   // Releases carry no .blockmap files (packaging/sign-mac.sh zips the signed app itself), so a differential
   // download could only fail first and then fetch the whole zip.
   u.disableDifferentialDownload = true
@@ -48,10 +59,14 @@ export function electronUpdaterBackend(opts: {
 
   return {
     async check() {
+      const found = await newerRelease(opts.fetch, opts.version, opts.releasesApi)
+      if (!found) return null
+      u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
       const r = await u.checkForUpdates()
       if (!r) throw new Error('The updater is not active in this build.')
+      // latest-mac.yml names an older version than its release tag: nothing to install
       if (!r.isUpdateAvailable) return null
-      return { version: r.updateInfo.version, notes: r.updateInfo.releaseNotes ?? null, releaseUrl: null }
+      return { version: r.updateInfo.version, notes: found.notes, releaseUrl: found.url }
     },
     async download(onProgress) {
       const progress = (p: ProgressInfo): void => onProgress(p.percent)

@@ -155,11 +155,14 @@ a { color: inherit; }
   font: inherit; font-size: 13px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 }
 .update-pop-link:hover { color: var(--ink); }
+.update-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 /* Settings > About */
 .update-row { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .update-row-line { display: flex; align-items: center; gap: 14px; }
 .update-row-line p { flex: 1; }
+.update-releases-link { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ink-2); text-underline-offset: 3px; white-space: nowrap; min-height: 32px; }
+.update-releases-link:hover { color: var(--ink); }
 
 .main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; position: relative; padding-top: var(--titlebar); }
 .page { max-width: 1120px; margin: 0 auto; padding: 14px 40px 60px; }

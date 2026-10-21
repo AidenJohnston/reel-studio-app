@@ -12,6 +12,7 @@ import { releaseNotesFrom } from './release-notes'
 import {
   FIRST_CHECK_DELAY_MS,
   isRateLimited,
+  isSnoozed,
   nextCheckDelay,
   onAvailable,
   onCheckFailed,
@@ -24,7 +25,12 @@ import {
   onUpToDate,
   plainError,
   progressWorthSending,
-  type CheckOutcome
+  SNOOZE_MS,
+  stillNewer,
+  validDismissal,
+  type CheckOutcome,
+  type Dismissal,
+  type UpdateMemory
 } from './update-machine'
 import { initialUpdateState, updateAction, type UpdateActionResult, type UpdateBusy, type UpdateMode, type UpdateState } from '../shared/update'
 
@@ -51,9 +57,9 @@ export interface UpdaterDeps {
   /** null = updates can run (main/update-machine.ts disabledReason). */
   disabledReason: string | null
   backend: UpdateBackend | null
-  /** Settings > "Check for updates" */
-  loadAutoCheck(): Promise<boolean>
-  saveAutoCheck(on: boolean): Promise<unknown>
+  /** The settings this keeps across launches (main/settings.ts). */
+  load(): Promise<UpdateMemory>
+  save(patch: Partial<UpdateMemory>): Promise<unknown>
   busy(): UpdateBusy
   /** Stop running work cleanly before the installer quits the app. */
   prepareToQuit(): Promise<void>
@@ -75,10 +81,43 @@ export function createUpdater(d: UpdaterDeps) {
   let failures = 0
   let timer: ReturnType<typeof setTimeout> | null = null
   let started = false
+  let dismissed: Dismissal | null = null
+  let snoozeEnd: ReturnType<typeof setTimeout> | null = null
+  // A check in this run found the offered version. False when it came from memory (an offline start), and then
+  // electron-updater has to read the release before it can download it.
+  let fresh = false
 
   const set = (next: UpdateState): void => {
-    state = next
+    state = { ...next, snoozed: isSnoozed(dismissed, next, d.now()) }
     d.send(state)
+  }
+  const remember = (patch: Partial<UpdateMemory>): void =>
+    void d.save(patch).catch((e) => d.log(`[update] could not save: ${why(e)}`))
+
+  /** Show the sidebar button again when "Not now" runs out, even if no check happens then. */
+  function armSnoozeEnd(): void {
+    if (snoozeEnd) clearTimeout(snoozeEnd)
+    snoozeEnd = null
+    const left = dismissed ? dismissed.at + SNOOZE_MS - d.now() : 0
+    if (left <= 0) return
+    snoozeEnd = setTimeout(() => set(state), left)
+    snoozeEnd.unref?.()
+  }
+
+  /** What a check found becomes the state, and is remembered for the next start. */
+  function applyFound(found: FoundUpdate | null): void {
+    if (found) {
+      const url = allowedReleaseUrl(found.releaseUrl) ?? pageFor(`v${found.version}`)
+      const notes = releaseNotesFrom(found.notes, found.version)
+      set(onAvailable(state, found.version, d.now(), notes, url))
+      remember({ updateLatest: { version: found.version, url, notes } })
+      d.log(`[update] ${found.version} is available`)
+    } else {
+      set(onUpToDate(state, d.now()))
+      if (state.status === 'up-to-date') remember({ updateLatest: null })
+      d.log('[update] up to date')
+    }
+    fresh = found !== null
   }
   const enabled = (): boolean => d.disabledReason === null && d.backend !== null
 
@@ -102,15 +141,7 @@ export function createUpdater(d: UpdaterDeps) {
     set(onCheckStart(state, d.now()))
     d.log(`[update] checking (${reason}), running ${d.version}`)
     try {
-      const found = await d.backend!.check()
-      if (found) {
-        const url = allowedReleaseUrl(found.releaseUrl) ?? pageFor(`v${found.version}`)
-        set(onAvailable(state, found.version, d.now(), releaseNotesFrom(found.notes, found.version), url))
-        d.log(`[update] ${found.version} is available`)
-      } else {
-        set(onUpToDate(state, d.now()))
-        d.log('[update] up to date')
-      }
+      applyFound(await d.backend!.check())
       failures = 0
       return 'ok'
     } catch (e) {
@@ -146,10 +177,21 @@ export function createUpdater(d: UpdaterDeps) {
   return {
     state: (): UpdateState => state,
 
-    /** Read the saved setting, then broadcast the first state. Call once before start(). */
+    /** Read what was kept from the last run, then broadcast the first state. Call once before start(). */
     async init(): Promise<void> {
-      const autoCheck = await d.loadAutoCheck().catch(() => true)
-      set({ ...state, autoCheck })
+      const mem = await d.load().catch((e) => {
+        d.log(`[update] could not read settings: ${why(e)}`)
+        return { checkUpdates: true, updateLatest: null, updateDismissed: null }
+      })
+      dismissed = validDismissal(mem.updateDismissed)
+      const kept = stillNewer(mem.updateLatest, d.version)
+      // installed since, or not ours: forget it
+      if (mem.updateLatest && !kept) remember({ updateLatest: null })
+      let first: UpdateState = { ...state, autoCheck: mem.checkUpdates }
+      // Offered as the old update note did: only while automatic checks are on.
+      if (kept && enabled() && mem.checkUpdates) first = { ...onAvailable(first, kept.version, d.now(), kept.notes ?? null, kept.url), checkedAt: null }
+      set(first)
+      armSnoozeEnd()
     },
 
     start,
@@ -170,6 +212,15 @@ export function createUpdater(d: UpdaterDeps) {
       set(onDownloadStart(state))
       d.log(`[update] downloading ${version}`)
       try {
+        if (!fresh) {
+          // offered from memory: read the release first (offline, this fails as a stopped download)
+          const found = await d.backend!.check()
+          if (found?.version !== version) {
+            applyFound(found)
+            return { accepted: true, state }
+          }
+          fresh = true
+        }
         await d.backend!.download((p) => {
           if (progressWorthSending(state, p)) set(onDownloadProgress(state, p))
         })
@@ -207,12 +258,23 @@ export function createUpdater(d: UpdaterDeps) {
       if (url) await d.openExternal(url)
     },
 
+    /** "Not now" in the popover: hide the sidebar button for 24 h for this version (or until a newer one). */
+    async dismiss(version: unknown): Promise<UpdateState> {
+      if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) return state
+      dismissed = { version, at: d.now() }
+      await d.save({ updateDismissed: dismissed })
+      set(state)
+      armSnoozeEnd()
+      d.log(`[update] not now: ${version}`)
+      return state
+    },
+
     /** Settings > "Check for updates" (`enabled` = automatic checks on). */
     status: (): { enabled: boolean } => ({ enabled: state.autoCheck }),
 
     async setEnabled(on: unknown): Promise<{ enabled: boolean }> {
       const autoCheck = on === true
-      await d.saveAutoCheck(autoCheck)
+      await d.save({ checkUpdates: autoCheck })
       set({ ...state, autoCheck })
       // on: look right away. off: schedule() only clears the next look.
       schedule(0)

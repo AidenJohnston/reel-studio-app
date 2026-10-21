@@ -83,12 +83,10 @@ upload `app/release/latest-mac.yml` if electron-builder left one there; it descr
 
 Then:
 
-* Publish it as a normal release, not a pre-release, with the tag `v<version>` (for example `v0.1.3`). The
-  update check follows GitHub's "Latest release", which skips pre-releases and drafts.
-* When you publish anything else on this repository (an `ffmpeg-...` source release, for example), untick
-  "Set as the latest release". If a release without `latest-mac.yml` becomes "Latest", installed copies cannot
-  find their update and say so in Settings until the next app release is Latest again.
-* Check it: `curl -sL https://github.com/AidenJohnston/reel-studio-app/releases/latest/download/latest-mac.yml`
+* Tag it `v<version>` (for example `v0.1.3`) and publish it; a draft is invisible to installed copies. The update
+  check takes the highest `vX.Y.Z` tag among published releases, pre-releases included, and ignores other tags,
+  so an `ffmpeg-...` source release never gets in the way.
+* Check it: `curl -sL https://github.com/AidenJohnston/reel-studio-app/releases/download/v<version>/latest-mac.yml`
   prints the new version.
 
 Practice first (no risk, uses the throw-away spike app): `packaging/build-mac.sh --spike` then

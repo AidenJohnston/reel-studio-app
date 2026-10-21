@@ -3,10 +3,15 @@ import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
 import { settingsFile } from './paths'
 import { writeJson } from './store'
+import type { Dismissal, RememberedRelease } from './update-machine'
 
 export interface Settings {
   /** Settings > "Check for updates": automatic update checks (main/updater.ts). Default on. */
   checkUpdates: boolean
+  /** The newest release the last check found, so a start without internet still offers it. */
+  updateLatest: RememberedRelease | null
+  /** "Not now" in the update popover: which version, and when. */
+  updateDismissed: Dismissal | null
   firstRunDone: boolean
   root: string | null
   /** Written by the 0.1.0/0.1.1 local-Claude-Code builds (a one-time automatic AI pick); read once by ai-carryover.ts. */
@@ -15,7 +20,7 @@ export interface Settings {
   aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true, updateLatest: null, updateDismissed: null }
 
 export async function loadSettings(): Promise<Settings> {
   try {

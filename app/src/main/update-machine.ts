@@ -2,6 +2,7 @@
 // when to check next, why updates may be off, and whether this copy may install updates itself.
 // No electron here; main/updater.ts drives it and the tests call it directly.
 import type { ReleaseNotes, UpdateMode, UpdateState } from '../shared/update'
+import { allowedReleaseUrl, isNewer } from './update-check'
 
 // ---- transitions ---------------------------------------------------------------------------------
 
@@ -85,12 +86,11 @@ export function progressWorthSending(s: UpdateState, percent: number): boolean {
 /** First check this long after start, so launch is never slower (T3 Code: 15 s). */
 export const FIRST_CHECK_DELAY_MS = 15_000
 /**
- * Then every 4 hours. T3 Code polls its own feed every 4 minutes; Reel Studio asks GitHub, anonymously. The
- * Windows page check uses GitHub's API, which allows 60 unauthenticated requests an hour per IP address, and a
+ * Then every 4 hours. T3 Code polls its own feed every 4 minutes; Reel Studio asks GitHub, anonymously. Each
+ * check reads GitHub's releases API, which allows 60 unauthenticated requests an hour per IP address, and a
  * school or office network puts many people behind one address. Every 4 h is at most 6 checks a day per copy,
  * so about 240 copies can share one address before the limit; releases come weeks apart, so a person still
- * hears about one the same day. The Mac check (electron-updater's GitHub provider) asks github.com itself, not
- * the API, and gets the same pace.
+ * hears about one the same day. No measurement backs the 4 h: it is a judgment.
  */
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 /** After a failed check (offline, GitHub down): 30 min, then 1 h, 2 h, never longer than the interval. */
@@ -112,6 +112,62 @@ export function isRateLimited(e: unknown): boolean {
   const status = (e as { statusCode?: unknown })?.statusCode
   if (status === 429 || status === 403) return true
   return /\b(429|403)\b|rate limit/i.test(String((e as Error)?.message ?? e))
+}
+
+// ---- remembered across launches (main/settings.ts, the same keys the old update note used) ----------
+
+/** The newest release a check found, so a start without internet still offers it. */
+export interface RememberedRelease {
+  version: string
+  url: string
+  notes?: ReleaseNotes | null
+}
+
+/** "Not now": which version, and when (ms since 1970). */
+export interface Dismissal {
+  version: string
+  at: number
+}
+
+export interface UpdateMemory {
+  /** Settings > "Check for updates": automatic checks. */
+  checkUpdates: boolean
+  updateLatest: RememberedRelease | null
+  updateDismissed: Dismissal | null
+}
+
+/** The remembered release if it is still worth offering: newer than this copy, with one of our release pages.
+ * settings.json is a file anyone can edit, so anything odd in it counts as nothing remembered. */
+export function stillNewer(remembered: unknown, current: string): RememberedRelease | null {
+  if (!remembered || typeof remembered !== 'object') return null
+  const { version, url, notes } = remembered as Partial<Record<keyof RememberedRelease, unknown>>
+  const page = allowedReleaseUrl(url)
+  if (typeof version !== 'string' || !isNewer(version, current) || !page) return null
+  return { version, url: page, notes: rememberedNotes(notes, version) }
+}
+
+function rememberedNotes(notes: unknown, version: string): ReleaseNotes | null {
+  if (!notes || typeof notes !== 'object') return null
+  const { items, totalItems } = notes as Partial<Record<keyof ReleaseNotes, unknown>>
+  if (!Array.isArray(items) || !items.every((i) => typeof i === 'string') || typeof totalItems !== 'number') return null
+  return { version, items, totalItems }
+}
+
+export function validDismissal(d: unknown): Dismissal | null {
+  if (!d || typeof d !== 'object') return null
+  const { version, at } = d as Partial<Record<keyof Dismissal, unknown>>
+  return typeof version === 'string' && typeof at === 'number' && Number.isFinite(at) ? { version, at } : null
+}
+
+/** How long "Not now" hides the sidebar button (the old update note's rule: the rest of the day). */
+export const SNOOZE_MS = 24 * 60 * 60 * 1000
+
+/** "Not now" hides the sidebar button for 24 h for that version or an older one; a newer version shows at once.
+ * A clock set back before the dismissal does not keep it hidden. */
+export function isSnoozed(d: Dismissal | null, s: Pick<UpdateState, 'availableVersion' | 'downloadedVersion'>, now: number): boolean {
+  const v = s.downloadedVersion ?? s.availableVersion
+  if (!d || !v) return false
+  return !isNewer(v, d.version) && d.at <= now && now - d.at < SNOOZE_MS
 }
 
 // ---- may this copy update itself? ----------------------------------------------------------------

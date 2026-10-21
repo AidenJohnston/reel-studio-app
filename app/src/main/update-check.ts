@@ -1,6 +1,7 @@
-// GitHub releases, read the way the old "update available" note did: the release-page allowlist, version
-// order, and the page check that Windows still uses until its installer is signed (main/update-machine.ts
-// updateMode says why). The Mac downloads and installs through electron-updater instead (main/updater.ts).
+// GitHub releases, read the way the old "update available" note did: the release-page allowlist, version order
+// and which release counts. Both platforms find the newest release here; Windows then opens its page (until its
+// installer is signed: main/update-machine.ts updateMode), the Mac downloads it through electron-updater
+// (main/updater-electron.ts).
 //
 // Privacy (the release notes promise "No account, no telemetry"): one GET of GitHub's public releases list
 // per check, with a generic User-Agent and nothing else that could identify the person. Node's fetch has no
@@ -109,9 +110,9 @@ export function requestHeaders(appVersion: string): Record<string, string> {
 }
 
 /** One GET of the releases list. Never throws. */
-export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutMs = TIMEOUT_MS): Promise<AskResult> {
+export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutMs = TIMEOUT_MS, url = RELEASES_API): Promise<AskResult> {
   try {
-    const res = await fetchFn(RELEASES_API, { headers: requestHeaders(appVersion), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' })
+    const res = await fetchFn(url, { headers: requestHeaders(appVersion), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' })
     // GitHub's unauthenticated limit is 60 an hour per IP (a shared campus or office IP can hit it):
     // 403/429 with x-ratelimit-remaining 0 or a retry-after. The updater backs off for a full day.
     if (res.status === 429 || (res.status === 403 && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after')))) {
@@ -124,15 +125,22 @@ export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutM
   }
 }
 
+/** The newest app release if it is newer than `appVersion`, else null. Throws when GitHub could not tell
+ * (a rate limit carries statusCode 429, so the updater waits a day). `url` is the releases list (a local
+ * server in the update e2e). */
+export async function newerRelease(fetchFn: FetchLike, appVersion: string, url = RELEASES_API): Promise<ReleaseFound | null> {
+  const r = await askGitHub(fetchFn, appVersion, TIMEOUT_MS, url)
+  if (r.kind === 'rate-limited') throw Object.assign(new Error('GitHub rate limit'), { statusCode: 429 })
+  if (r.kind === 'failed') throw new Error(r.why)
+  return r.latest && isNewer(r.latest.version, appVersion) ? r.latest : null
+}
+
 /** The Windows (unsigned) updater: finds a newer release; Download opens its page (main/updater.ts openRelease). */
 export function releasePageBackend(fetchFn: FetchLike, appVersion: string): UpdateBackend {
   return {
     async check() {
-      const r = await askGitHub(fetchFn, appVersion)
-      if (r.kind === 'rate-limited') throw Object.assign(new Error('GitHub rate limit'), { statusCode: 429 })
-      if (r.kind === 'failed') throw new Error(r.why)
-      if (!r.latest || !isNewer(r.latest.version, appVersion)) return null
-      return { version: r.latest.version, notes: r.latest.notes, releaseUrl: r.latest.url }
+      const found = await newerRelease(fetchFn, appVersion)
+      return found && { version: found.version, notes: found.notes, releaseUrl: found.url }
     },
     download: () => Promise.reject(new Error('This copy opens the download page instead of downloading.')),
     install() {

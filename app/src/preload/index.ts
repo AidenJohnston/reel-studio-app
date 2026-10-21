@@ -99,6 +99,7 @@ const api: ReelApi = {
     install: () => call('update:install'),
     openRelease: () => call('update:openRelease'),
     busy: () => call('update:busy'),
+    dismiss: (version) => call('update:dismiss', version),
     status: () => call('update:status'),
     setEnabled: (on) => call('update:setEnabled', on)
   }

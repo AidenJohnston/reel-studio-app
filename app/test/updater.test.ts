@@ -2,11 +2,16 @@
 // the Windows decision: an unsigned installer never self-updates.
 import { describe, expect, it } from 'vitest'
 import { createUpdater, type FoundUpdate, type UpdateBackend } from '../src/main/updater'
-import { parseFeedFile, updateMode } from '../src/main/update-machine'
-import { updateAction, type UpdateState } from '../src/shared/update'
+import { parseFeedFile, SNOOZE_MS, updateMode, type UpdateMemory } from '../src/main/update-machine'
+import { showsUpdateButton, updateAction, type UpdateState } from '../src/shared/update'
 
-function setup(found: () => Promise<FoundUpdate | null>, opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean } = {}) {
+function setup(
+  found: () => Promise<FoundUpdate | null>,
+  opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; memory?: Partial<UpdateMemory> } = {}
+) {
   const installs: number[] = []
+  let memory: UpdateMemory = { checkUpdates: true, updateLatest: null, updateDismissed: null, ...opts.memory }
+  let now = 1000
   const backend: UpdateBackend = {
     check: found,
     download: opts.download ?? (async (p) => [0, 40, 100].forEach(p)),
@@ -18,16 +23,16 @@ function setup(found: () => Promise<FoundUpdate | null>, opts: { download?: (p: 
     mode: 'install',
     disabledReason: null,
     backend,
-    loadAutoCheck: async () => true,
-    saveAutoCheck: async () => undefined,
+    load: async () => memory,
+    save: async (patch) => void (memory = { ...memory, ...patch }),
     busy: () => ({ exporting: !!opts.exporting, working: 0 }),
     prepareToQuit: async () => undefined,
     openExternal: async () => undefined,
     send: (s) => void sent.push(s),
     log: () => {},
-    now: () => 1000
+    now: () => now
   })
-  return { u, sent, installs }
+  return { u, sent, installs, memory: () => memory, tick: (ms: number) => void (now += ms) }
 }
 
 const v013: FoundUpdate = { version: '0.1.3', notes: '## What\'s new\n\n* **Updates install themselves.** More text.\n', releaseUrl: null }
@@ -103,6 +108,48 @@ describe('state machine', () => {
     await u.download()
     expect(await u.install()).toMatchObject({ accepted: false, refused: 'exporting' })
     expect(installs).toHaveLength(0)
+  })
+})
+
+describe('remembered across launches', () => {
+  it('a start without internet still offers the release found before; an installed one is forgotten', async () => {
+    const offline = async (): Promise<FoundUpdate | null> => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com'))
+    const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
+    const notes = { version: '0.1.3', items: ['Updates install themselves.'], totalItems: 1 }
+    const a = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: page, notes } } })
+    await a.u.init()
+    expect(a.u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, releaseNotes: notes })
+    // Download reads the release first: offline, that is a stopped download, not a silent no
+    await a.u.download()
+    expect(a.u.state()).toMatchObject({ status: 'error', errorContext: 'download', availableVersion: '0.1.3' })
+
+    const b = setup(offline, { memory: { updateLatest: { version: '0.1.2', url: page } } })
+    await b.u.init()
+    expect(b.u.state().status).toBe('idle')
+    expect(b.memory().updateLatest).toBeNull()
+  })
+})
+
+describe('"Not now"', () => {
+  it('hides the sidebar button for 24 h for that version, at once for nothing newer, and remembers it', async () => {
+    let latest = v013
+    const { u, tick, memory } = setup(async () => latest)
+    await u.init()
+    await u.check('test')
+    await u.dismiss('0.1.3')
+    expect(memory().updateDismissed).toEqual({ version: '0.1.3', at: 1000 })
+    expect(showsUpdateButton(u.state())).toBe(false)
+    // still offered where the person goes looking (Settings and the menu read the same state)
+    expect(updateAction(u.state())).toBe('download')
+
+    latest = { ...v013, version: '0.1.4' }
+    await u.check('test')
+    expect(showsUpdateButton(u.state())).toBe(true)
+
+    await u.dismiss('0.1.4')
+    tick(SNOOZE_MS)
+    await u.check('test')
+    expect(showsUpdateButton(u.state())).toBe(true)
   })
 })
 

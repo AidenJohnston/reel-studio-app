@@ -1,7 +1,9 @@
-// Updates, end to end on a dev build: a local server plays the release feed (electron-updater's generic
-// provider, through dev-app-update.yml: main/index.ts REELSTUDIO_UPDATE_FEED), and the UI goes through
-// "Download update", the progress ring, and "Restart to update" with its question. The install itself
-// (Squirrel.Mac replacing the app) needs a Developer ID signed build and is not run here.
+// Updates, end to end on a dev build: a local server plays GitHub (main/index.ts REELSTUDIO_UPDATE_FEED): the
+// releases list the check reads, and each release's folder with latest-mac.yml and the zip. The new version is
+// a GitHub pre-release and an ffmpeg source release came out after it, as can happen on the real repository:
+// the check must still pick v0.1.3 (main/update-check.ts newestRelease). The UI goes through "Download update",
+// the progress ring, "Restart to update" with its question, and "Not now". The install itself (Squirrel.Mac
+// replacing the app) needs a Developer ID signed build and is not run here.
 //
 // REELSTUDIO_EVIDENCE_DIR=<dir> also saves a screenshot of each state there, and update-flow.mp4: available,
 // downloading and ready, joined from screenshots by ffmpeg (Playwright's recordVideo hangs Electron's launch).
@@ -38,14 +40,25 @@ test.beforeAll(async () => {
   zip = randomBytes(3 * 1024 * 1024)
   const zipFile = join(BASE, ZIP_NAME)
   writeFileSync(zipFile, zip)
-  const yml = (v: string) => latestMacYml(zipFile, '0.1.3').replace('version: 0.1.3', `version: ${v}`) + `releaseNotes: ${JSON.stringify(NOTES)}\n`
+  const yml = latestMacYml(zipFile, '0.1.3')
+  const release = (tag: string, extra: Record<string, unknown> = {}) => ({
+    tag_name: tag,
+    draft: false,
+    prerelease: false,
+    html_url: `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`,
+    body: '',
+    ...extra
+  })
   server = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0]
-    if (path === '/latest-mac.yml') {
+    if (path === '/releases') {
       if (latest === 'broken') return void res.writeHead(500).end('down')
-      return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml(latest === 'new' ? '0.1.3' : '0.1.2'))
+      const list = [release('v0.1.2')]
+      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES }))
+      return void res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(list))
     }
-    if (path === `/${ZIP_NAME}`) {
+    if (path === '/download/v0.1.3/latest-mac.yml') return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
+    if (path === `/download/v0.1.3/${ZIP_NAME}`) {
       // about 6 s for the whole file, so the ring can be seen filling
       res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': zip.length })
       let at = 0
@@ -176,6 +189,8 @@ test('find, download and get ready to install an update', async () => {
     await page.getByTestId('nav-settings').click()
     const row = page.getByTestId('update-settings')
     await expect(row).toContainText('You have Reel Studio 0.1.2')
+    // the releases page is always one click away, whatever the updater can do
+    await expect(page.getByTestId('update-releases-link')).toHaveAttribute('href', 'https://github.com/AidenJohnston/reel-studio-app/releases')
     await row.scrollIntoViewIfNeeded()
     await snap(page, 'settings-idle')
 
@@ -237,6 +252,17 @@ test('find, download and get ready to install an update', async () => {
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
     await row.scrollIntoViewIfNeeded()
     await snap(page, 'settings-downloaded')
+
+    // "Not now": the sidebar button goes for 24 h; Settings still offers the update
+    await page.getByTestId('nav-settings').focus()
+    await page.keyboard.press('Tab') // keyboard focus opens the popover
+    await expect(pop).toHaveAttribute('data-open', 'true')
+    await snap(page, 'popover-downloaded', { x: 0, y: 380, width: 560, height: 440 })
+    await page.getByTestId('update-not-now').click()
+    await expect(button).toBeHidden()
+    await expect(page.getByTestId('toast')).toContainText('Hidden until tomorrow. You can still update from Settings.')
+    await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
+    await snap(page, 'settings-after-not-now')
   } finally {
     await app.close()
   }

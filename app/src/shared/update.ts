@@ -40,6 +40,8 @@ export interface UpdateState {
   /** Why updates are off (status disabled), or what went wrong, in plain words. */
   message: string | null
   errorContext: UpdateErrorContext | null
+  /** "Not now" in the popover: the sidebar button stays hidden for 24 h. Settings and the menu still offer it. */
+  snoozed: boolean
 }
 
 export interface UpdateActionResult {
@@ -71,7 +73,8 @@ export function initialUpdateState(currentVersion: string, mode: UpdateMode, aut
     downloadPercent: null,
     checkedAt: null,
     message: disabledReason,
-    errorContext: null
+    errorContext: null,
+    snoozed: false
   }
 }
 
@@ -87,9 +90,9 @@ export function updateAction(s: UpdateState): UpdateAction {
   return s.mode === 'page' ? 'open-page' : 'download'
 }
 
-/** The sidebar button shows only when there is an update to act on or one on its way. */
+/** The sidebar button shows only when there is an update to act on or one on its way, and not after "Not now". */
 export function showsUpdateButton(s: UpdateState | null): boolean {
-  return !!s && (updateAction(s) !== 'none' || s.status === 'downloading')
+  return !!s && (s.status === 'downloading' || (updateAction(s) !== 'none' && !s.snoozed))
 }
 
 export type UpdateIcon = 'available' | 'downloading' | 'downloaded' | 'failed'

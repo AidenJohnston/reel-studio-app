@@ -110,15 +110,15 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 crash reporting.
 
 One request happens without you asking: 15 seconds after it opens and then every 4 hours, Reel Studio asks GitHub
-whether a newer version is out. On a Mac that is the repository's public release feed on `github.com`
-(`/AidenJohnston/reel-studio-app/releases.atom`, `/releases/latest` and the newest release's `latest-mac.yml`);
-on Windows it is GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`).
-Nothing about you or your videos is sent: no cookies, account or ID. (The update library normally adds a random
-ID per computer to these requests; Reel Studio replaces it with the same all-zero value for everyone.) If there
-is a newer version, an update button appears in the sidebar. Nothing is downloaded until you click it; on a Mac
-it then downloads the update from the GitHub release and installs it when you choose to restart. On Windows the
-button opens the download page until the installer is signed. Turn the automatic check off in Settings with
-"Check for updates".
+whether a newer version is out: one GET of GitHub's public releases list
+(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`) with a generic `User-Agent: ReelStudio/<version>`.
+On a Mac, when there is a newer version, it also reads that release's `latest-mac.yml` from GitHub. Nothing
+about you or your videos is sent: no cookies, account or ID. (The update library normally adds a random ID per
+computer to its requests; Reel Studio replaces it with the same all-zero value for everyone.) If there is a newer
+version, an update button appears in the sidebar ("Not now" hides it until the next day). Nothing is downloaded
+until you click it; on a Mac it then downloads the update from the GitHub release and installs it when you
+choose to restart. On Windows the button opens the download page until the installer is signed. Turn the
+automatic check off in Settings with "Check for updates".
 
 ## Build from source
 

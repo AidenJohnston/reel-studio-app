@@ -407,6 +407,8 @@ export interface ReelApi {
     openRelease(): Promise<void>
     /** What restarting now would interrupt. */
     busy(): Promise<UpdateBusy>
+    /** "Not now": hide the sidebar button for 24 h for this version (or until a newer one comes out). */
+    dismiss(version: string): Promise<UpdateState>
     /** Settings > "Check for updates": `enabled` = automatic checks on. */
     status(): Promise<{ enabled: boolean }>
     setEnabled(on: boolean): Promise<{ enabled: boolean }>

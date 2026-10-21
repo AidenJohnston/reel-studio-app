@@ -50,9 +50,10 @@ import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '.
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
+import { RELEASES_REPO } from '../shared/config'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
-import { releasePageBackend } from './update-check'
+import { RELEASES_API, releasePageBackend, type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
 import { electronUpdaterBackend } from './updater-electron'
 import { disabledReason, parseFeedFile, updateMode, type FeedFile } from './update-machine'
@@ -171,6 +172,8 @@ const updateEnv = {
   feed: updateFeed?.feed ?? null,
   inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
 }
+// Node's fetch: no Electron session, so no cookies ride along
+const githubFetch: FetchLike = (url, init) => fetch(url, init)
 const updateOff = disabledReason(updateEnv)
 const updateHow = updateMode(updateEnv)
 const updates = createUpdater({
@@ -180,10 +183,18 @@ const updates = createUpdater({
   backend: updateOff
     ? null
     : updateHow === 'install'
-      ? electronUpdaterBackend({ log, devFeedFile: TEST_FEED ? updateFeed?.file : undefined, onError: (e) => updates.installFailed(e) })
-      : releasePageBackend((url, init) => fetch(url, init), app.getVersion()), // Node's fetch: no Electron session, so no cookies
-  loadAutoCheck: async () => (await loadSettings()).checkUpdates,
-  saveAutoCheck: (on) => saveSettings({ checkUpdates: on }),
+      ? electronUpdaterBackend({
+          version: app.getVersion(),
+          fetch: githubFetch,
+          releasesApi: TEST_FEED ? `${TEST_FEED}/releases` : RELEASES_API,
+          releaseFolder: (tag) => (TEST_FEED ? `${TEST_FEED}/download/${tag}` : `https://github.com/${RELEASES_REPO}/releases/download/${tag}`),
+          log,
+          devFeedFile: TEST_FEED ? updateFeed?.file : undefined,
+          onError: (e) => updates.installFailed(e)
+        })
+      : releasePageBackend(githubFetch, app.getVersion()),
+  load: loadSettings,
+  save: saveSettings,
   busy: updateBusy,
   prepareToQuit: async () => {
     await stopPhoneShare()
@@ -618,6 +629,7 @@ function registerIpc(): void {
   handle('update:install', () => updates.install())
   handle('update:openRelease', () => updates.openRelease())
   handle('update:busy', updateBusy)
+  handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
   handle('update:status', () => updates.status())
   handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
 

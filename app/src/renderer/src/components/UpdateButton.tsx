@@ -4,6 +4,7 @@
 // thing its label says. It shows only when there is an update to act on, so it never sits in the way.
 import { useEffect, useId, useRef, useState } from 'react'
 import { releaseLinkLabel, showsUpdateButton, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary, type UpdateState } from '../../../shared/update'
+import { reel } from '../api'
 import { useNotify } from '../App'
 import { Icon } from './icons'
 import { openReleasePage, useUpdateActions, useUpdateState } from './update'
@@ -144,6 +145,22 @@ export function UpdateButton() {
 
   const notes = s.releaseNotes
   const busy = s.status === 'downloading' || pending
+  const version = s.downloadedVersion ?? s.availableVersion
+
+  // "Not now" (the old update note's): the button goes away for 24 h; Settings and the menu still offer the update.
+  const notNow = async (): Promise<void> => {
+    if (!version) return
+    close()
+    hovering.current = false
+    // the button is about to go: put focus somewhere that stays, the page you are on
+    document.querySelector<HTMLElement>('.sidebar nav [aria-current="page"]')?.focus()
+    try {
+      await reel.update.dismiss(version)
+      notify('Hidden until tomorrow. You can still update from Settings.')
+    } catch {
+      notify('I could not hide the update note. Try again in a moment.', 'error')
+    }
+  }
 
   return (
     <div className="update-wrap" onFocus={focusIn} onBlur={focusOut} data-testid="update-button-wrap">
@@ -194,10 +211,17 @@ export function UpdateButton() {
             </ul>
           </section>
         )}
-        <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => openReleasePage(notify)} data-testid="update-release-link">
-          {notes ? releaseLinkLabel(notes) : 'Read the release notes on GitHub'}
-          <Icon name="external" size={12} stroke={2} />
-        </button>
+        <div className="update-pop-foot">
+          <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => openReleasePage(notify)} data-testid="update-release-link">
+            {notes ? releaseLinkLabel(notes) : 'Read the release notes on GitHub'}
+            <Icon name="external" size={12} stroke={2} />
+          </button>
+          {s.status !== 'downloading' && (
+            <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => void notNow()} data-testid="update-not-now">
+              Not now
+            </button>
+          )}
+        </div>
       </div>
       {dialog}
     </div>
