@@ -32,6 +32,15 @@ export function placeWords(segments: RenderSegment[], words: Word[]): PlacedWord
   return out.sort((a, b) => a.s - b.s)
 }
 
+/**
+ * Where output time `t` comes from: the source and the time in it, by the render's own segments.
+ * null in a gap between segments or past the end, where no source frame plays.
+ */
+export function sourceAt(segments: RenderSegment[], t: number): { source: string; at: number } | null {
+  const seg = segments.find((s) => t >= s.out_start && t < s.out_start + (s.src_end - s.src_start))
+  return seg ? { source: seg.source, at: seg.src_start + (t - seg.out_start) } : null
+}
+
 /** The words that play within `radius` seconds of output time `t`, each named once, where it first plays. */
 export function wordsAt(placed: PlacedWord[], t: number, radius = 1.1): MomentWord[] {
   const out: MomentWord[] = []

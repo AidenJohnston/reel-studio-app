@@ -14,7 +14,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { ChangeAt } from '../components/ChangeAt'
-import { noteMarks, typedMoment } from '../../../shared/moments'
+import { noteMarks, sourceAt, typedMoment, type RenderSegment } from '../../../shared/moments'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -59,6 +59,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
+  // the pointer or focus reached Hold for original: load the raw footage from then on
+  const [warmOriginal, setWarmOriginal] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
@@ -130,7 +132,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const changePreview = job?.preview?.video ?? null
   // Where the shown version plays each word, for the marks. Keyed on its video URL, which changes
   // with every render of it (the file's mtime is in the URL).
-  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[] } | null>(null)
+  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] } | null>(null)
   const shownN = version?.n
   const shownVideo = version?.video
   useEffect(() => {
@@ -139,7 +141,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     reel.projects
       .timeline(slug, shownN)
       .then((t) => {
-        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [] })
+        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [], segments: t?.segments ?? [] })
       })
       .catch((e) => notify(userMessage(e), 'error'))
     return () => {
@@ -279,6 +281,14 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   // none over a change's quick preview: it is cut differently from the saved version they are placed on
   const marks = !changePreview && timeline && timeline.video === version?.video ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
+  // Hold for original shows the raw take at the moment on screen, by the shown version's own segments (same
+  // rule as the marks). Without them, the player starts the first take from 0:00 as it used to.
+  const originalAt = (t: number) => {
+    if (changePreview || !timeline || timeline.video !== version?.video) return null
+    const at = sourceAt(timeline.segments, t)
+    const src = at && d.sourceVideos[at.source]
+    return src ? { src, at: at.at } : null
+  }
   const sent = async (jobId: string | null) => {
     if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
     await load()
@@ -346,6 +356,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               instagram={igOverlay}
               caption={d.project.post?.caption}
               original={d.sourceVideo}
+              originalAt={originalAt}
+              warmOriginal={warmOriginal}
               holdingOriginal={holding}
               onDuration={setDuration}
               dragFile={version && !version.draft ? version.videoPath : null}
@@ -383,6 +395,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             {d.sourceVideo && (
               <button
                 className={`tool${holding ? ' on' : ''}`}
+                onPointerEnter={() => setWarmOriginal(true)}
+                onFocus={() => setWarmOriginal(true)}
                 onPointerDown={() => setHolding(true)}
                 onPointerUp={() => setHolding(false)}
                 onPointerLeave={() => setHolding(false)}

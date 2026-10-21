@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { RenderSegment } from './moments'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -116,6 +117,8 @@ export interface AttachResult {
 export interface ProjectDetail extends ProjectSummary {
   /** The raw take (reel-media URL), or null before it is copied in. */
   sourceVideo: string | null
+  /** Every raw take by source id (reel-media URL), for the ones on disk. */
+  sourceVideos: Record<string, string>
   project: ProjectJson
   versions: VersionInfo[]
   words: Word[]
@@ -374,8 +377,9 @@ export interface ReelApi {
      * `moment`: a "Just here" note's place; main writes it into the text the AI reads. */
     note(slug: string, text: string, attachments?: string[], moment?: NoteMoment): Promise<{ jobId: string | null }>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
-     * fresh from that render's manifest each call. null when the render left no timeline to read. */
-    timeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null>
+     * fresh from that render's manifest each call, with the segments it was cut from. null when the render
+     * left no timeline to read. */
+    timeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[]; segments: RenderSegment[] } | null>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */

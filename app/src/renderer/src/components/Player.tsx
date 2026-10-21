@@ -177,6 +177,8 @@ export function PhonePlayer({
   instagram,
   caption,
   original,
+  originalAt,
+  warmOriginal,
   holdingOriginal,
   still,
   onDuration,
@@ -199,6 +201,10 @@ export function PhonePlayer({
   caption?: string
   /** The raw footage, shown while "Original" is held down. */
   original?: string | null
+  /** The raw take and the time in it that the reel plays at `seconds`, or null to start `original` from 0:00. */
+  originalAt?: (seconds: number) => { src: string; at: number } | null
+  /** The pointer or focus is on the hold button: load the raw footage now, so the hold is instant. */
+  warmOriginal?: boolean
   holdingOriginal?: boolean
   /** A still frame (the raw take, no subtitles burned in) under the subtitle preview. */
   still?: string | null
@@ -344,23 +350,51 @@ export function PhonePlayer({
     if (asking) video.current?.pause()
   }, [asking])
 
-  // Hold "Original": play the raw footage from the start over the reel, then go back to the reel where it was.
-  // Both are loaded and stacked, so only opacity changes; only the one on screen plays.
+  // Hold "Original": play the raw footage from the moment on screen, over the reel, then go back to the reel
+  // where it was. Both are stacked, so only opacity changes; only the one on screen plays. The raw footage
+  // shows once its seek lands, so its previous frame never flashes.
   const resumeAfterHold = useRef(false)
+  const [rawOn, setRawOn] = useState(false)
   useEffect(() => {
     const r = raw.current
     const v = video.current
     if (!r) return
-    if (holdingOriginal) {
-      resumeAfterHold.current = !!v && !v.paused
-      v?.pause()
-      r.currentTime = 0
-      void r.play().catch(() => {})
-    } else {
+    if (!holdingOriginal) {
       r.pause()
+      setRawOn(false)
       if (resumeAfterHold.current) void v?.play().catch(() => {})
       resumeAfterHold.current = false
+      return
     }
+    resumeAfterHold.current = !!v && !v.paused
+    v?.pause()
+    const at = v ? originalAt?.(v.currentTime) : null
+    const src = at?.src ?? original
+    if (src && r.getAttribute('src') !== src) r.src = src
+    r.currentTime = at?.at ?? 0
+    void r.play().catch(() => {})
+    const show = () => setRawOn(true)
+    if (r.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !r.seeking) {
+      show()
+      return
+    }
+    // a take's file that will not load: the first take from 0:00, as before
+    const fallBack = () => {
+      if (!original || r.getAttribute('src') === original) return
+      r.src = original
+      r.currentTime = 0
+      void r.play().catch(() => {})
+    }
+    // a different take's file: before its metadata the time waits, and it shows once it plays
+    r.addEventListener('seeked', show, { once: true })
+    r.addEventListener('playing', show, { once: true })
+    r.addEventListener('error', fallBack, { once: true })
+    return () => {
+      r.removeEventListener('seeked', show)
+      r.removeEventListener('playing', show)
+      r.removeEventListener('error', fallBack)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read at the press, not followed while held
   }, [holdingOriginal])
 
   return (
@@ -430,9 +464,9 @@ export function PhonePlayer({
             {original && (
               <Video
                 el={(v) => (raw.current = v)}
-                className={`raw-video${holdingOriginal ? ' on' : ''}`}
+                className={`raw-video${rawOn ? ' on' : ''}`}
                 src={original}
-                preload="auto"
+                preload={warmOriginal || holdingOriginal ? 'auto' : 'metadata'}
                 playsInline
                 muted={muted}
                 disablePictureInPicture

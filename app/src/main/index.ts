@@ -311,13 +311,13 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // Every word version `n` (0 = the Preview) plays, placed by that render's own timeline: the segments
 // the engine cut it from (render.json segmentsDetail, docs/versions.md). null when the version or its
 // timeline is missing.
-async function readTimeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null> {
+async function readTimeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[]; segments: RenderSegment[] } | null> {
   const dir = projectDir(slug)
   const file = n === 0 ? join(dir, 'versions', PREVIEW_DIR, 'render_draft.json') : join(dir, 'versions', `v${n}`, 'render.json')
   const r = await readJson<{ duration?: number; segmentsDetail?: RenderSegment[] }>(file, {})
   if (typeof r.duration !== 'number' || !r.segmentsDetail?.length) return null
   const words = await readWords(dir, await readProject(slug))
-  return { duration: r.duration, words: placeWords(r.segmentsDetail, words) }
+  return { duration: r.duration, words: placeWords(r.segmentsDetail, words), segments: r.segmentsDetail }
 }
 
 function registerIpc(): void {

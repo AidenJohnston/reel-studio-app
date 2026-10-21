@@ -517,11 +517,16 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     if (existsSync(p)) brollThumbs[b.id] = mediaUrl(p)
   }
   // The raw footage, for "hold for Original" and the Working screen's first frame.
-  const src = project.sources?.[0]?.path
-  const srcPath = src ? (isAbsolute(src) ? src : join(dir, ...src.split('/'))) : null
+  const sourceVideos: Record<string, string> = {}
+  for (const src of project.sources ?? []) {
+    const p = isAbsolute(src.path) ? src.path : join(dir, ...src.path.split('/'))
+    if (existsSync(p)) sourceVideos[src.id] = mediaUrl(p)
+  }
+  const first = project.sources?.[0]
   return {
     ...s,
-    sourceVideo: srcPath && existsSync(srcPath) ? mediaUrl(srcPath) : null,
+    sourceVideo: (first && sourceVideos[first.id]) ?? null,
+    sourceVideos,
     project,
     versions,
     words,

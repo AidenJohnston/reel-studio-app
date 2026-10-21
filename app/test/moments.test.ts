@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { planFastNote } from '../../ai/src/fastnote'
 import { withDefaults } from '../../ai/src/project'
-import { aiNoteText, checkMoment, groupMarks, momentRoute, noteMarks, noteMoment, parseMoment, placeWords, typedMoment, wordsAt } from '../src/shared/moments'
+import { aiNoteText, checkMoment, groupMarks, momentRoute, noteMarks, noteMoment, parseMoment, placeWords, sourceAt, typedMoment, wordsAt } from '../src/shared/moments'
 import type { ChatMessage, Word } from '../src/shared/api'
 
 const you = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id, from: 'you', text, at: '', ...extra })
@@ -24,6 +24,16 @@ const cut = placeWords(
 describe('notes asked at a moment', () => {
   it('finds the words on screen through the segments of the render being watched', () => {
     expect(wordsAt(cut, 15).map((w) => w.id)).toEqual(['w48', 'w49', 'w50', 'w51', 'w52'])
+  })
+
+  it('finds the raw footage moment for Hold for original through the same segments', () => {
+    const segs = [
+      { source: 's1', src_start: 0, src_end: 10, out_start: 0 },
+      { source: 's2', src_start: 20, src_end: 50, out_start: 10 }
+    ]
+    expect(sourceAt(segs, 4)).toEqual({ source: 's1', at: 4 })
+    expect(sourceAt(segs, 15)).toEqual({ source: 's2', at: 25 })
+    expect(sourceAt(segs, 40)).toBeNull() // past the end
   })
 
   it('places each mark where its words play in the version on screen, or not at all', () => {
