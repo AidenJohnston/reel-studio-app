@@ -185,11 +185,12 @@ export class NoteTransaction {
       const cache = path.join(this.versionDir, '.cache');
       await fs.mkdir(cache, { recursive: true });
       await transferCompletedCaches(this.dir, cache, 'move', this.signal);
-      await writeFileAtomic(path.join(this.versionDir, 'project.json'), JSON.stringify({ ...p, notes: [...p.notes, note] }, null, 2) + '\n');
+      const files: [string, string][] = [[path.join(this.versionDir, 'project.json'),
+        JSON.stringify({ ...p, notes: [...p.notes, note] }, null, 2) + '\n']];
       const notesFile = path.join(this.versionDir, 'notes.md');
       try {
         const notes = await fs.readFile(notesFile, 'utf8');
-        await writeFileAtomic(notesFile, `# v${version}\n\n${notes.replace(/^# v\d+\r?\n(?:\r?\n)?/, '')}`);
+        files.push([notesFile, `# v${version}\n\n${notes.replace(/^# v\d+\r?\n(?:\r?\n)?/, '')}`]);
       } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       // Engine metadata must point at the published files after staging is removed.
       for (const name of ['render.json', 'verify.json']) {
@@ -203,8 +204,12 @@ export class NoteTransaction {
           metadata.versionDir = destination;
           if (metadata.cover) metadata.cover = path.join(destination, 'cover.png');
         }
-        await writeFileAtomic(metadataFile, JSON.stringify(metadata, null, 2) + '\n');
+        files.push([metadataFile, JSON.stringify(metadata, null, 2) + '\n']);
       }
+      // These independent staged files each sync before publication. Settle every write even
+      // after a failure so cleanup cannot race a sibling still preparing its file.
+      const prepared = await Promise.allSettled(files.map(([file, data]) => writeFileAtomic(file, data)));
+      for (const result of prepared) if (result.status === 'rejected') throw result.reason;
       await removeUnpublished(this.liveDir, Number(current.version ?? 0));
       afterStep?.('base');
       this.check();
