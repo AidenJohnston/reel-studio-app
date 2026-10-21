@@ -6,9 +6,9 @@
 
 /* The Reel column fits the window with nothing scrolled (1280x820 down to the 1024x700 minimum). Below
    the phone: picker 12+32, Instagram view row 4+32, versions 12+34, Export 12+52, Send to my phone 12+44
-   = 246px, plus 50px above the phone (title bar, page top) and 24px of page bottom = 320px. A real phone
-   adds the 20px line under the picker. styles.css's own .phone budget (250px) leaves the column about
-   18px too tall even without the picker. */
+   = 246px, plus 50px above the phone (title bar, page top) and 24px of page bottom = 320px. A real
+   phone adds the 22px line under the picker (20px and a 2px gap). styles.css's own .phone budget (250px)
+   leaves the column about 18px too tall even without the picker. */
 .device-frame .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 304px) * 9 / 16 + 24px), 340px); }
 @media (max-width: 1180px) {
   .device-frame .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 304px) * 9 / 16 + 24px), 300px); }
@@ -16,17 +16,17 @@
 /* The picker and the Instagram view row are one group of phone controls: 4px apart, not the column's 12px. */
 .device-pick + .phone-tools { margin-top: -8px; }
 
-/* ---- a real phone: its own width, corners and camera; 20px shorter than the plain phone, which is the
+/* ---- a real phone: its own width, corners and camera; 22px shorter than the plain phone, which is the
    line under the picker that says how much Instagram may cut off, so nothing below moves ---- */
 .device-frame:not([data-device="any"]) {
-  --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 302px), 566px);
+  --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 302px), 563px);
   /* the chin is the whole forehead or chin (devices.ts), so it replaces the plain 12px bezel rather than adding to it */
   --bezel-y: max(12px, calc(var(--frame-h) * var(--dev-chin)));
   --screen-h: calc(var(--frame-h) - 2 * var(--bezel-y));
   --screen-r: calc(var(--screen-h) * var(--dev-radius));
 }
 @media (max-width: 1180px) {
-  .device-frame:not([data-device="any"]) { --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 302px), 494px); }
+  .device-frame:not([data-device="any"]) { --frame-h: clamp(348px, calc(100vh - var(--titlebar) - 302px), 492px); }
 }
 .device-frame:not([data-device="any"]) .phone {
   width: calc(var(--screen-h) * var(--dev-ratio) + 24px);
