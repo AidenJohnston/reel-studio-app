@@ -3,8 +3,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { beginNote, recoverNoteStaging, PublishStep } from '../src/note-staging';
+import { beginNote, recoverNoteStaging, withProjectLock, PublishStep } from '../src/note-staging';
 import { createAI, loadProject, saveProject, AgentEvent } from '../src';
+import { StyleStore } from '../src/style';
 import { FakeHost, ScriptedModel, call, makeProject } from './helpers';
 
 const roots: string[] = [];
@@ -176,12 +177,18 @@ it('a crash at each publish boundary exposes the old project or a complete new v
   const boundaries: PublishStep[] = ['base', 'assets', 'credits', 'version', 'project', 'append'];
   for (const boundary of boundaries) {
     const { dir, before } = await setup();
+    const creditsFile = path.join(dir, 'work/assets/credits.json');
+    await fs.mkdir(path.dirname(creditsFile), { recursive: true });
+    const oldCredits = '{ "existing.png": {"attribution":"Original"} }\n';
+    await fs.writeFile(creditsFile, oldCredits);
     const txn = await beginNote(dir);
     const asset = `${txn.txnId}-image.png`;
     const p = await loadProject(txn.dir);
     p.music.level = 'quiet';
     await saveProject(txn.dir, p);
     await fs.writeFile(path.join(txn.dir, 'work', 'assets', asset), 'new image');
+    await fs.mkdir(path.join(txn.dir, 'work/thumbs'));
+    await fs.writeFile(path.join(txn.dir, 'work/thumbs', asset), 'new thumbnail');
     await fs.writeFile(path.join(txn.dir, 'work', 'assets', 'credits.json'), JSON.stringify({ [asset]: { attribution: 'Photographer' } }));
     await fs.mkdir(txn.versionDir);
     await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
@@ -192,6 +199,9 @@ it('a crash at each publish boundary exposes the old project or a complete new v
     await recoverNoteStaging(dir);
     const live = await loadProject(dir);
     if (boundary === 'project' || boundary === 'append') {
+      expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(
+        await fs.readFile(path.join(dir, 'versions/v2/project.json')));
+      expect(live.notes.at(-1)?.txnId).toBe(txn.txnId);
       expect(live.version).toBe(2);
       expect(live.music.level).toBe('quiet');
       expect(await fs.readFile(path.join(dir, 'versions', 'v2', 'export.mp4'), 'utf8')).toBe('new video');
@@ -201,9 +211,32 @@ it('a crash at each publish boundary exposes the old project or a complete new v
     } else {
       expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
       await expect(fs.access(path.join(dir, 'versions', 'v2'))).rejects.toThrow();
+      await expect(fs.access(path.join(dir, 'work/assets', asset))).rejects.toThrow();
+      expect(await fs.readFile(creditsFile, 'utf8')).toBe(oldCredits);
+      await expect(fs.access(path.join(dir, 'work/thumbs', asset))).rejects.toThrow();
     }
     expect(await fs.readFile(path.join(dir, 'versions', 'v1', 'export.mp4'), 'utf8')).toBe('old video');
   }
+});
+
+it('recovers style rules after the project commit without rewriting the committed project or duplicating rules', async () => {
+  const { dir, root } = await setup();
+  const style = new StyleStore(() => root);
+  const txn = await beginNote(dir);
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  await expect(txn.publish(note, ['Always use quiet music', 'Keep captions small'], style, (step) => {
+    if (step === 'project') throw new Error('simulated process crash');
+  })).rejects.toThrow('simulated process crash');
+  const committed = await fs.readFile(path.join(dir, 'versions/v2/project.json'));
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(committed);
+  // A retry after a partially completed append must recognize an existing equivalent rule.
+  await style.add('Always use quiet music');
+  await recoverNoteStaging(dir);
+  await recoverNoteStaging(dir);
+  expect((await style.list()).map((rule) => rule.text)).toEqual(['Always use quiet music.', 'Keep captions small.']);
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(committed);
+  expect(existsSync(txn.dir)).toBe(false);
 });
 
 it('Stop during render waits for the in-flight render before deleting staging and preserves the project', async () => {
@@ -238,6 +271,34 @@ it('Stop during render waits for the in-flight render before deleting staging an
   expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
   expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
   expect(lifecycle).toEqual([expect.any(String), null]);
+});
+
+it('rolls back a stopped publication before a queued manual credit edit runs', async () => {
+  const { dir, before } = await setup();
+  const controller = new AbortController();
+  const txn = await beginNote(dir, controller.signal);
+  const asset = `${txn.txnId}-image.png`;
+  const credits = path.join(dir, 'work/assets/credits.json');
+  await fs.mkdir(path.dirname(credits), { recursive: true });
+  await fs.writeFile(credits, '{}');
+  await fs.writeFile(path.join(txn.dir, 'work/assets', asset), 'new image');
+  await fs.writeFile(path.join(txn.dir, 'work/assets/credits.json'), JSON.stringify({ [asset]: {} }));
+  await fs.mkdir(txn.versionDir);
+  await fs.writeFile(path.join(txn.versionDir, 'export.mp4'), 'new video');
+  let manual: Promise<void> | undefined;
+  await expect(txn.publish(note, [], undefined, (step) => {
+    if (step !== 'credits') return;
+    controller.abort();
+    manual = withProjectLock(dir, async () => {
+      expect(await fs.readFile(credits, 'utf8')).toBe('{}');
+      await fs.writeFile(credits, '{"manual": {}}');
+    });
+  })).rejects.toMatchObject({ code: 'cancelled' });
+  await manual;
+  await txn.discard();
+  expect(await fs.readFile(credits, 'utf8')).toBe('{"manual": {}}');
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  expect(existsSync(path.join(dir, 'work/assets', asset))).toBe(false);
 });
 
 it('a stale base refuses to publish without overwriting the newer manual edit', async () => {

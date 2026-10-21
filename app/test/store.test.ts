@@ -204,6 +204,7 @@ describe('project store', () => {
     const original = readFileSync(join(dir, 'project.json'))
     const staging = join(dir, '.staging', 'interrupted')
     mkdirSync(staging, { recursive: true })
+    mkdirSync(join(dir, '.staging', 'second'))
     writeFileSync(join(staging, 'project.json'), 'staged')
     mkdirSync(join(dir, 'versions', 'v2'))
     writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'unpublished')
@@ -216,7 +217,9 @@ describe('project store', () => {
     expect(state.chat.map((message) => message.text)).toEqual([
       'Reel Studio closed before I finished that change. Send your note again and I will pick it up.'
     ])
-    expect(await recoverInterrupted()).toEqual([])
+    // Simulate a crash during deletion: only one already-announced orphan remains.
+    mkdirSync(join(dir, '.staging', 'second'), { recursive: true })
+    await recoverInterrupted()
     expect((await readAppState('orphan')).chat).toEqual(state.chat)
     expect(readFileSync(join(dir, 'project.json'))).toEqual(original)
   })
