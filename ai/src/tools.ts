@@ -765,7 +765,7 @@ const tools: ToolDef[] = [
   {
     name: 'set_gap_cap',
     description: 'Longest pause (seconds) kept between words. ~0.12 tight, 0.25-0.4 for slow heartfelt delivery.',
-    parameters: S.obj({ seconds: S.num('seconds, 0 to 5', { minimum: 0, maximum: 5 }) }),
+    parameters: S.obj({ seconds: S.num('0.05 to 1.0', { minimum: 0.02, maximum: 2 }) }),
     async run(ctx, args) {
       await mutate(ctx, 'cut', (p) => { p.cut.gapCap = args.seconds; });
       return { content: { ok: true, gapCap: args.seconds }, summary: args.seconds <= 0.2 ? 'Tightened the pauses' : 'Gave the pauses a little more room' };
@@ -777,8 +777,8 @@ const tools: ToolDef[] = [
     parameters: S.obj({
       enabled: S.opt(S.bool()),
       preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
-      size: S.opt(S.num('font size in px at 1080 wide, 10-300. Default 105; prefer at least 80 for phone readability', { minimum: 10, maximum: 300 })),
-      maxWords: S.opt(S.int('words per caption chunk, 1-12', { minimum: 1, maximum: 12 })),
+      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80', { minimum: 10, maximum: 300 })),
+      maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
       case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
       color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
@@ -799,7 +799,7 @@ const tools: ToolDef[] = [
     parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p, t) => {
-        if (!hasCaptionPhrase(t, args.from)) return `phrase not found in the transcript: "${args.from}"`;
+        if (!hasCaptionPhrase(t, args.from, args.to)) return `phrase not found in the transcript: "${args.from}"`;
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
         c.push({ from: args.from, to: args.to });
         p.captions.corrections = c;
@@ -891,7 +891,7 @@ const tools: ToolDef[] = [
     name: 'set_music_automation',
     description: 'Replace music volume changes, each over a word range: gainDb relative to the level (e.g. -6 quieter, +3 swell). Empty list = none.',
     parameters: S.obj({
-      automation: S.arr(S.obj({ fromWord: S.str(undefined, WORD_ID), toWord: S.str(undefined, WORD_ID), gainDb: S.num('-60 to +24', { minimum: -60, maximum: 24 }) })),
+      automation: S.arr(S.obj({ fromWord: S.str(undefined, WORD_ID), toWord: S.str(undefined, WORD_ID), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
     }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -1095,7 +1095,7 @@ const tools: ToolDef[] = [
   {
     name: 'set_zoom',
     description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
-    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-3.0', { minimum: 1, maximum: 3 }) })) }),
+    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));

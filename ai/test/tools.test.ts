@@ -51,6 +51,37 @@ describe('tool implementations', () => {
     expect(ctx.state.changed.has('cut')).toBe(true);
   });
 
+  it('keeps the editor limits inside the wider engine envelope', async () => {
+    const { ctx, dir } = await ctxFor();
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    for (const [name, args] of [
+      ['set_gap_cap', { seconds: 3 }],
+      ['set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: 20 }] }],
+      ['set_zoom', { zooms: [{ anchor: { from: 'w0', to: 'w8' }, scale: 2 }] }],
+    ] as const) {
+      expect((await executeTool(ctx, name, args)).isError, name).toBe(true);
+      expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    }
+    const captions = TOOLS.find((t) => t.name === 'set_caption_style')!.parameters.properties;
+    expect(captions.size.description).toBe('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80');
+    expect(captions.maxWords.description).toBe('words per caption chunk, 1-4');
+  });
+
+  it('accepts a possessive-base correction using the engine single-word rule', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = "Claude’s";
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'Claude', to: 'Claud' }]);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    // Multiword replacements use the engine's exact phrase rule, not its possessive-base rule.
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'the assistant' })).isError).toBe(true);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  });
+
   it.each([
     ['size', -100], ['size', 301], ['maxWords', 0], ['maxWords', 13], ['maxWords', 1.5],
     ['color', 'garbage'], ['case', 'sentence'], ['position', 0], ['position', 1],
@@ -90,11 +121,11 @@ describe('tool implementations', () => {
   });
 
   it.each([
-    ['set_gap_cap', { seconds: 0 }], ['set_gap_cap', { seconds: 5 }],
-    ['set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: -60 }] }],
-    ['set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: 24 }] }],
-    ['set_zoom', { zooms: [{ anchor: { from: 'w0', to: 'w8' }, scale: 3 }] }],
-  ])('accepts the engine boundary for %s', async (name, args) => {
+    ['set_gap_cap', { seconds: 0.02 }], ['set_gap_cap', { seconds: 2 }],
+    ['set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: -40 }] }],
+    ['set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: 12 }] }],
+    ['set_zoom', { zooms: [{ anchor: { from: 'w0', to: 'w8' }, scale: 1.6 }] }],
+  ])('accepts the editor boundary for %s', async (name, args) => {
     const { ctx } = await ctxFor();
     expect((await executeTool(ctx, name, args)).isError).toBe(false);
   });

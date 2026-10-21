@@ -28,13 +28,15 @@ for (const field of ['fromWord', 'toWord']) pairs.push([`automation ${field}`, t
 for (const name of ['update_broll', 'remove_broll']) pairs.push([`${name} id`, tool(name).id, p.broll.items.properties.id]);
 
 const constraints = (schema: JSONSchema) => Object.fromEntries(
-  ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'pattern', 'minLength', 'enum'].filter((key) => schema[key] !== undefined)
+  ['pattern', 'minLength', 'enum'].filter((key) => schema[key] !== undefined)
     .map((key) => [key, key === 'enum' ? schema[key].filter((v: unknown) => v !== null) : schema[key]]),
 );
 
 describe('hand-mirrored engine constraints', () => {
-  it.each(pairs)('%s matches the engine schema', (_name, ai, authoritative) => {
+  it.each(pairs)('%s stays inside the engine schema', (_name, ai, authoritative) => {
     expect(constraints(ai)).toEqual(constraints(authoritative));
+    if (authoritative.minimum !== undefined) expect(ai.minimum).toBeGreaterThanOrEqual(authoritative.minimum);
+    if (authoritative.maximum !== undefined) expect(ai.maximum).toBeLessThanOrEqual(authoritative.maximum);
     if (authoritative.type === 'integer') expect(ai.type).toContain('integer');
   });
 });

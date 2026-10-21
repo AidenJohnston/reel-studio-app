@@ -305,20 +305,28 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
 
-/** Match the tokens seen by captions.py: stitch_numbers, then apply_corrections' _bare. */
-export function hasCaptionPhrase(t: Transcript, phrase: string): boolean {
+/** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
+export function hasCaptionPhrase(t: Transcript, phrase: string, replacement: string): boolean {
   const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
   const words: string[] = [];
   for (let i = 0; i < t.words.length; i++) {
-    const word = t.words[i].w.trim();
-    const next = t.words[i + 1]?.w.trim();
-    if (/^\$?[0-9]+$/.test(word) && next && /^,[0-9]{3}/.test(next)) {
-      words.push(bare(word + next));
+    const word = t.words[i].w;
+    const next = t.words[i + 1]?.w;
+    if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
+      words.push(word.trim() + next.trim());
       i++;
-    } else words.push(bare(word));
+    } else words.push(word);
   }
+  if (!phrase.trim()) return false;
   const target = phrase.trim().split(/\s+/).map(bare);
-  return !!phrase.trim() && words.some((_word, i) => target.every((word, k) => words[i + k] === word));
+  if (target.length === 1 && replacement.trim() && replacement.trim().split(/\s+/).length === 1) {
+    return words.some((word) => {
+      // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
+      const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word)?.[1].toLowerCase();
+      return core === target[0] || core?.split(/['’]/)[0] === target[0];
+    });
+  }
+  return words.some((_word, i) => target.every((word, k) => words[i + k] !== undefined && bare(words[i + k]) === word));
 }
 
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */
