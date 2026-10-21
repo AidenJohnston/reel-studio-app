@@ -59,6 +59,48 @@ async function staleProbe(parent, api) {
   assert.deepEqual(await fs.readFile(file), bytes);
 }
 
+// Compile the store unchanged and connect it to the copied transaction API.
+// The wrapper stops recursive cleanup after its first orphan directory.
+async function recoveryNoticeProbe(parent, api) {
+  const app = path.join(parent, 'app');
+  for (const name of ['main/store', 'main/paths', 'main/media-url', 'shared/cut']) {
+    const source = await fs.readFile(path.join(root, 'app/src', name + '.ts'), 'utf8');
+    const file = path.join(app, name + '.js');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+    }).outputText);
+  }
+  const bridge = path.join(app, 'main/ai.js');
+  await fs.writeFile(bridge, 'module.exports = require(' + JSON.stringify(path.join(parent, 'note-staging.js')) + ');');
+  const paths = require(path.join(app, 'main/paths.js'));
+  paths.initPaths({ isPackaged: false, resourcesPath: parent, documentsDir: parent,
+    userDataDir: parent, appDir: app, rootOverride: path.join(parent, 'store-fixture'), env: {} });
+  const store = require(path.join(app, 'main/store.js'));
+  await store.ensureRoot();
+  const dir = store.projectDir('interrupted');
+  await fs.mkdir(path.join(dir, '.staging/A'), { recursive: true });
+  await fs.mkdir(path.join(dir, '.staging/B'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({ version: 0, notes: [] }));
+  const recover = api.recoverNoteStaging;
+  api.recoverNoteStaging = async projectDir => {
+    assert.equal(projectDir, dir);
+    await fs.rm(path.join(dir, '.staging/A'), { recursive: true });
+    throw new Error('crash during recursive cleanup');
+  };
+  try {
+    await assert.rejects(store.recoverInterrupted(), /crash during recursive cleanup/);
+  } finally { api.recoverNoteStaging = recover; }
+  await store.recoverInterrupted();
+  const ids = (await store.readAppState('interrupted')).chat.map(message => message.id);
+  assert.deepEqual(ids, ['interrupted-note:A,B', 'interrupted-note:B']);
+  const once = await fs.readFile(path.join(dir, 'app.json'));
+  await store.recoverInterrupted();
+  assert.deepEqual(await fs.readFile(path.join(dir, 'app.json')), once);
+  console.log('FINDING actual store: interrupted cleanup of A,B duplicates the notice for B on retry');
+  console.log('PASS actual store: two completed recovery passes leave identical app.json bytes');
+}
+
 async function main() {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'note-staging-source-'));
   try {
@@ -86,6 +128,8 @@ async function main() {
     assert.equal(live.notes.some(n => n.txnId === append.txn.txnId), false);
     assert.equal(snapshot.notes.some(n => n.txnId === append.txn.txnId), true);
     console.log('FINDING actual source: committed live project lacks the note present in the version snapshot');
+
+    await recoveryNoticeProbe(temp, api);
 
     const scratch = path.join(temp, 'mutant');
     await fs.mkdir(scratch);

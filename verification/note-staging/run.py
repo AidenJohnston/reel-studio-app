@@ -101,6 +101,13 @@ def main():
             raise RuntimeError("Unknown case: " + args.case)
     results = HERE / "results"
     results.mkdir(exist_ok=True)
+    if not args.case:
+        probe = subprocess.run(["node", str(HERE / "source-probes.cjs")], cwd=ROOT,
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        (results / "source-probes.log").write_text(probe.stdout)
+        print(probe.stdout, end="", flush=True)
+        if probe.returncode:
+            raise RuntimeError("Source rehearsal failed; install repository dependencies with npm ci if TypeScript is missing")
     summaries = [check_case(java, case, results) for case in cases]
     (results / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n")
     if not all(summary["matched"] for summary in summaries):

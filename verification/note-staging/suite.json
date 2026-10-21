@@ -37,7 +37,7 @@
   {
     "name": "broken-cache",
     "expect": "mutation",
-    "invariant": "LiveCachesUntouched"
+    "invariant": "CachePublicationSafe"
   },
   {
     "name": "broken-rewrite",
@@ -63,5 +63,45 @@
     "name": "witness-stale",
     "expect": "witness",
     "invariant": "NeverRejectedStale"
+  },
+  {
+    "name": "broken-cache-overwrite",
+    "expect": "mutation",
+    "invariant": "CachePublicationSafe"
+  },
+  {
+    "name": "broken-cache-copy",
+    "expect": "mutation",
+    "invariant": "CachePublicationSafe"
+  },
+  {
+    "name": "broken-lock-writer-first",
+    "expect": "mutation",
+    "invariant": "PublishExclusive"
+  },
+  {
+    "name": "preview-only",
+    "expect": "pass",
+    "invariant": null
+  },
+  {
+    "name": "broken-preview-publish",
+    "expect": "mutation",
+    "invariant": "PreviewNeverPublishes"
+  },
+  {
+    "name": "broken-preview-grant",
+    "expect": "mutation",
+    "invariant": "CleanupRevokesPreview"
+  },
+  {
+    "name": "witness-promotion",
+    "expect": "witness",
+    "invariant": "NeverPromoted"
+  },
+  {
+    "name": "witness-preview",
+    "expect": "witness",
+    "invariant": "NeverPreviewed"
   }
 ]

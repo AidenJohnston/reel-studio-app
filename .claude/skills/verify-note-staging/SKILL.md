@@ -15,22 +15,25 @@ From the repository root, run:
 
 The runner downloads the official TLA+ v1.8.0 jar if absent and checks its pinned SHA-256 before executing it. Java defaults to /opt/homebrew/opt/openjdk/bin/java; set TLC_JAVA on another machine.
 
-Exit 1 means the current-source findings in REPORT.md reproduced. Exit 2 means a source mismatch or unexpected checker result. Use --self-test to validate every recorded pass and counterexample. It returns zero only when all expected outcomes match, while still printing RESULT: FAIL for the current findings. Do not describe that self-test as all six requested properties passing.
+Exit 1 means the current-source findings in REPORT.md reproduced. Exit 2 means a source mismatch or unexpected checker result. Use --self-test to validate every recorded pass and counterexample. It returns zero only when all expected outcomes match, while still printing RESULT: FAIL for the current findings. Do not describe that self-test as all requested properties passing.
 
 TLC logs and a machine-readable summary go into verification/note-staging/results/. State databases use owned temporary directories and are deleted when TLC exits. Do not commit the jar, result logs, or states/.
 
 ## Confirm the source mapping before accepting results
 
-Last confirmed source commit: 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4. coverage.json records SHA-256 digests for the covered paths. The runner refuses any drift, including uncommitted edits.
+Last confirmed source commit: b2f302508c549de26f7871ec74667325256ee55d. coverage.json records SHA-256 digests for the covered paths. The runner refuses any drift, including uncommitted edits.
 
-- ai/src/note-staging.ts: withProjectLock, cloneFile, seedRenderCache, beginNote, NoteTransaction.publish, discard, removeUnpublished, and recoverNoteStaging.
+- ai/src/note-staging.ts: withProjectLock, cloneFile, transferCompletedCaches, promoteCompletedCaches, beginNote, NoteTransaction.publish, discard, removeUnpublished, and recoverNoteStaging.
 - ai/src/project.ts: writeFileAtomic, loadProject, and saveProject.
 - ai/src/editor.ts: applyNote, bounded Stop wait, pending tool settlement, applyStagedNote, and the final publication call.
 - ai/src/tools.ts: staged engine arguments, output and cache destinations, tool error handling, and render completion.
 - ai/src/index.ts: AI edit serialization and withEditLock.
 - app/src/main/index.ts: runEngine, projects:update, and startup ordering.
 - app/src/main/store.ts: per-file queues, writeProject, listVersions, recoverInterrupted, and cleanPartialVersions.
-- app/src/main/jobs.ts: per-project job admission, cancellation, completion, and cleanup.
+- app/src/main/jobs.ts: per-project job admission, cancellation, completion, draft event ordering, and cleanup.
+- app/src/main/ai.ts, app/src/main/project-engine.ts, app/src/main/staging-media.ts, app/src/main/live-video.ts, and app/src/main/media.ts: the shared lock, staged preview grant, media path check, and draft playback copy.
+- ai/src/cli.ts: the draft-only no-publication path.
+- engine/reelengine/cache.py and engine/reelengine/render.py: private cache inputs, post-only reuse, and output routing.
 - engine/reelengine/render.py: staged output contract and the legacy cover writer used by the global-immutability counterexample.
 - docs/versions.md: protocol and threat-model claims.
 

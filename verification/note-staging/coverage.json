@@ -1,15 +1,24 @@
 {
-  "syncCommit": "50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4",
+  "syncCommit": "b2f302508c549de26f7871ec74667325256ee55d",
   "files": {
-    "ai/src/note-staging.ts": "58f8f20da54484a59d5e3582d51f8d55f81a70b4669f1c06fc65b9955b2f0ed2",
+    "ai/src/note-staging.ts": "b424862c86d44d8265b24748190c2078ce94f2f1bb8c27b5acb1e91ef661fa68",
     "ai/src/project.ts": "9f6313213cc9ea73c19d6cb90a8ea6e855ee33a97961aa55a85efcf26ee4332f",
-    "ai/src/editor.ts": "c14a946ad4ce2e6a4f6f142142afd2a2284b4b346c5bad51abb12d2f9bf6b575",
-    "ai/src/tools.ts": "45759e63a6716bc9c6a214fc70fbc31ce99b94fdb3b65aec33d28b030b29411c",
+    "ai/src/editor.ts": "722d3118aa82d507766cdde9baef433f63897bf4d812c6c8f86208fd0e6f9ff7",
+    "ai/src/tools.ts": "380e277b7db6e72d7273986838059f0b32b20a354f263d554e136512c345c7d9",
     "ai/src/index.ts": "43603654ea097dfcf6b07c350c177e02a65420c22e8f0db6d1f4a22f30018737",
-    "app/src/main/index.ts": "3d5a6e576947aa1ed1821a9fb7fe3cebec74559335bf3e3421293e5b1bd5cab8",
-    "app/src/main/store.ts": "b3b7dd80e7f8c687b6d600b03f7a5a4f7b9d439616a79cf511064638ff0a9633",
-    "app/src/main/jobs.ts": "cfccb7b673acb95e4719e11540afd1d3faa45c08522ee108ac8a97020b289bb6",
-    "engine/reelengine/render.py": "71fb0169cf107b942053c3c2afb965dbc96407d19ce4343d0931275bf6028377",
-    "docs/versions.md": "3ee08f4d274fd7ac6fc5e191d02e459de18057075c1029fd9178c037045c4f7c"
+    "app/src/main/index.ts": "b5f0ffda2a480e2569b73dd45321c051058a511ac22c3f4ca5838c4f67ddfa9f",
+    "app/src/main/store.ts": "df63868853aafd2c2eb363d388f829fda1c07275caf21f4b2e6dc8840607d07a",
+    "app/src/main/jobs.ts": "5e354728ab79653dd945fc0d394a6f1a3b95261a6fd2b22a244d978db9fe69de",
+    "engine/reelengine/render.py": "d8960cd114b73ff21c94eda13c4bac15d27f09b8df150fb784a731757e94b5d0",
+    "docs/versions.md": "c80a754de25519fe9873ba00e8f08f999f08abad6685c505d01dcde1a7511f87",
+    "ai/src/cli.ts": "cb5ecc6fbcedeb8533ab8224bb0483fb55c38752d11c5da82b522b6200fbb5d1",
+    "app/src/main/ai.ts": "7192cc466d7179aab465be079d87495bd833d325d0fa41e216828a4256e617c7",
+    "app/src/main/project-engine.ts": "b6b3f94b0a492ea604532a26f3e0456538ec56d6f737fbbb9064cc946380073c",
+    "app/src/main/engine.ts": "a6001cfc2cd7b10a3e1f8ede3cdb92e3b329ce773482a25b85b4838cebb923ce",
+    "app/src/main/media.ts": "066028c66505d8446dfbd487e67f2235a9d0085959d942fa029be954fa3aaea1",
+    "app/src/main/staging-media.ts": "777cd3fbec7044068f5f83dce924c2e890c370d2a28ab6d9e3a0bf7edc75d9ac",
+    "app/src/main/live-video.ts": "0fa198ffd529bd348d9252a786804ab64ad08475666d75760a3b2e24d34e68c7",
+    "engine/reelengine/cache.py": "10ff00b6581f55772ac2af3d0f6313373ea7f7db68f3f8b85231a83020355f57",
+    "engine/reelengine/cli.py": "bbc5b834bfcef3057cd33229932fd08a18b6bedad3d800f2e46bc979e37b4d1e"
   }
 }

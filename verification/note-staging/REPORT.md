@@ -1,6 +1,6 @@
 # Note-staging verification
 
-Source/model sync: 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4, PR #20. The runner checks the covered files against coverage.json before running TLC.
+Source/model sync: b2f302508c549de26f7871ec74667325256ee55d, PR #20. The runner checks the covered files against coverage.json before running TLC.
 
 ## Findings
 
@@ -10,23 +10,23 @@ Source/model sync: 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4, PR #20. The runner 
 
 These are findings against the stated requirements, not product changes. No dangling asset or version reference was found in the baseline model.
 
-## Checked result and pending source change
+## Checked result
 
-The final run explored 1,094,072 generated states and 263,517 distinct states in the baseline, to depth 71. All six narrower baseline invariants passed. All six broken variants and all three reachability witnesses produced the intended counterexample. The two literal-equality checks and the legacy-writer check failed as documented above. The real-source mutation rehearsal passed, and the existing note-staging test file passed all six tests.
+The final run explored 3,265,479 generated states and 675,633 distinct states in the baseline, to depth 86. The baseline invariants passed. The cache, writer-first lock, preview, hash, order, rewrite, and recovery mutants produced their named counterexamples. The two literal-equality checks and the legacy-writer check failed as documented above. The source rehearsal passed, including the real-source hash mutation and the two-orphan notice retry. The focused AI tests passed 14 tests, and the focused engine tests passed 3 tests.
 
-The final fetch of fork/ai-note-staging still resolved to 50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4. It contains no postcommit cache-promotion step. Sam's revised property 3 permits only new cache keys published by atomic rename after commit. Its precommit part is checked here; the announced promotion implementation remains unverified until it is pushed and this model is resynchronized. The source-digest gate will refuse that changed implementation. This report does not claim the old blanket cache invariant covers the forthcoming promotion.
+The model is synchronized to b2f3025. It includes private cache snapshots before the version move and postcommit promotion of absent live keys. Promotion copies to a private scratch path, then renames into live work under the project lock. The cache safety invariant allows the old key to remain and a new key to appear only after commit. Mutants that overwrite an existing key or write the live key during the copy fail this invariant. Draft-only notes take a private preview-copy path and never publish. The source rehearsal also checks the staging grant and the CLI preview path.
 
 ## Checks and bounds
 
 TLC v1.8.0, revision d2e1472, checks safety by exhaustive breadth-first traversal. TLA+ fits this task because the main question is ordering independent filesystem effects. It checks a model, not the TypeScript implementation.
 
-The baseline contains one project, one note, one competing manual writer, one old version and one new version, two new files, one representative input/cache copy, and four version-file classes. Each copy or ordinary write has absent, partial-prefix, and complete states. The note may fail or receive Stop, with one late staging write. Up to two process crashes include crashes during recovery. Two completed recovery passes run with no admitted writer between them. All finite reachable states are explored with no depth cutoff. Deadlock checking is disabled because terminal and failed operations may stop.
+The baseline contains one project, one note, one competing manual writer, one old version and one new version, two new files, two cache keys, one representative input/cache copy, four version-file classes, and one preview output. Each copy or ordinary write has absent, partial-prefix, and complete states. The note may fail or receive Stop, with one late staging write. Up to two process crashes include crashes during recovery. Two completed recovery passes run with no admitted writer between them. All finite reachable states are explored with no depth cutoff. Deadlock checking is disabled because terminal and failed operations may stop.
 
 The manual writer models a shared-lock read-modify-write in separate read, partial temp write, full temp write, and rename steps. UI BUSY checks and the AI edit lock permit fewer schedules than the model. Two simultaneous full AI transactions are not modeled. There is no unbounded-writer or liveness proof.
 
-The baseline checks reference consistency, note-only published-folder immutability, cache isolation, stale-base rejection at the commit rename, publish exclusion, and recovery idempotence. Literal byte equality stays in separate failing cases. This separation prevents one known failure from hiding other checks.
+The baseline checks reference consistency, note-only published-folder immutability, cache publication safety, stale-base rejection at the commit rename, publish exclusion, preview-only non-publication, preview grant cleanup, and recovery idempotence. Literal byte equality stays in separate failing cases. This separation prevents one known failure from hiding other checks.
 
-The model assumes valid initial project JSON, a complete old version, unique transaction-prefixed asset names, successfully completed render outputs, one app process, same-volume rename semantics, and collision-free symbolic hashes. A content symbol represents a byte string. The model does not check parsers, media contents, UUID collisions, or SHA-256 collision resistance.
+The model assumes valid initial project JSON, a complete old version, unique transaction-prefixed asset names, successfully completed render outputs, one app process, same-volume rename semantics, and collision-free symbolic hashes. Preview access is a boolean grant; the app media protocol and range streaming are source-reviewed, not TLC-modeled. A content symbol represents a byte string. The model does not check parsers, media contents, UUID collisions, or SHA-256 collision resistance.
 
 A process crash is not a machine power loss. Directory fsync and filesystem durability after power loss are not established. User-created symlinks, injected disk I/O errors, and external writes after the base check remain outside scope. Engine internals, every possible tool path, app logs, UI behavior, preferences, and multi-process locking are not formally verified. Cache/output routing is a source-reviewed assumption recorded by coverage digests.
 
@@ -52,7 +52,7 @@ Each config changes one implementation choice and must produce the named counter
 - broken-order publishes project.json before the version rename. The project points to a folder still in staging. ReferencesExist fails.
 - broken-hash removes the base guard. A manual edit follows begin; the note commits over it. StaleNeverPublishes fails.
 - broken-lock lets a writer bypass withProjectLock. It enters while the note owns publish. PublishExclusive fails.
-- broken-cache aliases the live cache. A staged render changes live bytes before commit. LiveCachesUntouched fails.
+- broken-cache aliases the live cache. A staged render changes live bytes before commit. CachePublicationSafe fails.
 - broken-rewrite writes version metadata after publication. PublishedImmutable fails.
 - broken-recovery returns after deleting one file of the newer version. The second recovery removes another file. RecoveryIdempotent fails.
 
