@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from fractions import Fraction
 from pathlib import Path
 
 from . import tools
@@ -13,19 +14,81 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".avif"
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".aif", ".aiff"}
 
 HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}
+STANDARD_FPS = (24000 / 1001, 24.0, 25.0, 30000 / 1001, 30.0, 48.0, 50.0, 60000 / 1001, 60.0)
+
+
+def _rate(raw) -> float:
+    try:
+        val = float(Fraction(raw or "0/0"))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+    return round(val, 3) if 0 < val < 1000 else 0.0
 
 
 def _fps(stream) -> float:
     for key in ("avg_frame_rate", "r_frame_rate"):
-        raw = stream.get(key) or "0/0"
-        num, _, den = raw.partition("/")
-        try:
-            val = float(num) / float(den or 1)
-        except (ValueError, ZeroDivisionError):
-            val = 0.0
-        if 0 < val < 1000:
-            return round(val, 3)
+        val = _rate(stream.get(key))
+        if val:
+            return val
     return 0.0
+
+
+def _window_rate(path: Path, stream: dict, start: float) -> tuple[float, float] | None:
+    proc = tools.text_run([
+        tools.ffprobe(), "-v", "error", "-select_streams", str(stream["index"]),
+        "-read_intervals", f"{start:.3f}%+#120", "-show_entries", "packet=pts,dts", "-of", "json", str(path)
+    ], 30, f"sample frame cadence for {path.name}", check=False)
+    if proc.returncode:
+        return None
+    packets = json.loads(proc.stdout or "{}").get("packets", [])
+    if any("pts" not in packet for packet in packets):
+        return None
+    timestamps = sorted(packet["pts"] for packet in packets)
+    # Future packets can still fill presentation-time gaps after the last sampled decode time.
+    if stream.get("has_b_frames"):
+        decode_times = [packet["dts"] for packet in packets if "dts" in packet]
+        if not decode_times:
+            return None
+        last_decode_time = max(decode_times)
+        timestamps = [pts for pts in timestamps if pts <= last_decode_time]
+    if len(timestamps) < 5:
+        return None
+    cadence = (timestamps[-1] - timestamps[0]) / (len(timestamps) - 1)
+    if cadence <= 0:
+        return None
+    tolerance = max(1.0, cadence * 0.01)
+    if any(b <= a or abs(b - a - cadence) > tolerance for a, b in zip(timestamps, timestamps[1:])):
+        return None
+    timebase = Fraction(stream.get("time_base") or "0/1")
+    if timebase <= 0:
+        return None
+    rate = 1 / (cadence * float(timebase))
+    standard = min(STANDARD_FPS, key=lambda candidate: abs(candidate - rate))
+    expected_ticks = 1.0 / (standard * float(timebase))
+    if all(abs(pts - timestamps[0] - i * expected_ticks) <= 1.000001 for i, pts in enumerate(timestamps)):
+        rate = standard
+    return rate, rate / (timestamps[-1] - timestamps[0])
+
+
+def _sample_frame_cadence(path: Path, stream: dict, duration: float) -> tuple[float, bool]:
+    """Check bounded packet windows across the stream and its whole-frame count."""
+    duration = float(stream.get("duration") or duration)
+    starts = {max(0.0, (duration - 2.0) * i / 3) for i in range(4)}
+    windows = [_window_rate(path, stream, start) for start in sorted(starts)]
+    if any(window is None for window in windows):
+        return 0.0, True
+    rate, tolerance = windows[0]
+    if any(abs(other - rate) > tolerance + error for other, error in windows[1:]):
+        return 0.0, True
+    frame_count = stream.get("nb_frames") or stream.get("nb_read_packets")
+    try:
+        frame_count = int(frame_count)
+    except (TypeError, ValueError):
+        return 0.0, True
+    timebase = float(Fraction(stream.get("time_base") or "0/1"))
+    if abs(frame_count - duration * rate) > 1.0 + rate * timebase:
+        return 0.0, True
+    return rate, False
 
 
 def _rotation(stream) -> int:
@@ -70,12 +133,14 @@ def probe(path: Path, quick: bool = False) -> dict:
               and not (s.get("disposition") or {}).get("attached_pic")), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
     duration = float(fmt.get("duration") or 0.0)
+    cadence_fps, sampled_vfr = _sample_frame_cadence(path, v, duration) if v and ext not in IMAGE_EXT else (0.0, False)
     out = {
         "path": str(path),
         "duration": round(duration, 3),
         "hasVideo": v is not None,
         "hasAudio": a is not None,
-        "fps": _fps(v) if v else 0.0,
+        "fps": cadence_fps or (_fps(v) if v else 0.0),
+        "variableFrameRate": sampled_vfr,
         "width": int(v.get("width") or 0) if v else 0,
         "height": int(v.get("height") or 0) if v else 0,
         "rotation": _rotation(v) if v else 0,

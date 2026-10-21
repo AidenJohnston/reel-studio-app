@@ -43,7 +43,8 @@ def cmd_classify(args):
 
 def cmd_init(args):
     from . import init as initmod
-    return initmod.run(_project(args), args.title, [Path(f) for f in args.files], slug=args.slug)
+    return initmod.run(_project(args), args.title, [Path(f) for f in args.files], slug=args.slug,
+                       faster_exports=args.faster_exports)
 
 
 def cmd_transcribe(args):
@@ -310,6 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--move", action="store_true", help="move instead of copy")
     sp.add_argument("files", nargs="+")
     sp = add("init", cmd_init, "create a project from raw takes")
+    sp.add_argument("--faster-exports", action="store_true")
     sp.add_argument("--title", default="My video")
     sp.add_argument("--slug")
     sp.add_argument("files", nargs="+")
