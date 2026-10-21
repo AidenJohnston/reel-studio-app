@@ -14,6 +14,7 @@ import type {
   ProjectSummary,
   ScreenStatus,
   VersionInfo,
+  VersionMade,
   Word,
   JobKind
 } from '../shared/api'
@@ -31,6 +32,8 @@ export interface AppState {
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** What made each version, written once when it was made (jobs.ts). Versions made before these records existed have none. */
+  versionsMade?: VersionMade[]
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -204,6 +207,14 @@ export async function addChat(
 }
 
 // ---- versions ---------------------------------------------------------------------------------
+
+/** Records what made a version. The first record for a number stays: nothing replaces it. */
+export async function recordVersionMade(slug: string, made: VersionMade): Promise<void> {
+  await updateAppState(slug, (s) => {
+    const list = s.versionsMade ?? []
+    if (!list.some((r) => r.version === made.version)) s.versionsMade = [...list, made]
+  })
+}
 
 const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 
@@ -552,6 +563,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     versionChecklists,
     versionNotes,
+    versionsMade: st.versionsMade ?? [],
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,

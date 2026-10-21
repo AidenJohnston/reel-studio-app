@@ -1,4 +1,4 @@
-import type { ChatMessage, ProjectJson, VersionInfo } from './api'
+import type { ProjectJson, VersionInfo, VersionMade } from './api'
 
 export type ProjectNote = NonNullable<ProjectJson['notes']>[number]
 
@@ -16,20 +16,20 @@ export function readNotes(raw: unknown): ProjectNote[] | null {
  * One line per version saying what changed, for the version menu: the note that made it, in the
  * person's own words ("“music too loud”"), or the change made by hand ("New cover").
  *
- * The note that made version N is one tagged N, with changes, that N's own project.json copy
- * (versions/vN/project.json, `copies[N]`) does not hold. The engine takes that copy when N's final
- * render starts, and the AI editor saves the note after the render, so the copy never holds it.
- * A note tagged N that the copy does hold was saved before N existed: its own final render failed
- * and it kept the number its edit would have got (docs/versions.md).
- *
- * A change made by hand is the main process's own "Version N: …" message (describe.ts
- * versionMessage), which it writes only after that version's final render succeeded.
+ * The record written when the version was made (`made`, main/jobs.ts) decides. Versions from before
+ * those records fall back, best effort, to the project.json copies (versions/vN/project.json,
+ * `copies[N]`): the note that made N is one tagged N, with changes, that N's own copy does not hold.
+ * The engine takes that copy when N's final render starts and the AI editor saves the note after the
+ * render, so a note tagged N that the copy does hold was saved before N existed (its final render
+ * failed and it kept the number its edit would have got, docs/versions.md). An unchanged rerender
+ * retakes the copy, so after one this fallback finds nothing. Chat text is never evidence: an AI reply
+ * can say anything, including "Version 2: …".
  *
  * Without either, Version 1 is the first edit and any other version says the change was not recorded.
  */
 export function versionChanges(
   versions: VersionInfo[],
-  chat: ChatMessage[],
+  made: VersionMade[],
   notes: ProjectNote[],
   copies: Record<number, ProjectNote[]>
 ): Map<number, string> {
@@ -37,24 +37,19 @@ export function versionChanges(
   // every note saved so far: the project's own list, then any only a copy still holds
   const all = new Map<string, ProjectNote>()
   for (const e of [...notes, ...Object.values(copies).flat()]) if (!all.has(key(e))) all.set(key(e), e)
+  const quoted = (text: string): string => (text.trim() ? `“${text.trim()}”` : 'Your note with attached files')
   const out = new Map<number, string>()
   for (const v of versions) {
-    const copy = copies[v.n]
-    const held = new Set(copy?.map(key))
-    const made = copy && [...all.values()].find((e) => e.version === v.n && e.applied.length > 0 && !held.has(key(e)))
-    if (made) {
-      out.set(v.n, made.text.trim() ? `“${made.text.trim()}”` : 'Your note with attached files')
+    const record = made.find((r) => r.version === v.n)
+    if (record) {
+      const what = record.summary.trim()
+      out.set(v.n, record.by === 'note' ? quoted(what) : what ? what.charAt(0).toUpperCase() + what.slice(1) : 'Changed by hand')
       continue
     }
-    let byHand: string | null = null
-    for (const m of chat) if (!byHand && m.from === 'editor' && m.version === v.n) byHand = handChange(m.text, v.n)
-    out.set(v.n, byHand ?? (v.n === 1 ? 'First edit' : 'Changes not recorded'))
+    const copy = copies[v.n]
+    const held = new Set(copy?.map(key))
+    const note = copy && [...all.values()].find((e) => e.version === v.n && e.applied.length > 0 && !held.has(key(e)))
+    out.set(v.n, note ? quoted(note.text) : v.n === 1 ? 'First edit' : 'Changes not recorded')
   }
   return out
-}
-
-/** "New cover" from "Version 3: new cover."; null for anything else, including "Version 3 is ready." (no change named). */
-function handChange(text: string, v: number): string | null {
-  const m = new RegExp(`^Version ${v}: (.+?)\\.?$`, 's').exec(text.trim())
-  return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : null
 }

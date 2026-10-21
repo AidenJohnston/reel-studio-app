@@ -402,7 +402,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <VersionSwitch
                   versions={d.versions}
                   shown={version.n}
-                  changes={versionChanges(d.versions, d.chat, readNotes(d.project.notes) ?? [], d.versionNotes)}
+                  changes={versionChanges(d.versions, d.versionsMade, readNotes(d.project.notes) ?? [], d.versionNotes)}
                   onPick={(n) => {
                     setSelected(n)
                     setFreshPlay(false)
