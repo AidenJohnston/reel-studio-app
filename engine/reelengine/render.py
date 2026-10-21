@@ -22,6 +22,7 @@ import math
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -914,11 +915,14 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     timings["total"] = round(time.time() - t_start, 2)
     result["timings"] = timings
     if not win:
-        # the reports that describe THIS video live beside it (verify, the AI's frame checks, e2e)
+        # the reports that describe THIS video live beside it (verify, the AI's frame checks, e2e); a
+        # report this render did not make is removed, so a reused folder never keeps an older one
         projmod.write_json(vdir / "captions.json", {"cues": cap_report})
         for report, name in ((layers_report, "layers.json"), (Path(audio).with_suffix(".json"), "mix.json")):
             if report.exists():
-                shutil.copyfile(report, vdir / name)
+                copy_whole(report, vdir / name)
+            else:
+                (vdir / name).unlink(missing_ok=True)
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
         manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
@@ -933,6 +937,16 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             projmod.save(project_dir, fresh, file=project_file)
     progress(STAGE, 100, "Your video is ready", force=True)
     return result
+
+
+def copy_whole(src: Path, dst: Path) -> None:
+    """Copy to a unique `.part` beside `dst`, then rename it into place: `dst` is never half a file."""
+    part = dst.with_name(f"{dst.name}.{uuid.uuid4().hex[:8]}.part")
+    try:
+        shutil.copy2(src, part)
+        os.replace(part, dst)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def cover_key(ctx, proj: dict) -> str:
@@ -974,10 +988,10 @@ class CoverJob:
                 hit = cache / f"{key}.png"
                 if hit.exists():
                     self.out_png.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(hit, self.out_png)
+                    copy_whole(hit, self.out_png)
                     meta = cache / f"{key}.json"
                     if meta.exists():
-                        shutil.copy2(meta, Path(ctx.work) / "cover.json")
+                        copy_whole(meta, Path(ctx.work) / "cover.json")
                     self._res = self.out_png
                     return
                 self._res = render_cover(quiet, proj, tl, src_meta, src_paths, faces, self.out_png, warnings)
@@ -990,9 +1004,7 @@ class CoverJob:
                     cj = Path(ctx.work) / "cover.json"
                     for src, dst in ((cj, cache / f"{key}.json"), (self._res, hit)):
                         if src.exists():
-                            part = dst.with_name(dst.name + ".part")
-                            shutil.copy2(src, part)
-                            os.replace(part, dst)
+                            copy_whole(src, dst)
                 except OSError:
                     pass
             except BaseException as exc:   # noqa: BLE001 -- re-raised in result()

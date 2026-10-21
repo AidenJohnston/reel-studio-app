@@ -6,8 +6,9 @@
    and mix reports live beside it).
 2. Frames at a spread of times (plus the middle of the first b-roll layers) -> PNGs + one contact
    sheet, so a person (or an agent) can look at captions, b-roll placement and the face.
-3. Music presence: the export's level where the cut voice (work/render/voice.wav) is silent, i.e.
-   the music-only moments between words, vs. the level while talking. Also the first 3 s.
+3. Music: the export's level overall and in the first 3 s, and what the engine measured when it
+   mixed this version (its mix.json): whether a song is in it, and how far the voice sits above it
+   while talking. The voice track itself is not kept per version, so it is not re-measured here.
 Prints one JSON object.
 """
 from __future__ import annotations
@@ -141,29 +142,17 @@ def main() -> None:
         res["cover"] = str(cover)
     res["sheet"] = sheet(fp, a.out) if fp else None
 
-    voice_wav = a.project / "work" / "render" / "voice.wav"
     mix = pcm(a.export)
     m = db_windows(mix)
     music: dict = {"mixMedianDb": round(float(np.median(m)), 1), "first3sDb": round(float(np.median(m[: int(3 / WIN)])), 1)}
-    if voice_wav.exists():
-        v = db_windows(pcm(voice_wav))
-        n = min(len(v), len(m))
-        v, mm = v[:n], m[:n]
-        quiet = v < -50
-        talk = v > (np.median(v) - 6)
-        music["voiceSilentWindows"] = int(quiet.sum())
-        if quiet.sum():
-            music["musicOnlyMedianDb"] = round(float(np.median(mm[quiet])), 1)
-        if talk.sum():
-            music["talkingMedianDb"] = round(float(np.median(mm[talk])), 1)
-        if quiet.sum() and talk.sum():
-            music["voiceOverMusicDb"] = round(music["talkingMedianDb"] - music["musicOnlyMedianDb"], 1)
-        music["present"] = bool(quiet.sum() and music["musicOnlyMedianDb"] > -55)
     mixjson = version / "mix.json"
     if mixjson.exists():
         try:
             mj = json.loads(mixjson.read_text("utf-8"))
             music["mixReport"] = {k: mj[k] for k in list(mj)[:12] if not isinstance(mj[k], (list, dict))}
+            music["present"] = mj.get("music") is not None
+            if mj.get("music"):
+                music["voiceOverMusicDb"] = mj["music"].get("measuredGapDb")
         except ValueError:
             pass
     res["music"] = music
