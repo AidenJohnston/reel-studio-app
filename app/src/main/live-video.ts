@@ -5,7 +5,7 @@
 // alternate between two, so the copy being written is never the one on screen. A final version
 // (versions/vN/export.mp4) plays in place. Note drafts already have unique staging paths and
 // need only a temporary playback grant.
-import { existsSync, promises as fs } from 'node:fs'
+import { existsSync, realpathSync, promises as fs } from 'node:fs'
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import type { JobUpdate } from '../shared/api'
 import { mediaUrl } from './media-url'
@@ -25,17 +25,19 @@ export function createNoteVideos() {
   return {
     set(jobId: string, projectDir: string, stage: string | null): void {
       if (stage === null) { roots.delete(jobId); return }
-      const root = resolve(stage)
-      if (dirname(root) !== resolve(projectDir, '.staging')) throw new Error('Note preview must be inside its transaction')
+      const root = realpathSync(stage)
+      if (dirname(root) !== realpathSync(resolve(projectDir, '.staging'))) throw new Error('Note preview must be inside its transaction')
       roots.set(jobId, root)
     },
     roots: (): string[] => [...roots.values()],
     async video(jobId: string, e: Render): Promise<string | null> {
       const root = roots.get(jobId)
-      if (!root || !e.draft || !e.file || !inside(root, e.file)) return null
-      const stat = await fs.stat(e.file)
+      if (!root || !e.draft || !e.file) return null
+      const file = await fs.realpath(e.file)
+      if (!inside(root, file)) return null
+      const stat = await fs.stat(file)
       // Cleanup may revoke the grant while stat is in flight.
-      return roots.get(jobId) === root ? mediaUrl(resolve(e.file), stat.mtimeMs) : null
+      return roots.get(jobId) === root ? mediaUrl(file, stat.mtimeMs) : null
     }
   }
 }

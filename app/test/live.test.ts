@@ -2,8 +2,9 @@
 // emits, what main adds (overall, secondsLeft, thinking kept across ticks, a playable `video` for every
 // render), and how the renderer folds it (shared/live.ts).
 import { describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
 import { createLiveVideos, createNoteVideos, LIVE_DIR } from '../src/main/live-video'
@@ -145,6 +146,46 @@ describe('job manager (main): the contract on the wire', () => {
     expect(response.status).toBe(403)
   })
 
+  it('serves canonical note drafts through a symlinked root without granting another transaction', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'rs-symlink-'))
+    const realRoot = join(home, 'real-projects')
+    const root = join(home, 'linked-projects')
+    mkdirSync(realRoot)
+    symlinkSync(realRoot, root, 'junction')
+    try {
+      const dir = join(root, 'video')
+      const stage = join(dir, '.staging', 'note')
+      const other = join(dir, '.staging', 'other')
+      mkdirSync(stage, { recursive: true })
+      mkdirSync(other)
+      const draft = join(stage, 'draft.mp4')
+      const privateDraft = join(other, 'draft.mp4')
+      writeFileSync(draft, 'staged preview')
+      writeFileSync(privateDraft, 'another note')
+      const videos = createNoteVideos()
+      const render = { type: 'render', version: 2, draft: true, file: realpathSync(draft) } as const
+      videos.set('job', dir, stage)
+      const url = await videos.video('job', render)
+      expect(url).not.toBeNull()
+      const request = (file: string) => serveMedia(new Request(file, { headers: { Range: 'bytes=0-5' } }), () => [root], videos.roots)
+      const response = await request(url!)
+      expect(response.status).toBe(206)
+      expect(await response.text()).toBe('staged')
+      // The parent check must accept the engine's canonical path with the app's lexical project path.
+      videos.set('job', dir, realpathSync(stage))
+      expect(await videos.video('job', { ...render, file: draft })).toBe(url)
+      symlinkSync(privateDraft, join(stage, 'escape.mp4'))
+      expect(await videos.video('job', { ...render, file: join(stage, 'escape.mp4') })).toBeNull()
+      expect((await request(mediaUrl(privateDraft))).status).toBe(403)
+      expect((await request(mediaUrl(join(stage, 'escape.mp4')))).status).toBe(403)
+      videos.set('job', dir, null)
+      rmSync(stage, { recursive: true })
+      expect((await request(url!)).status).toBe(403)
+    } finally {
+      rmSync(home, { recursive: true })
+    }
+  })
+
   it('serves a note draft only for its active staging job and revokes it before cleanup', async () => {
     const { root } = setupPaths()
     const slug = 'staged-note'
@@ -182,7 +223,7 @@ describe('job manager (main): the contract on the wire', () => {
     })
     const event = await preview
     try {
-      expect(pathFromMediaUrl(event.video!)).toBe(draft)
+      expect(pathFromMediaUrl(event.video!)).toBe(realpathSync(draft))
       const response = await request(event.video!)
       expect(response.status).toBe(206)
       expect(await response.text()).toBe('staged')
