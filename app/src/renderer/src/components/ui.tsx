@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths } from '../api'
 import { Icon } from './icons'
 
@@ -48,13 +48,27 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
 }
 
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
-export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
+export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
+    const background: HTMLElement[] = []
+    let branch = ref.current?.parentElement
+    while (branch?.parentElement) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling instanceof HTMLElement && sibling !== branch && !sibling.inert) {
+          sibling.inert = true
+          background.push(sibling)
+        }
+      }
+      branch = branch.parentElement
+    }
     first?.focus()
-    return () => prev?.focus?.()
+    return () => {
+      background.forEach((el) => { el.inert = false })
+      prev?.focus()
+    }
   }, [])
   useEffect(() => {
     if (!onClose) return
@@ -69,7 +83,22 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
+      <div
+        ref={ref}
+        className={`modal${wide ? ' wide' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return
+          const controls = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]'))
+            .filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0)
+          const target = e.shiftKey ? controls.at(-1) : controls[0]
+          if (e.target === (e.shiftKey ? controls[0] : controls.at(-1))) {
+            e.preventDefault()
+            target?.focus()
+          }
+        }}
+        role="dialog" aria-modal aria-labelledby={labelledBy} data-testid={testid}
+      >
         {children}
       </div>
     </div>
@@ -78,9 +107,10 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
 
 /** "Are you sure?" with the safe choice in focus. */
 export function Confirm(props: { title: string; body: string; yes: string; no: string; danger?: boolean; onYes: () => void; onNo: () => void }) {
+  const titleId = useId()
   return (
-    <Modal onClose={props.onNo} testid="confirm">
-      <h2>{props.title}</h2>
+    <Modal onClose={props.onNo} testid="confirm" labelledBy={titleId}>
+      <h2 id={titleId}>{props.title}</h2>
       <p className="muted">{props.body}</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn ghost" onClick={props.onNo} data-autofocus data-testid="confirm-no">
