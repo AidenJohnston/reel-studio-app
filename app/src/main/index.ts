@@ -46,7 +46,9 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, CoverCandidate, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import { COVER_SUGGESTIONS } from '../shared/cover'
+import { mediaUrl } from './media-url'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
@@ -499,6 +501,29 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:coverCandidates', async (_e, slug: string, moments: number[], source: string): Promise<CoverCandidate[]> => {
+    const at = moments.filter((t) => Number.isFinite(t) && t >= 0).slice(0, COVER_SUGGESTIONS)
+    if (!at.length) return []
+    // The editor may be looking at its own candidates in the same folder; the engine clears it on every call.
+    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Use the slider to pick a moment for now.' }
+    const r: any = await runEngine('cover-candidates', ['--project', projectDir(slug), '--at', at.join(','), '--source', source])
+    const out: CoverCandidate[] = []
+    for (const c of Array.isArray(r?.candidates) ? r.candidates : []) {
+      const t = Number(c?.atSourceTime)
+      // two moments can land on the same frame; show it once
+      if (!Number.isFinite(t) || typeof c?.file !== 'string' || out.some((o) => Math.abs(o.atSourceTime - t) < 0.3)) continue
+      out.push({
+        atSourceTime: t,
+        source: String(r.source ?? source),
+        eyesOpen: Number(c.eyesOpen) || 0,
+        sharp: Number(c.sharp) || 0,
+        still: Number(c.still) || 0,
+        betweenWords: c.betweenWords === true,
+        image: mediaUrl(c.file, Date.now())
+      })
+    }
+    return out
+  })
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {

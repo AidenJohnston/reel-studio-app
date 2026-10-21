@@ -361,6 +361,24 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .toggle { display: flex; gap: 12px; align-items: center; cursor: pointer; font-weight: 600; min-height: 32px; }
 .slider { width: 100%; max-width: 420px; }
 .cover-img { width: 180px; border-radius: 12px; display: block; background: var(--soft); aspect-ratio: 9/16; object-fit: cover; }
+/* The current cover sits at the suggestions' size, so the suggestions show without scrolling. */
+.drawer .cover-img { width: 132px; }
+/* Cover suggestions: the same ink ring as the subtitle swatches marks the chosen frame. */
+.cover-picks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; max-width: 384px; }
+.cover-pick { border: 0; background: none; padding: 0; font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 2px; border-radius: 12px; }
+.cover-pick:focus-visible { outline-offset: 4px; }
+.cover-pick-frame { position: relative; display: block; aspect-ratio: 9/16; margin-bottom: 6px; border-radius: 10px; overflow: hidden; background: var(--soft); outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s, transform .16s var(--ease); }
+.cover-pick-frame img { width: 100%; height: 100%; object-fit: cover; display: block; animation: fade .2s ease-out both; }
+@media (hover: hover) and (pointer: fine) { .cover-pick:hover:not(.on) .cover-pick-frame { outline-color: var(--line-2); } }
+.cover-pick:active .cover-pick-frame { transform: scale(.97); }
+.cover-pick.on .cover-pick-frame { outline-color: var(--ink); }
+.cover-pick-check { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.85); animation: fade .12s ease-out both; }
+.cover-pick-time { font-size: 14px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cover-pick-why { font-size: 13px; line-height: 1.35; color: var(--ink-3); }
+.cover-pick.on .cover-pick-why { color: var(--ink-2); }
+.cover-pick-wait { margin-bottom: 0; animation: cover-wait 1.4s ease-in-out infinite; }
+.cover-picks-status { grid-column: 1 / -1; }
+@keyframes cover-wait { 50% { opacity: .5; } }
 .swatches { display: flex; gap: 12px; flex-wrap: wrap; }
 .swatch { border: 0; background: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font: inherit; font-weight: 600; font-size: 14.5px; color: var(--ink-2); border-radius: 12px; }
 .swatch-frame { width: 92px; aspect-ratio: 3/4; border-radius: 12px; background: linear-gradient(170deg, #8a8178, #4a433d 70%); position: relative; overflow: hidden; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s; }

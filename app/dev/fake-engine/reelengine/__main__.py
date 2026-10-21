@@ -290,6 +290,29 @@ def cmd_render(args: list[str]) -> dict:
             "versionDir": str(vdir)}
 
 
+def cmd_cover_candidates(args: list[str]) -> dict:
+    """The real engine scores faces; this one takes the frame at each moment and gives fixed signals that
+    vary from frame to frame, so every reason the app can say shows up."""
+    proj = Path(take(args, "--project"))
+    data = load(proj)
+    src = data["sources"][0]
+    out_dir = proj / "work" / "cover-candidates"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    signals = [(1.0, 1.0, 0.8, False), (0.7, 1.0, 1.0, True), (1.0, 0.6, 0.5, True), (0.6, 0.8, 1.0, False),
+               (0.8, 0.7, 0.6, False), (1.0, 0.9, 1.0, True)]
+    rows = []
+    for i, t in enumerate(float(x) for x in (take(args, "--at") or "").split(",") if x.strip()):
+        t = min(t, max(0.0, float(src["duration"]) - 0.1))
+        f = out_dir / f"cover_{t:08.3f}.jpg"
+        subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(proj / src["path"]), "-frames:v", "1",
+                        "-vf", "scale=360:640:force_original_aspect_ratio=increase,crop=360:640", str(f)],
+                       check=False, capture_output=True)
+        eyes, sharp, still, between = signals[i % len(signals)]
+        rows.append({"moment": t, "atSourceTime": round(t, 3), "score": round(0.9 - i * 0.05, 4), "eyesOpen": eyes,
+                     "sharp": sharp, "still": still, "betweenWords": between, "file": str(f)})
+    return {"source": src.get("id", "s1"), "candidates": rows}
+
+
 def cmd_probe(args: list[str]) -> dict:
     files = [a for a in args if not a.startswith("--")]
     return probe(files[0])
@@ -341,7 +364,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "cover-candidates": cmd_cover_candidates,
 }
 
 

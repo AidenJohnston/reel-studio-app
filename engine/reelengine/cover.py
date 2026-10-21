@@ -167,8 +167,10 @@ def render(ctx, out_png) -> Path:
 
 def candidates(ctx, sid: str, moments: list[float], out_dir, width: int = 360) -> list[dict]:
     """The best cover frame near each moment (raw-take seconds), for the AI to LOOK at before it
-    picks: faces scored as for the cover (detector confidence, sharpness, eyes open, between words),
-    each saved as a small still fitted like the video. Sorted by score, best first."""
+    picks and for the app's cover picker: faces scored as for the cover (detector confidence,
+    sharpness, eyes open, a still frame, between words), each saved as a small still fitted like the
+    video. eyesOpen / sharp / still are 0-1 against the other frames near the same moment, so the app
+    can say why this frame won. Sorted by score, best first."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     W, H, _ = fmt_of(ctx)
@@ -187,6 +189,7 @@ def candidates(ctx, sid: str, moments: list[float], out_dir, width: int = 360) -
         img.save(f, "JPEG", quality=85)
         out.append({"moment": float(m), "atSourceTime": round(float(best["t"]), 3), "score": best["score"],
                     "eyesOpen": round(float(best.get("eyesN", 0.0)), 2), "sharp": round(float(best.get("sharpN", 0.0)), 2),
+                    "still": round(float(best.get("stillN", 0.0)), 2),
                     "betweenWords": bool(best.get("between")), "file": str(f)})
     out.sort(key=lambda r: -r["score"])
     return out
