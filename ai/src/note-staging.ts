@@ -34,7 +34,7 @@ async function cloneFile(src: string, dest: string): Promise<void> {
   await fs.mkdir(path.dirname(dest), { recursive: true });
   // Node/libuv 1.52.1 returns ENOSYS for FICLONE_FORCE on macOS, making FICLONE a full copy.
   // macOS cp -c uses clonefile on APFS and falls back to an isolated copy on other volumes.
-  if (process.platform === 'darwin') await copyOnMac('/bin/cp', ['-c', src, dest]);
+  if (process.platform === 'darwin') await copyOnMac('/bin/cp', ['-c', '--', path.resolve(src), path.resolve(dest)]);
   else await fs.copyFile(src, dest, constants.COPYFILE_FICLONE);
   await fs.utimes(dest, stat.atimeMs / 1000, stat.mtimeMs / 1000);
 }

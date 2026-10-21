@@ -23,6 +23,19 @@ async function setup() {
 
 const note = { text: 'quieter music', applied: ['music'], at: '2026-10-21T00:00:00Z' };
 
+it('stages a relative project path starting with a dash', async () => {
+  const root = await fs.mkdtemp('-dash-project-');
+  roots.push(path.resolve(root));
+  const { dir } = await makeProject({ root });
+  const before = await fs.readFile(path.join(dir, 'project.json'));
+  const transcript = await fs.readFile(path.join(dir, 'work', 'transcript.json'));
+  const txn = await beginNote(dir);
+  expect(await fs.readFile(path.join(txn.dir, 'work', 'transcript.json'))).toEqual(transcript);
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  await txn.discard();
+  expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
+});
+
 it('a failed final render leaves project bytes and the published video unchanged, with no success reply', async () => {
   const { dir, root, before } = await setup();
   const caches: Record<string, string> = {
