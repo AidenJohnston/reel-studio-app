@@ -12,3 +12,8 @@ packaging/cache/
 packaging/runtime/
 *.log
 .DS_Store
+
+# TLC distribution
+tools/tla2tools.jar
+states/
+verification/note-staging/results/

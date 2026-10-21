@@ -1,0 +1,15 @@
+{
+  "syncCommit": "50a22b3e9cc0f8f5aa8fbaf8b30c8bc067f4a2e4",
+  "files": {
+    "ai/src/note-staging.ts": "58f8f20da54484a59d5e3582d51f8d55f81a70b4669f1c06fc65b9955b2f0ed2",
+    "ai/src/project.ts": "9f6313213cc9ea73c19d6cb90a8ea6e855ee33a97961aa55a85efcf26ee4332f",
+    "ai/src/editor.ts": "c14a946ad4ce2e6a4f6f142142afd2a2284b4b346c5bad51abb12d2f9bf6b575",
+    "ai/src/tools.ts": "45759e63a6716bc9c6a214fc70fbc31ce99b94fdb3b65aec33d28b030b29411c",
+    "ai/src/index.ts": "43603654ea097dfcf6b07c350c177e02a65420c22e8f0db6d1f4a22f30018737",
+    "app/src/main/index.ts": "3d5a6e576947aa1ed1821a9fb7fe3cebec74559335bf3e3421293e5b1bd5cab8",
+    "app/src/main/store.ts": "b3b7dd80e7f8c687b6d600b03f7a5a4f7b9d439616a79cf511064638ff0a9633",
+    "app/src/main/jobs.ts": "cfccb7b673acb95e4719e11540afd1d3faa45c08522ee108ac8a97020b289bb6",
+    "engine/reelengine/render.py": "71fb0169cf107b942053c3c2afb965dbc96407d19ce4343d0931275bf6028377",
+    "docs/versions.md": "3ee08f4d274fd7ac6fc5e191d02e459de18057075c1029fd9178c037045c4f7c"
+  }
+}

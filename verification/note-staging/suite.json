@@ -1,0 +1,67 @@
+[
+  {
+    "name": "NoteStaging",
+    "expect": "pass",
+    "invariant": null
+  },
+  {
+    "name": "literal-bytes",
+    "expect": "finding",
+    "invariant": "OldOrCompleteNew"
+  },
+  {
+    "name": "project-bytes",
+    "expect": "finding",
+    "invariant": "ProjectOldOrCompleteNew"
+  },
+  {
+    "name": "legacy-immutability",
+    "expect": "finding",
+    "invariant": "PublishedImmutable"
+  },
+  {
+    "name": "broken-order",
+    "expect": "mutation",
+    "invariant": "ReferencesExist"
+  },
+  {
+    "name": "broken-hash",
+    "expect": "mutation",
+    "invariant": "StaleNeverPublishes"
+  },
+  {
+    "name": "broken-lock",
+    "expect": "mutation",
+    "invariant": "PublishExclusive"
+  },
+  {
+    "name": "broken-cache",
+    "expect": "mutation",
+    "invariant": "LiveCachesUntouched"
+  },
+  {
+    "name": "broken-rewrite",
+    "expect": "mutation",
+    "invariant": "PublishedImmutable"
+  },
+  {
+    "name": "broken-recovery",
+    "expect": "mutation",
+    "invariant": "RecoveryIdempotent"
+  },
+  {
+    "name": "witness-commit",
+    "expect": "witness",
+    "invariant": "NeverCommitted"
+  },
+  {
+    "name": "witness-recovery",
+    "expect": "witness",
+    "invariant": "NeverRecoveredTwice"
+  },
+  {
+    "name": "witness-stale",
+    "expect": "witness",
+    "invariant": "NeverRejectedStale"
+  }
+]
