@@ -229,9 +229,7 @@ a { color: inherit; }
 /* Fixed phone column: adding version buttons never shifts the layout. */
 .reel { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 36px; align-items: start; }
 .reel-left { position: sticky; top: 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 340px; }
-/* 306px: what sits under the phone on the Reel screen (change button, tools, versions, two export
-   buttons), so all of it fits an 820px-high window. Working uses the same size, so nothing jumps. */
-.phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 340px); background: #111; border-radius: 40px; padding: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.18); position: relative; }
+.phone { width: clamp(220px, calc((100vh - var(--titlebar) - 250px) * 9 / 16 + 24px), 340px); background: #111; border-radius: 40px; padding: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.18); position: relative; }
 .phone-screen { width: 100%; aspect-ratio: 9 / 16; border-radius: 30px; overflow: hidden; background: #000; display: grid; place-items: center; position: relative; container-type: inline-size; }
 .phone-screen > video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; cursor: pointer; }
 .phone-screen > video.raw-video { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .12s; }
@@ -321,6 +319,19 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .banner > span { flex: 1; min-width: 0; }
 .banner > .icon-btn { color: inherit; }
 .folder-line { display: flex; align-items: center; gap: 10px; margin: 12px 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 600; }
+
+/* ---- the Reel column: the phone takes what the rows under it leave ----
+   The column is as tall as the window (top 10px sticky offset, 24px page bottom, 6px to spare), and the
+   phone's slot gets the height that is left. A row that any change adds under the phone shrinks the phone
+   instead of pushing "Send to my phone" below the window, and there is no fixed height reserve to keep
+   in step. Working keeps the window-based .phone size above (it has no slot). */
+.reel-left:has(> .phone-slot) { height: calc(100vh - var(--titlebar) - 40px); }
+.phone-slot { flex: 1 1 0; min-height: 0; align-self: stretch; container-type: size; display: flex; justify-content: center; }
+/* Sized from the slot, over any rule that sizes it from the window. A frame that draws a real phone
+   around it (device previews) brings its screen height and ratio (--screen-h, --dev-ratio, from its
+   --frame-h); the slot gives that frame its height. */
+.reel .reel-left .phone-slot > * { --frame-h: min(100cqh, 563px); }
+.reel .reel-left .phone-slot .phone { width: min(100cqw, calc(var(--screen-h, calc(100cqh - 24px)) * var(--dev-ratio, 9 / 16) + 24px)); }
 
 /* ---- a change at a moment (components/ChangeAt.tsx) ---- */
 .change-at { position: relative; width: 100%; max-width: 340px; }
@@ -504,7 +515,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 @media (max-width: 1180px) {
   .reel { grid-template-columns: 300px minmax(0, 1fr); gap: 26px; }
   .reel-left { width: 300px; }
-  .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 300px); }
+  .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 250px) * 9 / 16 + 24px), 300px); }
   .checklist.two { grid-template-columns: 1fr; }
   .page { padding-left: 28px; padding-right: 28px; }
 }

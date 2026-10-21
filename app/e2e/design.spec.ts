@@ -179,6 +179,27 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('change-at')).toContainText('Change something at')
   await shot(page, 'd-12-reel-with-ai')
 
+  // ---- an AI check that has not answered: the change button waits, and no connect prompt shows ----
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:active')
+    const waiting: ((v: unknown) => void)[] = []
+    ;(globalThis as { __aiWaiting?: typeof waiting }).__aiWaiting = waiting
+    ipcMain.handle('ai:active', () => new Promise((answer) => waiting.push(answer)))
+  })
+  await page.getByTestId('nav-home').click()
+  await page.getByTestId('project-card').first().click()
+  await expect(page.getByTestId('player')).toBeVisible()
+  await expect(page.getByTestId('change-checking')).toBeDisabled()
+  await expect(page.getByTestId('change-checking')).toHaveText('Checking for your AI editor…')
+  await expect(page.getByTestId('change-connect')).toHaveCount(0)
+  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
+  await app.evaluate(() => {
+    for (const answer of (globalThis as { __aiWaiting?: ((v: unknown) => void)[] }).__aiWaiting ?? [])
+      answer({ ok: true, value: { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' } })
+  })
+  await expect(page.getByTestId('change-at')).toBeEnabled()
+  await stubConnected(app)
+
   // ---- Library: a drop anywhere on the window lands in the Library ----
   await page.getByTestId('nav-library').click()
   await dropOnWindow(page, [media.song], false)

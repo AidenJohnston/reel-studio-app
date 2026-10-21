@@ -38,6 +38,7 @@ export function ChangeAt({
   at,
   shown,
   aiOn,
+  checking,
   busy,
   onConnect,
   onOpenChange,
@@ -49,6 +50,8 @@ export function ChangeAt({
   /** the version on screen (0 = the Preview), and whether it is the newest */
   shown: { n: number; latest: boolean } | null
   aiOn: boolean
+  /** the AI check has not answered yet: whether an editor is connected is not known */
+  checking: boolean
   /** a change is being made: wait for it */
   busy: boolean
   onConnect: () => void
@@ -86,7 +89,7 @@ export function ChangeAt({
 
   // Motion only for the pointer: opened or closed from the keyboard (N, Enter, Escape, Tab) it is instant.
   const open = (byKey: boolean) => {
-    if (busy || !aiOn || !shown) return
+    if (busy || checking || !aiOn || !shown) return
     window.clearTimeout(exitTimer.current)
     setInstant(byKey)
     const n = shown.n
@@ -158,6 +161,12 @@ export function ChangeAt({
     return () => document.removeEventListener('pointerdown', down)
   })
 
+  if (checking)
+    return (
+      <button className="btn change-btn" disabled data-testid="change-checking">
+        <Icon name="pencil" size={16} /> Checking for your AI editor…
+      </button>
+    )
   if (!aiOn)
     return (
       <button className="btn change-btn" onClick={onConnect} data-testid="change-connect">

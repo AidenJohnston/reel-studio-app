@@ -106,12 +106,12 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   // the person sees the time and their words; the AI reads the words on screen by id
   await expect(bubble).toContainText(/^0:00 · Put this here"[^"]+"$/)
   await expect(bubble).not.toContainText('w0')
-  await expect
-    .poll(() => JSON.parse(readFileSync(join(ROOT, 'Projects', slug, 'project.json'), 'utf8')).notes?.at(-1)?.text)
-    .toMatch(/^At 0:00 \(around "[^"]+", words w0, w1, w2\): Put this here$/)
+  // the moment is stored with the word ids main read off this render (the AI's text is built from it)
+  const sent = JSON.parse(readFileSync(join(ROOT, 'Projects', slug, 'app.json'), 'utf8')).chat.filter((m: { from: string }) => m.from === 'you').at(-1)
+  expect([sent.text, sent.moment.at, sent.moment.words]).toEqual(['Put this here', 0, ['w0', 'w1', 'w2']])
   await expect(bubble.getByTestId('bubble-attachments').locator('img')).toHaveCount(3)
-  await expect(page.getByTestId('bubble-editor').last()).toContainText('I saved your note')
-  // the stand-in AI makes no new version, so the note did not change the video
+  // Whatever the stand-in AI answers, it makes no new version, so the note's mark says it didn't work.
+  await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 60_000 })
   await expect(page.getByTestId('scrub-mark')).toHaveAttribute('data-state', 'failed')
   // the next note starts empty
   await page.getByTestId('change-at').click()

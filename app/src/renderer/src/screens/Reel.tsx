@@ -51,6 +51,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
+  const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
@@ -81,7 +82,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   useEffect(() => {
     void load(true)
-    reel.ai.active().then(setProvider).catch(() => {})
+    reel.ai
+      .active()
+      .then(setProvider)
+      .catch(() => {})
+      .finally(() => setProviderChecked(true))
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
       if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
@@ -158,7 +163,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   if (!d) return <div className="page"><Spinner /></div>
 
-  const aiOff = !provider || !provider.connected || provider.id === 'none'
+  // Only the AI-dependent parts (the banner, the note box) wait for the AI check, which can take seconds when a
+  // Claude Code app is probed. Drawn before it, a connected editor flashed the "No AI editor yet" banner.
+  const aiOff = providerChecked && (!provider || !provider.connected || provider.id === 'none')
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
@@ -274,28 +281,32 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
       <div className="reel">
         <div className="reel-left">
-          <PhonePlayer
-            key={playerSrc}
-            src={changePreview ?? version?.video ?? null}
-            poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
-            subtitle={drawer === 'captions' && preview ? preview : null}
-            still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
-            instagram={igOverlay}
-            caption={d.project.post?.caption}
-            original={d.sourceVideo}
-            holdingOriginal={holding}
-            onDuration={setDuration}
-            dragFile={version && !version.draft ? version.videoPath : null}
-            marks={marks}
-            asking={asking}
-            onTime={setPlayhead}
-          />
+          {/* the phone gets the height the rows under it leave (styles.css .phone-slot) */}
+          <div className="phone-slot">
+            <PhonePlayer
+              key={playerSrc}
+              src={changePreview ?? version?.video ?? null}
+              poster={version?.cover}
+              autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
+              subtitle={drawer === 'captions' && preview ? preview : null}
+              still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
+              instagram={igOverlay}
+              caption={d.project.post?.caption}
+              original={d.sourceVideo}
+              holdingOriginal={holding}
+              onDuration={setDuration}
+              dragFile={version && !version.draft ? version.videoPath : null}
+              marks={marks}
+              asking={asking}
+              onTime={setPlayhead}
+            />
+          </div>
           <ChangeAt
             slug={slug}
             at={playhead}
             shown={version ? { n: version.n, latest: version.n === d.versions[d.versions.length - 1].n } : null}
             aiOn={!aiOff}
+            checking={!providerChecked}
             busy={!!job}
             onConnect={connect}
             onOpenChange={setAsking}
