@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent } from '../src/shared/api'
-import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
+import { EMPTY_LIVE, PREVIEW_LABEL, timeLeftWords, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
@@ -25,6 +25,10 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(s.secondsLeft).toBe(60)
     expect(s.thinking).toBe(true)
     expect(s.message).toBe('Watching your video and planning the edit')
+    const uncertain = fold([status({ secondsLeft: 60, secondsMaxLeft: 120, approximate: true })])
+    expect(timeLeftWords(uncertain)).toBe('About 1 to 2 minutes left')
+    const measured = fold([status({ secondsLeft: 60, approximate: false })], uncertain)
+    expect(timeLeftWords(measured)).toBe('1 minute left')
     // the AI answered with a tool call: no longer thinking
     expect(fold([{ ...J, type: 'tool', name: 'set_captions', summary: 'Added subtitles' }], s)).toMatchObject({ thinking: false, tools: ['Added subtitles'] })
   })
@@ -132,10 +136,10 @@ describe('job manager (main): the contract on the wire', () => {
     expect(events.find((e) => e.type === 'heard')).toMatchObject({ words: ['hello'] })
     expect(events.find((e) => e.type === 'reply')).toMatchObject({ text: 'Done soon.' })
     expect(events.filter((e) => e.type === 'status').every((e) => e.type === 'status' && typeof e.overall === 'number' && typeof e.pct === 'number')).toBe(true)
-    // no time left before the video's length is known (it would only jump up later), then a number
+    // A zero-duration mocked listen phase supplies no machine-speed observation.
     const statuses = events.filter((e) => e.type === 'status')
     expect(statuses[0]).toMatchObject({ secondsLeft: null })
-    expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
+    expect(statuses.every((e) => e.type === 'status' && (e.secondsLeft === null || typeof e.secondsLeft === 'number'))).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
   })
 })

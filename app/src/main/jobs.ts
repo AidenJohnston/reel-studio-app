@@ -4,13 +4,14 @@ import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
 import { toUserError } from './engine'
-import { learn, ProgressTracker, type SpeedHistory } from './progress'
+import { learn, ProgressTracker, type ProgressKind, type SpeedHistory } from './progress'
 
 /** A job reports with the shared contract. A render's `file` becomes a playable `video` via `toVideo`. */
 export type Emit = (e: JobUpdate) => void
 
 /** Where measured phase times live, and how long the video is (for the time estimate). */
 export interface ProgressDeps {
+  profile?(kind: JobKind): Promise<ProgressKind>
   loadHistory(): Promise<SpeedHistory>
   saveHistory(h: SpeedHistory): Promise<void>
   mediaSeconds(slug: string): Promise<number>
@@ -31,6 +32,8 @@ interface Running {
   pct: number
   overall: number
   secondsLeft: number | null
+  secondsMaxLeft?: number
+  approximate?: boolean
   overdue: boolean
   thinking: boolean
   done: Promise<void>
@@ -56,17 +59,20 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
-    const tracker = new ProgressTracker(kind, 0, history)
+    let progressKind: ProgressKind = kind
+    let tracker = new ProgressTracker(progressKind, 0, history)
     let phase: Phase | undefined
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
     const status = (): void => {
       const snap = tracker.snapshot()
       job.overall = snap.overall
+      job.secondsMaxLeft = snap.etaMaxSec
+      job.approximate = snap.approximate
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
-      // later ("about a minute" -> "about 4 minutes"): say nothing yet (the screen uses its own guess).
+      // later: wait for duration and the tracker's first completed phase.
       job.secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
       job.overdue = snap.overdue
-      send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking })
+      send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, ...(snap.etaMaxSec ? { secondsMaxLeft: snap.etaMaxSec } : {}), approximate: snap.approximate, overdue: job.overdue, thinking: job.thinking })
     }
     // re-broadcast once a second: time moves the bar and the estimate even while the AI thinks
     const tick = setInterval(() => status(), progress?.tickMs ?? 1000)
@@ -84,7 +90,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         }
         if (progress) {
           history = await progress.loadHistory().catch(() => history)
-          tracker.setHistory(history)
+          progressKind = await progress.profile?.(kind) ?? kind
+          tracker = new ProgressTracker(progressKind, 0, history)
         }
         status()
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
@@ -119,7 +126,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
-          await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
+          await progress.saveHistory(learn(history, progressKind, mediaSec, tracker.finish())).catch(() => undefined)
         }
         if (slug) {
           await updateAppState(slug, (s) => {

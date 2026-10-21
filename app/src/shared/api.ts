@@ -92,7 +92,7 @@ export interface ProjectDetail extends ProjectSummary {
   checklist: ChecklistItem[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
-  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null
+  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; secondsMaxLeft?: number; approximate?: boolean; overdue: boolean; thinking: boolean } | null
   /** A small picture for each b-roll item with an image file (broll id -> reel-media URL). Animations and
    * text-only items have none (the Pictures list names them in words instead of a file name). */
   brollThumbs: Record<string, string>
@@ -171,8 +171,8 @@ export type JobEvent = Ids &
     /** overall = honest 0-99 for the whole job, never backwards; secondsLeft = from this computer's measured
      * history (main/progress.ts), null = too early to say. Status repeats about once a second while a job
      * runs (thinking kept), so a bar fed by `overall` never freezes. */
-    /** overdue = past every estimate on the last step: show "Still working, almost there", no number. */
-    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean }
+    /** overdue = the current phase ran past its estimate: show "Still working, almost there", no number. */
+    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; secondsMaxLeft?: number; approximate?: boolean; overdue: boolean; thinking: boolean }
     | { type: 'tool'; name: string; summary: string }
     /** video = a playable reel-media URL of a stable copy (never the file the engine overwrites next). */
     | { type: 'render'; version: number; draft: boolean; firstLook: boolean; video: string | null }

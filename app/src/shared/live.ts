@@ -18,7 +18,9 @@ export interface LiveState {
   overall: number
   /** Seconds left for the whole job. null = too early to say. */
   secondsLeft: number | null
-  /** Past every estimate on the last step: say "Still working, almost there", no number. */
+  secondsMaxLeft?: number
+  approximate?: boolean
+  /** The current phase ran past its estimate: say "Still working, almost there", no number. */
   overdue: boolean
   /** Waiting on the AI's answer: show "thinking", not "stuck". */
   thinking: boolean
@@ -64,6 +66,8 @@ export function reduceLive(s: LiveState, e: JobEvent): LiveState {
         message: e.message || base.message,
         overall: Math.max(base.overall, e.overall),
         secondsLeft: e.secondsLeft,
+        secondsMaxLeft: e.secondsMaxLeft,
+        approximate: e.approximate,
         overdue: e.overdue,
         thinking: e.thinking
       }
@@ -88,14 +92,22 @@ export function reduceLive(s: LiveState, e: JobEvent): LiveState {
 }
 
 /** State from `projects:get` when a screen opens on a job that is already running. */
-export function liveFromDetail(job: { id: string; message: string; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean }): LiveState {
-  return { ...EMPTY_LIVE, jobId: job.id, message: job.message, overall: job.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking }
+export function liveFromDetail(job: { id: string; message: string; overall: number; secondsLeft: number | null; secondsMaxLeft?: number; approximate?: boolean; overdue: boolean; thinking: boolean }): LiveState {
+  return { ...EMPTY_LIVE, jobId: job.id, message: job.message, overall: job.overall, secondsLeft: job.secondsLeft, secondsMaxLeft: job.secondsMaxLeft, approximate: job.approximate, overdue: job.overdue, thinking: job.thinking }
 }
 
 /** The time-left words for a running job: honest, or none. */
-export function timeLeftWords(s: Pick<LiveState, 'secondsLeft' | 'overdue'>): string | null {
+export function timeLeftWords(s: Pick<LiveState, 'secondsLeft' | 'secondsMaxLeft' | 'approximate' | 'overdue'>): string | null {
   if (s.overdue) return STILL_WORKING
-  return timeLeftText(s.secondsLeft)
+  if (s.approximate === undefined) return timeLeftText(s.secondsLeft)
+  if (s.secondsLeft === null || !Number.isFinite(s.secondsLeft) || s.secondsLeft < 0) return null
+  const unit = s.secondsLeft < 60 && (s.secondsMaxLeft ?? 0) < 60 ? 'seconds' : 'minutes'
+  const divisor = unit === 'seconds' ? 1 : 60
+  const low = Math.max(1, Math.round(s.secondsLeft / divisor))
+  const high = Math.max(low + 1, Math.round((s.secondsMaxLeft ?? s.secondsLeft) / divisor))
+  if (s.secondsMaxLeft) return `About ${low} to ${high} ${unit} left`
+  const word = low === 1 ? unit.slice(0, -1) : unit
+  return `${s.approximate ? 'About ' : ''}${low} ${word} left`
 }
 
 export const STILL_WORKING = 'Still working, almost there'

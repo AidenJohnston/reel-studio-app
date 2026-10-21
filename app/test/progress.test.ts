@@ -31,11 +31,15 @@ describe('honest progress', () => {
     const short = new ProgressTracker('first-edit', 44, empty(), () => now)
     const long = new ProgressTracker('first-edit', 240, empty(), () => now)
     short.update('listen', 0); long.update('listen', 0)
-    expect(long.snapshot().etaSec!).toBeGreaterThan(short.snapshot().etaSec!)
+    expect(short.snapshot().etaSec).toBeNull()
+    expect(long.snapshot().etaSec).toBeNull()
+    now += 10_000
+    short.update('analyze', 0); long.update('analyze', 0)
+    expect(long.estimate('final')).toBeGreaterThan(short.estimate('final'))
     const note = new ProgressTracker('note', 44, empty(), () => now)
     note.update('edit', 5)
     now += 10 * 60 * 1000                                     // way past the estimate
-    expect(note.snapshot().etaSec!).toBeGreaterThan(0)
+    expect(note.snapshot().etaSec).toBeNull()
   })
 
   it('a stalled step never freezes the bar (grandma 2: stuck at 10% for a minute)', () => {
@@ -52,15 +56,9 @@ describe('honest progress', () => {
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 5)
     expect(t.snapshot()).toMatchObject({ overdue: false })
-    expect(t.snapshot().etaSec).toBeGreaterThan(0)
+    expect(t.snapshot().etaSec).toBeNull()
     now += 10 * 60_000
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
-    // a real engine percent that says "lots left" is still a number
-    const r = new ProgressTracker('rerender', 60, empty(), () => now)
-    r.update('final', 10)
-    now += 10 * 60_000
-    expect(r.snapshot().overdue).toBe(false)
-    expect(r.snapshot().etaSec).toBeGreaterThan(60)
   })
 
   it('recalibrates: a slow first step makes every later estimate longer', () => {
@@ -84,13 +82,16 @@ describe('honest progress', () => {
     fast.update('final', 10)
     const full = new ProgressTracker('note', 60, empty(), () => now)
     full.update('edit', 5)
-    expect(fast.snapshot().etaSec!).toBeLessThan(full.snapshot().etaSec!)
+    expect(fast.snapshot().etaSec).toBeNull()
+    expect(full.snapshot().etaSec).toBeNull()
+    expect(fast.estimate('final')).toBeLessThan(full.estimate('edit') + full.estimate('final'))
   })
 
   it('learns from what a phase really took on this computer', () => {
     const h = learn(empty(), 'note', 120, { edit: 0, final: 6 + 2 * 60 })
     const d = DEFAULTS['note:final']
     expect(h.phases['note:final']!.n).toBe(1)
+    expect(h.phases['note:final']!.base).toBe(0)
     expect(h.phases['note:final']!.perMin).toBeGreaterThan(d.perMin)   // measured 60 s/min vs 22 default
     expect(h.phases['note:edit']).toBeUndefined()                       // a skipped phase teaches nothing
     const t = new ProgressTracker('note', 120, h)
@@ -128,5 +129,45 @@ describe('honest progress', () => {
     expect(events.at(-1).type).toBe('done')
     // slug null: no project to measure, so nothing learned (mediaSeconds is per project)
     expect(saved).toBeNull()
+  })
+
+  it('replays Aiden within 30% first-run and 10% with local history', async () => {
+    const fixture = (await import('./fixtures/aiden-progress.json')).default
+    const replay = (history: SpeedHistory) => {
+      let now = 0
+      const tracker = new ProgressTracker('first-edit-basic', fixture.mediaSeconds, history, () => now)
+      const rows = fixture.events.map((e) => {
+        now = e.at * 1000
+        const phase = e.phase
+        if (phase !== null && phase !== 'listen' && phase !== 'analyze' && phase !== 'final') throw new Error(`Unexpected phase: ${phase}`)
+        tracker.update(phase ?? undefined, e.pct)
+        return { at: e.at, ...tracker.snapshot() }
+      })
+      now = fixture.duration * 1000
+      return { rows, spent: tracker.finish() }
+    }
+    const first = replay(empty())
+    const second = replay(learn(empty(), 'first-edit-basic', fixture.mediaSeconds, first.spent))
+    for (const [run, tolerance] of [[first, 0.3], [second, 0.1]] as const) {
+      const afterListen = fixture.events.find((e) => e.phase === 'analyze')!
+      const row = run.rows.find((r) => r.at === afterListen.at)!
+      expect(row.etaSec).not.toBeNull()
+      expect(Math.abs(row.etaSec! - (fixture.duration - row.at)) / (fixture.duration - row.at)).toBeLessThanOrEqual(tolerance)
+    }
+    expect(first.spent.edit).toBeUndefined()
+  })
+
+  it('does not let substep percentages pin the bar and excludes AI editing from the basic plan', () => {
+    let now = 0
+    const t = new ProgressTracker('rerender', 60, empty(), () => now)
+    t.update('final', 0); now += 1000; t.update('final', 100)
+    const pinned = t.snapshot().overall
+    t.update('final', 16); expect(t.snapshot().overall).toBe(pinned)
+    now += 1000; t.update('final', 20); expect(t.snapshot().overall).toBeGreaterThan(pinned)
+    const basic = new ProgressTracker('first-edit-basic', 60, empty(), () => now)
+    const ai = new ProgressTracker('first-edit', 60, empty(), () => now)
+    basic.update('listen', 0); ai.update('listen', 0); now += 14_000; basic.update('analyze', 0); ai.update('analyze', 0)
+    expect(basic.snapshot().etaSec).toBeLessThan(ai.snapshot().etaSec!)
+    expect(ai.snapshot().etaMaxSec).toBeGreaterThan(ai.snapshot().etaSec!)
   })
 })

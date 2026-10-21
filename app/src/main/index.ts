@@ -126,6 +126,11 @@ const jobs = createJobManager(
   },
   log,
   {
+    profile: async (kind) => {
+      if (kind !== 'first-edit') return kind
+      const provider = await ai.active().catch(() => null)
+      return provider?.connected && provider.id !== 'none' ? kind : 'first-edit-basic'
+    },
     loadHistory: async () => JSON.parse(await fs.readFile(speedHistoryFile(), 'utf8')),
     saveHistory: (h) => writeJson(speedHistoryFile(), h),
     mediaSeconds: async (slug) =>
@@ -389,7 +394,7 @@ function registerIpc(): void {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
-      ? { id: running.id, kind: running.kind, message: running.message, pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, overdue: running.overdue, thinking: running.thinking }
+      ? { id: running.id, kind: running.kind, message: running.message, pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, secondsMaxLeft: running.secondsMaxLeft, approximate: running.approximate, overdue: running.overdue, thinking: running.thinking }
       : null
     if (!running && d.status === 'working') d.status = 'interrupted'
     return d
