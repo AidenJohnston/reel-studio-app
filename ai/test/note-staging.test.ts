@@ -24,6 +24,22 @@ async function setup() {
 
 const note = { text: 'quieter music', applied: ['music'], at: '2026-10-21T00:00:00Z' };
 
+it('does not render or publish an unchanged setter when the note reaches its step limit', async () => {
+  const { dir, root, before } = await setup();
+  expect((await loadProject(dir)).cut.gapCap).toBe(0.25);
+  const host = new FakeHost(root);
+  const provider = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.25 })] }]);
+  const ai = createAI({ host, settingsDir: path.join(root, 'settings'), providerOverride: provider, maxSteps: 1 });
+  const result = await ai.applyNote(dir, 'Adjust the pauses', () => {});
+  expect(result.version).toBe(1);
+  expect(result.changed).toEqual([]);
+  expect(result.summary).toBe('Your video has not changed.');
+  expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
+  expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  expect(await fs.readdir(path.join(dir, 'versions'))).toEqual(['v1']);
+  expect(await fs.readdir(path.join(dir, '.staging'))).toEqual([]);
+});
+
 it('streams distinct staged drafts while keeping final success behind publication and revoking playback before cleanup', async () => {
   const { dir, root, before } = await setup();
   const host = new FakeHost(root);

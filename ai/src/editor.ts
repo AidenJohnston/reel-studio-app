@@ -1,6 +1,7 @@
 // High-level editor tasks: firstEdit, applyNote, writeScript, pickTakes, and the no-AI path.
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Phase, ScriptResult, UserFacingError } from './types';
 import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
@@ -289,6 +290,11 @@ function noteLabel(note: string, attached: AttachmentInfo[]): string {
   return attached.length === 1 ? `(attached ${attached[0].name})` : `(attached ${attached.length} files)`;
 }
 
+/** Compare edit content, including post text and unknown fields, without publication bookkeeping. */
+function noteContent({ version, notes, txnId, createdAt, updatedAt, ...content }: Project) {
+  return content;
+}
+
 export async function applyNote(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: ApplyNoteOptions = {}): Promise<EditResult> {
   if (!provider) throw new AIError('no_ai', 'Connect ChatGPT or a Claude key in Settings so I can make changes from your notes.');
   const attached = await validateAttachments(projectDir, opts.attachments);
@@ -384,10 +390,15 @@ async function applyStagedNote(deps: EditorDeps, provider: ModelProvider, txn: N
       ?? (ctx.note!.styleRules.length ? 'I saved your preference.' : 'I looked, but I was not sure what to change. Could you say it another way?'));
   }
   if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
-  if (!ctx.state.changed.size && !ctx.note!.styleRules.length) {
-    return { summary, version: before.version,
-      styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [] };
-  }
+  const noChange = (): EditResult => ({
+    // Setter summaries describe attempted writes; they cannot establish that anything changed.
+    summary: ctx.state.changed.size || ctx.note!.styleRules.length ? 'Your video has not changed.' : summary,
+    version: before.version, styleRulesAdded: [], changed: [],
+    // A preference alone must not manufacture a video version. Keep it available for consent.
+    styleSuggestions: [...new Set([...ctx.state.styleSuggestions, ...ctx.note!.styleRules])],
+  });
+  const unchanged = (p: Project) => isDeepStrictEqual(noteContent(before), noteContent(p));
+  if (unchanged(await loadProject(txn.dir))) return noChange();
   await refreshCredits(ctx);
   if (previewOnly) {
     const rendered = await doRender(ctx, true);
@@ -408,6 +419,7 @@ async function applyStagedNote(deps: EditorDeps, provider: ModelProvider, txn: N
   await doRender(ctx, false);
   if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
   const p = await loadProject(txn.dir);
+  if (unchanged(p)) return noChange();
   const refs = attached.map((a) => a.asset);
   const placed = placedAssets(p);
   const recorded = [...refs, ...earlier.map((a) => a.asset).filter((ref) => placed.has(ref) && !refs.includes(ref))];

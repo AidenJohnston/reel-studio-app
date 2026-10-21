@@ -100,7 +100,15 @@ in-flight tools. After at most ten seconds, the note discards staging. A late wo
 can only write into its old staging folder and cannot publish an aborted transaction.
 Stop after the project rename leaves the committed version in place. A step limit
 can still publish a valid partial edit with main's explanation that the note was
-not finished. A no-change answer retains the model's explanation or question.
+not finished.
+
+Before final or draft-only output, every note path compares the staged project
+with its initial snapshot, excluding root `version`, `notes`, `txnId`, `createdAt`
+and `updatedAt`. It checks again after the engine updates the staged project and
+before publication. An unchanged setter or an edit that was undone makes no
+version and cannot claim a change. A no-change answer without attempted edits
+retains the model's explanation or question. A preference without a project change
+returns for consent instead of creating a video version to save it.
 
 Startup kills recorded orphan engines before accepting jobs, removes every
 `.staging/*` folder, and removes version folders newer than `project.json.version`.
