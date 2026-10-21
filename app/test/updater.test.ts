@@ -1,15 +1,16 @@
 import { createJobManager } from '../src/main/jobs'
-import type { FoundUpdate } from '../src/main/update-check'
+import { releasePageBackend, type FoundUpdate, type FetchLike } from '../src/main/update-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createUpdater, type UpdateBackend } from '../src/main/updater'
-import { updateMode, type UpdateMemory } from '../src/main/update-machine'
+import { disabledReason, updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction } from '../src/shared/update'
 
 function setup(
   found: () => Promise<FoundUpdate | null>,
-  opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; prepareToQuit?: () => Promise<void>; load?: () => Promise<UpdateMemory>; memory?: Partial<UpdateMemory> } = {}
+  opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; prepareToQuit?: () => Promise<void>; load?: () => Promise<UpdateMemory>; memory?: Partial<UpdateMemory>; backend?: UpdateBackend; disabledReason?: string; mode?: 'install' | 'page' } = {}
 ) {
   const installs: number[] = []
+  const opened: string[] = []
   let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
   let now = 1000
   const backend: UpdateBackend = {
@@ -19,19 +20,19 @@ function setup(
   }
   const u = createUpdater({
     version: '0.1.2',
-    mode: 'install',
-    disabledReason: null,
-    backend,
+    mode: opts.mode ?? 'install',
+    disabledReason: opts.disabledReason ?? null,
+    backend: opts.backend ?? backend,
     load: opts.load ?? (async () => memory),
     save: async (patch) => void (memory = { ...memory, ...patch }),
     busy: () => ({ exporting: !!opts.exporting, working: 0 }),
     prepareToQuit: opts.prepareToQuit ?? (async () => undefined),
-    openExternal: async () => undefined,
+    openExternal: async (url) => { opened.push(url) },
     send: () => {},
     log: () => {},
     now: () => now
   })
-  return { u, installs, memory: () => memory, tick: (ms: number) => void (now += ms) }
+  return { u, installs, opened, memory: () => memory, tick: (ms: number) => void (now += ms) }
 }
 
 const v013: FoundUpdate = { version: '0.1.3', notes: '## What\'s new\n\n* **Updates install themselves.** More text.\n', releaseUrl: 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3' }
@@ -249,4 +250,134 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   fail(new Error('shutdown failed'))
   await installing
   expect(() => u.assertCanStartWork()).not.toThrow()
+})
+
+it.each(['auto', 'auto reenabled', 'manual', 'joined manual'])('fails if opt-out publishes an automatic result or drops an explicit check: %s', async (reason) => {
+  let finish!: (value: FoundUpdate | null) => void
+  const { u, memory } = setup(() => new Promise((resolve) => { finish = resolve }))
+  await u.init()
+  const checking = u.check(reason === 'manual' ? 'button' : 'auto')
+  await u.setEnabled(false)
+  if (reason === 'auto reenabled') await u.setEnabled(true)
+  const manual = reason === 'joined manual' ? u.check('button') : null
+  finish(v013)
+  await checking
+  await manual
+  const explicit = reason === 'manual' || reason === 'joined manual'
+  expect(u.state().status).toBe(explicit ? 'available' : 'idle')
+  expect(memory().updateLatest?.version ?? null).toBe(explicit ? '0.1.3' : null)
+  expect(memory().updateCheckedAt).toBe(explicit ? 1000 : null)
+})
+
+it.each([
+  [429, {}],
+  [403, { 'x-ratelimit-remaining': '0' }],
+  [403, { 'retry-after': '60' }]
+] satisfies [number, Record<string, string>][])('fails if GitHub rate limit %s loses the notice or checks again within 24 hours', async (status, headers) => {
+  vi.useFakeTimers()
+  const responseHeaders = new Map(Object.entries(headers))
+  const fetch: FetchLike = vi.fn(async () => ({ ok: false, status, headers: { get: (name: string) => responseHeaders.get(name) ?? null }, json: async () => ({}) }))
+  const notice = { version: v013.version, url: v013.releaseUrl }
+  const backend = releasePageBackend(fetch, '0.1.2')
+  const { u, memory } = setup(async () => null, { backend, memory: { updateLatest: notice } })
+  let reopened: ReturnType<typeof setup> | undefined
+  try {
+    await u.init()
+    await u.check('auto')
+    expect(memory().updateCheckedAt).toBe(1000)
+    expect(memory().updateLatest).toEqual(notice)
+    expect(u.state().availableVersion).toBe('0.1.3')
+    reopened = setup(async () => null, { backend, memory: memory() })
+    await reopened.u.init()
+    reopened.u.start()
+    reopened.tick(86_399_999)
+    await vi.advanceTimersByTimeAsync(86_399_999)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    reopened.tick(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  } finally {
+    reopened?.u.stop()
+    u.stop()
+    vi.useRealTimers()
+  }
+})
+
+it.each(['HTTP failure', 'malformed JSON', 'timeout'])('fails if a failed request is remembered and suppresses a reopened app: %s', async (failure) => {
+  const fetch: FetchLike = vi.fn(async () => {
+    if (failure === 'timeout') throw new DOMException('The operation timed out', 'TimeoutError')
+    return { ok: failure !== 'HTTP failure', status: failure === 'HTTP failure' ? 500 : 200, headers: { get: () => null }, json: async () => JSON.parse('{broken') }
+  })
+  const backend = releasePageBackend(fetch, '0.1.2')
+  const first = setup(async () => null, { backend, memory: { updateCheckedAt: -86_400_000 } })
+  await first.u.init()
+  await first.u.check('auto')
+  expect(first.memory().updateCheckedAt).toBe(-86_400_000)
+  const reopened = setup(async () => null, { backend, memory: first.memory() })
+  vi.useFakeTimers()
+  try {
+    await reopened.u.init()
+    reopened.u.start()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(reopened.memory().updateCheckedAt).toBe(-86_400_000)
+  } finally {
+    reopened.u.stop()
+    vi.useRealTimers()
+  }
+})
+
+it.each([86_400_000 * 5, NaN])('fails if a future or invalid persisted check time suppresses startup: %s', async (updateCheckedAt) => {
+  const found = vi.fn(async () => null)
+  const { u } = setup(found, { memory: { updateCheckedAt } })
+  vi.useFakeTimers()
+  try {
+    await u.init()
+    u.start()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(found).toHaveBeenCalledTimes(1)
+  } finally {
+    u.stop()
+    vi.useRealTimers()
+  }
+})
+
+it('fails if Windows cannot find an eligible release or opens an untrusted release URL', async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true, status: 200, headers: { get: () => null }, json: async () => [
+      { tag_name: 'ffmpeg-7.1.1-rs3', draft: false },
+      { tag_name: 'v0.1.4', draft: true },
+      { tag_name: 'v0.1.3', draft: false, prerelease: true, html_url: 'https://evil.example/release' }
+    ]
+  })
+  const { u, opened } = setup(async () => null, { mode: 'page', backend: releasePageBackend(fetch, '0.1.2') })
+  await u.init()
+  await u.check('button')
+  expect(updateAction(u.state())).toBe('open-page')
+  await u.openRelease()
+  expect(opened).toEqual([v013.releaseUrl])
+  const malicious = setup(async () => ({ ...v013, releaseUrl: 'file:///tmp/update' }), { mode: 'page' })
+  await malicious.u.check('button')
+  await malicious.u.openRelease()
+  expect(malicious.opened).toEqual([v013.releaseUrl])
+})
+
+it.each(['opted out', 'test run', 'development build'])('fails if automatic network requests run when disabled: %s', async (configuration) => {
+  const found = vi.fn(async () => v013)
+  const { u } = setup(found, { memory: { checkUpdates: configuration !== 'opted out' }, disabledReason: disabledReason({ platform: 'darwin', isPackaged: configuration !== 'development build', test: configuration === 'test run', hasFeed: true, inApplications: true }) ?? undefined })
+  vi.useFakeTimers()
+  try {
+    await u.init()
+    u.start()
+    await vi.advanceTimersByTimeAsync(2 * 86_400_000)
+    await u.check('auto')
+    expect(found).not.toHaveBeenCalled()
+    if (configuration === 'opted out') {
+      await u.check('button')
+      expect(found).toHaveBeenCalledTimes(1)
+    }
+  } finally {
+    u.stop()
+    vi.useRealTimers()
+  }
 })

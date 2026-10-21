@@ -46,6 +46,8 @@ export function createUpdater(d: UpdaterDeps) {
   let state = initialUpdateState(d.version, d.mode, true, d.disabledReason)
   let active: Action | null = null
   let checking: Promise<CheckOutcome | null> | null = null
+  let automaticGeneration = 0
+  let manualCheck = false
   let lastAnswered: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let started = false
@@ -118,22 +120,31 @@ export function createUpdater(d: UpdaterDeps) {
   }
 
   function runCheck(reason: string): Promise<CheckOutcome | null> {
-    if (checking) return checking
+    if (checking) {
+      // A manual request may join the fetch without inheriting automatic opt-out cancellation.
+      if (reason !== 'auto') manualCheck = true
+      return checking
+    }
+    manualCheck = reason !== 'auto'
     checking = performCheck(reason).finally(() => { checking = null })
     return checking
   }
 
   async function performCheck(reason: string): Promise<CheckOutcome | null> {
-    if (!enabled() || active || state.status === 'downloading') return null
+    if (!enabled() || active || (reason === 'auto' && !state.autoCheck)) return null
+    const generation = automaticGeneration
     active = 'check'
     fresh = false
     if (!state.availableVersion) set({ ...state, status: 'checking', message: null, errorContext: null })
     d.log(`[update] checking (${reason}), running ${d.version}`)
     try {
-      applyFound(await d.backend!.check())
+      const found = await d.backend!.check()
+      if (!manualCheck && (generation !== automaticGeneration || !state.autoCheck)) return null
+      applyFound(found)
       answered()
       return 'answered'
     } catch (e) {
+      if (!manualCheck && (generation !== automaticGeneration || !state.autoCheck)) return null
       if (!state.availableVersion) set({ ...state, status: 'error', message: plainError('check', e), errorContext: 'check' })
       d.log(`[update] check failed: ${why(e)}`)
       if (!isRateLimited(e)) return 'failed'
@@ -261,9 +272,11 @@ export function createUpdater(d: UpdaterDeps) {
 
     async setEnabled(on: unknown): Promise<void> {
       const autoCheck = on === true
+      if (!autoCheck) automaticGeneration++
       await d.save({ checkUpdates: autoCheck })
       const latest = autoCheck && state.availableVersion === null ? (await d.load().catch(() => null))?.updateLatest : null
       const next: UpdateState = { ...state, autoCheck }
+      if (!autoCheck && next.status === 'checking') next.status = 'idle'
       set(autoCheck && next.availableVersion === null ? offerRemembered(next, latest) : next)
       schedule(nextCheckIn('answered', lastAnswered, d.now()))
     }

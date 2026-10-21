@@ -130,3 +130,10 @@ describe('settings store', () => {
     expect(s).toMatchObject({ firstRunDone: true, root: '/x', aiAutoPicked: true, checkUpdates: true })
   })
 })
+
+it('fails if a stalled GitHub request does not abort at its deadline', async () => {
+  const fetch: FetchLike = (_url, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
+  await expect(askGitHub(fetch, '0.1.2', 10)).resolves.toEqual({ kind: 'failed', why: 'timeout' })
+})
