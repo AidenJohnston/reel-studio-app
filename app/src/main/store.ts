@@ -339,6 +339,14 @@ export async function recoverInterrupted(): Promise<string[]> {
           if (pending.length) {
             st.chat.push({ id: `interrupted-note:${pending.join(',')}`, from: 'editor', text: INTERRUPTED_CHANGE, at: new Date().toISOString() })
           }
+          // Keep only the most recent 50 recovery IDs, without removing their chat messages.
+          let remaining = 50
+          for (const message of [...st.chat].reverse()) {
+            if (!message.id.startsWith('interrupted-note:')) continue
+            const ids = remaining ? message.id.slice('interrupted-note:'.length).split(',').slice(-remaining) : []
+            message.id = ids.length ? `interrupted-note:${ids.join(',')}` : randomUUID()
+            remaining -= ids.length
+          }
           st.job = null
           st.status = 'ready'
         })

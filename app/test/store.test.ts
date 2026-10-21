@@ -224,6 +224,24 @@ describe('project store', () => {
     expect(readFileSync(join(dir, 'project.json'))).toEqual(original)
   })
 
+  it('keeps only the latest 50 interrupted-note IDs while preserving chat messages', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('bounded-orphans', { versions: [1] })
+    await updateAppState('bounded-orphans', (state) => {
+      state.chat = Array.from({ length: 51 }, (_, i) => ({
+        id: `interrupted-note:old-${i}`, from: 'editor', text: `Notice ${i}`, at: '2026-10-21T00:00:00Z'
+      }))
+    })
+    mkdirSync(join(dir, '.staging', 'latest'), { recursive: true })
+    await recoverInterrupted()
+    const state = await readAppState('bounded-orphans')
+    const ids = state.chat.filter((message) => message.id.startsWith('interrupted-note:')).flatMap((message) =>
+      message.id.slice('interrupted-note:'.length).split(','))
+    expect(ids).toEqual([...Array.from({ length: 49 }, (_, i) => `old-${i + 2}`), 'latest'])
+    expect(state.chat.slice(0, 51).map((message) => message.text)).toEqual(Array.from({ length: 51 }, (_, i) => `Notice ${i}`))
+  })
+
   it('writes json atomically (no temp files left behind)', async () => {
     const { home } = setupPaths()
     const f = join(home, 'a b.json')

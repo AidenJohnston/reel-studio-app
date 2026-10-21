@@ -32,8 +32,10 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   this version. Older note entries remain valid. The version snapshot contains it
   before publication; the live note list commits atomically with the same snapshot.
 - Staging `publication.json` records new destinations and original credit bytes for
-  crash recovery. Version-local `style-rules.json` records requested rules and their
-  root for idempotent replay. Both are internal files, outside the project schema.
+  crash recovery. Its optional `creditsHash` is the SHA-256 of the merged credit bytes
+  and is required whenever original credits are recorded. Recovery refuses an older
+  pending credit manifest without this hash instead of restoring unverified bytes.
+  Version-local `style-rules.json` records requested rules and their root for idempotent replay. Both are internal files, outside the project schema.
 - `render.json` gains optional `reuseInputs` metadata, outside the project schema.
   It records render dependency identities so a post-only note can reuse a completed
   export. Older manifests still work and require the timestamp compatibility check.
