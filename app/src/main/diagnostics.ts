@@ -1,13 +1,3 @@
-import { posix } from 'node:path'
-
-export function isMacVolumePath(execPath: string, platform: NodeJS.Platform): boolean {
-  return platform === 'darwin' && posix.normalize(execPath).startsWith('/Volumes/')
-}
-
-export function isMacAppTranslocationPath(execPath: string, platform: NodeJS.Platform): boolean {
-  return platform === 'darwin' && posix.normalize(execPath).includes('/AppTranslocation/')
-}
-
 export async function logDuration<T>(label: string, log: (line: string) => void, operation: () => Promise<T>): Promise<T> {
   const started = performance.now()
   log(`${label} started`)

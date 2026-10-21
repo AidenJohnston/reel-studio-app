@@ -1,32 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMacAppTranslocationPath, isMacVolumePath, logDuration } from '../src/main/diagnostics'
-
-describe('isMacVolumePath', () => {
-  it.each([
-    ['/Volumes/Reel Studio/Reel Studio.app/Contents/MacOS/Reel Studio', 'darwin', true],
-    ['/Volumes/External Drive/Reel Studio.app/Contents/MacOS/Reel Studio', 'darwin', true],
-    ['/Applications/Reel Studio.app/Contents/MacOS/Reel Studio', 'darwin', false],
-    ['/Volumes-backup/Reel Studio', 'darwin', false],
-    ['/Volumes/../Applications/Reel Studio', 'darwin', false],
-    ['/Volumes/Reel Studio', 'linux', false],
-    ['C:\\Program Files\\Reel Studio.exe', 'win32', false]
-  ] satisfies [string, NodeJS.Platform, boolean][])('checks %s on %s', (execPath, platform, expected) => {
-    expect(isMacVolumePath(execPath, platform)).toBe(expected)
-  })
-})
-
-describe('isMacAppTranslocationPath', () => {
-  it.each([
-    ['/private/var/folders/abc/T/AppTranslocation/uuid/d/Reel Studio.app/Contents/MacOS/Reel Studio', 'darwin', true],
-    ['/Applications/Reel Studio.app/Contents/MacOS/Reel Studio', 'darwin', false],
-    ['/tmp/AppTranslocation-backup/Reel Studio', 'darwin', false],
-    ['/tmp/AppTranslocation/../Reel Studio', 'darwin', false],
-    ['/tmp/AppTranslocation/uuid/Reel Studio', 'linux', false],
-    ['/tmp/AppTranslocation/uuid/Reel Studio', 'win32', false]
-  ] satisfies [string, NodeJS.Platform, boolean][])('checks %s on %s', (execPath, platform, expected) => {
-    expect(isMacAppTranslocationPath(execPath, platform)).toBe(expected)
-  })
-})
+import { logDuration } from '../src/main/diagnostics'
 
 describe('logDuration', () => {
   it('logs the request before starting and completion after returning the result', async () => {
