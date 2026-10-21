@@ -13,7 +13,7 @@ import { EXPORT_EVENT, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentThumb } from '../components/NoteAttachments'
 import { ChangeAt } from '../components/ChangeAt'
-import { noteMarks } from '../../../shared/moments'
+import { noteMarks, typedMoment } from '../../../shared/moments'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -492,7 +492,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                       ))}
                     </div>
                   ) : null}
-                  {m.moment && <span className="bubble-moment">{clock(m.moment.at)} · </span>}
+                  {m.moment && !typedMoment(m.text) && <span className="bubble-moment">{clock(m.moment.at)} · </span>}
                   {m.text}
                   {m.moment && <span className="bubble-quote" title={m.moment.quote}>"{m.moment.quote}"</span>}
                   {/* "Connect" is the change button under the player, once; not in every old reply */}

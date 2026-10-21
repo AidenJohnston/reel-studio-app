@@ -475,7 +475,8 @@ function registerIpc(): void {
       // from applyNote's no-model fast path; the chat shows the words as typed.
       if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
     }
-    const noteId = await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat), moment)
+    // the chat keeps the words as typed, "At 0:05:" included; the AI reads them without it (aiNoteText)
+    const noteId = await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead

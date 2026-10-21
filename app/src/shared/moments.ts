@@ -78,19 +78,20 @@ export function typedMoment(text: string): { at: number; rest: string } | null {
   return m ? { at: Number(m[1]) * 60 + Number(m[2]), rest: text.trim().slice(m[0].length) } : null
 }
 
-// Words that point at a place in the video: the note is about that place, even when the rest of it
-// reads like a whole-reel setting ("smaller captions here").
-const LOCAL = /\b(here|this part|this bit|at this|right now|this moment|in this section)\b/i
+// Words that point somewhere: with any of them the note may be about a place in the video, even when
+// the rest reads like a whole-reel setting ("smaller captions this section"). A list of phrases always
+// misses a wording, so the fast path is only for text with none of these words at all.
+const DEICTIC = /\b(this|these|that|here|there|now|then|moment|part|bit|section|spot|point|when|where|during|around)\b/i
 
 /**
  * How a "Just here" note goes, from the person's words as typed. A typed time ("At 0:05: ...") or a
- * word for a place keeps the moment for the full editor. Otherwise a setting that is global by
+ * word that points somewhere ("this", "here", "around"...) keeps the moment for the full editor. Otherwise a setting that is global by
  * nature ("smaller captions", "quieter music": `isSetting`, the AI package's own fast-note check)
  * goes without the moment, so the editor does it at once as it does on main. Anything else keeps
  * the moment.
  */
 export async function momentRoute(typed: string, isSetting: (words: string) => Promise<boolean>): Promise<'fast' | 'moment'> {
-  if (typedMoment(typed) || LOCAL.test(typed)) return 'moment'
+  if (typedMoment(typed) || DEICTIC.test(typed)) return 'moment'
   return (await isSetting(typed.trim())) ? 'fast' : 'moment'
 }
 

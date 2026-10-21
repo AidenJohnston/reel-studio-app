@@ -76,7 +76,16 @@ describe('notes asked at a moment', () => {
       ['smaller captions here', 'moment'],
       ['At 0:05: smaller captions', 'moment'],
       ['quieter music here', 'moment'],
-      ['cut this', 'moment']
+      ['cut this', 'moment'],
+      ['make captions smaller this section', 'moment'],
+      ['smaller captions at that point', 'moment'],
+      ['quieter music from here', 'moment'],
+      ['bigger captions around 0:05', 'moment'],
+      ['make the captions bigger', 'fast'],
+      ['music quieter', 'fast'],
+      // not this guard: fastnote sends lasting-preference words ("everywhere", "always") to the full
+      // editor, which can offer a My style rule (ai/src/fastnote.ts NOT_FAST), as on main
+      ['make captions smaller everywhere', 'moment']
     ]
     for (const [typed, route] of table) expect([typed, await momentRoute(typed, isSetting)]).toEqual([typed, route])
   })
