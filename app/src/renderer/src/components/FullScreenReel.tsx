@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { clock } from '../../../shared/progress'
 import { reel } from '../api'
+import { EXPORT_EVENT } from '../App'
 import { Icon } from './icons'
 import { applyPlay, handOff, readPlay } from './handoff'
 
@@ -54,9 +55,10 @@ export function FullScreenReel({
       // Unmounted without closing (the phone was replaced by a new version): leave full screen too.
       if (!closingRef.current) void reel.app.fullScreen(false).catch(() => {})
       if (app) app.inert = false
-      // A dialog that opened behind this one (Cmd+E export) could not take focus while the page
-      // was inert: give it focus the way Modal does. Otherwise back to the opener, or to the new
-      // opener if a new version replaced the phone while open.
+      // An export started from the menu closes this view and opens its dialog while the page is
+      // still inert, so the dialog could not take focus: give it focus the way Modal does, and never
+      // to the opener behind it. Otherwise back to the opener, or to the new opener if a new version
+      // replaced the phone while open.
       const dialog = app?.querySelector<HTMLElement>('[role="dialog"]')
       const back = dialog
         ? (dialog.querySelector<HTMLElement>('[data-autofocus]') ?? dialog.querySelector<HTMLElement>('button'))
@@ -90,9 +92,14 @@ export function FullScreenReel({
     void Promise.allSettled(running).then(onClosed)
   }, [closing, onClosed])
 
+  // Export (Cmd/Ctrl+E, File > Export) shows its dialog on the page behind: step out of the way.
+  useEffect(() => {
+    window.addEventListener(EXPORT_EVENT, close)
+    return () => window.removeEventListener(EXPORT_EVENT, close)
+  }, [close])
+
   // Window capture phase: this runs before the page's bubble-phase handlers (the phone's Space, the
-  // drawer's Esc) and before the capture handler of a dialog opened later (Cmd+E export), so those
-  // never see these keys. While closing, Space is the phone's again.
+  // drawer's Esc), so those never see these keys. While closing, Space is the phone's again.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
