@@ -37,6 +37,8 @@ interface Running {
   secondsLeft: number | null
   overdue: boolean
   thinking: boolean
+  /** The final full-quality render has finished: the new version exists, so Stop no longer applies (see cancel). */
+  committed: boolean
   done: Promise<void>
 }
 
@@ -53,7 +55,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     }
     const id = randomUUID()
     const abort = new AbortController()
-    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
+    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, committed: false, done: Promise.resolve() }
     jobs.set(id, job)
     const send = (e: JobEvent): void => broadcast(e)
     let history: SpeedHistory = { v: 1, phases: {} }
@@ -119,14 +121,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
             const r = e
-            if (!r.draft) finals.add(r.version)
+            if (!r.draft) {
+              finals.add(r.version)
+              job.committed = true
+            }
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
             pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
         await Promise.all(pending) // a render's event before `done`, never after
-        // Stop pressed while the last render's video was being prepared: nothing below may count as success.
+        // Stop pressed before the final render finished (after it, cancel does nothing): nothing below may count as success.
         if (abort.signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
@@ -171,8 +176,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     start,
     forSlug,
     get: (id: string) => jobs.get(id),
+    /** Stop, unless the final render has finished: from then on the job completes and reports its new version. */
     cancel(id: string): void {
-      jobs.get(id)?.abort.abort()
+      const j = jobs.get(id)
+      if (j && !j.committed) j.abort.abort()
     },
     async cancelAll(): Promise<void> {
       const all = [...jobs.values()]
