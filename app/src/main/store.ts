@@ -9,6 +9,7 @@ import type {
   ChatMessage,
   ChecklistItem,
   NoteAttachment,
+  NoteOutcome,
   ProjectDetail,
   ProjectJson,
   ProjectSummary,
@@ -193,13 +194,20 @@ export async function addChat(
   actions?: ChatMessage['actions'],
   suggestion?: string,
   attachments?: ChatMessage['attachments']
-): Promise<void> {
+): Promise<string> {
+  const id = randomUUID()
   await updateAppState(slug, (s) => {
     s.chat.push({
-      id: randomUUID(), from, text, at: new Date().toISOString(), version,
+      id, from, text, at: new Date().toISOString(), version,
       ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
     })
   })
+  return id
+}
+
+/** Records how a note's job ended on the note itself, so its mark never borrows another note's reply. */
+export function settleNote(s: AppState, jobId: string, outcome: NoteOutcome): void {
+  for (const m of s.chat) if (m.jobId === jobId) m.outcome = outcome
 }
 
 // ---- versions ---------------------------------------------------------------------------------

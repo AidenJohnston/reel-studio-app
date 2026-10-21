@@ -10,7 +10,7 @@ import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, approxOutputTimes,
+  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
 } from './project';
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
@@ -346,8 +346,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const { images, stills } = await attachmentStills(projectDir, [...attached, ...earlier]);
   const files = attachmentsSection(attached, earlier, provider.supportsImages ? stills : new Map());
   const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
-  const moment = ctx.transcript ? momentSection(note, ctx.project ?? p0, ctx.transcript) : '';
-  const task = deps.prompts.render('applyNote', { note: noteText }) + (moment ? `\n\n${moment}` : '') + (files ? `\n\n${files}` : '');
+  const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
   const label = noteLabel(note, attached);
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
@@ -374,23 +373,6 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
     throw e;
   }
-}
-
-/**
- * A note from the change button under the player starts "At 0:14: " (app/src/shared/moments.ts): seconds
- * into the reel as the person watched it. The model places things on word ids, so name the kept words
- * said around then (output times are approximate, as in look_at_frames). '' for any other note.
- */
-export function momentSection(note: string, p: Project, t: Transcript): string {
-  const m = /^At (\d+):([0-5]\d): /.exec(note.trim());
-  if (!m) return '';
-  const at = Number(m[1]) * 60 + Number(m[2]);
-  const text = new Map(t.words.map((w) => [w.id, w.w.trim()]));
-  const kept = [...approxOutputTimes(t, p.cut.keep, p.cut.gapCap)].map(([id, v]) => ({ id, s: v.s, e: v.e, d: Math.max(0, v.s - at, at - v.e) }));
-  if (!kept.length) return '';
-  const near = kept.filter((w) => w.d <= 1.5);
-  const words = (near.length ? near : [...kept].sort((a, b) => a.d - b.d).slice(0, 4).sort((a, b) => a.s - b.s)).map((w) => `${w.id}:${text.get(w.id)}`);
-  return `## The moment\n\nThe note is about what plays at ${m[1]}:${m[2]} in the latest draft (${at} s). The kept words said around then: ${words.join(' ')}. "Here", "this part" and "this" mean these words: anchor the change on them.`;
 }
 
 // ---------------------------------------------------------------- idea -> script

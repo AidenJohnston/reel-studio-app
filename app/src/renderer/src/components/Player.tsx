@@ -84,7 +84,7 @@ function useWidth(ref: React.RefObject<HTMLElement | null>): number {
   return w
 }
 
-const MARK_STATE: Record<NoteMark['state'], string> = { making: 'Being made', done: 'Done', failed: "Didn't work" }
+const MARK_STATE: Record<NoteMark['state'], string> = { making: 'Being made', done: 'Done', failed: "Didn't work", stopped: 'Stopped' }
 
 const typing = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null

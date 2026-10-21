@@ -1,36 +1,48 @@
-// The marks on the scrub bar, read back from the chat (shared/moments.ts).
+// Notes asked at a moment (shared/moments.ts): the words on screen, the note text, the scrub-bar marks.
 import { describe, expect, it } from 'vitest'
-import { groupMarks, momentNote, noteMarks, noteMoment } from '../src/shared/moments'
-import type { ChatMessage } from '../src/shared/api'
+import { groupMarks, momentNote, noteMarks, noteMoment, typedMoment, wordsAt } from '../src/shared/moments'
+import type { ChatMessage, Word } from '../src/shared/api'
 
-const you = (id: string, text: string): ChatMessage => ({ id, from: 'you', text, at: '' })
+const you = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id, from: 'you', text, at: '', ...extra })
 const editor = (id: string, text: string, version?: number): ChatMessage => ({ id, from: 'editor', text, at: '', version })
 
 describe('notes asked at a moment', () => {
-  it('carries the time in the note text', () => {
-    expect(momentNote(74.4, 'cut this part')).toBe('At 1:14: cut this part')
-    expect(noteMoment('At 1:14: cut this part')).toBe(74)
-    expect(noteMoment('cut the part at 1:14')).toBeNull()
+  it('finds the words on screen through the segments of the render being watched', () => {
+    // 100 words of 0.2 s, 0.3 s apart. This render cut source 10-20 s, so output 15 s is source 25 s (w50).
+    const words: Word[] = Array.from({ length: 100 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i * 0.5, e: i * 0.5 + 0.2, source: 's1' }))
+    const segments = [
+      { source: 's1', src_start: 0, src_end: 10, out_start: 0 },
+      { source: 's1', src_start: 20, src_end: 50, out_start: 10 }
+    ]
+    expect(wordsAt(segments, words, 15).map((w) => w.id)).toEqual(['w48', 'w49', 'w50', 'w51', 'w52'])
   })
 
-  it('marks each one done, failed or being made', () => {
+  it('names the moment in the note text, once', () => {
+    const note = momentNote(74.4, [{ id: 'w3', w: 'a (big)' }, { id: 'w4', w: 'mixer' }], 'cut this part')
+    expect(note).toBe('At 1:14 (around "a big mixer", words w3, w4): cut this part')
+    expect(noteMoment(note)).toBe(74)
+    expect(typedMoment('At 1:00: zoom in here')).toEqual({ at: 60, rest: 'zoom in here' })
+  })
+
+  it('marks each note by its own job, never by the reply to a later note', () => {
     const chat = [
       editor('a', 'Your video is ready.', 1),
-      you('b', 'At 0:03: cut this part'),
-      editor('c', 'I cut it.', 2),
-      you('d', 'Make the subtitles bigger'),
-      editor('e', 'Bigger now.', 3),
-      you('f', 'At 0:09: zoom in here'),
-      editor('g', 'I looked, but I was not sure what to change.', 3),
-      you('h', 'At 0:11: quieter music here')
+      you('b', 'At 0:03 (around "x", words w1): cut this part', { jobId: 'j1', outcome: 'stopped' }),
+      you('c', 'At 0:09 (around "y", words w9): zoom in here', { jobId: 'j2', outcome: 'done' }),
+      editor('d', 'I zoomed in.', 2),
+      you('e', 'At 0:11 (around "z", words w11): quieter music here', { jobId: 'j3' }),
+      // from before outcomes were recorded: its reply made no new version
+      you('f', 'At 0:12: bigger', {}),
+      editor('g', 'I looked, but I was not sure what to change.', 2)
     ]
-    expect(noteMarks(chat, true)).toEqual([
-      { id: 'b', at: 3, text: 'cut this part', state: 'done' },
-      { id: 'f', at: 9, text: 'zoom in here', state: 'failed' },
-      { id: 'h', at: 11, text: 'quieter music here', state: 'making' }
+    expect(noteMarks(chat, 'j3').map((m) => [m.id, m.text, m.state])).toEqual([
+      ['b', 'cut this part', 'stopped'],
+      ['c', 'zoom in here', 'done'],
+      ['e', 'quieter music here', 'making'],
+      ['f', 'bigger', 'failed']
     ])
-    // stopped: no reply and nothing running
-    expect(noteMarks(chat, false)[2].state).toBe('failed')
+    // j3 ended without recording how (the app quit): stopped
+    expect(noteMarks(chat, null)[2].state).toBe('stopped')
   })
 
   it('gives marks too close to tell apart one target, with the busiest state', () => {

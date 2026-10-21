@@ -191,7 +191,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
-  const marks = noteMarks(d.chat, !!job)
+  const marks = noteMarks(d.chat, job?.jobId ?? null)
   const sent = async (jobId: string | null) => {
     if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
     await load()
@@ -265,7 +265,16 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             asking={asking}
             onTime={setPlayhead}
           />
-          <ChangeAt slug={slug} at={playhead} aiOn={!aiOff} busy={!!job} onConnect={connect} onOpenChange={setAsking} onSent={(id) => void sent(id)} />
+          <ChangeAt
+            slug={slug}
+            at={playhead}
+            shown={version ? { n: version.n, latest: version.n === d.versions[d.versions.length - 1].n } : null}
+            aiOn={!aiOff}
+            busy={!!job}
+            onConnect={connect}
+            onOpenChange={setAsking}
+            onSent={(id) => void sent(id)}
+          />
           {changePreview && (
             <p className="muted-sm center" data-testid="change-preview">Here's your change. I'm making the full-quality version.</p>
           )}

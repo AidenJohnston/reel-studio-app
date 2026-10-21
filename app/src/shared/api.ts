@@ -54,6 +54,18 @@ export interface ChatMessage {
   suggestion?: string
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
+  /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
+  jobId?: string
+  outcome?: NoteOutcome
+}
+
+/** done: the note made a new version. failed: an error, or nothing changed. stopped: Stop, or the app quit. */
+export type NoteOutcome = 'done' | 'failed' | 'stopped'
+
+/** A word on screen at a moment of a render (projects.moment). */
+export interface MomentWord {
+  id: string
+  w: string
 }
 
 /** A file attached to a note: what `engine attach` wrote in its sidecar (shared/attachments.ts). */
@@ -341,6 +353,9 @@ export interface ReelApi {
     /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs.
      * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one). */
     note(slug: string, text: string, attachments?: string[]): Promise<{ jobId: string | null }>
+    /** The words playing around `seconds` in version `n` (0 = the Preview), from that render's own
+     * timeline, and that render's length. null when the render left no timeline to read. */
+    moment(slug: string, n: number, seconds: number): Promise<{ duration: number; words: MomentWord[] } | null>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */

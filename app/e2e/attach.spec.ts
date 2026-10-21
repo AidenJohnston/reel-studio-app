@@ -35,6 +35,8 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   expect(projects()).toHaveLength(1)
   const slug = projects()[0]
   await page.getByTestId('change-at').click()
+  // the words on screen at the playhead, read from this render's timeline
+  await expect(page.getByTestId('change-context')).toContainText('Around "')
 
   // ---- a plain text paste is left to the box ----
   const handledText = await page.evaluate(() => {
@@ -90,15 +92,22 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await expect.poll(() => assetsOf(slug).filter((f) => !f.endsWith('.json')).length).toBe(3)
   expect(assetsOf(slug).filter((f) => f.endsWith('.attach.json'))).toHaveLength(3)
 
+  // ---- a typed time past the end is caught in the pop-up, not sent ----
+  await page.getByTestId('change-input').fill('At 9:00: zoom in here')
+  await page.getByTestId('change-send').click()
+  await expect(page.getByTestId('change-alert')).toContainText("There's no 9:00 in this video")
+  await page.getByTestId('change-input').fill('')
+
   // ---- send: a note can be only files, at this moment; the bubble shows them; the moment gets a mark ----
   await expect(page.getByTestId('change-send')).toBeEnabled()
   await page.getByTestId('change-send').click()
   await expect(page.getByTestId('change-pop')).toHaveCount(0)
   const bubble = page.getByTestId('bubble-you').last()
-  await expect(bubble).toContainText(/^At 0:00: Put this here$/)
+  await expect(bubble).toContainText(/^At 0:00 \(around "[^"]+", words w0, w1, w2\): Put this here$/)
   await expect(bubble.getByTestId('bubble-attachments').locator('img')).toHaveCount(3)
   await expect(page.getByTestId('bubble-editor').last()).toContainText('I saved your note')
-  await expect(page.getByTestId('scrub-mark')).toHaveCount(1)
+  // the stand-in AI makes no new version, so the note did not change the video
+  await expect(page.getByTestId('scrub-mark')).toHaveAttribute('data-state', 'failed')
   // the next note starts empty
   await page.getByTestId('change-at').click()
   await expect(page.getByTestId('note-attachment')).toHaveCount(0)
