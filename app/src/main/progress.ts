@@ -13,8 +13,8 @@ export interface SpeedHistory { v: 1; phases: Partial<Record<string, PhaseModel>
 export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
   'first-edit:listen': { base: 6, perMin: 8 },
   'first-edit:analyze': { base: 2, perMin: 4 },
-  // 2026-10-21 live-test: Claude Sonnet via CLIProxyAPI took 128 s on IMG_7303, 39 s.
-  // AI latency is not proportional to clip length or local engine throughput.
+  // First-run fallback from one observation: Claude Sonnet via CLIProxyAPI took
+  // 128 s on IMG_7303, 39 s, on 2026-10-21. Local history always replaces this seed.
   'first-edit:edit': { base: 128, perMin: 0 },
   'first-edit:final': { base: 8, perMin: 25 },
   // Basic edits skip AI drafts. Checked against Aiden 5.41 s and IMG_7303 23.13 s finals

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
-import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, NEUTRAL_WORKING, type LiveState } from '../../../shared/live'
+import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
@@ -547,7 +547,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <div className="row" style={{ marginBottom: 8 }}>
                   {job.thinking ? <Thinking /> : <Spinner />} <span>{job.message}</span>
                   <span className="spacer" />
-                  <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? NEUTRAL_WORKING}</span>
+                  <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? ''}</span>
                   <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId)} style={{ padding: 0, marginLeft: 12 }}>
                     Stop
                   </button>

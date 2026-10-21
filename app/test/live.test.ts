@@ -28,36 +28,39 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(s.thinking).toBe(true)
     expect(s.message).toBe('Watching your video and planning the edit')
     const uncertain = fold([status({ secondsLeft: 60, secondsMaxLeft: 120, approximate: true })])
-    expect(timeLeftWords(uncertain)).toBe('About 1 to 2 minutes left')
+    expect(timeLeftWords(uncertain)).toBe('About 2 minutes left')
     const measured = fold([status({ secondsLeft: 60, approximate: false })], uncertain)
-    expect(timeLeftWords(measured)).toBe('1 minute left')
+    expect(timeLeftWords(measured)).toBe('About a minute left')
     // the AI answered with a tool call: no longer thinking
     expect(fold([{ ...J, type: 'tool', name: 'set_captions', summary: 'Added subtitles' }], s)).toMatchObject({ thinking: false, tools: ['Added subtitles'] })
   })
 
-  it('keeps neutral wording after a numeric estimate overruns', () => {
-    const shown = fold([status({ secondsLeft: 12, approximate: true })])
-    expect(timeLeftWords(shown)).toBe('About 12 seconds left')
+  it('keeps the last rounded estimate after an overrun and resets for a new job', () => {
+    const shown = fold([status({ secondsLeft: 95, approximate: true })])
+    expect(timeLeftWords(shown)).toBe('About 2 minutes left')
     const overrun = fold([status({ secondsLeft: null, approximate: true, overdue: false })], shown)
-    expect(timeLeftWords(overrun)).toBe('Still working')
+    expect(timeLeftWords(overrun)).toBe('About 2 minutes left')
+    expect(timeLeftWords(fold([status({ jobId: 'j2', secondsLeft: null })], overrun))).toBeNull()
   })
 
-  it('shows approximate note defaults, local history, and neutral overruns', () => {
+  it("rounds note defaults and local history with Aiden's existing wording", () => {
     let now = 0
     const first = new ProgressTracker('note', note1.mediaSeconds, { v: 1, phases: {} }, () => now)
     first.update('edit', 0)
+    let live = EMPTY_LIVE
     const words = note1.samples.map((sample) => {
       now = sample.t * 1000
       const snap = first.snapshot()
-      return timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })
+      live = reduceLive(live, status({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue }))
+      return timeLeftWords(live)
     })
-    expect(words[0]).toBe('About 42 seconds left')
-    expect(words.at(-1)).toBe('Still working')
+    expect(words[0]).toBe('Less than a minute left')
+    expect(words.at(-1)).toBe('Less than a minute left')
     const history = learn({ v: 1, phases: {} }, 'note', 39, { edit: 30, final: 16 })
     const tracker = new ProgressTracker('note', 39, history, () => 0)
     tracker.update('edit', 0)
     const snap = tracker.snapshot()
-    expect(timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })).toBe('46 seconds left')
+    expect(timeLeftWords({ secondsLeft: snap.etaSec, approximate: snap.approximate, overdue: snap.overdue })).toBe('Less than a minute left')
   })
 
   it('first look plays, then the AI draft replaces it, never the other way round', () => {

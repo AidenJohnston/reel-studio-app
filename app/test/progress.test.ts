@@ -234,8 +234,8 @@ describe('honest progress', () => {
     const later = tracker.snapshot()
     expect(later.etaSec).toBeGreaterThanOrEqual(first.etaSec!)
     expect(later.etaMaxSec).toBeGreaterThan(first.etaMaxSec!)
-    const history = learn(empty(), 'first-edit', 39, { edit: 128 })
-    expect(new ProgressTracker('first-edit', 39, history).estimate('edit')).toBeCloseTo(128, 1)
+    const history = learn(empty(), 'first-edit', 39, { edit: 30 })
+    expect(new ProgressTracker('first-edit', 39, history).estimate('edit')).toBeCloseTo(30, 1)
   })
 
   it('continues advancing during the observed 100-second AI stretch', () => {
