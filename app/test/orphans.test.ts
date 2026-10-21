@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,8 +10,19 @@ import { PYTHON } from './helpers'
 
 describe('orphaned engine reaper', () => {
   it('names a running process', async () => {
-    expect((await processName(process.pid))?.toLowerCase()).toContain('node')
-    expect(await processName(999999)).toBeNull()
+    // Linux can name the test runner's thread mainthread instead of node.
+    const child = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore', windowsHide: true })
+    try {
+      await once(child, 'spawn')
+      expect((await processName(child.pid!))?.toLowerCase()).toContain('python')
+      expect(await processName(999999)).toBeNull()
+    } finally {
+      if (child.pid) {
+        const exited = once(child, 'exit')
+        child.kill()
+        await exited
+      }
+    }
   })
 
   it('kills our engine left over from a crashed app, and nothing else (not another python)', async () => {
