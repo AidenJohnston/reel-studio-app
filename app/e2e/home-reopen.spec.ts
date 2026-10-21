@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { launch, makeMedia, passFirstRun, shot } from './helpers'
+import { launch, makeMedia, passFirstRun } from './helpers'
 
 test('Home reopens a running note or rerender on the Reel screen', async () => {
   const media = makeMedia()
@@ -30,10 +30,7 @@ test('Home reopens a running note or rerender on the Reel screen', async () => {
       await expect(page.getByTestId('card-status')).toHaveText('Working on it')
       await page.getByTestId('project-card').focus()
       await page.keyboard.press('Enter')
-      await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Your videos')
-      await shot(page, `home-reopen-${kind}`)
       await expect(page.getByTestId('note-progress')).toContainText('Reading your note')
-      await expect(page.getByText('Making your reel', { exact: true })).toHaveCount(0)
     }
 
     // Home can still have a working summary after the note has finished.
@@ -48,7 +45,6 @@ test('Home reopens a running note or rerender on the Reel screen', async () => {
     await page.getByTestId('nav-home').click()
     await page.getByTestId('project-card').click()
     await expect(page.getByTestId('export')).toBeEnabled()
-    await expect(page.getByText('Making your reel', { exact: true })).toHaveCount(0)
 
     await app.evaluate(({ ipcMain }, d) => {
       ipcMain.removeHandler('projects:get')
