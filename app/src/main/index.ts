@@ -506,7 +506,7 @@ function registerIpc(): void {
     const at = moments.filter((t) => Number.isFinite(t) && t >= 0).slice(0, COVER_SUGGESTIONS)
     if (!at.length) return []
     const r = await coverScans.scan(slug, ['--project', projectDir(slug), '--at', at.join(','), '--source', source])
-    return parseCoverCandidates(r, source)
+    return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
   handle('projects:remove', async (_e, slug: string) => {

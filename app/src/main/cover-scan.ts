@@ -1,5 +1,6 @@
 // The cover picker's face scan (engine `cover-candidates --picker`), one per project at a time: every
 // scan empties work/cover-picker first, so two at once would delete each other's stills.
+import { basename, join } from 'node:path'
 import { COVER_SIGNALS, type CoverCandidate, type CoverSignal } from '../shared/cover'
 import type { RunEngine } from './engine'
 import { mediaUrl } from './media-url'
@@ -46,21 +47,28 @@ export function createCoverScans(runEngine: RunEngine) {
   return { scan, stop }
 }
 
+// engine render.cover_candidates(picker=True) writes cover_<seconds>.jpg here
+const PICKER_DIR = join('work', 'cover-picker')
+const STILL = /^cover_[\d.]+\.jpg$/
+
 const isSignal = (x: unknown): x is CoverSignal => COVER_SIGNALS.includes(x as CoverSignal)
 
-/** The engine's answer -> what the picker shows. Two moments can land on the same frame; it shows once. */
-export function parseCoverCandidates(r: any, source: string): CoverCandidate[] {
+/** The engine's answer -> what the picker shows. Two moments can land on the same frame; it shows once.
+ * Each still is addressed under `projectDir` by its file name: the engine reports real paths, which can
+ * differ from the app's when the Reel Studio folder is reached through a symlink. */
+export function parseCoverCandidates(r: any, source: string, projectDir: string): CoverCandidate[] {
   const out: CoverCandidate[] = []
   for (const c of Array.isArray(r?.candidates) ? r.candidates : []) {
     const t = Number(c?.atSourceTime)
-    if (!Number.isFinite(t) || typeof c?.file !== 'string' || !Array.isArray(c.reasons) || !c.reasons.every(isSignal))
+    const name = typeof c?.file === 'string' ? basename(c.file) : ''
+    if (!Number.isFinite(t) || !STILL.test(name) || !Array.isArray(c.reasons) || !c.reasons.every(isSignal))
       throw { code: 'ENGINE_OUTPUT', userMessage: 'I could not look through your video for a cover. Pick any moment below.', message: `cover-candidates row ${JSON.stringify(c)}` }
     if (out.some((o) => Math.abs(o.atSourceTime - t) < 0.3)) continue
     out.push({
       atSourceTime: t,
       source: String(r.source ?? source),
       reasons: COVER_SIGNALS.filter((s) => c.reasons.includes(s)),
-      image: mediaUrl(c.file, Date.now())
+      image: mediaUrl(join(projectDir, PICKER_DIR, name), Date.now())
     })
   }
   return out
