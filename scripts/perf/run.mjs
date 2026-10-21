@@ -7,7 +7,7 @@ import { cpus, homedir, platform, release, arch, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
 import { aggregate, compare, report } from './metrics.mjs'
 import { cleanupEngines } from './processes.mjs'
-import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad } from './resources.mjs'
+import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad, requireAdmission } from './resources.mjs'
 import { drive } from './drive.mjs'
 import { noteFixture } from './fixtures.mjs'
 
@@ -90,6 +90,7 @@ function instrument(checkout) {
     if (!main.includes('  registerIpc()\n')) throw new Error('Cannot expose background speech check: unsupported main entry contract')
     writeFileSync(mainPath, main.replace('  registerIpc()\n', '  registerIpc()\n  Object.assign(globalThis, { __rsPerfSpeechCheck: () => models.checkInBackground() })\n'))
   }
+  copyFileSync(join(scripts, 'process-registry.cjs'), join(checkout, 'app/process-registry.cjs'))
   copyFileSync(join(scripts, 'bootstrap.cjs'), join(checkout, 'app/perf-bootstrap.cjs'))
   const pkgPath = join(checkout, 'app/package.json')
   const pkg = json(pkgPath)
@@ -122,7 +123,7 @@ async function main() {
   writeFileSync(lock, String(process.pid))
   let scratch, checkout, added = false
   const result = { method, ref: options.ref, sha, expectedRuns: options.runs, replayNote: !!options.note, adoptModel: !!options.adoptModel, startedAt: new Date().toISOString(), runs: [],
-    harnessSha256: createHash('sha256').update(['run.mjs', 'drive.mjs', 'bootstrap.cjs', 'resources.mjs', 'processes.mjs', 'metrics.mjs', 'fixtures.mjs'].map((file) => readFileSync(join(scripts, file), 'utf8')).join('\n')).digest('hex'),
+    harnessSha256: createHash('sha256').update(['run.mjs', 'drive.mjs', 'bootstrap.cjs', 'resources.mjs', 'processes.mjs', 'process-registry.cjs', 'metrics.mjs', 'fixtures.mjs'].map((file) => readFileSync(join(scripts, file), 'utf8')).join('\n')).digest('hex'),
     host: { platform: platform(), release: release(), cpu: cpus()[0].model, cores: cpus().length, arch: arch(), memoryBytes: totalmem(),
       machineFingerprint: createHash('sha256').update(execFileSync('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], { encoding: 'utf8' }).match(/"IOPlatformUUID" = "([^"]+)"/)[1]).digest('hex') },
     loadGuard: { oneMinuteBelow: maxTrialLoad }, loadChecks: [],
@@ -134,6 +135,8 @@ async function main() {
   }
   try {
     guard(null, true)
+    result.admission = requireAdmission({ signal: abort.signal, checkResources: () => guard(null),
+      record: (load) => { result.loadChecks.push({ phase: 'before_build', ...load }); save() } })
     result.ffmpeg = { sha256: await sha256(join(ffmpegDir, 'ffmpeg')), version: execFileSync(join(ffmpegDir, 'ffmpeg'), ['-version'], { encoding: 'utf8' }).split('\n')[0] }
     result.model = { path: modelDir, sha256: await sha256(join(modelDir, 'model.bin')) }
     scratch = mkdtempSync('/tmp/rs-perf-build-')

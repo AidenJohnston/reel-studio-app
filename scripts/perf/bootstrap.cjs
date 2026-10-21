@@ -1,8 +1,14 @@
 // Loaded instead of the entry point, only by the scratch benchmark build.
 const { ipcMain, app } = require('electron')
 const childProcess = require('node:child_process')
-const { appendFileSync } = require('node:fs')
+const { registerProcess, captureDescendants } = require('./process-registry.cjs')
 const { StringDecoder } = require('node:string_decoder')
+const registry = process.env.REELSTUDIO_PERF_PID_REGISTRY
+registerProcess(registry, process.pid)
+// Persist observed descendants before their parents can exit and reparent them.
+const processTimer = setInterval(() => captureDescendants(registry), 200)
+processTimer.unref()
+process.on('exit', () => captureDescendants(registry))
 const state = globalThis.__rsPerf = { ipc: [], events: [], engines: [] }
 const handle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, fn) => handle(channel, async (...args) => {
@@ -26,7 +32,7 @@ const spawn = childProcess.spawn
 childProcess.spawn = function (file, args, options) {
   const child = spawn.call(this, file, args, options)
   if (!args?.includes('reelengine')) return child
-  if (child.pid) appendFileSync(process.env.REELSTUDIO_PERF_PID_REGISTRY, JSON.stringify({ pid: child.pid, file, args }) + '\n')
+  if (child.pid) registerProcess(registry, child.pid)
   const index = args.indexOf('reelengine')
   const run = { command: args[index + 1], args: args.slice(index + 2), pid: child.pid,
     at: performance.now(), threads: options.env.REELENGINE_ASR_THREADS ?? null, progress: [], stderr: '' }

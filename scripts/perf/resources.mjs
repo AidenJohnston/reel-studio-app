@@ -43,8 +43,27 @@ export function diskBytes(path) {
 // Fixed at 8 on the 12-core benchmark host to reject the previously accepted 26.44 load.
 export const maxTrialLoad = 8
 
-export function trialLoad(oneMinute = loadavg()[0]) {
-  return { at: new Date().toISOString(), oneMinute, threshold: maxTrialLoad, accepted: Number.isFinite(oneMinute) && oneMinute < maxTrialLoad }
+export function parseSwapUsage(text) {
+  const match = text.match(/total\s*=\s*([\d.]+)([KMGT])\s+used\s*=\s*([\d.]+)([KMGT])/)
+  if (!match) throw new Error(`Cannot parse vm.swapusage: ${text.trim()}`)
+  const units = { K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 }
+  const totalBytes = Number(match[1]) * units[match[2]]
+  const usedBytes = Number(match[3]) * units[match[4]]
+  if (!Number.isFinite(totalBytes) || !Number.isFinite(usedBytes) || usedBytes > totalBytes) throw new Error('Invalid vm.swapusage totals')
+  return { totalBytes, usedBytes, usedFraction: totalBytes ? usedBytes / totalBytes : 0 }
+}
+
+export function requireAdmission({ signal, checkResources, record, readLoad = trialLoad }) {
+  signal.throwIfAborted()
+  checkResources()
+  const load = readLoad()
+  record(load)
+  if (!load.accepted) throw new Error(`REFUSED before build: 1-minute load ${load.oneMinute.toFixed(2)} must be below ${load.threshold}`)
+  return load
+}
+
+export function trialLoad(oneMinute = loadavg()[0], swap = parseSwapUsage(execFileSync('sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8' }))) {
+  return { at: new Date().toISOString(), oneMinute, swap, threshold: maxTrialLoad, accepted: Number.isFinite(oneMinute) && oneMinute < maxTrialLoad }
 }
 
 export async function waitForTrialLoad({ signal, checkResources, record, readLoad = trialLoad, retryMs = 30000 }) {
