@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, ROOT, SHOTS, dropFiles, launch, makeMedia, passFirstRun, passMacStage, shot } from './helpers'
+import { BASE, ROOT, SHOTS, dropFiles, launch, listeningState, makeMedia, passFirstRun, passMacStage, shot } from './helpers'
 
 test.beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true })
@@ -26,17 +26,12 @@ test('make a reel end to end', async () => {
   await passMacStage(page)
   // "One download" before the model is here, "Ready to listen" once it is (grandma3 #1).
   await expect(page.getByTestId('model-heading')).toHaveText(/One download, about 500 MB|Ready to listen/)
-  await expect(page.getByTestId('model-next').or(page.getByTestId('download-model'))).toBeVisible({ timeout: 15_000 })
-  if (await page.getByTestId('model-next').isVisible()) await expect(page.getByTestId('model-heading')).toHaveText('Ready to listen')
+  // Use an installed model if there is one; else "download" (instant with the stand-in engine). Either way the short
+  // timing check runs and the stage moves on by itself.
+  const state = await listeningState(page)
   await shot(page, '02-firstrun-model')
-  // Use an installed model if there is one; else "download" (instant with the stand-in engine).
-  const next = page.getByTestId('model-next')
-  const download = page.getByTestId('download-model')
-  await expect(next.or(download)).toBeVisible()
-  if (!(await next.isVisible())) await download.click()
-  // after the download, the short timing check, then Next
-  await next.click({ timeout: 15_000 })
-  await expect(page.getByText('Connect your AI editor')).toBeVisible()
+  if (state === 'download') await page.getByTestId('download-model').click()
+  await expect(page.getByText('Connect your AI editor')).toBeVisible({ timeout: 15_000 })
   await shot(page, '03-firstrun-connect')
   await page.getByTestId('skip').click()
 

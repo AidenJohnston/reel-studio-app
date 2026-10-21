@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { attachMemeFlow, chooseClaudeCode, dropFiles, passMacStage } from './helpers'
+import { attachMemeFlow, chooseClaudeCode, dropFiles, listeningState, passMacStage } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_INSTALLED
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
@@ -109,9 +109,8 @@ test('first run: speech model + AI', async () => {
       await passMacStage(page)
       await snap(page, '01-download')
       const t0 = Date.now()
-      const dl = page.getByTestId('download-model')
-      if (await dl.isVisible()) await dl.click()
-      else await page.getByTestId('model-next').click()
+      // A model already here moves on by itself after the short timing check.
+      if ((await listeningState(page)) === 'download') await page.getByTestId('download-model').click()
       const connect = page.getByText('Connect your AI editor')
       while (!(await connect.isVisible())) {
         if (Date.now() - t0 > 25 * 60_000) throw new Error('model download took over 25 minutes')

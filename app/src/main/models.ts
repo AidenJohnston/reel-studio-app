@@ -38,6 +38,9 @@ export interface SpeechCheckResult {
   threads: number | null
 }
 
+/** A failed timing check changes nothing the person relies on, so it says so and lets them go on. */
+const CHECK_FAILED = "I couldn't finish getting the listener ready for this computer, so it will use its usual settings. Everything still works."
+
 const thisMachine = (): string => `${process.arch} ${cpus()[0]?.model ?? 'unknown'} x${cpus().length}`
 
 export interface ModelDeps {
@@ -148,20 +151,28 @@ export function createModelManager(deps: ModelDeps) {
         if (!modelInstalled()) return state
         set({ check: 'running', error: null })
         try {
-          const r = (await runEngine('speech-check', ['--name', modelName()], undefined, abort.signal)) as { threads?: unknown; runs?: unknown } | null
+          const r = (await runEngine('speech-check', ['--name', modelName()], undefined, abort.signal)) as {
+            threads?: unknown
+            runs?: unknown
+            complete?: unknown
+          } | null
           const threads = typeof r?.threads === 'number' && r.threads > 0 ? r.threads : null
-          await deps.saveCheck({ machine: thisMachine(), threads })
+          // Cut short by its time budget (a busy computer): use what it found now, but don't keep it, so the quiet
+          // background check tries again on a later start. Seen 2026-10-21: one 7 s run at 8 threads, 4 never tried.
+          const complete = r?.complete !== false
+          if (complete) await deps.saveCheck({ machine: thisMachine(), threads })
           deps.useThreads(threads)
-          log(`[model] speech check: ${threads ?? 'usual'} thread(s) ${JSON.stringify(r?.runs ?? [])}`)
+          log(`[model] speech check: ${threads ?? 'usual'} thread(s)${complete ? '' : ' (cut short, not saved)'} ${JSON.stringify(r?.runs ?? [])}`)
           return set({ check: 'done' })
         } catch (e) {
           const err = toUserError(e)
           if (err.code === 'CANCELLED') return set({ check: 'needed' })
           // It failed for a reason that would repeat: keep the usual setting and don't run it again on this computer.
+          // The engine's own message would talk about videos; this one says what it means here.
           log(`[model] speech check failed: ${err.code} ${err.message ?? ''}`)
           await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
           deps.useThreads(null)
-          return set({ check: 'done', error: err.userMessage })
+          return set({ check: 'done', error: CHECK_FAILED })
         } finally {
           if (watch) clearInterval(watch)
           timing = null

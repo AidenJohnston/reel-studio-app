@@ -1,7 +1,9 @@
 // The listening model stage, self-contained: it reads and shows the model's state itself and talks to the wizard
 // (screens/FirstRun.tsx) only through its props, so what it checks can grow without touching the wizard.
 // Order: use a matching copy already on this computer, else download it; then a short timing check picks how the
-// listener runs on this computer (main/models.ts runCheck), which can be skipped.
+// listener runs on this computer (main/models.ts runCheck). When that check succeeds the stage moves on by itself,
+// as the download alone did before the check existed; Skip moves on at once. Next appears only when there is
+// something to read: a failed check, or a stage opened again after it was done.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelStatus } from '../../../../shared/api'
 import { MODEL_FOUND, ModelDownload } from '../../components/connect'
@@ -15,9 +17,13 @@ export interface ListeningStageProps {
   onNext: () => void
 }
 
+/** How long "Set up for this computer" stays before the stage moves on: long enough to see it land. Chosen by eye. */
+const SUCCESS_BEAT_MS = 900
+
 export function ListeningStage({ onNext }: ListeningStageProps) {
   const [s, setS] = useState<ModelStatus | null>(null)
-  const [skipped, setSkipped] = useState(false)
+  // The check ran during this visit. A stage opened again after it was done waits for Next instead of leaving.
+  const [ranCheck, setRanCheck] = useState(false)
   // Look for a copy on this computer before saying anything, so nobody with one sees "One download" first.
   const [looked, setLooked] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -46,15 +52,24 @@ export function ListeningStage({ onNext }: ListeningStageProps) {
   // A found copy usually checks in well under a second; only a slow check gets its own screen.
   const slowCheck = useAfter(!!s?.checking, 300)
   // The timing check starts by itself once the model is here (found, downloaded, or from before).
-  const needsCheck = !!s?.installed && s.check === 'needed' && !skipped
+  const needsCheck = !!s?.installed && s.check === 'needed'
   useEffect(() => {
-    if (needsCheck) void reel.model.runCheck().catch(() => undefined)
+    if (!needsCheck) return
+    setRanCheck(true)
+    void reel.model.runCheck().catch(() => undefined)
   }, [needsCheck])
-  const ready = !!s?.installed && (s.check === 'done' || skipped)
-  // "Skip" goes away when the check ends; keyboard focus moves to what replaced it instead of the page.
+  const checked = !!s?.installed && s.check === 'done'
+  const succeeded = checked && ranCheck && !s?.error
   useEffect(() => {
-    if (ready && (document.activeElement === document.body || !document.activeElement)) next.current?.focus()
-  }, [ready])
+    if (!succeeded) return
+    const t = setTimeout(onNext, SUCCESS_BEAT_MS)
+    return () => clearTimeout(t)
+  }, [succeeded, onNext])
+  const showNext = checked && !succeeded
+  // Skip leaves the footer when Next takes its place; keyboard focus goes to Next instead of the page.
+  useEffect(() => {
+    if (showNext && (document.activeElement === document.body || !document.activeElement)) next.current?.focus()
+  }, [showNext])
   // Leaving the stage stops a check still running; it runs again later, quietly.
   useEffect(() => () => void reel.model.skipCheck().catch(() => undefined), [])
 
@@ -91,10 +106,9 @@ export function ListeningStage({ onNext }: ListeningStageProps) {
         </div>
       )
     if (s.installed) {
-      const checking = !ready
       const skip = () => {
-        setSkipped(true)
         void reel.model.skipCheck()
+        onNext()
       }
       return (
         <StageShell
@@ -102,19 +116,27 @@ export function ListeningStage({ onNext }: ListeningStageProps) {
           title="Ready to listen"
           description={s.reused ? MODEL_FOUND : 'The listening model that understands what you say is already on this computer.'}
           footer={
-            checking ? (
-              <button className="link" onClick={skip} data-testid="skip-check">
-                Skip
-              </button>
-            ) : (
+            showNext ? (
               <button ref={next} className="btn primary" onClick={onNext} data-testid="model-next">
                 Next
+              </button>
+            ) : (
+              // Kept in place, hidden, during the success beat, so the card does not change height as it leaves.
+              <button
+                className="link"
+                onClick={skip}
+                data-testid="skip-check"
+                disabled={succeeded}
+                aria-hidden={succeeded || undefined}
+                style={succeeded ? { visibility: 'hidden' } : undefined}
+              >
+                Skip
               </button>
             )
           }
         >
-          <div className="listen-state" data-testid={checking ? 'speech-check' : 'speech-ready'}>
-            {checking ? (
+          <div className="listen-state" data-testid={checked ? 'speech-ready' : 'speech-check'}>
+            {!checked ? (
               <p className="listen-line">
                 <Thinking />
                 <span>Getting the listener ready for this computer</span>
@@ -122,12 +144,10 @@ export function ListeningStage({ onNext }: ListeningStageProps) {
             ) : s.error ? (
               <p className="listen-note">{s.error}</p>
             ) : (
-              !skipped && (
-                <p className="listen-line done">
-                  <Icon name="check" size={16} stroke={2.25} />
-                  <span>Set up for this computer</span>
-                </p>
-              )
+              <p className="listen-line done">
+                <Icon name="check" size={16} stroke={2.25} />
+                <span>Set up for this computer</span>
+              </p>
             )}
           </div>
         </StageShell>
@@ -161,17 +181,17 @@ export function ListeningStage({ onNext }: ListeningStageProps) {
       {view}
       {/* Mounted empty from the start, so each phase is announced once (not every MB of a download). */}
       <span className="sr-only" role="status">
-        {announcement(s, ready, skipped)}
+        {announcement(s, checked)}
       </span>
     </>
   )
 }
 
-function announcement(s: ModelStatus | null, ready: boolean, skipped: boolean): string {
+function announcement(s: ModelStatus | null, checked: boolean): string {
   if (!s) return ''
   if (s.installed) {
-    if (!ready) return 'Getting the listener ready for this computer'
-    return s.error ?? (skipped ? 'Ready to listen' : 'Ready to listen. Set up for this computer.')
+    if (!checked) return 'Getting the listener ready for this computer'
+    return s.error ?? 'Ready to listen. Set up for this computer.'
   }
   if (s.checking) return 'Checking the listener on this computer'
   if (s.downloading) return 'Downloading the listening model'

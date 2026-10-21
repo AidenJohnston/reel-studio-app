@@ -409,13 +409,14 @@ def choose_threads(runs: list) -> int:
 
 def speech_check(name: Optional[str] = None) -> dict:
     """Transcribe the bundled sample at each candidate thread count and pick one (choose_threads).
-    Model loading is not timed. Returns {"threads": n or None, "default", "device", "runs"}."""
+    Model loading is not timed. Returns {"threads": n or None, "default", "device", "runs", "complete"};
+    complete is False when the time budget stopped it before every count ran (a busy computer)."""
     name = name or default_model()
     path = str(require_model(name))
     default = default_threads()
     if cuda_available():
         # The GPU ignores the CPU thread count; leave it to load_model's own GPU check.
-        return {"threads": None, "default": default, "device": "cuda", "runs": []}
+        return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
     progress("speech-check", 0, "Getting the listener ready for this computer", force=True)
@@ -434,15 +435,17 @@ def speech_check(name: Optional[str] = None) -> dict:
         seconds = time.perf_counter() - t0
         last_cost = time.perf_counter() - t_load
         del model
-        runs.append({"threads": n, "seconds": round(seconds, 3), "words": [(w["w"], w["s"], w["e"]) for w in words]})
+        runs.append({"threads": n, "seconds": round(seconds, 3),
+                     "words": [(w["w"], w["s"], w["e"]) for w in words]})
         log(f"# speech check: {n} thread(s) {seconds:.2f}s, {len(words)} words")
         progress("speech-check", 100 * (i + 1) / len(cands), "Getting the listener ready for this computer")
     if not runs[0]["words"]:
         raise EngineError("SPEECH_CHECK_EMPTY", "the speech check sample produced no words",
                           "The listener didn't hear the test recording. Reel Studio will keep its usual settings.")
     return {"threads": choose_threads(runs), "default": default, "device": "cpu",
-            "runs": [{"threads": r["threads"], "seconds": r["seconds"], "sameWords": r["words"] == runs[0]["words"]}
-                     for r in runs]}
+            "complete": len(runs) == len(cands),
+            "runs": [{"threads": r["threads"], "seconds": r["seconds"],
+                      "sameWords": r["words"] == runs[0]["words"]} for r in runs]}
 
 
 def load_model(name: str, prefer: Optional[str] = None):

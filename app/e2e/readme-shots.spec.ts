@@ -17,7 +17,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { chooseClaudeCode, dropFiles, launch, passFirstRun, passMacStage, SHOTS } from './helpers'
+import { chooseClaudeCode, dropFiles, launch, passFirstRun, passListeningStage, passMacStage, SHOTS } from './helpers'
 
 const DIR = process.env.REELSTUDIO_README_DIR
 const VIDEO = process.env.REELSTUDIO_README_VIDEO
@@ -147,9 +147,7 @@ test('public: first-run connect screen and the script screen', async () => {
   try {
     await page.getByTestId('get-started').click()
     await passMacStage(page)
-    const ready = page.getByTestId('model-next')
-    await expect(ready.or(page.getByTestId('download-model'))).toBeVisible({ timeout: 15_000 })
-    await ((await ready.isVisible()) ? ready : page.getByTestId('later')).click()
+    await passListeningStage(page)
     await expect(page.getByTestId('skip')).toBeVisible()
     await snap(page, 'connect-ai')
     await page.getByTestId('skip').click()

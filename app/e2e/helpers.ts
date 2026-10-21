@@ -78,6 +78,27 @@ export async function passMacStage(page: Page): Promise<void> {
   await expect(page.getByTestId('model-heading')).toBeVisible()
 }
 
+/**
+ * Waits for the Listening setup stage to settle: 'download' when the model is missing and the Download button shows,
+ * 'here' when the model is in place (the stage then moves on by itself after its short timing check).
+ */
+export async function listeningState(page: Page): Promise<'download' | 'here'> {
+  const download = page.getByTestId('download-model')
+  const here = page.getByTestId('model-heading').filter({ hasText: 'Ready to listen' }).or(page.getByText('Connect your AI editor'))
+  await expect(download.or(here).first()).toBeVisible({ timeout: 30_000 })
+  return (await download.isVisible()) ? 'download' : 'here'
+}
+
+/** Gets past the Listening stage without downloading: "Do this later", or wait while it moves on by itself. */
+export async function passListeningStage(page: Page): Promise<void> {
+  if ((await listeningState(page)) === 'download') await page.getByTestId('later').click()
+  const connect = page.getByText('Connect your AI editor')
+  const next = page.getByTestId('model-next') // only after a failed timing check
+  await expect(connect.or(next)).toBeVisible({ timeout: 15_000 })
+  if (await next.isVisible()) await next.click()
+  await expect(connect).toBeVisible()
+}
+
 /** Gets past the first-run screens if this is a fresh profile. */
 export async function passFirstRun(page: Page): Promise<void> {
   const welcome = page.getByTestId('get-started')
@@ -85,10 +106,7 @@ export async function passFirstRun(page: Page): Promise<void> {
   if (await welcome.isVisible()) {
     await welcome.click()
     await passMacStage(page)
-    // A model already on this computer shows "Next" after its short timing check; otherwise "Do this later".
-    const ready = page.getByTestId('model-next')
-    await expect(ready.or(page.getByTestId('download-model'))).toBeVisible({ timeout: 15_000 })
-    await ((await ready.isVisible()) ? ready : page.getByTestId('later')).click()
+    await passListeningStage(page)
     await page.getByTestId('skip').click()
   }
   await expect(page.getByText('Your videos')).toBeVisible()
