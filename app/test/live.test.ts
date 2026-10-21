@@ -10,8 +10,7 @@ import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
 import { projectDir } from '../src/main/store'
-import { ownProject } from '@reelstudio/ai'
-import { setupPaths, unlocked } from './helpers'
+import { setupPaths } from './helpers'
 
 const J = { jobId: 'j1', slug: 's' }
 const status = (over: Partial<Extract<JobEvent, { type: 'status' }>> = {}): JobEvent => ({
@@ -107,7 +106,6 @@ describe('job manager (main): the contract on the wire', () => {
     const jobs = createJobManager(
       (e) => events.push(e),
       () => undefined,
-      unlocked,
       { loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined, mediaSeconds: async () => 30, tickMs: 15 },
       async (s, e) => (e.firstLook ? `reel-media://f/${s}/look` : null)
     )
@@ -145,7 +143,7 @@ describe('job manager (main): the contract on the wire', () => {
     setupPaths()
     const slug = 'one-lane'
     mkdirSync(projectDir(slug), { recursive: true })
-    const jobs = createJobManager(() => undefined, () => undefined, (s) => ownProject(projectDir(s)))
+    const jobs = createJobManager(() => undefined, () => undefined)
     let release!: () => void
     let saving!: () => void
     const inside = new Promise<void>((r) => (saving = r))

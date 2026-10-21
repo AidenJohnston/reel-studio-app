@@ -22,7 +22,7 @@ import {
 } from '../src/main/store'
 import { classifyByExtension } from '../src/main/library'
 import { binDir, projectsDir, reelStudioRoot } from '../src/main/paths'
-import { setupPaths, unlocked } from './helpers'
+import { setupPaths } from './helpers'
 import type { Word } from '../src/shared/api'
 
 function fakeProject(slug: string, opts: { versions?: number[]; partial?: number[] } = {}): string {
@@ -183,7 +183,7 @@ describe('project store', () => {
       s.job = { id: 'j2', kind: 'first-edit', startedAt: new Date().toISOString() }
       s.status = 'working'
     })
-    expect(await recoverInterrupted(unlocked)).toEqual(expect.arrayContaining(['gamma', 'delta']))
+    expect(await recoverInterrupted()).toEqual(expect.arrayContaining(['gamma', 'delta']))
     const g = await readAppState('gamma')
     expect(g.job).toBeNull()
     expect(g.status).toBe('ready')
@@ -193,7 +193,7 @@ describe('project store', () => {
     expect(d.status).toBe('interrupted')
     expect(existsSync(firstOnly)).toBe(true)
     // Running it again finds nothing to do.
-    expect(await recoverInterrupted(unlocked)).toEqual([])
+    expect(await recoverInterrupted()).toEqual([])
   })
 
   it('a note that never got saved is not a version, before or after the app restarts', async () => {
@@ -206,7 +206,7 @@ describe('project store', () => {
     await updateAppState('zeta', (s) => {
       s.job = { id: 'j5', kind: 'note', startedAt: new Date().toISOString() }
     })
-    await recoverInterrupted(unlocked)
+    await recoverInterrupted()
     expect((await readAppState('zeta')).chat.at(-1)?.text).toMatch(/closed before I finished/)
     expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
   })
@@ -224,17 +224,17 @@ describe('project store', () => {
     })
     // unreadable for now (another program is writing it): the note may be saved, so nothing is said yet
     writeFileSync(join(dir, 'project.json'), JSON.stringify(p).slice(0, 80))
-    expect(await recoverInterrupted(unlocked)).toEqual([])
+    expect(await recoverInterrupted()).toEqual([])
     expect((await readAppState('eta')).job?.id).toBe('j6')
     expect((await readAppState('eta')).chat).toEqual([])
     writeFileSync(join(dir, 'project.json'), JSON.stringify(p))
-    await recoverInterrupted(unlocked)
+    await recoverInterrupted()
     const chat = (await readAppState('eta')).chat
     expect(chat.map((m) => [m.text, m.version, m.suggestion])).toEqual([
       ['I gave the pauses more room.', 2, undefined],
       ['Remember this for next time? "Leave more room."', undefined, 'Leave more room.']
     ])
-    expect(await recoverInterrupted(unlocked)).toEqual([])
+    expect(await recoverInterrupted()).toEqual([])
     expect((await readAppState('eta')).chat).toHaveLength(2)
   })
 

@@ -84,13 +84,12 @@ def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(proj
     assert (project / "versions" / "preview" / "draft.mp4").read_bytes() == b"the creator's preview"
 
 
-def test_a_render_run_by_hand_waits_for_the_app_that_owns_the_project(project):
+def test_a_render_run_by_hand_refuses_a_project_reel_studio_has_open(project):
     lock = project / "work" / ".owner.lock"
-    lock.write_text("the app's note")        # a fresh lock: Reel Studio is editing this video
+    lock.write_text(json.dumps({"app": "Reel Studio", "token": "the app's note"}))
     refused = last_event(project, "render")
-    assert refused["event"] == "error" and refused["code"] == "PROJECT_BUSY"
-    assert "open in Reel Studio" in refused["userMessage"]
+    assert refused["event"] == "error" and refused["code"] == "PROJECT_OPEN"
+    assert str(lock) in refused["userMessage"]
     assert not (project / "versions" / "v1").exists()
 
     assert engine(project, "render", "--owner", "the app's note")["version"] == 1
-    assert lock.read_text() == "the app's note"

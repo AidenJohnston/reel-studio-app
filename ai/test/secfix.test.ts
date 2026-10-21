@@ -10,9 +10,9 @@ import {
 } from '../src';
 import { DATA_BOUNDARY } from '../src/editor';
 import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
-import { ownProject, OWNER_LOCK } from '../src/index';
 import { childEnv, devSettingsDir, isBlockedAddress, safeResolve } from '../src/safety';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
+import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng, firstVersion } from './helpers';
+import { listVersions } from '../src';
 
 const PUBLIC = async () => ['93.184.215.14'];
 const nullP = { side: null, tilt: null, scale: null, text: null };
@@ -319,6 +319,7 @@ describe('finding 34: an already-cancelled engine call never starts', () => {
 describe('finding 35: a note is rolled back on ANY failure, including the final render', () => {
   it('final render fails: project.json and My style stay as they were, no version is left', async () => {
     const { root, dir, host, settingsDir } = await setup();
+    await firstVersion(dir, host);
     host.failRender = true;
     const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const fetchImpl = (async () => new Response(tinyPng(), { headers: { 'content-type': 'image/png' } })) as any;
@@ -328,25 +329,12 @@ describe('finding 35: a note is rolled back on ANY failure, including the final 
     ]);
     await expect(createAI({ host, settingsDir, providerOverride: m, fetch: fetchImpl, lookup: PUBLIC }).applyNote(dir, 'slower', () => undefined)).rejects.toBeTruthy();
     expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
-    expect(fs.existsSync(path.join(dir, 'versions', 'v1'))).toBe(false);
+    expect(await listVersions(dir)).toEqual([1]);
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
 });
 
-describe('finding 36: cross-process edit lock, serialised style writes', () => {
-  it('a project another owner keeps alive refuses; one whose owner stopped touching it is taken over', async () => {
-    const { dir } = await makeProject();
-    const lock = path.join(dir, OWNER_LOCK);
-    await fsp.writeFile(lock, 'the app');
-    await expect(ownProject(dir)).rejects.toMatchObject({ code: 'busy' });
-    const gone = new Date(Date.now() - 60_000);
-    await fsp.utimes(lock, gone, gone);
-    const own = await ownProject(dir);
-    expect(await fsp.readFile(lock, 'utf8')).toBe(own.token);
-    await own.release();
-    expect(fs.existsSync(lock)).toBe(false);
-  });
-
+describe('finding 36: serialised style writes', () => {
   it('concurrent style adds keep every rule', async () => {
     const root = tmpDir('style ');
     const s = new StyleStore(() => root);

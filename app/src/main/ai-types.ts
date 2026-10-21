@@ -59,14 +59,6 @@ export interface SecretStore {
   decryptString(b: Buffer): string
 }
 
-/** The project's single writer (ai owner.ts). `token: null`: no lock file is held, so each engine
- * command takes the project for itself while it runs. */
-export interface ProjectOwner {
-  token: string | null
-  release(): Promise<void>
-}
-export type OwnProject = (slug: string) => Promise<ProjectOwner>
-
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>

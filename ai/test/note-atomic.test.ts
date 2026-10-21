@@ -4,18 +4,14 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, AIError, StyleStore } from '../src';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
+import { createAI, AIError, StyleStore, OWNER_LOCK, listVersions } from '../src';
+import { FakeHost, ScriptedModel, makeProject, call, tmpDir, firstVersion } from './helpers';
 
 async function setup(opts: { firstVersion?: boolean } = {}) {
   const { root, dir } = await makeProject();
   const host = new FakeHost(root);
-  const pj = path.join(dir, 'project.json');
-  const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
-  await fsp.writeFile(pj, JSON.stringify({ ...p, cut: { ...p.cut, keep: [{ from: 'w16', to: 'w56' }] } }, null, 2));
-  if (opts.firstVersion !== false) await host.runEngine('render', ['--project', dir]);
-  host.calls = [];
-  const read = () => fsp.readFile(pj, 'utf8');
+  await firstVersion(dir, host, opts.firstVersion !== false);
+  const read = () => fsp.readFile(path.join(dir, 'project.json'), 'utf8');
   return { root, dir, host, settingsDir: tmpDir('settings '), read, before: await read() };
 }
 
@@ -53,7 +49,7 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(offered).not.toMatch(/loaf\.png/);
   });
 
-  it('Stop during the final render: the half-made version is gone and the next note makes it cleanly', async () => {
+  it('Stop during the final render: the half-made version is not a version, and the next note makes it cleanly', async () => {
     const { dir, host, settingsDir, read, before } = await setup();
     const ac = new AbortController();
     host.afterRenderFiles = ({ draft }) => {
@@ -64,7 +60,7 @@ describe('a note that does not finish leaves the project as it was', () => {
     const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, finish('I gave the pauses more room.')]);
     await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined, ac.signal)).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(await read()).toBe(before);
-    expect(fs.existsSync(path.join(dir, 'versions', 'v2'))).toBe(false);
+    expect(await listVersions(dir)).toEqual([1]);
     expect(notesLeft(dir)).toBe(0);
 
     host.afterRenderFiles = undefined;
@@ -88,7 +84,7 @@ describe('a note that does not finish leaves the project as it was', () => {
     const p = JSON.parse(await read());
     expect(p.title).toBe('Renamed by hand');
     expect(p.cut.gapCap).toBe(0.25);
-    expect(fs.existsSync(path.join(dir, 'versions', 'v2'))).toBe(false);
+    expect(await listVersions(dir)).toEqual([1]);
   });
 
   it('a project with only a preview keeps that preview when a note fails at the final render', async () => {
@@ -111,17 +107,13 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(notesLeft(dir)).toBe(0);
   });
 
-  it('a second editor in the same app cannot take a project the first one is editing', async () => {
-    const { dir, host, settingsDir } = await setup();
-    let second: unknown;
-    const m = new ScriptedModel([
-      async () => {
-        second = await createAI({ host, settingsDir, providerOverride: new ScriptedModel([]) }).applyNote(dir, 'louder', () => undefined).catch((e) => e);
-        return finish('Done.');
-      },
-    ]);
-    await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'any change', () => undefined);
-    expect(second).toMatchObject({ code: 'busy' });
+  it('the dev CLI refuses a project Reel Studio has open, and changes nothing', async () => {
+    const { dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'the app\'s job' }));
+    const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, finish('Done.')]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'project_open' });
+    expect(await read()).toBe(before);
+    expect(m.requests).toEqual([]);
   });
 });
 
@@ -143,29 +135,29 @@ describe('a note that finishes is saved in one write', () => {
     expect(notesLeft(dir)).toBe(0);
   });
 
-  it('a new caption keeps the video and its version, and that version folder is not touched', async () => {
+  it('a caption-only note takes the version the engine reuses and writes nothing into its folder', async () => {
     const { dir, host, settingsDir, read } = await setup();
-    const v1 = await fsp.readFile(path.join(dir, 'versions', 'v1', 'project.json'), 'utf8');
+    const v1 = path.join(dir, 'versions', 'v1');
+    const folder = async () => Object.fromEntries(await Promise.all((await fsp.readdir(v1)).map(async (f) => [f, await fsp.readFile(path.join(v1, f), 'utf8')])));
+    const before = await folder();
     const m = new ScriptedModel([
       { toolCalls: [call('write_post', { caption: 'Bread takes patience', hashtags: ['bread', 'baking', 'sourdough', 'homemade', 'patience'], keywords: ['bread'] })] },
       finish('I rewrote your caption.'),
     ]);
     const r = await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'new caption about patience', () => undefined);
     expect(r.version).toBe(1);
-    const p = JSON.parse(await read());
-    expect(p.post.caption).toBe('Bread takes patience');
-    expect(p.notes.at(-1)).toMatchObject({ version: 1 });
-    expect(await fsp.readFile(path.join(dir, 'versions', 'v1', 'project.json'), 'utf8')).toBe(v1);
+    expect(JSON.parse(await read()).post.caption).toBe('Bread takes patience');
+    expect(await folder()).toEqual(before);
   });
 
-  it('"from now on..." alone is saved as a note with its rule, with no render', async () => {
+  it('a note that only proposes a rule is saved with its question, with no render', async () => {
     const { root, dir, host, settingsDir, read } = await setup();
-    const m = new ScriptedModel([{ toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' })] }, finish('Got it.')]);
+    const m = new ScriptedModel([{ toolCalls: [call('add_style_rule', { rule: 'Keep music quieter under talking' })] }, finish('I can do that in every video.')]);
     const r = await createAI({ host, settingsDir, providerOverride: m })
-      .applyNote(dir, 'from now on keep music quieter', () => undefined, undefined, { id: 'job-2', saveStyleRules: false });
-    expect(r).toMatchObject({ version: 1, styleRulesAdded: ['Keep music quieter under talking.'] });
+      .applyNote(dir, 'I like quieter music', () => undefined, undefined, { id: 'job-2', saveStyleRules: false });
+    expect(r).toMatchObject({ version: 1, styleSuggestions: ['Keep music quieter under talking.'] });
     expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
-    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-2', version: 1, styleRulesAdded: ['Keep music quieter under talking.'] });
+    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-2', version: 1, styleSuggestions: ['Keep music quieter under talking.'] });
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
 });

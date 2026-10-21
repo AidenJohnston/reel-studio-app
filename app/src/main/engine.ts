@@ -104,15 +104,15 @@ export async function killAllEngines(): Promise<void> {
   await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
 }
 
-/** Settles once the engine has exited and nothing it started is left in its process group: an
- * engine that died early must not leave an ffmpeg writing into a project its job has let go of. */
-function ended(child: ChildProcess): Promise<void> {
+/** Settles once the engine has exited and nothing it started is left in its process group (false
+ * when something survived SIGKILL): an engine that died early must not leave an ffmpeg writing into
+ * a project its job has let go of. Windows has no groups; there the engine's Job Object ends its
+ * children with it (engine/reelengine/contain.py). */
+function ended(child: ChildProcess): Promise<boolean> {
   return new Promise<void>((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) resolve()
     else child.once('close', () => resolve())
-  }).then(async () => {
-    if (child.pid && process.platform !== 'win32' && groupAlive(child.pid)) await killTree(child.pid)
-  })
+  }).then(() => !child.pid || process.platform === 'win32' || !groupAlive(child.pid) || killTree(child.pid))
 }
 
 export function createEngineRunner(cfg: RunnerConfig) {
@@ -165,7 +165,8 @@ export function createEngineRunner(cfg: RunnerConfig) {
         if (settled) return
         settled = true
         signal?.removeEventListener('abort', onAbort)
-        void Promise.all([child.pid ? killTree(child.pid) : undefined, gone]).then(() => rejectPromise(cancelled()))
+        void Promise.all([child.pid ? killTree(child.pid) : true, gone]).then(([killed, clean]) =>
+          rejectPromise(killed && clean ? cancelled() : stuck(child.pid)))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -200,9 +201,10 @@ export function createEngineRunner(cfg: RunnerConfig) {
         if (child.pid) cfg.onExit?.(child.pid)
         out.end()
         err.end()
-        void gone.then(() => finish(() => {
+        void gone.then((clean) => finish(() => {
           const r = result as typeof result
-          if (r?.ok === true && code === 0) resolvePromise(r.value)
+          if (!clean) rejectPromise(stuck(child.pid))
+          else if (r?.ok === true && code === 0) resolvePromise(r.value)
           else if (r?.ok === false) rejectPromise(r.err)
           else if (r?.ok === true) resolvePromise(r.value)
           else
@@ -221,6 +223,15 @@ export type RunEngine = ReturnType<typeof createEngineRunner>
 
 function cancelled(): EngineError {
   return { code: 'CANCELLED', userMessage: 'Stopped.' }
+}
+
+/** Something the engine started would not stop: it may still be writing (jobs.ts keeps the project closed). */
+function stuck(pid: number | undefined): EngineError {
+  return {
+    code: 'ENGINE_STUCK',
+    userMessage: "Part of Reel Studio's video engine would not stop. Restart Reel Studio before you change this video again.",
+    message: `process group ${pid} is still alive after SIGKILL`
+  }
 }
 
 export function isEngineError(e: unknown): e is EngineError {

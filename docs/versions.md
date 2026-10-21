@@ -73,14 +73,16 @@ Rules:
 
 ## One writer per project
 
-`<project>/work/.owner.lock` holds the token of the project's single writer (`ai/src/owner.ts`,
-`engine/reelengine/owner.py`). The app's job lane takes it for every job and manual edit and passes the
-token on: the AI edit joins it, and every engine command the job runs gets `--owner <token>`. An
-engine command run by hand without a token takes the project for itself while it runs, and refuses
-("This project is open in Reel Studio") while another owner is alive. `attach` and commands that
-change nothing in the project run beside the owner.
+The running app is the only writer of its projects. Electron's single-instance lock is held by the OS
+until the app process dies, and inside the app the job lane runs one job or manual edit per project.
+Everything a job runs, the AI edit and each engine command, gets the job's token (`--owner`) and never
+decides ownership itself. `<project>/work/.owner.lock` only tells tools run by hand that the app has
+the project open: the engine CLI and the AI dev CLI refuse while it exists ("Reel Studio may be using
+this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
+app removes leftover lock files when it starts (`app/src/main/owner.ts`).
 
-The owner touches the lock file every 5 s; a lock untouched for 30 s has no live owner and can be taken
-over. The timestamp is the liveness signal because Node has no OS file lock, a PID can be reused, and
-`os.kill(pid, 0)` sends Ctrl-C on Windows. A note checks it still owns the project right before it
-replaces `project.json`, so a note whose lock was taken over fails instead of saving.
+An engine call settles only after the engine and everything it started have exited. On macOS and
+Linux the engine runs as its own process group and the host stops what is left of the group after
+any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
+project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
+children when it exits (`engine/reelengine/contain.py`).

@@ -15,11 +15,11 @@ import {
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { requireOwner } from './owner';
+import { refuseIfOpen } from './owner';
 
 export interface EditorDeps {
   host: EngineHost;
-  /** the token that owns the project for this edit (owner.ts); a note commits only while it still does */
+  /** the token of the app job that has the project (owner.ts); without one this is a dev run */
   owner?: string;
   prompts: Prompts;
   style: StyleStore;
@@ -351,11 +351,10 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     if (r.stoppedBy !== 'finish') throw unfinished(ctx.state);
-    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to save: a proposed rule still goes back to the app to ask about
+    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length) {
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
-        version: baseVersion, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
+        version: baseVersion, styleRulesAdded: [], styleSuggestions: [], changed: [],
       };
     }
     const summary = withStyleEcho(r.finished || 'I saved your preference.', ctx.state);
@@ -363,17 +362,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const placedNow = placedAssets(await loadProject(projectDir, ctx.note!.file));
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
     return await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false);
-  } catch (e) {
-    // a final video this note started is not a version: never shown, and its number is free again
-    const saved = await loadProject(projectDir).catch(() => null);
-    if (saved && saved.version <= baseVersion) await fsp.rm(versionDir(projectDir, baseVersion + 1), { recursive: true, force: true });
-    throw e;
   } finally {
+    // only what this note made under its own id; a final it started stays above project.json's
+    // version, never shown, and the app's job lane clears it (app store.ts cleanPartialVersions)
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-/** The final video (none when only a My style rule changed), then the one write that saves the note
+/** The final video (none when the note only saved or proposed a My style rule), then the one write that saves the note
  * (see applyNote). Nothing after that write can fail the note. */
 async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVersion: number, n: { text: string; label: string; summary: string; attachments: string[] }, saveStyle: boolean): Promise<EditResult> {
   let final: RenderInfo | null = null;
@@ -402,7 +398,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     await fsp.writeFile(path.join(vdir, 'notes.md'), `# v${version}\n\nNote: ${n.label}\n\n${n.summary}\n`);
   }
   await writeFileAtomic(live, bytes, undefined, async () => {
-    if (deps.owner) await requireOwner(ctx.projectDir, deps.owner);
+    if (!deps.owner) refuseIfOpen(ctx.projectDir);
     if (!(await fsp.readFile(live)).equals(base)) {
       throw new AIError('project_changed', 'Your video was changed somewhere else while I worked on your note, so I left it as it was. Send your note again.');
     }

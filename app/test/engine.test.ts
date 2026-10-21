@@ -43,11 +43,12 @@ describe('parseEngineLine', () => {
   })
 })
 
-function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void) {
+function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void, onExit?: (pid: number) => void) {
   return createEngineRunner({
     python: () => PYTHON,
     env: () => ({ ...engineEnv(), PYTHONPATH: engineDir, ...extra }),
-    onSpawn
+    onSpawn,
+    onExit
   })
 }
 
@@ -104,15 +105,15 @@ describe('engine runner (against the stand-in engine)', () => {
     setupPaths()
     let pid = 0
     let grandchild = 0
-    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p))
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => (exited = true))
     const ac = new AbortController()
-    const t0 = Date.now()
     const p = run('sleep', [], (pr) => {
       grandchild = Number(pr.message)
       ac.abort()
     }, ac.signal)
     await expect(p).rejects.toMatchObject({ code: 'CANCELLED' })
-    expect(Date.now() - t0).toBeLessThan(15000)
+    expect(exited).toBe(true)
     expect(pid).toBeGreaterThan(0)
     expect(grandchild).toBeGreaterThan(0)
     expect(isAlive(pid)).toBe(false)

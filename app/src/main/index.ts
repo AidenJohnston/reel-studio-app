@@ -34,11 +34,12 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
+import { clearStaleLocks } from './owner'
 import { createLiveVideos } from './live-video'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
-import type { AI, EngineHost, ProjectOwner } from './ai-types'
+import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
@@ -101,7 +102,6 @@ const host: EngineHost = {
 }
 
 let ai: AI
-let ownProject: (projectDir: string) => Promise<ProjectOwner>
 let aiSource: 'package' | 'mock' = 'mock'
 let win: BrowserWindow | null = null
 
@@ -126,7 +126,6 @@ const jobs = createJobManager(
     feedback.onJobEvent(e)
   },
   log,
-  (slug) => ownProject(projectDir(slug)),
   {
     loadHistory: async () => JSON.parse(await fs.readFile(speedHistoryFile(), 'utf8')),
     saveHistory: (h) => writeJson(speedHistoryFile(), h),
@@ -630,6 +629,12 @@ app.whenReady().then(async () => {
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
   await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
+  await clearStaleLocks().catch((e) => log(`[locks] ${String(e)}`))
+  const recovered = await recoverInterrupted().catch((e) => {
+    log(`[recover] ${String(e)}`)
+    return []
+  })
+  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
   const loaded = await loadAI(
     {
       host,
@@ -641,12 +646,6 @@ app.whenReady().then(async () => {
   )
   ai = loaded.ai
   aiSource = loaded.source
-  ownProject = loaded.ownProject
-  const recovered = await recoverInterrupted((slug) => ownProject(projectDir(slug))).catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])

@@ -19,7 +19,6 @@ import type {
 } from '../shared/api'
 import { mediaUrl } from './media-url'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
-import type { OwnProject } from './ai-types'
 import { keptIds } from '../shared/cut'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
@@ -256,8 +255,9 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
 export const PREVIEW_DIR = 'preview'
 
 /**
- * Removes versions that never finished (crash or quit mid-render) and stray temp files.
- * A finished version has a video file and no `.rendering` marker.
+ * Removes versions that never finished (crash or quit mid-render, or a note that never saved its
+ * final) and stray temp files. A finished version has a video file, no `.rendering` marker, and a
+ * number project.json has saved. Runs only in the job lane or at startup, before any job.
  */
 export async function cleanPartialVersions(dir: string): Promise<string[]> {
   const removed: string[] = []
@@ -268,6 +268,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   } catch {
     return removed
   }
+  // a folder above project.json's version is a final no note or render ever saved (docs/versions.md)
+  const saved = await readJson<{ version?: number } | null>(join(dir, 'project.json'), null)
   for (const name of names) {
     // The engine's scratch previews (docs/versions.md) are the engine's to overwrite (review 31).
     if (name === PREVIEW_DIR) continue
@@ -283,6 +285,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
     }
     const finished =
       /^v\d+$/.test(name) &&
+      !(saved && Number(name.slice(1)) > (Number(saved.version) || 0)) &&
       VIDEO_NAMES.some((v) => existsSync(join(d, v))) &&
       !existsSync(join(d, '.rendering'))
     if (!finished) {
@@ -305,7 +308,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
  * to pick up where it left off.
  */
-export async function recoverInterrupted(own: OwnProject): Promise<string[]> {
+export async function recoverInterrupted(): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -314,29 +317,20 @@ export async function recoverInterrupted(own: OwnProject): Promise<string[]> {
     return recovered
   }
   for (const slug of slugs) {
-    let dir: string
     try {
-      dir = projectDir(slug)
+      projectDir(slug) // refuses a folder name that is not a project
     } catch {
       continue
     }
-    if (!existsSync(join(dir, 'app.json')) || !(await readAppState(slug)).job) continue
-    // another writer (the dev CLI) has it now: the next job on it settles it instead
-    const owner = await own(slug).catch(() => null)
-    if (!owner) continue
-    try {
-      if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
-    } finally {
-      await owner.release()
-    }
+    if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
   }
   return recovered
 }
 
 /**
  * Ends a job app.json still records but nothing is running: the app quit or crashed during it, or the
- * write that ends it failed. The caller owns the project. Runs at startup and before the next job on
- * that project, so a new job
+ * write that ends it failed. Runs at startup, before any job, and as the next job on that project
+ * begins, so a new job
  * never replaces a marker whose note may already be saved. A note found saved in project.json (by its
  * job id) gets its reply and questions; one that is not gets "send it again". While project.json
  * cannot be read the marker stays for the next try: the note may be saved, and telling the creator

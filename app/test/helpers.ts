@@ -45,6 +45,3 @@ export function makeClip(path: string, seconds = 3): string {
   )
   return path
 }
-
-/** A job lane owner without a lock file, for tests that are not about ownership. */
-export const unlocked = async (): Promise<{ token: null; release(): Promise<void> }> => ({ token: null, release: async () => undefined })

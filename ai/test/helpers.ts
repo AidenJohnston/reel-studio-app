@@ -74,6 +74,15 @@ export function tinyPng(rgb: [number, number, number] = [200, 30, 30]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** A project after its first edit, as every note finds it: a cut, and (`render`) Version 1. */
+export async function firstVersion(dir: string, host: FakeHost, render = true): Promise<void> {
+  const pj = path.join(dir, 'project.json');
+  const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
+  await fsp.writeFile(pj, JSON.stringify({ ...p, cut: { ...p.cut, keep: [{ from: 'w16', to: 'w56' }] } }, null, 2));
+  if (render) await host.runEngine('render', ['--project', dir]);
+  host.calls = [];
+}
+
 /** engine/reelengine/project.py edit_signature: what changes the rendered video. */
 function editSignature(p: Record<string, unknown>): string {
   const { updatedAt: _u, version: _v, notes: _n, post: _p, createdAt: _c, ...edit } = p;
@@ -102,10 +111,9 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
-    // like engine/reelengine/owner.py: with a lock on the project, a command must join its owner
-    const lock = await fsp.readFile(path.join(dir, OWNER_LOCK), 'utf8').catch(() => null);
-    if (lock !== null && (!args.includes('--owner') || args[args.indexOf('--owner') + 1] !== lock.trim())) {
-      throw { code: 'NOT_OWNER', userMessage: 'This video is being edited somewhere else right now.' };
+    // like engine/reelengine/owner.py: run by hand (no --owner) while Reel Studio has the project open
+    if (!args.includes('--owner') && fs.existsSync(path.join(dir, OWNER_LOCK))) {
+      throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
     }
     const pj = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));

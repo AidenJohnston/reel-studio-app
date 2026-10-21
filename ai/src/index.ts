@@ -15,12 +15,11 @@ import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import * as editor from './editor';
-import { ownProject, requireOwner } from './owner';
+import { refuseIfOpen } from './owner';
 
 export * from './types';
 export * from './project';
-export { ownProject, requireOwner, ownerToken, OWNER_LOCK } from './owner';
-export type { ProjectOwner } from './owner';
+export { refuseIfOpen, OWNER_LOCK } from './owner';
 export { TOOLS, TOOL_NAMES, toolSchemas, executeTool, newToolState } from './tools';
 export type { ToolContext, ToolDef } from './tools';
 export { runAgent } from './agent';
@@ -95,20 +94,16 @@ export function createAI(opts: CreateAIOptions) {
   const prompts = new Prompts(opts.promptsDir ?? defaultPromptsDir());
   const style = new StyleStore(() => opts.host.reelStudioRoot());
   const siwc = new SiwcAuth({ settingsDir: opts.settingsDir, secretStore: opts.secretStore, fetch: opts.fetch, issuer: opts.siwcIssuer, allowPlaintextSecrets: opts.allowPlaintextSecrets });
-  // One edit at a time per project (the app may double-click; the CLI may race). `owner`: the token
-  // of the caller that already owns the project (the app's job lane, owner.ts); without one the
-  // edit takes the project itself, as the dev CLI does.
+  // One edit at a time per project (the app may double-click; the CLI may race). `owner`: the token of
+  // the app job that has the project (owner.ts); without one (the dev CLI) the edit refuses while
+  // the app has the project open.
   const locks = new Map<string, Promise<unknown>>();
-  function exclusive<T>(dir: string, owner: string | undefined, fn: (owner: string) => Promise<T>): Promise<T> {
+  function exclusive<T>(dir: string, owner: string | undefined, fn: () => Promise<T>): Promise<T> {
     const key = path.resolve(dir).toLowerCase();
     const prev = locks.get(key) ?? Promise.resolve();
-    const run = prev.catch(() => undefined).then(async () => {
-      if (owner) {
-        await requireOwner(dir, owner);
-        return fn(owner);
-      }
-      const own = await ownProject(dir);
-      try { return await fn(own.token); } finally { await own.release(); }
+    const run = prev.catch(() => undefined).then(() => {
+      if (!owner) refuseIfOpen(dir);
+      return fn();
     });
     // The lock's copy of the run must never reject on its own: the caller gets `run` and handles
     // its error; an unobserved rejected `finally` copy is an unhandled rejection in Node.
@@ -290,10 +285,10 @@ export function createAI(opts: CreateAIOptions) {
       return { provider: p.id, model: p.model, reply: r.text.trim() };
     },
     async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<AgentResult & { notice?: any }> {
-      return exclusive(projectDir, opts.owner, async (owner) => editor.firstEdit(deps(owner), await modelProvider(), projectDir, onEvent, signal));
+      return exclusive(projectDir, opts.owner, async () => editor.firstEdit(deps(opts.owner), await modelProvider(), projectDir, onEvent, signal));
     },
     async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: editor.ApplyNoteOptions & { owner?: string } = {}): Promise<AgentResult> {
-      return exclusive(projectDir, opts.owner, async (owner) => editor.applyNote(deps(owner), await modelProvider(), projectDir, note, onEvent, signal, opts));
+      return exclusive(projectDir, opts.owner, async () => editor.applyNote(deps(opts.owner), await modelProvider(), projectDir, note, onEvent, signal, opts));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);
@@ -307,7 +302,7 @@ export function createAI(opts: CreateAIOptions) {
 
 export type ReelStudioAI = ReturnType<typeof createAI>;
 
-/** Every engine command an edit runs joins the project's owner (engine/reelengine/owner.py). */
+/** Every engine command an app job's edit runs carries the job's token (engine/reelengine/owner.py). */
 function ownedHost(host: EngineHost, owner: string): EngineHost {
   return {
     runEngine: (command, args, onProgress, signal) => host.runEngine(command, [...args, '--owner', owner], onProgress, signal),

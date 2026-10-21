@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, settleInterrupted, stamp, updateAppState } from './store'
-import type { OwnProject, ProjectOwner } from './ai-types'
+import { claimProject, type ProjectOwner } from './owner'
 import type { ChatLine } from './style-consent'
 import { toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
@@ -41,19 +41,28 @@ interface Running {
   done: Promise<void>
 }
 
-export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, own: OwnProject, progress?: ProgressDeps, toVideo?: ToVideo) {
+export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
   const jobs = new Map<string, Running>()
 
   /** Projects a manual edit is writing right now: no job may start on them meanwhile. */
   const held = new Set<string>()
+  /** Projects an engine process may still be writing to after its job ended (ENGINE_STUCK): nothing
+   * runs on them and they stay marked open until Reel Studio restarts and its leftovers are reaped. */
+  const stuck = new Map<string, { code: string; userMessage: string }>()
   const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+
+  function refuseIfBusy(slug: string): void {
+    const s = stuck.get(slug)
+    if (s) throw s
+    if (forSlug(slug) || held.has(slug)) throw BUSY
+  }
 
   function forSlug(slug: string): Running | undefined {
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
-    if (slug && (forSlug(slug) || held.has(slug))) throw BUSY
+    if (slug) refuseIfBusy(slug)
     const id = randomUUID()
     const abort = new AbortController()
     const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
@@ -149,9 +158,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
-        // Without the project (another writer has it, or an earlier job could not be settled) this job
-        // wrote nothing, and app.json's record of an earlier job must stay for settleInterrupted.
-        if (slug && owner) {
+        if (slug && err.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage })
+        // Without the project (an earlier job could not be settled) this job wrote nothing, and app.json's
+        // record of that earlier job must stay for settleInterrupted. With a stuck engine nothing is
+        // cleaned up or let go: it may still be writing.
+        if (slug && owner && !stuck.has(slug)) {
           await cleanPartialVersions(projectDir(slug)).catch(() => [])
           await updateAppState(slug, (s) => {
             s.job = null
@@ -163,16 +174,16 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
         clearInterval(tick)
-        await owner?.release().catch((e) => log(`[job ${kind}] could not let go of the project: ${String(e)}`))
+        if (!(slug && stuck.has(slug))) await owner?.release().catch((e) => log(`[job ${kind}] could not let go of the project: ${String(e)}`))
         jobs.delete(id)
       }
     })()
     return id
   }
 
-  /** Takes the project, then finishes a job app.json still records, before anything else writes. */
+  /** Marks the project open, then finishes a job app.json still records, before anything else writes. */
   async function enter(slug: string): Promise<ProjectOwner> {
-    const owner = await own(slug)
+    const owner = await claimProject(projectDir(slug))
     try {
       if ((await settleInterrupted(slug)) === 'unreadable') {
         throw { code: 'PROJECT_UNREADABLE', userMessage: 'I could not read this video right now. Try again in a moment.' }
@@ -187,7 +198,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
    * on it, and no job can start on it until `fn` is done. */
   async function hold<T>(slug: string, fn: () => Promise<T>): Promise<T> {
-    if (forSlug(slug) || held.has(slug)) throw BUSY
+    refuseIfBusy(slug)
     held.add(slug)
     try {
       const owner = await enter(slug)

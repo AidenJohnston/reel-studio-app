@@ -31,16 +31,18 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-/** Ends the process and everything it started, and settles once they have exited (SIGKILL after 1.5 s). */
-export async function killTree(pid: number): Promise<void> {
+/** Ends the process and everything it started (SIGKILL after 1.5 s) and settles once they have exited:
+ * false when something is still alive 5 s after SIGKILL. On Windows the engine's Job Object ends its
+ * children with it (engine/reelengine/contain.py), and taskkill /T ends the whole tree. */
+export async function killTree(pid: number): Promise<boolean> {
   if (process.platform === 'win32') {
     await new Promise<void>((resolve) => execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve()))
-    return
+    return true
   }
   signalGroup(pid, 'SIGTERM')
-  if (await goneWithin(pid, 1500)) return
+  if (await goneWithin(pid, 1500)) return true
   signalGroup(pid, 'SIGKILL')
-  await goneWithin(pid, 5000)
+  return goneWithin(pid, 5000)
 }
 
 export function isAlive(pid: number): boolean {
