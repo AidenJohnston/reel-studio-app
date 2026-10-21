@@ -48,6 +48,7 @@ from urllib.parse import quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .compose_util import EngineError, ffmpeg_bin, log
+from .cache import cache_dir
 
 API_UA = "ReelStudio/0.1 (+https://github.com/AidenJohnston/reel-studio-app)"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -191,18 +192,6 @@ _CONCEPT_WORDS = {"love", "money", "success", "stress", "anxiety", "time", "free
                   "motivation", "heartbreak", "grief", "joy", "peace", "chaos", "work", "life", "future", "dream",
                   "dreams", "romance", "rejection", "confidence", "ambition", "procrastination", "nostalgia"}
 _CONCEPT_SUFFIX = ("ness", "ity", "ism", "ship", "hood", "dom", "tion", "sion", "ment", "ing", "ance", "ence")
-
-
-def cache_dir() -> Path:
-    """Per-user cache (Simple Icons index, search credits). REELENGINE_CACHE_DIR overrides."""
-    env = os.environ.get("REELENGINE_CACHE_DIR")
-    if env:
-        return Path(env)
-    if sys.platform == "win32":
-        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ReelStudio" / "cache"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "ReelStudio"
-    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "reelstudio"
 
 
 def _write_json(path: Path, obj) -> None:

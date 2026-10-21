@@ -3,7 +3,20 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
+
+
+def cache_dir() -> Path:
+    """Per-user cache (Simple Icons index, search credits). REELENGINE_CACHE_DIR overrides."""
+    env = os.environ.get("REELENGINE_CACHE_DIR")
+    if env:
+        return Path(env)
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ReelStudio" / "cache"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ReelStudio"
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "reelstudio"
 
 
 def file_digest(path: Path) -> str:
@@ -16,7 +29,7 @@ def file_digest(path: Path) -> str:
 
 def seed_private_cache(destination: Path) -> None:
     """Copy completed shared cache JSON into private work before redirecting engine writes."""
-    from . import assets, tools
+    from . import tools
 
     destination = Path(destination)
 
@@ -34,7 +47,7 @@ def seed_private_cache(destination: Path) -> None:
         except (OSError, ValueError):
             pass  # Optional or incomplete caches can be rebuilt privately.
 
-    shared = assets.cache_dir()
+    shared = cache_dir()
     for name in ("simple-icons.json", "wikidata.json", "search-credits.json"):
         copy_json(shared / name, Path(name))
     for source in (shared / "music-analysis").glob("*.json"):
