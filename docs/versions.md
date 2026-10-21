@@ -71,24 +71,27 @@ by manual updates and live engine renders:
 
 1. Hash the live `project.json` again. A different SHA-256 refuses publication with
    "Your video changed while I was working. Send your note again."
-2. Move new assets and thumbnails into their live folders. Their unique names are
-   not referenced by the old edit. Existing files cannot be replaced. Same-volume
-   renames preserve the exact timestamps recorded in `assets.json`, so an unchanged
-   manual rerender reuses the version just published.
-3. Atomically replace the credit book, preserving existing entries and adding only
-   this note's new asset credits.
+2. Prepare and sync a staging manifest listing the new asset and thumbnail destinations,
+   directories created for them, and the original credit-book bytes. Every destination
+   has this transaction's unique prefix and must not already exist.
+3. Move those assets and thumbnails into their live folders and replace the credit book
+   with the prepared merged copy. Same-volume renames preserve the timestamps recorded
+   in `assets.json`, so an unchanged manual rerender reuses the published version.
 4. Rename the complete staged version folder to `versions/vN+1/`.
-5. Rename a prepared temporary project file over the live `project.json`. This is
-   the commit point and the last live write before the append step.
-6. Append saved style rules and the note record with `notes[].txnId`. A crash before
-   this step finishes may lose preferences or the live note record; the published
-   version's project snapshot already contains the record.
+5. Rename the synced temporary project file over live `project.json`. This is the
+   commit point. Its bytes match the version snapshot, including the note record and
+   `notes[].txnId`; there is no later project-file append.
+6. Save requested style rules. The immutable version contains `style-rules.json` with
+   the rules and their destination root. If the app closes before this finishes,
+   startup replays the rules before deleting staging. Equivalent rules are not added twice.
 
-The staged snapshot and `notes.md` are prepared before the version folder moves.
-Notes never rewrite a published version folder. The app shows only versions at or
-below the number recorded in the live project. A crash before the commit can leave
-unreferenced assets and credit entries, or an unpublished version folder, but the
-old edit still reads its original files.
+All temporary publication files stay in staging, including the merged credit book.
+Published version folders are never rewritten. Before commit, recovery removes only
+manifest-listed new assets and restores the exact original credit bytes, then deletes
+unpublished versions and staging. The manifest remains until repairs finish, so a
+second crash can repeat recovery. After commit, recovery retains the complete version
+and its note record, and finishes any style append. Reordering assets after the project
+commit would instead expose a project referencing files that do not exist yet.
 
 ## Stop, failure, and startup
 
@@ -112,11 +115,15 @@ returns for consent instead of creating a video version to save it.
 
 Startup kills recorded orphan engines before accepting jobs. If staging contains an
 unpublished note, it saves the existing interrupted-change chat message even when
-the app job record is missing. The message has a stable ID so retrying cleanup does
-not repeat it. The committed version snapshot identifies notes that already published.
+the app job record is missing. The message records the announced transaction IDs, so
+retrying cleanup does not repeat it even if only some orphan folders remain. The
+committed version snapshot identifies notes that already published.
 Recovery removes the whole `.staging` directory, including an empty one, and removes
 version folders newer than `project.json.version`.
 Publication also removes unpublished version folders before choosing the next number.
+If the optional AI package has been removed since a note ran, the app keeps any
+publication manifest and its staging for recovery after the package is restored.
+It still starts without AI and cleans ordinary staging that has no publication intent.
 The live app history in `app.json`, progress statistics, and diagnostic logs record
 attempts even when the edit is unchanged; they are not part of the edit transaction.
 

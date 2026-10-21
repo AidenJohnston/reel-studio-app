@@ -326,16 +326,18 @@ export async function recoverInterrupted(): Promise<string[]> {
     })
     if (entries.length) {
       const project = await readProject(slug)
-      // The version snapshot contains txnId even if the app closed before the live note append.
+      // Older staged notes committed txnId in the snapshot before appending it live.
       const snapshot = await readJson<{ notes?: { txnId?: string }[] }>(join(dir, 'versions', `v${project.version}`, 'project.json'), {})
       const published = new Set(snapshot.notes?.map((note) => note.txnId))
       const unfinished = entries.filter((id) => !published.has(id)).sort()
       if (unfinished.length) {
-        const id = `interrupted-note:${unfinished.join(',')}`
-        // Save the notice before deleting its evidence; the stable id prevents a second notice on retry.
+        // Persist all announced IDs before cleanup, even if a retry finds only some folders.
         await updateAppState(slug, (st) => {
-          if (!st.chat.some((message) => message.id === id)) {
-            st.chat.push({ id, from: 'editor', text: INTERRUPTED_CHANGE, at: new Date().toISOString() })
+          const announced = new Set(st.chat.flatMap((message) => message.id.startsWith('interrupted-note:')
+            ? message.id.slice('interrupted-note:'.length).split(',') : []))
+          const pending = unfinished.filter((id) => !announced.has(id))
+          if (pending.length) {
+            st.chat.push({ id: `interrupted-note:${pending.join(',')}`, from: 'editor', text: INTERRUPTED_CHANGE, at: new Date().toISOString() })
           }
           st.job = null
           st.status = 'ready'

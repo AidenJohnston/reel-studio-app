@@ -37,8 +37,13 @@ export function handleMediaProtocol(allowedRoots: () => string[], stagingRoots: 
     } catch {
       return new Response('bad url', { status: 400 })
     }
-    const ok = allowedRoots().some((r) => {
+    // Python reports canonical render paths. Keep lexical URLs working too, including
+    // existing Library links, while checking staging against its active canonical grant.
+    const roots = await Promise.all(allowedRoots().map(async (r) => {
       const root = resolve(r)
+      return [root, await fs.realpath(root).catch(() => root)]
+    }))
+    const ok = roots.flat().some((root) => {
       return file === root || file.startsWith(root.endsWith(sep) ? root : root + sep)
     })
     if (!ok) return new Response('forbidden', { status: 403 })

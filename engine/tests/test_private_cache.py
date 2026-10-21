@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 
 from reelengine import assets, cli, tools
 
@@ -52,3 +54,16 @@ def test_cli_seeds_completed_shared_cache_json_and_keeps_updates_private(tmp_pat
     for source, data in cached.items():
         assert source.read_text() == data
         assert source.stat().st_mtime_ns == 1700000000000000000
+
+
+def test_private_cache_seeding_does_not_import_web_assets(tmp_path):
+    env = dict(os.environ, REELENGINE_CACHE_DIR=str(tmp_path / "shared"),
+               REELENGINE_CACHE=str(tmp_path / "encoder"), XDG_CACHE_HOME=str(tmp_path))
+    subprocess.run([sys.executable, "-c", """
+import sys
+from pathlib import Path
+from reelengine.cache import seed_private_cache
+seed_private_cache(Path(sys.argv[1]))
+assert 'reelengine.assets' not in sys.modules
+assert 'numpy' not in sys.modules
+""", str(tmp_path / "private")], env=env, check=True)

@@ -23,6 +23,11 @@ it('keeps project access and recovery working when the optional AI package is ab
     await recoverNoteStaging(project)
     await expect(readFile(join(project, '.staging', 'old'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(join(project, 'versions', 'v2'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const manifest = join(project, '.staging', 'pending', 'publication.json')
+    await mkdir(join(project, '.staging', 'pending'), { recursive: true })
+    await writeFile(manifest, '{"version":2,"assets":["work/assets/pending-image.png"]}')
+    await recoverNoteStaging(project)
+    expect(await readFile(manifest, 'utf8')).toContain('pending-image.png')
     const loaded = await loadAI({ settingsDir: join(home, 'settings'), host: {
       reelStudioRoot: () => root,
       runEngine: async () => { throw new Error('No engine was requested') },

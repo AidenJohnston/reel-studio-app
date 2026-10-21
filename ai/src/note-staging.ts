@@ -126,9 +126,58 @@ async function removeUnpublished(dir: string, version: number): Promise<void> {
   }
 }
 
-/** Startup only, before jobs are accepted. Staging is disposable even without an app job record. */
+interface PublicationManifest {
+  version: number;
+  assets: string[];
+  createdDirectories: string[];
+  credits?: string | null; // Original bytes in base64; null means the file did not exist.
+}
+
+async function readOptional<T>(file: string): Promise<T | undefined> {
+  try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+  catch (e: any) { if (e.code === 'ENOENT') return undefined; throw e; }
+}
+
+async function replayStyle(versionDir: string, store?: StyleStore): Promise<void> {
+  const intent = await readOptional<{ root: string; rules: string[] }>(path.join(versionDir, 'style-rules.json'));
+  if (!intent) return;
+  const style = store ?? new StyleStore(() => intent.root);
+  for (const rule of intent.rules) await style.add(rule);
+}
+
+/** Keep the manifest until all repairs finish, so another crash can repeat them safely. */
+async function recoverTransaction(liveDir: string, dir: string, style?: StyleStore): Promise<void> {
+  const p = await loadProject(liveDir);
+  const committed = p.notes.find((note) => note.txnId === path.basename(dir));
+  if (committed) {
+    await replayStyle(path.join(liveDir, 'versions', `v${committed.version}`), style);
+  } else {
+    const manifest = await readOptional<PublicationManifest>(path.join(dir, 'publication.json'));
+    if (manifest) {
+      for (const rel of manifest.assets) await fs.rm(path.join(liveDir, rel), { force: true });
+      const credits = path.join(liveDir, 'work/assets/credits.json');
+      if (manifest.credits === null) await fs.rm(credits, { force: true });
+      else if (manifest.credits !== undefined) {
+        const restored = path.join(dir, 'restored-credits.json');
+        await writeFileAtomic(restored, Buffer.from(manifest.credits, 'base64'));
+        await fs.rename(restored, credits);
+      }
+      for (const rel of manifest.createdDirectories) {
+        try { await fs.rmdir(path.join(liveDir, rel)); }
+        catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
+      }
+      if (manifest.version > p.version) await fs.rm(path.join(liveDir, 'versions', `v${manifest.version}`), { recursive: true, force: true });
+    }
+  }
+  await fs.rm(dir, { recursive: true, force: true });
+}
+
+/** Startup only, before jobs are accepted. Repair publication before deleting its evidence. */
 export async function recoverNoteStaging(dir: string): Promise<void> {
   await withProjectLock(dir, async () => {
+    for (const txn of await names(path.join(dir, '.staging'))) {
+      await recoverTransaction(dir, path.join(dir, '.staging', txn));
+    }
     await fs.rm(path.join(dir, '.staging'), { recursive: true, force: true });
     let p;
     try { p = await loadProject(dir); } catch { return; }
@@ -142,6 +191,8 @@ export class NoteTransaction {
   readonly versionDir: string;
   published = false;
   private discardNotified = false;
+  private appended = false;
+  private style?: StyleStore;
   constructor(
     readonly liveDir: string,
     readonly dir: string,
@@ -151,26 +202,38 @@ export class NoteTransaction {
     private readonly onDiscard?: () => void,
   ) { this.versionDir = path.join(dir, 'version'); }
 
-  private check(): void { if (this.signal?.aborted) throw cancelled(); }
+  private async check(): Promise<void> {
+    if (!this.signal?.aborted) return;
+    // Publication still owns the lock: undo live moves before a queued edit can run.
+    await this.discardLocked();
+    throw cancelled();
+  }
 
   async discard(): Promise<void> {
+    await withProjectLock(this.liveDir, () => this.discardLocked());
+  }
+
+  private async discardLocked(): Promise<void> {
     try {
       if (!this.discardNotified) {
         this.discardNotified = true;
         this.onDiscard?.();
       }
-    } finally { await fs.rm(this.dir, { recursive: true, force: true }); }
+    } finally {
+      if (this.appended) await fs.rm(this.dir, { recursive: true, force: true });
+      else await recoverTransaction(this.liveDir, this.dir, this.style);
+    }
   }
 
   /** Only this function publishes a note. The project rename makes the complete version visible. */
   async publish(entry: Omit<NoteEntry, 'version' | 'txnId'>, rules: string[] = [], style?: StyleStore,
     afterStep?: (step: PublishStep) => void): Promise<number> {
     return withProjectLock(this.liveDir, async () => {
-      this.check();
+      await this.check();
       const file = path.join(this.liveDir, 'project.json');
       const live = await fs.readFile(file);
       if (hash(live) !== this.base) {
-        await this.discard();
+        await this.discardLocked();
         throw new AIError('stale_note', 'Your video changed while I was working. Send your note again.');
       }
       const current = JSON.parse(live.toString('utf8'));
@@ -178,18 +241,24 @@ export class NoteTransaction {
       const version = Number(current.version ?? 0) + 1;
       const destination = path.join(this.liveDir, 'versions', `v${version}`);
       p.version = version;
+      this.style = style;
       const note: NoteEntry = { ...entry, version, txnId: this.txnId };
+      p.notes = [...p.notes, note];
       // Prepare every version file before it is moved; published folders are never edited.
       await fs.access(path.join(this.versionDir, 'export.mp4'));
       // Preserve completed work for the next note without copying generated media again.
       const cache = path.join(this.versionDir, '.cache');
       await fs.mkdir(cache, { recursive: true });
       await transferCompletedCaches(this.dir, cache, 'move', this.signal);
-      await writeFileAtomic(path.join(this.versionDir, 'project.json'), JSON.stringify({ ...p, notes: [...p.notes, note] }, null, 2) + '\n');
+      const projectBytes = JSON.stringify(p, null, 2) + '\n';
+      const tmp = path.join(this.dir, 'published-project.json');
+      const files: [string, string][] = [[path.join(this.versionDir, 'project.json'), projectBytes], [tmp, projectBytes]];
+      if (style && rules.length) files.push([path.join(this.versionDir, 'style-rules.json'),
+        JSON.stringify({ root: path.dirname(style.file), rules }) + '\n']);
       const notesFile = path.join(this.versionDir, 'notes.md');
       try {
         const notes = await fs.readFile(notesFile, 'utf8');
-        await writeFileAtomic(notesFile, `# v${version}\n\n${notes.replace(/^# v\d+\r?\n(?:\r?\n)?/, '')}`);
+        files.push([notesFile, `# v${version}\n\n${notes.replace(/^# v\d+\r?\n(?:\r?\n)?/, '')}`]);
       } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       // Engine metadata must point at the published files after staging is removed.
       for (const name of ['render.json', 'verify.json']) {
@@ -203,52 +272,68 @@ export class NoteTransaction {
           metadata.versionDir = destination;
           if (metadata.cover) metadata.cover = path.join(destination, 'cover.png');
         }
-        await writeFileAtomic(metadataFile, JSON.stringify(metadata, null, 2) + '\n');
+        files.push([metadataFile, JSON.stringify(metadata, null, 2) + '\n']);
       }
-      await removeUnpublished(this.liveDir, Number(current.version ?? 0));
-      afterStep?.('base');
-      this.check();
+      const manifest: PublicationManifest = { version, assets: [], createdDirectories: [] };
       for (const folder of ['assets', 'thumbs']) {
-        const staged = path.join(this.dir, 'work', folder);
-        const dest = path.join(this.liveDir, 'work', folder);
+        const rel = `work/${folder}`;
+        const dest = path.join(this.liveDir, rel);
         const existing = new Set(await names(dest));
-        for (const name of await names(staged)) {
-          if (folder === 'assets' && name === 'credits.json') continue;
+        const staged = (await names(path.join(this.dir, rel))).filter((name) => !(folder === 'assets' && name === 'credits.json'));
+        if (staged.length) {
+          try { await fs.access(dest); }
+          catch (e: any) { if (e.code !== 'ENOENT') throw e; manifest.createdDirectories.push(rel); }
+        }
+        for (const name of staged) {
           if (!name.startsWith(`${this.txnId}-`)) throw new Error(`Staged ${folder} file has no transaction prefix: ${name}`);
-          await fs.mkdir(dest, { recursive: true });
-          // The lock protects this check from same-app writers. Rename preserves the exact
-          // mtime recorded in assets.json, so the next unchanged render reuses this version.
           if (existing.has(name)) throw new Error(`Asset already exists: ${name}`);
-          await fs.rename(path.join(staged, name), path.join(dest, name));
+          manifest.assets.push(`${rel}/${name}`);
         }
       }
-      afterStep?.('assets');
-      this.check();
-      const credits = path.join(this.dir, 'work', 'assets', 'credits.json');
-      let stagedCredits: Record<string, unknown> | undefined;
-      try { stagedCredits = JSON.parse(await fs.readFile(credits, 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+      const creditsFile = path.join(this.liveDir, 'work/assets/credits.json');
+      const stagedCredits = await readOptional<Record<string, unknown>>(path.join(this.dir, 'work/assets/credits.json'));
+      let mergedCredits: string | undefined;
       if (stagedCredits) {
-        const dest = path.join(this.liveDir, 'work', 'assets', 'credits.json');
-        let prior: Record<string, unknown> = {};
-        try { prior = JSON.parse(await fs.readFile(dest, 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
         const additions = Object.fromEntries(Object.entries(stagedCredits).filter(([key]) => key.startsWith(`${this.txnId}-`)));
-        if (Object.keys(additions).length) await writeFileAtomic(dest, JSON.stringify({ ...prior, ...additions }, null, 2) + '\n');
+        if (Object.keys(additions).length) {
+          let prior: Buffer | undefined;
+          try { prior = await fs.readFile(creditsFile); }
+          catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+          manifest.credits = prior?.toString('base64') ?? null;
+          mergedCredits = JSON.stringify({ ...(prior ? JSON.parse(prior.toString('utf8')) : {}), ...additions }, null, 2) + '\n';
+        }
       }
+      const preparedCredits = path.join(this.dir, 'published-credits.json');
+      if (mergedCredits !== undefined) files.push([preparedCredits, mergedCredits]);
+      // Sync the complete destination list and original credits before any live write.
+      files.push([path.join(this.dir, 'publication.json'), JSON.stringify(manifest) + '\n']);
+      // These independent staged files each sync before publication. Settle every write even
+      // after a failure so cleanup cannot race a sibling still preparing its file.
+      const prepared = await Promise.allSettled(files.map(([file, data]) => writeFileAtomic(file, data)));
+      for (const result of prepared) if (result.status === 'rejected') throw result.reason;
+      await removeUnpublished(this.liveDir, Number(current.version ?? 0));
+      afterStep?.('base');
+      await this.check();
+      for (const rel of manifest.assets) {
+        await fs.mkdir(path.dirname(path.join(this.liveDir, rel)), { recursive: true });
+        // Preserve the timestamps recorded in assets.json for unchanged manual rerenders.
+        await fs.rename(path.join(this.dir, rel), path.join(this.liveDir, rel));
+      }
+      afterStep?.('assets');
+      await this.check();
+      if (mergedCredits !== undefined) await fs.rename(preparedCredits, creditsFile);
       afterStep?.('credits');
-      this.check();
+      await this.check();
       await fs.mkdir(path.join(this.liveDir, 'versions'), { recursive: true });
       await fs.rename(this.versionDir, destination);
       afterStep?.('version');
-      const tmp = path.join(this.dir, 'published-project.json');
-      await fs.writeFile(tmp, JSON.stringify(p, null, 2) + '\n');
-      this.check();
+      await this.check();
       await fs.rename(tmp, file);
       this.published = true;
       afterStep?.('project');
-      // Stop after the commit cannot undo the version. Complete its note record and preferences.
+      // The note record committed with the edit. StyleStore.add deduplicates replayed rules.
       for (const rule of rules) await style?.add(rule);
-      p.notes = [...p.notes, note];
-      await writeFileAtomic(file, JSON.stringify(p, null, 2) + '\n');
+      this.appended = true;
       afterStep?.('append');
       // Cache additions are optional work after the complete note has committed. Existing
       // keys remain untouched, including singleton metadata describing an older live render.

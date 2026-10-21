@@ -58,6 +58,16 @@ export async function recoverNoteStaging(dir: string): Promise<void> {
   const ai = await loadSupport()
   if (ai) return ai.recoverNoteStaging(dir)
   await withProjectLock(dir, async () => {
+    // A missing package cannot replay publication. Keep its durable repair instructions
+    // for the next startup with AI installed; ordinary unfinished work is still disposable.
+    const stages = await fs.readdir(join(dir, '.staging')).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return []
+      throw e
+    })
+    for (const stage of stages) {
+      try { await fs.access(join(dir, '.staging', stage, 'publication.json')); return }
+      catch (e) { if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) throw e }
+    }
     await fs.rm(join(dir, '.staging'), { recursive: true, force: true })
     let project: unknown
     try { project = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')) }
