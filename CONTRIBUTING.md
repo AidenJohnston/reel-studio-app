@@ -28,6 +28,8 @@ npm run typecheck
 cd engine && python -m pytest tests
 ```
 
+CI: `.github/workflows/ci.yml` runs Node on Ubuntu, macOS, and Windows, Engine / Python 3.11, and Animation rendering.
+
 Tests that read your own videos or music are marked `real` and skip themselves when the files are absent;
 put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TEST_TAKES` and
 `REELENGINE_TEST_MUSIC` at them.
