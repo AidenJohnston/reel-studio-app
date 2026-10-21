@@ -30,6 +30,7 @@ describe('moveReason', () => {
 describe('offerMoveToApplications', () => {
   it('fails if a translocated copy is described as an installer disk', async () => {
     const deps: MoveDeps = {
+      destinationExists: () => false,
       ask: async (question) => {
         expect(question.detail).toContain('temporary copy')
         return 1
@@ -41,37 +42,30 @@ describe('offerMoveToApplications', () => {
 
   it('fails if declining the move still copies the app', async () => {
     const deps: MoveDeps = {
+      destinationExists: () => false,
       ask: async () => 1, askNow: () => { throw new Error('unexpected replacement prompt') },
       move: () => { throw new Error('copied after declining') }, log: () => {}
     }
     expect(await offerMoveToApplications(fromDisk, deps)).toBe('declined')
   })
 
-  it.each<[number, boolean]>([[0, true], [1, false]])('fails if replacement consent %s is ignored', async (answer, allowed) => {
-    let replace: boolean | undefined
+  it.each<[number, boolean]>([[0, true], [1, false]])('fails if a move starts without replacement consent %s', async (answer, allowed) => {
+    let moved = false
     const deps: MoveDeps = {
-      ask: async () => 0,
-      askNow: () => answer,
-      move: ({ conflictHandler }) => { replace = conflictHandler('exists'); return replace },
+      destinationExists: () => true,
+      ask: async (question) => question.message.startsWith('Replace') ? answer : 0,
+      askNow: () => { throw new Error('the privileged mover never calls conflictHandler') },
+      move: () => { moved = true; return true },
       log: () => {}
     }
-    expect(await offerMoveToApplications(fromDisk, deps)).toBe(allowed ? 'moving' : 'cancelled')
-    expect(replace).toBe(allowed)
-  })
-
-  it('fails if switching to an already-running installed copy asks to replace it', async () => {
-    const deps: MoveDeps = {
-      ask: async () => 0,
-      askNow: () => { throw new Error('unexpected replacement prompt') },
-      move: ({ conflictHandler }) => conflictHandler('existsAndRunning'),
-      log: () => {}
-    }
-    expect(await offerMoveToApplications(fromDisk, deps)).toBe('moving')
+    expect(await offerMoveToApplications(fromDisk, deps)).toBe(allowed ? 'moving' : 'declined')
+    expect(moved).toBe(allowed)
   })
 
   it('fails if a copy failure leaves the user without recovery instructions', async () => {
     const questions: Question[] = []
     const deps: MoveDeps = {
+      destinationExists: () => false,
       ask: async (question) => { questions.push(question); return 0 }, askNow: () => 0,
       move: () => { throw new Error('disk full') }, log: () => {}
     }

@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type { RunEngine } from './engine'
 import { isEngineError } from './engine'
 
@@ -27,6 +29,7 @@ export interface SelfTestResult {
 const NOT_REQUIRED = new Set(['speech model'])
 
 const DOCTOR_TIMEOUT_MS = 120_000
+const execFileAsync = promisify(execFile)
 
 export function selfTestArgs(argv: string[]): { selfTest: boolean; out: string | null } {
   const i = argv.indexOf('--out')
@@ -54,19 +57,28 @@ function isDoctorResult(r: unknown): r is { ok: boolean; checks: DoctorCheck[] }
 export async function runSelfTest(opts: {
   locations: SelfTestLocations
   runEngine: RunEngine
-  timeoutMs?: number
 }): Promise<SelfTestResult> {
   const { locations: L } = opts
+  const ffprobeCheck: SelfTestCheck = { name: 'bundled ffprobe', ok: existsSync(L.ffprobe), required: true, detail: L.ffprobe }
+  if (ffprobeCheck.ok) {
+    try {
+      const { stdout } = await execFileAsync(L.ffprobe, ['-version'], { timeout: 10_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024, windowsHide: true })
+      ffprobeCheck.ok = /^ffprobe version \S+/m.test(stdout)
+      ffprobeCheck.detail = stdout.trim() || 'ffprobe -version returned no version'
+    } catch (e) {
+      ffprobeCheck.ok = false
+      ffprobeCheck.detail = e instanceof Error ? e.message : String(e)
+    }
+  }
   const checks: SelfTestCheck[] = [
     { name: 'bundled python', ok: existsSync(L.python), required: true, detail: L.python },
     { name: 'bundled ffmpeg', ok: existsSync(L.ffmpeg), required: true, detail: L.ffmpeg },
-    { name: 'bundled ffprobe', ok: existsSync(L.ffprobe), required: true, detail: L.ffprobe },
+    ffprobeCheck,
     { name: 'engine files', ok: existsSync(join(L.engine, 'reelengine', '__main__.py')), required: true, detail: L.engine }
   ]
 
-  const timeoutMs = opts.timeoutMs ?? DOCTOR_TIMEOUT_MS
   const ac = new AbortController()
-  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  const timer = setTimeout(() => ac.abort(), DOCTOR_TIMEOUT_MS)
   const t0 = Date.now()
   const seconds = (): number => Math.round((Date.now() - t0) / 100) / 10
   try {
@@ -87,7 +99,7 @@ export async function runSelfTest(opts: {
   } catch (e) {
     const timedOut = ac.signal.aborted
     const detail = timedOut
-      ? `doctor did not finish within ${timeoutMs / 1000}s`
+      ? `doctor did not finish within ${DOCTOR_TIMEOUT_MS / 1000}s`
       : isEngineError(e)
         ? { code: e.code, message: e.message }
         : String(e)
