@@ -49,3 +49,12 @@ export function layersReducer(s: Layers, e: LayerEvent): Layers {
       return s.leaving?.id === e.id ? { ...s, leaving: null } : s
   }
 }
+
+/**
+ * The version the person is looking at: the one whose video the player has on screen (`onShown`), not the one
+ * just picked, which plays only once it has loaded. null when something else is on screen, such as a change's
+ * quick preview.
+ */
+export function versionOnScreen<V extends { video?: string | null }>(versions: V[], shownSrc: string | null): V | null {
+  return (shownSrc && versions.find((v) => v.video === shownSrc)) || null
+}

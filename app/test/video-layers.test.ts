@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NO_LAYERS, layersReducer, type LayerEvent, type Layers } from '../src/renderer/src/components/videoLayers'
+import { NO_LAYERS, layersReducer, versionOnScreen, type LayerEvent, type Layers } from '../src/renderer/src/components/videoLayers'
 
 const run = (...events: LayerEvent[]): Layers => events.reduce(layersReducer, NO_LAYERS)
 const want = (src: string): LayerEvent => ({ type: 'want', src, poster: null })
@@ -12,11 +12,13 @@ describe('player source switching', () => {
     expect(run(want('v1'), want('v2'), want('v3'), { type: 'ready', id: 2 }, { type: 'ready', id: 3 }).shown?.src).toBe('v3')
   })
 
-  it('keeps the old video on screen until the new one is ready, then lets it fade out', () => {
-    const loading = run(want('v1'), want('v2'))
-    expect([loading.shown?.src, loading.next?.src, loading.leaving]).toEqual(['v1', 'v2', null])
-    const swapped = layersReducer(loading, { type: 'ready', id: 2 })
-    expect([swapped.shown?.src, swapped.next, swapped.leaving?.src]).toEqual(['v2', null, 'v1'])
-    expect(layersReducer(swapped, { type: 'gone', id: 1 }).leaving).toBeNull()
+  it('while a picked version loads, the marks, change pop-up and original read the version still on screen', () => {
+    const versions = [
+      { n: 1, video: 'v1' },
+      { n: 2, video: 'v2' }
+    ]
+    const picked2 = run(want('v1'), want('v2'))
+    expect(versionOnScreen(versions, picked2.shown?.src ?? null)?.n).toBe(1)
+    expect(versionOnScreen(versions, layersReducer(picked2, { type: 'ready', id: 2 }).shown?.src ?? null)?.n).toBe(2)
   })
 })

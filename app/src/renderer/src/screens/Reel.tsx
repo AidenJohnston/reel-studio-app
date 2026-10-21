@@ -10,6 +10,7 @@ import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { createPlayhead } from '../components/playhead'
+import { versionOnScreen } from '../components/videoLayers'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
@@ -71,6 +72,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const noteDropDepth = useRef(0)
   // Read by the player and the change button only, so playback does not re-render this screen.
   const [playhead] = useState(createPlayhead)
+  // the video the player has on screen; during a switch it is still the old one
+  const [shownSrc, setShownSrc] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
 
   const load = useCallback(
@@ -133,8 +136,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // Where the shown version plays each word, for the marks. Keyed on its video URL, which changes
   // with every render of it (the file's mtime is in the URL).
   const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] } | null>(null)
-  const shownN = version?.n
-  const shownVideo = version?.video
+  // The marks, the change pop-up and Hold for original act on what is on screen, not on what was just picked.
+  const onScreen = d ? versionOnScreen(d.versions, shownSrc) : null
+  const shownN = onScreen?.n
+  const shownVideo = onScreen?.video
   useEffect(() => {
     if (shownN === undefined || !shownVideo) return
     let live = true
@@ -280,11 +285,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   }
 
   // none over a change's quick preview: it is cut differently from the saved version they are placed on
-  const marks = !changePreview && timeline && timeline.video === version?.video ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
+  const marks = !changePreview && timeline && timeline.video === shownVideo ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
   // Hold for original shows the raw take at the moment on screen, by the shown version's own segments (same
   // rule as the marks). Without them, the player starts the first take from 0:00 as it used to.
   const originalAt = (t: number) => {
-    if (changePreview || !timeline || timeline.video !== version?.video) return null
+    if (changePreview || !timeline || timeline.video !== shownVideo) return null
     const at = sourceAt(timeline.segments, t)
     const src = at && d.sourceVideos[at.source]
     return src ? { src, at: at.at } : null
@@ -364,12 +369,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               marks={marks}
               asking={asking}
               playhead={playhead}
+              onShown={setShownSrc}
             />
           </div>
           <ChangeAt
             slug={slug}
             playhead={playhead}
-            shown={version ? { n: version.n, latest: version.n === d.versions[d.versions.length - 1].n } : null}
+            shown={onScreen ? { n: onScreen.n, latest: onScreen.n === d.versions[d.versions.length - 1].n } : null}
             aiOn={!aiOff}
             checking={!providerChecked}
             busy={!!job}
