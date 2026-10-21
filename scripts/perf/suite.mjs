@@ -78,6 +78,7 @@ try {
     const combined = { ...previous[0], ref, expectedRuns: count, roundRobin: true,
       finishedAt: round === count ? result.finishedAt : null,
       runs: previous.flatMap((entry, index) => entry.runs.map((run) => ({ ...run, run: index + 1 }))),
+      loadChecks: previous.flatMap((entry, index) => entry.loadChecks.map((load) => ({ ...load, run: index + 1 }))),
       builds: previous.map((entry) => ({ sha: entry.sha, startedAt: entry.startedAt, finishedAt: entry.finishedAt, cleaned: entry.cleaned })) }
     combined.summary = aggregate(combined.runs)
     writeFileSync(join(output, 'results.json'), JSON.stringify(combined, null, 2) + '\n')

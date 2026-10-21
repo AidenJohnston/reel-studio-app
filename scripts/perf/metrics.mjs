@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+
 export function summarize(values) {
   if (!values.length || values.some((v) => !Number.isFinite(v))) throw new Error('Expected finite, nonempty measurements')
   const sorted = [...values].sort((a, b) => a - b)
@@ -32,6 +34,26 @@ export function compare(before, after, { wholeRef = false } = {}) {
     if (side.error || side.runs.some((r) => r.error) || !Object.keys(side.summary).length) throw new Error(`Cannot compare an incomplete or failed benchmark: ${side.ref}`)
     if (!side.finishedAt || side.cleaned !== true || side.cleanupErrors?.length) throw new Error(`Cannot compare an unfinished benchmark or failed cleanup: ${side.ref}`)
   }
+  for (const side of [before, after]) {
+    const strings = [[side.host, ['platform', 'release', 'cpu', 'arch', 'machineFingerprint']],
+      [side.runtime, ['node', 'arch', 'python', 'electron', 'playwright']],
+      [side.runtime?.electronVersions, ['node', 'electron', 'chrome', 'v8']]]
+    if (strings.some(([object, keys]) => keys.some((key) => typeof object?.[key] !== 'string' || !object[key]))
+      || !Number.isInteger(side.host?.cores) || side.host.cores <= 0
+      || !Number.isSafeInteger(side.host?.memoryBytes) || side.host.memoryBytes <= 0) throw new Error(`Incomplete machine or runtime fingerprints: ${side.ref}`)
+  }
+  for (const key of ['host', 'runtime']) {
+    if (!isDeepStrictEqual(before[key], after[key])) throw new Error(`Incompatible machine or runtime fingerprints: ${key}`)
+  }
+  if ([before, after].some((side) => side.loadGuard?.oneMinuteBelow !== 8)) throw new Error('Missing or incompatible load guard: requires 1-minute load below 8')
+  for (const side of [before, after]) {
+    for (const run of side.runs) {
+      const phases = ['startup', 'first_edit', 'open_project', 'rerender_1', 'rerender_2', ...(side.replayNote ? ['note'] : []),
+        ...(side.adoptModel ? ['model_adoption'] : []), ...(run.speechSetupMs !== undefined ? ['speech_setup'] : [])]
+      if (phases.some((phase) => !run.loads?.some((load) => load.phase === phase && load.accepted === true
+        && Number.isFinite(load.oneMinute) && load.oneMinute < side.loadGuard.oneMinuteBelow))) throw new Error(`Missing accepted load readings: ${side.ref}`)
+    }
+  }
   const rows = ['| Clip | Metric | Before | After | Delta | Delta % | Spread before / after | Verdict |', '|---|---|---:|---:|---:|---:|---:|---|']
   for (const [clip, metrics] of Object.entries(before.summary)) {
     const aClip = before.runs.find((r) => r.clip === clip && !r.error)
@@ -52,5 +74,5 @@ export function compare(before, after, { wholeRef = false } = {}) {
     }
   }
   const dependencyNote = before.dependencyLockSha256 !== after.dependencyLockSha256 ? '\nJavaScript dependency locks differ. This compares the whole refs as built; it cannot attribute a change to one feature alone.\n' : ''
-  return `# ${before.ref} → ${after.ref}\n\nA difference at or below the larger full observed range is noise. Single runs cannot establish a gain. Shared-machine load and thermal drift are not controlled.\n${dependencyNote}\n${rows.join('\n')}\n`
+  return `# ${before.ref} → ${after.ref}\n\nA difference at or below the larger full observed range is noise. Single runs cannot establish a gain. Trials require 1-minute load below 8 before each timed operation. Thermal drift is not controlled.\n${dependencyNote}\n${rows.join('\n')}\n`
 }

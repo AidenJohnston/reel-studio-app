@@ -3,17 +3,18 @@ import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { cpus, homedir, platform, release } from 'node:os'
+import { cpus, homedir, platform, release, arch, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
 import { aggregate, compare, report } from './metrics.mjs'
-import { fileHash as sha256, guard } from './resources.mjs'
+import { cleanupEngines } from './processes.mjs'
+import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad } from './resources.mjs'
 import { drive } from './drive.mjs'
 import { noteFixture } from './fixtures.mjs'
 
 const scripts = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(scripts, '../..')
 const outputRoot = '/tmp/rs-perf-harness'
-const method = 'real-electron-basic-plan-v1'
+const method = 'real-electron-basic-plan-v2-load-guard'
 const abort = new AbortController()
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => abort.abort(new Error(`Interrupted by ${signal}`)))
 
@@ -121,9 +122,11 @@ async function main() {
   writeFileSync(lock, String(process.pid))
   let scratch, checkout, added = false
   const result = { method, ref: options.ref, sha, expectedRuns: options.runs, replayNote: !!options.note, adoptModel: !!options.adoptModel, startedAt: new Date().toISOString(), runs: [],
-    harnessSha256: createHash('sha256').update(['run.mjs', 'drive.mjs', 'bootstrap.cjs', 'resources.mjs', 'metrics.mjs', 'fixtures.mjs'].map((file) => readFileSync(join(scripts, file), 'utf8')).join('\n')).digest('hex'),
-    host: { platform: platform(), release: release(), cpu: cpus()[0].model, cores: cpus().length },
-    notes: ['Fresh process/profile/cache per run; OS file caches are not flushed.', '200 ms sampled RSS can miss short peaks. Engine tree RSS sums simultaneous Python and media children.', 'Reel/PhonePlayer useLayoutEffect counters exist only in scratch builds. They count committed component renders, not every child commit.', 'Open-project time includes clicking Edit it myself and opening the drawer.', 'Phase spans use successive job phase transitions and are not additive engine command CPU time.', 'One ref is built at a time. Shared-machine load and thermal drift are not controlled.'] }
+    harnessSha256: createHash('sha256').update(['run.mjs', 'drive.mjs', 'bootstrap.cjs', 'resources.mjs', 'processes.mjs', 'metrics.mjs', 'fixtures.mjs'].map((file) => readFileSync(join(scripts, file), 'utf8')).join('\n')).digest('hex'),
+    host: { platform: platform(), release: release(), cpu: cpus()[0].model, cores: cpus().length, arch: arch(), memoryBytes: totalmem(),
+      machineFingerprint: createHash('sha256').update(execFileSync('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], { encoding: 'utf8' }).match(/"IOPlatformUUID" = "([^"]+)"/)[1]).digest('hex') },
+    loadGuard: { oneMinuteBelow: maxTrialLoad }, loadChecks: [],
+    notes: ['Fresh process/profile/cache per run; OS file caches are not flushed.', '200 ms sampled RSS can miss short peaks. Engine tree RSS sums simultaneous Python and media children.', 'Reel/PhonePlayer useLayoutEffect counters exist only in scratch builds. They count committed component renders, not every child commit.', 'Open-project time includes clicking Edit it myself and opening the drawer.', 'Phase spans use successive job phase transitions and are not additive engine command CPU time.', 'One ref is built at a time. One-minute load must be below 8 before each timed operation. Thermal drift is not controlled.'] }
   const save = () => {
     result.summary = aggregate(result.runs)
     writeFileSync(join(output, 'results.json'), JSON.stringify(result, null, 2) + '\n')
@@ -148,6 +151,8 @@ async function main() {
     await command(options.python ?? 'python3.11', ['-m', 'venv', join(scratch, 'venv')], checkout, process.env, scratch)
     const python = join(scratch, 'venv/bin/python')
     await command('uv', ['pip', 'install', '--python', python, '--no-cache', '-r', 'engine/requirements.txt'], checkout, process.env, scratch)
+    result.runtime = { node: process.version, arch: arch(), python: execFileSync(python, ['--version'], { encoding: 'utf8' }).trim(),
+      electron: json(join(checkout, 'node_modules/electron/package.json')).version, playwright: json(join(checkout, 'node_modules/@playwright/test/package.json')).version }
     result.pythonPackages = execFileSync('uv', ['pip', 'freeze', '--python', python], { encoding: 'utf8' }).trim().split('\n')
     instrument(checkout)
     guard(scratch, true)
@@ -182,38 +187,42 @@ async function main() {
         REELSTUDIO_ROOT: join(runDir, 'root'), REELSTUDIO_MODELS_DIR: join(runDir, 'models'),
         REELSTUDIO_ENGINE_DIR: join(checkout, 'engine'), REELSTUDIO_PYTHON: python,
         REELSTUDIO_PERF_ENTRY: join(checkout, 'app/out/main/index.js'),
+        REELSTUDIO_PERF_SCRATCH: scratch, REELSTUDIO_PERF_PID_REGISTRY: join(scratch, 'engine-pids.jsonl'),
         REELENGINE_CACHE: join(runDir, 'engine-cache'), REELENGINE_MODELS: join(runDir, 'models'),
         REELENGINE_FFMPEG: join(ffmpegDir, 'ffmpeg'), REELENGINE_FFPROBE: join(ffmpegDir, 'ffprobe'),
         HF_HUB_OFFLINE: '1', HF_HOME: join(runDir, 'hf-cache'), HF_HUB_CACHE: join(runDir, 'hf-cache/hub'), HUGGINGFACE_HUB_CACHE: join(runDir, 'hf-cache/hub'), XDG_CACHE_HOME: join(runDir, 'cache'),
         TMPDIR: join(runDir, 'tmp') })
       if (options.note) Object.assign(env, { REELSTUDIO_DEV: '1', REELSTUDIO_REPLAY: replay })
       mkdirSync(env.TMPDIR, { recursive: true })
-      const measured = await drive({ checkout, runDir, output, env, signal: abort.signal, note: options.note, adoptModel: options.adoptModel, modelSha256: result.model.sha256, clip: input.name, run, input: { name: input.name, sha256: input.sha256 }, guard: () => guard(scratch) })
+      const measured = await drive({ checkout, runDir, output, env, signal: abort.signal, note: options.note, adoptModel: options.adoptModel, modelSha256: result.model.sha256, clip: input.name, run, input: { name: input.name, sha256: input.sha256 }, guard: () => guard(scratch), beforeMeasurement: (phase) => waitForTrialLoad({ signal: abort.signal, checkResources: () => guard(scratch),
+        record: (load) => { result.loadChecks.push({ clip: input.name, run, phase, ...load }); save() } }) })
+      result.runtime.electronVersions = measured.runtimeVersions
       result.runs.push(measured)
       save()
       console.log(JSON.stringify({ clip: measured.clip, run, metrics: measured.metrics, error: measured.error }))
-      rmSync(runDir, { recursive: true, force: true })
       if (measured.error) throw new Error(measured.error)
+      rmSync(runDir, { recursive: true, force: true })
     }
   } catch (error) {
     result.error = error.stack ?? String(error)
     process.exitCode = 1
   } finally {
-    const cleanupErrors = []
+    const cleanupErrors = result.runs.flatMap((run) => run.cleanupError ? [run.cleanupError] : [])
     try {
-      if (added) {
+      if (scratch) result.engineCleanup = await cleanupEngines(scratch, join(scratch, 'engine-pids.jsonl'))
+      if (added && !cleanupErrors.length) {
         // All files in this worktree were created by this invocation, including instrumentation.
         await command('git', ['worktree', 'remove', '--force', checkout], repo)
       }
     } catch (error) {
       cleanupErrors.push(String(error))
     }
-    try { if (scratch) rmSync(scratch, { recursive: true, force: true }) } catch (error) { cleanupErrors.push(String(error)) }
+    try { if (scratch && !cleanupErrors.length) rmSync(scratch, { recursive: true, force: true }) } catch (error) { cleanupErrors.push(String(error)) }
     if (cleanupErrors.length) { result.cleanupErrors = cleanupErrors; process.exitCode = 1 }
     closeSync(lock)
     rmSync(lockPath)
     result.finishedAt = new Date().toISOString()
-    result.cleaned = !scratch || !existsSync(scratch)
+    result.cleaned = cleanupErrors.length === 0 && (!scratch || !existsSync(scratch))
     save()
   }
   console.log(report(result))

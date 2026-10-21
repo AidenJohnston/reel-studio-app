@@ -3,6 +3,8 @@ import { createReadStream, readdirSync, lstatSync, statfsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { loadavg } from 'node:os'
+import { setTimeout as delay } from 'node:timers/promises'
 
 export const exec = promisify(execFile)
 export const GiB = 1024 ** 3
@@ -26,15 +28,35 @@ export function diskBytes(path) {
       for (const name of names) visit(join(p, name))
     }
     else {
-      logical += s.size
       const inode = `${s.dev}:${s.ino}`
-      if (!inodes.has(inode)) allocated += s.blocks * 512
+      if (inodes.has(inode)) return
+      logical += s.size
+      allocated += s.blocks * 512
       inodes.add(inode)
       files++
     }
   }
   visit(path)
-  return { logical, allocated, files }
+  return { logical, allocated, files, apfsClonePhysicalUsage: 'not measured' }
+}
+
+// Fixed at 8 on the 12-core benchmark host to reject the previously accepted 26.44 load.
+export const maxTrialLoad = 8
+
+export function trialLoad(oneMinute = loadavg()[0]) {
+  return { at: new Date().toISOString(), oneMinute, threshold: maxTrialLoad, accepted: Number.isFinite(oneMinute) && oneMinute < maxTrialLoad }
+}
+
+export async function waitForTrialLoad({ signal, checkResources, record, readLoad = trialLoad, retryMs = 30000 }) {
+  for (;;) {
+    signal.throwIfAborted()
+    checkResources()
+    const load = readLoad()
+    record(load)
+    if (load.accepted) return load
+    console.log(`REFUSED trial: 1-minute load ${load.oneMinute.toFixed(2)} >= ${load.threshold}; retry in ${retryMs / 1000}s`)
+    await delay(retryMs, undefined, { signal })
+  }
 }
 
 export function guard(scratch, beforeBuild = false) {

@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { readFileSync, realpathSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { createHash } from 'node:crypto'
+import { cleanupEngines } from './processes.mjs'
 import { diskBytes, exec, fileHash, sampler } from './resources.mjs'
 
 const hash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -43,14 +44,19 @@ function projectCheck(projectDir) {
     disk: Object.fromEntries(['media', 'work', 'versions'].map((folder) => [folder, diskBytes(join(projectDir, folder))])) }
 }
 
-export async function drive({ checkout, runDir, output, env, signal, note, adoptModel, modelSha256, clip, run, input, guard }) {
+export async function drive({ checkout, runDir, output, env, signal, note, adoptModel, modelSha256, clip, run, input, guard, beforeMeasurement }) {
   const require = createRequire(join(checkout, 'package.json'))
   const { _electron: electron } = require('@playwright/test')
   const executablePath = require('electron')
   if (!realpathSync(executablePath).startsWith(realpathSync(checkout) + sep)) throw new Error('Electron executable must belong to the scratch checkout')
   let app, sample, resourceTimer, resourceFailure
   const workAbort = new AbortController()
-  const result = { clip, run, input, metrics: {}, load: (await exec('uptime', [])).stdout.trim() }
+  const result = { clip, run, input, metrics: {}, loads: [] }
+  const measureLoad = async (phase) => {
+    const load = await beforeMeasurement(phase)
+    result.loads.push({ phase, ...load })
+    return load
+  }
   const stop = () => { workAbort.abort(resourceFailure ?? signal.reason); if (app) void app.close() }
   const decode = async (file) => {
     const decoding = exec(env.REELENGINE_FFMPEG, ['-v', 'error', '-i', file, '-f', 'null', '-'], { signal: workAbort.signal, maxBuffer: 1024 * 1024 })
@@ -59,10 +65,12 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
   }
   try {
     signal.throwIfAborted()
+    result.load = await measureLoad('startup')
     const start = performance.now()
     app = await electron.launch({ executablePath, args: [join(checkout, 'app')], cwd: checkout, env, artifactsDir: join(runDir, 'playwright'), timeout: 120000 })
     signal.addEventListener('abort', stop, { once: true })
     signal.throwIfAborted()
+    result.runtimeVersions = await app.evaluate(() => process.versions)
     sample = sampler(app)
     resourceTimer = setInterval(() => { try { guard() } catch (error) { resourceFailure = error; stop() } }, 3000)
     const page = await app.firstWindow()
@@ -78,6 +86,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
     if (result.provider.id !== 'none') throw new Error('AI must be disabled for the deterministic first edit')
     await page.evaluate(() => { window.__perfEvents = []; window.reel.jobs.onEvent((e) => window.__perfEvents.push(e)) })
     if (adoptModel) {
+      await measureLoad('model_adoption')
       if (!await page.evaluate(() => typeof window.reel.model.find === 'function')) throw new Error('This ref does not expose local model reuse')
       const at = performance.now()
       result.modelAdoption = await page.evaluate(() => window.reel.model.find())
@@ -91,6 +100,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
     const manualCheck = await page.evaluate(() => typeof window.reel.model.runCheck === 'function')
     const backgroundCheck = await app.evaluate(() => typeof globalThis.__rsPerfSpeechCheck === 'function')
     if (manualCheck || backgroundCheck) {
+      await measureLoad('speech_setup')
       const at = performance.now()
       result.speechSetup = manualCheck ? await page.evaluate(() => window.reel.model.runCheck())
         : await app.evaluate(() => globalThis.__rsPerfSpeechCheck())
@@ -102,6 +112,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
       sample.peaks.engine_rss_mib = 0
       sample.peaks.engine_tree_rss_mib = 0
     }
+    await measureLoad('first_edit')
     const before = await state(app)
     const mainStart = await app.evaluate(() => performance.now())
     const at = performance.now()
@@ -117,6 +128,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
     result.firstEditEngineCommands = after.engines.slice(before.engines.length)
     await page.getByTestId('nav-home').click()
     await page.getByTestId('project-card').waitFor()
+    await measureLoad('open_project')
     const openStart = performance.now()
     await page.getByTestId('project-card').click()
     await page.getByTestId('edit-myself').click()
@@ -158,6 +170,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
       const target = n === 0 ? buttons.last() : buttons.first()
       if (await target.getAttribute('aria-checked') === 'true') throw new Error('Subtitle edit would be a no-op')
       await target.click()
+      await measureLoad(`rerender_${n + 1}`)
       const eventOffset = await page.evaluate(() => window.__perfEvents.length)
       const start = performance.now()
       await page.getByTestId('make-version').click()
@@ -193,6 +206,7 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
       await page.evaluate(() => window.reel.ai.setActive('replay'))
       const eventOffset = await page.evaluate(() => window.__perfEvents.length)
       const commandsBefore = (await state(app)).engines.length
+      await measureLoad('note')
       const start = performance.now()
       const reply = await page.evaluate((slug) => window.reel.projects.note(slug, 'Please follow the recorded benchmark editing steps.'), done.slug)
       if (!reply.jobId) throw new Error('Replay note did not start an editing job')
@@ -238,10 +252,9 @@ export async function drive({ checkout, runDir, output, env, signal, note, adopt
     sample?.stop()
     if (app) {
       await app.close().catch(() => app.process().kill('SIGTERM'))
-      for (const engine of (result.telemetry?.engines ?? []).filter((c) => c.ms === undefined)) {
-        try { process.kill(-engine.pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') throw error }
-      }
     }
+    try { result.engineCleanup = await cleanupEngines(env.REELSTUDIO_PERF_SCRATCH, env.REELSTUDIO_PERF_PID_REGISTRY) }
+    catch (error) { result.cleanupError = String(error); result.error ??= String(error) }
     writeFileSync(join(output, `${clip}-${run}.json`), JSON.stringify(result, null, 2) + '\n')
   }
   return result
