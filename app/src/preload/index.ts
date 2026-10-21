@@ -90,6 +90,12 @@ const api: ReelApi = {
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)
   },
+  perm: {
+    status: () => call('perm:status'),
+    allowFolder: () => call('perm:allowFolder'),
+    setNotifications: (on) => call('perm:setNotifications', on),
+    openSettings: (pane) => call('perm:openSettings', pane)
+  },
   update: {
     status: () => call('update:status'),
     setEnabled: (on) => call('update:setEnabled', on),

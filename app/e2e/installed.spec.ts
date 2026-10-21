@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
+import { attachMemeFlow, chooseClaudeCode, dropFiles, passMacStage } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_INSTALLED
 const TAKES = (process.env.REELSTUDIO_E2E_TAKES_LIST ?? '').split(';').filter(Boolean)
@@ -106,6 +106,7 @@ test('first run: speech model + AI', async () => {
     await snap(page, '00-welcome')
     if (info.freshProfile) {
       await welcome.click()
+      await passMacStage(page)
       await snap(page, '01-download')
       const t0 = Date.now()
       const dl = page.getByTestId('download-model')
@@ -119,7 +120,7 @@ test('first run: speech model + AI', async () => {
       info.modelSec = Math.round((Date.now() - t0) / 1000)
       await page.waitForTimeout(2000)
       await snap(page, '02-connect')
-      info.connectButtons = await page.locator('.first-card button').allInnerTexts()
+      info.connectButtons = await page.locator('.setup-panel button').allInnerTexts()
       // Nothing picks the Claude Code app on its own: this run chooses it, like a person would.
       const picked = EXPECT_AI === 'claude-cli' && (await chooseClaudeCode(page))
       const c = page.getByTestId('ai-connected')

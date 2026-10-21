@@ -393,6 +393,16 @@ export interface ReelApi {
     /** Test builds only. `template` defaults to the bundled self-test template. */
     renderTestAnimation(outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>): Promise<string>
   }
+  /** macOS privacy questions, asked when they make sense (main/permissions.ts). */
+  perm: {
+    status(): Promise<PermissionStatus>
+    /** Make the folder for videos now, so macOS asks about Documents right after the setup explained why. */
+    allowFolder(): Promise<PermissionStatus>
+    /** "Tell me when a video is ready". Turning it on shows one notification, which is when macOS asks. */
+    setNotifications(on: boolean): Promise<PermissionStatus>
+    /** macOS: open the System Settings page where a "no" can be changed. */
+    openSettings(pane: SettingsPane): Promise<void>
+  }
   /** "Update available" notice (main/update-check.ts). Tells, never installs. */
   update: {
     status(): Promise<UpdateStatus>
@@ -406,6 +416,26 @@ export interface ReelApi {
     onChange(cb: (n: UpdateNotice | null) => void): () => void
   }
 }
+
+/**
+ * The folder for videos: `not-asked` = not touched yet (touching it is what makes macOS ask), `denied` = macOS
+ * privacy said no (EPERM), `unusable` = any other reason it cannot be used (read-only drive, ordinary file rights).
+ */
+export type FolderAccess = 'not-asked' | 'allowed' | 'denied' | 'unusable'
+/** `asking` = turned on, and macOS has not said yes or no yet. */
+export type NotifyAccess = 'off' | 'asking' | 'on' | 'blocked' | 'unsupported'
+/** Local Network has no status API on macOS, so all Reel Studio knows is whether it has asked yet. */
+export type NetworkAccess = 'not-asked' | 'asked'
+
+export interface PermissionStatus {
+  folder: FolderAccess
+  /** Where the videos go, in friendly words ("Documents › Reel Studio"). */
+  folderDisplay: string
+  notifications: NotifyAccess
+  network: NetworkAccess
+}
+
+export type SettingsPane = 'folder' | 'notifications' | 'network'
 
 /** A newer Reel Studio is out. `url` is its release page on GitHub. */
 export interface UpdateNotice {

@@ -65,6 +65,13 @@ test('send to my phone: QR link, phone fetch, Sent!, fallbacks', async () => {
   await page.getByTestId('export-caption').fill('Three things I wish I knew')
   await page.screenshot({ path: join(SHOTS, 'phone-01-export-dialog.png') })
   await page.getByTestId('send-to-phone').click()
+  // macOS asks about the local network when the first link opens; the panel says so first, once.
+  if (process.platform === 'darwin') {
+    await expect(page.getByTestId('phone-network-note')).toContainText('Your Mac will ask one question')
+    await expect(page.getByTestId('phone-qr')).toHaveCount(0) // no link yet, so no question yet
+    await page.screenshot({ path: join(SHOTS, 'phone-01b-network-note.png') })
+    await page.getByTestId('phone-network-continue').click()
+  }
   await expect(page.getByTestId('phone-lead')).toHaveText(
     "Point your phone's camera at this code. Your video opens on your phone; tap Share, then Save Video (or open Instagram)."
   )
@@ -115,13 +122,23 @@ test('send to my phone: QR link, phone fetch, Sent!, fallbacks', async () => {
   // ---- the Reel-screen button exports straight into the panel; no phone visit -> fallbacks ----
   await page.getByTestId('send-to-phone-reel').click()
   const url2 = await qrUrl(page)
+  await expect(page.getByTestId('phone-network-note')).toHaveCount(0) // asked once already
   expect(url2).not.toBe(url) // a fresh one-time link
   await expect(page.getByTestId('phone-fallbacks')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Email it to yourself')
   await expect(page.getByTestId('phone-why')).toHaveText('School, work and hotel Wi-Fi often block this. Use one of these instead:')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('iCloud Drive')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Use a cable')
-  if (process.platform === 'darwin') await expect(page.getByTestId('phone-airdrop')).toBeVisible()
+  if (process.platform === 'darwin') {
+    await expect(page.getByTestId('phone-airdrop')).toBeVisible()
+    // a "Don't Allow" to the local network question looks just like this, so the help says where to change it
+    await expect(page.getByTestId('phone-network-help')).toContainText('local network')
+    // ...and opens that page, with the helper beside it (a test build logs the page instead of opening it)
+    await page.getByTestId('phone-network-settings').click()
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as any).__reelPermLog.opened))
+      .toEqual(['x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork'])
+  }
   await page.getByTestId('phone-email').click()
   await expect(page.getByTestId('phone-emailed')).toBeVisible()
   await page.screenshot({ path: join(SHOTS, 'phone-05-panel-help.png') })

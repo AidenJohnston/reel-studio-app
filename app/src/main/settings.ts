@@ -12,9 +12,13 @@ export interface Settings extends UpdateState {
   aiAutoPicked: boolean
   /** ai-carryover.ts already ran (it kept, or left alone, what an old local-Claude-Code install was using) */
   aiCarriedOver: boolean
+  /** "Tell me when a video is ready". null = never chosen (main/permissions.ts notificationsWanted). */
+  notifications: boolean | null
+  /** "Send to my phone" has opened a link once, so macOS has asked about the local network. */
+  phoneNetworkAsked: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, notifications: null, phoneNetworkAsked: false, ...UPDATE_DEFAULTS }
 
 export async function loadSettings(): Promise<Settings> {
   try {

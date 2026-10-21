@@ -13,7 +13,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { CLAUDE_CODE_MISNAMED, attachMemeFlow, chooseClaudeCode, dropFiles } from './helpers'
+import { CLAUDE_CODE_MISNAMED, attachMemeFlow, chooseClaudeCode, dropFiles, passMacStage } from './helpers'
 
 const EXE = process.env.REELSTUDIO_E2E_EXE
 const USE_CLAUDE = process.env.REELSTUDIO_E2E_USE_CLAUDE !== '0'
@@ -75,6 +75,7 @@ async function firstRun(page: Page): Promise<Record<string, unknown>> {
   if (!(await welcome.isVisible())) return info
   await snap(page, `${TAG}-00-welcome`)
   await welcome.click()
+  await passMacStage(page)
   const connect = page.getByText('Connect your AI editor')
   const ready = page.getByTestId('model-next')
   await expect(connect.or(ready).or(page.getByTestId('download-model'))).toBeVisible()
@@ -82,8 +83,8 @@ async function firstRun(page: Page): Promise<Record<string, unknown>> {
   await expect(connect).toBeVisible()
   await page.waitForTimeout(2500) // the Claude choice shows once the app has looked for the Claude Code app
   await snap(page, `${TAG}-01-connect`)
-  info.connectButtons = await page.locator('.first-card button').allInnerTexts()
-  info.connectText = await page.locator('.first-card').innerText()
+  info.connectButtons = await page.locator('.setup-panel button').allInnerTexts()
+  info.connectText = await page.locator('.setup-panel').innerText()
   info.claudeCode = await page.evaluate(() => (window as any).reel.ai.claudeCodeStatus())
   const picked = USE_CLAUDE && (await chooseClaudeCode(page))
   info.connectAi = picked ? (await page.evaluate(() => (window as any).reel.ai.active())).label : 'none'

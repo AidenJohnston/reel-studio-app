@@ -16,6 +16,8 @@ export interface PhoneIpcDeps {
   send: (channel: string, v: unknown) => void
   log: (line: string) => void
   test: boolean
+  /** A link opened (on macOS, the first one is when it asks about the local network). */
+  onStart?: () => void
 }
 
 const EMAIL_LIMIT = 20_000_000 // most mail services stop at 20-25 MB per message
@@ -86,6 +88,7 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
       throw { code: 'PHONE_START', userMessage: 'I could not open a link on this network. Try a different network below, or use one of the other ways.' }
     }
     current = s
+    d.onStart?.()
     d.log(`[phone] link open on ${pick.name} for 15 minutes`) // no token, no file name
     const wait = Number(d.test ? process.env.REELSTUDIO_PHONE_WAIT_MS : '') || PHONE_WAIT_MS
     return {

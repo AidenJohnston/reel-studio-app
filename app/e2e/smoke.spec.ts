@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, ROOT, SHOTS, dropFiles, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, ROOT, SHOTS, dropFiles, launch, makeMedia, passFirstRun, passMacStage, shot } from './helpers'
 
 test.beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true })
@@ -23,6 +23,7 @@ test('make a reel end to end', async () => {
   await expect(page.getByText('Welcome to Reel Studio')).toBeVisible()
   await shot(page, '01-firstrun-welcome')
   await page.getByTestId('get-started').click()
+  await passMacStage(page)
   // "One download" before the model is here, "Ready to listen" once it is (grandma3 #1).
   await expect(page.getByTestId('model-heading')).toHaveText(/One download, about 500 MB|Ready to listen/)
   await expect(page.getByTestId('model-next').or(page.getByTestId('download-model'))).toBeVisible()

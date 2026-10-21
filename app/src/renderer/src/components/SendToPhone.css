@@ -19,3 +19,6 @@
 .phone-way { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .phone-way > .icon { margin-top: 2px; color: var(--ink-2); }
 .phone-way p { margin-top: 2px; }
+/* Before the first link on a Mac: what the local network question is for, said before macOS asks it. */
+.phone-ask { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.phone-ask-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--soft); color: var(--ink-2); }

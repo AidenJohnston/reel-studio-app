@@ -148,6 +148,12 @@ export function templatesDir(): string {
   return join(repoRoot(), 'templates')
 }
 
+/** The app icon as a PNG, for the macOS permission helper window (main/mac-permission-helper.ts). */
+export function appIconPath(): string {
+  if (need().isPackaged) return resource('icon.png')
+  return join(repoRoot(), 'packaging', 'icons', 'icon.png')
+}
+
 /** Small test template shipped with the app, used to prove the animation renderer. */
 export function testAnimationDir(): string {
   if (need().isPackaged) return resource('test-animation')

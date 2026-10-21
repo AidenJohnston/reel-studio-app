@@ -1,7 +1,8 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
+  appIconPath,
   binDir,
   engineDir,
   engineEnv,
@@ -46,18 +47,23 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson, SettingsPane } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
+import { createPermissions, notificationsWanted, parseFakes, type NotifyResult, type Permissions } from './permissions'
+import { helperInstruction, MAC_PANES } from './mac-permission'
+import { MacPermissionHelper } from './mac-permission-helper'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
+// Test builds: a stand-in Documents folder, so first run shows and makes the real default "Documents › Reel Studio".
+if (TEST && process.env.REELSTUDIO_DOCUMENTS) app.setPath('documents', process.env.REELSTUDIO_DOCUMENTS)
 
 registerMediaScheme()
 
@@ -101,6 +107,7 @@ const host: EngineHost = {
 }
 
 let ai: AI
+let perms: Permissions
 let aiSource: 'package' | 'mock' = 'mock'
 let win: BrowserWindow | null = null
 
@@ -110,11 +117,13 @@ function broadcast(channel: string, payload: unknown): void {
 
 // The window, menu, Dock/taskbar and notifications (window.ts) hear about every job too.
 const sendCommand = (c: AppCommand): void => broadcast('app:command', c)
+let notificationsOn = true // read from settings at start, changed by perm:setNotifications
 const feedback = createJobFeedback({
   window: () => win,
   title: async (slug) => (await readProject(slug).catch(() => null))?.title || slug,
   send: sendCommand,
-  test: TEST
+  test: TEST,
+  notificationsOn: () => notificationsOn
 })
 if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedbackLog
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
@@ -165,12 +174,16 @@ function handle(channel: string, fn: Handler): void {
   })
 }
 
+const rootDisplay = (root: string): string =>
+  displayPath(root, { documents: app.getPath('documents'), desktop: app.getPath('desktop'), home: app.getPath('home') }, process.platform)
+
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
-  // The real long path, never an 8.3 short name like USERNA~1 (design critique 1.9).
+  // The real long path, never an 8.3 short name like USERNA~1 (design critique 1.9). Not during first run: the
+  // folder is not made yet, and looking inside Documents before setup explains why is what makes macOS ask.
   let root = reelStudioRoot()
   try {
-    root = realpathSync.native(root)
+    if (s.firstRunDone) root = realpathSync.native(root)
   } catch {
     /* not created yet: show it as configured */
   }
@@ -178,11 +191,7 @@ async function appInfo(): Promise<AppInfo> {
     version: app.getVersion(),
     platform: process.platform,
     root,
-    rootDisplay: displayPath(
-      root,
-      { documents: app.getPath('documents'), desktop: app.getPath('desktop'), home: app.getPath('home') },
-      process.platform
-    ),
+    rootDisplay: rootDisplay(root),
     firstRunDone: s.firstRunDone,
     engine: { mode: engineMode(), dir: engineDir(), python: pythonExe() },
     ai: aiSource,
@@ -308,7 +317,13 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 function registerIpc(): void {
   handle('app:info', () => appInfo())
   handle('app:finishFirstRun', async () => {
-    await saveSettings({ firstRunDone: true })
+    // Windows and Linux skip the "Your Mac" stage, so their folder is made here (on a Mac it already exists).
+    await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
+    const s = await loadSettings()
+    // A new Mac user who never turned on "Tell me when a video is ready" said no (main/permissions.ts).
+    const patch = process.platform === 'darwin' && s.notifications === null ? { notifications: false } : {}
+    const next = await saveSettings({ firstRunDone: true, ...patch })
+    notificationsOn = notificationsWanted(next, process.platform)
   })
   handle('app:openFolder', async (_e, p: string) => {
     if (TEST) return
@@ -335,10 +350,28 @@ function registerIpc(): void {
     await saveSettings({ root })
     setRootOverride(root)
     await ensureRoot()
+    perms.markTouched()
     return appInfo()
   })
 
-  registerPhoneIpc({ handle, roots: () => [reelStudioRoot(), projectsDir()], send: broadcast, log, test: TEST })
+  handle('perm:status', () => perms.status())
+  handle('perm:allowFolder', () => perms.allowFolder())
+  handle('perm:setNotifications', async (_e, on: unknown) => {
+    const st = await perms.setNotifications(on === true)
+    notificationsOn = notificationsWanted(await loadSettings(), process.platform)
+    return st
+  })
+  handle('perm:openSettings', (_e, pane: unknown) => perms.openSettings(pane))
+
+  registerPhoneIpc({
+    handle,
+    roots: () => [reelStudioRoot(), projectsDir()],
+    send: broadcast,
+    log,
+    test: TEST,
+    // The first link is when macOS asks about the local network; SendToPhone explains it before that once.
+    onStart: () => void saveSettings({ phoneNetworkAsked: true }).catch(() => undefined)
+  })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
     handle,
@@ -587,6 +620,51 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
   log('[ai] kept Claude (your Claude Code app), which this install used before 0.1.2')
 }
 
+const permissionHelper = new MacPermissionHelper()
+/** Test builds: the System Settings pages that would have opened (a test never opens System Settings). */
+const paneLog: { opened: string[] } = { opened: [] }
+
+/** The exact System Settings page, with the helper beside it saying what to turn on (main/mac-permission-helper.ts). */
+async function openPane(pane: SettingsPane, help: { isGranted?: () => Promise<boolean>; onEnd?: () => void }): Promise<void> {
+  const url = MAC_PANES[pane].url
+  if (TEST) paneLog.opened.push(url)
+  else await shell.openExternal(url)
+  // A dev build runs as "Electron", which is the name System Settings lists; the helper would point at the wrong
+  // row, so only the packaged app (and test builds, with no System Settings) shows it.
+  if (!app.isPackaged && !TEST) return
+  await permissionHelper
+    .show(pane, {
+      owner: win,
+      preload: join(__dirname, '../preload/permission-helper.js'),
+      icon: appIconPath(),
+      instruction: helperInstruction(pane, rootDisplay(reelStudioRoot())),
+      isGranted: help.isGranted,
+      onEnd: () => help.onEnd?.(),
+      test: TEST
+    })
+    .catch((e) => log(`[permissions] helper: ${String(e)}`))
+}
+
+/** "Notifications are on": on macOS the first notification is what asks (Electron 44 requests authorization then). */
+function showTestNotification(): Promise<NotifyResult> {
+  if (TEST) return Promise.resolve('shown')
+  return new Promise((resolve) => {
+    const n = new Notification({ title: 'Notifications are on', body: "I'll tell you here when a video is ready.", silent: true })
+    // No answer yet (the macOS question is still on screen): the checklist offers "Ask again".
+    const t = setTimeout(() => resolve('pending'), 20_000)
+    n.once('show', () => {
+      clearTimeout(t)
+      resolve('shown')
+    })
+    n.once('failed', (_e, error) => {
+      clearTimeout(t)
+      log(`[notify] ${error}`)
+      resolve('failed')
+    })
+    n.show()
+  })
+}
+
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
@@ -622,12 +700,31 @@ app.whenReady().then(async () => {
   if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
+  notificationsOn = notificationsWanted(settings, process.platform)
+  perms = createPermissions({
+    platform: process.platform,
+    root: reelStudioRoot,
+    rootDisplay: () => rootDisplay(reelStudioRoot()),
+    touched: settings.firstRunDone,
+    ensureRoot,
+    load: loadSettings,
+    save: saveSettings,
+    notificationsSupported: () => Notification.isSupported(),
+    showTestNotification,
+    openPane,
+    fakes: TEST ? parseFakes(process.env.REELSTUDIO_TEST_PERMISSIONS) : undefined
   })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  if (TEST) Object.assign(globalThis, { __reelPermFakes: perms.fakes, __reelPermLog: paneLog })
+  // Before first run the Reel Studio folder is not touched at all: it lives in Documents, and the first-run
+  // "Your Mac" stage explains that before macOS asks (main/permissions.ts). Existing installs start as before.
+  if (settings.firstRunDone) {
+    await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
+    const recovered = await recoverInterrupted().catch((e) => {
+      log(`[recover] ${String(e)}`)
+      return []
+    })
+    if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  }
   const loaded = await loadAI(
     {
       host,
@@ -653,6 +750,7 @@ app.whenReady().then(async () => {
 let quitting = false
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
+  permissionHelper.close()
   if (quitting || !jobs.runningCount()) {
     void killAllEngines()
     return

@@ -65,12 +65,24 @@ export async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) })
 }
 
+/** The macOS "Your Mac" setup stage (first run): allow the folder, then continue. Other systems skip the stage. */
+export async function passMacStage(page: Page): Promise<void> {
+  const mac = page.getByTestId('stage-mac')
+  await expect(mac.or(page.getByTestId('model-heading'))).toBeVisible()
+  if (!(await mac.isVisible())) return
+  await page.getByTestId('perm-folder-allow').click()
+  await expect(page.getByTestId('perm-folder')).toHaveAttribute('data-state', 'allowed')
+  await page.getByTestId('mac-continue').click()
+  await expect(page.getByTestId('model-heading')).toBeVisible()
+}
+
 /** Gets past the first-run screens if this is a fresh profile. */
 export async function passFirstRun(page: Page): Promise<void> {
   const welcome = page.getByTestId('get-started')
   await expect(welcome.or(page.getByText('Your videos'))).toBeVisible()
   if (await welcome.isVisible()) {
     await welcome.click()
+    await passMacStage(page)
     // A model already on this computer shows "Next"; otherwise "Do this later".
     // Wait for the model box to know (it hides "Do this later" once the model is found).
     const ready = page.getByTestId('model-next')

@@ -80,9 +80,32 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
   const [attempt, setAttempt] = useState(0)
   const sentRef = useRef(false)
   const mounted = useRef(true)
+  // macOS asks once whether Reel Studio may use the local network, when the first link opens. It has no API that
+  // says what the person answered, so the only thing known is whether a link has opened before (settings
+  // phoneNetworkAsked). Until then, say what is coming and wait for Continue. A "no" shows up as a phone that
+  // cannot connect; the help below then says where to turn it on.
+  const [explain, setExplain] = useState<boolean | null>(IS_MAC ? null : false)
+  useEffect(() => {
+    if (!IS_MAC) return
+    reel.perm
+      .status()
+      .then((st) => setExplain(st.network === 'not-asked'))
+      .catch(() => setExplain(false))
+  }, [])
+  // Keyboard focus follows: onto Continue when the note appears, onto Done once the code is showing.
+  const continueRef = useRef<HTMLButtonElement>(null)
+  const doneRef = useRef<HTMLButtonElement>(null)
+  const explained = useRef(false)
+  useEffect(() => {
+    if (explain) {
+      explained.current = true
+      continueRef.current?.focus()
+    } else if (explain === false && explained.current) doneRef.current?.focus()
+  }, [explain])
 
   // Open the link (again, on another network or after it ran out); always close it when the panel goes.
   useEffect(() => {
+    if (explain !== false) return
     let live = true
     setShare(null)
     setError(null)
@@ -101,7 +124,7 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
     return () => {
       live = false
     }
-  }, [video, address, attempt]) // eslint-disable-line react-hooks/exhaustive-deps -- caption is read once per link
+  }, [video, address, attempt, explain]) // eslint-disable-line react-hooks/exhaustive-deps -- caption is read once per link
   useEffect(() => {
     mounted.current = true
     return () => {
@@ -209,14 +232,51 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
     )
   }
 
+  const head = (
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <h2>Send to my phone</h2>
+      <button className="btn ghost small" onClick={onBack} data-testid="phone-back">
+        <Icon name="back" size={16} /> Back
+      </button>
+    </div>
+  )
+
+  if (explain !== false) {
+    return (
+      <div className="stack send-phone" data-testid="send-to-phone">
+        {head}
+        {explain && (
+          <>
+            <div className="phone-ask" data-testid="phone-network-note">
+              <span className="phone-ask-icon" aria-hidden>
+                <Glyph name="wifi" size={22} />
+              </span>
+              <div className="stack" style={{ gap: 6 }}>
+                <h3>Your Mac will ask one question</h3>
+                <p className="muted">
+                  Your phone gets the video from this computer over your Wi-Fi. Your Mac will ask if Reel Studio may find devices on your local network.
+                  Choose <b>Allow</b>.
+                </p>
+                <p className="muted-sm">Reel Studio only uses it while this screen is open.</p>
+              </div>
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={onBack}>
+                Not now
+              </button>
+              <button ref={continueRef} className="btn primary" onClick={() => setExplain(false)} data-testid="phone-network-continue">
+                Continue
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="stack send-phone" data-testid="send-to-phone">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2>Send to my phone</h2>
-        <button className="btn ghost small" onClick={onBack} data-testid="phone-back">
-          <Icon name="back" size={16} /> Back
-        </button>
-      </div>
+      {head}
 
       {!error && (
         <div className="phone-main">
@@ -326,6 +386,21 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
               </p>
             </div>
           )}
+          {IS_MAC && !sent && !error && (
+            <div className="phone-way" data-testid="phone-network-help">
+              <Glyph name="wifi" />
+              <div>
+                <b>Check that your Mac allows it</b>
+                <p className="muted-sm">
+                  If you chose Don't Allow when your Mac asked about your local network, your phone can't reach this computer. Turn on Reel Studio in
+                  System Settings, then scan the code again.
+                </p>
+              </div>
+              <button className="btn small" onClick={() => void reel.perm.openSettings('network')} data-testid="phone-network-settings">
+                Open System Settings
+              </button>
+            </div>
+          )}
           {fallbackOrder(IS_MAC).map((way) => (
             <Fragment key={way}>{ways[way]}</Fragment>
           ))}
@@ -333,7 +408,7 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
       )}
 
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn ghost" onClick={onBack} data-autofocus data-testid="phone-done">
+        <button ref={doneRef} className="btn ghost" onClick={onBack} data-autofocus data-testid="phone-done">
           Done
         </button>
       </div>

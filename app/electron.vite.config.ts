@@ -15,7 +15,13 @@ export default defineConfig({
   },
   preload: {
     build: {
-      rollupOptions: { input: { index: resolve(__dirname, 'src/preload/index.ts') } }
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          // the macOS permission helper window (src/main/mac-permission-helper.ts)
+          'permission-helper': resolve(__dirname, 'src/preload/permission-helper.ts')
+        }
+      }
     }
   },
   renderer: {
