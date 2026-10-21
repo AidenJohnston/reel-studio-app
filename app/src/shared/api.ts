@@ -105,9 +105,6 @@ export interface ProjectDetail extends ProjectSummary {
   /** "What I did" for each older version (number -> list), from the project.json its final render saved.
    * A version whose copy is missing or damaged has none. The latest version uses `checklist`. */
   versionChecklists: Record<number, ChecklistItem[]>
-  /** The notes list in each version's project.json copy (shared/versions.ts), for the version menu.
-   * A version whose copy or notes list is missing or damaged has none. */
-  versionNotes: Record<number, NonNullable<ProjectJson['notes']>>
   versionsMade: VersionMade[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null

@@ -20,7 +20,6 @@ import type {
 } from '../shared/api'
 import { mediaUrl } from './media-url'
 import { keptIds } from '../shared/cut'
-import { readNotes, type ProjectNote } from '../shared/versions'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
 export interface AppState {
@@ -208,11 +207,13 @@ export async function addChat(
 
 // ---- versions ---------------------------------------------------------------------------------
 
-/** Records what made a version. The first record for a number stays: nothing replaces it. */
+/**
+ * Records what made a version. jobs.ts calls this only for a number that had no version when the job
+ * started, so an older record for it belongs to a version since deleted, and is replaced.
+ */
 export async function recordVersionMade(slug: string, made: VersionMade): Promise<void> {
   await updateAppState(slug, (s) => {
-    const list = s.versionsMade ?? []
-    if (!list.some((r) => r.version === made.version)) s.versionsMade = [...list, made]
+    s.versionsMade = [...(s.versionsMade ?? []).filter((r) => r.version !== made.version), made]
   })
 }
 
@@ -519,16 +520,12 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
-  // Each version's own project.json copy (docs/versions.md): its notes for the version menu, and "What I
-  // did" for the older ones. A damaged copy only costs that version its line and list.
-  const versionNotes: Record<number, ProjectNote[]> = {}
+  // "What I did" for each older version, from its own project.json copy (docs/versions.md). A damaged
+  // copy only costs that version its list.
   const versionChecklists: Record<number, ChecklistItem[]> = {}
-  for (const v of versions) {
+  for (const v of versions.slice(0, -1)) {
     const copy = await readJson<unknown>(join(dir, 'versions', `v${v.n}`, 'project.json'), null)
-    if (!isRecord(copy)) continue
-    const notes = readNotes(copy.notes)
-    if (notes) versionNotes[v.n] = notes
-    if (v === versions[versions.length - 1] || !checklistReadable(copy)) continue
+    if (!isRecord(copy) || !checklistReadable(copy)) continue
     try {
       versionChecklists[v.n] = checklist(copy, words, keptIds(words, copy.cut?.keep), [v], !!st.aiEdited)
     } catch (e) {
@@ -562,7 +559,6 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     versionChecklists,
-    versionNotes,
     versionsMade: st.versionsMade ?? [],
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),

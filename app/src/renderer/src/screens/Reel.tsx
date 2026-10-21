@@ -13,7 +13,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { VersionSwitch } from '../components/VersionSwitch'
-import { readNotes, versionChanges } from '../../../shared/versions'
+import { versionChanges } from '../../../shared/versions'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -402,7 +402,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <VersionSwitch
                   versions={d.versions}
                   shown={version.n}
-                  changes={versionChanges(d.versions, d.versionsMade, readNotes(d.project.notes) ?? [], d.versionNotes)}
+                  changes={versionChanges(d.versions, d.versionsMade)}
                   onPick={(n) => {
                     setSelected(n)
                     setFreshPlay(false)

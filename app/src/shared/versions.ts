@@ -1,55 +1,23 @@
-import type { ProjectJson, VersionInfo, VersionMade } from './api'
-
-export type ProjectNote = NonNullable<ProjectJson['notes']>[number]
-
-const isNote = (e: unknown): e is ProjectNote =>
-  typeof e === 'object' && e !== null && 'version' in e && typeof e.version === 'number' && 'text' in e && typeof e.text === 'string' &&
-  'at' in e && typeof e.at === 'string' && 'applied' in e && Array.isArray(e.applied)
-
-/** The notes list of a project.json: [] when it has none yet, null when the list is there but damaged. */
-export function readNotes(raw: unknown): ProjectNote[] | null {
-  if (raw === undefined) return []
-  return Array.isArray(raw) && raw.every(isNote) ? raw : null
-}
+import type { VersionInfo, VersionMade } from './api'
 
 /**
  * One line per version saying what changed, for the version menu: the note that made it, in the
  * person's own words ("“music too loud”"), or the change made by hand ("New cover").
  *
- * The record written when the version was made (`made`, main/jobs.ts) decides. Versions from before
- * those records fall back, best effort, to the project.json copies (versions/vN/project.json,
- * `copies[N]`): the note that made N is one tagged N, with changes, that N's own copy does not hold.
- * The engine takes that copy when N's final render starts and the AI editor saves the note after the
- * render, so a note tagged N that the copy does hold was saved before N existed (its final render
- * failed and it kept the number its edit would have got, docs/versions.md). An unchanged rerender
- * retakes the copy, so after one this fallback finds nothing. Chat text is never evidence: an AI reply
- * can say anything, including "Version 2: …".
- *
- * Without either, Version 1 is the first edit and any other version says the change was not recorded.
+ * Only the record written when the version was made (`made`, main/jobs.ts) counts. Versions without
+ * one, including every version made before those records existed, say the change was not recorded
+ * (Version 1 is the first edit). Reconstructing it later from chat replies or project.json copies
+ * credited the wrong note too often: AI replies are free text, a failed final render keeps the number
+ * its edit would have got, and an unchanged rerender retakes the version's copy.
  */
-export function versionChanges(
-  versions: VersionInfo[],
-  made: VersionMade[],
-  notes: ProjectNote[],
-  copies: Record<number, ProjectNote[]>
-): Map<number, string> {
-  const key = (e: ProjectNote): string => JSON.stringify([e.version, e.at, e.text])
-  // every note saved so far: the project's own list, then any only a copy still holds
-  const all = new Map<string, ProjectNote>()
-  for (const e of [...notes, ...Object.values(copies).flat()]) if (!all.has(key(e))) all.set(key(e), e)
-  const quoted = (text: string): string => (text.trim() ? `“${text.trim()}”` : 'Your note with attached files')
+export function versionChanges(versions: VersionInfo[], made: VersionMade[]): Map<number, string> {
   const out = new Map<number, string>()
   for (const v of versions) {
     const record = made.find((r) => r.version === v.n)
-    if (record) {
-      const what = record.summary.trim()
-      out.set(v.n, record.by === 'note' ? quoted(what) : what ? what.charAt(0).toUpperCase() + what.slice(1) : 'Changed by hand')
-      continue
-    }
-    const copy = copies[v.n]
-    const held = new Set(copy?.map(key))
-    const note = copy && [...all.values()].find((e) => e.version === v.n && e.applied.length > 0 && !held.has(key(e)))
-    out.set(v.n, note ? quoted(note.text) : v.n === 1 ? 'First edit' : 'Changes not recorded')
+    const what = record?.summary.trim() ?? ''
+    if (!record) out.set(v.n, v.n === 1 ? 'First edit' : 'Changes not recorded')
+    else if (record.by === 'note') out.set(v.n, what ? `“${what}”` : 'Your note with attached files')
+    else out.set(v.n, what ? what.charAt(0).toUpperCase() + what.slice(1) : 'Changed by hand')
   }
   return out
 }

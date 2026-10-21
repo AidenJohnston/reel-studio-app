@@ -126,6 +126,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
         await Promise.all(pending) // a render's event before `done`, never after
+        // Stop pressed while the last render's video was being prepared: nothing below may count as success.
+        if (abort.signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
           await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
