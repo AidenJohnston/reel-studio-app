@@ -3,7 +3,8 @@ import { protocol } from 'electron'
 import { createReadStream, promises as fs } from 'node:fs'
 import { extname, resolve } from 'node:path'
 import { Readable } from 'node:stream'
-import { isInsideFolder } from './inside-folder'
+import { isInsideFolder as inside } from './inside-folder'
+import { isLinkedMedia } from './media-allow'
 import { MEDIA_SCHEME, pathFromMediaUrl } from './media-url'
 
 const TYPES: Record<string, string> = {
@@ -36,8 +37,14 @@ export function handleMediaProtocol(allowedRoots: () => string[]): void {
     } catch {
       return new Response('bad url', { status: 400 })
     }
-    const ok = allowedRoots().some((r) => isInsideFolder(file, r))
-    if (!ok) return new Response('forbidden', { status: 403 })
+    const real = await fs.realpath(file).catch(() => null)
+    if (!real) {
+      const known = allowedRoots().some((r) => inside(file, resolve(r)))
+      return known ? new Response('not found', { status: 404 }) : new Response('forbidden', { status: 403 })
+    }
+    const roots = (await Promise.all(allowedRoots().map((r) => fs.realpath(r).catch(() => null)))).filter((r) => r !== null)
+    if (!roots.some((root) => inside(real, root)) && !(await isLinkedMedia(real, roots))) return new Response('forbidden', { status: 403 })
+    file = real
     let size: number
     try {
       size = (await fs.stat(file)).size
