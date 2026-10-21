@@ -53,7 +53,7 @@ import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
-import { offerMoveToApplications } from './move-to-applications'
+import { offerMoveToApplications, writeErrorCode } from './move-to-applications'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -625,7 +625,8 @@ app.whenReady().then(async () => {
         isPackaged: app.isPackaged,
         test: TEST,
         inApplications: process.platform === 'darwin' && app.isInApplicationsFolder(),
-        exePath: process.execPath
+        exePath: process.execPath,
+        writeError: writeErrorCode
       },
       {
         ask: async (q) => (await dialog.showMessageBox(q)).response,
