@@ -35,6 +35,10 @@ put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TES
 ## Pull requests
 
 * Keep a change focused, and add a test for a bug you fix.
+* Fill in the pull request template. Say what the old code did before the new behavior, and list the checks you
+  actually ran with their results.
+* Actions sets the `size:*` label from the diff (tests not counted) and the `vouch:*` label from
+  [.github/VOUCHED.td](.github/VOUCHED.td) on `main`. Both are review signals, not merge gates, so don't set them by hand.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.
 * New dependencies need a license that fits the MIT app and, if they ship in the installer, an entry in
