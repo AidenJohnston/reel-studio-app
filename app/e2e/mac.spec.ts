@@ -116,6 +116,26 @@ function osKeystroke(key: string): string {
   }
 }
 
+/** ⌘<key> to the app's own window, made key first. A press macOS lets this session send must do `expectation`;
+ * one it refuses (no Accessibility permission) is recorded as a test annotation, never as a pass. */
+async function osShortcut(app: ElectronApplication, key: string, expectation: () => Promise<void>): Promise<string> {
+  const focused = await app.evaluate(({ app: a, BrowserWindow }) => {
+    a.focus({ steal: true })
+    const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.isOffscreen())!
+    w.show()
+    w.focus()
+    return BrowserWindow.getFocusedWindow()?.id === w.id
+  })
+  expect(focused, `the app window is key before ⌘${key}`).toBe(true)
+  const sent = osKeystroke(key)
+  if (sent !== 'sent') {
+    test.info().annotations.push({ type: 'not checked', description: `⌘${key}: ${sent}` })
+    return sent
+  }
+  await expectation()
+  return 'worked'
+}
+
 test(`${TAG}: first run + macOS chrome`, async () => {
   test.setTimeout(10 * 60_000)
   mkdirSync(OUT, { recursive: true })
@@ -142,12 +162,11 @@ test(`${TAG}: first run + macOS chrome`, async () => {
     await expect(page.getByTestId('drop-zone')).toBeVisible()
     // the same two through real key presses, when this session may send them
     await page.getByTestId('nav-home').click()
-    await app.evaluate(({ app: a }) => a.focus({ steal: true }))
-    await page.waitForTimeout(800)
-    info.osCmdComma = osKeystroke(',')
-    info.osCmdCommaWorked = await page.getByTestId('root-display').isVisible({ timeout: 3000 }).catch(() => false)
-    info.osCmdN = osKeystroke('n')
-    info.osCmdNWorked = await page.getByTestId('drop-zone').isVisible({ timeout: 3000 }).catch(() => false)
+    await expect(page.getByTestId('root-display')).toHaveCount(0)
+    info.osCmdComma = await osShortcut(app, ',', () => expect(page.getByTestId('root-display')).toBeVisible({ timeout: 5000 }))
+    await page.getByTestId('nav-home').click()
+    await expect(page.getByTestId('drop-zone')).toHaveCount(0)
+    info.osCmdN = await osShortcut(app, 'n', () => expect(page.getByTestId('drop-zone')).toBeVisible({ timeout: 5000 }))
 
     // ---- Edit > Paste into the Claude key box (the reason the Edit menu exists) ----
     await page.getByTestId('nav-settings').click()
@@ -175,9 +194,7 @@ test(`${TAG}: first run + macOS chrome`, async () => {
     info.pasteMenuWorked = true
     await key.fill('')
     await key.focus()
-    info.osCmdV = osKeystroke('v')
-    await page.waitForTimeout(800)
-    info.osCmdVWorked = (await key.inputValue()) === fake
+    info.osCmdV = await osShortcut(app, 'v', () => expect(key).toHaveValue(fake, { timeout: 5000 }))
     await snap(page, `${TAG}-03-key-pasted`)
     await key.fill('') // never saved: the field is cleared and "Use this key" is not pressed
 

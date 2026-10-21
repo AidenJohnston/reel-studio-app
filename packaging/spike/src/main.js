@@ -9,6 +9,8 @@ const plat = isWin ? 'win-x64' : 'mac-arm64'
 const argv = process.argv.slice(1)
 const flag = (n) => argv.includes(n)
 const opt = (n) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined }
+// Same variable as the real app: packaging/test-mac-install.sh runs the spike with a test profile.
+if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
 
 // Packaged: <resources>/{python,ffmpeg,engine}. Dev: packaging/runtime/<plat> + the stub engine.
 function locations() {
