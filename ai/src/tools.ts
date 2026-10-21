@@ -48,6 +48,9 @@ export interface ToolContext {
   fetchImpl?: typeof fetch;
   /** the user's own note for this task (applyNote); decides whether add_style_rule saves or only proposes */
   userNote?: string;
+  /** A note edits `file`, its private copy of project.json, and renders its previews into `dir`;
+   * project.json changes only when the whole note is done (editor.ts applyNote). */
+  note?: { id: string; file: string; dir: string };
   /** DNS lookup used to refuse private/loopback hosts (test hook; default node:dns) */
   lookupImpl?: LookupFn;
   /** whole-download timeout for in-process image fetches (test hook; default 30 s) */
@@ -76,7 +79,7 @@ export function newToolState(): ToolState {
 // ---------------------------------------------------------------- helpers
 
 export async function load(ctx: ToolContext): Promise<{ p: Project; t: Transcript }> {
-  ctx.project = await loadProject(ctx.projectDir);
+  ctx.project = await loadProject(ctx.projectDir, ctx.note?.file);
   if (!ctx.transcript) ctx.transcript = await loadTranscript(ctx.projectDir, ctx.project);
   if (ctx.analysis === undefined) ctx.analysis = await loadAnalysis(ctx.projectDir);
   return { p: ctx.project, t: ctx.transcript };
@@ -88,7 +91,7 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
-  await saveProject(ctx.projectDir, p);
+  await saveProject(ctx.projectDir, p, ctx.note?.file);
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);
 }
@@ -123,6 +126,16 @@ const EXT: Record<string, string[]> = {
   raw: ['.mp4', '.mov', '.m4v'],
   exports: ['.mp4'],
 };
+
+/** Pictures and clips already in this edit, and files the user attached. A download from a note that
+ * was not saved stays on disk but is never offered as "already fetched". */
+async function projectAssets(ctx: ToolContext): Promise<string[]> {
+  const { p } = await load(ctx);
+  const used = new Set<string>();
+  for (const b of p.broll) assetRefs(b, used);
+  const files = await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0);
+  return files.filter((f) => used.has(path.basename(f)) || path.basename(f).startsWith('attach-'));
+}
 
 async function listFiles(dir: string, exts: string[], prefix: string, depth = 2): Promise<string[]> {
   const out: string[] = [];
@@ -248,9 +261,16 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
   };
 }
 
+/** Engine commands that read the edit: during a note they read its private copy. */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates']);
+
+function projectArgs(ctx: ToolContext, command: string): string[] {
+  return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
+}
+
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
   if (stageMessage) ctx.emit({ type: 'status', message: stageMessage });
-  return ctx.host.runEngine(command, ['--project', ctx.projectDir, ...extra], (pr) => {
+  return ctx.host.runEngine(command, [...projectArgs(ctx, command), ...extra], (pr) => {
     ctx.emit({ type: 'status', message: pr.message || stageMessage || 'Working', pct: pr.pct });
   }, ctx.signal);
 }
@@ -368,11 +388,15 @@ export function popCards(p: Project): { id: string; text: string }[] {
     .map((b) => ({ id: b.id, text: asData(String((b.params as any)?.text ?? '')) }));
 }
 
-/** Layers the last render put on screen for under `min` seconds (engine windows, not anchors): too
+/** Where each layer of a rendered video was on screen: the engine's layers.json beside that video. */
+async function layersOf(video: string): Promise<any[]> {
+  try { return JSON.parse(await fsp.readFile(path.join(path.dirname(video), 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+}
+
+/** Layers a render put on screen for under `min` seconds (engine windows, not anchors): too
  * short to read. Usually a picture whose next visual starts right after it. */
-async function shortFlashes(ctx: ToolContext, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+async function shortFlashes(video: string | undefined, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
+  const recs = video ? await layersOf(video) : [];
   return recs.filter((r) => typeof r?.t0 === 'number' && typeof r?.t1 === 'number' && !r.skipped && r.t1 - r.t0 < min)
     .map((r) => {
       const b = p.broll.find((x) => x.id === r.id);
@@ -405,17 +429,23 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
   return [...(ctx.state.dirty ?? [])].some((f) => !NOT_VISIBLE.has(f));
 }
 
-export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
+/** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
+export async function doRender(ctx: ToolContext, draft: boolean, announce = true): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   ctx.state.dirty = new Set();
-  const result = await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
-  const p = await loadProject(ctx.projectDir);
+  const out = draft && ctx.note ? ['--out', ctx.note.dir] : [];
+  const result = await engine(ctx, 'render', draft ? ['--draft', ...out] : [], draft ? 'Making a preview' : 'Making the final video');
+  const p = await loadProject(ctx.projectDir, ctx.note?.file);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
   ctx.state.renders.push(info);
-  ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
+  if (announce) ctx.emit(renderEvent(info));
   return info;
+}
+
+export function renderEvent(r: RenderInfo): AgentEvent {
+  return { type: 'render', version: r.version, draft: r.draft, ...(r.result?.file ? { file: String(r.result.file) } : {}) };
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -453,11 +483,17 @@ async function downloadImage(ctx: ToolContext, url: string, nameHint?: string): 
   const base = slugName(nameHint ?? path.basename(urlPath, path.extname(urlPath)));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
-  let name = `${base}${ext}`; let n = 2;
-  while (fs.existsSync(path.join(dir, name))) name = `${base}-${n++}${ext}`;
-  const dest = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), `work/assets/${name}`, 'write');
-  await fsp.writeFile(dest.abs, buf);
-  return `work/assets/${name}`;
+  // claim the name with the write itself: fetch_image runs in parallel
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${base}${ext}` : `${base}-${n}${ext}`;
+    const dest = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), `work/assets/${name}`, 'write');
+    try {
+      await fsp.writeFile(dest.abs, buf, { flag: 'wx' });
+      return `work/assets/${name}`;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+    }
+  }
 }
 
 /** The credit block the post caption ends with, rebuilt from the pictures the edit really uses. */
@@ -594,7 +630,7 @@ interface AnimContext { t0: number; region?: { x: number; y: number; w: number; 
  *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. */
 async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: number): Promise<AnimContext | null> {
   try {
-    const r = await ctx.host.runEngine('anim-context', ['--project', ctx.projectDir, '--from', anchor.from, '--to', anchor.to,
+    const r = await ctx.host.runEngine('anim-context', [...projectArgs(ctx, 'anim-context'), '--from', anchor.from, '--to', anchor.to,
       '--duration', String(duration)], undefined, ctx.signal);
     if (r && Array.isArray(r.words)) return { t0: r.t0, region: r.region, layout: r.layout, words: r.words, exact: true };
   } catch {
@@ -817,8 +853,7 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const kind = args.kind as LibraryKind;
       const files = await listFiles(libraryDir(ctx, kind), EXT[kind], `Library/${LIBRARY_FOLDERS[kind]}`);
-      const project = kind === 'images' || kind === 'broll'
-        ? await listFiles(path.join(ctx.projectDir, 'work', 'assets'), EXT.broll, 'work/assets', 0) : [];
+      const project = kind === 'images' || kind === 'broll' ? await projectAssets(ctx) : [];
       const songs = kind === 'music' && files.length ? await librarySongs(ctx) : null;
       return { content: { kind, files, projectAssets: project, ...(songs ? { songs, howToChoose: SONG_HELP } : {}), note: files.length ? undefined : `The ${LIBRARY_FOLDERS[kind]} folder is empty.` } };
     },
@@ -835,7 +870,7 @@ const tools: ToolDef[] = [
       let ref: string | null = null;
       let abs: string | null = null;
       if (!args.track && args.level) {
-        const cur = (await loadProject(ctx.projectDir)).music;
+        const cur = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
         if (!cur.enabled || !cur.track) {
           // a volume change on a video with no song: nothing happens, and the reply must not claim it did
           return {
@@ -852,7 +887,7 @@ const tools: ToolDef[] = [
         ref = r.ref;
         abs = r.abs;
       }
-      const prev = (await loadProject(ctx.projectDir)).music;
+      const prev = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
       // a new song with no start point: start where the engine hears a calm bar before the build
       const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
@@ -1164,6 +1199,11 @@ const tools: ToolDef[] = [
       try { text = cleanRuleText(args.rule); } catch { throw new ToolInputError('rule is empty'); }
       const existing = await ctx.style.find(text);
       if (existing) return { content: { ok: true, alreadySaved: existing.text } };
+      if (noteAsksToRemember(ctx.userNote) && ctx.note) {
+        // saved to My style with the note itself, never before (editor.ts applyNote)
+        if (!ctx.state.styleRulesAdded.includes(text)) ctx.state.styleRulesAdded.push(text);
+        return { content: { ok: true, saved: text }, summary: `Saved to My style: "${text}"` };
+      }
       if (noteAsksToRemember(ctx.userNote)) {
         const r = await ctx.style.add(text);
         if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
@@ -1216,7 +1256,7 @@ const tools: ToolDef[] = [
       if (perMin > 10) notes.push(`${p.zooms.length} zooms is about ${Math.round(perMin)} a minute, which reads as constant: keep 4 to 8 a minute, on punchlines and in the middle of bare stretches (set_zoom replaces the list).`);
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
-      const flashes = await shortFlashes(ctx, p, ctx.transcript);
+      const flashes = await shortFlashes(r.file, p, ctx.transcript);
       if (flashes.length) notes.push(`${flashes.length} visual${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
       const names = ctx.transcript ? unshownNames(p, ctx.transcript) : [];
       if (names.length) notes.push(`Named things the viewer hears but never sees (see namedNotShown). A brand, app, product, company or show: search_images "<name> logo" and place it on its words; a place or event: "<name> photo". Skip people the viewer would not know and anything that is not really a name.`);
@@ -1256,8 +1296,11 @@ const tools: ToolDef[] = [
         }
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
-      const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      // this note's newest preview, else the video the project shows now
+      const video: string = ctx.state.renders.at(-1)?.result?.file
+        ?? path.join(ctx.projectDir, 'versions', p.version ? `v${p.version}` : 'preview', p.version ? 'export.mp4' : 'draft.mp4');
+      const { pick, moved } = await settleOnAnimations(video, times.slice(0, 6));
+      const r = await engine(ctx, 'frames', ['--times', pick.join(','), '--file', video]);
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1293,9 +1336,8 @@ const tools: ToolDef[] = [
 /** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
  * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
  * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
+async function settleOnAnimations(video: string, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
+  const recs = await layersOf(video);
   const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
   const moved: { asked: number; sampled: number; id: string }[] = [];
   const pick = times.map((tm) => {

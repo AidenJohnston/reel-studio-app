@@ -297,6 +297,7 @@ export function createAI(opts: CreateAIOptions) {
 export type ReelStudioAI = ReturnType<typeof createAI>;
 
 const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
+const LOCK_FILLING_MS = 10_000;
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === 'EPERM'; }
@@ -318,9 +319,12 @@ export async function withEditLock<T>(dir: string, fn: () => Promise<T>): Promis
         if (e?.code === 'EEXIST') throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
         throw e;
       }
-      let held: { pid?: number; at?: number } = {};
-      try { held = JSON.parse(await fsp.readFile(lock, 'utf8')); } catch { /* unreadable = stale */ }
-      const live = held.pid && held.pid !== process.pid && alive(held.pid) && Date.now() - (held.at ?? 0) < LOCK_STALE_MS;
+      let held: { pid?: number; at?: number } | null = null;
+      try { held = JSON.parse(await fsp.readFile(lock, 'utf8')); } catch { /* still being written, or damaged */ }
+      // an unreadable lock is a holder between creating and filling it, unless it has been like that a while
+      const live = held
+        ? held.pid && held.pid !== process.pid && alive(held.pid) && Date.now() - (held.at ?? 0) < LOCK_STALE_MS
+        : Date.now() - ((await fsp.stat(lock).catch(() => null))?.mtimeMs ?? 0) < LOCK_FILLING_MS;
       if (live) throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
       await fsp.rm(lock, { force: true });
     }

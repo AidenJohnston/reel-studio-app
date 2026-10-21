@@ -121,7 +121,10 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) =
   const out: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  // every started call ends before this returns or throws: a Stop must not leave a download writing
+  const ran = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const failed = ran.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed) throw failed.reason;
   return out;
 }
 
