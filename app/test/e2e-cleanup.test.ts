@@ -1,29 +1,48 @@
 import { expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
-for (const keep of ['0', '1']) {
-  it(`cleans up the e2e worker folder unless KEEP_E2E_TMP=1 (${keep})`, () => {
-    const helper = resolve(__dirname, '../e2e/helpers.ts')
-    const base = execFileSync(process.execPath, ['-e', `
-      const { readFileSync } = require('node:fs')
-      const { Module } = require('node:module')
-      const { dirname } = require('node:path')
-      const ts = require('typescript')
-      const file = process.argv[1]
-      const mod = new Module(file)
-      mod.filename = file
-      mod.paths = Module._nodeModulePaths(dirname(file))
-      mod._compile(ts.transpileModule(readFileSync(file, 'utf8'), {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
-      }).outputText, file)
-      process.stdout.write(mod.exports.BASE)
-    `, helper], { env: { ...process.env, KEEP_E2E_TMP: keep }, encoding: 'utf8' })
+for (const [keep, fail] of [['0', false], ['1', false], ['0', true]] as const) {
+  it(`cleans up passed runs and keeps debugging files (keep=${keep}, fail=${fail})`, () => {
+    const dir = mkdtempSync(resolve(__dirname, '../e2e-cleanup-'))
+    const config = join(dir, 'playwright.config.ts')
+    let base: string | undefined
     try {
-      expect(existsSync(base)).toBe(keep === '1')
+      writeFileSync(config, `export default { testDir: '.', outputDir: './results', workers: 1, reporter: [['list'], ['../e2e/cleanup-reporter.ts']] }`)
+      writeFileSync(join(dir, 'a-pass.spec.ts'), `
+        import { test } from '@playwright/test'
+        import '../e2e/helpers'
+        test('earlier spec in the same worker', () => {})
+      `)
+      writeFileSync(join(dir, 'cleanup.spec.ts'), `
+        import { test, expect } from '@playwright/test'
+        import { writeFileSync } from 'node:fs'
+        import { join } from 'node:path'
+        import { BASE } from '../e2e/helpers'
+        test.beforeAll(() => {
+          console.log('BASE=' + BASE)
+          writeFileSync(join(BASE, 'main.log'), 'debug evidence')
+          expect(${fail}).toBe(false)
+        })
+        test('cleanup', () => {})
+      `)
+      const result = spawnSync(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '-c', config], {
+        cwd: dir, env: { ...process.env, KEEP_E2E_TMP: keep, TMPDIR: dir, TMP: dir, TEMP: dir }, encoding: 'utf8'
+      })
+      base = result.stdout.match(/BASE=(.+)/)?.[1].trim()
+      expect(result.status, result.stdout + result.stderr).toBe(fail ? 1 : 0)
+      expect(base).toBeDefined()
+      if (!base) throw new Error('test worker did not report its temp folder')
+      const retained = keep === '1' || fail
+      expect(existsSync(base)).toBe(retained)
+      if (retained) {
+        expect(readFileSync(join(base, 'main.log'), 'utf8')).toBe('debug evidence')
+        expect(result.stdout).toContain(`Kept e2e files: ${base}`)
+      }
     } finally {
-      rmSync(base, { recursive: true, force: true })
+      if (base) rmSync(base, { recursive: true, force: true })
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 }
