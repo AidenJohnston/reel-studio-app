@@ -97,6 +97,7 @@ export function PhonePlayer({
   src,
   poster,
   autoPlayMuted,
+  playRequest,
   subtitle,
   instagram,
   caption,
@@ -114,6 +115,8 @@ export function PhonePlayer({
   poster?: string | null
   /** First arrival after Working: start playing, muted, with a "Tap for sound" chip. */
   autoPlayMuted?: boolean
+  /** Each new number starts playing, with sound (the person just picked this version). */
+  playRequest?: number
   /** Live preview of the subtitle style (the drawer). */
   subtitle?: { look: SubtitleLook; text: string } | null
   /** Faint Instagram buttons + caption area over the video. */
@@ -167,6 +170,10 @@ export function PhonePlayer({
     video.current.muted = true
     void video.current.play().catch(() => {})
   }, [autoPlayMuted, src])
+
+  useEffect(() => {
+    if (playRequest) void video.current?.play().catch(() => {})
+  }, [playRequest, src])
 
   // Hold "Original": play the raw footage from the start over the reel, then go back.
   useEffect(() => {
