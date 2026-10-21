@@ -110,8 +110,12 @@ version and cannot claim a change. A no-change answer without attempted edits
 retains the model's explanation or question. A preference without a project change
 returns for consent instead of creating a video version to save it.
 
-Startup kills recorded orphan engines before accepting jobs, removes every
-`.staging/*` folder, and removes version folders newer than `project.json.version`.
+Startup kills recorded orphan engines before accepting jobs. If staging contains an
+unpublished note, it saves the existing interrupted-change chat message even when
+the app job record is missing. The message has a stable ID so retrying cleanup does
+not repeat it. The committed version snapshot identifies notes that already published.
+Recovery removes the whole `.staging` directory, including an empty one, and removes
+version folders newer than `project.json.version`.
 Publication also removes unpublished version folders before choosing the next number.
 The live app history in `app.json`, progress statistics, and diagnostic logs record
 attempts even when the edit is unchanged; they are not part of the edit transaction.

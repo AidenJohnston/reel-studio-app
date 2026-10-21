@@ -14,6 +14,7 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
+import { lockProjectEngine } from './project-engine'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -93,17 +94,7 @@ const engineRunner = createEngineRunner({
   onExit: (pid) => pidRegistry?.remove(pid)
 })
 
-const runEngine: RunEngine = (command, args, onProgress, signal) => {
-  const dir = args[args.indexOf('--project') + 1]
-  const run = (): Promise<unknown> => {
-    if (signal?.aborted) return Promise.reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
-    return engineRunner(command, args, onProgress, signal)
-  }
-  // Staged note renders do not touch the live edit. Legacy renders share its publish lock.
-  return (command === 'render' || command === 'cover') && args.includes('--project') && dir && !args.includes('--out')
-    ? withProjectLock(dir, run)
-    : run()
-}
+const runEngine: RunEngine = lockProjectEngine(engineRunner)
 
 const host: EngineHost = {
   runEngine,

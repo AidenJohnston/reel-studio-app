@@ -1,17 +1,26 @@
 // The job event contract (shared/api.ts JobUpdate -> JobEvent) end to end without Electron: what a job
 // emits, what main adds (overall, secondsLeft, thinking kept across ticks, a playable `video` for every
 // render), and how the renderer folds it (shared/live.ts).
-import { describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
 import { createLiveVideos, createNoteVideos, LIVE_DIR } from '../src/main/live-video'
-import { serveMedia } from '../src/main/media-file'
+import { protocol } from 'electron'
+import { handleMediaProtocol } from '../src/main/media'
 import { createJobManager } from '../src/main/jobs'
 import { mediaUrl, pathFromMediaUrl } from '../src/main/media-url'
 import { projectDir } from '../src/main/store'
 import { setupPaths } from './helpers'
+
+vi.mock('electron', () => ({ protocol: { handle: vi.fn() } }))
+
+function serveMedia(req: Request, roots: () => string[], stagingRoots: () => string[] = () => []): Promise<Response> {
+  handleMediaProtocol(roots, stagingRoots)
+  const handler = vi.mocked(protocol.handle).mock.calls.at(-1)![1]
+  return Promise.resolve(handler(req))
+}
 
 const J = { jobId: 'j1', slug: 's' }
 const status = (over: Partial<Extract<JobEvent, { type: 'status' }>> = {}): JobEvent => ({
@@ -99,6 +108,17 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('keeps inactive staging private through an alias in an allowed media folder', async () => {
+    const { home } = setupPaths()
+    const stage = join(home, '.staging', 'stopped')
+    mkdirSync(stage, { recursive: true })
+    writeFileSync(join(stage, 'draft.mp4'), 'private draft')
+    const alias = join(home, 'draft.mp4')
+    symlinkSync(join(stage, 'draft.mp4'), alias)
+    const response = await serveMedia(new Request(mediaUrl(alias)), () => [home])
+    expect(response.status).toBe(403)
+  })
+
   it('serves a note draft only for its active staging job and revokes it before cleanup', async () => {
     const { root } = setupPaths()
     const slug = 'staged-note'
