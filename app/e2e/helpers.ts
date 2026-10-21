@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path'
 
 export const APP_DIR = resolve(__dirname, '..')
 export const SHOTS = join(APP_DIR, 'e2e', 'screenshots')
-export const BASE = mkdtempSync(join(tmpdir(), 'rs-e2e-'))
+// The cleanup reporter owns the run folder and keeps files from failed workers.
+export const BASE = mkdtempSync(join(process.env.REELSTUDIO_E2E_TMP ?? tmpdir(), `rs-e2e-${process.env.TEST_WORKER_INDEX ?? 'loader'}-`))
 // Spaces and non-ASCII on purpose: real users have them.
 export const HOME = join(BASE, 'Zoë Müller', 'Documents')
 export const ROOT = join(HOME, 'Reel Studio')

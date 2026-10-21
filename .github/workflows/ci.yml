@@ -1,0 +1,102 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  node:
+    name: Node / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build -w ai
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build -w app
+  engine:
+    name: Engine / Python 3.11
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      REELENGINE_NET_TESTS: '0'
+      REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: '0.11.15'
+          python-version: '3.11'
+          enable-cache: true
+          cache-dependency-glob: |
+            engine/requirements.txt
+            packaging/requirements-extra.txt
+            engine/pyproject.toml
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv run --no-project python packaging/hash_requirements.py --check
+      - name: Install engine and test dependencies
+        run: |
+          uv venv --python 3.11 engine/.venv
+          # CI encodes HEIC samples; the packaged app keeps decode-only pi-heif.
+          uv pip install --python engine/.venv -c engine/requirements.txt -r packaging/requirements-extra.txt -e 'engine[dev]' 'pytest<10' pillow-heif
+      - name: Verify FFmpeg capabilities
+        shell: bash
+        run: |
+          ffmpeg -hide_banner -filters > "$RUNNER_TEMP/ffmpeg-filters.txt"
+          grep -w subtitles "$RUNNER_TEMP/ffmpeg-filters.txt"
+          ffmpeg -hide_banner -encoders > "$RUNNER_TEMP/ffmpeg-encoders.txt"
+          grep -w libx264 "$RUNNER_TEMP/ffmpeg-encoders.txt"
+          ffprobe -version
+      - run: uv run --no-project --python engine/.venv python -m pytest engine/tests -v -ra
+  animations:
+    name: Animation rendering
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: templates/animations
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: templates/animations/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
