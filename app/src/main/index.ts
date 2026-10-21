@@ -1,18 +1,23 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
-import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   binDir,
   engineDir,
   engineEnv,
   engineMode,
+  ffmpegPath,
+  ffprobePath,
   initPaths,
   projectsDir,
   pythonExe,
   reelStudioRoot,
   setRootOverride,
-  settingsDir
+  settingsDir,
+  which
 } from './paths'
+import { runSelfTest, selfTestArgs, type SelfTestResult } from './self-test'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
@@ -57,7 +62,10 @@ import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDra
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
+const SELF_TEST = selfTestArgs(process.argv)
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
+// The self-test must never read or write the person's own data: a throw-away folder stands in for both.
+else if (SELF_TEST.selfTest) app.setPath('userData', mkdtempSync(join(tmpdir(), 'reel-studio-self-test-')))
 
 registerMediaScheme()
 
@@ -66,7 +74,8 @@ initPaths({
   resourcesPath: process.resourcesPath,
   documentsDir: app.getPath('documents'),
   userDataDir: app.getPath('userData'),
-  appDir: app.getAppPath()
+  appDir: app.getAppPath(),
+  rootOverride: SELF_TEST.selfTest ? join(app.getPath('userData'), 'Reel Studio') : null
 })
 
 // ---- logging ------------------------------------------------------------------------------------
@@ -607,7 +616,54 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
-const gotLock = TEST || app.requestSingleInstanceLock()
+/** `--self-test [--out <file>]`: check the bundled python, ffmpeg and engine, write JSON, exit 0 (passed) or 1. */
+async function selfTestAndQuit(): Promise<void> {
+  app.dock?.hide()
+  const t0 = Date.now()
+  const userData = app.getPath('userData')
+  const out = SELF_TEST.out ?? join(userData, 'selftest-result.json')
+  const locations = { python: pythonExe(), ffmpeg: ffmpegPath(), ffprobe: ffprobePath(), engine: engineDir() }
+  // The engine's encoder probe and caches would otherwise land in the person's Application Support / Caches.
+  const isolated = join(userData, 'engine cache')
+  const run = createEngineRunner({
+    python: pythonExe,
+    env: () => ({ ...engineEnv(), REELENGINE_CACHE: isolated, REELENGINE_CACHE_DIR: isolated, HF_HOME: join(userData, 'hf-cache') }),
+    cwd: engineDir,
+    log
+  })
+  // A result file is always written: the install scripts treat a missing one as a failure they cannot explain.
+  let outcome: { ok: boolean; result?: SelfTestResult; error?: string }
+  try {
+    const result = await runSelfTest({
+      locations,
+      exists: (p) => (isAbsolute(p) ? existsSync(p) : which(p) !== null),
+      engineExists: (dir) => existsSync(join(dir, 'reelengine', '__main__.py')),
+      runEngine: run
+    })
+    outcome = { ok: result.ok, result }
+  } catch (e) {
+    outcome = { ok: false, error: String((e as Error)?.stack ?? e) }
+  }
+  const payload = {
+    ...outcome,
+    seconds: Math.round((Date.now() - t0) / 100) / 10,
+    electron: process.versions.electron,
+    node: process.versions.node,
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    resourcesPath: process.resourcesPath,
+    execPath: process.execPath,
+    userData,
+    locations
+  }
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, JSON.stringify(payload, null, 2))
+  app.exit(payload.ok ? 0 : 1)
+}
+
+const gotLock = TEST || SELF_TEST.selfTest || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 app.on('second-instance', () => {
   if (win) {
@@ -617,6 +673,7 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(async () => {
+  if (SELF_TEST.selfTest) return selfTestAndQuit()
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
   if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
