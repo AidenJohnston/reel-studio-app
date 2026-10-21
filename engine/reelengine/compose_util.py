@@ -472,9 +472,9 @@ def source_path(ctx, sid: str) -> Optional[Path]:
 def resolve_asset(ctx, p: str) -> Path:
     """project.json path -> real path inside media/, work/ or root/Library; UNSAFE_PATH otherwise.
     No fallback: a resolver that fails must never fall through to an unchecked join."""
-    from .safepath import safe_resolve
-    return safe_resolve(Path(ctx.project_dir), p, root=Path(ctx.root) if getattr(ctx, "root", None) else None,
-                        what="asset")
+    from .safepath import resolve_input
+    return resolve_input(Path(ctx.project_dir), p, root=Path(ctx.root) if getattr(ctx, "root", None) else None,
+                         staged_dir=getattr(ctx, "staged_dir", None))
 
 
 # --- source -> output pixel transform -------------------------------------------------------------

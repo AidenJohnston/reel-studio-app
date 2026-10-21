@@ -97,11 +97,25 @@ export interface RunnerConfig {
   onExit?: (pid: number) => void
 }
 
-const running = new Set<ChildProcess>()
+export const ENGINE_STOP_TIMEOUT_MS = 10_000
+
+const running = new Map<ChildProcess, Promise<void>>()
+
+async function stopEngine(child: ChildProcess, exited: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Promise.all([child.pid ? killTree(child.pid) : Promise.resolve(), exited]),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, ENGINE_STOP_TIMEOUT_MS) })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Kills every engine process this runner started. Used when the app quits. */
 export async function killAllEngines(): Promise<void> {
-  await Promise.all([...running].map((c) => (c.pid ? killTree(c.pid) : Promise.resolve())))
+  await Promise.all([...running].map(([child, exited]) => stopEngine(child, exited)))
 }
 
 export function createEngineRunner(cfg: RunnerConfig) {
@@ -136,22 +150,26 @@ export function createEngineRunner(cfg: RunnerConfig) {
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe']
       })
-      running.add(child)
+      let markExited!: () => void
+      const exited = new Promise<void>((resolve) => { markExited = resolve })
+      running.set(child, exited)
       if (child.pid) cfg.onSpawn?.(child.pid)
 
       const finish = (fn: () => void): void => {
         if (settled) return
         settled = true
-        running.delete(child)
         signal?.removeEventListener('abort', onAbort)
         fn()
       }
 
+      let stopping = false
       const onAbort = (): void => {
-        if (child.pid) void killTree(child.pid)
-        finish(() => rejectPromise(cancelled()))
+        if (stopping || settled) return
+        stopping = true
+        void stopEngine(child, exited).then(() => finish(() => rejectPromise(cancelled())))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) onAbort()
 
       const out = new LineSplitter((line) => {
         const ev = parseEngineLine(line)
@@ -159,6 +177,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
           log(`[engine ${command} stdout] ${line}`)
           return
         }
+        if (signal?.aborted) return
         if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message })
         else if (ev.event === 'done') result = { ok: true, value: ev.result }
         else result = { ok: false, err: { code: ev.code, userMessage: ev.userMessage, message: ev.message } }
@@ -172,6 +191,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
       child.stderr!.on('data', (c: Buffer) => err.push(c))
 
       child.on('error', (e: NodeJS.ErrnoException) => {
+        if (signal?.aborted) return
         finish(() =>
           rejectPromise({
             code: e.code === 'ENOENT' ? 'ENGINE_MISSING' : 'ENGINE_START_FAILED',
@@ -181,14 +201,16 @@ export function createEngineRunner(cfg: RunnerConfig) {
         )
       })
       child.on('close', (code) => {
+        running.delete(child)
+        markExited()
         if (child.pid) cfg.onExit?.(child.pid)
         out.end()
         err.end()
+        if (signal?.aborted) return
         finish(() => {
           const r = result as typeof result
           if (r?.ok === true && code === 0) resolvePromise(r.value)
           else if (r?.ok === false) rejectPromise(r.err)
-          else if (r?.ok === true) resolvePromise(r.value)
           else
             rejectPromise({
               code: 'ENGINE_CRASHED',

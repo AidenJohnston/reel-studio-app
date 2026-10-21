@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
 import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
-import { toUserError } from './engine'
+import { ENGINE_STOP_TIMEOUT_MS, toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
 
 /** A job reports with the shared contract. A render's `file` becomes a playable `video` via `toVideo`. */
@@ -90,7 +90,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
         const t0 = Date.now()
         let logged = ''
+        if (abort.signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
         const res = await fn((e) => {
+          if (abort.signal.aborted || (kind === 'note' && e.type === 'render' && e.draft)) return
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
@@ -135,13 +137,14 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
         if (slug) {
-          await cleanPartialVersions(projectDir(slug)).catch(() => [])
+          if (kind !== 'note') await cleanPartialVersions(projectDir(slug)).catch(() => [])
           await updateAppState(slug, (s) => {
             s.job = null
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
             if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
           if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
+          if (cancelled && kind === 'note') await addChat(slug, 'editor', 'Stopped. Your video has not changed.').catch(() => {})
         }
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
@@ -162,7 +165,15 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     async cancelAll(): Promise<void> {
       const all = [...jobs.values()]
       all.forEach((j) => j.abort.abort())
-      await Promise.race([Promise.all(all.map((j) => j.done)), new Promise((r) => setTimeout(r, 4000))])
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          Promise.all(all.map((j) => j.done)),
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, ENGINE_STOP_TIMEOUT_MS + 2000) })
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
     },
     runningCount: () => jobs.size
   }

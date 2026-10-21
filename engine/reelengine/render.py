@@ -53,7 +53,8 @@ def _opt_module(name: str):
 
 # --- versions -----------------------------------------------------------------------------------
 
-def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
+def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None,
+                      staged_dir: Optional[Path] = None) -> dict:
     """{path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
     song or picture was REPLACED under the same name."""
     refs = [s.get("path") for s in proj.get("sources") or []]
@@ -66,7 +67,7 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
         if not isinstance(r, str) or not r:
             continue
         try:
-            st = safepath.safe_resolve(project_dir, r, root=root).stat()
+            st = safepath.resolve_input(project_dir, r, root=root, staged_dir=staged_dir).stat()
             out[r] = [st.st_size, st.st_mtime_ns]
         except (EngineError, OSError):
             out[r] = None
@@ -611,13 +612,14 @@ def parse_window(spec: Optional[str], duration: float):
     return a, b
 
 
-def make_ctx(project_dir: Path, proj: dict, tl, draft: bool, root: Path, rwork: Path) -> RenderCtx:
+def make_ctx(project_dir: Path, proj: dict, tl, draft: bool, root: Path, rwork: Path,
+             staged_dir: Optional[Path] = None) -> RenderCtx:
     def _progress(stage, pct, message):
         progress(stage or STAGE, pct, message)
 
     return RenderCtx(project=proj, project_dir=project_dir, root=root, out_timeline=tl.segments,
                      word_out_time=tl.word_out_time, duration=tl.duration, fmt=dict(proj["format"]),
-                     draft=draft, work=project_dir / "work", ffmpeg=tools.ffmpeg(),
+                     draft=draft, work=rwork.parent, staged_dir=staged_dir, ffmpeg=tools.ffmpeg(),
                      ffprobe=tools.ffprobe(), progress=_progress, word_out_end=tl.word_out_end,
                      words=tl.words)
 
@@ -650,11 +652,11 @@ def unknown_anchor_skips(proj: dict, tl) -> tuple:
     return rows, warns
 
 
-def read_broll_report(project_dir: Path) -> list:
+def read_broll_report(project_dir: Path, work: Optional[Path] = None) -> list:
     """Per b-roll item, from A2's work/layers/layers.json: how it was actually shown. Items that
     could not be shown as asked carry `fallback` (and `shownAs`) or `skipped`, in plain words the
     editor can repeat to the user ("no room on the left of the face; shown above you instead")."""
-    side = Path(project_dir) / "work" / "layers" / "layers.json"
+    side = (Path(work) if work is not None else Path(project_dir) / "work") / "layers" / "layers.json"
     try:
         items = projmod.read_json(side).get("items") or []
     except (ValueError, OSError):
@@ -706,10 +708,14 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
+        out: Optional[Path] = None) -> dict:
+    explicit_output = out is not None
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    project_file = Path(project_file).resolve() if project_file is not None else None
+    staged_dir = project_file.parent if project_file is not None else None
+    proj = projmod.load(project_dir, file=project_file)
     if first_look:
         draft = True
         proj = first_look_project(project_dir, proj, music)
@@ -723,9 +729,11 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if win:
         draft = True        # a window is a preview: always the fast encoder
 
-    version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
+    # A staged note gets a new version even when only its post text changed.
+    version = int(proj.get("version") or 0) + 1 if explicit_output else pick_version(project_dir, proj, root)
     preview = bool(draft)
-    vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
+    vdir = Path(out).resolve() if explicit_output else (
+        preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}")
     vdir.mkdir(parents=True, exist_ok=True)
     if win:     # one scratch window at a time: older window slices go
         for old in vdir.glob("window_*"):
@@ -733,7 +741,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                 old.unlink()
             except OSError:
                 pass
-    rwork = project_dir / "work" / "render"
+    work_dir = staged_dir / "work" if staged_dir is not None else (
+        vdir / ".work" if explicit_output else project_dir / "work")
+    rwork = work_dir / "render"
     rwork.mkdir(parents=True, exist_ok=True)
     warnings: list = []
 
@@ -746,7 +756,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                               "moved or deleted.")
     faces = source_faces(project_dir, proj)
 
-    ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
+    ctx = make_ctx(project_dir, proj, tl, draft, root, rwork, staged_dir=staged_dir)
     ctx.out_dir = vdir
     ctx.window = win
     timings = {}
@@ -772,7 +782,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             # dev detail goes to the log, never into a warning the app may show
             log(f"# broll.build_layers crashed: {exc!r}")
             warnings.append(BROLL_FAILED)
-    broll_report = read_broll_report(project_dir) if proj.get("broll") and broll is not None else []
+    broll_report = read_broll_report(project_dir, work=work_dir) if proj.get("broll") and broll is not None else []
     gone_rows, gone_warns = unknown_anchor_skips(proj, tl)
     broll_report = [r for r in broll_report if r.get("id") not in {g["id"] for g in gone_rows}] + gone_rows
     warnings += gone_warns
@@ -813,7 +823,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         fonts.mkdir(parents=True, exist_ok=True)
         shutil.copy2(font_path, fonts / Path(font_path).name)
         if not win:
-            projmod.write_json(project_dir / "work" / "captions.json", {"cues": cap_report})
+            projmod.write_json(work_dir / "captions.json", {"cues": cap_report})
 
     # 4. the picture
     if win:
@@ -891,6 +901,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         progress(STAGE, 93, "Making your cover", force=True)
         t = time.time()
         result["cover"] = str(cover_job.result())
+        if explicit_output and (work_dir / "cover.json").exists():
+            shutil.copy2(work_dir / "cover.json", vdir / "cover.json")
         timings["cover"] = round(time.time() - t + cover_job.seconds, 2)
         timings["coverWait"] = round(time.time() - t, 2)
 
@@ -910,17 +922,19 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     result["timings"] = timings
     if not win:
         snap = json.loads(json.dumps(proj))
+        if explicit_output and not preview:
+            snap["version"] = version
         projmod.write_json(vdir / "project.json", snap)
         manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
         if not preview:
-            projmod.write_json(vdir / "assets.json", asset_fingerprint(project_dir, proj, root))
+            projmod.write_json(vdir / "assets.json", asset_fingerprint(project_dir, proj, root, staged_dir=staged_dir))
         if not preview and int(proj.get("version") or 0) != version:
             # Re-read: an edit saved during this 1-2 minute render must survive. Patch the one field
             # render owns instead of writing back the dict loaded at the start.
-            fresh = projmod.load(project_dir)
+            fresh = projmod.load(project_dir, file=project_file)
             fresh["version"] = version          # project.version = the last FINAL version
-            projmod.save(project_dir, fresh)
+            projmod.save(project_dir, fresh, file=project_file)
     progress(STAGE, 100, "Your video is ready", force=True)
     return result
 
@@ -954,7 +968,7 @@ class CoverJob:
         self.out_png, self.seconds, self._res, self._exc = Path(out_png), 0.0, None, None
         # no progress from the thread: it would interleave "Making your cover" with the encode's percent
         quiet = dataclasses.replace(ctx, progress=None) if dataclasses.is_dataclass(ctx) else ctx
-        cache = Path(ctx.project_dir) / "work" / "render" / "cover-cache"
+        cache = Path(ctx.work) / "render" / "cover-cache"
         key = cover_key(ctx, proj)
 
         def work():
@@ -1008,17 +1022,22 @@ def render_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png: Path, warni
     return fallback_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png)
 
 
-def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None) -> dict:
+def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None,
+                     project_file: Optional[Path] = None, out: Optional[Path] = None) -> dict:
     """`cover-candidates --at t1,t2,...`: the best cover frame near each raw-take moment, as small
     stills the AI looks at before choosing (cover.candidates)."""
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    staged_dir = Path(project_file).resolve().parent if project_file is not None else None
+    proj = projmod.load(project_dir, file=project_file)
     tl = projmod.timeline(project_dir, proj)
+    work = (staged_dir or project_dir) / "work"
+    if out is not None and staged_dir is None:
+        work = Path(out) / ".work"
     ctx = make_ctx(project_dir, proj, tl, True, tools.root_dir(str(root) if root else None),
-                   project_dir / "work" / "render")
+                   work / "render", staged_dir=staged_dir)
     cover = _opt_module("cover")
     sid = source or (ctx.out_timeline[0].source if ctx.out_timeline else proj["sources"][0]["id"])
-    out_dir = project_dir / "work" / "cover-candidates"
+    out_dir = Path(out).resolve() if out is not None else work / "cover-candidates"
     for f in out_dir.glob("cover_*.jpg") if out_dir.exists() else []:
         f.unlink(missing_ok=True)
     progress("cover", 10, "Looking for a cover", force=True)
@@ -1027,22 +1046,28 @@ def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = N
     return {"source": sid, "candidates": rows}
 
 
-def cover_only(project_dir: Path, root: Optional[Path] = None) -> dict:
+def cover_only(project_dir: Path, root: Optional[Path] = None, project_file: Optional[Path] = None,
+               out: Optional[Path] = None) -> dict:
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    staged_dir = Path(project_file).resolve().parent if project_file is not None else None
+    proj = projmod.load(project_dir, file=project_file)
     tl = projmod.timeline(project_dir, proj)
     version = max(1, pick_version(project_dir, proj, tools.root_dir(str(root) if root else None)))
-    vdir = project_dir / "versions" / f"v{version}"
-    if not (vdir / "export.mp4").exists():      # the edit has no final yet: the cover is a preview too
+    vdir = Path(out).resolve() if out is not None else project_dir / "versions" / f"v{version}"
+    if out is None and not (vdir / "export.mp4").exists():      # the edit has no final yet: the cover is a preview too
         vdir = preview_dir(project_dir)
     vdir.mkdir(parents=True, exist_ok=True)
+    work = staged_dir / "work" if staged_dir is not None else (
+        vdir / ".work" if out is not None else project_dir / "work")
     ctx = make_ctx(project_dir, proj, tl, False, tools.root_dir(str(root) if root else None),
-                   project_dir / "work" / "render")
+                   work / "render", staged_dir=staged_dir)
     src_meta = {s["id"]: s for s in proj["sources"]}
     src_paths = {s["id"]: projmod.source_path(project_dir, s) for s in proj["sources"]}
     warnings: list = []
     progress("cover", 10, "Making your cover", force=True)
     p = render_cover(ctx, proj, tl, src_meta, src_paths, source_faces(project_dir, proj),
                      vdir / "cover.png", warnings)
+    if out is not None and (work / "cover.json").exists():
+        shutil.copy2(work / "cover.json", vdir / "cover.json")
     progress("cover", 100, "Your cover is ready", force=True)
     return {"file": str(p), "version": version, "preview": vdir.name == PREVIEW_DIR, "warnings": warnings}

@@ -94,7 +94,7 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
-    const pj = path.join(dir, 'project.json');
+    const pj = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
     switch (command) {
@@ -118,7 +118,7 @@ export class FakeHost implements EngineHost {
           p.version = v;
           await fsp.writeFile(pj, JSON.stringify(p, null, 2));
         }
-        const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
+        const vd = args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
         await fsp.mkdir(vd, { recursive: true });
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
         return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };

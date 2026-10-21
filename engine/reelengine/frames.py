@@ -8,7 +8,8 @@ from . import tools
 from .proto import EngineError, progress
 
 
-def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int = 540) -> dict:
+def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int = 540,
+        out: Optional[Path] = None) -> dict:
     from .render import latest_render
     project_dir = Path(project_dir)
     src = Path(file) if file else latest_render(project_dir)
@@ -19,7 +20,7 @@ def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int 
         raise EngineError("BAD_ARGS", "no times given", "Reel Studio didn't say which moments to show.")
     from .probe import probe
     dur = probe(src, quick=True)["duration"]
-    out_dir = src.parent / "frames"
+    out_dir = Path(out) if out is not None else src.parent / "frames"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = []
     for n, t in enumerate(times):

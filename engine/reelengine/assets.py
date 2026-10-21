@@ -1219,6 +1219,8 @@ def download_media(url: str, dest, kind: str = "video", name: Optional[str] = No
         "http_headers": {"User-Agent": BROWSER_UA}, "socket_timeout": 30, "retries": 3,
     }
     opts = {k: v for k, v in opts.items() if v is not None}
+    if os.environ.get("REELENGINE_CACHE_DIR"):
+        opts["cachedir"] = str(cache_dir() / "yt-dlp")
     if kind in ("music", "audio"):
         opts.update({"format": "bestaudio/best",
                      "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "0"}]})

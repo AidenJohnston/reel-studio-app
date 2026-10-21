@@ -71,7 +71,8 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
   work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxies; safe to delete
   versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md
   versions/v2/ ...
-  versions/preview/       the one scratch folder for drafts, overwritten each time (see versions.md)
+  versions/preview/       scratch drafts for legacy non-note renders (see versions.md)
+  .staging/<txnId>/       private AI note edit, assets, caches, and complete version before publish
 ```
 
 ### project.json (schemaVersion 1)
@@ -194,8 +195,10 @@ cover.render(ctx, out_png) -> Path
 
 ## 6. AI tools (the editor's actions)
 
-The agent loop lives in `ai/`. Tools are strict JSON-schema functions that operate on project.json through a
-small TypeScript project API and then ask the main process to re-render. The set:
+The agent loop lives in `ai/`. For notes, tools edit a staged project.json and publish only after a final
+render succeeds, as described in [versions.md](versions.md). Tools are strict JSON-schema functions that
+operate on project.json through a small TypeScript project API and then ask the main process to re-render.
+The set:
 
 `get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`,
 `set_gap_cap`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,

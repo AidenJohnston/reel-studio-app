@@ -1,57 +1,94 @@
-# Versions and previews (contract between engine, ai and app)
+# Versions, previews, and staged notes
 
-Decided 2026-10-17 (polish stream). Goal: the user sees v1, v2, v3 for edits they can export,
-never a pile of preview-only folders an AI run left behind.
+An AI note works in `<project>/.staging/<txnId>/`. Until publication, the live
+`project.json`, existing media, and published versions stay unchanged. A failed or
+stopped note discards its staged edit. The app reports success only after a complete
+new version is published.
 
-## On disk
+## A note's files
 
-```
-<project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
-  v2/
-  preview/       the ONE scratch folder for previews, overwritten every time:
-                 draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
-                 render_draft.json, project.json
-```
+The staged folder contains a copy of `project.json`, small transcript and analysis
+inputs, a copy of the credit book, and new assets with transaction-prefixed names.
+Existing media and Library files remain read-only inputs. Tools save proposed style
+rules in memory until publication. Rules that still need consent return as suggestions.
 
-Rules:
+Final rendering writes `.staging/<txnId>/version/`. Drafts, frame grabs, cover
+candidates, animation files, thumbnails, and all caches stay under the same transaction.
+The app keeps playing the published video while the note runs. A post-text-only edit
+also renders a new version; this implementation does not reuse encoded media.
 
-1. **Only a final render (`render` without `--draft`/`--window`) creates or fills `versions/vN/`.**
-2. **Every `render --draft` and every `render --window a:b` writes into `versions/preview/`**,
-   replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
-   `vN` folder and never changes `project.json`'s `version`.
-3. `project.json` `version` = the last FINAL version number.
-4. A final render re-uses `vN` when the edit is unchanged since `vN` was rendered (re-rendering the
-   same edit overwrites it); otherwise it makes `v(N+1)`.
-5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
-   `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+The engine accepts additive options:
 
-## Render result (engine `done.result`)
+- `render --project <live-dir> --project-file <staged-project.json> --out <dir>`
+  reads the staged edit, resolves existing inputs from the live project, and writes
+  version files into `dir`. Engine changes to the version number go only into the
+  staged project file.
+- `cover`, `cover-candidates`, and `anim-context` accept the same options. New staged
+  `work/` assets take precedence over existing live assets when resolving inputs.
+- `frames --file <video> --out <dir>` reads the selected video and writes frames into
+  `dir`, including when the input is a published export.
+- `--cache-dir <dir>` redirects engine download, search, music, and encoder caches.
+  Note calls always supply a staged cache directory. Render scratch files also stay
+  in staging, so note safety does not depend on shared cache atomicity.
 
-| field | meaning |
-|---|---|
-| `version` | final: the version written. Preview: the number this edit WILL get when it is finalised |
-| `preview` | `true` for drafts and windows (file is under `versions/preview/`) |
-| `versionDir` | absolute folder the files went to |
-| `file` | absolute path of the mp4 |
-| `broll` | b-roll items shown differently than asked (`fallback`, `shownAs`) or skipped (`skipped`) |
+## Publication
 
-## What the app shows
+`NoteTransaction.publish` owns the sequence under the same per-project lock used
+by manual updates and live engine renders:
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4`, sorted by number.
-  Folders without `export.mp4` (from older builds, or an AI run whose final render failed) are
-  not shown.
-- **While an AI run is working**, the player may show `versions/preview/draft.mp4` (the `render`
-  event with `draft: true`).
-- **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
-  no `export.mp4` (the final render failed and the run fell back to its preview), show
-  `versions/preview/draft.mp4` and offer to try the final render again.
-- `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
+1. Hash the live `project.json` again. A different SHA-256 refuses publication with
+   "Your video changed while I was working. Send your note again."
+2. Move new assets and thumbnails into their live folders. Their unique names are
+   not referenced by the old edit. Existing files cannot be replaced.
+3. Atomically replace the credit book, preserving existing entries and adding only
+   this note's new asset credits.
+4. Rename the complete staged version folder to `versions/vN+1/`.
+5. Rename a prepared temporary project file over the live `project.json`. This is
+   the commit point and the last live write before the append step.
+6. Append saved style rules and the note record with `notes[].txnId`. A crash before
+   this step finishes may lose preferences or the live note record; the published
+   version's project snapshot already contains the record.
 
-## ai package
+The staged snapshot and `notes.md` are prepared before the version folder moves.
+Notes never rewrite a published version folder. The app shows only versions at or
+below the number recorded in the live project. A crash before the commit can leave
+unreferenced assets and credit entries, or an unpublished version folder, but the
+old edit still reads its original files.
 
-- `render_draft` = engine `render --draft` (preview). The agent caps previews per task (3 per first
-  edit, 2 per note).
-- After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
-  version.
+## Stop, failure, and startup
+
+A failed tool aborts the note and stops scheduling further tools, including queued
+parallel calls. Stop waits for the engine child and process-tree cleanup and for
+in-flight tools. After at most ten seconds, the note discards staging. A late worker
+can only write into its old staging folder and cannot publish an aborted transaction.
+Stop after the project rename leaves the committed version in place.
+
+Startup kills recorded orphan engines before accepting jobs, removes every
+`.staging/*` folder, and removes version folders newer than `project.json.version`.
+Publication also removes unpublished version folders before choosing the next number.
+The live app history in `app.json`, progress statistics, and diagnostic logs record
+attempts even when the edit is unchanged; they are not part of the edit transaction.
+
+## Threat model
+
+The transaction covers process crashes or kills, Stop, engine failures, tool failures
+including parallel tools, and manual edits or other jobs racing a note in the same app.
+The same-app lock covers the final hash check through the commit and append. An AI
+edit lock also prevents overlapping AI runs on one project.
+
+User-created symlinks inside a project folder are outside this guarantee.
+Injected disk I/O errors are outside this guarantee.
+Another program editing project files mid-note is outside the same-app lock; the
+base-hash check refuses a changed project file, with no further defense.
+
+## Existing callers without the new options
+
+Legacy engine behavior is unchanged. Final `render` writes `versions/vN/` and may
+reuse the current folder for an unchanged edit. `cover` may replace that folder's
+`cover.png`. Drafts and windows overwrite `versions/preview/`, and legacy `frames`
+writes beside its input. First edits, manual rerenders, and export promotion still
+use those paths. AI notes always use the explicit staged output contract.
+
+Render results retain `version`, `preview`, `versionDir`, `file`, and `broll`.
+A note returns `AgentResult.version` only after publication; it never falls back to
+a draft when the final render fails.

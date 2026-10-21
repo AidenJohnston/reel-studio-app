@@ -121,9 +121,9 @@ describe('attachments: the AI sees them', () => {
     const imgs = firstImages(req);
     expect(imgs).toHaveLength(2);
     expect(imgs.every((i: any) => i.mime === 'image/jpeg' && i.base64.length > 10)).toBe(true);
-    // nothing changed (the model asked a question): no version, nothing recorded, the question is the reply
+    // No edit was made, so the reply says that explicitly and nothing is recorded.
     expect(r.changed).toEqual([]);
-    expect(r.summary).toBe('Which words should it show on?');
+    expect(r.summary).toMatch(/not changed your video/);
     expect((await loadProject(dir)).notes).toEqual([]);
     // the prompt tells it what to do with attached files
     expect(text).toMatch(/Never search the web or the library for something the user attached/);

@@ -215,6 +215,11 @@ def _is_video_item(ctx, it) -> bool:
 
 
 def _asset_path(ctx, a: str) -> Path:
+    if getattr(ctx, "staged_dir", None) is not None and _ANIM_ID.match(str(a)):
+        for ext in (".mov", ".webm", ".mp4", ".png"):
+            q = resolve_asset(ctx, f"work/animations/{a}{ext}")
+            if q.exists():
+                return q
     p = resolve_asset(ctx, a)          # UNSAFE_PATH for anything outside media/, work/, Library/
     if p.exists():
         return p

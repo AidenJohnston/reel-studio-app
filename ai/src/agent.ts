@@ -117,11 +117,20 @@ const FORMAT_CORRECTION = 'Your last reply could not be read, so nothing ran. Re
  * animation (one renderer) runs alone, in the order the model wrote it. */
 export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'list_library', 'search_images', 'fetch_image', 'cover_candidates']);
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>, signal?: AbortSignal): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
-  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  let failed = false;
+  const worker = async () => {
+    while (!failed && !signal?.aborted && next < items.length) {
+      const i = next++;
+      try { out[i] = await fn(items[i], i); } catch (error) { failed = true; throw error; }
+    }
+  };
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const failure = settled.find((r) => r.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+  if (signal?.aborted) throw new AIError('cancelled', 'Stopped.');
   return out;
 }
 
@@ -134,13 +143,13 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
     const stage = STAGE[call.name];
     if (stage) o.onEvent({ type: 'status', message: stage.message, pct: stage.pct, phase: 'edit' });
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
-    const r = await executeTool(o.ctx, call.name, call.args);
+    const r = await executeTool(o.ctx, call.name, call.args, call.id);
     return { callId: call.id, name: call.name, content: r.content, images: r.images, isError: r.isError };
   };
   for (let i = 0; i < calls.length;) {
     let j = i;
     while (j < calls.length && PARALLEL_SAFE.has(calls[j].name)) j++;
-    if (j - i > 1) { results.push(...await mapLimit(calls.slice(i, j), o.parallel ?? PARALLEL_LIMIT, one)); i = j; continue; }
+    if (j - i > 1) { results.push(...await mapLimit(calls.slice(i, j), o.parallel ?? PARALLEL_LIMIT, one, o.signal)); i = j; continue; }
     results.push(await one(calls[i])); i++;
   }
   return results;

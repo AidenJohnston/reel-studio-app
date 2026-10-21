@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -73,12 +74,14 @@ def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
-                      first_look=args.first_look, music=args.music, cover=not args.no_cover)
+                      first_look=args.first_look, music=args.music, cover=not args.no_cover,
+                      project_file=args.project_file, out=args.out)
 
 
 def cmd_cover(args):
     from . import render
-    return render.cover_only(_project(args), root=Path(args.root) if args.root else None)
+    return render.cover_only(_project(args), root=Path(args.root) if args.root else None,
+                             project_file=args.project_file, out=args.out)
 
 
 def cmd_cover_candidates(args):
@@ -87,7 +90,8 @@ def cmd_cover_candidates(args):
     if not moments:
         raise EngineError("BAD_ARGS", "cover-candidates needs --at", "Reel Studio didn't say which moments to look at.")
     return render.cover_candidates(_project(args), moments, source=args.source,
-                                   root=Path(args.root) if args.root else None)
+                                   root=Path(args.root) if args.root else None,
+                                   project_file=args.project_file, out=args.out)
 
 
 def cmd_verify(args):
@@ -99,7 +103,7 @@ def cmd_verify(args):
 def cmd_frames(args):
     from . import frames
     times = [float(t) for t in args.times.split(",") if t.strip()]
-    return frames.run(_project(args), times, file=Path(args.file) if args.file else None)
+    return frames.run(_project(args), times, file=Path(args.file) if args.file else None, out=args.out)
 
 
 def cmd_captions(args):
@@ -275,10 +279,15 @@ def cmd_anim_context(args):
     broll.anim_context). The AI calls this before rendering an animation."""
     from . import broll, project as projmod, render, tools
     pdir = _project(args).resolve()
-    proj = projmod.load(pdir)
+    staged_dir = Path(args.project_file).resolve().parent if args.project_file else None
+    proj = projmod.load(pdir, file=args.project_file)
     words = projmod.load_transcript(pdir, proj)["words"]
     tl = projmod.timeline(pdir, proj, words)
-    ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
+    work = (staged_dir or pdir) / "work"
+    if args.out and staged_dir is None:
+        work = Path(args.out) / ".work"
+    ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), work / "render",
+                          staged_dir=staged_dir)
     return broll.anim_context(ctx, args.word_from, args.word_to, args.duration)
 
 
@@ -301,6 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
         sp.set_defaults(fn=fn)
         sp.add_argument("--project", help="project folder")
+        sp.add_argument("--cache-dir", type=Path, help="keep downloaded and encoder caches in this folder")
         return sp
 
     sp = add("probe", cmd_probe, "describe a media file")
@@ -325,6 +335,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("autocut", cmd_autocut, "write the deterministic default cut")
     sp.add_argument("--gap-cap", type=float)
     sp = add("render", cmd_render, "render project.json")
+    sp.add_argument("--project-file", type=Path, help="read and update this project.json instead")
+    sp.add_argument("--out", type=Path, help="write output files into this folder")
     sp.add_argument("--draft", action="store_true")
     sp.add_argument("--window", help="a:b output seconds")
     sp.add_argument("--root")
@@ -334,15 +346,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
+    sp.add_argument("--project-file", type=Path, help="read and update this project.json instead")
+    sp.add_argument("--out", type=Path, help="write output files into this folder")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
     sp.add_argument("--root")
     sp = add("cover", cmd_cover, "render cover.png only")
+    sp.add_argument("--project-file", type=Path, help="read and update this project.json instead")
+    sp.add_argument("--out", type=Path, help="write output files into this folder")
     sp.add_argument("--root")
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
     sp = add("frames", cmd_frames, "extract frames from the latest render")
+    sp.add_argument("--out", type=Path, help="write extracted frames into this folder")
     sp.add_argument("--times", required=True)
     sp.add_argument("--file")
     add("captions", cmd_captions, "write the caption file only (debug)")
@@ -371,6 +388,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name")
     sp.add_argument("--to-project", action="store_true", help="save into <project>/work/assets")
     sp = add("anim-context", cmd_anim_context, "free region above the face + word times for an animation")
+    sp.add_argument("--project-file", type=Path, help="read and update this project.json instead")
+    sp.add_argument("--out", type=Path, help="write output files into this folder")
     sp.add_argument("--from", dest="word_from", required=True)
     sp.add_argument("--to", dest="word_to", required=True)
     sp.add_argument("--duration", type=float)
@@ -396,7 +415,26 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
-        result = args.fn(args)
+        if getattr(args, "project_file", None) is not None and getattr(args, "out", None) is None:
+            raise EngineError("BAD_ARGS", "--project-file requires --out so staged edits cannot write a live version",
+                              "Reel Studio couldn't save this edit safely. Please try again.")
+        cache_dir = args.cache_dir
+        if cache_dir is None and getattr(args, "project_file", None) is not None:
+            cache_dir = args.project_file.resolve().parent / "work" / "cache"
+        if cache_dir is None and getattr(args, "out", None) is not None:
+            cache_dir = args.out.resolve() / ".work" / "cache"
+        old_cache = {key: os.environ.get(key) for key in ("REELENGINE_CACHE_DIR", "REELENGINE_CACHE")}
+        try:
+            if cache_dir is not None:
+                for key in old_cache:
+                    os.environ[key] = str(cache_dir)
+            result = args.fn(args)
+        finally:
+            for key, value in old_cache.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
         proto.done(result)
         return 0
     except EngineError as exc:

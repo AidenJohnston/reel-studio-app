@@ -48,6 +48,8 @@ export interface Cover { atSourceTime: number; source: string; text: string | nu
 export interface Post { caption: string; hashtags: string[]; keywords: string[]; [k: string]: unknown }
 export interface NoteEntry {
   version: number; text: string; applied: string[]; at: string;
+  /** Identifies a published staged note. Older notes have no transaction id. */
+  txnId?: string;
   /** files the user attached to this note (`work/assets/attach-*`), 0.1.2 */
   attachments?: string[];
 }

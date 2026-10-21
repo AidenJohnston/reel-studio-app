@@ -195,8 +195,7 @@ export interface AttachIpcDeps extends AttachDeps {
 
 const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
 
-/** The project folder; refused while a job runs on it (a failed note puts work/assets back as it was,
- * which would take a file attached meanwhile with it). */
+/** Attachment changes wait until the current job has finished using the files. */
 async function projectOf(deps: AttachIpcDeps, slug: unknown): Promise<string> {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video.' }
   const dir = deps.projectDir(slug)

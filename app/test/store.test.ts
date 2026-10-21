@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, promises as fs, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   cleanPartialVersions,
@@ -166,6 +166,9 @@ describe('project store', () => {
     writeFileSync(join(dir, 'versions', 'v1', 'draft.mp4'), 'old-style draft-only folder')
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[0, true]])
     writeFileSync(join(dir, 'versions', 'v1', 'export.mp4'), 'final')
+    expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[0, true]])
+    const project = JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8'))
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ ...project, version: 1 }))
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[1, false]])
   })
 
@@ -192,6 +195,22 @@ describe('project store', () => {
     expect(existsSync(firstOnly)).toBe(true)
     // Running it again finds nothing to do.
     expect(await recoverInterrupted()).toEqual([])
+  })
+
+  it('recovers unpublished notes even without app.json', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('orphan', { versions: [1] })
+    const staging = join(dir, '.staging', 'interrupted')
+    mkdirSync(staging, { recursive: true })
+    writeFileSync(join(staging, 'project.json'), 'staged')
+    mkdirSync(join(dir, 'versions', 'v2'))
+    writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'unpublished')
+    expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
+    await recoverInterrupted()
+    expect(existsSync(staging)).toBe(false)
+    expect(existsSync(join(dir, 'versions', 'v2'))).toBe(false)
+    expect(existsSync(join(dir, 'app.json'))).toBe(false)
   })
 
   it('writes json atomically (no temp files left behind)', async () => {

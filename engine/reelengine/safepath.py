@@ -116,3 +116,15 @@ def safe_child(base: Path, name: str, what: str = "file") -> Path:
     if not _inside(_real(out), [Path(base)]):
         raise EngineError("UNSAFE_PATH", f"{what}: {name!r} escapes {base}", USER_MESSAGE)
     return out
+
+
+def resolve_input(project_dir: Path, p, root: Optional[Path] = None,
+                  staged_dir: Optional[Path] = None) -> Path:
+    """Read new staged work assets first, then existing media/work/Library inputs."""
+    if staged_dir is not None and isinstance(p, (str, Path)):
+        name = str(p).replace("\\", "/")
+        if name.startswith("work/"):
+            staged = safe_resolve(staged_dir, p, root=root, what="staged asset")
+            if staged.exists():
+                return staged
+    return safe_resolve(project_dir, p, root=root, what="asset")

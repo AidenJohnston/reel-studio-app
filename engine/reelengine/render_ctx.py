@@ -93,8 +93,10 @@ class RenderCtx:
     window: Optional[tuple] = None                          # (a, b) output seconds when --window used
     out_dir: Optional[Path] = None                          # versions/vN
 
+    staged_dir: Optional[Path] = None                       # optional read overlay for new work assets
+
     def resolve_path(self, p: str) -> Path:
         """Resolve a project.json asset path: 'Library/...' against root, else project-relative.
         Raises EngineError UNSAFE_PATH for anything outside media/, work/ or root/Library."""
-        from .safepath import safe_resolve
-        return safe_resolve(self.project_dir, p, root=self.root, what="asset")
+        from .safepath import resolve_input
+        return resolve_input(self.project_dir, p, root=self.root, staged_dir=self.staged_dir)

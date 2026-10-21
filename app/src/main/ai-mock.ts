@@ -164,27 +164,10 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
-    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
-      onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
-      const p = await readProject(projectDir)
-      const added: string[] = []
-      if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
-        added.push(note.trim())
-      }
-      const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
-      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
-      await writeProject(projectDir, p)
-      onEvent({ type: 'status', message: 'Done', pct: 100 })
-      return {
-        summary: added.length
-          ? 'I saved that to My style. Connect ChatGPT in Settings and I can change this video from your notes too.'
-          : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".',
-        version: p.version ?? 0,
-        styleRulesAdded: added,
-        changed: []
+    async applyNote(): Promise<AgentResult> {
+      throw {
+        code: 'NO_AI',
+        userMessage: 'Connect ChatGPT or Claude in Settings and send your note again. Your video has not changed.'
       }
     },
 

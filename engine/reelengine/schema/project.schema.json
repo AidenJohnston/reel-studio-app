@@ -177,6 +177,7 @@
           "text": { "type": "string" },
           "applied": { "type": "array", "items": { "type": "string" } },
           "at": { "type": "string" },
+          "txnId": { "type": "string", "description": "Identifies a published staged note; absent on older notes." },
           "attachments": {
             "type": "array",
             "maxItems": 4,

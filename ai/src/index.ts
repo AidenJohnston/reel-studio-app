@@ -23,6 +23,7 @@ export type { ToolContext, ToolDef } from './tools';
 export { runAgent } from './agent';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
+export { beginNote, recoverNoteStaging, withProjectLock } from './note-staging';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 export { SiwcAuth, USAGE_URL } from './providers/siwc';
 export { OpenAIResponsesProvider, listChatGPTModels, mapResponsesError } from './providers/openai';

@@ -207,14 +207,14 @@ describe('finding 13: transcript and web text are data, style rules are visible 
 });
 
 describe('finding 14: no "I made that change" when the agent ran out of steps', () => {
-  it('step cap after a change: the summary says so and lists what changed', async () => {
+  it('step cap discards the staged change and reports that the note did not finish', async () => {
     const { dir, host, settingsDir } = await setup();
     const loop = Array.from({ length: 10 }, () => ({ toolCalls: [call('get_project')] }));
     const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, ...loop]);
-    const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 }).applyNote(dir, 'slower and add music', () => undefined);
-    expect(r.summary).not.toBe('I made that change.');
-    expect(r.summary).toMatch(/ran out of time/);
-    expect(r.summary).toMatch(/pauses/);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    await expect(createAI({ host, settingsDir, providerOverride: m, finalRender: false, maxSteps: 4 })
+      .applyNote(dir, 'slower and add music', () => undefined)).rejects.toMatchObject({ code: 'note_incomplete' });
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
   });
 
   it('firstEdit without finish does not claim a finished edit', async () => {

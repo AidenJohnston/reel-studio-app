@@ -98,6 +98,26 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('does not copy or show staged note drafts', async () => {
+    setupPaths()
+    const slug = 'staged-note'
+    const dir = projectDir(slug)
+    const stage = join(dir, '.staging', 'note', 'version')
+    mkdirSync(stage, { recursive: true })
+    const draft = join(stage, 'draft.mp4')
+    writeFileSync(draft, 'staged preview')
+    const events: JobEvent[] = []
+    const live = createLiveVideos()
+    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, (s, e) => live(projectDir(s), e))
+    jobs.start(slug, 'note', async (emit) => {
+      emit({ type: 'render', version: 2, draft: true, file: draft })
+      throw { code: 'RENDER_FAILED', userMessage: 'Send your note again.' }
+    })
+    await jobs.forSlug(slug)?.done
+    expect(events.some((e) => e.type === 'render')).toBe(false)
+    expect(existsSync(join(dir, LIVE_DIR))).toBe(false)
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'

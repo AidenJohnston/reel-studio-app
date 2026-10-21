@@ -1,6 +1,7 @@
 // Project store: folders on disk under <Reel Studio>/Projects (docs/architecture.md section 3).
 // project.json belongs to the engine and the AI. The app keeps its own small state
 // (chat history, running job, last error) in app.json next to it.
+import { recoverNoteStaging } from '@reelstudio/ai'
 import { existsSync, promises as fs } from 'node:fs'
 import { join, basename, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -208,6 +209,8 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
+  const published = await readJson<{ version?: number }>(join(dir, 'project.json'), {})
+  const latest = Number(published.version ?? 0)
   let names: string[] = []
   try {
     names = await fs.readdir(vdir)
@@ -232,7 +235,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > latest) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
@@ -313,6 +316,8 @@ export async function recoverInterrupted(): Promise<string[]> {
     } catch {
       continue
     }
+    if (!(await fs.stat(dir)).isDirectory()) continue
+    await recoverNoteStaging(dir)
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
     if (!s.job) continue

@@ -54,10 +54,10 @@ describe('fast notes (no model turns)', () => {
     expect(Number((await loadProject(dir)).captions.style.size)).toBeLessThan(size);
     expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([false]);
     expect(events.some((e) => e.type === 'status' && e.phase === 'final')).toBe(true);
-    // the reply goes out BEFORE the render that makes it true (the app shows it at once)
+    // The reply follows the published render, so a failed render cannot claim success.
     const reply = events.findIndex((e) => e.type === 'reply');
     expect(events[reply]).toEqual({ type: 'reply', text: 'I made the captions a bit smaller.' });
-    expect(reply).toBeLessThan(events.findIndex((e) => e.type === 'render'));
+    expect(reply).toBeGreaterThan(events.findIndex((e) => e.type === 'render'));
     expect((await loadProject(dir)).notes).toEqual([expect.objectContaining({ text: 'make the captions smaller', applied: ['captions'] })]);
   });
 

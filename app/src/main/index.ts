@@ -1,3 +1,4 @@
+import { withProjectLock } from '@reelstudio/ai'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -84,7 +85,7 @@ function log(line: string): void {
 
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
 let pidRegistry: ReturnType<typeof createPidRegistry> | null = null
-const runEngine: RunEngine = createEngineRunner({
+const engineRunner = createEngineRunner({
   python: pythonExe,
   env: engineEnv,
   cwd: engineDir,
@@ -92,6 +93,18 @@ const runEngine: RunEngine = createEngineRunner({
   onSpawn: (pid) => pidRegistry?.add(pid),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
+
+const runEngine: RunEngine = (command, args, onProgress, signal) => {
+  const dir = args[args.indexOf('--project') + 1]
+  const run = (): Promise<unknown> => {
+    if (signal?.aborted) return Promise.reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
+    return engineRunner(command, args, onProgress, signal)
+  }
+  // Staged note renders do not touch the live edit. Legacy renders share its publish lock.
+  return (command === 'render' || command === 'cover') && args.includes('--project') && dir && !args.includes('--out')
+    ? withProjectLock(dir, run)
+    : run()
+}
 
 const host: EngineHost = {
   runEngine,
@@ -461,14 +474,16 @@ function registerIpc(): void {
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const p = await readProject(slug)
-    for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
-      if (!EDITABLE.includes(k)) continue
-      ;(p as any)[k] = (patch as any)[k]
-    }
-    await writeProject(slug, p)
-    const d = await detail(slug)
-    return d
+    return withProjectLock(projectDir(slug), async () => {
+      if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+      const p = await readProject(slug)
+      for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        if (!EDITABLE.includes(k)) continue
+        ;(p as any)[k] = (patch as any)[k]
+      }
+      await writeProject(slug, p)
+      return detail(slug)
+    })
   })
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's

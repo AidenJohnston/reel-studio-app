@@ -25,3 +25,9 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   `<asset>.attach.json` next to it (`asset`, `name`, `kind` image|video, `bytes`, `width`, `height`,
   `duration`, `hasAudio`, `fromGif`, `thumb`, `createdAt`). The sidecar is not part of project.json. A note
   may have empty `text` when it has attachments.
+
+## 2026-10-21 (staged AI notes)
+
+- `notes[].txnId` is an optional string identifying the staged note that published
+  this version. Older note entries remain valid. The version snapshot contains it
+  before publication; the live note list receives it after the project commit.
