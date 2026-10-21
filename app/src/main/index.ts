@@ -503,7 +503,7 @@ function registerIpc(): void {
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {
-      jobs.cancel(running.id)
+      jobs.abandon(running.id)
       await running.done
     }
     await fs.rm(projectDir(slug), { recursive: true, force: true })
