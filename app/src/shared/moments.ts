@@ -78,16 +78,21 @@ export function typedMoment(text: string): { at: number; rest: string } | null {
   return m ? { at: Number(m[1]) * 60 + Number(m[2]), rest: text.trim().slice(m[0].length) } : null
 }
 
+export const NO_TIMELINE = "I can't tell which words play here in this version. Choose Whole reel, or switch to your newest version."
+export const noSpeech = (at: number): string => `I can't tell which words play at ${clock(at)}. Pick a moment where you're talking, or choose Whole reel.`
+
 /**
- * A parsed moment against the render it names. `duration` is that render's length, or null when the
- * version or its timeline is gone: then the note goes to the whole reel, with the reason. A time past
- * the end is refused, in the pop-up's words.
+ * A parsed moment against the render it names (`timeline` null: that version or its timeline is
+ * gone). A "Just here" note is never widened to the whole reel: without a timeline, past the end or
+ * with nothing said there it is refused, in the pop-up's words. Otherwise the words and quote are
+ * rebuilt from that render, whatever the page sent.
  */
-export function checkMoment(m: NoteMoment, duration: number | null): { moment: NoteMoment } | { wholeReel: string } | { refuse: string } {
-  const name = m.version === 0 ? 'the Preview' : `Version ${m.version}`
-  if (duration === null) return { wholeReel: `I couldn't find ${name} to tell which words play at ${clock(m.at)}, so I'm making this change to the whole reel.` }
-  if (m.at > duration) return { refuse: `There's no ${clock(m.at)} in this video. It's ${clock(duration)} long.` }
-  return { moment: m }
+export function checkMoment(m: NoteMoment, timeline: { duration: number; words: PlacedWord[] } | null): { moment: NoteMoment } | { refuse: string } {
+  if (!timeline) return { refuse: NO_TIMELINE }
+  if (m.at > timeline.duration) return { refuse: `There's no ${clock(m.at)} in this video. It's ${clock(timeline.duration)} long.` }
+  const words = wordsAt(timeline.words, m.at)
+  if (!words.length) return { refuse: noSpeech(m.at) }
+  return { moment: noteMoment(m.at, m.version, words) }
 }
 
 // The note text an earlier build of this branch wrote, with the moment inside it. Read for marks

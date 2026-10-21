@@ -52,8 +52,9 @@ Rules:
   reads them from the version being watched: `duration` and `segmentsDetail` (source, src_start,
   src_end, out_start per kept span) in `versions/vN/render.json`, or `versions/preview/render_draft.json`
   for the Preview, mapped onto `work/transcript.json`, read again each time the pop-up opens. Without
-  them the change can only be for the whole reel. The engine lists at most 2000 segments; past the
-  last one listed, the same applies. The note's mark on the scrub bar maps the same way in reverse:
+  them a "Just here" change is refused (never widened); the person can choose Whole reel. The main
+  process checks the same render and rebuilds the word ids itself. The engine lists at most 2000
+  segments; past the last one listed, the same applies. The note's mark on the scrub bar maps the same way in reverse:
   its word ids, placed on the version on screen; with none of them in that cut, it has no mark.
 
 ## ai package

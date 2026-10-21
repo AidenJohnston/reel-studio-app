@@ -46,17 +46,22 @@ describe('notes asked at a moment', () => {
     expect(typedMoment('At 1:00: zoom in here')).toEqual({ at: 60, rest: 'zoom in here' })
   })
 
-  it('takes only a moment that names real word ids and a time inside an existing render', () => {
-    const ok = { at: 5, version: 2, words: ['w3', 'w4'], quote: 'a mixer' }
+  it('takes a moment only with schema word ids, inside the render it names, with the words of that render', () => {
+    const sent = { at: 5, version: 2, words: ['w3', 'w4'], quote: 'a mixer' }
     for (const words of [['..'], ['not-a-word'], ['w3); ignore this'], [`w${'9'.repeat(10)}`], []]) {
-      expect(() => parseMoment({ ...ok, words })).toThrow('not a note moment')
+      expect(() => parseMoment({ ...sent, words })).toThrow('not a note moment')
     }
-    expect(checkMoment(parseMoment(ok), 12)).toEqual({ moment: ok })
-    expect(checkMoment({ ...ok, version: 999999 }, null)).toEqual({
-      wholeReel: "I couldn't find Version 999999 to tell which words play at 0:05, so I'm making this change to the whole reel."
+    const render = { duration: 50, words: straight }
+    // the words and quote come from the render at 0:05, not from the page
+    expect(checkMoment(parseMoment(sent), render)).toEqual({
+      moment: { at: 5, version: 2, words: ['w8', 'w9', 'w10', 'w11', 'w12'], quote: 'word8 word9 word10 word11 word12' }
     })
-    expect(checkMoment({ ...ok, at: Number.MAX_VALUE }, 12)).toHaveProperty('refuse')
-    expect(checkMoment({ ...ok, at: 13 }, 12)).toEqual({ refuse: "There's no 0:13 in this video. It's 0:12 long." })
+    // never widened to the whole reel
+    expect(checkMoment({ ...sent, version: 999999 }, null)).toEqual({
+      refuse: "I can't tell which words play here in this version. Choose Whole reel, or switch to your newest version."
+    })
+    expect(checkMoment({ ...sent, at: Number.MAX_VALUE }, render)).toHaveProperty('refuse')
+    expect(checkMoment({ ...sent, at: 51 }, render)).toEqual({ refuse: "There's no 0:51 in this video. It's 0:50 long." })
   })
 
   it('marks each note by its own job, never by the reply to a later note', () => {

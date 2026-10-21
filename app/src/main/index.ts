@@ -453,7 +453,6 @@ function registerIpc(): void {
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     let moment: NoteMoment | undefined
-    let wholeReel: string | undefined
     if (at !== undefined) {
       let asked: NoteMoment
       try {
@@ -461,11 +460,12 @@ function registerIpc(): void {
       } catch (e) {
         throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
       }
-      // checked against the render it names, the one the pop-up read its words from
-      const c = checkMoment(asked, (await readTimeline(slug, asked.version))?.duration ?? null)
+      // checked against the render it names, the one the pop-up read its words from; its words and
+      // quote come from that render, never from the page
+      const c = checkMoment(asked, await readTimeline(slug, asked.version))
       if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
-      if ('wholeReel' in c) wholeReel = c.wholeReel
-      else moment = c.moment
+      moment = c.moment
+      if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
     }
     // A whole-reel setting ("smaller captions") goes without its moment: the moment in the AI's text
     // would hide it from applyNote's no-model fast path. The pop-up already shows it as Whole reel.
@@ -479,8 +479,6 @@ function registerIpc(): void {
       await addChat(slug, 'editor', reply.text, undefined, reply.actions)
       return { jobId: null }
     }
-    // only now that a change will really be made
-    if (wholeReel) await addChat(slug, 'editor', wholeReel)
     const before = (await readProject(slug)).version ?? 0
     const jobId = jobs.start(
       slug,

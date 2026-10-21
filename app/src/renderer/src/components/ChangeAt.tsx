@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { clock } from '../../../shared/progress'
-import { noteMoment, typedMoment, wordsAt } from '../../../shared/moments'
+import { NO_TIMELINE, noSpeech, noteMoment, typedMoment, wordsAt } from '../../../shared/moments'
 import type { MomentWord, NoteMoment } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { NOTE_DROP_DONE, useNotify } from '../App'
@@ -83,8 +83,6 @@ export function ChangeAt({
   const request = useRef(0)
   const mounted = phase !== 'closed'
   const isOpen = phase === 'open'
-  // nothing to anchor "here" to in this render: the change can only be for the whole reel
-  const noWords = !!found && found.n === shown?.n && (!found.lookup || !found.lookup.words.length)
 
   // Read fresh every time: a note can replace the Preview's render without changing its number.
   const lookup = async (seconds: number): Promise<Lookup> => {
@@ -107,7 +105,6 @@ export function ChangeAt({
         .then((r) => {
           if (request.current !== mine) return // opened again since
           setFound({ n, at, lookup: r })
-          if (!r || !r.words.length) setScope('whole')
         })
         .catch((e) => notify(userMessage(e), 'error'))
     }
@@ -158,7 +155,7 @@ export function ChangeAt({
   // Words that are a setting for the whole reel ("smaller captions") make it Whole reel as they are
   // typed, by the same check the editor uses to do them at once; other words put Just here back.
   useEffect(() => {
-    if (!isOpen || noWords || typedMoment(text) || (scope === 'whole' && !autoWhole.current)) return
+    if (!isOpen || typedMoment(text) || (scope === 'whole' && !autoWhole.current)) return
     const words = text.trim()
     let live = true
     const t = window.setTimeout(() => {
@@ -175,7 +172,7 @@ export function ChangeAt({
       live = false
       window.clearTimeout(t)
     }
-  }, [isOpen, noWords, text, scope, slug, notify])
+  }, [isOpen, text, scope, slug, notify])
 
   // A click or focus anywhere else puts it away (the words typed stay for next time). Closing an error
   // toast about an attached file is not "anywhere else".
@@ -200,7 +197,7 @@ export function ChangeAt({
   const pick = (q: (typeof QUICK)[number]) => {
     const cur = text.trim()
     setText(!cur || quickText ? q.text : `${cur.replace(/[.!]?$/, '.')} ${q.text}`)
-    setScope(noWords ? 'whole' : q.scope)
+    setScope(q.scope)
     field.current?.focus()
   }
   const canSend = (!!text.trim() || att.chips.length > 0) && !att.busy && !sending
@@ -220,8 +217,13 @@ export function ChangeAt({
           setAlert(`There's no ${clock(when)} in this video. It's ${clock(r.duration)} long.`)
           return
         }
-        if (!r || !r.words.length || !shown) {
-          setAlert(`I can't tell which words play at ${clock(when)}. Pick a moment where you're talking, or choose Whole reel.`)
+        // never widened to the whole reel on its own: the person chooses that
+        if (!r || !shown) {
+          setAlert(shown?.latest ? "I can't tell which words play here in this version. Choose Whole reel." : NO_TIMELINE)
+          return
+        }
+        if (!r.words.length) {
+          setAlert(noSpeech(when))
           return
         }
         at = noteMoment(when, shown.n, r.words)
@@ -303,10 +305,9 @@ export function ChangeAt({
         >
           {dropOver && <div className="note-drop-hint">Drop to put it in your note</div>}
           <h3 className="change-title">{title}</h3>
-          {(heard?.length || noWords || (shown && !shown.latest)) && (
+          {(heard?.length || (shown && !shown.latest)) && (
             <div className="change-context" data-testid="change-context">
               {!!heard?.length && <p className="change-heard">Around "{heard.map((x) => x.w).join(' ')}"</p>}
-              {noWords && !typed && <p>I can't tell which words play at {clock(moment)} in this video, so this change is for the whole reel.</p>}
               {shown && !shown.latest && (
                 <p>
                   You're watching {shown.n === 0 ? 'the Preview' : `Version ${shown.n}`}. I'll make the change in your newest version
@@ -364,7 +365,6 @@ export function ChangeAt({
                     type="radio"
                     name={`change-scope-${slug}`}
                     checked={scope === v}
-                    disabled={v === 'here' && noWords}
                     onChange={() => {
                       setScope(v)
                       setAlert(null)
