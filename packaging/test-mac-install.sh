@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # Mount a built .dmg, copy the app into a throw-away folder (path with spaces), check its signature, Gatekeeper
 # verdict and stapled ticket, run its --self-test, print every check, unmount. Exits non-zero on any failure.
-# Never touches /Applications or the app's saved data: the app runs with its data folders in a temporary folder.
+# Never touches /Applications or the app's saved data: the app runs with a test profile, <copy folder>-profile.
 #
-#   packaging/test-mac-install.sh <path.dmg> [--unsigned] [--timeout SECONDS]
+#   packaging/test-mac-install.sh <path.dmg> [--fresh] [--unsigned] [--timeout SECONDS]
+#     --fresh     empty the test profile first (packaging/spike then downloads its speech model again)
 #     --unsigned  a local build: report codesign/spctl/stapler without failing on them
 #     --timeout   give up on the self-test after this long (default 300)
-#   TEST_APPS_DIR=<dir>  where the copy goes (default ~/reel-studio-build/Applications-test); it is replaced each run
+#   TEST_APPS_DIR=<dir>  where the copy goes (default ~/reel-studio-build/Applications-test); it is replaced each run.
+#                        The test profile <dir>-profile is kept between runs, so a downloaded model is reused.
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
-[ $# -ge 1 ] || { sed -n '2,10p' "$0" >&2; exit 2; }
+[ $# -ge 1 ] || { sed -n '2,12p' "$0" >&2; exit 2; }
 DMG="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; shift
-UNSIGNED=0; TIMEOUT=300
+FRESH=0; UNSIGNED=0; TIMEOUT=300
 while [ $# -gt 0 ]; do
   case "$1" in
+    --fresh) FRESH=1 ;;
     --unsigned) UNSIGNED=1 ;;
     --timeout) TIMEOUT="$2"; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
@@ -21,6 +24,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 DEST="${TEST_APPS_DIR:-$HOME/reel-studio-build/Applications-test}"
+PROFILE="$DEST-profile"
 MNT="$(mktemp -d /tmp/rsdmg.XXXXXX)"
 WORK="$(mktemp -d /tmp/rs-mac-install.XXXXXX)"
 RES="$WORK/selftest-result.json"
@@ -60,12 +64,13 @@ check "gatekeeper (spctl)" spctl --assess --type execute --verbose=4 "$APP"
 check "stapled ticket" xcrun stapler validate "$APP"
 
 PRODUCT="${APPNAME%.app}"
+if [ "$FRESH" = 1 ]; then rm -rf "$PROFILE"; echo "emptied test profile: $PROFILE"; fi
 EXE="$APP/Contents/MacOS/$PRODUCT"
-# The app's data folders point into $WORK (removed by cleanup). The self-test isolates itself, but a build
-# without --self-test opens its window instead, and that window must not see the real profile.
+# The app's data folders point into the test profile. The app and packaging/spike both read REELSTUDIO_USER_DATA;
+# a build without --self-test opens its window instead, and that window must not see the real profile either.
 S=$(date +%s)
-REELSTUDIO_USER_DATA="$WORK/user data" REELSTUDIO_ROOT="$WORK/Reel Studio" \
-  REELENGINE_CACHE="$WORK/engine cache" REELENGINE_CACHE_DIR="$WORK/engine cache" \
+REELSTUDIO_USER_DATA="$PROFILE/user data" REELSTUDIO_ROOT="$PROFILE/Reel Studio" \
+  REELENGINE_CACHE="$PROFILE/engine cache" REELENGINE_CACHE_DIR="$PROFILE/engine cache" \
   "$EXE" --self-test --out "$RES" >"$WORK/app.log" 2>&1 &
 PID=$!
 CODE=""
