@@ -197,6 +197,27 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')
   await shot(page, 'd-12-reel-with-ai')
 
+  // ---- AI detection that never answers: the reel still opens at once, only the note box waits ----
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:active')
+    ipcMain.handle('ai:active', () => new Promise(() => {}))
+  })
+  await page.getByTestId('nav-home').click()
+  const opened = Date.now()
+  await page.getByTestId('project-card').first().click()
+  await expect(page.getByTestId('player')).toBeVisible({ timeout: 1000 })
+  await expect(page.getByTestId('export')).toBeEnabled({ timeout: 1000 })
+  await expect(page.getByTestId('edit-myself')).toBeEnabled({ timeout: 1000 })
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const wasPaused = await paused()
+  await page.keyboard.press('Space') // plays or pauses, like on a reel opened normally
+  await expect.poll(paused, { timeout: 1000 }).toBe(!wasPaused)
+  expect(Date.now() - opened).toBeLessThan(1000)
+  await expect(page.getByTestId('note-input')).toBeDisabled()
+  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
+  await expect(page.getByTestId('composer-connect')).toHaveCount(0)
+  await stubConnected(app)
+
   // ---- Library: a drop anywhere on the window lands in the Library ----
   await page.getByTestId('nav-library').click()
   await dropOnWindow(page, [media.song], false)

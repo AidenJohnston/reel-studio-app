@@ -142,10 +142,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     return () => window.removeEventListener(EXPORT_EVENT, fn)
   }, [doExport])
 
-  // Wait for the AI check too: drawn before it, a connected editor flashed the "No AI editor yet" banner.
-  if (!d || !providerChecked) return <div className="page"><Spinner /></div>
+  if (!d) return <div className="page"><Spinner /></div>
 
-  const aiOff = !provider || !provider.connected || provider.id === 'none'
+  // Only the AI-dependent parts (the banner, the note box) wait for the AI check, which can take seconds when a
+  // Claude Code app is probed. Drawn before it, a connected editor flashed the "No AI editor yet" banner.
+  const aiOff = providerChecked && (!provider || !provider.connected || provider.id === 'none')
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
@@ -569,7 +570,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <button
                 className="btn attach-btn"
                 onClick={att.choose}
-                disabled={!!job}
+                disabled={!!job || !providerChecked}
                 aria-label="Attach a picture or a clip"
                 title="Attach a picture or a clip"
                 data-testid="note-attach"
@@ -580,7 +581,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <textarea
                 className="input composer-input"
                 rows={1}
-                placeholder={aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'}
+                placeholder={
+                  !providerChecked ? 'Checking for your AI editor…' : aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'
+                }
                 aria-label="Note for your editor"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -591,7 +594,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     void send()
                   }
                 }}
-                disabled={!!job}
+                disabled={!!job || !providerChecked}
                 data-testid="note-input"
               />
               {aiOff && !note.trim() && (
