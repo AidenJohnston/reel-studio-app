@@ -40,6 +40,7 @@ test('see it on: phone shapes, Instagram view on each, remembered', async () => 
     // Working: the take's first frame fades in over paper.
     await expect(page.getByTestId('working-frame')).toHaveClass(/shown/, { timeout: 60_000 })
     await expect(page.getByTestId('working-screen')).not.toHaveClass(/waiting/)
+    await expect(page.getByTestId('working-spinner')).toHaveCount(0) // the spinner shows only until the footage is in
     await expect(page.getByTestId('player')).toBeVisible({ timeout: 10 * 60_000 })
     await expect(page.getByTestId('export')).toBeEnabled({ timeout: 10 * 60_000 })
     await pauseAt(page, 3)

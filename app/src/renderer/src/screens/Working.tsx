@@ -146,6 +146,11 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
                     data-testid="working-frame"
                   />
                 )}
+                {!source && running && (
+                  <div className="phone-empty" data-testid="working-spinner">
+                    <Spinner />
+                  </div>
+                )}
                 {running && <div className="phone-scan" aria-hidden />}
               </div>
             </div>
