@@ -14,7 +14,7 @@ import { SiwcAuth } from './providers/siwc';
 import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
-import { CONNECTION_KINDS, ConnectionKind, listConnectionModels, noRedirectFetch, normalizeBaseURL } from './providers/connection';
+import { CONNECTION_KINDS, ConnectionKind, listConnectionModels, noRedirectFetch, normalizeBaseURL, suggestedModel } from './providers/connection';
 import { OpenAICompatibleProvider } from './providers/openaiCompatible';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import * as editor from './editor';
@@ -32,7 +32,7 @@ export { OpenAIResponsesProvider, listChatGPTModels, mapResponsesError } from '.
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 export { ReplayProvider, RecordingProvider } from './providers/replay';
 export { OpenAICompatibleProvider, toChatMessages, fromChatCompletion } from './providers/openaiCompatible';
-export { CONNECTION_KINDS, listConnectionModels, mapConnectionError, normalizeBaseURL } from './providers/connection';
+export { CONNECTION_KINDS, listConnectionModels, mapConnectionError, normalizeBaseURL, suggestedModel } from './providers/connection';
 export type { ConnectionKind } from './providers/connection';
 export { detectLocalClaude, findClaude, claudeCandidates, claudeFromLoginShell, CLAUDE_CODE_MESSAGES } from './providers/localClaude';
 export type { LocalClaude, ClaudeCodeState } from './providers/localClaude';
@@ -63,6 +63,8 @@ export interface ConnectionInput {
   /** a new key; empty or missing keeps the stored one when editing; null removes it */
   key?: string | null;
 }
+/** The models a server reports and the one to preselect (null: none Reel Studio knows, the person picks). */
+export interface ConnectionModels { models: string[]; suggested: string | null }
 /** Which field the person should fix. */
 export type ConnectionField = 'label' | 'address' | 'key' | 'model';
 export interface SaveConnectionResult {
@@ -373,12 +375,13 @@ export function createAI(opts: CreateAIOptions) {
       ...(wasActive ? { active: undefined } : {}),
     });
   }
-  async function connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]> {
-    if (!(q.kind in CONNECTION_KINDS)) return [];
+  async function connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<ConnectionModels> {
+    if (!(q.kind in CONNECTION_KINDS)) return { models: [], suggested: null };
     // a saved key only goes to the address it was saved for
     const saved = q.id ? (await settings()).connections?.find((c) => c.id === q.id) : undefined;
     const key = q.key?.trim() || (saved && sameOrigin(saved.baseURL, q.baseURL) ? await readSecret(connectionSecret(saved.id)) : null);
-    try { return await listConnectionModels(q.kind, q.baseURL, key, { fetch: opts.fetch }); } catch { return []; }
+    const models = await listConnectionModels(q.kind, q.baseURL, key, { fetch: opts.fetch }).catch(() => []);
+    return { models, suggested: suggestedModel(models) };
   }
 
   return {
@@ -458,7 +461,7 @@ export function createAI(opts: CreateAIOptions) {
     },
     /** The models a server reports, for the model list while adding a connection. Empty when it does not say.
      * `key` empty with `id` set uses that connection's stored key (it never leaves this process). */
-    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]> {
+    connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<ConnectionModels> {
       return oneAtATime(() => connectionModels(q));
     },
     async setModel(which: 'claude' | 'chatgpt' | 'cli', model: string | null): Promise<void> {

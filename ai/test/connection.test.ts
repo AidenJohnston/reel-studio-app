@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as http from 'node:http';
-import { AIError, createAI, OpenAICompatibleProvider, SecretStore, listConnectionModels, mapConnectionError, normalizeBaseURL } from '../src';
+import { AIError, createAI, OpenAICompatibleProvider, SecretStore, listConnectionModels, mapConnectionError, normalizeBaseURL, suggestedModel } from '../src';
 import { AnthropicProvider } from '../src/providers/anthropic';
 import { toChatMessages } from '../src/providers/openaiCompatible';
 import { MockCompatible } from './mockCompatible';
@@ -218,6 +218,12 @@ describe('what reaches the person\'s server, and what comes back', () => {
 });
 
 describe('model list', () => {
+  it('preselects the preferred model, not the first one listed, and nothing when none is known', () => {
+    expect(suggestedModel(['claude-3-5-haiku-20241022', 'gpt-5.6-luna', 'claude-sonnet-4-5-20250929', 'claude-sonnet-5-5', 'claude-opus-5'])).toBe('claude-sonnet-5-5');
+    expect(suggestedModel(['claude-3-5-haiku-20241022', 'anthropic/claude-sonnet-4-5-20250929'])).toBe('anthropic/claude-sonnet-4-5-20250929');
+    expect(suggestedModel(['claude-3-5-haiku-20241022', 'llama-3.3-70b'])).toBeNull();
+  });
+
   it('reads GET /models when the server answers it, else nothing', async () => {
     expect(await listConnectionModels('openai', `${mock.origin}/v1`, KEY)).toEqual(['mock-small', 'mock-large']);
     expect(mock.requests.at(-1)!.headers.authorization).toBe(`Bearer ${KEY}`);
@@ -303,10 +309,10 @@ describe('saved connections (createAI)', () => {
       const moved = await ai.saveConnection({ id, label: 'Home', kind: 'openai', baseURL: `${other.origin}/v1`, model: 'mock-small' });
       expect(moved.error).toMatchObject({ code: 'connection_key_new_address', field: 'key' });
       expect(other.requests).toEqual([]);
-      expect(await ai.connectionModels({ id, kind: 'openai', baseURL: `${other.origin}/v1` })).toEqual([]);
+      expect((await ai.connectionModels({ id, kind: 'openai', baseURL: `${other.origin}/v1` })).models).toEqual([]);
       expect(other.requests.every((q) => !q.headers.authorization)).toBe(true);
       // the stored key does go to its own address for the model list
-      expect(await ai.connectionModels({ id, kind: 'openai', baseURL: `${mock.origin}/v1` })).toEqual(['mock-small', 'mock-large']);
+      expect((await ai.connectionModels({ id, kind: 'openai', baseURL: `${mock.origin}/v1` })).models).toEqual(['mock-small', 'mock-large']);
     } finally { await other.stop(); }
 
     await ai.removeConnection(id);

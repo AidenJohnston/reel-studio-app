@@ -72,8 +72,11 @@ export function Connections({ onConnected }: { onConnected: (p: ProviderInfo) =>
                   <span className="conn-label">{c.label}</span>
                   {c.active && <span className="badge ready">In use</span>}
                 </div>
-                <div className="conn-meta" title={`${c.model} · ${c.baseURL}`}>
-                  {KINDS.find((k) => k.kind === c.kind)?.label} · {c.model} · {c.baseURL}
+                <div className="conn-model" title={c.model} data-testid="connection-card-model">
+                  Model: {c.model}
+                </div>
+                <div className="conn-meta" title={c.baseURL}>
+                  {KINDS.find((k) => k.kind === c.kind)?.label} · {c.baseURL}
                 </div>
                 <div className="conn-meta">{c.hasKey ? 'Key stored separately, encrypted on this computer.' : 'No key.'}</div>
               </div>
@@ -133,6 +136,8 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
   const [key, setKey] = useState('')
   const [model, setModel] = useState(editing?.model ?? '')
   const [models, setModels] = useState<string[] | null>(null)
+  // the model Reel Studio prefers among the server's (ai/src/providers/connection.ts PREFERRED_MODELS), or null
+  const [suggested, setSuggested] = useState<string | null>(null)
   const [looking, setLooking] = useState(false)
   const [customModel, setCustomModel] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -161,8 +166,10 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
     try {
       const found = await reel.ai.connectionModels({ kind, baseURL: baseURL.trim(), key: key.trim() || undefined, id: editing?.id })
       if (lookedUp.current !== q) return
-      setModels(found)
-      if (found.length && !modelNow.current.trim()) setModel(found[0])
+      setModels(found.models)
+      setSuggested(found.suggested)
+      // never the first one listed: server order says nothing about quality. No known model: the person picks.
+      if (found.suggested && !modelNow.current.trim()) setModel(found.suggested)
     } catch {
       setModels([])
     } finally {
@@ -199,7 +206,7 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
   const save = async () => {
     if (busy) return
     if (!baseURL.trim()) return showError('Enter the server address.', 'address')
-    if (!model.trim()) return showError('Enter a model name.', 'model')
+    if (!model.trim()) return showError(models?.length && !customModel ? 'Pick a model from the list.' : 'Enter a model name.', 'model')
     setBusy(true)
     setError(null)
     try {
@@ -355,7 +362,7 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
             className="input"
             value={models!.includes(model) ? model : ''}
             aria-invalid={invalid('model')}
-            aria-describedby={invalid('model') ? 'conn-error' : undefined}
+            aria-describedby={describedBy('model', 'conn-model-help')}
             onChange={(e) => change('model', setModel)(e.target.value)}
             data-testid="connection-model-list"
           >
@@ -384,11 +391,15 @@ export function ConnectionDialog({ editing, onClose, onSaved }: { editing: Conne
             data-testid="connection-model"
           />
         )}
-        {!modelList && (
-          <p id="conn-model-help" className="muted-sm">
-            {models && !models.length ? "No models reported by this server yet. Type the model's name." : "Type the model's name, or fill in the address to pick from a list."}
-          </p>
-        )}
+        <p id="conn-model-help" className="muted-sm" data-testid="connection-model-help">
+          {modelList
+            ? model && model === suggested
+              ? 'Suggested: the newest model Reel Studio knows on this server.'
+              : "Pick the newest, largest model. The first one listed is often an old, small one."
+            : models && !models.length
+              ? "No models reported by this server yet. Type the model's name."
+              : "Type the model's name, or fill in the address to pick from a list."}
+        </p>
       </div>
     </div>
   ]

@@ -114,7 +114,9 @@ test('add a connection to your own AI server from Settings', async () => {
     // the right key: the server's models fill the list
     await page.getByTestId('connection-key').fill(KEY)
     await page.getByTestId('connection-key').blur()
+    // the model typed earlier stays chosen; none of the mock's models is one Reel Studio knows, so no suggestion
     await expect(page.getByTestId('connection-model-list')).toHaveValue('mock-small')
+    await expect(page.getByTestId('connection-model-help')).toHaveText('Pick the newest, largest model. The first one listed is often an old, small one.')
     await snap(page, '05-add-details')
     await page.getByTestId('connection-save').click()
     await expect(dialog).toHaveCount(0)
@@ -127,7 +129,8 @@ test('add a connection to your own AI server from Settings', async () => {
     await expect(card).toHaveCount(1)
     await expect(card).toContainText('Work')
     await expect(card).toContainText('In use')
-    await expect(card).toContainText(`OpenAI-compatible · mock-small · ${origin}/v1`)
+    await expect(card.getByTestId('connection-card-model')).toHaveText('Model: mock-small')
+    await expect(card).toContainText(`OpenAI-compatible · ${origin}/v1`)
     await card.scrollIntoViewIfNeeded()
     await snap(page, '06-saved-card')
 

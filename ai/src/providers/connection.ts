@@ -101,6 +101,25 @@ export async function readBody(res: Response): Promise<unknown> {
   try { return JSON.parse(text); } catch { return text.slice(0, 300); }
 }
 
+/** Models to suggest when the server lists them, best first. The servers' own list order says nothing about
+ * quality (CLIProxyAPI lists claude-3-5-haiku first), so the first entry is never picked blindly. The list holds the
+ * family Reel Studio's built-in Claude providers use: Sonnet (DEFAULT_CLAUDE_MODEL for a Claude key, the `sonnet`
+ * alias for the Claude Code app), newest first. ChatGPT sign-in has no fixed model (it takes the account's own list),
+ * so no GPT model is here. Add a model when a built-in provider moves to it. */
+export const PREFERRED_MODELS = ['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5'];
+
+/** The first preferred model the server offers, matched exactly, with a date suffix (claude-sonnet-4-5-20250929)
+ * or behind a provider prefix (anthropic/claude-sonnet-5-5). null when none is offered: the person picks. */
+export function suggestedModel(models: string[]): string | null {
+  // drop a provider prefix and a date suffix, then compare whole names
+  const bare = (m: string) => m.slice(m.lastIndexOf('/') + 1).replace(/-\d{8}$/, '');
+  for (const want of PREFERRED_MODELS) {
+    const hit = models.find((m) => bare(m) === want);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export interface ConnectionModelsOptions { fetch?: typeof fetch; timeoutMs?: number }
 
 /** The models the server reports (GET {base}/models for OpenAI-compatible, {base}/v1/models for Anthropic-compatible).

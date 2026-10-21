@@ -428,6 +428,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .conn-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .conn-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .conn-label { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-model { font-size: 14px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-meta { font-size: 13px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-card .more > .icon-btn { width: 36px; height: 36px; border: 0; background: transparent; }
 .conn-card .more > .icon-btn:hover { background: var(--soft); }

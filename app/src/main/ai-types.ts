@@ -117,7 +117,7 @@ export interface AI {
   connections?(): Promise<ConnectionInfo[]>
   saveConnection?(input: ConnectionInput): Promise<SaveConnectionResult>
   removeConnection?(id: string): Promise<void>
-  connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<string[]>
+  connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null }>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void
 }

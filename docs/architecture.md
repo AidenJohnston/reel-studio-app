@@ -303,7 +303,7 @@ export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: bo
   saveConnection(c: { id?: string; label: string; kind: 'anthropic' | 'openai'; baseURL: string; model: string; key?: string | null }):
     Promise<{ status: ProviderStatus; connection?: ConnectionInfo; error?: UserFacingError & { field?: 'label' | 'address' | 'key' | 'model' } }>; // checks first
   removeConnection(id: string): Promise<void>;
-  connectionModels(q: { kind: 'anthropic' | 'openai'; baseURL: string; key?: string; id?: string }): Promise<string[]>; // [] when the server does not say
+  connectionModels(q: { kind: 'anthropic' | 'openai'; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null }>; // suggested: first of PREFERRED_MODELS the server lists, never just its first
   claudeCodeStatus(): Promise<{ state: 'missing' | 'broken' | 'signed_out' | 'ready'; version?: string; plan?: string }>; // the person's own Claude Code app, a fresh look
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>;
   applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal,
