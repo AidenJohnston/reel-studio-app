@@ -35,6 +35,10 @@ packaging/sign-mac.sh             # run in a GUI session: sign + notarize + stap
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.
 
+After you publish a release (not a pre-release) with the DMG attached, the `Homebrew cask` workflow commits the
+new version and DMG checksum to `Casks/reel-studio.rb` on `main`. Pull before your next commit. If you attached the
+DMG after publishing, run the workflow by hand from the Actions tab with the tag.
+
 ## What the installed app looks like (the contract with `app/`)
 
 `process.resourcesPath` contains real folders (extraResources, not inside asar):

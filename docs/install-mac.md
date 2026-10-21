@@ -53,6 +53,8 @@ Reel Studio does not update itself yet, but it tells you when a new version is o
 same page you got the first one from (the version number is in the file name), drag the new **Reel Studio** onto
 **Applications** and choose **Replace**. Your videos, music and settings are untouched. Only download it from that page.
 
+If you installed it with Homebrew, run `brew upgrade reel-studio` in Terminal instead.
+
 ## Removing it
 
 Drag **Reel Studio** from **Applications** to the Trash. Your **Documents > Reel Studio** folder is left alone, so you never lose your videos by accident.
