@@ -404,7 +404,6 @@ export interface ReelApi {
     openRelease(): Promise<void>
     busy(): Promise<UpdateBusy>
     dismiss(version: string): Promise<UpdateState>
-    status(): Promise<{ enabled: boolean }>
-    setEnabled(on: boolean): Promise<{ enabled: boolean }>
+    setEnabled(on: boolean): Promise<void>
   }
 }

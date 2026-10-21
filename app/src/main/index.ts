@@ -137,7 +137,8 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  () => updates.assertCanStartWork()
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // ---- updates (main/updater.ts) -------------------------------------------------------------------
@@ -557,6 +558,7 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', async (_e, slug: string, n: number) => {
+    updates.assertCanStartWork()
     exportsWriting++ // the updater will not restart the app while an export writes its file
     try {
       return await exportVersion(slug, n)
@@ -628,7 +630,6 @@ function registerIpc(): void {
   handle('update:openRelease', () => updates.openRelease())
   handle('update:busy', updateBusy)
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
-  handle('update:status', () => updates.status())
   handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
 
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {

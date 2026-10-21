@@ -115,6 +115,7 @@ mac:
   # Unsigned here on purpose. packaging/sign-mac.sh signs every nested binary inside-out, notarizes and staples.
   identity: null
   extendInfo:
+    ElectronSquirrelPreventDowngrades: true
     NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
 
 dmg:

@@ -1,11 +1,13 @@
+import { createJobManager } from '../src/main/jobs'
+import type { FoundUpdate } from '../src/main/update-check'
 import { describe, expect, it, vi } from 'vitest'
-import { createUpdater, type FoundUpdate, type UpdateBackend } from '../src/main/updater'
-import { CHECK_INTERVAL_MS, SNOOZE_MS, updateMode, type UpdateMemory } from '../src/main/update-machine'
+import { createUpdater, type UpdateBackend } from '../src/main/updater'
+import { updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction } from '../src/shared/update'
 
 function setup(
   found: () => Promise<FoundUpdate | null>,
-  opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; memory?: Partial<UpdateMemory> } = {}
+  opts: { download?: (p: (n: number) => void) => Promise<void>; exporting?: boolean; prepareToQuit?: () => Promise<void>; load?: () => Promise<UpdateMemory>; memory?: Partial<UpdateMemory> } = {}
 ) {
   const installs: number[] = []
   let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
@@ -20,10 +22,10 @@ function setup(
     mode: 'install',
     disabledReason: null,
     backend,
-    load: async () => memory,
+    load: opts.load ?? (async () => memory),
     save: async (patch) => void (memory = { ...memory, ...patch }),
     busy: () => ({ exporting: !!opts.exporting, working: 0 }),
-    prepareToQuit: async () => undefined,
+    prepareToQuit: opts.prepareToQuit ?? (async () => undefined),
     openExternal: async () => undefined,
     send: () => {},
     log: () => {},
@@ -32,7 +34,7 @@ function setup(
   return { u, installs, memory: () => memory, tick: (ms: number) => void (now += ms) }
 }
 
-const v013: FoundUpdate = { version: '0.1.3', notes: '## What\'s new\n\n* **Updates install themselves.** More text.\n', releaseUrl: null }
+const v013: FoundUpdate = { version: '0.1.3', notes: '## What\'s new\n\n* **Updates install themselves.** More text.\n', releaseUrl: 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3' }
 
 describe('state machine', () => {
   it('fails if a later check hides an already downloaded update', async () => {
@@ -90,7 +92,7 @@ describe('once a day', () => {
     try {
       let asks = 0
       const hour = 60 * 60 * 1000
-      const { u } = setup(async () => (asks++, null), { memory: { updateCheckedAt: 1000 - CHECK_INTERVAL_MS + hour } })
+      const { u } = setup(async () => (asks++, null), { memory: { updateCheckedAt: 1000 - 86_400_000 + hour } })
       await u.init()
       u.start()
       await vi.advanceTimersByTimeAsync(hour - 1)
@@ -162,7 +164,7 @@ describe('turning "Check for updates" back on', () => {
     expect(u.state().availableVersion).toBeNull()
     await u.setEnabled(true)
     expect(u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, snoozed: true })
-    tick(SNOOZE_MS)
+    tick(86_400_000)
     await u.setEnabled(false)
     expect(showsUpdateButton(u.state())).toBe(false)
   })
@@ -183,13 +185,68 @@ describe('"Not now"', () => {
     await u.check('test')
     expect(showsUpdateButton(u.state())).toBe(true)
 
-    await u.dismiss('0.1.4')
-    tick(SNOOZE_MS)
-    await u.check('test')
-    expect(showsUpdateButton(u.state())).toBe(true)
+    vi.useFakeTimers()
+    try {
+      await u.dismiss('0.1.4')
+      tick(86_399_999)
+      await vi.advanceTimersByTimeAsync(86_399_999)
+      expect(showsUpdateButton(u.state())).toBe(false)
+      tick(2)
+      await vi.advanceTimersByTimeAsync(2)
+      expect(showsUpdateButton(u.state())).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
 it('fails if Windows offers in-app installation', () => {
   expect(updateMode({ platform: 'win32', inApplications: true })).toBe('page')
+})
+
+it('fails if Download or Restart is dropped during a background check', async () => {
+  let finish: ((value: FoundUpdate | null) => void) | undefined
+  let slow = false
+  const { u, installs } = setup(() => slow ? new Promise((resolve) => { finish = resolve }) : Promise.resolve(v013))
+  await u.check('first')
+  slow = true
+  const checking = u.check('background')
+  const downloading = u.download()
+  finish!(v013)
+  await checking
+  expect((await downloading).state.downloadedVersion).toBe('0.1.3')
+  const nextCheck = u.check('background')
+  const installing = u.install()
+  finish!(v013)
+  await nextCheck
+  expect((await installing).accepted).toBe(true)
+  expect(installs).toHaveLength(1)
+})
+
+it('fails if new work is allowed during restart preparation or remains blocked after failure', async () => {
+  let fail!: (error: Error) => void
+  let releaseRead!: () => void
+  let reading!: () => void
+  const readStarted = new Promise<void>((resolve) => { reading = resolve })
+  const { u } = setup(async () => v013, {
+    prepareToQuit: () => new Promise((_resolve, reject) => { fail = reject }),
+    load: () => new Promise((resolve) => {
+      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null })
+      reading()
+    })
+  })
+  const enabling = u.setEnabled(true)
+  await readStarted
+  await u.check('first')
+  await u.download()
+  const installing = u.install()
+  releaseRead()
+  await enabling
+  expect(u.state().status).toBe('installing')
+  const jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
+  expect(() => jobs.start(null, 'rerender', async () => ({ summary: '' }))).toThrow(expect.objectContaining({ code: 'UPDATING' }))
+  expect(jobs.runningCount()).toBe(0)
+  fail(new Error('shutdown failed'))
+  await installing
+  expect(() => u.assertCanStartWork()).not.toThrow()
 })

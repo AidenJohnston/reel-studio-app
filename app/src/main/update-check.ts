@@ -3,9 +3,9 @@ import { RELEASES_REPO } from '../shared/config'
 import type { UpdateBackend } from './updater'
 
 /** The newest app release on GitHub: its version, release page and raw markdown notes. */
-export interface ReleaseFound {
+export interface FoundUpdate {
   version: string
-  url: string
+  releaseUrl: string
   notes: string | null
 }
 
@@ -68,7 +68,7 @@ export const pageFor = (tag: string): string => `${RELEASE_PAGE_ORIGIN}${RELEASE
 
 /** The newest app release in GitHub's releases list, or null. Drafts and non-app tags are ignored;
  * pre-releases count (every release is a pre-release for now). Never throws on odd data. */
-export function newestRelease(list: unknown): ReleaseFound | null {
+export function newestRelease(list: unknown): FoundUpdate | null {
   if (!Array.isArray(list)) return null
   let best: { t: Triple; tag: string; url: unknown; body: unknown } | null = null
   for (const r of list) {
@@ -81,7 +81,7 @@ export function newestRelease(list: unknown): ReleaseFound | null {
   }
   if (!best) return null
   // The API's link is used only if it points at our releases; otherwise build the page link ourselves.
-  return { version: best.t.join('.'), url: allowedReleaseUrl(best.url) ?? pageFor(best.tag), notes: typeof best.body === 'string' ? best.body : null }
+  return { version: best.t.join('.'), releaseUrl: allowedReleaseUrl(best.url) ?? pageFor(best.tag), notes: typeof best.body === 'string' ? best.body : null }
 }
 
 // ---- the request ---------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ export type FetchLike = (url: string, init: { headers: Record<string, string>; s
   json(): Promise<unknown>
 }>
 
-export type AskResult = { kind: 'ok'; latest: ReleaseFound | null } | { kind: 'rate-limited' } | { kind: 'failed'; why: string }
+export type AskResult = { kind: 'ok'; latest: FoundUpdate | null } | { kind: 'rate-limited' } | { kind: 'failed'; why: string }
 
 /** The exact headers sent. Nothing else: no token, no cookie, no machine or user detail. */
 export function requestHeaders(appVersion: string): Record<string, string> {
@@ -119,7 +119,7 @@ export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutM
 /** The newest app release if it is newer than `appVersion`, else null. Throws when GitHub could not tell
  * (a rate limit carries statusCode 429, so the updater waits a day). `url` is the releases list (a local
  * server in the update e2e). */
-export async function newerRelease(fetchFn: FetchLike, appVersion: string, url = RELEASES_API): Promise<ReleaseFound | null> {
+export async function newerRelease(fetchFn: FetchLike, appVersion: string, url = RELEASES_API): Promise<FoundUpdate | null> {
   const r = await askGitHub(fetchFn, appVersion, TIMEOUT_MS, url)
   if (r.kind === 'rate-limited') throw Object.assign(new Error('GitHub rate limit'), { statusCode: 429 })
   if (r.kind === 'failed') throw new Error(r.why)
@@ -129,10 +129,7 @@ export async function newerRelease(fetchFn: FetchLike, appVersion: string, url =
 // Windows keeps the release-page route regardless of signing metadata.
 export function releasePageBackend(fetchFn: FetchLike, appVersion: string): UpdateBackend {
   return {
-    async check() {
-      const found = await newerRelease(fetchFn, appVersion)
-      return found && { version: found.version, notes: found.notes, releaseUrl: found.url }
-    },
+    check: () => newerRelease(fetchFn, appVersion),
     download: () => Promise.reject(new Error('This copy opens the download page instead of downloading.')),
     install() {
       throw new Error('This copy opens the download page instead of installing.')

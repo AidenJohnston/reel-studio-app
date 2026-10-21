@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
@@ -13,7 +17,7 @@ class FakeUpdater extends EventEmitter implements UpdaterLike {
   requestHeaders: UpdaterLike['requestHeaders'] = null
   forceDevUpdateConfig = false
   updateConfigPath: string | null = null
-  constructor(private yml: UpdateInfo) {
+  constructor(private yml: UpdateInfo, private zip = '') {
     super()
   }
   setFeedURL(): void {}
@@ -21,7 +25,7 @@ class FakeUpdater extends EventEmitter implements UpdaterLike {
     return { isUpdateAvailable: true, updateInfo: this.yml, versionInfo: this.yml }
   }
   async downloadUpdate(): Promise<string[]> {
-    return []
+    return [this.zip]
   }
   quitAndInstall(): void {}
 }
@@ -47,4 +51,28 @@ describe('the Mac backend', () => {
     })
     await expect(backend.check()).rejects.toThrow(/0\.1\.4/)
   })
+})
+
+it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismatched or downgraded bundle', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rs-update-bundle-'))
+  try {
+    const app = join(root, 'Reel Studio.app')
+    mkdirSync(join(app, 'Contents'), { recursive: true })
+    for (const version of ['0.1.4', '0.1.1', '0.1.3']) {
+      writeFileSync(join(app, 'Contents', 'Info.plist'), `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`)
+      const zip = join(root, version + '.zip')
+      execFileSync('/usr/bin/ditto', ['-c', '-k', '--keepParent', app, zip])
+      const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' }, zip)
+      let installed = false
+      updater.quitAndInstall = () => { installed = true }
+      const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {} })
+      await backend.check()
+      await backend.download(() => {})
+      if (version === '0.1.3') await backend.install()
+      else await expect(Promise.resolve().then(() => backend.install())).rejects.toThrow(/bundle version/)
+      expect(installed).toBe(version === '0.1.3')
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

@@ -1,5 +1,6 @@
 import { useId, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { installQuestion, updateAction, type InstallQuestion, type UpdateState } from '../../../shared/update'
+import { updateAction, type UpdateState } from '../../../shared/update'
+import { installQuestion, type InstallQuestion } from './update-copy'
 import { reel, userMessage } from '../api'
 import { useNotify } from '../App'
 import { Confirm, Modal } from './ui'
@@ -55,7 +56,9 @@ export function useUpdateActions(): { act: (s: UpdateState) => Promise<void>; pe
     if (pending) return
     const a = updateAction(s)
     if (a === 'open-page') return openReleasePage(notify)
-    if (a === 'download') return run(async () => void (await reel.update.download()))
+    if (a === 'download') return run(async () => {
+      if (!(await reel.update.download()).accepted) notify('The update changed while checking. Choose its action again.', 'info')
+    })
     if (a === 'install') {
       const busy = await reel.update.busy().catch(() => ({ exporting: false, working: 0 }))
       setQuestion(installQuestion(s, busy))
@@ -71,7 +74,8 @@ export function useUpdateActions(): { act: (s: UpdateState) => Promise<void>; pe
     setQuestion(null)
     void run(async () => {
       const r = await reel.update.install()
-      if (r.refused === 'exporting') notify('Your export is still saving. Restart to update when it is done.', 'error')
+      if (!r.accepted && !r.refused) notify('The update changed while checking. Choose its action again.', 'info')
+      else if (r.refused === 'exporting') notify('Your export is still saving. Restart to update when it is done.', 'error')
       else if (r.accepted && r.state.status !== 'error') notify('Installing the update. Reel Studio closes and opens again in a moment.')
     })
   }

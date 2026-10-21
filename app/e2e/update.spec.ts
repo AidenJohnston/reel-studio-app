@@ -1,7 +1,7 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -106,7 +106,8 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(button).toContainText('Download update')
     await expect(button).toContainText('Version 0.1.3')
     await page.getByTestId('nav-home').click()
-    await button.hover()
+    await page.getByTestId('nav-settings').focus()
+    await page.keyboard.press('Tab')
     const pop = page.getByTestId('update-popover')
     await expect(pop).toHaveAttribute('data-open', 'true')
     await expect(pop).toContainText('Update ready to download')
@@ -146,6 +147,27 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(button).toBeHidden()
     await expect(page.getByTestId('toast')).toContainText('Hidden until tomorrow. You can still update from Settings.')
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
+    const project = join(ROOT, 'Projects', 'update-export')
+    mkdirSync(join(project, 'versions', 'v1'), { recursive: true })
+    writeFileSync(join(project, 'project.json'), JSON.stringify({ title: 'Update export', sources: [] }))
+    writeFileSync(join(project, 'versions', 'v1', 'export.mp4'), 'completed export fixture')
+    await page.evaluate(() => window.reel.projects.exportVersion('update-export', 1))
+    const exportError = await page.evaluate(async () => {
+      const attempt = new Promise<unknown>((resolve) => {
+        const off = window.reel.update.onState((s) => {
+          if (s.status !== 'installing') return
+          off()
+          resolve(window.reel.projects.exportVersion('update-export', 1).then(() => null, (error) => error))
+        })
+      })
+      const installation = window.reel.update.install()
+      const error = await attempt
+      await installation
+      return error
+    })
+    expect(exportError).toMatchObject({ code: 'UPDATING', userMessage: expect.stringContaining('restarting') })
+    // The random-byte download cannot install; work becomes available again after that failure.
+    await page.evaluate(() => window.reel.projects.exportVersion('update-export', 1))
   } finally {
     await app.close()
   }

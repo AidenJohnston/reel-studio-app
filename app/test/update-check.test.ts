@@ -47,12 +47,12 @@ describe('which releases count', () => {
       expect(parseTag(t)).toBeNull()
   })
   it('ignores the ffmpeg tag even though its numbers are bigger', () => {
-    expect(newestRelease([rel('ffmpeg-7.1.1-rs2'), rel('v0.1.0')])).toMatchObject({ version: '0.1.0', url: PAGE('v0.1.0') })
+    expect(newestRelease([rel('ffmpeg-7.1.1-rs2'), rel('v0.1.0')])).toMatchObject({ version: '0.1.0', releaseUrl: PAGE('v0.1.0') })
   })
   it('ignores drafts, and anything that does not say it is not a draft', () => {
     expect(newestRelease([rel('v0.1.0'), rel('v0.2.0', { draft: true }), rel('v0.3.0', { draft: undefined }), rel('v0.4.0', { draft: 'false' })])).toMatchObject({
       version: '0.1.0',
-      url: PAGE('v0.1.0')
+      releaseUrl: PAGE('v0.1.0')
     })
   })
   it('counts pre-releases (every release is one for now) and picks the highest, in any order', () => {
@@ -65,9 +65,9 @@ describe('which releases count', () => {
   it('never passes on a link that is not our release page', () => {
     expect(newestRelease([rel('v0.1.1', { html_url: 'https://evil.example/AidenJohnston/reel-studio-app/releases/tag/v0.1.1' })])).toMatchObject({
       version: '0.1.1',
-      url: PAGE('v0.1.1')
+      releaseUrl: PAGE('v0.1.1')
     })
-    expect(newestRelease([rel('v0.1.1', { html_url: undefined })])?.url).toBe(PAGE('v0.1.1'))
+    expect(newestRelease([rel('v0.1.1', { html_url: undefined })])?.releaseUrl).toBe(PAGE('v0.1.1'))
   })
 })
 

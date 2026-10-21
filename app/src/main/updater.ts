@@ -1,5 +1,5 @@
 import type { MessageBoxOptions } from 'electron'
-import { allowedReleaseUrl, pageFor } from './update-check'
+import { allowedReleaseUrl, pageFor, type FoundUpdate } from './update-check'
 import { releaseNotesFrom } from './release-notes'
 import {
   FIRST_CHECK_DELAY_MS,
@@ -7,17 +7,7 @@ import {
   BUSY_RETRY_MS,
   isSnoozed,
   nextCheckIn,
-  onAvailable,
-  onCheckFailed,
-  onCheckStart,
-  onDownloadFailed,
-  onDownloaded,
-  onDownloadProgress,
-  onDownloadStart,
-  onInstallFailed,
-  onUpToDate,
   plainError,
-  progressWorthSending,
   SNOOZE_MS,
   stillNewer,
   validDismissal,
@@ -27,16 +17,10 @@ import {
 } from './update-machine'
 import { initialUpdateState, updateAction, type UpdateActionResult, type UpdateBusy, type UpdateMode, type UpdateState } from '../shared/update'
 
-export interface FoundUpdate {
-  version: string
-  notes: string | null
-  releaseUrl: string | null
-}
-
 export interface UpdateBackend {
   check(): Promise<FoundUpdate | null>
   download(onProgress: (percent: number) => void): Promise<void>
-  install(): void
+  install(): void | Promise<void>
 }
 
 export interface UpdaterDeps {
@@ -61,6 +45,7 @@ const why = (e: unknown): string => String(e instanceof Error ? e.message : e).s
 export function createUpdater(d: UpdaterDeps) {
   let state = initialUpdateState(d.version, d.mode, true, d.disabledReason)
   let active: Action | null = null
+  let checking: Promise<CheckOutcome | null> | null = null
   let lastAnswered: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let started = false
@@ -89,11 +74,18 @@ export function createUpdater(d: UpdaterDeps) {
     if (found) {
       const url = allowedReleaseUrl(found.releaseUrl) ?? pageFor(`v${found.version}`)
       const notes = releaseNotesFrom(found.notes, found.version)
-      set(onAvailable(state, found.version, notes, url))
+      const downloaded = state.downloadedVersion === found.version
+      set({
+        ...state, status: downloaded ? 'downloaded' : 'available', availableVersion: found.version,
+        downloadedVersion: downloaded ? found.version : null, releaseNotes: notes ?? (downloaded ? state.releaseNotes : null),
+        releaseUrl: url, downloadPercent: downloaded ? 100 : null, message: null, errorContext: null
+      })
       remember({ updateLatest: { version: found.version, url, notes } })
       d.log(`[update] ${found.version} is available`)
     } else {
-      set(onUpToDate(state))
+      set(state.downloadedVersion
+        ? { ...state, status: 'downloaded', availableVersion: state.downloadedVersion, downloadPercent: 100, message: null, errorContext: null }
+        : { ...initialUpdateState(d.version, d.mode, state.autoCheck, null), status: 'up-to-date' })
       if (state.status === 'up-to-date') remember({ updateLatest: null })
       d.log('[update] up to date')
     }
@@ -117,7 +109,7 @@ export function createUpdater(d: UpdaterDeps) {
   function offerRemembered(base: UpdateState, latest: unknown): UpdateState {
     const kept = stillNewer(latest, d.version)
     if (!kept || !enabled()) return base
-    return onAvailable(base, kept.version, kept.notes ?? null, kept.url)
+    return { ...base, status: 'available', availableVersion: kept.version, releaseNotes: kept.notes ?? null, releaseUrl: kept.url }
   }
 
   function answered(): void {
@@ -125,18 +117,24 @@ export function createUpdater(d: UpdaterDeps) {
     remember({ updateCheckedAt: lastAnswered })
   }
 
-  async function runCheck(reason: string): Promise<CheckOutcome | null> {
+  function runCheck(reason: string): Promise<CheckOutcome | null> {
+    if (checking) return checking
+    checking = performCheck(reason).finally(() => { checking = null })
+    return checking
+  }
+
+  async function performCheck(reason: string): Promise<CheckOutcome | null> {
     if (!enabled() || active || state.status === 'downloading') return null
     active = 'check'
     fresh = false
-    set(onCheckStart(state))
+    if (!state.availableVersion) set({ ...state, status: 'checking', message: null, errorContext: null })
     d.log(`[update] checking (${reason}), running ${d.version}`)
     try {
       applyFound(await d.backend!.check())
       answered()
       return 'answered'
     } catch (e) {
-      set(onCheckFailed(state, plainError('check', e)))
+      if (!state.availableVersion) set({ ...state, status: 'error', message: plainError('check', e), errorContext: 'check' })
       d.log(`[update] check failed: ${why(e)}`)
       if (!isRateLimited(e)) return 'failed'
       answered()
@@ -160,7 +158,7 @@ export function createUpdater(d: UpdaterDeps) {
   function installFailed(e: unknown): void {
     if (active !== 'install') return
     active = null
-    set(onInstallFailed(state, plainError('install', e)))
+    set({ ...state, status: 'error', message: plainError('install', e), errorContext: 'install' })
     d.log(`[update] install failed: ${why(e)}`)
     start()
   }
@@ -194,10 +192,11 @@ export function createUpdater(d: UpdaterDeps) {
     },
 
     async download(): Promise<UpdateActionResult> {
+      if (checking) await checking
       if (active || updateAction(state) !== 'download' || state.mode !== 'install') return { accepted: false, state }
       active = 'download'
       const version = state.availableVersion!
-      set(onDownloadStart(state))
+      set({ ...state, status: 'downloading', downloadPercent: 0, message: null, errorContext: null })
       d.log(`[update] downloading ${version}`)
       try {
         if (!fresh) {
@@ -209,12 +208,13 @@ export function createUpdater(d: UpdaterDeps) {
           fresh = true
         }
         await d.backend!.download((p) => {
-          if (progressWorthSending(state, p)) set(onDownloadProgress(state, p))
+          const percent = Number.isFinite(p) ? Math.min(100, Math.max(0, p)) : 0
+          if (Math.floor(percent) !== Math.floor(state.downloadPercent ?? -1)) set({ ...state, downloadPercent: percent })
         })
-        set(onDownloaded(state, version))
+        set({ ...state, status: 'downloaded', availableVersion: version, downloadedVersion: version, downloadPercent: 100, message: null, errorContext: null })
         d.log(`[update] downloaded ${version}`)
       } catch (e) {
-        set(onDownloadFailed(state, plainError('download', e)))
+        set({ ...state, status: 'error', message: plainError('download', e), downloadPercent: null, errorContext: 'download' })
         d.log(`[update] download failed: ${why(e)}`)
       } finally {
         active = null
@@ -223,14 +223,16 @@ export function createUpdater(d: UpdaterDeps) {
     },
 
     async install(): Promise<UpdateActionResult> {
+      if (checking) await checking
       if (active || updateAction(state) !== 'install') return { accepted: false, state }
       if (d.busy().exporting) return { accepted: false, state, refused: 'exporting' }
       active = 'install'
+      set({ ...state, status: 'installing' })
       d.log(`[update] installing ${state.downloadedVersion}`)
       stop()
       try {
         await d.prepareToQuit()
-        d.backend!.install()
+        await d.backend!.install()
       } catch (e) {
         installFailed(e)
       }
@@ -253,16 +255,17 @@ export function createUpdater(d: UpdaterDeps) {
       return state
     },
 
-    status: (): { enabled: boolean } => ({ enabled: state.autoCheck }),
+    assertCanStartWork(): void {
+      if (active === 'install') throw { code: 'UPDATING', userMessage: 'Reel Studio is restarting to install an update. Try again after it opens.' }
+    },
 
-    async setEnabled(on: unknown): Promise<{ enabled: boolean }> {
+    async setEnabled(on: unknown): Promise<void> {
       const autoCheck = on === true
       await d.save({ checkUpdates: autoCheck })
-      let next: UpdateState = { ...state, autoCheck }
-      if (autoCheck && state.availableVersion === null) next = offerRemembered(next, (await d.load().catch(() => null))?.updateLatest)
-      set(next)
+      const latest = autoCheck && state.availableVersion === null ? (await d.load().catch(() => null))?.updateLatest : null
+      const next: UpdateState = { ...state, autoCheck }
+      set(autoCheck && next.availableVersion === null ? offerRemembered(next, latest) : next)
       schedule(nextCheckIn('answered', lastAnswered, d.now()))
-      return { enabled: autoCheck }
     }
   }
 }

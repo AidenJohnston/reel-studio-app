@@ -1,5 +1,10 @@
+import { execFile } from 'node:child_process'
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type { AppUpdater, ProgressInfo } from 'electron-updater'
-import { newerRelease, type FetchLike } from './update-check'
+import { isNewer, newerRelease, type FetchLike } from './update-check'
 import type { UpdateBackend } from './updater'
 
 // A shared staging ID preserves the promise that update requests identify no individual install.
@@ -36,6 +41,8 @@ export function electronUpdaterBackend(opts: {
   onError(e: unknown): void
 }): UpdateBackend {
   const u = opts.updater
+  let selected: string | null = null
+  let downloaded: string | undefined
   u.logger = {
     info: (m: unknown) => opts.log(`[updater] ${String(m)}`),
     warn: (m: unknown) => opts.log(`[updater] warn: ${String(m)}`),
@@ -70,18 +77,37 @@ export function electronUpdaterBackend(opts: {
         throw new Error(`latest-mac.yml in release v${found.version} is for version ${r.updateInfo.version}`)
       }
       if (!r.isUpdateAvailable) return null
-      return { version: r.updateInfo.version, notes: found.notes, releaseUrl: found.url }
+      selected = found.version
+      return found
     },
     async download(onProgress) {
       const progress = (p: ProgressInfo): void => onProgress(p.percent)
       u.on('download-progress', progress)
       try {
-        await u.downloadUpdate()
+        const files = await u.downloadUpdate()
+        downloaded = files[0]
       } finally {
         u.removeListener('download-progress', progress)
       }
     },
-    install() {
+    async install() {
+      if (!downloaded || !selected) throw new Error('No downloaded update is selected.')
+      const exec = promisify(execFile)
+      const { stdout: listing } = await exec('/usr/bin/unzip', ['-Z1', downloaded, '*.app/Contents/Info.plist'])
+      const plists = listing.split('\n').filter((name) => /^[^/]+\.app\/Contents\/Info\.plist$/.test(name))
+      if (plists.length !== 1) throw new Error('The update must contain one app bundle version.')
+      // Read only the bundle plist, without unpacking executable code or trusting ZIP paths.
+      const { stdout: plist } = await exec('/usr/bin/unzip', ['-p', downloaded, plists[0]], { encoding: 'buffer', maxBuffer: 1024 * 1024 })
+      const dir = await fs.mkdtemp(join(tmpdir(), 'rs-update-plist-'))
+      try {
+        const file = join(dir, 'Info.plist')
+        await fs.writeFile(file, plist)
+        const { stdout } = await exec('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', file])
+        const version = stdout.trim()
+        if (version !== selected || !isNewer(version, opts.version)) throw new Error(`Update bundle version ${version} does not match the newer release ${selected}.`)
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true })
+      }
       u.quitAndInstall(true, true)
     }
   }

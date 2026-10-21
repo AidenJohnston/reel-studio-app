@@ -100,7 +100,6 @@ const api: ReelApi = {
     openRelease: () => call('update:openRelease'),
     busy: () => call('update:busy'),
     dismiss: (version) => call('update:dismiss', version),
-    status: () => call('update:status'),
     setEnabled: (on) => call('update:setEnabled', on)
   }
 }

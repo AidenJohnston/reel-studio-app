@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { releaseLinkLabel, showsUpdateButton, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary, type UpdateState } from '../../../shared/update'
+import { showsUpdateButton, type UpdateState } from '../../../shared/update'
+import { releaseLinkLabel, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary } from './update-copy'
 import { reel } from '../api'
 import { useNotify } from '../App'
 import { Icon } from './icons'
