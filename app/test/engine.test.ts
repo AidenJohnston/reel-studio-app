@@ -100,6 +100,22 @@ describe('engine runner (against the stand-in engine)', () => {
     await expect(run('doctor', [])).rejects.toMatchObject({ code: 'ENGINE_MISSING' })
   })
 
+  it('reports and logs the signal that killed the engine', async () => {
+    setupPaths()
+    const logs: string[] = []
+    const run = createEngineRunner({
+      python: () => PYTHON,
+      env: () => engineEnv(),
+      log: (line) => logs.push(line),
+      onSpawn: (pid) => process.kill(pid, 'SIGKILL')
+    })
+    await expect(run('doctor', [])).rejects.toMatchObject({
+      code: 'ENGINE_CRASHED',
+      message: expect.stringContaining('SIGKILL')
+    })
+    expect(logs).toContain('[engine doctor] closed exitCode=null signal=SIGKILL')
+  })
+
   it('cancel kills the engine and everything it started', async () => {
     setupPaths()
     let pid = 0
