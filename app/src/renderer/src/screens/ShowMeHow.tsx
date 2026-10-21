@@ -111,6 +111,20 @@ function Swatches({ value, style, text, onPick }: { value: string; style: CapSty
   )
 }
 
+/**
+ * Arrow keys between the words of a word list, so the list is one Tab stop and not one per word
+ * (a 5-minute take was about 900 stops before the drawer's buttons).
+ */
+function wordKeys(e: React.KeyboardEvent<HTMLElement>): void {
+  const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+  if (!step && e.key !== 'Home' && e.key !== 'End') return
+  const all = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('.word'))
+  const at = all.indexOf(document.activeElement as HTMLElement)
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? all.length - 1 : Math.min(all.length - 1, Math.max(0, at + step))
+  e.preventDefault()
+  all[next]?.focus()
+}
+
 /** The transcript in takes: a new paragraph where the speaker paused or the file changes. */
 function takes(words: Word[]): Word[][] {
   const out: Word[][] = []
@@ -165,6 +179,24 @@ export function ShowMeHow({
   onTab?: (t: Tab) => void
 }) {
   const notify = useNotify()
+  // Closing plays the drawer's exit, then tells Reel (onAnimationEnd below).
+  const [closing, setClosing] = useState(false)
+  const close = () => setClosing(true)
+  useEffect(() => {
+    if (!closing) return
+    const t = setTimeout(onClose, 400) // in case the exit animation never reports its end
+    return () => clearTimeout(t)
+  }, [closing, onClose])
+  // Focus goes back to the button that opened the drawer, not to the top of the page.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    return () => {
+      if (opener?.isConnected && (!document.activeElement || document.activeElement === document.body)) opener.focus()
+    }
+  }, [])
+  // The word that holds the one Tab stop in each word list.
+  const [cutFocus, setCutFocus] = useState<string | null>(null)
+  const [pickFocus, setPickFocus] = useState<string | null>(null)
   const [tab, setTabState] = useState<Tab>(initialTab)
   const setTab = (t: Tab) => {
     setTabState(t)
@@ -212,6 +244,8 @@ export function ShowMeHow({
     set('captions', { ...(p.captions ?? { enabled: true }), style: { ...capStyle, ...extra } })
 
   const keptWords = d.words.filter((w) => kept.has(w.id))
+  // The picture-word list's one Tab stop; back to the first word if that word was cut since.
+  const pickStop = keptWords.some((w) => w.id === pickFocus) ? pickFocus : keptWords[0]?.id
   const addPictureAt = (wordId: string) => {
     if (!picking) return
     const i = keptWords.findIndex((w) => w.id === wordId)
@@ -254,7 +288,7 @@ export function ShowMeHow({
       if (document.querySelector('.modal-backdrop')) return
       if (e.key === 'Escape') {
         e.preventDefault()
-        onClose()
+        close()
         return
       }
       const t = e.target as HTMLElement | null
@@ -266,7 +300,7 @@ export function ShowMeHow({
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [onClose])
+  }, [])
 
   const save = async () => {
     try {
@@ -299,6 +333,12 @@ export function ShowMeHow({
   }, [tab, subsOn, lookJson, sample.text, sample.at])
 
   const coverTime = Number(p.cover?.atSourceTime ?? 0) || 0
+  // While the slider moves, show that moment of the take; the saved cover only changes with a new version.
+  const coverMoved = patch.cover !== undefined && coverTime !== (Number(d.project.cover?.atSourceTime ?? 0) || 0)
+  const coverVideo = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (coverVideo.current) coverVideo.current.currentTime = coverTime
+  }, [coverTime, coverMoved])
   const sourceDuration = d.project.sources?.[0]?.duration ?? 60
   const hashtags = (Array.isArray(p.post?.hashtags) ? p.post!.hashtags : [])
     .map((h) => String(h))
@@ -307,18 +347,39 @@ export function ShowMeHow({
 
   return (
     <>
-      <aside className="drawer" data-testid="drawer" aria-label="Edit it myself">
+      <aside
+        className={`drawer${closing ? ' closing' : ''}`}
+        data-testid="drawer"
+        aria-label="Edit it myself"
+        onAnimationEnd={(e) => {
+          if (closing && e.target === e.currentTarget) onClose()
+        }}
+      >
         <div className="drawer-head">
           <div>
             <h2>Edit it myself</h2>
             <p className="muted-sm">Change anything you like, then press "Make a new version". Or leave it as it is.</p>
           </div>
           <span className="spacer" />
-          <button className="icon-btn" onClick={onClose} aria-label="Close" title="Close (Esc)" data-testid="drawer-close">
+          <button className="icon-btn" onClick={close} aria-label="Close" title="Close (Esc)" data-testid="drawer-close">
             <Icon name="x" />
           </button>
         </div>
-        <div className="tabs" role="tablist">
+        <div
+          className="tabs"
+          role="tablist"
+          aria-label="What to change"
+          onKeyDown={(e) => {
+            const i = TABS.findIndex((t) => t.key === tab)
+            const byKey: Partial<Record<string, number>> = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }
+            const to = byKey[e.key]
+            if (to === undefined) return
+            e.preventDefault()
+            const next = TABS[(to + TABS.length) % TABS.length].key
+            setTab(next)
+            tabRefs.current[next]?.focus()
+          }}
+        >
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -326,7 +387,10 @@ export function ShowMeHow({
                 tabRefs.current[t.key] = el
               }}
               role="tab"
+              id={`tab-${t.key}`}
               aria-selected={tab === t.key}
+              aria-controls="drawer-panel"
+              tabIndex={tab === t.key ? 0 : -1}
               className={`tab${tab === t.key ? ' active' : ''}`}
               onClick={() => setTab(t.key)}
               data-testid={`tab-${t.key}`}
@@ -335,7 +399,7 @@ export function ShowMeHow({
             </button>
           ))}
         </div>
-        <div className="drawer-body">
+        <div className="drawer-body" role="tabpanel" id="drawer-panel" aria-labelledby={`tab-${tab}`}>
           {tab === 'cut' && (
             <div className="stack">
               <p className="muted" style={{ fontSize: 16 }}>
@@ -344,7 +408,7 @@ export function ShowMeHow({
               {d.words.length === 0 ? (
                 <p className="faint">No words yet.</p>
               ) : (
-                <div className="words" data-testid="words">
+                <div className="words" data-testid="words" onKeyDown={wordKeys}>
                   {takes(d.words).map((take, ti) => {
                     const k = take.filter((w) => kept.has(w.id)).length
                     const state = k === 0 ? 'cut' : k === take.length ? 'kept' : 'trimmed'
@@ -359,7 +423,9 @@ export function ShowMeHow({
                               <span
                                 key={w.id}
                                 role="button"
-                                tabIndex={0}
+                                tabIndex={w.id === (cutFocus ?? d.words[0]?.id) ? 0 : -1}
+                                onFocus={() => setCutFocus(w.id)}
+                                aria-pressed={!kept.has(w.id)}
                                 className={`word${kept.has(w.id) ? '' : ' cut'}`}
                                 title={kept.has(w.id) ? 'Click to cut' : 'Click to bring back'}
                                 onClick={() => {
@@ -517,10 +583,24 @@ export function ShowMeHow({
                   <p className="muted">
                     <b>Click the word where the picture should pop up.</b> It shows above your head for about two seconds.
                   </p>
-                  <div className="pick-words">
+                  <div className="pick-words" onKeyDown={wordKeys}>
                     {keptWords.map((w) => (
-                      <span key={w.id} className="word" onClick={() => addPictureAt(w.id)}>
-                        {w.w}{' '}
+                      <span key={w.id}>
+                        <span
+                          className="word"
+                          role="button"
+                          tabIndex={w.id === pickStop ? 0 : -1}
+                          onFocus={() => setPickFocus(w.id)}
+                          onClick={() => addPictureAt(w.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              addPictureAt(w.id)
+                            }
+                          }}
+                        >
+                          {w.w}
+                        </span>{' '}
                       </span>
                     ))}
                   </div>
@@ -585,7 +665,13 @@ export function ShowMeHow({
 
           {tab === 'cover' && (
             <div className="stack">
-              {version?.cover ? <img className="cover-img" src={version.cover} alt="Cover" /> : <p className="muted-sm">No cover yet.</p>}
+              {coverMoved && d.sourceVideo ? (
+                <video ref={coverVideo} className="cover-img" src={d.sourceVideo} muted playsInline preload="metadata" disablePictureInPicture aria-label="Your new cover moment" data-testid="cover-moment" />
+              ) : version?.cover ? (
+                <img className="cover-img" src={version.cover} alt="Cover" />
+              ) : (
+                <p className="muted-sm">No cover yet.</p>
+              )}
               <h3 style={{ marginTop: 6 }}>Pick the moment for your cover</h3>
               <input
                 type="range"
@@ -599,7 +685,9 @@ export function ShowMeHow({
                   set('cover', { ...(p.cover ?? { source: 's1', text: null }), atSourceTime: Number(e.target.value) } as ProjectJson['cover'])
                 }
               />
-              <p className="muted-sm">At {coverTime.toFixed(1)} seconds into your video.</p>
+              <p className="muted-sm">
+                At {coverTime.toFixed(1)} seconds into your video.{coverMoved ? ' Press "Make a new version" to use it.' : ''}
+              </p>
               <h3 style={{ marginTop: 6 }}>Words on the cover</h3>
               <input
                 className="input"

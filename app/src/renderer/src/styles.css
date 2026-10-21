@@ -32,6 +32,7 @@
   --titlebar: 40px;
   --shadow: 0 1px 2px rgba(29, 27, 24, 0.06), 0 4px 16px rgba(29, 27, 24, 0.06);
   --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-out: cubic-bezier(.23, 1, .32, 1);      /* things appearing and press feedback: moves at once, settles softly */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', Inter, system-ui, sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -117,21 +118,22 @@ a { color: inherit; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px;
   border-radius: var(--radius-sm); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink);
-  font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .12s, transform .05s, border-color .12s;
-  text-decoration: none;
+  font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; text-decoration: none;
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease, transform .12s var(--ease-out);
 }
-.btn:hover { background: #fbfaf8; border-color: var(--ink-4); }
-.btn:active { transform: translateY(1px); }
+/* Hover and press only on buttons that can be pressed: a greyed-out button must not light up. */
+.btn:not(:disabled):hover { background: #fbfaf8; border-color: var(--ink-4); }
+.btn:not(:disabled):active { transform: scale(.97); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.primary { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
-.btn.primary:hover { background: #34312c; }
+.btn.primary:not(:disabled):hover { background: #34312c; }
 .btn.big { min-height: 52px; padding: 0 28px; font-size: 16px; border-radius: var(--radius); }
 .btn.small { min-height: 36px; padding: 0 14px; font-size: 14px; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
-.btn.ghost:hover { background: var(--soft); color: var(--ink); }
+.btn.ghost:not(:disabled):hover { background: var(--soft); color: var(--ink); }
 .btn.danger { color: var(--red-ink); }
 .btn.danger-solid { background: var(--red-ink); border-color: var(--red-ink); color: #fff; }
-.btn.danger-solid:hover { background: #75220f; }
+.btn.danger-solid:not(:disabled):hover { background: #75220f; }
 .icon-btn { width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent; color: var(--ink-2); display: inline-grid; place-items: center; cursor: pointer; flex: none; }
 .icon-btn:hover { background: var(--soft); color: var(--ink); }
 .icon-btn.on-dark { color: #fff; }
@@ -168,7 +170,7 @@ a { color: inherit; }
 /* ---- video grid ---- */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; cursor: pointer; text-align: left; padding: 0; font: inherit; color: inherit; transition: box-shadow .12s, transform .12s; }
-.card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+@media (hover: hover) and (pointer: fine) { .card:hover { box-shadow: var(--shadow); transform: translateY(-1px); } }
 .thumb { aspect-ratio: 9 / 16; background: linear-gradient(160deg, #ece6dc, #ddd5c8); display: grid; place-items: center; overflow: hidden; position: relative; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb .placeholder { color: var(--ink-3); opacity: .7; }
@@ -182,8 +184,10 @@ a { color: inherit; }
 
 /* ---- progress ---- */
 .progress { height: 12px; border-radius: 999px; background: var(--soft); overflow: hidden; position: relative; }
-/* Ink while working, green only once it is done (green = done, and only done). */
-.progress > div { height: 100%; background: var(--ink); border-radius: 999px; transition: width .6s var(--ease), background .3s; position: relative; overflow: hidden; }
+/* Ink while working, green only once it is done (green = done, and only done).
+   The fill is full width and slides in from the left (components/ui.tsx sets translateX): moving it
+   never lays out the page, where animating its width did on every frame of every update. */
+.progress > div { height: 100%; background: var(--ink); border-radius: 999px; transition: transform .6s var(--ease), background-color .3s; position: relative; overflow: hidden; }
 .progress.done > div { background: var(--green); }
 .progress > div::after {
   content: ''; position: absolute; inset: 0;
@@ -270,10 +274,11 @@ a { color: inherit; }
 .did-label { font-weight: 550; }
 .check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); flex: none; display: grid; place-items: center; margin-top: 1px; }
 .item-action { border: 0; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 6px 6px; margin: -6px 0 -6px 4px; min-height: 32px; }
-.item-action:hover { color: var(--ink); }
+.item-action:hover:not(:disabled) { color: var(--ink); }
+.item-action:disabled, .extra:disabled { opacity: .5; cursor: default; }
 .extras { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .extra { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px dashed var(--line-2); background: transparent; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
-.extra:hover { border-style: solid; background: var(--soft); }
+.extra:hover:not(:disabled) { border-style: solid; background: var(--soft); }
 .chat { display: flex; flex-direction: column; gap: 10px; overflow: auto; padding: 4px 2px; margin: 10px 0 12px; }
 .bubble { max-width: 86%; padding: 10px 14px; border-radius: 14px; line-height: 1.4; user-select: text; white-space: pre-wrap; }
 .bubble.editor { background: var(--soft); align-self: flex-start; border-bottom-left-radius: 4px; }
@@ -307,6 +312,8 @@ a { color: inherit; }
 .bubble-attachments:only-child { margin-bottom: 0; }
 .drop-overlay.light { background: rgba(247,245,241,.55); }
 .job-progress { background: var(--soft); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+/* On the soft box the bar's own soft track vanished: a change starting looked like a lone dot. */
+.job-progress .progress { background: var(--panel); }
 .export-wait { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); text-align: center; }
 .seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line-2); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); }
 .seg button { border: 0; background: none; font: inherit; font-weight: 600; padding: 10px 18px; cursor: pointer; color: var(--ink-2); min-height: 44px; min-width: 88px; }
@@ -334,7 +341,10 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 /* ---- drawer ---- */
 /* No dimming: the phone on the left stays bright, it shows the live subtitle preview. */
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: clamp(460px, calc(100vw - 620px), 620px); background: var(--bg); z-index: 21; display: flex; flex-direction: column; box-shadow: -8px 0 30px rgba(0,0,0,.12); border-left: 1px solid var(--line); animation: slide-in .22s var(--ease); }
+/* Leaves the way it came, faster than it arrived. */
+.drawer.closing { animation: slide-out .16s var(--ease-out) forwards; pointer-events: none; }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slide-out { to { transform: translateX(24px); opacity: 0; } }
 .drawer-head { padding: calc(var(--titlebar) + 4px) 22px 10px 26px; display: flex; align-items: flex-start; gap: 12px; }
 .platform-win32 .drawer-head { padding-right: 150px; }
 .platform-win32 .drawer-head .icon-btn { position: absolute; right: 18px; top: calc(var(--titlebar) + 6px); }
@@ -346,10 +356,9 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .drawer-foot { padding: 14px 22px 14px 26px; border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: center; background: var(--panel); }
 .words { display: flex; flex-direction: column; gap: 14px; user-select: none; text-align: left; }
 .take p { line-height: 2; font-size: 16px; overflow-wrap: anywhere; }
-.take-label { font-size: 12.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); margin-bottom: 2px; }
-.take.kept .take-label { color: var(--green-ink); }
+.take-label { font-size: 13px; font-weight: 600; color: var(--ink-3); margin-bottom: 2px; }
 .word { padding: 2px 1px; border-radius: 5px; cursor: pointer; }
-.word:hover { background: var(--soft); }
+@media (hover: hover) and (pointer: fine) { .word:hover { background: var(--soft); } }
 .word.cut { color: var(--ink-3); text-decoration: line-through; text-decoration-color: #c4492f; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .broll-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; background: var(--soft); }
@@ -392,13 +401,14 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .file { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .file-thumb { aspect-ratio: 4 / 3; background: var(--soft); display: grid; place-items: center; overflow: hidden; color: var(--ink-3); }
 .file-thumb img, .file-thumb video { width: 100%; height: 100%; object-fit: cover; }
-.file-name { padding: 8px 10px 2px; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Two lines, not one: the end of a name is what tells files apart ("… - Version 2.mp4"). */
+.file-name { padding: 8px 10px 2px; font-size: 13.5px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .empty-bin { color: var(--ink-3); font-size: 14px; padding: 14px 16px; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); }
 
 /* ---- more menu ---- */
 .more { position: relative; }
 .more > .icon-btn { width: 44px; height: 44px; border: 1px solid var(--line-2); background: var(--panel); }
-.more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px; display: flex; flex-direction: column; }
+.more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px; display: flex; flex-direction: column; transform-origin: top right; animation: pop-in .15s var(--ease-out); }
 .more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: var(--ink); min-height: 36px; }
 .more-menu button:hover { background: var(--soft); }
 .more-menu button.danger { color: var(--red-ink); }
@@ -406,13 +416,17 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 
 /* ---- modal and toast ---- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(29,27,24,.3); z-index: 40; display: grid; place-items: center; animation: fade .12s ease-out; }
-.modal { background: var(--bg); border-radius: 16px; padding: 28px; width: min(480px, 92vw); max-height: calc(100vh - 60px); overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 16px; }
+.modal:focus { outline: none; }
+.modal { background: var(--bg); border-radius: 16px; padding: 28px; width: min(480px, 92vw); max-height: calc(100vh - 60px); overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 16px; animation: pop-in .18s var(--ease-out); }
+/* The dialog and the ⋯ menu settle in from just smaller, instead of appearing in one frame. */
+@keyframes pop-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
 .modal.wide { width: min(580px, 92vw); }
 .export-head { display: flex; gap: 18px; align-items: flex-start; }
 .file-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 600; overflow-wrap: anywhere; user-select: text; }
 .post-how { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .post-how p { flex: 1; color: var(--ink-2); }
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 12px; box-shadow: var(--shadow); display: flex; gap: 10px; align-items: center; max-width: min(640px, 80vw); animation: toast-in .2s var(--ease); }
+.toast:not(.error) { pointer-events: none; } /* nothing to press on it; a click goes to the button it covers */
 .toast.error { background: #7d2618; padding-right: 8px; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
@@ -449,7 +463,17 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
   .page { padding-left: 28px; padding-right: 28px; }
 }
 
+/* Reduced motion: nothing slides, scales or staggers, but things still fade in, and a spinner still turns
+   (a frozen spinner reads as "stuck"). */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: 1ms !important; }
+  .modal, .more-menu, .drawer, .toast { animation: fade .15s ease-out !important; }
+  .drawer.closing { animation: fade-out .12s ease-out forwards !important; }
+  .spin { animation: spin .8s linear infinite !important; }
+  .thinking i { animation: breathe-soft 1.8s ease-in-out infinite !important; }
+  .thinking i:nth-child(2) { animation-delay: .3s !important; }
+  .thinking i:nth-child(3) { animation-delay: .6s !important; }
   .progress > div::after, .phone-scan { display: none; }
 }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes breathe-soft { 0%, 100% { opacity: .2; } 50% { opacity: .85; } }

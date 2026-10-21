@@ -72,6 +72,11 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.getByTestId('stop').click()
   await expect(page.getByTestId('confirm')).toContainText('Stop making this reel?')
   await shot(page, 'd-02-stop-confirm')
+  // Tab stays in the dialog (aria-modal): it used to walk into the page behind it.
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab')
+    await expect(page.getByTestId('confirm').locator(':focus')).toHaveCount(1)
+  }
   await page.keyboard.press('Escape') // Esc = the safe choice: keep going
   await expect(page.getByTestId('confirm')).toHaveCount(0)
   await expect(page.getByText('Making your reel')).toBeVisible()
@@ -177,8 +182,16 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await shot(page, 'd-11-settings-different-ai')
   await page.getByTestId('nav-home').click()
   await expect(page.getByTestId('ai-status')).toContainText('AI editor: ChatGPT')
+  // With an AI editor on, the no-AI controls must never be drawn, not even for the first frame.
+  await page.evaluate(() => {
+    ;(window as any).__sawNoAi = false
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid=composer-connect],[data-testid=ai-banner]')) (window as any).__sawNoAi = true
+    }).observe(document.body, { subtree: true, childList: true })
+  })
   await page.getByTestId('project-card').first().click()
   await expect(page.getByTestId('player')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__sawNoAi)).toBe(false)
   await expect(page.getByTestId('did-cut')).toContainText('Kept your best takes')
   await expect(page.getByTestId('ai-banner')).toHaveCount(0)
   await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')

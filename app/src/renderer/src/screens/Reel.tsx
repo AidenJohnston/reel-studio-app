@@ -50,6 +50,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
+  const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
@@ -82,7 +83,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   useEffect(() => {
     void load(true)
-    reel.ai.active().then(setProvider).catch(() => {})
+    reel.ai
+      .active()
+      .then(setProvider)
+      .catch(() => {})
+      .finally(() => setProviderChecked(true))
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
       if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
@@ -137,7 +142,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     return () => window.removeEventListener(EXPORT_EVENT, fn)
   }, [doExport])
 
-  if (!d) return <div className="page"><Spinner /></div>
+  // Wait for the AI check too: drawn before it, a connected editor flashed the "No AI editor yet" banner.
+  if (!d || !providerChecked) return <div className="page"><Spinner /></div>
 
   const aiOff = !provider || !provider.connected || provider.id === 'none'
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
@@ -447,8 +453,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     <div style={{ minWidth: 0 }}>
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
-                      {line.act && !job && (
-                        <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
+                      {/* greyed, not removed, while a version is made: the panel keeps its size */}
+                      {line.act && (
+                        <button className="item-action" onClick={line.act.run} disabled={!!job} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
                       )}
@@ -457,11 +464,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && (
+            {extras.length > 0 && (
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                  <button key={x.key} className="extra" onClick={x.run} disabled={!!job} data-testid={x.testid}>
                     <Icon name="plus" size={14} stroke={2} /> {x.label}
                   </button>
                 ))}
