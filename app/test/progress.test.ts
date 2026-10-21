@@ -6,6 +6,7 @@ import type { JobUpdate } from '../src/shared/api'
 import type { EngineProgress } from '../src/main/engine'
 import { performance } from 'node:perf_hooks'
 import { DEFAULTS, ProgressTracker, learn, migrateHistory, type SpeedHistory } from '../src/main/progress'
+import { EMPTY_LIVE, reduceLive, timeLeftWords } from '../src/shared/live'
 import { timeLeftText as formatEta } from '../src/shared/progress'
 import { createJobManager } from '../src/main/jobs'
 
@@ -174,7 +175,7 @@ describe('honest progress', () => {
     const ai = new ProgressTracker('first-edit', 60, empty(), () => now)
     basic.update('listen', 0); ai.update('listen', 0); now += 14_000; basic.update('analyze', 0); ai.update('analyze', 0)
     expect(basic.snapshot().etaSec).toBeLessThan(ai.snapshot().etaSec!)
-    expect(ai.snapshot().etaMaxSec).toBeGreaterThan(ai.snapshot().etaSec!)
+    expect(ai.snapshot().etaMaxSec).toBe(ai.snapshot().etaSec)
   })
 
   it('keeps overruns neutral without measured near-completion or known media length', () => {
@@ -228,7 +229,7 @@ describe('honest progress', () => {
     }
   })
 
-  it('anchors an unmeasured AI range on the live run and widens it during editing', () => {
+  it('counts down the unmeasured AI budget and replaces it with local history', () => {
     let now = 0
     const tracker = new ProgressTracker('first-edit', 39, empty(), () => now)
     tracker.update('listen', 0)
@@ -237,8 +238,8 @@ describe('honest progress', () => {
     expect(first.etaSec).toBeGreaterThanOrEqual(128)
     now += 100_000
     const later = tracker.snapshot()
-    expect(later.etaSec).toBeGreaterThanOrEqual(first.etaSec!)
-    expect(later.etaMaxSec).toBeGreaterThan(first.etaMaxSec!)
+    expect(later.etaSec).toBeCloseTo(first.etaSec! - 100)
+    expect(later.etaMaxSec).toBe(later.etaSec)
     const history = learn(empty(), 'first-edit', 39, { edit: 30 })
     expect(new ProgressTracker('first-edit', 39, history).estimate('edit')).toBeCloseTo(30, 1)
   })
@@ -347,5 +348,40 @@ describe('honest progress', () => {
       previous = bar
       if (checkpoints.includes(time)) expect(Math.abs(bar - time / fixture.duration * 100)).toBeLessThanOrEqual(15)
     }
+  })
+
+  it('counts down the alpha v3 first AI edit and keeps its bar within 15 points of elapsed', async () => {
+    const fixture = (await import('./fixtures/alpha-v3-progress.json')).default
+    let now = 0
+    const tracker = new ProgressTracker('first-edit', fixture.mediaSeconds, empty(), () => now)
+    tracker.update('listen', 0)
+    let live = EMPTY_LIVE
+    let previousBar = 0
+    let previousLeft = Infinity
+    const checkpoints = [0.25, 0.5, 0.75].map((f) => fixture.duration * f)
+    const times = [...fixture.samples, ...checkpoints, fixture.editAt, fixture.finalAt].sort((a, b) => a - b)
+    for (const time of times) {
+      now = time * 1000
+      if (time === fixture.editAt) tracker.update('edit', 0)
+      if (time === fixture.finalAt) tracker.update('final', 0)
+      const snap = tracker.snapshot()
+      expect(snap.overall).toBeGreaterThanOrEqual(previousBar)
+      previousBar = snap.overall
+      live = reduceLive(live, { type: 'status', jobId: 'alpha', slug: 'alpha', message: 'Making your video', pct: 0, overall: snap.overall, secondsLeft: snap.etaSec, secondsMaxLeft: snap.etaMaxSec, overdue: snap.overdue, thinking: false })
+      if (time >= fixture.editAt && time < fixture.finalAt) {
+        const left = snap.etaMaxSec ?? snap.etaSec
+        expect(left).not.toBeNull()
+        expect(left!).toBeLessThanOrEqual(previousLeft)
+        previousLeft = left!
+        expect(timeLeftWords(live)).toBe(formatEta(left))
+      }
+      if (checkpoints.includes(time)) expect(Math.abs(snap.overall - time / fixture.duration * 100)).toBeLessThanOrEqual(15)
+    }
+    now = (fixture.editAt + 130) * 1000
+    const overrun = new ProgressTracker('first-edit', fixture.mediaSeconds, empty(), () => now)
+    overrun.update('listen', 0)
+    now += 10_000; overrun.update('edit', 0)
+    now += 130_000
+    expect(overrun.snapshot()).toMatchObject({ etaSec: null, overdue: true })
   })
 })

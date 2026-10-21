@@ -146,11 +146,11 @@ export class ProgressTracker {
     const remaining = Math.max(0, current - elapsed) + later
     const observed = this.factor() !== undefined
     const unknownEdit = this.phases.slice(this.cur).includes('edit') && !this.local('edit')
-    // Use the larger AI budget that timeLeftWords displays, rather than a separate eased curve.
+    // The first-run AI seed is a total phase budget, not an allowance to add again each tick.
     const aiBudget = unknownEdit && observed ? this.phaseEstimate('edit') : 0
     const aiElapsed = this.phases[this.cur] === 'edit' ? elapsed : 0
     const other = this.phases[this.cur] === 'edit' ? later : remaining - aiBudget
-    const displayRemaining = aiBudget ? 2 * aiBudget + aiElapsed + other : remaining
+    const displayRemaining = aiBudget ? Math.max(1, aiBudget - aiElapsed) + other : remaining
     // Count completed wall time and elapsed work, keeping a sliver of the phase unfinished.
     // An overrun grows its budget without completing the phase or changing the ETA policy.
     const phaseBudget = Math.max(current, elapsed)
@@ -169,10 +169,9 @@ export class ProgressTracker {
     if (aggregateLeft !== undefined) {
       return { ...out, approximate: true, etaSec: aggregateLeft > 0 ? Math.max(1, aggregateLeft) : null, overdue: false }
     }
-    // An unmeasured AI step has a remaining-time budget, not a countdown to a known deadline.
     if (unknownEdit && observed) {
-      const ai = this.phaseEstimate('edit')
-      return { ...out, etaSec: ai + other, etaMaxSec: displayRemaining, overdue: false }
+      if (aiElapsed > aiBudget) return { ...out, etaSec: null, overdue: true }
+      return { ...out, etaSec: displayRemaining, etaMaxSec: displayRemaining, overdue: false }
     }
     // Use the existing 30-second near-completion cutoff only with local history for all work left.
     if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
