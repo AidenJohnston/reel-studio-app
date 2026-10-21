@@ -1,6 +1,8 @@
 from contextlib import closing
 import hashlib
+import io
 import math
+from pathlib import Path
 import subprocess
 
 from reelengine import compose_util
@@ -60,3 +62,61 @@ def test_dense_window_reaps_ffmpeg_when_consumer_stops(tmp_path, monkeypatch):
         assert child.poll() is None
     assert child.returncode is not None
     assert child.stdout.closed
+
+
+def test_dense_window_timeout_excludes_consumer_suspension(monkeypatch):
+    clock = [0.0]
+    timers = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(b"\0" * (4 * 2 * 3 * 2))
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self):
+            if self.returncode is None:
+                self.returncode = 0
+            return self.returncode
+
+        def kill(self):
+            if self.returncode is None:
+                self.returncode = -9
+
+    class FakeTimer:
+        def __init__(self, delay, callback):
+            self.deadline = clock[0] + delay
+            self.callback = callback
+            self.ident = None
+            self.cancelled = False
+            timers.append(self)
+
+        def start(self):
+            self.ident = 1
+
+        def cancel(self):
+            self.cancelled = True
+
+        def join(self):
+            pass
+
+    process = FakeProcess()
+    monkeypatch.setattr(compose_util, "probe", lambda *_args: {"fps": 1})
+    monkeypatch.setattr(compose_util.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(compose_util.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(compose_util.time, "monotonic", lambda: clock[0])
+    with closing(compose_util._window_frames(Path("clip"), [0.0, 1.0], (0.0, 2.0), 4, 2)) as frames:
+        next(frames)
+        clock[0] += 121.0
+        for timer in timers:
+            if not timer.cancelled and timer.deadline <= clock[0]:
+                timer.callback()
+        assert process.returncode is None
+        next(frames)
+        process.returncode = 0
+        # Even a watchdog callback racing with process exit must not mark a timeout.
+        timers[-1].callback()
+        clock[0] += 121.0
+        assert list(frames) == []

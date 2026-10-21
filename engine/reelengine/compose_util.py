@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -229,12 +231,15 @@ def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None
         timed_out = threading.Event()
 
         def timeout():
-            timed_out.set()
-            proc.kill()
+            if proc.poll() is None:
+                timed_out.set()
+                proc.kill()
 
-        timer = threading.Timer(120, timeout)
+        remaining = 120.0
+        timer = threading.Timer(remaining, timeout)
         index, buf, eof = -1, b"", False
         try:
+            started = time.monotonic()
             timer.start()
             for t in times:
                 k = max(0, int(math.ceil((t - t0) * fps - 1e-6)))
@@ -247,7 +252,15 @@ def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None
                         index += 1
                 # At EOF, repeat the final complete frame, as the buffered decoder did.
                 if buf:
+                    # Scoring time belongs to the consumer, not FFmpeg's timeout budget.
+                    timer.cancel()
+                    timer.join()
+                    remaining -= time.monotonic() - started
+                    # A later decode failure can raise after these partial frames were yielded.
                     yield t, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+                    started = time.monotonic()
+                    timer = threading.Timer(max(0.0, remaining), timeout)
+                    timer.start()
             while not eof:
                 eof = len(proc.stdout.read(size)) < size
             proc.wait()
@@ -275,8 +288,9 @@ def grab_frame(path: Path, t: float, ctx=None, width: Optional[int] = None) -> n
     """One full-resolution (or `width`-scaled) BGR frame at t seconds."""
     info = probe(path, ctx)
     w = width or info["width"]
-    for _, fr in decode_frames(path, 1, w, ctx=ctx, times=[t]):
-        return fr
+    with closing(decode_frames(path, 1, w, ctx=ctx, times=[t])) as frames:
+        for _, fr in frames:
+            return fr
     raise EngineError("FRAME_FAILED", f"no frame at {t}s in {path}", "I couldn't read a picture from this video.")
 
 
