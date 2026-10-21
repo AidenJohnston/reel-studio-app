@@ -106,6 +106,8 @@ test('add a connection to your own AI server from Settings', async () => {
     await expect(dialog).toHaveCount(0)
 
     await expect(page.getByTestId('ai-connected')).toHaveText('Connected to Work (mock-small).')
+    // the sidebar says so right away, without leaving Settings
+    await expect(page.getByTestId('ai-status')).toHaveText('AI editor: Work')
     await page.getByTestId('use-different-ai').click()
     const card = page.getByTestId('connection-card')
     await expect(card).toHaveCount(1)
@@ -135,6 +137,10 @@ test('add a connection to your own AI server from Settings', async () => {
     await snap(page, '07-edit')
     await page.getByTestId('connection-back').click()
     await expect(page.getByTestId('connection-dialog')).toHaveCount(0)
+
+    // disconnecting updates the sidebar too, still on Settings
+    await page.getByTestId('use-no-ai').click()
+    await expect(page.getByTestId('ai-status')).toContainText('No AI editor connected.')
   } finally {
     await app.close()
   }

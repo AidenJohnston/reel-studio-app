@@ -59,7 +59,9 @@ export function App() {
   useEffect(() => {
     reel.app.info().then(setInfo)
   }, [])
-  // The sidebar says which AI editor is on, and is a way in when none is.
+  // The sidebar says which AI editor is on, and is a way in when none is. Main announces every change; the read on
+  // screen change catches what main cannot see (a Claude Code app signed out in a terminal).
+  useEffect(() => reel.ai.onChange(setProvider), [])
   useEffect(() => {
     reel.ai.active().then(setProvider).catch(() => {})
   }, [screen, info?.firstRunDone])

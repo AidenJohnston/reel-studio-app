@@ -209,7 +209,7 @@ test('Claude Code app ready: "Use Claude (your Claude Code app)" comes first, bu
   await shot(page, 'ux-15-connect-claude-ready')
   await page.getByTestId('use-claude-code').click()
   await expect(page.getByTestId('ai-connected')).toHaveText('Using Claude through your Claude Code app.')
-  await page.getByTestId('nav-home').click() // the sidebar re-reads the AI editor on every screen change
+  // the sidebar follows at once, still on Settings (main announces the change)
   await expect(page.getByTestId('ai-status')).toContainText(`AI editor: ${CLAUDE_CODE_LABEL}`)
   expect(await page.locator('body').innerText()).not.toMatch(CLAUDE_CODE_MISNAMED)
   expect(await page.locator('body').innerText()).not.toContain('—')

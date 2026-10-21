@@ -371,21 +371,31 @@ function registerIpc(): void {
 
   handle('ai:providers', () => ai.providers())
   handle('ai:active', () => ai.active())
-  handle('ai:setActive', (_e, id, connectionId?: string) => ai.setActive(id, typeof connectionId === 'string' ? connectionId : undefined))
-  handle('ai:signInChatGPT', () => ai.signInChatGPT((url) => shell.openExternal(url)))
+  // Every call that can change the AI editor tells all windows the new one when it settles, done or failed, so the
+  // sidebar line follows at once instead of on the next screen change.
+  const changesAI = (channel: string, fn: Handler): void =>
+    handle(channel, async (e, ...args) => {
+      try {
+        return await fn(e, ...args)
+      } finally {
+        ai.active().then((p) => broadcast('ai:change', p), () => {})
+      }
+    })
+  changesAI('ai:setActive', (_e, id, connectionId?: string) => ai.setActive(id, typeof connectionId === 'string' ? connectionId : undefined))
+  changesAI('ai:signInChatGPT', () => ai.signInChatGPT((url) => shell.openExternal(url)))
   handle('ai:cancelSignIn', () => ai.cancelSignInChatGPT?.())
-  handle('ai:signOutChatGPT', () => ai.signOutChatGPT())
-  handle('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
+  changesAI('ai:signOutChatGPT', () => ai.signOutChatGPT())
+  changesAI('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
   // The person's own AI servers. The key goes from the page to the AI package once and never comes back.
   const text = (v: unknown): string => (typeof v === 'string' ? v : '')
   const connectionsNotReady = { code: 'NOT_READY', userMessage: 'Connecting your own AI server is not ready in this build yet. Your videos still work without it.' }
   handle('ai:connections', async () => (await ai.connections?.()) ?? [])
-  handle('ai:saveConnection', async (_e, input: Record<string, unknown>) => {
+  changesAI('ai:saveConnection', async (_e, input: Record<string, unknown>) => {
     if (!ai.saveConnection) throw connectionsNotReady
     const kind = input?.kind === 'anthropic' ? 'anthropic' : 'openai'
     return ai.saveConnection({ ...(input?.id ? { id: text(input.id) } : {}), label: text(input?.label), kind, baseURL: text(input?.baseURL), model: text(input?.model), key: text(input?.key) })
   })
-  handle('ai:removeConnection', async (_e, id: unknown) => {
+  changesAI('ai:removeConnection', async (_e, id: unknown) => {
     if (!ai.removeConnection) throw connectionsNotReady
     await ai.removeConnection(text(id))
   })

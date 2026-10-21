@@ -1,6 +1,6 @@
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ReelApi, UpdateNotice } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateNotice } from '../shared/api'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as
@@ -47,7 +47,8 @@ const api: ReelApi = {
     connections: () => call('ai:connections'),
     saveConnection: (input) => call('ai:saveConnection', input),
     removeConnection: (id) => call('ai:removeConnection', id),
-    connectionModels: (q) => call('ai:connectionModels', q)
+    connectionModels: (q) => call('ai:connectionModels', q),
+    onChange: (cb) => on<ProviderInfo>('ai:change', cb)
   },
   projects: {
     list: () => call('projects:list'),

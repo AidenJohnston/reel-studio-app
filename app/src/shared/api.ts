@@ -372,6 +372,8 @@ export interface ReelApi {
     removeConnection(id: string): Promise<void>
     /** Models the server reports; empty when it does not say (then the person types one). */
     connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<string[]>
+    /** The AI editor after anything changed it (connected, picked, signed out, removed). Returns unsubscribe. */
+    onChange(cb: (p: ProviderInfo) => void): () => void
   }
   projects: {
     list(): Promise<ProjectSummary[]>
