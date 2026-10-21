@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, findPhrase, saveProject, validateProject, wordIndex, anchorProblem,
+  nextBrollId, normalizeKeep, hasCaptionPhrase, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -86,12 +86,6 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   const { p, t } = await load(ctx);
   const problem = fn(p, t);
   if (typeof problem === 'string') throw new ToolInputError(problem);
-  if (field === 'broll') {
-    for (const b of p.broll) {
-      if (b.asset) b.asset = requireAsset(ctx, b.asset).ref;
-      if (b.assets) b.assets = b.assets.map((asset) => requireAsset(ctx, asset).ref);
-    }
-  }
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
   await saveProject(ctx.projectDir, p);
@@ -805,7 +799,7 @@ const tools: ToolDef[] = [
     parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p, t) => {
-        if (!findPhrase(t, args.from)) return `phrase not found in the transcript: "${args.from}"`;
+        if (!hasCaptionPhrase(t, args.from)) return `phrase not found in the transcript: "${args.from}"`;
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
         c.push({ from: args.from, to: args.to });
         p.captions.corrections = c;
@@ -948,6 +942,7 @@ const tools: ToolDef[] = [
       } else if (args.treatment !== 'text-pop') {
         throw new ToolInputError('give asset, search, or animation (only text-pop works with text alone)');
       }
+      if (asset) asset = requireAsset(ctx, asset).ref;
       if (args.treatment === 'text-pop' && !asset && !args.params?.text) throw new ToolInputError('text-pop needs params.text');
       let id = '';
       await mutate(ctx, 'broll', (p) => {
@@ -998,7 +993,7 @@ const tools: ToolDef[] = [
         let says = '';
         await mutate(ctx, 'broll', (pp) => {
           const b = pp.broll.find((x) => x.id === args.id)!;
-          b.anchor = anchor; b.asset = made.asset; b.treatment = 'animation';
+          b.anchor = anchor; b.asset = requireAsset(ctx, made.asset).ref; b.treatment = 'animation';
           says = quote(t, b.anchor);
         });
         const summary = wantFull !== (anim.layout === 'full')

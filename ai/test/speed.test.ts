@@ -52,6 +52,19 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('quieter music', p)).toBeNull();
   });
 
+  it('turns quiet music up for the cannot-hear complaint without calling the model', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const p = await loadProject(dir);
+    p.music.level = 'quiet';
+    await saveProject(dir, p);
+    const model = new ScriptedModel([new Error('the model must not be called')]);
+    const ai = createAI({ host, settingsDir, providerOverride: model });
+    const result = await ai.applyNote(dir, "can't hear the music", () => undefined);
+    expect(model.requests).toHaveLength(0);
+    expect(result.fast).toBe('music-louder');
+    expect((await loadProject(dir)).music.level).toBe('under-voice');
+  });
+
   it('applies a simple note with one direct change and one final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);

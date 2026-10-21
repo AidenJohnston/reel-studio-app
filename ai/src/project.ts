@@ -305,6 +305,22 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
 
+/** Match the tokens seen by captions.py: stitch_numbers, then apply_corrections' _bare. */
+export function hasCaptionPhrase(t: Transcript, phrase: string): boolean {
+  const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
+  const words: string[] = [];
+  for (let i = 0; i < t.words.length; i++) {
+    const word = t.words[i].w.trim();
+    const next = t.words[i + 1]?.w.trim();
+    if (/^\$?[0-9]+$/.test(word) && next && /^,[0-9]{3}/.test(next)) {
+      words.push(bare(word + next));
+      i++;
+    } else words.push(bare(word));
+  }
+  const target = phrase.trim().split(/\s+/).map(bare);
+  return !!phrase.trim() && words.some((_word, i) => target.every((word, k) => words[i + k] === word));
+}
+
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */
 export function findPhrase(t: Transcript, phrase: string, keep?: WordAnchor[]): WordAnchor | null {
   const target = norm(phrase).split(/\s+/).filter(Boolean);

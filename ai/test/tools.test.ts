@@ -99,20 +99,30 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, name, args)).isError).toBe(false);
   });
 
-  it('refuses to save an updated visual whose existing asset disappeared', async () => {
+  it('removes missing b-roll assets one after another', async () => {
     const { ctx, dir } = await ctxFor();
-    const file = path.join(dir, 'work', 'found.png');
-    await fsp.writeFile(file, tinyPng());
-    const added = await executeTool(ctx, 'add_broll', {
-      anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card', asset: 'work/found.png', params: {},
-    });
-    expect(added.isError).toBe(false);
-    await fsp.unlink(file);
-    const before = await fsp.readFile(path.join(dir, 'project.json'));
-    const result = await executeTool(ctx, 'update_broll', { id: 'b1', params: { tilt: 2 } });
-    expect(result.isError).toBe(true);
-    expect(result.content).toMatch(/asset not found/);
-    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    const p = await loadProject(dir);
+    p.broll = ['b1', 'b2'].map((id) => ({
+      id, anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card',
+      asset: `work/${id}-missing.png`, params: {},
+    }));
+    await saveProject(dir, p);
+    expect((await executeTool(ctx, 'remove_broll', { id: 'b1' })).isError).toBe(false);
+    expect((await loadProject(dir)).broll.map((b) => b.id)).toEqual(['b2']);
+    expect((await executeTool(ctx, 'remove_broll', { id: 'b2' })).isError).toBe(false);
+    expect((await loadProject(dir)).broll).toEqual([]);
+  });
+
+  it('corrects a number split across transcript tokens', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = '3';
+    transcript.words[1].w = ',000';
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    const result = await executeTool(ctx, 'add_caption_correction', { from: '3,000', to: 'three thousand' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: '3,000', to: 'three thousand' }]);
   });
 
   it('rejects a generated animation that disappeared before placement', async () => {

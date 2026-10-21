@@ -21,7 +21,10 @@ function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, 
 
 export function planFastNote(note: string, p: Project): FastPlan | null {
   const n = note.toLowerCase().replace(/[.!,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!n || n.length > 60 || NOT_FAST.test(n) || NEGATED.test(n)) return null;
+  if (!n || n.length > 60 || NOT_FAST.test(n)) return null;
+  // This complaint asks for louder music; other negated requests still need the full editor.
+  const cannotHearMusic = /^(i )?can'?t hear (the )?music$/.test(n);
+  if (NEGATED.test(n) && !cannotHearMusic) return null;
   const caps = CAPTIONS.test(n); const music = MUSIC.test(n);
   if (caps === music) return null;                 // neither, or both: let the AI read it
 
