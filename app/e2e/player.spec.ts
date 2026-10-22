@@ -1,6 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { launch, makeMedia, passFirstRun } from './helpers'
 
 test('fails if player controls start file drag or picture drag-out stops working', async () => {
@@ -21,11 +19,6 @@ test('fails if player controls start file drag or picture drag-out stops working
     await expect(page.getByTestId('export')).toBeEnabled()
     await player.evaluate((v: HTMLVideoElement) => { v.pause(); v.currentTime = 0 })
     const track = page.getByRole('slider', { name: 'Position in the video' })
-    const evidence = process.env.REELSTUDIO_PLAYER_EVIDENCE
-    if (evidence) {
-      mkdirSync(evidence, { recursive: true })
-      await page.screenshot({ path: join(evidence, 'before.png') })
-    }
     await track.hover()
     const box = await track.boundingBox()
     if (!box) throw new Error('The scrub track has no bounds')
@@ -33,9 +26,6 @@ test('fails if player controls start file drag or picture drag-out stops working
     await page.mouse.down()
     await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2, { steps: 12 })
     await page.mouse.up()
-    if (evidence) {
-      await page.screenshot({ path: join(evidence, 'scrub.png') })
-    }
     expect(await dragged.evaluate((files) => files), 'scrubbing must not start a file drag').toEqual([])
     await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.currentTime / v.duration)).toBeGreaterThan(0.7)
     const picture = await player.boundingBox()
