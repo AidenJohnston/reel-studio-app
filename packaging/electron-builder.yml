@@ -137,4 +137,5 @@ nsis:
   runAfterFinish: true
   deleteAppDataOnUninstall: false   # never delete the user's videos or settings
   differentialPackage: false
+  include: ${env.RS_REPO_ROOT}/packaging/installer.nsh   # "Open with Reel Studio" for videos (see the file for why not fileAssociations)
   artifactName: Reel-Studio-Setup-${version}-${arch}.${ext}
