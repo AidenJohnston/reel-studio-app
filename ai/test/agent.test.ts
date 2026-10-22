@@ -68,7 +68,7 @@ describe('agent loop with a scripted model', () => {
     // system prompt carries doctrine + style placeholder filled
     expect(model.requests[0].system).toMatch(/red thread/i);
     expect(model.requests[0].system).not.toMatch(/\{\{styleRules\}\}/);
-    expect(model.requests[0].tools.length).toBe(26);   // SPEC section 6 + set_mirror
+    expect(model.requests[0].tools.length).toBe(26);   // docs/architecture.md section 6 + set_mirror
     await fsp.access(path.join(dir, 'versions', 'v1', 'project.json'));
     await fsp.access(path.join(dir, 'versions', 'preview', 'draft.mp4'));
     expect((await fsp.readdir(path.join(dir, 'versions'))).sort()).toEqual(['preview', 'v1']);
