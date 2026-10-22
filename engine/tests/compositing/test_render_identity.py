@@ -36,6 +36,13 @@ def test_frames_refuse_a_preview_that_a_newer_one_replaced(pdir):
     assert render_identity.inspect(pdir, second["renderId"])["timeline"]["words"][0]["id"] == "w0"
 
 
+def test_a_manifest_names_its_video_without_a_machine_path(pdir):
+    """Fails if a manifest written on Windows names a video a Mac (or a moved folder) cannot resolve."""
+    result = render.run(pdir, draft=True, cover=False)
+    assert project.read_json(pdir / "versions" / "preview" / "render_draft.json")["file"] == "draft.mp4"
+    assert result["file"].endswith("draft.mp4") and result["file"] != "draft.mp4"
+
+
 def test_a_verify_report_left_from_another_render_is_refused(pdir):
     """Fails if a newer video is checked or inspected against an older render's verify report."""
     render.run(pdir, draft=True, cover=False)

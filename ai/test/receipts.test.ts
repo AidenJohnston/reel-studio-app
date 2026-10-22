@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, executeTool, loadProject, newToolState, StyleStore, ToolContext } from '../src';
+import { createAI, executeTool, loadProject, newToolState, saveProject, StyleStore, ToolContext } from '../src';
 import { call, FakeHost, makeProject, ScriptedModel, tmpDir } from './helpers';
 
 it('fails if look_at_frames looks at the newer final render instead of its own preview, or at later layers', async () => {
@@ -69,4 +69,33 @@ it('fails if a note whose final render failed records the fallback preview as it
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
   await ai.applyNote(dir, 'keep the second take', () => {}, undefined, { jobId: 'job-2' });
   expect((await loadProject(dir)).notes.at(-1)!.receipt).toBeUndefined();
+});
+
+it("fails if the AI's view of the project carries every note's receipt", async () => {
+  const { root, dir } = await makeProject();
+  const p = await loadProject(dir);
+  const facts = [{ kind: 'cut.keep', before: [{ from: 'w0', to: 'w56' }], after: [{ from: 'w16', to: 'w56' }] }];
+  p.notes = [{ version: 1, text: 'keep the second take', applied: ['cut'], at: '2026-10-22T00:00:00Z', receipt: { jobId: 'job-1', renderId: 'r_1', version: 1, facts } }];
+  await saveProject(dir, p);
+  const ctx: ToolContext = { projectDir: dir, host: new FakeHost(root), style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
+  const view = JSON.parse((await executeTool(ctx, 'get_project', {})).content);
+  expect(view.notes).toEqual([{ version: 1, text: 'keep the second take', applied: ['cut'], at: '2026-10-22T00:00:00Z' }]);
+});
+
+it('fails if look_at_frames on a project rendered before render ids gives up instead of making a preview', async () => {
+  const { root, dir } = await makeProject();
+  const p = await loadProject(dir);
+  p.version = 1;
+  await saveProject(dir, p);
+  await fsp.mkdir(path.join(dir, 'versions', 'v1'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'versions', 'v1', 'render.json'), JSON.stringify({ version: 1, file: 'export.mp4' }));
+  const host = new FakeHost(root);
+  const ctx: ToolContext = { projectDir: dir, host, style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
+  await executeTool(ctx, 'write_post', { caption: 'Bread', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: [] });
+  expect(JSON.parse((await executeTool(ctx, 'render_draft', {})).content).skipped).toBeTruthy();
+  const r = await executeTool(ctx, 'look_at_frames', { times: [1], words: null });
+  expect(r.isError, String(r.content)).toBe(false);
+  const draft = ctx.state.renders.at(-1)!;
+  expect(draft.draft).toBe(true);
+  expect(host.calls.find((c) => c.command === 'frames')!.args).toEqual(expect.arrayContaining(['--render-id', draft.result.renderId]));
 });

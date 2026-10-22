@@ -245,7 +245,8 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
     cover: p.cover,
     post: p.post,
-    notes: p.notes,
+    // a receipt is for the app's version buttons; sent with every note it grows each request
+    notes: p.notes.map(({ receipt: _receipt, ...n }) => n),
     lastRender: ctx.state.renders.at(-1)?.version ?? null,
   };
 }
@@ -1273,9 +1274,10 @@ const tools: ToolDef[] = [
     }),
     async run(ctx, args) {
       if (!ctx.state.renders.length && !ctx.state.previewSkipped) throw new ToolInputError('call render_draft first');
+      // a version rendered before render ids has none to inspect: make a preview of it instead
       const renderId: string | undefined = ctx.state.renders.length ? ctx.state.renders.at(-1)!.result?.renderId
         : await fsp.readFile(path.join(ctx.projectDir, 'versions', `v${(await load(ctx)).p.version}`, 'render.json'), 'utf8')
-          .then((s) => JSON.parse(s).renderId).catch(() => undefined);
+          .then((s) => JSON.parse(s).renderId).catch(() => undefined) ?? (await doRender(ctx, true)).result?.renderId;
       if (!renderId) throw new ToolInputError('there is no preview to look at; the final video after finish includes the change');
       const shown: RenderReports = await engine(ctx, 'inspect-render', ['--render-id', renderId]);
       const times: number[] = [...(args.times ?? [])];

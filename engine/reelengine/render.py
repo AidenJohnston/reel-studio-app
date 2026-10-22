@@ -923,7 +923,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if not win:
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
-        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], words=tl.words_out,
+        manifest = dict(result, file=out.name, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], words=tl.words_out,
                         captionsReport=cap_report, format=[W, H], layerItems=layer_items, videoSha256=render_identity.video_digest(out))
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
         if not preview and result.get("receipt", {}).get("facts"):
