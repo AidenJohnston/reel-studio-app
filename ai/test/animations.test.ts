@@ -89,7 +89,7 @@ describe('make_animation', () => {
         words: [{ id: 'w42', w: 'so', t: 0.13 }, { id: 'w43', w: 'I', t: 0.3 }, { id: 'w44', w: 'tried', t: 0.5 },
           { id: 'w45', w: 'the', t: 0.8 }, { id: 'w46', w: 'slow', t: 0.95 }, { id: 'w47', w: 'method', t: 1.3 }] };
     };
-    const r = await executeTool(ctx, 'add_broll', { anchor: { from: 'w42', to: 'w47' }, treatment: 'card-above-head', asset: null, search: null,
+    const r = await executeTool(ctx, 'add_broll', { anchor: { from: 'w42', to: 'w47' }, treatment: 'card-above-head', asset: null,
       animation: { template: 'list-reveal', params: { items: ['slow', 'method'] } }, params: {} });
     expect(r.isError).toBe(false);
     const sent = host.animations[0].params;

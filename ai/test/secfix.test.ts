@@ -25,7 +25,7 @@ async function ctxFor(extra: Partial<ToolContext> = {}) {
   return { ctx, host, dir, root };
 }
 
-const addBroll = (asset: string) => ({ anchor: { from: 'w29', to: 'w30' }, treatment: 'full-frame', asset, search: null, animation: null, params: nullP });
+const addBroll = (asset: string) => ({ anchor: { from: 'w29', to: 'w30' }, treatment: 'full-frame', asset, animation: null, params: nullP });
 
 // ---------------------------------------------------------------- 2, 3: paths
 

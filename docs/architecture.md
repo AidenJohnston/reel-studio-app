@@ -310,17 +310,8 @@ See `ai/README.md` for the extra methods beyond this list.
 
 ### Frozen image assets
 
-`resolve_asset` stages images, logos, icons and website screenshots before placement. Its
-candidate IDs belong to one editing request. The image-capable agent must receive a still
-before committing the candidate, and commit verifies that the staged SHA-256 has not changed.
-`add_broll` accepts only committed image IDs or paths; existing video and inline animation
-placement stays compatible. The old search, fetch and capture tools remain available, but
-an image they save must go through the resolver before placement.
-
-`work/assets/manifest.jsonl` is the append-only provenance ledger. Frozen bytes live under
-`work/assets/frozen/<kind>/<sha256>.<ext>`; equal hashes reuse bytes while each new selection
-records its intent. `index.json` is a derived inventory. Reservation and ledger writes hold
-an exclusive project-local lock that recovers a confirmed dead owner. Credits exports go under `work/credits/` so they cannot
-overwrite project data or frozen media. Website captures require commentary policy and
-carry their ownership and non-endorsement notice in the export. This PR uses project-local
-reuse only; there is no shared cache or eviction policy yet.
+Pictures reach the edit through `resolve_asset`. It offers candidates, each with a still, read where they
+are (the Library, an attachment, or a fresh download), and only a committed candidate can be placed.
+Commit copies the bytes to `work/assets/frozen/<kind>/<sha256>.<ext>` (reusing a file with the same hash)
+and appends one record of source, licence, credit and intent to `work/assets/manifest.jsonl`. `add_broll`
+takes a committed picture's `assetId` or path; video clips and animations are placed as before.

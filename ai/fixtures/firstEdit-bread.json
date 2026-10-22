@@ -125,7 +125,6 @@
               },
               "treatment": "card-above-head",
               "asset": "Library/Images/bag of flour.png",
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,
@@ -144,7 +143,6 @@
               },
               "treatment": "text-pop",
               "asset": null,
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,
@@ -163,7 +161,6 @@
               },
               "treatment": "card-above-head",
               "asset": "Library/Images/sourdough loaf.png",
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,

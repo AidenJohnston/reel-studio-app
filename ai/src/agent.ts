@@ -1,6 +1,6 @@
 // The provider-neutral agent loop: model -> tool calls -> results -> model ... until `finish`.
 import { AgentEvent, AIError, ChatMessage, ImagePart, ModelProvider, TokenUsage, ToolCall, ToolResultMsg } from './types';
-import { executeTool, toolSchemas, ToolContext } from './tools';
+import { discardAssetCandidates, executeTool, toolSchemas, ToolContext } from './tools';
 
 const STAGE: Record<string, { message: string; pct: number }> = {
   get_project: { message: 'Reading your video', pct: 8 },
@@ -102,7 +102,7 @@ export function thinkingMessage(messages: ChatMessage[]): string {
   if (!names.length) return 'Watching your video and planning the edit';
   if (names.includes('look_at_frames')) return 'Checking the preview frame by frame';
   if (names.includes('render_draft')) return 'Looking over the preview';
-  if (names.some((n) => n === 'search_images' || n === 'fetch_image' || n === 'list_library')) return 'Choosing pictures and music';
+  if (names.some((n) => n === 'search_images' || n === 'fetch_image' || n === 'resolve_asset' || n === 'list_library')) return 'Choosing pictures and music';
   if (names.some((n) => n === 'set_cut' || n === 'set_gap_cap')) return 'Planning captions, music and pictures';
   return 'Deciding what to do next';
 }
@@ -114,10 +114,10 @@ const KEEP_GOING = 'Keep going: act only through the tools. When everything is d
 const FORMAT_CORRECTION = 'Your last reply could not be read, so nothing ran. Reply again with ONE JSON object and nothing else: '
   + '{"thought": "<one short sentence>", "tool_calls": [{"name": "<tool>", "arguments": {...}}]}. No XML, no <invoke> tags, no prose.';
 
-/** Tools that only read, search or download into a fresh file: a run of them in one reply is
+/** Tools that only read, search, add new files or remove files they made themselves (resolve_asset): a run of them in one reply is
  * independent, so they execute together. Everything that changes project.json, renders, or makes an
  * animation (one renderer) runs alone, in the order the model wrote it. */
-export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'list_library', 'search_images', 'fetch_image', 'cover_candidates']);
+export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'list_library', 'search_images', 'fetch_image', 'resolve_asset', 'cover_candidates']);
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -149,7 +149,7 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { o.provider.dispose?.(); }
+  try { return await agentLoop(o); } finally { o.provider.dispose?.(); await discardAssetCandidates(o.ctx); }
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {

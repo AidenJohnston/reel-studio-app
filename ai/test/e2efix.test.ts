@@ -30,7 +30,7 @@ const nullP = { side: null, tilt: null, scale: null, text: null, iconic: null };
 
 async function addCountUp(ctx: ToolContext, text = 'people signed up') {
   const r = await executeTool(ctx, 'add_broll', {
-    anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', asset: null, search: null,
+    anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', asset: null,
     animation: { template: 'stat-count-up', params: { value: '20', text } }, params: nullP,
   });
   expect(r.isError, r.content).toBe(false);

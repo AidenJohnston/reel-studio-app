@@ -136,7 +136,7 @@ describe('attachments: the AI sees them', () => {
     const model = new ScriptedModel([
       (req) => {
         expect(firstText(req)).toMatch(/no words: the user only attached the file/);
-        return { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: gif, search: null, animation: null, params: nullP })] };
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: gif, animation: null, params: nullP })] };
       },
       { toolCalls: [call('render_draft')] },
       { toolCalls: [call('finish', { summary_for_user: "I put your GIF over your face when you say 'the ick'." })] },
@@ -202,7 +202,7 @@ describe('attachments: the AI sees them', () => {
     const a = await attach(dir, { kind: 'video', stem: 'clip' });
     const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const model = new ScriptedModel([
-      { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'side-card', asset: a, search: null, animation: null, params: nullP })] },
+      { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'side-card', asset: a, animation: null, params: nullP })] },
       new AIError('chatgpt_usage_limit', 'limit'),
     ]);
     await expect(createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'next to me on the ick', () => undefined, undefined, { attachments: [a] }))

@@ -7,6 +7,7 @@ import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
+import { LEDGER } from './assets';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
@@ -135,14 +136,17 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
   return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
 }
 
+const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, () => 0);
+
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, state: ToolState): Promise<void> {
+ * it added, the pictures it downloaded, and the asset records it appended. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
   await removeStyleRules(deps, state);
   for (const f of await listAssets(projectDir)) {
-    if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
+    if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
+  if (ledgerBefore) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -309,6 +313,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // project.json, My style and work/assets back as they were.
   const before = await fsp.readFile(path.join(projectDir, 'project.json'));
   const assetsBefore = await listAssets(projectDir);
+  const ledgerBefore = await ledgerBytes(projectDir);
   const mediaSec = mediaSeconds(p0);
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
   const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
@@ -331,12 +336,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+        await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
         throw e;
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
     ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
     await load(ctx);
   }
@@ -370,7 +375,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
     throw e;
   }
 }

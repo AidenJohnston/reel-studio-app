@@ -17,7 +17,7 @@ function firstEditScript() {
     },
     { toolCalls: [
       call('choose_music', { track: 'Library/Music/gentle.mp3', startAt: 2, level: 'under-voice' }),
-      call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { ...nullP, text: '$20' } }),
+      call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, animation: null, params: { ...nullP, text: '$20' } }),
       call('set_zoom', { zooms: [{ anchor: { from: 'w53', to: 'w56' }, scale: 1.1 }] }),
       call('set_cover', { atSourceTime: 8.5, source: null, text: 'Bread' }),
       call('write_post', { caption: 'The hardest part of baking bread is waiting', hashtags: ['sourdough', 'breadtok', 'baking', 'homebaker', 'slowfood'], keywords: ['baking bread'] }),
@@ -68,6 +68,7 @@ describe('agent loop with a scripted model', () => {
     // system prompt carries doctrine + style placeholder filled
     expect(model.requests[0].system).toMatch(/red thread/i);
     expect(model.requests[0].system).not.toMatch(/\{\{styleRules\}\}/);
+    expect(model.requests[0].tools.length).toBe(30);   // docs/architecture.md section 6 + set_mirror
     await fsp.access(path.join(dir, 'versions', 'v1', 'project.json'));
     await fsp.access(path.join(dir, 'versions', 'preview', 'draft.mp4'));
     expect((await fsp.readdir(path.join(dir, 'versions'))).sort()).toEqual(['preview', 'v1']);

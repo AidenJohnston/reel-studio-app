@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
+import { randomUUID } from 'node:crypto';
 import { EngineHost, EngineProgress, ToolContext, executeTool, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
@@ -131,7 +132,12 @@ export class FakeHost implements EngineHost {
         for (const t of times) { const f = path.join(fd, `f_${t}.png`); await fsp.writeFile(f, tinyPng()); frames.push({ time: t, path: f }); }
         return { frames };
       }
-      case 'inspect-image': return { previewPath: args[args.indexOf('--asset') + 1], width: 1, height: 1, mime: 'image/png' };
+      case 'inspect-image': {
+        const still = `work/thumbs/candidate-${randomUUID()}.jpg`;
+        await fsp.mkdir(path.join(dir, 'work', 'thumbs'), { recursive: true });
+        await fsp.writeFile(path.join(dir, still), tinyPng());
+        return { previewPath: still, width: 8, height: 8 };
+      }
       case 'search-images': return { results: this.searchResults };
       case 'fetch-image': {
         if (!this.engineAssets) throw { code: 'BAD_ARGS', userMessage: 'unknown command' };

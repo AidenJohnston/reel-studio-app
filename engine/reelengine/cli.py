@@ -10,6 +10,7 @@ import hashlib
 import json
 import sys
 import traceback
+import uuid
 from pathlib import Path
 
 from . import proto
@@ -125,7 +126,7 @@ def cmd_search_images(args):
     return res
 
 
-def _thumb(proj: Path, out: Path) -> str | None:
+def _thumb(proj: Path, out: Path, stem: str | None = None) -> str | None:
     """A small still the AI LOOKS at before placing a picture: a matching title can hide a wrong one."""
     try:
         from PIL import Image
@@ -137,7 +138,7 @@ def _thumb(proj: Path, out: Path) -> str | None:
             bg.alpha_composite(im)
             bg = bg.convert("RGB")
             bg.thumbnail((320, 320))
-            thumb = tdir / f"{out.stem}.jpg"
+            thumb = tdir / f"{stem or out.stem}.jpg"
             bg.save(thumb, "JPEG", quality=80)
         return str(thumb)
     except Exception as e:  # noqa: BLE001 -- a missing thumbnail never costs the picture
@@ -147,21 +148,18 @@ def _thumb(proj: Path, out: Path) -> str | None:
 
 
 def cmd_inspect_image(args):
+    """A picture the AI is choosing (Library, attachment or download), read where it is: its size and
+    a still of its own, so candidates inspected side by side never share one."""
     from PIL import Image
     from .safepath import safe_resolve
     proj = _project(args)
-    out = safe_resolve(proj, args.asset, write=True, what="staged image")
-    if out.stat().st_size > 40 * 1024 * 1024:
-        raise EngineError("TOO_BIG", "staged image over 40 MB", "That picture is too large. Choose a smaller one.")
-    with Image.open(out) as im:
-        im.load()
+    src = safe_resolve(proj, args.asset, root=Path(args.root) if args.root else None, what="image")
+    with Image.open(src) as im:
         width, height = im.size
-    safe_resolve(proj, "work/thumbs", write=True, what="asset preview")
-    safe_resolve(proj, f"work/thumbs/{out.stem}.jpg", write=True, what="asset preview")
-    thumb = _thumb(proj, out)
+    thumb = _thumb(proj, src, stem=f"candidate-{uuid.uuid4().hex}")
     if not thumb:
-        raise EngineError("NOT_AN_IMAGE", "asset preview failed", "I couldn't make a still of that picture. Try another one.")
-    return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height, "mime": "image/jpeg"}
+        raise EngineError("NOT_AN_IMAGE", f"no still for {src.name}", "I couldn't open that picture. Try another one.")
+    return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height}
 
 
 def cmd_register_capture(args):
@@ -371,8 +369,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--copyrighted", action="store_true",
                     help="also posters/stills of shows and films (copyrighted; labelled as such)")
     sp.add_argument("words", nargs="*")
-    sp = add("inspect-image", cmd_inspect_image, "validate a staged picture and return its still")
+    sp = add("inspect-image", cmd_inspect_image, "a picture's size and a still of it for the AI to look at")
     sp.add_argument("--asset", required=True)
+    sp.add_argument("--root")
     sp = add("register-capture", cmd_register_capture, "credit a website screenshot saved in work/assets")
     sp.add_argument("--asset", required=True)
     sp.add_argument("--url", required=True)

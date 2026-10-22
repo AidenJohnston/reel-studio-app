@@ -238,3 +238,26 @@ def test_cli_register_capture_stays_inside_work_assets(tmp_path):
         with pytest.raises((EngineError, CliError)):
             cli.cmd_register_capture(p.parse_args(["register-capture", "--project", str(proj),
                                                    "--asset", bad, "--url", "https://zorblax.example"]))
+
+
+def test_cli_inspect_image_reads_the_library_in_place_and_gives_each_picture_its_own_still(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.delenv("REELENGINE_EXTRA_READ_DIRS", raising=False)
+    proj, root = tmp_path / "p", tmp_path / "root"
+    (proj / "work" / "assets").mkdir(parents=True)
+    (root / "Library" / "Images").mkdir(parents=True)
+    Image.new("RGB", (40, 80), "red").save(root / "Library" / "Images" / "bread.png")
+    Image.new("RGB", (80, 40), "blue").save(proj / "work" / "assets" / "bread.png")
+    Image.new("RGB", (8, 8), "white").save(tmp_path / "outside.png")
+    p = cli.build_parser()
+
+    def inspect(ref):
+        return cli.cmd_inspect_image(p.parse_args(["inspect-image", "--project", str(proj), "--root", str(root), "--asset", ref]))
+
+    lib, download = inspect("Library/Images/bread.png"), inspect("work/assets/bread.png")
+    assert (lib["width"], lib["height"], download["width"], download["height"]) == (40, 80, 80, 40)
+    with Image.open(proj / lib["previewPath"]) as still:
+        assert still.convert("RGB").getpixel((5, 5))[0] > 200  # the red Library picture, not the blue download
+    for bad in ("work/../../outside.png", str(tmp_path / "outside.png")):
+        with pytest.raises((EngineError, CliError)):
+            inspect(bad)
