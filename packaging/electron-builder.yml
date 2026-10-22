@@ -58,6 +58,8 @@ extraResources:
       - "!**/tests/**"
       - "!**/*.egg-info/**"
       - "!pyproject.toml"
+      # README/CONTRIBUTING create engine/.venv for development; the app runs resources/python, never this venv
+      - "!.venv/**"
   - from: ${env.RS_REPO_ROOT}/packaging/fonts
     to: fonts
   # No dev leftovers: a developer's `npm install` inside templates/animations leaves node_modules (Playwright), and
