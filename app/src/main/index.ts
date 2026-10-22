@@ -7,6 +7,8 @@ import {
   engineEnv,
   engineMode,
   initPaths,
+  noteStagingDir,
+  noteStagingRoot,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -56,7 +58,7 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc, unstage } from './attachments'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -89,7 +91,7 @@ function log(line: string): void {
 
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
 let pidRegistry: ReturnType<typeof createPidRegistry> | null = null
-const runEngine: RunEngine = withRenderSlot(
+const renderSlot = withRenderSlot(
   createEngineRunner({
     python: pythonExe,
     env: engineEnv,
@@ -100,6 +102,7 @@ const runEngine: RunEngine = withRenderSlot(
   }),
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
+const runEngine: RunEngine = renderSlot.run
 
 const host: EngineHost = {
   runEngine,
@@ -151,6 +154,7 @@ async function startNote(slug: string, { id: noteId, text, attachments }: NoteTo
     slug,
     'note',
     async (emit, signal, { owner }) => {
+      await unstage(dir, noteStagingDir(slug), attachments)
       // saved under its queue entry's id (note-queue.ts); the app asks before anything goes into My style
       const opts = { attachments: attachments.map((f) => f.asset), id: noteId, saveStyleRules: false, ...(owner ? { owner } : {}) }
       const r: AgentResult = await ai.applyNote(dir, text, (e) => emit(e), signal, opts)
@@ -379,6 +383,7 @@ function registerIpc(): void {
     projectDir,
     readProject,
     busy: (slug) => !!jobs.forSlug(slug),
+    stagingDir: noteStagingDir,
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -421,7 +426,7 @@ function registerIpc(): void {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
-      ? { id: running.id, kind: running.kind, message: jobs.message(running), pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, overdue: running.overdue, thinking: running.thinking }
+      ? { id: running.id, kind: running.kind, message: jobs.message(running), pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, overdue: running.overdue, thinking: running.thinking, waitingForRender: running.waitingForRender }
       : null
     if (!running && d.status === 'working') d.status = 'interrupted'
     return d
@@ -465,8 +470,8 @@ function registerIpc(): void {
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, onVersion?: unknown) => {
     const note = String(text ?? '').trim()
     const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
+    // never trust the page: every attached ref is re-read from THIS project's own sidecars (or its staging)
+    const files = await checkNoteAttachments(dir, attachments, noteStagingDir(slug))
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -531,13 +536,14 @@ function registerIpc(): void {
       await running.done
     }
     await fs.rm(projectDir(slug), { recursive: true, force: true })
+    await fs.rm(noteStagingDir(slug), { recursive: true, force: true })
   })
 
   handle('jobs:cancel', (_e, id: string) => noteQueue.stop(String(id)))
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
-  handle('queue:runNext', (_e, slug: string) => noteQueue.runNext(slug))
+  handle('queue:resume', (_e, slug: string) => noteQueue.resume(slug))
   handle('queue:clear', (_e, slug: string) => noteQueue.clear(slug))
 
   handle('library:list', async () => {
@@ -650,6 +656,8 @@ app.whenReady().then(async () => {
   pidRegistry = createPidRegistry(settingsDir())
   const { stopped, stillRunning } = await pidRegistry.reap()
   if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
+  // an engine that would not stop may be encoding: no reel renders until they are all gone
+  renderSlot.occupy(pidRegistry.drained())
   // something there would not stop and may still be writing: the project stays closed, its lock kept
   const closed = stillRunning.map((dir) => basename(dir))
   for (const slug of closed) {
@@ -679,7 +687,7 @@ app.whenReady().then(async () => {
   aiSource = loaded.source
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot()])
   registerIpc()
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower

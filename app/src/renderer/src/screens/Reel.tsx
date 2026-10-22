@@ -188,7 +188,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     onDragOver: (e: React.DragEvent) => {
       if (!Array.from(e.dataTransfer.types).includes('Files')) return
       e.preventDefault()
-      e.dataTransfer.dropEffect = job ? 'none' : 'copy'
+      e.dataTransfer.dropEffect = 'copy'
     },
     onDragLeave: () => {
       noteDropDepth.current = Math.max(0, noteDropDepth.current - 1)
@@ -200,7 +200,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       noteDropDepth.current = 0
       setNoteDrop(false)
       window.dispatchEvent(new Event(NOTE_DROP_DONE))
-      if (job) return
       att.onDropFiles(e.dataTransfer)
     }
   }
@@ -576,7 +575,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <button
                 className="btn attach-btn"
                 onClick={att.choose}
-                disabled={!!job}
                 aria-label="Attach a picture or a clip"
                 title="Attach a picture or a clip"
                 data-testid="note-attach"

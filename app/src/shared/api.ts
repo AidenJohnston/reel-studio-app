@@ -108,9 +108,10 @@ export interface ProjectDetail extends ProjectSummary {
   lastError: { code: string; userMessage: string } | null
   /** Notes waiting their turn, in the order they will run. */
   queue: QueuedNote[]
-  /** True: the queue waits for "Run next" (after Stop, a failed note, or a restart). */
+  /** True: the queue waits for Resume (after Stop, a failed note, or a restart). */
   queueHeld: boolean
-  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null
+  /** `waitingForRender`: its render waits for another reel's (one render at a time); the bar holds. */
+  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean; waitingForRender: boolean } | null
   /** A small picture for each b-roll item with an image file (broll id -> reel-media URL). Animations and
    * text-only items have none (the Pictures list names them in words instead of a file name). */
   brollThumbs: Record<string, string>
@@ -156,7 +157,8 @@ export interface ProjectJson {
   zooms?: unknown[]
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
-  notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** `id`: the queued note's id (docs/schema-changes.md) */
+  notes?: { id?: string; version: number; text: string; applied: string[]; at: string }[]
   [k: string]: unknown
 }
 
@@ -191,7 +193,7 @@ export type JobEvent = Ids &
      * history (main/progress.ts), null = too early to say. Status repeats about once a second while a job
      * runs (thinking kept), so a bar fed by `overall` never freezes. */
     /** overdue = past every estimate on the last step: show "Still working, almost there", no number. */
-    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean }
+    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean; waitingForRender: boolean }
     | { type: 'tool'; name: string; summary: string }
     /** video = a playable reel-media URL of a stable copy (never the file the engine overwrites next). */
     | { type: 'render'; version: number; draft: boolean; firstLook: boolean; video: string | null }
@@ -390,8 +392,8 @@ export interface ReelApi {
     cancel(slug: string, id: string): Promise<void>
     /** -1 = one place earlier, 1 = one place later */
     move(slug: string, id: string, by: -1 | 1): Promise<void>
-    /** Starts the waiting notes again after Stop, a failed note or a restart. */
-    runNext(slug: string): Promise<void>
+    /** Runs the waiting notes again, from the first, after Stop, a failed note or a restart. */
+    resume(slug: string): Promise<void>
     clear(slug: string): Promise<void>
     /** Something about a reel's queue changed. */
     onChange(cb: (slug: string) => void): () => void

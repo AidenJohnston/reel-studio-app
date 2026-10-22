@@ -71,7 +71,7 @@ const api: ReelApi = {
     edit: (slug, id, text) => call('queue:edit', slug, id, text),
     cancel: (slug, id) => call('queue:cancel', slug, id),
     move: (slug, id, by) => call('queue:move', slug, id, by),
-    runNext: (slug) => call('queue:runNext', slug),
+    resume: (slug) => call('queue:resume', slug),
     clear: (slug) => call('queue:clear', slug),
     onChange: (cb) => on<string>('queue:change', cb)
   },

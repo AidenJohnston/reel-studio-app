@@ -206,7 +206,7 @@ export const createMockAI: CreateAI = ({ host }) => {
         added.push(note.trim())
       }
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
-      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
+      p.notes = [...(p.notes ?? []), { ...(opts?.id ? { id: opts.id } : {}), version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
       await writeProject(projectDir, p)
       onEvent({ type: 'status', message: 'Done', pct: 100 })
       return {

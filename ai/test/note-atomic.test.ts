@@ -160,4 +160,14 @@ describe('a note that finishes is saved in one write', () => {
     expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-2', version: 1, styleSuggestions: ['Keep music quieter under talking.'] });
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
+
+  it('a note that changes nothing is saved under its id with its reply, with no render', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    const m = new ScriptedModel([finish('It already looks right to me.')]);
+    const r = await createAI({ host, settingsDir, providerOverride: m })
+      .applyNote(dir, 'make it pop', () => undefined, undefined, { id: 'job-3', saveStyleRules: false });
+    expect(r).toMatchObject({ version: 1, changed: [], summary: 'It already looks right to me.' });
+    expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
+    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-3', version: 1, applied: [], reply: 'It already looks right to me.' });
+  });
 });

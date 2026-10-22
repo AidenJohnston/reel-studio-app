@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
+import { withRenderSlot } from '../src/main/render-slot'
 import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
 import { engineEnv, projectsDir } from '../src/main/paths'
 import { APP_DIR, PYTHON, setupPaths } from './helpers'
@@ -93,6 +94,31 @@ describe('orphaned engine reaper', () => {
     expect(existsSync(join(other, OWNER_LOCK))).toBe(false)
     expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project }])
     await killTree(left.pid!)
+  }, 60000)
+
+  it('no reel renders while an engine the last run left (and that would not stop) still runs', async () => {
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const sleeper = join(APP_DIR, 'test', 'fixtures', 'sleeper')
+    const left = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: sleeper, stdio: 'ignore', detached: true, windowsHide: true })
+    await once(left, 'spawn')
+    createPidRegistry(settings).add(left.pid!, join(settings, 'bread'))
+    const next = createPidRegistry(settings, async () => false)
+    expect((await next.reap()).stillRunning).toEqual([join(settings, 'bread')])
+
+    const rendered: string[] = []
+    const waits: boolean[] = []
+    const slot = withRenderSlot(async (command) => void rendered.push(command), (_owner, waiting) => waits.push(waiting))
+    slot.occupy(next.drained(50))
+    const render = slot.run('render', ['--project', 'cake', '--owner', 't'])
+    await new Promise((r) => setImmediate(r))
+    expect(waits).toEqual([true])
+    expect(rendered).toEqual([])
+
+    await killTree(left.pid!)
+    await render
+    expect(waits).toEqual([true, false])
+    expect(rendered).toEqual(['render'])
+    expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([])
   }, 60000)
 
   it('recognises only our engine command line', () => {

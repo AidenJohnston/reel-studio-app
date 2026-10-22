@@ -1,50 +1,121 @@
 // Notes sent while a note runs (main/note-queue.ts), driven like the app drives them: the job lane, the
-// mock AI's slow practice note (REELSTUDIO_MOCK_NOTE), and the stand-in engine's real renders.
+// mock AI's practice note (REELSTUDIO_MOCK_NOTE) and the stand-in engine's real renders. Each note waits
+// at a gate until the test lets it go on, and every check waits for the queue to come to rest, so no
+// result depends on how fast this computer's disk or engine is.
 import { describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
+import { rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
 import { createJobManager, WAITING_FOR_RENDER } from '../src/main/jobs'
 import { createMockAI } from '../src/main/ai-mock'
-import { createNoteQueue } from '../src/main/note-queue'
+import { BACK_IN_QUEUE, createNoteQueue, STOPPED } from '../src/main/note-queue'
 import { withRenderSlot } from '../src/main/render-slot'
 import { engineEnv, reelStudioRoot } from '../src/main/paths'
 import { projectDir, readAppState, readProject, recoverInterrupted, updateAppState } from '../src/main/store'
 import type { JobEvent, QueuedNote } from '../src/shared/api'
 import { FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
 
-process.env.REELSTUDIO_MOCK_NOTE = '400'
+process.env.REELSTUDIO_MOCK_NOTE = '1'
 
-function app(opts: { failRender?: () => boolean; onRender?: (phase: 'start' | 'end') => void } = {}) {
+const CANCELLED = { code: 'CANCELLED', userMessage: 'Stopped.' }
+
+function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?: boolean } = {}) {
   const engine = createEngineRunner({
     python: () => PYTHON,
-    env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, ...(opts.failRender?.() ? { FAKE_ENGINE_FAIL: 'render' } : {}) })
+    env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, ...(opts.failRender ? { FAKE_ENGINE_FAIL: 'render' } : {}) })
   })
+  /** gates the test opens: a note before its AI work, a render before the engine, a note after its save */
+  const thinking = new Map<string, () => void>()
+  const renders = new Map<string, () => void>()
+  const saved = new Map<string, () => void>()
+  let slotWaiters = 0
+  let rendering = 0
+  let mostRendering = 0
+  const gate = (at: Map<string, () => void>, slug: string, signal?: AbortSignal): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      at.set(slug, resolve)
+      signal?.addEventListener('abort', () => reject(CANCELLED), { once: true })
+    }).finally(() => at.delete(slug))
+
   const counted: typeof engine = async (command, args, onProgress, signal) => {
-    if (command === 'render') opts.onRender?.('start')
+    if (command !== 'render') return engine(command, args, onProgress, signal)
+    const slug = args[args.indexOf('--project') + 1].split(/[\\/]/).pop()!
+    mostRendering = Math.max(mostRendering, ++rendering)
     try {
+      if (opts.holdRenders) await gate(renders, slug, signal)
       return await engine(command, args, onProgress, signal)
     } finally {
-      if (command === 'render') opts.onRender?.('end')
+      rendering--
     }
   }
   const events: JobEvent[] = []
-  const runEngine = withRenderSlot(counted, (owner, waiting) => jobs.waitingForRender(owner, waiting))
-  const jobs = createJobManager((e) => (events.push(e), queue.onJobEvent(e)), () => undefined)
-  const ai = createMockAI({ host: { runEngine, renderAnimation: async () => '', reelStudioRoot }, settingsDir: join(reelStudioRoot(), 'ai') })
+  const pending = new Set<Promise<void>>()
+  const slot = withRenderSlot(counted, (owner, waiting) => {
+    slotWaiters += waiting ? 1 : -1
+    jobs.waitingForRender(owner, waiting)
+  })
+  const jobs = createJobManager((e) => {
+    events.push(e)
+    const p = queue.onJobEvent(e)
+    pending.add(p)
+    void p.finally(() => pending.delete(p))
+  }, () => undefined)
+  const ai = createMockAI({ host: { runEngine: slot.run, renderAnimation: async () => '', reelStudioRoot }, settingsDir: join(reelStudioRoot(), 'ai') })
   // as index.ts startNote
   const queue = createNoteQueue({
     jobs,
     startNote: async (slug, note, record) =>
       jobs.start(slug, 'note', async (emit, signal, { owner }) => {
+        await gate(thinking, slug, signal)
         const r = await ai.applyNote(projectDir(slug), note.text, emit, signal, { id: note.id, ...(owner ? { owner } : {}) })
+        // the job's bookkeeping after the save (jobs.ts): Stop can land here, too late to undo the note
+        if (opts.holdAfterSave) await gate(saved, slug)
         return { summary: r.summary, version: r.version }
       }, { record }),
     changed: () => undefined,
     log: () => undefined
   })
-  const send = (slug: string, text: string) => queue.send(slug, { text, attachments: [] }, 1)
-  return { ai, jobs, queue, events, send }
+
+  /** Resolves once the queue has acted on every job event and every running job waits at a gate. */
+  async function settled(): Promise<void> {
+    for (let i = 0; i < 20_000; i++) {
+      await Promise.all([...pending])
+      await new Promise((r) => setTimeout(r, 1))
+      const parked = thinking.size + renders.size + saved.size + slotWaiters
+      if (!pending.size && parked === jobs.runningCount()) return
+    }
+    throw new Error(`the queue never came to rest: ${jobs.runningCount()} jobs, ${thinking.size + renders.size + saved.size} at gates, ${slotWaiters} waiting for the slot`)
+  }
+  /** Opens a gate, then waits for the queue to come to rest. */
+  const open = async (at: Map<string, () => void>, slug: string): Promise<void> => {
+    const go = at.get(slug)
+    if (!go) throw new Error(`nothing waits at that gate on ${slug}`)
+    go()
+    await settled()
+  }
+  const send = async (slug: string, text: string) => {
+    const r = await queue.send(slug, { text, attachments: [] }, 1)
+    await settled()
+    return r
+  }
+  /** Lets each note on the reel run to its end, one after another, until nothing runs there. */
+  const runAll = async (slug: string): Promise<void> => {
+    await settled()
+    while (jobs.forSlug(slug)) {
+      const at = [thinking, renders, saved].find((g) => g.has(slug))
+      if (!at) throw new Error(`a note runs on ${slug} but waits at no gate`)
+      await open(at, slug)
+    }
+  }
+  return {
+    ai, jobs, queue, events, send, settled, runAll,
+    think: (slug: string) => open(thinking, slug),
+    render: (slug: string) => open(renders, slug),
+    finishSave: (slug: string) => open(saved, slug),
+    waitingAt: { thinking, renders, saved },
+    mostRendering: () => mostRendering
+  }
 }
 
 async function reel(slug: string): Promise<string> {
@@ -57,10 +128,8 @@ async function reel(slug: string): Promise<string> {
   return slug
 }
 
-const until = async (ok: () => Promise<boolean> | boolean): Promise<void> => {
-  while (!(await ok())) await new Promise((r) => setTimeout(r, 20))
-}
 const replies = async (slug: string): Promise<string[]> => (await readAppState(slug)).chat.filter((m) => m.from === 'editor').map((m) => m.text)
+const yours = async (slug: string): Promise<string[]> => (await readAppState(slug)).chat.filter((m) => m.from === 'you').map((m) => m.text)
 const waitingTexts = async (slug: string): Promise<string[]> => ((await readAppState(slug)).queue ?? []).map((q) => q.text)
 const entry = (id: string, text: string, started = false): QueuedNote => ({
   id, text, attachments: [], seenVersion: 1, ...(started ? { attempt: { base: 1 } } : {})
@@ -74,13 +143,13 @@ describe('note queue', () => {
     expect((await a.send(slug, 'first')).jobId).toBeTruthy()
     expect(await a.send(slug, 'second')).toEqual({ jobId: null, queued: true })
     expect(await a.send(slug, 'third')).toEqual({ jobId: null, queued: true })
-    await until(async () => (await replies(slug)).length === 3)
+    await a.runAll(slug)
     expect(await replies(slug)).toEqual(['Done: "first". It is Version 2.', 'Done: "second". It is Version 3.', 'Done: "third". It is Version 4.'])
     expect((await readProject(slug)).version).toBe(4)
     expect(await waitingTexts(slug)).toEqual([])
   }, 60000)
 
-  it('Stop holds the waiting notes, and nothing starts until Run next', async () => {
+  it('Stop says so, holds the waiting notes, and nothing starts until Resume', async () => {
     setupPaths()
     const slug = await reel('stop')
     const a = app()
@@ -88,33 +157,55 @@ describe('note queue', () => {
     await a.send(slug, 'second')
     await a.send(slug, 'third')
     a.queue.stop(jobId!)
-    await until(async () => !!(await readAppState(slug)).queueHeld)
+    await a.settled()
     expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await readAppState(slug)).queueHeld).toBe(true)
     expect(await waitingTexts(slug)).toEqual(['second', 'third'])
+    expect(await replies(slug)).toEqual([STOPPED])
     expect((await readProject(slug)).version).toBe(1)
 
-    await a.queue.runNext(slug)
-    await until(async () => (await replies(slug)).length === 2)
+    await a.queue.resume(slug)
+    await a.runAll(slug)
     expect((await readProject(slug)).version).toBe(3)
   }, 60000)
 
-  it('a note that fails holds the queue instead of skipping to the next one', async () => {
+  it('Stop pressed after the note was saved keeps it, and still holds the notes behind it', async () => {
+    setupPaths()
+    const slug = await reel('stop-late')
+    const a = app({ holdAfterSave: true })
+    const { jobId } = await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.think(slug)
+    expect(a.waitingAt.saved.has(slug)).toBe(true)
+    a.queue.stop(jobId!)
+    await a.finishSave(slug)
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await readProject(slug)).version).toBe(2)
+    expect(await waitingTexts(slug)).toEqual(['second'])
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+  }, 60000)
+
+  it('a note that fails holds the queue instead of skipping to the next one, and shows only as waiting', async () => {
     setupPaths()
     const slug = await reel('fails')
-    const a = app({ failRender: () => true })
+    const a = app({ failRender: true })
     await a.send(slug, 'first')
     await a.send(slug, 'second')
-    await until(async () => !!(await readAppState(slug)).queueHeld)
+    await a.think(slug)
     expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await readAppState(slug)).queueHeld).toBe(true)
     expect(await waitingTexts(slug)).toEqual(['first', 'second'])
+    expect(await yours(slug)).toEqual([])
+    expect((await replies(slug)).at(-1)).toBe(BACK_IN_QUEUE)
     expect((await readProject(slug)).version).toBe(1)
   }, 60000)
 
-  it('a crash before a note is saved: it and the notes behind it come back, waiting for Run next', async () => {
+  it('a crash before a note is saved: it and the notes behind it come back once, waiting for Resume', async () => {
     setupPaths()
     const slug = await reel('crash-before')
     await updateAppState(slug, (s) => {
       s.job = { id: 'job-1', kind: 'note', startedAt: '', noteId: 'q1' }
+      s.chat = [{ id: 'q1', from: 'you', text: 'first', at: '' }]
       s.queue = [entry('q1', 'first', true), entry('q2', 'second')]
     })
     // the next start
@@ -124,10 +215,12 @@ describe('note queue', () => {
     expect(await a.send(slug, 'third')).toEqual({ jobId: null, queued: true })
     expect(a.jobs.forSlug(slug)).toBeUndefined()
     expect(await waitingTexts(slug)).toEqual(['first', 'second', 'third'])
+    expect(await yours(slug)).toEqual([])
 
-    await a.queue.runNext(slug)
-    await until(async () => (await replies(slug)).length === 4)
+    await a.queue.resume(slug)
+    await a.runAll(slug)
     expect((await readProject(slug)).version).toBe(4)
+    expect(await yours(slug)).toEqual(['first', 'second', 'third'])
   }, 60000)
 
   it('a crash after a note is saved but before it left the queue: it is not run a second time', async () => {
@@ -144,22 +237,57 @@ describe('note queue', () => {
     expect(await replies(slug)).toEqual(['I made your change. It is Version 2.'])
     expect(await waitingTexts(slug)).toEqual(['second'])
 
-    await a.queue.runNext(slug)
-    await until(async () => (await replies(slug)).length === 2)
+    await a.queue.resume(slug)
+    await a.runAll(slug)
     expect((await readProject(slug)).version).toBe(3)
   }, 60000)
 
-  it('notes on two reels run at once, but only one of them renders at a time', async () => {
+  it('a note project.json already has never runs again, and nothing starts while project.json cannot be read', async () => {
+    setupPaths()
+    const slug = await reel('saved-unseen')
+    const a = app()
+    await a.ai.applyNote(projectDir(slug), 'first', () => undefined, undefined, { id: 'q1' })
+    const good = await readProject(slug)
+    await updateAppState(slug, (s) => {
+      s.queue = [entry('q1', 'first'), entry('q2', 'second')]
+      s.queueHeld = true
+    })
+    await rename(join(projectDir(slug), 'project.json'), join(projectDir(slug), 'project.json.bak'))
+    await a.queue.resume(slug)
+    await a.settled()
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+
+    await rename(join(projectDir(slug), 'project.json.bak'), join(projectDir(slug), 'project.json'))
+    await a.queue.resume(slug)
+    await a.runAll(slug)
+    expect(await replies(slug)).toEqual(['Done: "second". It is Version 3.'])
+    expect(await waitingTexts(slug)).toEqual([])
+    const ids = (p: typeof good): (string | undefined)[] => (p.notes ?? []).map((n) => n.id)
+    expect(ids(await readProject(slug))).toEqual([...ids(good), expect.any(String)])
+  }, 60000)
+
+  it('notes on two reels plan at once, but only one renders at a time, and the waiting one says so and holds its bar', async () => {
     setupPaths()
     const [one, two] = [await reel('reel-one'), await reel('reel-two')]
-    let rendering = 0
-    let most = 0
-    const a = app({ onRender: (p) => ((rendering += p === 'start' ? 1 : -1), (most = Math.max(most, rendering))) })
-    await Promise.all([a.send(one, 'brighter'), a.send(two, 'brighter')])
-    await until(async () => (await replies(one)).length === 1 && (await replies(two)).length === 1)
-    expect(most).toBe(1)
+    const a = app({ holdRenders: true })
+    await a.send(one, 'brighter')
+    await a.send(two, 'brighter')
+    expect([...a.waitingAt.thinking.keys()].sort()).toEqual([one, two])
+    await a.think(one)
+    expect(a.waitingAt.renders.has(one)).toBe(true)
+    const seen = a.events.length
+    await a.think(two)
+    const waiting = a.events.slice(seen).filter((e) => e.type === 'status' && e.slug === two && e.waitingForRender)
+    expect(waiting.length).toBeGreaterThan(0)
+    expect(waiting.every((e) => e.type === 'status' && e.message === WAITING_FOR_RENDER && e.secondsLeft === null && !e.overdue)).toBe(true)
+    expect(a.waitingAt.renders.has(two)).toBe(false)
+
+    await a.render(one)
+    expect(a.waitingAt.renders.has(two)).toBe(true)
+    await a.render(two)
+    expect(a.mostRendering()).toBe(1)
     expect((await readProject(one)).version).toBe(2)
     expect((await readProject(two)).version).toBe(2)
-    expect(a.events.some((e) => e.type === 'status' && e.message === WAITING_FOR_RENDER)).toBe(true)
   }, 60000)
 })

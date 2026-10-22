@@ -86,3 +86,19 @@ Linux the engine runs as its own process group and the host stops what is left o
 any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
 project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
 children when it exits (`engine/reelengine/contain.py`).
+
+## Notes waiting their turn
+
+A note sent while another job runs on the same video waits in that video's queue in `app.json`
+(`app/src/main/note-queue.ts`), written to disk before the send returns. Notes run one at a time, oldest
+first, each on whatever version is newest when it starts. A queued note's id is the id it is saved under in
+`project.json` `notes`, and it leaves the queue only once that id is there, so a crash on either side of
+the save never runs it twice. A note that changes nothing is saved too, with `applied: []`.
+
+The queue goes on by itself only after a saved note. Stop, a failed note and a restart hold it until the
+user presses Resume (a note sent to an empty queue starts at once). A file attached while a job runs goes
+to `<userData>/note-staging/<slug>/` and is copied into `work/assets` by its own note's job.
+
+Notes on different videos run side by side, but only one engine `render` runs at a time across all of
+them (`app/src/main/render-slot.ts`). A render that ends with `ENGINE_STUCK`, or an engine a crashed run
+left that would not stop, keeps the slot until it is gone.

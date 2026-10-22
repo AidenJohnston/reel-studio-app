@@ -42,8 +42,7 @@ interface Running {
   owner: string | null
   /** Waiting for the render slot another reel holds (render-slot.ts). */
   waitingForRender: boolean
-  /** Sends its status now. */
-  report: () => void
+  setWaitingForRender: (waiting: boolean) => void
   done: Promise<void>
 }
 
@@ -75,7 +74,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     if (slug) refuseIfBusy(slug)
     const id = randomUUID()
     const abort = new AbortController()
-    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, owner: null, waitingForRender: false, report: () => undefined, done: Promise.resolve() }
+    const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, owner: null, waitingForRender: false, setWaitingForRender: () => undefined, done: Promise.resolve() }
     jobs.set(id, job)
     const send = (e: JobEvent): void => broadcast(e)
     let history: SpeedHistory = { v: 1, phases: {} }
@@ -93,12 +92,15 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       job.overall = snap.overall
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
       // later ("about a minute" -> "about 4 minutes"): say nothing yet (the screen uses its own guess).
-      // waiting for another reel's render: no estimate covers that wait, so say none
-      job.secondsLeft = job.waitingForRender || (slug && progress && !mediaSec) ? null : snap.etaSec
-      job.overdue = !job.waitingForRender && snap.overdue
-      send({ jobId: id, slug, type: 'status', message: shown(job), pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking })
+      job.secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
+      job.overdue = snap.overdue
+      send({ jobId: id, slug, type: 'status', message: shown(job), pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking, waitingForRender: job.waitingForRender })
     }
-    job.report = status
+    job.setWaitingForRender = (waiting) => {
+      job.waitingForRender = waiting
+      tracker.hold(waiting)
+      status()
+    }
     // re-broadcast once a second: time moves the bar and the estimate even while the AI thinks
     const tick = setInterval(() => status(), progress?.tickMs ?? 1000)
     tick.unref?.()
@@ -240,10 +242,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     /** What a job is showing now (its own words, or that it waits for the render slot). */
     message: shown,
     waitingForRender(owner: string, waiting: boolean): void {
-      const job = [...jobs.values()].find((j) => j.owner === owner)
-      if (!job) return
-      job.waitingForRender = waiting
-      job.report()
+      ;[...jobs.values()].find((j) => j.owner === owner)?.setWaitingForRender(waiting)
     },
     cancel(id: string): void {
       jobs.get(id)?.abort.abort()

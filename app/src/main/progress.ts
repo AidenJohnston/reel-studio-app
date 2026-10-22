@@ -39,6 +39,7 @@ export class ProgressTracker {
   private phaseStart = 0
   private reported = 0
   private best = 0
+  private heldAt: number | null = null
   private readonly spent: Partial<Record<Timed, number>> = {}
 
   constructor(
@@ -66,6 +67,17 @@ export class ProgressTracker {
     return Math.max(2, m.base + m.perMin * (this.mediaSec / 60))
   }
 
+  /** While the job waits for another reel's render (render-slot.ts) the bar and the clock stop: the
+   * wait is not this phase running long, so afterwards the estimate neither jumps nor says "overdue". */
+  hold(on: boolean): void {
+    if (on === (this.heldAt !== null)) return
+    if (on) this.heldAt = this.now()
+    else {
+      this.phaseStart += this.now() - this.heldAt!
+      this.heldAt = null
+    }
+  }
+
   /** A status event: `phase` moves us forward (never back); `pct` is that step's own percent. */
   update(phase: Phase | undefined, pct: number | undefined): void {
     if (phase && phase !== 'firstLook') {
@@ -82,6 +94,7 @@ export class ProgressTracker {
         for (let k = Math.max(0, this.cur + 1); k < i; k++) this.spent[this.phases[k]] = 0
         this.cur = i
         this.phaseStart = t
+        if (this.heldAt !== null) this.heldAt = t
         this.reported = 0
       }
     }
@@ -129,6 +142,7 @@ export class ProgressTracker {
     const est = this.phases.map((p, i) => (i < this.cur ? 0 : this.estimate(p)))
     const doneEst = this.phases.reduce((a, p, i) => a + (i < this.cur ? this.estimate(p) : 0), 0)
     const total = this.phases.reduce((a, p) => a + this.estimate(p), 0)
+    if (this.heldAt !== null) return { overall: this.best, etaSec: null, overdue: false }
     if (this.cur < 0) return { overall: this.best, etaSec: Math.round(total), overdue: false }
     const f = this.fraction()
     const curEst = est[this.cur]

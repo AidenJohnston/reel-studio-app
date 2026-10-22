@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { QueuedNote } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { Icon } from './icons'
+import { AttachmentThumb } from './NoteAttachments'
 
 const waitingWords = (n: number): string => `${n} ${n === 1 ? 'note' : 'notes'} waiting`
 
 /** Notes waiting their turn on this reel, under the running note. Held (after Stop, a failed note or a
- * restart) they wait for "Run next". `head`: the newest version, the one the next note runs on. */
+ * restart) they wait for Resume, which runs them all in order. `head`: the newest version, the one the next
+ * note runs on. */
 export function NoteQueue({ slug, queue, held, head, onError }: { slug: string; queue: QueuedNote[]; held: boolean; head: number; onError: (msg: string) => void }) {
   const waiting = queue.filter((q) => !q.attempt)
   const act = (p: Promise<unknown>): void => void p.catch((e) => onError(userMessage(e)))
@@ -25,8 +27,8 @@ export function NoteQueue({ slug, queue, held, head, onError }: { slug: string; 
               <button className="link" onClick={() => act(reel.queue.clear(slug))} data-testid="queue-clear">
                 Clear
               </button>
-              <button className="btn small primary" onClick={() => act(reel.queue.runNext(slug))} data-testid="queue-run-next">
-                Run next
+              <button className="btn small primary" onClick={() => act(reel.queue.resume(slug))} data-testid="queue-resume">
+                Resume
               </button>
             </div>
           )}
@@ -63,8 +65,12 @@ function Row({ q, first, last, head, slug, act }: { q: QueuedNote; first: boolea
     <li className="note-queue-row" data-testid="queue-row">
       <span className="note-queue-label">{first ? 'Next' : 'Then'}</span>
       <div className="note-queue-body">
+        <div className="note-queue-line">
+        {q.attachments.map((a) => (
+          <AttachmentThumb key={a.asset} a={a} size="row" />
+        ))}
         {draft === null ? (
-          <span className="note-queue-text">{q.text}</span>
+          <span className="note-queue-text">{q.text || q.attachments.map((a) => a.name).join(', ')}</span>
         ) : (
           <input
             className="input note-queue-input"
@@ -87,6 +93,7 @@ function Row({ q, first, last, head, slug, act }: { q: QueuedNote; first: boolea
             data-testid="queue-edit-input"
           />
         )}
+        </div>
         {q.seenVersion !== head && head > 0 && (
           <span className="muted-sm" data-testid="queue-versions">Written on Version {q.seenVersion} · runs on Version {head}</span>
         )}

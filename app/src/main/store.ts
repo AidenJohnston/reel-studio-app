@@ -4,7 +4,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import { join, basename, dirname, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { BIN_FOLDERS, binDir, projectsDir, libraryDir, reelStudioRoot } from './paths'
+import { BIN_FOLDERS, binDir, noteStagingDir, projectsDir, libraryDir, reelStudioRoot } from './paths'
 import type {
   ChatMessage,
   ChecklistItem,
@@ -35,7 +35,7 @@ export interface AppState {
   aiEdited?: boolean
   /** Notes sent and not yet saved in project.json, oldest first; the first may be running (main/note-queue.ts). */
   queue?: QueuedNote[]
-  /** The queue waits for "Run next": after Stop, a failed note, or a restart. */
+  /** The queue waits for Resume: after Stop, a failed note, or a restart. */
   queueHeld?: boolean
 }
 
@@ -204,13 +204,14 @@ export function readAppState(slug: string): Promise<AppState> {
   return serialized(file, () => readAppStateNow(file))
 }
 
-/** `durable`: on disk before this resolves (fsync), for writes a creator was told happened (the note queue). */
+/** `durable`: on disk before this resolves (fsync), for writes a creator was told happened (the note queue).
+ * A state holding queued notes is always flushed: every write replaces the copy that holds them. */
 export function updateAppState(slug: string, fn: (s: AppState) => void, opts: { durable?: boolean } = {}): Promise<AppState> {
   const file = join(projectDir(slug), 'app.json')
   return serialized(file, async () => {
     const s = await readAppStateNow(file)
     fn(s)
-    await writeJson(file, s, opts)
+    await writeJson(file, s, { durable: opts.durable || !!s.queue?.length })
     return s
   })
 }
@@ -380,7 +381,7 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
       const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
       st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
     } else if (st.queue?.some((q) => q.id === st.job?.noteId)) {
-      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. It is waiting below. Press Run next when you want it.' }))
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. It is waiting below. Press Resume when you want it.' }))
     } else if (st.status === 'ready' && st.job?.kind !== 'export') {
       st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.' }))
     }
@@ -558,6 +559,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
+  const thumb = (a: NoteAttachment): NoteAttachment => attachmentThumb(slug, a)
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
@@ -585,13 +587,19 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
-    chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
+    chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map(thumb) } : m)),
     lastError: st.lastError,
-    queue: st.queue ?? [],
+    queue: (st.queue ?? []).map((q) => ({ ...q, attachments: q.attachments.map(thumb) })),
     queueHeld: !!st.queueHeld,
-    job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false } : null,
+    job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, waitingForRender: false } : null,
     aiEdited: !!st.aiEdited
   }
+}
+
+/** A file attached while a job ran stays in staging until its note runs (attachments.ts). */
+function attachmentThumb(slug: string, a: NoteAttachment): NoteAttachment {
+  const t = chatThumb(projectDir(slug), a)
+  return t.thumbUrl ? t : chatThumb(noteStagingDir(slug), a)
 }
 
 function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {

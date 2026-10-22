@@ -12,6 +12,8 @@ import { groupAlive, isAlive, killTree } from './proctree'
 export function createPidRegistry(dir: string, stop: (pid: number) => Promise<boolean> = killTree) {
   const file = join(dir, 'engines.json')
   const engines = new Map<number, string | null>()
+  /** Engines of a previous run that reap could not stop. */
+  const leftover = new Set<number>()
   const save = (): void => {
     try {
       writeFileSync(file, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
@@ -47,10 +49,23 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           continue
         }
         engines.set(pid, project)
+        leftover.add(pid)
         if (project) stillRunning.push(project)
       }
       save()
       return { stopped, stillRunning }
+    },
+    /** Resolves once every engine reap could not stop has exited (checked every `everyMs`). */
+    async drained(everyMs = 2000): Promise<void> {
+      while (leftover.size) {
+        for (const pid of [...leftover]) {
+          if (await leftRunning(pid)) continue
+          leftover.delete(pid)
+          engines.delete(pid)
+          save()
+        }
+        if (leftover.size) await new Promise((r) => setTimeout(r, everyMs))
+      }
     }
   }
 }

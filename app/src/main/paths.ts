@@ -72,6 +72,9 @@ export const stylePath = (): string => join(reelStudioRoot(), 'My style.json')
 export const settingsDir = (): string => need().userDataDir
 export const settingsFile = (): string => join(need().userDataDir, 'settings.json')
 export const modelsDir = (): string => env().REELSTUDIO_MODELS_DIR ?? join(need().userDataDir, 'models')
+/** Files attached to a note while a job runs on its reel. They move into the project when their note runs. */
+export const noteStagingRoot = (): string => join(need().userDataDir, 'note-staging')
+export const noteStagingDir = (slug: string): string => join(noteStagingRoot(), slug)
 
 // ---- Bundled resources -----------------------------------------------------------------------
 
