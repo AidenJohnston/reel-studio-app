@@ -38,7 +38,7 @@ it('fails if Windows cloud folders or the mounted Google Drive are missed', asyn
   )
 })
 
-it.skipIf(process.platform !== 'darwin' && process.platform !== 'win32')('fails if saving again or concurrently overwrites a reel', async () => {
+it('fails if saving again or concurrently overwrites a reel', async () => {
   const dir = await temp()
   const source = join(dir, 'Family reel.mp4')
   const cloud = join(dir, 'drive')
@@ -46,7 +46,7 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'win32')('fails 
   await fs.writeFile(source, 'new video')
   const original = join(cloud, 'Reel Studio', basename(source))
   await fs.writeFile(original, 'previous video')
-  const results = await Promise.all([copyToCloudDrive(source, cloud, process.platform === 'win32' ? 'python' : 'python3'), copyToCloudDrive(source, cloud, process.platform === 'win32' ? 'python' : 'python3')])
+  const results = await Promise.all([copyToCloudDrive(source, cloud), copyToCloudDrive(source, cloud)])
   expect(results.map((file) => basename(file)).sort()).toEqual(['Family reel (2).mp4', 'Family reel (3).mp4'])
   expect(await fs.readFile(original, 'utf8')).toBe('previous video')
   for (const result of results) expect(await fs.readFile(result, 'utf8')).toBe('new video')
@@ -61,7 +61,7 @@ it('fails if an interrupted copy exposes a partial reel or leaves its temporary 
     await fs.writeFile(target, 'partial')
     throw Object.assign(new Error('disk full'), { code: 'ENOSPC' })
   })
-  await expect(copyToCloudDrive(source, cloud, process.platform === 'win32' ? 'python' : 'python3')).rejects.toThrow('disk full')
+  await expect(copyToCloudDrive(source, cloud)).rejects.toThrow('disk full')
   expect(await fs.readdir(join(cloud, 'Reel Studio'))).toEqual([])
   expect(await fs.readFile(source, 'utf8')).toBe('complete video')
 })

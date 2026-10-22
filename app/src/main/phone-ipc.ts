@@ -6,7 +6,6 @@ import { basename, extname, resolve, sep } from 'node:path'
 import type { PhoneEvent, PhoneShare } from '../shared/api'
 import { PHONE_WAIT_MS } from '../shared/phone-help'
 import { detectCloudDrives, copyToCloudDrive } from './cloud-drive'
-import { pythonExe } from './paths'
 import { lanAddresses, startShare, type LanAddress, type ShareServer } from './phone-share'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -68,7 +67,7 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
     const drive = (await drives()).find((drive) => drive.folder === folder)
     if (!drive) throw { code: 'CLOUD_MISSING', userMessage: 'That drive is no longer available. Open iCloud Drive or Google Drive on this computer, then try again.' }
     try {
-      return await copyToCloudDrive(file, drive.folder, pythonExe())
+      return await copyToCloudDrive(file, drive.folder)
     } catch (error) {
       d.log(`[cloud] save failed: ${error instanceof Error ? error.message : String(error)}`)
       throw { code: 'CLOUD_SAVE', userMessage: `I could not save to ${drive.label}. Check that the drive has space and is connected, then try again.` }
