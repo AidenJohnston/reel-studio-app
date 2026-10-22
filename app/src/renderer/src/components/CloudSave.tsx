@@ -23,7 +23,7 @@ export function CloudSave({ video, fallback = false }: { video: string; fallback
   const label = (drive: CloudDrive) => {
     if (drives.filter((other) => other.label === drive.label).length === 1) return drive.label
     const account = drive.folder.match(/GoogleDrive-([^/\\]+)/)?.[1] ?? drive.folder
-    return `${drive.label} (${account})`
+    return `${drive.label} · ${account}`
   }
   const save = async (drive: CloudDrive) => {
     setState({ kind: 'saving', drive })
@@ -36,10 +36,10 @@ export function CloudSave({ video, fallback = false }: { video: string; fallback
   }
   const actions = (
     <div className="stack cloud-save" style={{ gap: 8 }} data-testid="cloud-save">
-      <div className="row wrap">
+      <div className="stack" style={{ gap: 8 }}>
         {drives.map((drive) => (
-          <button className="btn small" key={drive.folder} disabled={state.kind === 'saving'} onClick={() => void save(drive)}>
-            {state.kind === 'saving' && state.drive.folder === drive.folder && <Spinner />} Save to {label(drive)}
+          <button className="btn small" key={drive.folder} title={`Save to ${label(drive)}`} disabled={state.kind === 'saving'} onClick={() => void save(drive)}>
+            {state.kind === 'saving' && state.drive.folder === drive.folder && <Spinner />} <span>Save to {label(drive)}</span>
           </button>
         ))}
       </div>
