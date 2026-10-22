@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { clock } from '../../../shared/progress'
 import { Icon } from './icons'
 import { reel } from '../api'
+import { FullScreenReel } from './FullScreenReel'
 
 /**
  * While our own reel is being dragged out, the window must not treat it as a new video dropped in.
@@ -140,6 +141,9 @@ export function PhonePlayer({
   const [t, setT] = useState(0)
   const [dur, setDur] = useState(0)
   const [started, setStarted] = useState(false)
+  // The phone's video while the reel is open full screen.
+  const [full, setFull] = useState<HTMLVideoElement | null>(null)
+  const closeFull = useCallback(() => setFull(null), [])
 
   const toggle = useCallback(() => {
     const v = video.current
@@ -209,6 +213,7 @@ export function PhonePlayer({
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
               onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+              onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
               onLoadedMetadata={(e) => {
                 setDur(e.currentTarget.duration || 0)
                 onDuration?.(e.currentTarget.duration || 0)
@@ -231,6 +236,20 @@ export function PhonePlayer({
               <video className="raw-video on" key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
             {holdingOriginal && <div className="phone-tag">Original</div>}
+            {!holdingOriginal && !(still && subtitle) && (
+              <button className="fs-open" onClick={() => setFull(video.current)} data-testid="open-fullscreen">
+                <Icon name="maximize" size={15} stroke={2} /> Full screen
+              </button>
+            )}
+            {full && (
+              <FullScreenReel
+                src={src}
+                poster={poster}
+                from={full}
+                overlay={instagram ? <InstagramOverlay caption={caption} /> : null}
+                onClosed={closeFull}
+              />
+            )}
             {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={width} testid="sub-preview" />}
             {instagram && !holdingOriginal && <InstagramOverlay caption={caption} />}
             {!playing && !holdingOriginal && !(still && subtitle) && (
