@@ -23,7 +23,7 @@ export interface CaptionStyle {
   [k: string]: unknown;
 }
 /** at: a fix the person made to that one word in the Subtitles list (engine captions.py apply_corrections). */
-export interface CaptionCorrection { from: string; to: string; at?: string }
+export interface CaptionCorrection { from: string; to: string; at?: string; through?: string }
 /** vocabulary: names/jargon the user or the AI supplies; the engine respells sound-alikes to them after
  * transcription (engine/reelengine/vocab.py). */
 export interface Captions { enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; vocabulary?: string[]; [k: string]: unknown }

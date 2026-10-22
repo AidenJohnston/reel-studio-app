@@ -131,12 +131,12 @@ def test_split_and_join_change_only_the_lines_they_touch():
                      (1.25, 1.5, "mixer"), (1.55, 1.8, "at"), (1.85, 2.1, "all.")])
     assert _lines(words, {}) == ["YOU DON'T NEED", "A MIXER AT", "ALL"]
     assert _lines(words, {"split": ["w1"]}) == ["YOU", "DON'T NEED", "A MIXER AT", "ALL"]
-    assert _lines(words, {"join": ["w6"]}) == ["YOU DON'T NEED", "A MIXER AT ALL"]
+    assert _lines(words, {"join": [{"from": "w5", "to": "w6"}]}) == ["YOU DON'T NEED", "A MIXER AT ALL"]
     cues = captions.build_cues(words, {"split": ["w1"]})
     assert cues[0]["e"] == 0.35 - captions.GAP_LEAD and cues[1]["s"] == 0.35
     # no caption stays up through a long silence, joined or not
     pause = mkwords([(0.0, 0.3, "Hold"), (0.35, 0.6, "on."), (2.0, 2.3, "Okay"), (2.35, 2.6, "go.")])
-    assert _lines(pause, {"join": ["w2"]}) == ["HOLD ON", "OKAY GO"]
+    assert _lines(pause, {"join": [{"from": "w1", "to": "w2"}]}) == ["HOLD ON", "OKAY GO"]
 
 
 def test_the_subtitle_editor_gets_each_word_as_drawn_and_can_fix_one_made_of_two():
@@ -147,11 +147,55 @@ def test_the_subtitle_editor_gets_each_word_as_drawn_and_can_fix_one_made_of_two
     assert [c["tokens"] for c in report] == [
         [{"w": "I", "ids": ["w0"]}, {"w": "write", "ids": ["w1"]}, {"w": "TypeScript.", "ids": ["w2", "w3"]}],
         [{"w": "3", "ids": ["w4"]}, {"w": "users.", "ids": ["w5"]}]]
-    # what the editor writes for "TypeScript." retyped as "Typescript": the first word's fix, the rest emptied
-    cap["corrections"] += [{"from": "TypeScript.", "to": "Typescript", "at": "w2"}, {"from": "TypeScript.", "to": "", "at": "w3"}]
+    # what the editor writes for "TypeScript." retyped as "Typescript": one fix over the words as heard
+    cap["corrections"] += [{"from": "type script.", "to": "Typescript", "at": "w2", "through": "w3"}]
     _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
-    assert report[0]["tokens"][2] == {"w": "Typescript", "ids": ["w2"]}
+    assert report[0]["tokens"][2] == {"w": "Typescript", "ids": ["w2", "w3"]}
     # a correction that writes several words is one word to the editor
     cap = {"corrections": [{"from": "type script", "to": "Type Script Pro"}]}
     _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
     assert {"w": "Type Script Pro.", "ids": ["w2", "w3"]} in [t for c in report for t in c["tokens"]]
+
+
+def test_a_join_never_shows_words_a_full_frame_card_hides():
+    words = mkwords([(0.0, 0.3, "Look"), (0.35, 0.6, "at"), (0.65, 0.9, "this."), (1.0, 1.3, "Big"),
+                     (1.35, 1.6, "card"), (1.65, 1.9, "here."), (2.0, 2.3, "Back"), (2.35, 2.6, "to"), (2.65, 2.9, "me.")])
+    hidden = {"w3", "w4", "w5"}
+    for join in ([{"from": "w2", "to": "w3"}], [{"from": "w5", "to": "w6"}]):
+        cues = captions.build_cues(words, {"join": join}, hidden)
+        assert [c["t"] for c in cues] == ["LOOK AT THIS", "BACK TO ME"]
+
+
+def test_deleting_a_word_leaves_the_other_lines_as_they_were():
+    words = mkwords([(0.0, 0.3, "Um"), (0.35, 0.6, "I"), (0.65, 0.9, "think"), (0.95, 1.2, "we"), (1.25, 1.5, "should"),
+                     (1.55, 1.8, "go"), (1.85, 2.1, "now."), (2.2, 2.5, "Then"), (2.55, 2.8, "wait.")])
+    assert _lines(words, {}) == ["UM I THINK", "WE SHOULD GO", "NOW", "THEN WAIT"]
+    gone = {"corrections": [{"from": "Um", "to": "", "at": "w0"}, {"from": "now.", "to": "", "at": "w6"}]}
+    assert _lines(words, gone) == ["I THINK", "WE SHOULD GO", "THEN WAIT"]
+    # the editor still gets the word, empty, in its place, so it can be brought back
+    _, report, _, _, _ = captions.build_for_timeline(None, {"captions": gone}, 1080, 1920, words_out=words)
+    assert report[0]["tokens"][0] == {"w": "", "ids": ["w0"]}
+
+
+def test_a_word_fix_waits_for_the_word_it_was_made_on():
+    words = mkwords([(0.0, 0.3, "I"), (0.35, 0.6, "love"), (0.65, 0.9, "cloud.")])
+    cap = {"corrections": [{"from": "cloud.", "to": "Claude.", "at": "w2"}]}
+    assert _lines(words, cap) == ["I LOVE CLAUDE"]
+    # listened to again, w2 is now heard as another word: the fix was for "cloud", not for it
+    words[2]["w"] = "crowds."
+    assert _lines(words, cap) == ["I LOVE CROWDS"]
+
+
+def test_a_split_line_ends_before_the_next_one_starts():
+    words = mkwords([(0.0, 0.004, "Go"), (0.005, 0.6, "now")])  # the transcriber can start two words together
+    cues = captions.build_cues(words, {"split": ["w1"]})
+    assert cues[0]["e"] <= cues[1]["s"]
+
+
+def test_a_join_lets_go_when_a_recut_takes_away_the_line_it_joined():
+    words = mkwords([(0.0, 0.3, "Red"), (0.35, 0.6, "green"), (0.65, 0.9, "blue"), (0.95, 1.2, "pink"), (1.25, 1.5, "gray"),
+                     (1.55, 1.8, "tan"), (1.85, 2.1, "gold"), (2.15, 2.4, "jade"), (2.45, 2.7, "navy")])
+    cap = {"join": [{"from": "w5", "to": "w6"}]}
+    assert _lines(words, cap) == ["RED GREEN BLUE", "PINK GRAY TAN GOLD JADE NAVY"]
+    recut = words[:3] + [dict(w, s=w["s"] - 0.9, e=w["e"] - 0.9) for w in words[6:]]  # on the output clock
+    assert _lines(recut, cap) == ["RED GREEN BLUE", "GOLD JADE NAVY"]

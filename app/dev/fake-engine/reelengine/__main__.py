@@ -254,8 +254,8 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
 
 def write_captions(proj: Path, data: dict) -> None:
     """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line
-    (one speech run), the one-word fixes applied, then the subtitle editor's split and join applied as the
-    engine does (captions.edit_lines)."""
+    (one speech run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the
+    subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
     cap = data.get("captions") or {}
     if cap.get("enabled") is False:
         return
@@ -264,11 +264,15 @@ def write_captions(proj: Path, data: dict) -> None:
     fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
     tokens = [{"w": fixes.get(w["id"], w["w"]), "ids": [w["id"]]}
               for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
-    tokens = [t for t in tokens if t["w"]]
-    split, join = set(cap.get("split") or []), set(cap.get("join") or [])
+    split = set(cap.get("split") or [])
+    joins = {(j["from"], j["to"]) for j in cap.get("join") or []}
+
+    def shown(line):
+        return [t["ids"][0] for t in line if t["w"]]
+
     joined: list = []
     for line in (tokens[i:i + 3] for i in range(0, len(tokens), 3)):
-        if joined and line[0]["ids"][0] in join:
+        if joined and shown(joined[-1]) and shown(line) and (shown(joined[-1])[-1], shown(line)[0]) in joins:
             joined[-1] += line
         else:
             joined.append(line)
@@ -279,7 +283,7 @@ def write_captions(proj: Path, data: dict) -> None:
             if t["ids"][0] in split:
                 lines.append([])
             lines[-1].append(t)
-    cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines]
+    cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
     (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 

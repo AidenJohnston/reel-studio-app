@@ -127,11 +127,11 @@ export interface ProjectJson {
   captions?: {
     enabled: boolean
     style?: Record<string, unknown>
-    /** `at`: fixes only that word (the Subtitles list). */
-    corrections?: { from: string; to: string; at?: string }[]
-    /** word ids that start a caption line, and word ids whose line goes onto the line before */
+    /** `at` (through `through`): fixes only that word, made of those words, while it is heard as `from` (the Subtitles list). */
+    corrections?: { from: string; to: string; at?: string; through?: string }[]
+    /** word ids that start a caption line; lines starting at `to` that go onto the line ending at `from` */
     split?: string[]
-    join?: string[]
+    join?: { from: string; to: string }[]
   }
   music?: {
     enabled: boolean

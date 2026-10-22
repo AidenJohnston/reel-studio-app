@@ -42,6 +42,7 @@ export function SubtitleLines({
   lines,
   saved,
   corrections,
+  heard,
   onEdit,
   onShow
 }: {
@@ -49,6 +50,8 @@ export function SubtitleLines({
   /** The corrections as saved (the render drew these), and with the edits not yet made into a version. */
   saved: Correction[]
   corrections: Correction[]
+  /** What the transcript heard at each word id. */
+  heard: Map<string, string>
   /** One edit to the project's captions, as a function of their current state. */
   onEdit: (edit: (c: Captions) => Captions) => void
   /** The line (as typed so far) and the word the caret is on. */
@@ -72,7 +75,7 @@ export function SubtitleLines({
   })
 
   /** The corrections with line i's typing in them. */
-  const typed = (i: number): Correction[] => (draft?.line === i ? retype(lines[i], corrections, saved, draft.text) : corrections)
+  const typed = (i: number): Correction[] => (draft?.line === i ? retype(lines[i], corrections, saved, draft.text, heard) : corrections)
   const fixed = (next: Correction[]) => (c: Captions): Captions => ({ ...c, corrections: next })
   const keepTyping = (next: Correction[]) => {
     setDraft(null)
@@ -81,7 +84,8 @@ export function SubtitleLines({
   const join = (i: number, next: Correction[]) => {
     setDraft(null)
     caretTo.current = lines[i][0].ids[0]
-    onEdit((c) => setBreak(fixed(next)(c), lines[i][0].ids[0], false))
+    const above = lines[i - 1]
+    onEdit((c) => setBreak(fixed(next)(c), lines[i][0].ids[0], false, above[above.length - 1].ids[0]))
   }
 
   return (
@@ -113,7 +117,7 @@ export function SubtitleLines({
                 } else if (e.key === 'Enter') {
                   e.preventDefault()
                   const next = typed(i)
-                  const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next) })).filter((t) => t.shown)
+                  const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next, heard) })).filter((t) => t.shown)
                   const k = after.length ? breakAt(after, el.selectionStart ?? 0) : 0
                   if (k <= 0 || k >= after.length) return keepTyping(next)
                   setDraft(null)

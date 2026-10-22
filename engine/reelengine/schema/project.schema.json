@@ -97,7 +97,8 @@
             "properties": {
               "from": { "type": "string", "minLength": 1 },
               "to": { "type": "string" },
-              "at": { "$ref": "#/$defs/wordId", "description": "fix only this word (empty `to` takes it off the captions)" }
+              "at": { "$ref": "#/$defs/wordId", "description": "fix only this word, while it is still heard as `from` (empty `to` takes it off the captions)" },
+              "through": { "$ref": "#/$defs/wordId", "description": "with `at`: the words from `at` through this one become one word" }
             }
           }
         },
@@ -107,7 +108,7 @@
           "items": { "$ref": "#/$defs/wordRange" }
         },
         "split": { "type": "array", "description": "words that start a new caption line", "items": { "$ref": "#/$defs/wordId" } },
-        "join": { "type": "array", "description": "words whose caption line goes onto the line before", "items": { "$ref": "#/$defs/wordId" } }
+        "join": { "type": "array", "description": "the caption line starting at `to` goes onto the line ending at `from`", "items": { "$ref": "#/$defs/wordRange" } }
       }
     },
     "music": {

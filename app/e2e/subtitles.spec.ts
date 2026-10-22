@@ -46,5 +46,17 @@ test('fix a word and break a line in the Subtitles list', async () => {
   await page.getByTestId('tab-captions').click()
   await expect(page.getByLabel('Subtitle line 1')).toHaveValue('this')
   await expect(page.getByLabel('Subtitle line 2')).toHaveValue('is Placeholders')
+
+  // a word typed away leaves the subtitles in the next version, and "Fix a word" brings it back
+  await page.getByLabel('Subtitle line 2').fill('Placeholders')
+  await page.getByLabel('Subtitle line 1').click()
+  await page.getByTestId('make-version').click()
+  await expect(page.getByTestId('versions').getByText('Version 3')).toBeVisible({ timeout: 10 * 60_000 })
+  await page.getByTestId('edit-myself').click()
+  await page.getByTestId('tab-captions').click()
+  await expect(page.getByLabel('Subtitle line 2')).toHaveValue('Placeholders')
+  const off = page.locator('.list-item', { hasText: '"is" is off the subtitles in one place' })
+  await off.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByLabel('Subtitle line 2')).toHaveValue('is Placeholders')
   await app.close()
 })
