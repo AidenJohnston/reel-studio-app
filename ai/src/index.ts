@@ -112,7 +112,11 @@ export function createAI(opts: CreateAIOptions) {
     locks.set(key, tail);
     return run;
   }
-  const deps = (owner?: string): editor.EditorDeps => ({ host: owner ? ownedHost(opts.host, owner) : opts.host, owner, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (host: EngineHost, owner?: string): editor.EditorDeps => ({ host, owner, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  function edit<T>(owner: string | undefined, run: (d: editor.EditorDeps) => Promise<T>): Promise<T> {
+    const engine = editHost(opts.host, owner);
+    return engine.settle(run(deps(engine.host, owner)));
+  }
 
   async function settings(): Promise<AISettings> {
     try { return JSON.parse(await fsp.readFile(settingsFile, 'utf8')); } catch { return {}; }
@@ -285,13 +289,13 @@ export function createAI(opts: CreateAIOptions) {
       return { provider: p.id, model: p.model, reply: r.text.trim() };
     },
     async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<AgentResult & { notice?: any }> {
-      return exclusive(projectDir, opts.owner, async () => editor.firstEdit(deps(opts.owner), await modelProvider(), projectDir, onEvent, signal));
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => editor.firstEdit(d, await modelProvider(), projectDir, onEvent, signal)));
     },
     async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: editor.ApplyNoteOptions & { owner?: string } = {}): Promise<AgentResult> {
-      return exclusive(projectDir, opts.owner, async () => editor.applyNote(deps(opts.owner), await modelProvider(), projectDir, note, onEvent, signal, opts));
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => editor.applyNote(d, await modelProvider(), projectDir, note, onEvent, signal, opts)));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
-      return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);
+      return editor.writeScript(deps(opts.host), await modelProvider(), idea, onEvent, signal);
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },
@@ -302,13 +306,33 @@ export function createAI(opts: CreateAIOptions) {
 
 export type ReelStudioAI = ReturnType<typeof createAI>;
 
-/** Every engine command an app job's edit runs carries the job's token (engine/reelengine/owner.py). */
-function ownedHost(host: EngineHost, owner: string): EngineHost {
+/** The engine as one edit sees it. An app job's `owner` token goes on every command
+ * (engine/reelengine/owner.py). Once part of an engine would not stop (ENGINE_STUCK) no further command
+ * runs, and `settle` fails the edit with that error however it ended: a first look or a tool result
+ * would otherwise swallow it, and the app job would let go of the project (app jobs.ts) while that
+ * part may still be writing to it. */
+function editHost(host: EngineHost, owner: string | undefined) {
+  let stuck: unknown = null;
   return {
-    runEngine: (command, args, onProgress, signal) => host.runEngine(command, [...args, '--owner', owner], onProgress, signal),
-    renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
-    reelStudioRoot: () => host.reelStudioRoot(),
-    ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+    host: {
+      async runEngine(command, args, onProgress, signal) {
+        if (stuck) throw stuck;
+        try {
+          return await host.runEngine(command, owner ? [...args, '--owner', owner] : args, onProgress, signal);
+        } catch (e: any) {
+          if (e?.code === 'ENGINE_STUCK') stuck ??= e;
+          throw e;
+        }
+      },
+      renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
+      reelStudioRoot: () => host.reelStudioRoot(),
+      ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+    } satisfies EngineHost,
+    async settle<T>(edit: Promise<T>): Promise<T> {
+      const r = await edit.catch((e) => { throw stuck ?? e; });
+      if (stuck) throw stuck;
+      return r;
+    },
   };
 }
 

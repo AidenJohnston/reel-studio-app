@@ -230,7 +230,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
 
   /** A project something of a previous run still writes to (orphans.ts reap): closed until it stops. */
   function keepClosed(slug: string): void {
-    stuck.set(slug, { code: 'ENGINE_STILL_RUNNING', userMessage: "Part of Reel Studio's video engine from last time is still running on this video. Restart your computer before you change it." })
+    stuck.set(slug, { code: 'ENGINE_STILL_RUNNING', userMessage: "Part of Reel Studio's video engine from last time may still be running on this video. Restart your computer before you change it." })
   }
 
   return {

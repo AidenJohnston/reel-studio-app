@@ -1,8 +1,9 @@
 # Refuse private material in the public repo (scripts/leak-check/check.py).
 #
 # pull_request_target runs THIS file and the checker from main, never from the pull request, so a pull request
-# cannot change or skip the check. The pull request is checked out as data only: the checker reads its files and
-# nothing from it is installed, built or run. The token can only read, and is not kept in either checkout.
+# cannot change or skip the check. The pull request (a fork's too) is checked out as data only: the checker reads
+# its files and nothing from it is installed, built or run. The token can only read, and is not kept in either
+# checkout.
 name: Leak check
 
 on:
@@ -38,6 +39,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate
           persist-credentials: false
+          # Needed for pull requests from forks. Safe here because nothing from the checkout is installed, built
+          # or run: check.py only reads files (symlinks as their link text, never followed), the token is
+          # read-only and not persisted, and the job uses no secrets or caches.
+          allow-unsafe-pr-checkout: true
 
       - name: Scan
         env:

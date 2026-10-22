@@ -52,6 +52,14 @@ function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?
   })
 }
 
+function runTerminalThenKill(command: 'done' | 'error'): Promise<unknown> {
+  setupPaths()
+  let pid = 0
+  const run = runner(join(APP_DIR, 'test', 'fixtures', 'terminal-then-wait'), {}, (p) => (pid = p))
+  // The fixture reports progress after its terminal result, so the result is parsed before the kill.
+  return run(command, [], () => process.kill(pid, 'SIGKILL'))
+}
+
 describe('engine runner (against the stand-in engine)', () => {
   it('runs init -> transcribe -> autocut -> render on a path with spaces and unicode', async () => {
     const { home, root } = setupPaths()
@@ -99,6 +107,50 @@ describe('engine runner (against the stand-in engine)', () => {
     setupPaths()
     const run = createEngineRunner({ python: () => join(APP_DIR, 'no-python-here.exe'), env: () => engineEnv() })
     await expect(run('doctor', [])).rejects.toMatchObject({ code: 'ENGINE_MISSING' })
+  })
+
+  it.skipIf(process.platform === 'win32')('reports and logs the signal that killed the engine on POSIX', async () => {
+    setupPaths()
+    const logs: string[] = []
+    const run = createEngineRunner({
+      python: () => PYTHON,
+      env: () => engineEnv(),
+      log: (line) => logs.push(line),
+      onSpawn: (pid) => process.kill(pid, 'SIGKILL')
+    })
+    await expect(run('doctor', [])).rejects.toMatchObject({
+      code: 'ENGINE_CRASHED',
+      message: expect.stringContaining('SIGKILL')
+    })
+    expect(logs).toContain('[engine doctor] closed exitCode=null signal=SIGKILL')
+  })
+
+  it.skipIf(process.platform !== 'win32')('reports a killed engine with a nonzero exit code on Windows', async () => {
+    setupPaths()
+    const logs: string[] = []
+    const run = createEngineRunner({
+      python: () => PYTHON,
+      env: () => engineEnv(),
+      log: (line) => logs.push(line),
+      onSpawn: (pid) => process.kill(pid, 'SIGKILL')
+    })
+    await expect(run('doctor', [])).rejects.toMatchObject({
+      code: 'ENGINE_CRASHED',
+      message: expect.stringMatching(/^exit -?[1-9]\d*:/)
+    })
+    expect(logs).toContainEqual(expect.stringMatching(/^\[engine doctor\] closed exitCode=-?[1-9]\d* signal=none$/))
+  })
+
+  it('keeps a done result when the engine is killed during shutdown', async () => {
+    await expect(runTerminalThenKill('done')).resolves.toEqual({ imported: ['song.mp3'] })
+  })
+
+  it('keeps a structured error when the engine is killed during shutdown', async () => {
+    await expect(runTerminalThenKill('error')).rejects.toEqual({
+      code: 'CLASSIFY_FAILED',
+      userMessage: 'Try another file.',
+      message: 'fixture classification error'
+    })
   })
 
   it('cancel settles only after the engine and everything it started have exited', async () => {

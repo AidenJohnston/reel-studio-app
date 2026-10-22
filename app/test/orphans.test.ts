@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir, uptime } from 'node:os'
 import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
@@ -120,6 +120,59 @@ describe('orphaned engine reaper', () => {
     expect(rendered).toEqual(['render'])
     expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([])
   }, 60000)
+
+  it('the engine list on disk is never half written while it is rewritten (a force quit then would leave it so)', async () => {
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const file = join(settings, 'engines.json')
+    const stop = join(settings, 'stop')
+    const registry = createPidRegistry(settings)
+    registry.add(4242, '/projects/bread')
+    const reader = spawn(process.execPath, ['-e', `
+      const fs = require('fs'); let reads = 0, torn = 0
+      console.log('ready')
+      while (!fs.existsSync(${JSON.stringify(stop)})) {
+        try { JSON.parse(fs.readFileSync(${JSON.stringify(file)}, 'utf8')); reads++ } catch { torn++ }
+      }
+      console.log(JSON.stringify({ reads, torn }))`], { stdio: ['ignore', 'pipe', 'inherit'] })
+    let out = ''
+    reader.stdout.on('data', (d) => (out += d))
+    while (!out.includes('ready')) await new Promise((r) => setTimeout(r, 20))
+    for (let i = 0; i < 150; i++) {
+      registry.add(5000 + i, '/projects/cake')
+      registry.remove(5000 + i)
+    }
+    writeFileSync(stop, '')
+    await once(reader, 'exit')
+    const { reads, torn } = JSON.parse(out.split('\n').filter(Boolean).at(-1)!)
+    expect(reads).toBeGreaterThan(0)
+    expect(torn).toBe(0)
+  }, 60000)
+
+  it('a start that cannot read the engine list keeps every project the last run had open closed, until the computer restarts', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const open = join(projectsDir(), 'bread')
+    const shut = join(projectsDir(), 'cake')
+    for (const p of [open, shut]) mkdirSync(join(p, 'work'), { recursive: true })
+    writeFileSync(join(open, OWNER_LOCK), '{"app":"Reel Studio"}')
+    // what an older version's crash in the middle of rewriting it left
+    writeFileSync(join(settings, 'engines.json'), `[{"pid":4242,"project":${JSON.stringify(open).slice(0, 12)}`)
+
+    for (let start = 0; start < 2; start++) {
+      const { stillRunning, unknown } = await createPidRegistry(settings).reap()
+      await clearStaleLocks(stillRunning)
+      expect(stillRunning).toEqual([open])
+      expect(existsSync(join(open, OWNER_LOCK))).toBe(true)
+      expect(unknown).toBe(true)
+    }
+
+    const beforeBoot = new Date(Date.now() - (uptime() + 60) * 1000)
+    utimesSync(join(settings, 'engines.unreadable.json'), beforeBoot, beforeBoot)
+    const { stillRunning, unknown } = await createPidRegistry(settings).reap()
+    await clearStaleLocks(stillRunning)
+    expect(unknown).toBe(false)
+    expect(existsSync(join(open, OWNER_LOCK))).toBe(false)
+  })
 
   it('recognises only our engine command line', () => {
     expect(isOurEngine('"C:/x/python.exe" -s -E -X utf8 -u -m reelengine render --project p')).toBe(true)
