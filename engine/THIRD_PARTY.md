@@ -36,6 +36,8 @@ Licenses were read from each font's own `name` table (IDs 0, 13, 14), not assume
 | tokenizers, huggingface-hub, hf-xet | Apache 2.0 |
 | jsonschema, jsonschema-specifications, referencing, attrs, rpds-py | MIT |
 | yt-dlp | Unlicense (public domain) |
+| opentimelineio 0.18.1 | Apache-2.0 |
+| otio-fcpx-xml-adapter 1.0.0 | Apache-2.0 |
 | tqdm | MPL 2.0 + MIT |
 | numpy deps, click, colorama, filelock, fsspec, idna, packaging, pyyaml, protobuf, flatbuffers, anyio, h11, httpx2, httpcore2, truststore, typing-extensions | BSD / MIT / Apache 2.0 / PSF |
 

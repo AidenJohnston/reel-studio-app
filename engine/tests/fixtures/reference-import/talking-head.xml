@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="5"><sequence><name>Talking head cut</name><rate><timebase>25</timebase></rate><media><video><track><clipitem id="talk"><name>talking-head.mov</name><in>25</in><out>75</out><start>0</start><end>50</end><file id="file-1"><name>talking-head.mov</name><pathurl>file:///media/talking-head.mov</pathurl></file></clipitem></track></video></media></sequence></xmeml>

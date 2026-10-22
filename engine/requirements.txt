@@ -104,3 +104,7 @@ typing-extensions==4.16.0
     #   referencing
 yt-dlp==2026.8.19
     # via reelengine (pyproject.toml)
+opentimelineio==0.18.1
+    # via reelengine (pyproject.toml)
+otio-fcpx-xml-adapter==1.0.0
+    # via reelengine (pyproject.toml)

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fcpxml version="1.10"><resources><format id="r1" name="FFVideoFormat25p" frameDuration="1/25s"/><asset id="r2" name="talking-head.mov" src="file:///media/talking-head.mov" start="0s" duration="10s"/></resources><library><event name="Fixture"><project name="Cut"><sequence format="r1" duration="4s"><spine><asset-clip name="talking head" ref="r2" offset="0s" start="2s" duration="4s"><marker start="1s" duration="1/25s" value="hook"/></asset-clip></spine></sequence></project></event></library></fcpxml>
