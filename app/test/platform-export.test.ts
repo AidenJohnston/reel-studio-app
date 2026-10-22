@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -141,6 +141,20 @@ describe('platform files through the real engine', () => {
     } finally {
       for (const stub of stubs) stub.mockRestore()
     }
+    expect(await fs.readdir(folder)).toEqual([])
+  })
+  // A real lock, not a mock: PowerShell opens the file with FileShare.None for 600 ms, as a stopped ffmpeg can.
+  it.runIf(process.platform === 'win32')('removes a staging folder whose file is still locked for a moment', async () => {
+    const folder = join(scratch, 'sweep-locked')
+    const stage = join(folder, '.platform-export-locked')
+    const file = join(stage, 'video.mp4')
+    await fs.mkdir(stage, { recursive: true })
+    await fs.writeFile(file, 'leftover')
+    const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+      `$f = [IO.File]::Open('${file}', 'Open', 'ReadWrite', 'None'); 'locked'; Start-Sleep -Milliseconds 600; $f.Close()`])
+    await new Promise<void>((ok) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('locked') && ok()))
+    await expect(fs.rm(stage, { recursive: true, force: true })).rejects.toMatchObject({ code: 'EBUSY' })
+    await sweepExportStaging(folder)
     expect(await fs.readdir(folder)).toEqual([])
   })
 })

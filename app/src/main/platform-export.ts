@@ -115,5 +115,6 @@ async function place(from: string, dest: string, stage: string, placed: string[]
 /** Staging folders left by a crash or a force quit during an export. */
 export async function sweepExportStaging(folder: string): Promise<void> {
   const names = await fs.readdir(folder).catch(() => [])
-  await Promise.all(names.filter((n) => n.startsWith(STAGE_PREFIX)).map((n) => fs.rm(join(folder, n), { recursive: true, force: true })))
+  // Same retries as the export's own cleanup: on Windows a just-exited ffmpeg can hold a file for a moment (EBUSY).
+  await Promise.all(names.filter((n) => n.startsWith(STAGE_PREFIX)).map((n) => fs.rm(join(folder, n), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })))
 }
