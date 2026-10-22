@@ -1,3 +1,4 @@
+import { clipboardFiles, filesFromArgv } from './intake'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -308,6 +309,8 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:clipboardFiles', () => clipboardFiles())
+  handle('app:takeOpenFiles', async () => (await loadSettings()).firstRunDone ? pendingOpenFiles.splice(0) : [])
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
@@ -613,9 +616,21 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+const pendingOpenFiles: string[] = []
+function queueOpenFiles(files: string[]): void {
+  pendingOpenFiles.push(...files)
+  if (win && !win.isDestroyed()) win.webContents.send('app:filesAvailable')
+}
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  queueOpenFiles([path])
+})
+if (process.platform === 'win32') queueOpenFiles(filesFromArgv(process.argv, process.cwd(), !!process.defaultApp))
+
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv, cwd) => {
+  queueOpenFiles(filesFromArgv(argv, cwd, !!process.defaultApp))
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()

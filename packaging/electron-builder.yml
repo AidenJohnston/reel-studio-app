@@ -94,6 +94,10 @@ mac:
   target:
     - target: dmg
       arch: [arm64]
+  fileAssociations:
+    - ext: [mp4, mov, m4v, mkv, webm, avi, mts]
+      name: Video
+      role: Viewer
   category: public.app-category.video
   icon: ${env.RS_REPO_ROOT}/packaging/icons/icon.icns
   minimumSystemVersion: "14.0"
