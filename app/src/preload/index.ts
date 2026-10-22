@@ -67,6 +67,10 @@ const api: ReelApi = {
     cancel: (id) => call('jobs:cancel', id),
     onEvent: (cb) => on<JobEvent>('job:event', cb)
   },
+  cloud: {
+    drives: () => call('cloud:drives'),
+    save: (video, folder) => call('cloud:save', video, folder)
+  },
   phone: {
     start: (video, caption, address) => call('phone:start', video, caption, address),
     stop: () => call('phone:stop'),

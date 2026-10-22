@@ -1,10 +1,12 @@
 // The main-process side of "Send to my phone": one share link at a time, only for a finished video
 // inside the Reel Studio folder, stopped when the panel closes, after 15 minutes, or on quit.
-import { BrowserWindow, ShareMenu, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ShareMenu, shell, type IpcMainInvokeEvent } from 'electron'
 import { realpathSync, statSync } from 'node:fs'
 import { basename, extname, resolve, sep } from 'node:path'
 import type { PhoneEvent, PhoneShare } from '../shared/api'
 import { PHONE_WAIT_MS } from '../shared/phone-help'
+import { detectCloudDrives, copyToCloudDrive } from './cloud-drive'
+import { pythonExe } from './paths'
 import { lanAddresses, startShare, type LanAddress, type ShareServer } from './phone-share'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -59,6 +61,20 @@ export async function stopPhoneShare(): Promise<void> {
 }
 
 export function registerPhoneIpc(d: PhoneIpcDeps): void {
+  const drives = () => detectCloudDrives({ platform: process.platform, home: app.getPath('home') })
+  d.handle('cloud:drives', drives)
+  d.handle('cloud:save', async (_e, video: unknown, folder: unknown) => {
+    const file = checkedVideo(video, d.roots())
+    const drive = (await drives()).find((drive) => drive.folder === folder)
+    if (!drive) throw { code: 'CLOUD_MISSING', userMessage: 'That drive is no longer available. Open iCloud Drive or Google Drive on this computer, then try again.' }
+    try {
+      return await copyToCloudDrive(file, drive.folder, pythonExe())
+    } catch (error) {
+      d.log(`[cloud] save failed: ${error instanceof Error ? error.message : String(error)}`)
+      throw { code: 'CLOUD_SAVE', userMessage: `I could not save to ${drive.label}. Check that the drive has space and is connected, then try again.` }
+    }
+  })
+
   d.handle('phone:start', async (_e, video: unknown, caption: unknown, address?: unknown): Promise<PhoneShare> => {
     const file = checkedVideo(video, d.roots())
     await stopPhoneShare()
