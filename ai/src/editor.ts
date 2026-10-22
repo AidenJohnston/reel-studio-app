@@ -136,10 +136,13 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
 }
 
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, state: ToolState): Promise<void> {
+ * it added, the credits book, and the pictures it downloaded. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null, assetsBefore: Set<string>, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
   await removeStyleRules(deps, state);
+  const creditsPath = path.join(projectDir, 'work', 'assets', 'credits.json');
+  if (creditsBefore === null) await fsp.rm(creditsPath, { force: true }).catch(() => undefined);
+  else await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
   for (const f of await listAssets(projectDir)) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
   }
@@ -308,6 +311,10 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
   // project.json, My style and work/assets back as they were.
   const before = await fsp.readFile(path.join(projectDir, 'project.json'));
+  const creditsBefore = await fsp.readFile(path.join(projectDir, 'work', 'assets', 'credits.json')).catch((e) => {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  });
   const assetsBefore = await listAssets(projectDir);
   const mediaSec = mediaSeconds(p0);
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
@@ -331,12 +338,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+        await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
         throw e;
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
     ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
     await load(ctx);
   }
@@ -370,7 +377,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
     throw e;
   }
 }
