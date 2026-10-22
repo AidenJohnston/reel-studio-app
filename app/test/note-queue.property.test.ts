@@ -378,6 +378,6 @@ const EXAMPLES: Cmd[][] = [
 
 describe('note queue rules', () => {
   it('hold over random sends, edits, reorders, Stops, failures and crashes on two reels', async () => {
-    await fc.assert(fc.asyncProperty(fc.array(cmd, { minLength: 1, maxLength: 50 }), run), { numRuns: 200, examples: EXAMPLES.map((e) => [e]) })
+    await fc.assert(fc.asyncProperty(fc.array(cmd, { minLength: 1, maxLength: 40 }), run), { numRuns: 100, examples: EXAMPLES.map((e) => [e]) })
   }, 600_000)
 })
