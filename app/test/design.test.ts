@@ -2,7 +2,7 @@
 // folder names, and the Library summary line.
 import { describe, expect, it } from 'vitest'
 import { STAGES, clock, estimateSecondsLeft, overallProgress, stageIndex, timeLeftText } from '../src/shared/progress'
-import { describeChange, describeFacts, describeSorted, versionMessage } from '../src/shared/describe'
+import { acceptRewrite, describeChange, describeFacts, describeSorted, versionMessage, versionTitle } from '../src/shared/describe'
 import { displayPath } from '../src/shared/display-path'
 import type { DropResult, ProjectJson } from '../src/shared/api'
 
@@ -60,6 +60,33 @@ describe('version messages', () => {
       { kind: 'broll', id: 'b3', before: null, after: { id: 'b3' } }
     ]
     expect(versionMessage(4, describeFacts(facts, words))).toBe('Version 4: cut 2 words, bigger yellow subtitles, quieter music, added a picture.')
+  })
+  it('fails if the title of a cut-plus-subtitles version is wrong', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 }
+    ]
+    expect(versionTitle(facts, words)).toBe('Shorter cut, bigger subtitles')
+  })
+  it('fails if a version title names a change that is not in its receipt', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const receipts = [
+      [{ kind: 'source', id: 's1', before: { id: 's1', mirror: false }, after: { id: 's1', mirror: true } }],
+      [{ kind: 'cut.keep', before: [{ from: 'w0', to: 'w3' }], after: [{ from: 'w0', to: 'w5' }] }],
+      [{ kind: 'cut.gapCap', before: 0.25, after: 0.12 }],
+      [{ kind: 'captions.corrections', before: [], after: [{ from: 'bred', to: 'bread' }] }],
+      [{ kind: 'music.track', before: 'Library/Music/calm.mp3', after: 'Library/Music/Picture Perfect.mp3' }],
+      [{ kind: 'broll', id: 'b1', before: { id: 'b1', treatment: 'side-card' }, after: { id: 'b1', treatment: 'full-frame' } }],
+      [{ kind: 'zooms', before: [{ scale: 1.1 }], after: [] }],
+      [{ kind: 'cover.text', before: null, after: 'Bread' }],
+      [{ kind: 'post.caption', before: '', after: 'My bread' }]
+    ]
+    for (const facts of receipts) {
+      const title = versionTitle(facts, words)
+      expect(acceptRewrite({ title, summary: title }, facts, words), title).not.toBeNull()
+      for (const other of receipts.filter((r) => r !== facts)) expect(acceptRewrite({ title, summary: title }, other, words), `${title} for ${other[0].kind}`).toBeNull()
+    }
   })
   it('describes subtitle changes the way a person would', () => {
     const p = base()

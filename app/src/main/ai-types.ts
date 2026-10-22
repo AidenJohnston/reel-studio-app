@@ -32,7 +32,7 @@ export interface EngineHost {
   runEngine(
     command: string,
     args: string[],
-    onProgress?: (p: { stage: string; pct: number; message: string }) => void,
+    onProgress?: (p: { stage: string; pct: number; message: string; version?: number }) => void,
     signal?: AbortSignal
   ): Promise<any>
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>
@@ -84,6 +84,8 @@ export interface AI {
   cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** One small-model call that rewords a version's title and summary; null when the connection has no small model. Optional: older packages lack it. */
+  rewordVersion?(text: { title: string; summary: string }, signal?: AbortSignal): Promise<{ title: string; summary: string } | null>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void
 }

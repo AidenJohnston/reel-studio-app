@@ -35,8 +35,9 @@ def emit(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def progress(stage: str, pct: float, message: str) -> None:
-    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message})
+def progress(stage: str, pct: float, message: str, version: int | None = None) -> None:
+    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message,
+          **({"version": version} if version is not None else {})})
 
 
 class Fail(Exception):
@@ -260,6 +261,7 @@ def cmd_render(args: list[str]) -> dict:
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
     # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
     n = int(data.get("version", 0)) + 1
+    progress("render", 1, "Getting your video ready", version=n)
     vdir = proj / "versions" / ("preview" if draft else f"v{n}")
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / ".rendering").write_text("", "utf-8")

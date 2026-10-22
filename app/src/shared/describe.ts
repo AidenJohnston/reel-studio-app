@@ -60,19 +60,35 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
   return parts.join(', ')
 }
 
-/** The same words for a version's receipt facts (engine project.net_changes), whoever made the change. */
-export function describeFacts(facts: EditFact[], words: Word[]): string {
+/** What a receipt's facts changed, by kind: the few words a version title uses, and the summary's words. */
+type Group = 'flip' | 'cut' | 'pauses' | 'subtitles' | 'music' | 'pictures' | 'zooms' | 'cover' | 'post'
+interface Change { group: Group; title: string; said: string }
+
+const MUSIC_LEVELS = ['quiet', 'under-voice', 'loud-intro']
+
+function changes(facts: EditFact[], words: Word[]): Change[] {
   // SAFETY: each fact's before/after is the project.json value at its `kind` (engine net_changes), so
-  // the casts below name the schema's own types for cut.keep, captions.* and sources.
+  // the casts below name the schema's own types for cut.keep, captions.*, zooms and sources.
   const at = (kind: string): EditFact | undefined => facts.find((f) => f.kind === kind)
-  const parts: string[] = []
-  const flips = facts.filter((f) => f.kind === 'source').map((f) => (f.after as { mirror?: boolean } | null)?.mirror === true)
-  if (flips.length) parts.push(flips.every(Boolean) ? 'flipped the picture' : 'picture back the way you filmed it')
+  const out: Change[] = []
+  const mirrored = (s: unknown): boolean => (s as { mirror?: boolean } | null)?.mirror === true
+  const flips = facts.filter((f) => f.kind === 'source' && mirrored(f.before) !== mirrored(f.after)).map((f) => mirrored(f.after))
+  if (flips.length) {
+    out.push(flips.every(Boolean)
+      ? { group: 'flip', title: 'flipped video', said: 'flipped the picture' }
+      : { group: 'flip', title: 'video as filmed', said: 'picture back the way you filmed it' })
+  }
   const keep = at('cut.keep')
   if (keep) {
     const delta = keptIds(words, keep.after as Range[]).length - keptIds(words, keep.before as Range[]).length
-    if (delta > 0) parts.push(delta === 1 ? 'brought back a word' : `brought back ${delta} words`)
-    if (delta < 0) parts.push(delta === -1 ? 'cut a word' : `cut ${-delta} words`)
+    if (delta > 0) out.push({ group: 'cut', title: 'longer cut', said: delta === 1 ? 'brought back a word' : `brought back ${delta} words` })
+    else if (delta < 0) out.push({ group: 'cut', title: 'shorter cut', said: delta === -1 ? 'cut a word' : `cut ${-delta} words` })
+    else out.push({ group: 'cut', title: 'different takes', said: 'picked different takes' })
+  }
+  const gap = at('cut.gapCap')
+  if (gap) {
+    const w = Number(gap.after) < Number(gap.before) ? 'tighter pauses' : 'longer pauses'
+    out.push({ group: 'pauses', title: w, said: w })
   }
   const caps = facts.filter((f) => f.kind.startsWith('captions.'))
   if (caps.length) {
@@ -84,24 +100,113 @@ export function describeFacts(facts: EditFact[], words: Word[]): string {
       }
       return c as NonNullable<ProjectJson['captions']>
     }
-    parts.push(...subtitles(side('before'), side('after')))
+    const said = subtitles(side('before'), side('after'))
+    const first = said[0] ?? ''
+    out.push({
+      group: 'subtitles',
+      title: first.includes('subtitles') ? first : said.length ? 'fixed subtitles' : 'new subtitle look',
+      said: said.join(', ') || 'changed the subtitles'
+    })
   }
-  const track = at('music.track')
-  const level = at('music.level')
-  if (at('music.enabled')?.after === false || (track && !track.after)) parts.push('no music')
-  else if (track) parts.push(`new song "${name(track.after as string)}"`)
-  else if (level) parts.push(level.after === 'quiet' ? 'quieter music' : 'music volume changed')
+  const music = facts.filter((f) => f.kind.startsWith('music.'))
+  if (music.length) {
+    const track = at('music.track')
+    const level = at('music.level')
+    const on = at('music.enabled')
+    if (on?.after === false || (track && !track.after)) out.push({ group: 'music', title: 'no music', said: 'no music' })
+    else if (track) out.push({ group: 'music', title: 'new song', said: `new song "${name(track.after as string)}"` })
+    else if (on?.after === true) out.push({ group: 'music', title: 'music back on', said: 'music back on' })
+    else if (level && MUSIC_LEVELS.includes(String(level.after)) && MUSIC_LEVELS.includes(String(level.before))) {
+      const w = MUSIC_LEVELS.indexOf(String(level.after)) > MUSIC_LEVELS.indexOf(String(level.before)) ? 'louder music' : 'quieter music'
+      out.push({ group: 'music', title: w, said: w })
+    } else out.push({ group: 'music', title: 'music adjusted', said: 'music adjusted' })
+  }
   const broll = facts.filter((f) => f.kind === 'broll')
-  const n = broll.filter((f) => !f.before).length - broll.filter((f) => !f.after).length
-  if (n > 0) parts.push(n === 1 ? 'added a picture' : `added ${n} pictures`)
-  if (n < 0) parts.push(n === -1 ? 'removed a picture' : `removed ${-n} pictures`)
-  const text = at('cover.text')
-  if (text) parts.push(text.after ? 'new words on the cover' : 'no words on the cover')
-  else if (at('cover.atSourceTime')) parts.push('new cover')
-  return parts.join(', ')
+  if (broll.length) {
+    const n = broll.filter((f) => !f.before).length - broll.filter((f) => !f.after).length
+    if (n > 0) out.push({ group: 'pictures', title: n === 1 ? 'a new picture' : `${n} new pictures`, said: n === 1 ? 'added a picture' : `added ${n} pictures` })
+    else if (n < 0) out.push({ group: 'pictures', title: 'fewer pictures', said: n === -1 ? 'removed a picture' : `removed ${-n} pictures` })
+    else out.push({ group: 'pictures', title: 'pictures changed', said: broll.length === 1 ? 'changed a picture' : `changed ${broll.length} pictures` })
+  }
+  const zooms = at('zooms')
+  if (zooms) {
+    const n = (zooms.after as unknown[]).length - (zooms.before as unknown[]).length
+    const z = n > 0 ? 'more zoom-ins' : n < 0 ? ((zooms.after as unknown[]).length ? 'fewer zoom-ins' : 'no zoom-ins') : 'new zoom-ins'
+    out.push({ group: 'zooms', title: z, said: z })
+  }
+  if (facts.some((f) => f.kind.startsWith('cover.'))) {
+    const text = at('cover.text')
+    if (text) out.push(text.after ? { group: 'cover', title: 'new cover words', said: 'new words on the cover' } : { group: 'cover', title: 'no cover words', said: 'no words on the cover' })
+    else out.push({ group: 'cover', title: 'new cover', said: 'new cover' })
+  }
+  if (facts.some((f) => f.kind.startsWith('post.'))) out.push({ group: 'post', title: 'new post caption', said: 'new post caption' })
+  return out
 }
 
 type Range = { from: string; to: string }
+
+/** The same words for a version's receipt facts (engine project.net_changes), whoever made the change. */
+export function describeFacts(facts: EditFact[], words: Word[]): string {
+  return changes(facts, words).map((c) => c.said).join(', ')
+}
+
+/** "Tighter pauses, bigger subtitles": a version's short name, from its receipt facts. '' = nothing to name. */
+export function versionTitle(facts: EditFact[], words: Word[]): string {
+  const t = changes(facts, words).map((c) => c.title)
+  const s = t.length > 2 ? `${t[0]}, ${t[1]} and more` : t.join(', ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+// Words that claim a kind of change. A phrase is removed once matched, so "post caption" is not also a
+// subtitle and "flipped the picture" not also a picture. null = a kind the receipts never record.
+const CLAIMS: [Group | null, RegExp][] = [
+  ['post', /\b(post caption|hashtags?)\b/g],
+  ['cover', /\b(cover|thumbnail)s?\b/g],
+  ['flip', /\b(flip\w*|mirror\w*)( the)?( picture| video)?|\b(picture|video) (back )?(the way you filmed it|as filmed)/g],
+  ['cut', /\b(cuts?|trim\w*|takes?|retakes?|brought back)\b/g],
+  ['pauses', /\b(pauses?|gaps?|silences?|pace|pacing)\b/g],
+  ['subtitles', /\b(subtitles?|captions?)\b/g],
+  ['music', /\b(music|songs?|soundtrack|volume|audio)\b/g],
+  ['pictures', /\b(pictures?|images?|photos?|b-? ?roll|visuals?|clips?|gifs?|animations?|graphics?)\b/g],
+  ['zooms', /\bzoom/g],
+  [null, /\b(transitions?|filters?|speed|slow[- ]?mo\w*|effects?|stickers?|emojis?|crop\w*|brightness)\b/g]
+]
+
+function claims(text: string): Set<Group | null> {
+  let rest = text.toLowerCase()
+  const found = new Set<Group | null>()
+  for (const [group, re] of CLAIMS) {
+    if (rest.search(re) < 0) continue
+    found.add(group)
+    rest = rest.replace(re, ' ')
+  }
+  return found
+}
+
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+// Words that say which way or how much something changed. A rewording may only use the ones the app's own words use.
+const AMOUNTS = new RegExp(`\\b(\\d+|${NUMBER_WORDS.join('|')}|bigger|larger|smaller|louder|quieter|softer|more|fewer|less|tighter|looser|longer|shorter|faster|slower|higher|lower|up|down|on|off|no|back)\\b`, 'g')
+const amounts = (text: string): Set<string> =>
+  new Set([...text.toLowerCase().matchAll(AMOUNTS)].map(([w]) => (NUMBER_WORDS.includes(w) ? String(NUMBER_WORDS.indexOf(w)) : w)))
+
+/**
+ * A small model's rewording of a version's title and summary, kept only when it names at least one
+ * change, every change it names is in the receipt facts, every direction or number it states is one
+ * the app's own words state, and it reads like a title. null = keep the app's own words.
+ */
+export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
+  const own = changes(facts, words)
+  const has = new Set<Group | null>(own.map((c) => c.group))
+  const ownAmounts = amounts(own.map((c) => `${c.title} ${c.said}`).join(' '))
+  const title = text.title.trim()
+  const summary = text.summary.trim().replace(/\.$/, '')
+  if (title.split(/\s+/).length > 6 || title.length > 48 || summary.length > 160 || /[\n—–:"“”]/.test(title + summary) || title.endsWith('.')) return null
+  for (const t of [title, summary]) {
+    const named = claims(t)
+    if (!named.size || [...named].some((g) => !has.has(g)) || [...amounts(t)].some((a) => !ownAmounts.has(a))) return null
+  }
+  return { title, summary }
+}
 
 /** "Version 3: bigger yellow subtitles, moved up." */
 export function versionMessage(version: number, change: string): string {

@@ -35,6 +35,7 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
+import { titleVersion } from './version-title'
 import { createLiveVideos } from './live-video'
 import { rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -473,6 +474,11 @@ function registerIpc(): void {
       async (emit, signal, id) => {
         const opts = { jobId: id, ...(files.length ? { attachments: files.map((f) => f.asset) } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
+        if (r.changed.length && ai.rewordVersion) {
+          void titleVersion(slug, r.version, ai.rewordVersion.bind(ai), AbortSignal.timeout(60_000)).catch((e) =>
+            log(`[ai] version title: ${String(e?.message ?? e)}`)
+          )
+        }
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(slug, r, r.summary + extra)
       },

@@ -90,7 +90,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
         const t0 = Date.now()
         let logged = ''
+        let open = true
         const res = await fn((e) => {
+          // A stopped engine can still report progress after its job has ended; the job's result wins.
+          if (!open) return
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
             job.message = e.message || job.message
@@ -115,7 +118,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal, id)
+        }, abort.signal, id).finally(() => {
+          open = false
+        })
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it

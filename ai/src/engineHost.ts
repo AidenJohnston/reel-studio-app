@@ -53,7 +53,7 @@ export class PythonEngineHost implements EngineHost {
         if (!line.trim()) return;
         let ev: any;
         try { ev = JSON.parse(line); } catch { this.o.log?.(`[stdout] ${line}`); return; }
-        if (ev.event === 'progress') onProgress?.({ stage: ev.stage ?? command, pct: Number(ev.pct ?? 0), message: ev.message ?? '' });
+        if (ev.event === 'progress') onProgress?.({ stage: ev.stage ?? command, pct: Number(ev.pct ?? 0), message: ev.message ?? '', ...(typeof ev.version === 'number' ? { version: ev.version } : {}) });
         else if (ev.event === 'done') done = ev.result ?? {};
         else if (ev.event === 'error') error = { code: ev.code ?? 'ENGINE_ERROR', userMessage: ev.userMessage ?? 'Something went wrong making your video.', message: ev.message };
       };

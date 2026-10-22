@@ -27,6 +27,8 @@ export interface VersionInfo {
   createdAt: string
   /** what this version changed since the one before, from `versions/vN/receipts.json`; absent for versions made before receipts existed */
   facts?: EditFact[]
+  /** the AI connection's rewording of the title and summary, already checked against `facts` (`versions/vN/title.json`) */
+  wording?: { title: string; summary: string }
 }
 
 /** One thing an edit changed (engine project.net_changes): `kind` is the project.json path. */

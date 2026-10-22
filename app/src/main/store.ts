@@ -222,9 +222,12 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const push = async (n: number, d: string, video: string): Promise<void> => {
     const st = await fs.stat(video)
     const cover = join(d, 'cover.png')
-    const receipts = await readJson<{ facts: EditFact[] }[] | null>(join(d, 'receipts.json'), null)
+    const receipts = await readJson<{ renderId: string; facts: EditFact[] }[] | null>(join(d, 'receipts.json'), null)
+    // a rewording describes the receipts up to the one it names; a later receipt in this folder makes it stale
+    const titled = await readJson<{ renderId: string; title: string; summary: string } | null>(join(d, 'title.json'), null)
     out.push({
       ...(receipts ? { facts: receipts.flatMap((r) => r.facts) } : {}),
+      ...(titled && titled.renderId === receipts?.at(-1)?.renderId ? { wording: { title: titled.title, summary: titled.summary } } : {}),
       n,
       video: mediaUrl(video, st.mtimeMs),
       videoPath: video,

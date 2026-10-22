@@ -714,7 +714,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         draft = True
         proj = first_look_project(project_dir, proj, music)
     root = tools.root_dir(str(root) if root else None)
-    progress(STAGE, 1, "Getting your video ready", force=True)
+    version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
+    progress(STAGE, 1, "Getting your video ready", force=True, version=version)
     words = projmod.load_transcript(project_dir, proj)["words"]
     tl = projmod.timeline(project_dir, proj, words)
     if tl.duration < 0.3 or not tl.segments:
@@ -725,7 +726,6 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     committed = project_dir / "versions" / f"v{int(proj.get('version') or 0)}" / "project.json"
     baseline = projmod.read_json(committed) if committed.exists() else None
-    version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
     vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
     vdir.mkdir(parents=True, exist_ok=True)

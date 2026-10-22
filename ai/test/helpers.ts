@@ -117,6 +117,9 @@ export class FakeHost implements EngineHost {
         // docs/versions.md: drafts overwrite versions/preview/ and never bump project.version
         const draft = args.includes('--draft');
         const v = (p.version ?? 0) + 1;
+        // like the engine: the render names its version, and its own last step says the video is ready
+        onProgress?.({ stage: 'render', pct: 1, message: 'Getting your video ready', version: v });
+        onProgress?.({ stage: 'render', pct: 100, message: 'Your video is ready' });
         if (!draft) {
           p.version = v;
           await fsp.writeFile(pj, JSON.stringify(p, null, 2));

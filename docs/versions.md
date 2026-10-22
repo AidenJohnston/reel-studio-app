@@ -8,7 +8,7 @@ never a pile of preview-only folders an AI run left behind.
 ```
 <project>/versions/
   v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json
-                 (+ notes.md, receipts.json)
+                 (+ notes.md, receipts.json, title.json)
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -44,6 +44,12 @@ changed since the version `project.json` pointed at (`render --job-id` sets `job
 that changed something appends it to `versions/vN/receipts.json`, which the version buttons read
 (docs/schema-changes.md). `verify` finds a copied video (an export in the Library) by its SHA-256
 among the project's renders.
+
+The app names each version from its receipts ("Shorter cut, bigger subtitles", app/src/shared/describe.ts).
+After a note, the creator's own connection may reword that name with its small model (Haiku through
+Claude Code or a Claude key; none for other connections). The app keeps the rewording in
+`versions/vN/title.json` (`{renderId, title, summary}`) only when every change, direction and number it
+names is in the receipts, and shows it only while `renderId` is the folder's last receipt.
 
 ## Render result (engine `done.result`)
 

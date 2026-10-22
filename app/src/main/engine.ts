@@ -9,6 +9,8 @@ export interface EngineProgress {
   stage: string
   pct: number
   message: string
+  /** the version a render makes (render only) */
+  version?: number
 }
 
 export interface EngineError {
@@ -18,7 +20,7 @@ export interface EngineError {
 }
 
 export type EngineEvent =
-  | { event: 'progress'; stage: string; pct: number; message: string }
+  | ({ event: 'progress' } & EngineProgress)
   | { event: 'done'; result: unknown }
   | { event: 'error'; code: string; message?: string; userMessage: string }
 
@@ -61,7 +63,8 @@ export function parseEngineLine(line: string): EngineEvent | null {
         event: 'progress',
         stage: String(o.stage ?? ''),
         pct,
-        message: typeof o.message === 'string' ? o.message : ''
+        message: typeof o.message === 'string' ? o.message : '',
+        ...(typeof o.version === 'number' ? { version: o.version } : {})
       }
     }
     case 'done':
@@ -159,8 +162,10 @@ export function createEngineRunner(cfg: RunnerConfig) {
           log(`[engine ${command} stdout] ${line}`)
           return
         }
-        if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message })
-        else if (ev.event === 'done') result = { ok: true, value: ev.result }
+        if (ev.event === 'progress') {
+          const { event: _event, ...p } = ev
+          onProgress?.(p)
+        } else if (ev.event === 'done') result = { ok: true, value: ev.result }
         else result = { ok: false, err: { code: ev.code, userMessage: ev.userMessage, message: ev.message } }
       })
       const err = new LineSplitter((line) => {

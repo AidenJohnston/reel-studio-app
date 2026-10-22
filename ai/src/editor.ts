@@ -5,7 +5,7 @@ import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore } from './style';
-import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
+import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, operationStatus, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
@@ -321,7 +321,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
   const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
   if (fast) {
-    onEvent({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
+    onEvent({ type: 'status', message: operationStatus(ctx, fast.calls[0].name, fast.calls[0].args) ?? 'Making your change', pct: 10, phase: 'final' });
     let ok = true;
     for (const c of fast.calls) {
       const r = await executeTool(ctx, c.name, c.args);

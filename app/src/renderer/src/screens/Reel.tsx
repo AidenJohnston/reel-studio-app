@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
+import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo, VersionInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
-import { describeFacts, versionMessage } from '../../../shared/describe'
+import { describeFacts, versionMessage, versionTitle } from '../../../shared/describe'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
@@ -139,6 +139,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   }, [doExport])
 
   if (!d) return <div className="page"><Spinner /></div>
+
+  const nameOf = (v: VersionInfo): string => v.wording?.title ?? (v.facts ? versionTitle(v.facts, d.words) : '')
+  const named = d.versions.some((v) => nameOf(v))
 
   const aiOff = !provider || !provider.connected || provider.id === 'none'
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
@@ -349,12 +352,19 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   aria-checked={v.n === version?.n}
                   className={`chip${v.n === version?.n ? ' active' : ''}`}
                   onClick={() => setSelected(v.n)}
-                  title={v.facts && versionMessage(v.n, describeFacts(v.facts, d.words))}
+                  title={v.facts && versionMessage(v.n, v.wording?.summary ?? describeFacts(v.facts, d.words))}
+                  aria-label={nameOf(v) ? `Version ${v.n}, ${nameOf(v)}` : undefined}
                 >
                   {v.n === 0 ? 'Preview' : `Version ${v.n}`}
                 </button>
               ))}
             </div>
+          )}
+          {named && (
+            // aria-hidden: each chip's label already names its version
+            <p className="version-title" aria-hidden data-testid="version-title">
+              {version ? nameOf(version) : ''}
+            </p>
           )}
           {job && (
             // Right above the greyed buttons, so the reason is next to what it explains (grandma3 #10).
