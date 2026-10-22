@@ -35,6 +35,11 @@ def cmd_probe(args):
     return probe.probe(Path(args.file))
 
 
+def cmd_export_media(args):
+    from . import export_media
+    return export_media.run(Path(args.file), Path(args.dest), args.width, args.height, args.bitrate, args.cover_at)
+
+
 def cmd_classify(args):
     from . import classify
     return classify.run(Path(args.root) if args.root else None, [Path(f) for f in args.files],
@@ -305,6 +310,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("probe", cmd_probe, "describe a media file")
     sp.add_argument("file")
+    sp = add("export-media", cmd_export_media, "encode a finished edit for a platform")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--width", required=True, type=int)
+    sp.add_argument("--height", required=True, type=int)
+    sp.add_argument("--bitrate", required=True, type=int)
+    sp.add_argument("--cover-at", required=True, type=float)
     sp = add("classify", cmd_classify, "sort dropped files into the Library")
     sp.add_argument("--root", help="Reel Studio root (default REELENGINE_ROOT or ~/Documents/Reel Studio)")
     sp.add_argument("--move", action="store_true", help="move instead of copy")

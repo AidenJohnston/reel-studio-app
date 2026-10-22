@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { Platform, PlatformExportRequest } from './platforms'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -266,6 +267,11 @@ export interface ExportResult {
   caption: string
 }
 
+export interface PlatformExportResult {
+  folder: string
+  files: { platform: Platform; video: string; cover: string; captionFile: string; caption: string }[]
+}
+
 /** "Send to my phone": one network the phone could reach this computer on. */
 export interface PhoneAddress {
   address: string
@@ -347,6 +353,7 @@ export interface ReelApi {
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
     rerender(slug: string, change?: string, label?: string): Promise<{ jobId: string }>
     exportVersion(slug: string, version: number): Promise<ExportResult>
+    exportPlatforms(slug: string, version: number, request: PlatformExportRequest): Promise<PlatformExportResult>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */

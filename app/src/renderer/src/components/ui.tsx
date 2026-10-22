@@ -48,11 +48,27 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
 }
 
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
-export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
+export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    if (!labelledBy || !ref.current) return
+    const siblings: { element: HTMLElement; inert: boolean }[] = []
+    let node: HTMLElement = ref.current
+    while (node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling !== node && sibling instanceof HTMLElement) {
+          siblings.push({ element: sibling, inert: sibling.inert })
+          sibling.inert = true
+        }
+      }
+      node = node.parentElement
+      if (node === document.body) break
+    }
+    return () => { for (const { element, inert } of siblings) element.inert = inert }
+  }, [labelledBy])
+  useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
-    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
+    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]:not(:disabled)') ?? ref.current?.querySelector<HTMLElement>(labelledBy ? 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)' : 'button')
     first?.focus()
     return () => prev?.focus?.()
   }, [])
@@ -69,7 +85,14 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
+      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
+        if (!labelledBy || e.key !== 'Tab') return
+        const controls = [...e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href], select:not(:disabled), summary, video[controls]')]
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+      }} role="dialog" aria-modal aria-labelledby={labelledBy} data-testid={testid}>
         {children}
       </div>
     </div>

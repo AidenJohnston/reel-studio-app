@@ -47,8 +47,10 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, PlatformExportResult, ProjectJson, VersionInfo } from '../shared/api'
 import { noAiReply } from '../shared/notes'
+import { parsePlatformExportRequest } from '../shared/platforms'
+import { exportPlatforms } from './platform-export'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
@@ -274,13 +276,14 @@ function safeFileName(s: string): string {
   return t.slice(0, 80) || 'My video'
 }
 
-async function exportVersion(slug: string, n: number): Promise<ExportResult> {
+async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This video is not ready yet. Wait for it to finish, then try again.' }
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Wait until it is done, then export.' }
   if (v.draft) {
+    let renderedVersion: number | null = null
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
     jobs.start(slug, 'rerender', async (emit, signal) => {
@@ -292,14 +295,21 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
         signal
       )
       const version = Number(r?.version ?? 0)
+      renderedVersion = version
       emit({ type: 'render', version, draft: false })
       return { summary: '', version, quiet: true }
     })
     await jobs.forSlug(slug)?.done
+    if (renderedVersion === null) throw { code: 'EXPORT_FAILED', userMessage: 'The full-quality render stopped. Try Export again.' }
     versions = await listVersions(dir)
     v = versions[versions.length - 1]
     if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
   }
+  return v
+}
+
+async function exportVersion(slug: string, n: number): Promise<ExportResult> {
+  const v = await finishedExportVersion(slug, n)
   const p = await readProject(slug)
   const exportsDir = binDir('exports')
   await fs.mkdir(exportsDir, { recursive: true })
@@ -525,6 +535,26 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
+    const request = parsePlatformExportRequest(value)
+    if (!Number.isInteger(n) || n < 0) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
+    if (!(await listVersions(projectDir(slug))).some((v) => v.n === n)) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
+    const version = await finishedExportVersion(slug, n)
+    const project = await readProject(slug)
+    let result: PlatformExportResult | null = null
+    let failure: unknown
+    jobs.start(slug, 'export', async (emit, signal) => {
+      emit({ type: 'status', message: 'Saving platform files', pct: 1 })
+      try {
+        result = await exportPlatforms({ source: version.videoPath, folder: binDir('exports'), name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal })
+        return { summary: '', quiet: true }
+      } catch (e) { failure = e; throw e }
+    })
+    await jobs.forSlug(slug)?.done
+    if (failure) throw failure
+    if (!result) throw { code: 'EXPORT_FAILED', userMessage: 'The export stopped. Try Export again.' }
+    return result
+  })
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {

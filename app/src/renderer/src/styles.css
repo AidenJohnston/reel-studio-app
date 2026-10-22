@@ -411,6 +411,23 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .modal { background: var(--bg); border-radius: 16px; padding: 28px; width: min(480px, 92vw); max-height: calc(100vh - 60px); overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 16px; }
 .modal.wide { width: min(580px, 92vw); }
 .export-head { display: flex; gap: 18px; align-items: flex-start; }
+.export-alternatives { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.export-alternatives .btn { padding-inline: 8px; }
+.platform-options { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.platform-options legend { font-weight: 600; margin-bottom: 8px; }
+.platform-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; min-height: 44px; cursor: pointer; }
+.platform-option input { margin-top: 5px; flex: none; }
+.platform-option span { min-width: 0; }
+.platform-option small { display: block; color: var(--ink-3); font-size: 13px; margin-top: 3px; }
+.platform-cover { display: flex; gap: 16px; align-items: center; }
+.platform-cover video { width: 90px; height: 160px; object-fit: contain; background: #000; border-radius: var(--radius-sm); flex: none; }
+.platform-errors { color: var(--red-ink); font-size: 14px; }
+.platform-results { display: flex; flex-direction: column; gap: 20px; }
+.platform-result { display: flex; flex-direction: column; gap: 8px; }
+.platform-result .selectable { overflow-wrap: anywhere; }
+.modal-backdrop:has([data-testid="platform-export-dialog"]) { animation: none; }
+[data-testid="platform-export-dialog"] { overscroll-behavior: contain; }
+@media (max-width: 520px) { .platform-options { grid-template-columns: 1fr; } }
 .file-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 600; overflow-wrap: anywhere; user-select: text; }
 .post-how { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .post-how p { flex: 1; color: var(--ink-2); }
