@@ -59,7 +59,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
     async drained(everyMs = 2000): Promise<void> {
       while (leftover.size) {
         for (const pid of [...leftover]) {
-          if (await leftRunning(pid)) continue
+          if (await mayStillRun(pid)) continue
           leftover.delete(pid)
           engines.delete(pid)
           save()
@@ -76,6 +76,14 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
 async function leftRunning(pid: number): Promise<boolean> {
   if (isAlive(pid)) return isOurEngine(await processCommandLine(pid))
   return process.platform !== 'win32' && groupAlive(pid)
+}
+
+/** For an engine reap already found to be ours: alive with a command line that can't be read (a slow
+ * or failed `ps`/PowerShell) still counts as running, so its render slot is never freed early. */
+async function mayStillRun(pid: number): Promise<boolean> {
+  if (!isAlive(pid)) return process.platform !== 'win32' && groupAlive(pid)
+  const cmdline = await processCommandLine(pid)
+  return cmdline === null || isOurEngine(cmdline)
 }
 
 /** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */

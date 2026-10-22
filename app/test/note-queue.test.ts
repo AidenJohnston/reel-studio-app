@@ -80,7 +80,6 @@ function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?
   /** Resolves once the queue has acted on every job event and every running job waits at a gate. */
   async function settled(): Promise<void> {
     for (let i = 0; i < 20_000; i++) {
-      await Promise.all([...pending])
       await new Promise((r) => setTimeout(r, 1))
       const parked = thinking.size + renders.size + saved.size + slotWaiters
       if (!pending.size && parked === jobs.runningCount()) return
