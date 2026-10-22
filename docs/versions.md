@@ -34,7 +34,8 @@ Every render returns a random `renderId` and an `inputFingerprint` (SHA-256 of t
 words, asset sizes and times, draft flag and window). The manifest next to the video (`render.json` or
 `render_draft.json`) records both, the video's SHA-256, and that render's own caption boxes
 (`captionsReport`), b-roll records (`layerItems`), segments and word times. `verify.json` repeats the id
-and fingerprint. `frames`, `verify` and `inspect-render --render-id <id>` refuse with `RENDER_MISMATCH`
+and fingerprint. The manifest names its video by file name only, so it still resolves after the
+project folder moves or on another OS. `frames`, `verify` and `inspect-render --render-id <id>` refuse with `RENDER_MISMATCH`
 unless the manifest, the video and `verify.json` are one render, so a preview replaced by a newer one is
 never inspected in its place. A window slice has no manifest and cannot be inspected; neither can a
 render made with `--no-verify`.
