@@ -277,6 +277,19 @@ def test_bundle_with_a_link_is_refused(tmp_path, link):
     assert _code(bundle) == "UNSAFE_INPUT"
 
 
+def test_bundle_root_junction_is_refused_on_windows(tmp_path):
+    if not sys.platform.startswith("win"):
+        pytest.skip("junctions are Windows-only")
+    target = _bundle(tmp_path)
+    link = tmp_path / "linked.fcpxmld"
+    import subprocess
+    result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        pytest.skip(f"mklink /J unavailable: {result.stderr.strip()}")
+    assert _code(link) == "BAD_INPUT"
+
+
 def test_missing_reference_extra_is_reported(monkeypatch):
     monkeypatch.setitem(sys.modules, "opentimelineio", None)
     assert _code(FIXTURES / "talking-head.xml") == "ADAPTER_MISSING"

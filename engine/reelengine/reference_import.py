@@ -89,6 +89,14 @@ def _read_file(path: Path) -> bytes:
         raise _fail("BAD_INPUT", f"cannot read {path}: {exc}")
 
 
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def _bundle_files(bundle: Path) -> list[Path]:
     files, total, folders = [], 0, [bundle]
     try:
@@ -117,7 +125,7 @@ def _load(path: Path) -> tuple[bytes, str, str]:
     """The XML bytes to parse, the adapter name, and a sha256 of the whole input."""
     suffix = path.suffix.lower()
     if suffix == ".fcpxmld":
-        if path.is_symlink() or not path.is_dir():
+        if path.is_symlink() or _is_reparse_point(path) or not path.is_dir():
             raise _fail("BAD_INPUT", f"FCPXML bundle is not a folder: {path}")
         files = _bundle_files(path)
         info = path / "Info.fcpxml"
