@@ -33,6 +33,22 @@ def test_render_has_every_planned_frame(tmp_path, video, keep):
     assert _frames(Path(res["file"])) == round(res["duration"] * 30)
 
 
+def test_sound_lasts_as_long_as_the_picture(tmp_path):
+    """A take whose sound stops 40 ms before its picture used to render with the sound ending early."""
+    take = tmp_path / "media" / "take.mp4"
+    take.parent.mkdir()
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x6a6560:s=1080x1920:r=30:d=12",
+                    "-f", "lavfi", "-i", "sine=f=220:d=11.96:sample_rate=48000", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(take)], check=True)
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, take, keep=((0.1, 11.9),))
+    res = render.run(pdir, draft=False, root=tmp_path, verify=False)
+    out = subprocess.run([fx.FFPROBE, "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "json",
+                          res["file"]], capture_output=True, text=True, check=True).stdout
+    dur = {s["codec_type"]: float(s["duration"]) for s in json.loads(out)["streams"]}
+    assert dur["audio"] >= dur["video"] - 1024 / 48000
+
+
 def _zones(left_w, right_w, H=1920):
     return [{"zone": "left", "x": 30, "y": 300, "w": left_w, "h": 1000},
             {"zone": "right", "x": 1050 - right_w, "y": 300, "w": right_w, "h": 1000},
