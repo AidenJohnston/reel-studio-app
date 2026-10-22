@@ -560,7 +560,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   {job.thinking ? <Thinking /> : <Spinner />} <span>{job.message}</span>
                   <span className="spacer" />
                   <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? ''}</span>
-                  <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId)} style={{ padding: 0, marginLeft: 12 }}>
+                  <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId, slug)} style={{ padding: 0, marginLeft: 12 }}>
                     Stop
                   </button>
                 </div>

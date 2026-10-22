@@ -112,10 +112,10 @@ export function createAI(opts: CreateAIOptions) {
     locks.set(key, tail);
     return run;
   }
-  const deps = (host: EngineHost, owner?: string): editor.EditorDeps => ({ host, owner, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (host: EngineHost, owner?: string, stuck?: () => unknown): editor.EditorDeps => ({ host, owner, stuck, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
   function edit<T>(owner: string | undefined, run: (d: editor.EditorDeps) => Promise<T>): Promise<T> {
     const engine = editHost(opts.host, owner);
-    return engine.settle(run(deps(engine.host, owner)));
+    return engine.settle(run(deps(engine.host, owner, engine.stuck)));
   }
 
   async function settings(): Promise<AISettings> {
@@ -328,6 +328,7 @@ function editHost(host: EngineHost, owner: string | undefined) {
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
     } satisfies EngineHost,
+    stuck: () => stuck,
     async settle<T>(edit: Promise<T>): Promise<T> {
       const r = await edit.catch((e) => { throw stuck ?? e; });
       if (stuck) throw stuck;

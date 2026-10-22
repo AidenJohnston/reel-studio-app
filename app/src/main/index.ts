@@ -173,7 +173,7 @@ async function startNote(slug: string, { id: noteId, text, attachments }: NoteTo
     slug,
     'note',
     async (emit, signal, { owner }) => {
-      await unstage(dir, noteStagingDir(slug), attachments)
+      await unstage(dir, noteStagingDir(dir), attachments)
       // saved under its queue entry's id (note-queue.ts); the app asks before anything goes into My style
       const opts = { attachments: attachments.map((f) => f.asset), id: noteId, saveStyleRules: false, ...(owner ? { owner } : {}) }
       const r: AgentResult = await ai.applyNote(dir, text, (e) => emit(e), signal, opts)
@@ -402,7 +402,7 @@ function registerIpc(): void {
     projectDir,
     readProject,
     busy: (slug) => !!jobs.forSlug(slug),
-    stagingDir: noteStagingDir,
+    stagingDir: (slug) => noteStagingDir(projectDir(slug)),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -490,7 +490,7 @@ function registerIpc(): void {
     const note = String(text ?? '').trim()
     const dir = projectDir(slug)
     // never trust the page: every attached ref is re-read from THIS project's own sidecars (or its staging)
-    const files = await checkNoteAttachments(dir, attachments, noteStagingDir(slug))
+    const files = await checkNoteAttachments(dir, attachments, noteStagingDir(dir))
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -548,17 +548,14 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
-  handle('projects:remove', async (_e, slug: string) => {
-    const running = jobs.forSlug(slug)
-    if (running) {
-      jobs.cancel(running.id)
-      await running.done
-    }
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
-    await fs.rm(noteStagingDir(slug), { recursive: true, force: true })
-  })
+  handle('projects:remove', (_e, slug: string) =>
+    noteQueue.remove(slug, async () => {
+      await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
+      await fs.rm(projectDir(slug), { recursive: true, force: true })
+    })
+  )
 
-  handle('jobs:cancel', (_e, id: string) => noteQueue.stop(String(id)))
+  handle('jobs:cancel', (_e, id: string, slug?: string) => noteQueue.stop(String(id), typeof slug === 'string' ? slug : undefined))
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
@@ -715,6 +712,7 @@ app.on('before-quit', (e) => {
   // Stop running work cleanly so the next start finds a tidy project.
   e.preventDefault()
   quitting = true
+  noteQueue.quit()
   void jobs
     .cancelAll()
     .then(() => killAllEngines())

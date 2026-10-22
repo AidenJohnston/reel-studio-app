@@ -1,6 +1,7 @@
 // Every filesystem location the app uses lives here, so packaging can adjust one file.
 // This module never imports electron: index.ts calls initPaths() with the electron values,
 // and tests call it with temp folders.
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -74,7 +75,10 @@ export const settingsFile = (): string => join(need().userDataDir, 'settings.jso
 export const modelsDir = (): string => env().REELSTUDIO_MODELS_DIR ?? join(need().userDataDir, 'models')
 /** Files attached to a note while a job runs on its reel. They move into the project when their note runs. */
 export const noteStagingRoot = (): string => join(need().userDataDir, 'note-staging')
-export const noteStagingDir = (slug: string): string => join(noteStagingRoot(), slug)
+/** One folder per project folder, not per name: videos with the same name in two storage folders (Settings >
+ * Storage) never share, or clean up, each other's files. */
+export const noteStagingDir = (projectFolder: string): string =>
+  join(noteStagingRoot(), createHash('sha256').update(resolve(projectFolder)).digest('hex').slice(0, 16))
 
 // ---- Bundled resources -----------------------------------------------------------------------
 

@@ -197,6 +197,17 @@ describe('project store', () => {
     expect(await recoverInterrupted()).toEqual([])
   })
 
+  it('an app.json that cannot be read is never taken for an empty one, so a write never erases the chat and the waiting notes', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('theta', { versions: [1] })
+    const damaged = '{"chat": [{"id": "m1", "from": "you", "text": "make it pop"'
+    writeFileSync(join(dir, 'app.json'), damaged)
+    await expect(updateAppState('theta', (s) => void s.chat.push({ id: 'm2', from: 'editor', text: 'hi', at: '' }))).rejects.toMatchObject({ code: 'STATE_UNREADABLE' })
+    expect(await fs.readFile(join(dir, 'app.json'), 'utf8')).toBe(damaged)
+    expect((await listProjects()).map((p) => p.slug)).toContain('theta')
+  })
+
   it('a note that never got saved is not a version, and leaves no private copy, before or after the app restarts', async () => {
     setupPaths()
     await ensureRoot()

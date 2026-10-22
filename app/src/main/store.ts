@@ -139,13 +139,13 @@ export async function writeJson(path: string, data: unknown, opts: { durable?: b
     }
   }
   await renameWithRetry(tmp, path)
-  if (opts.durable) await syncFolder(dirname(path))
+  if (opts.durable) await syncRename(path)
 }
 
-/** Flushes a rename to disk. Windows cannot open a folder for this; NTFS journals the rename itself. */
-async function syncFolder(dir: string): Promise<void> {
-  if (process.platform === 'win32') return
-  const fh = await fs.open(dir, 'r')
+/** Flushes a rename to disk: the folder on macOS/Linux; Windows can't open a folder for this, so the
+ * renamed file itself is flushed, which writes its directory entry too. */
+async function syncRename(path: string): Promise<void> {
+  const fh = await fs.open(process.platform === 'win32' ? path : dirname(path), process.platform === 'win32' ? 'r+' : 'r')
   try {
     await fh.sync()
   } finally {
@@ -193,8 +193,14 @@ export async function writeProject(slug: string, project: ProjectJson): Promise<
   await serialized(file, () => writeJson(file, project))
 }
 
+const STATE_UNREADABLE = { code: 'STATE_UNREADABLE', userMessage: 'I could not read this video\'s notes right now. Try again in a moment.' }
+
+/** Only a missing app.json is an empty one. One that can't be read or parsed throws: reading it as empty
+ * would make the next write erase the chat and the waiting notes. */
 async function readAppStateNow(file: string): Promise<AppState> {
-  const s = await readJson<Partial<AppState>>(file, {})
+  if (!existsSync(file)) return { ...EMPTY_STATE, chat: [] }
+  const s = await readJson<Partial<AppState> | null>(file, null)
+  if (!s || typeof s !== 'object' || Array.isArray(s)) throw STATE_UNREADABLE
   return { ...EMPTY_STATE, ...s, chat: s.chat ?? [] }
 }
 
@@ -370,7 +376,8 @@ export async function recoverInterrupted(stillRunning: string[] = []): Promise<s
 export async function settleInterrupted(slug: string): Promise<'settled' | 'unreadable' | 'nothing'> {
   const dir = projectDir(slug)
   if (!existsSync(join(dir, 'app.json'))) return 'nothing'
-  const s = await readAppState(slug)
+  const s = await readAppState(slug).catch(() => null)
+  if (!s) return 'unreadable'
   if (!s.job) return 'nothing'
   const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.noteId ?? s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
@@ -510,7 +517,8 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
     }
   }
   const versions = await listVersions(dir)
-  const st = await readAppState(slug)
+  // Home still lists a video whose app.json can't be read right now; opening it says so
+  const st = await readAppState(slug).catch((): AppState => ({ ...EMPTY_STATE, chat: [] }))
   const last = versions[versions.length - 1]
   const status: ScreenStatus = st.job
     ? 'working'
@@ -601,7 +609,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
 /** A file attached while a job ran stays in staging until its note runs (attachments.ts). */
 function attachmentThumb(slug: string, a: NoteAttachment): NoteAttachment {
   const t = chatThumb(projectDir(slug), a)
-  return t.thumbUrl ? t : chatThumb(noteStagingDir(slug), a)
+  return t.thumbUrl ? t : chatThumb(noteStagingDir(projectDir(slug)), a)
 }
 
 function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {

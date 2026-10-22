@@ -124,6 +124,22 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(await read()).toBe(before);
   });
 
+  it('part of the engine would not stop during a step that hides its errors: a note that then changes nothing is not saved', async () => {
+    const { root, dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
+    await fsp.mkdir(path.join(root, 'Library', 'Music'), { recursive: true });
+    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm.mp3'), 'song');
+    const run = host.runEngine.bind(host);
+    host.runEngine = async (command, args, onProgress) => {
+      if (command === 'analyze-music') throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+      return run(command, args, onProgress);
+    };
+    const m = new ScriptedModel([{ toolCalls: [call('list_library', { kind: 'music' })] }, finish('The music already fits.')]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'better music', () => undefined, undefined, { owner: 'job-1' }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(await read()).toBe(before);
+  });
+
   it('the dev CLI refuses a project Reel Studio has open, and changes nothing', async () => {
     const { dir, host, settingsDir, read, before } = await setup();
     await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'the app\'s job' }));

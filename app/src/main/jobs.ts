@@ -54,6 +54,14 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
 
   /** Projects a manual edit is writing right now: no job may start on them meanwhile. */
   const held = new Set<string>()
+  /** Callers waiting for a project to have no job and no manual edit (`whenFree`). */
+  const freeWaiters = new Map<string, (() => void)[]>()
+  function freed(slug: string): void {
+    if (forSlug(slug) || held.has(slug)) return
+    const waiting = freeWaiters.get(slug)
+    freeWaiters.delete(slug)
+    waiting?.forEach((go) => go())
+  }
   /** Projects an engine process may still be writing to after its job ended (ENGINE_STUCK): nothing
    * runs on them and they stay marked open until Reel Studio restarts and its leftovers are reaped. */
   const stuck = new Map<string, { code: string; userMessage: string }>()
@@ -192,6 +200,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         clearInterval(tick)
         if (!(slug && stuck.has(slug))) await owner?.release().catch((e) => log(`[job ${kind}] could not let go of the project: ${String(e)}`))
         jobs.delete(id)
+        if (slug) freed(slug)
       }
     })()
     return id
@@ -225,6 +234,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       }
     } finally {
       held.delete(slug)
+      freed(slug)
     }
   }
 
@@ -238,6 +248,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     hold,
     keepClosed,
     forSlug,
+    /** Resolves once nothing runs on the project and no manual edit holds it. */
+    whenFree(slug: string): Promise<void> {
+      if (!forSlug(slug) && !held.has(slug)) return Promise.resolve()
+      return new Promise((resolve) => freeWaiters.set(slug, [...(freeWaiters.get(slug) ?? []), resolve]))
+    },
     get: (id: string) => jobs.get(id),
     /** What a job is showing now (its own words, or that it waits for the render slot). */
     message: shown,

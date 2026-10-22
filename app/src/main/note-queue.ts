@@ -2,8 +2,9 @@
 // the send returns. Entries run one at a time, oldest first, each as a note job on whatever version is
 // newest by then. An entry's id is the id the note is saved under in project.json.notes, so the commit
 // that publishes the note is also the proof it ran: an entry leaves the queue only once its id is there
-// (a note that changed nothing is saved too). The queue runs on by itself only after a saved note. Stop, a failure and a restart hold it until
-// Resume, so nothing the creator stopped to rethink applies behind their back.
+// (a note that changed nothing is saved too). The queue runs on by itself only after a saved note. Stop,
+// a failure and a restart hold it until Resume, so nothing the creator stopped to rethink applies behind
+// their back.
 // A note shows in one place: a waiting row, or from the moment it starts, a "you" message in the chat.
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -62,6 +63,8 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
   const lane = <T>(slug: string, fn: () => Promise<T>): Promise<T> => serialized(`queue:${slug}`, fn)
   /** Jobs the creator pressed Stop on. A quit cancels jobs too, but its note must come back. */
   const stopped = new Set<string>()
+  let quitting = false
+  const staging = (slug: string): string => noteStagingDir(projectDir(slug))
 
   async function change(slug: string, fn: (s: AppState) => void): Promise<AppState> {
     const s = await updateAppState(slug, fn, { durable: true })
@@ -72,9 +75,14 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
   /** Starts the oldest entry when nothing runs on the reel and the queue is not held. Returns its job id. */
   function pump(slug: string): Promise<string | null> {
     return lane(slug, async () => {
-      if (jobs.forSlug(slug)) return null
+      if (quitting || jobs.forSlug(slug)) return null
       const st = await readAppState(slug)
       if (!st.queue?.length || st.queueHeld) return null
+      // still marked started while nothing runs: a run that died before startup recovery cleared it
+      if (st.queue[0].attempt) {
+        await change(slug, backToWaiting)
+        return null
+      }
       const head = await committed(slug)
       if (!head) {
         await change(slug, (s) => void (s.queueHeld = true))
@@ -92,8 +100,21 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           s.chat.push({ ...stamp({ from: 'you', text: next.text, ...(next.attachments.length ? { attachments: next.attachments } : {}) }), id: next.id })
         }
       }).catch(async (e) => {
-        deps.log(`[queue] ${slug}: could not start the next note: ${toUserError(e).code}`)
-        await change(slug, backToWaiting)
+        const err = toUserError(e)
+        if (err.code === 'BUSY') {
+          // a manual edit or another job took the video first: this note never started, and goes first
+          // again once the video is free
+          await change(slug, (s) => {
+            if (s.queue?.[0]) delete s.queue[0].attempt
+          })
+          void jobs.whenFree(slug).then(() => pump(slug))
+          return null
+        }
+        deps.log(`[queue] ${slug}: could not start the next note: ${err.code}`)
+        await change(slug, (s) => {
+          backToWaiting(s)
+          s.chat.push(stamp({ from: 'editor', text: err.userMessage }))
+        })
         return null
       })
     })
@@ -136,7 +157,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           attached = stillWaiting(s, id).attachments
           s.queue = (s.queue ?? []).filter((q) => q.id !== id)
         })
-        await dropStaged(noteStagingDir(slug), attached, referenced(after))
+        await dropStaged(staging(slug), attached, referenced(after))
       })
     },
 
@@ -152,11 +173,38 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
       ).then(() => undefined)
     },
 
-    /** Stop on the Reel screen: the note running now is dropped and the ones behind it are held. */
-    stop(jobId: string): void {
-      if (!jobs.get(jobId)) return
-      stopped.add(jobId)
-      jobs.cancel(jobId)
+    /** Stop on the Reel screen: the note running now is dropped and the ones behind it are held. When
+     * that job has already ended (the screen was behind), the notes waiting are held all the same. */
+    async stop(jobId: string, slug?: string): Promise<void> {
+      if (jobs.get(jobId)) {
+        stopped.add(jobId)
+        jobs.cancel(jobId)
+      } else if (slug) {
+        await lane(slug, () =>
+          change(slug, (s) => {
+            if (s.queue?.length) s.queueHeld = true
+          })
+        )
+      }
+    },
+
+    /** The app is quitting: no note starts from now on. */
+    quit(): void {
+      quitting = true
+    },
+
+    /** Deletes a video inside its queue lane, after its job (if any) has ended, so no queue write lands in
+     * the folder while it goes. */
+    remove(slug: string, removeFolders: () => Promise<void>): Promise<void> {
+      return lane(slug, async () => {
+        const running = jobs.forSlug(slug)
+        if (running) {
+          stopped.add(running.id)
+          jobs.cancel(running.id)
+          await running.done
+        }
+        await removeFolders()
+      })
     },
 
     /** Runs the waiting notes again, from the first, after Stop, a failure or a restart. */
@@ -171,7 +219,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           s.queue = (s.queue ?? []).filter((q) => q.attempt)
           s.queueHeld = false
         })
-        await dropStaged(noteStagingDir(slug), before.filter((q) => !q.attempt).flatMap((q) => q.attachments), referenced(after))
+        await dropStaged(staging(slug), before.filter((q) => !q.attempt).flatMap((q) => q.attachments), referenced(after))
       })
     },
 
@@ -211,18 +259,23 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
 
     /** At startup, after recoverInterrupted: an entry whose note project.json already has is done (the
      * app stopped between saving it and taking it off the queue); every other entry waits for Resume.
-     * Staged files no entry or message needs are deleted. */
+     * Staged files no entry or message needs are deleted. A video that can't be settled now is skipped;
+     * a note it still marks started holds its queue when it would run (pump). */
     async recover(): Promise<void> {
       for (const p of await listProjects()) {
-        const st = await readAppState(p.slug)
-        if (st.queue?.length) {
-          const head = await committed(p.slug)
-          await updateAppState(p.slug, (s) => {
-            s.queue = (s.queue ?? []).filter((q) => !head?.ids.has(q.id))
-            backToWaiting(s)
-          }, { durable: true })
+        try {
+          const st = await readAppState(p.slug)
+          if (st.queue?.length) {
+            const head = await committed(p.slug)
+            await updateAppState(p.slug, (s) => {
+              s.queue = (s.queue ?? []).filter((q) => !head?.ids.has(q.id))
+              backToWaiting(s)
+            }, { durable: true })
+          }
+          await pruneStaging(staging(p.slug), referenced(await readAppState(p.slug)))
+        } catch (e) {
+          deps.log(`[queue] ${p.slug}: could not settle at startup: ${String(e)}`)
         }
-        await pruneStaging(noteStagingDir(p.slug), referenced(await readAppState(p.slug)))
       }
     }
   }

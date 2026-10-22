@@ -3,7 +3,7 @@
 // at a gate until the test lets it go on, and every check waits for the queue to come to rest, so no
 // result depends on how fast this computer's disk or engine is.
 import { describe, expect, it } from 'vitest'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
@@ -11,7 +11,7 @@ import { createJobManager, WAITING_FOR_RENDER } from '../src/main/jobs'
 import { createMockAI } from '../src/main/ai-mock'
 import { BACK_IN_QUEUE, createNoteQueue, STOPPED } from '../src/main/note-queue'
 import { withRenderSlot } from '../src/main/render-slot'
-import { engineEnv, reelStudioRoot } from '../src/main/paths'
+import { engineEnv, noteStagingDir, reelStudioRoot, setRootOverride } from '../src/main/paths'
 import { projectDir, readAppState, readProject, recoverInterrupted, updateAppState } from '../src/main/store'
 import type { JobEvent, QueuedNote } from '../src/shared/api'
 import { FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
@@ -128,6 +128,10 @@ async function reel(slug: string): Promise<string> {
   return slug
 }
 
+const until = async (ok: () => boolean): Promise<void> => {
+  for (let i = 0; i < 20_000 && !ok(); i++) await new Promise((r) => setTimeout(r, 1))
+  if (!ok()) throw new Error('it never happened')
+}
 const replies = async (slug: string): Promise<string[]> => (await readAppState(slug)).chat.filter((m) => m.from === 'editor').map((m) => m.text)
 const yours = async (slug: string): Promise<string[]> => (await readAppState(slug)).chat.filter((m) => m.from === 'you').map((m) => m.text)
 const waitingTexts = async (slug: string): Promise<string[]> => ((await readAppState(slug)).queue ?? []).map((q) => q.text)
@@ -303,4 +307,95 @@ describe('note queue', () => {
     expect((await readProject(one)).version).toBe(2)
     expect((await readProject(two)).version).toBe(2)
   }, 60000)
+
+  it('a note sent while a manual edit saves runs when the edit is done, without Resume', async () => {
+    setupPaths()
+    const slug = await reel('busy')
+    const a = app()
+    let finishEdit!: () => void
+    const editing = a.jobs.hold(slug, () => new Promise<void>((r) => (finishEdit = r)))
+    await a.send(slug, 'first')
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    finishEdit()
+    await editing
+    await until(() => a.waitingAt.thinking.has(slug))
+    expect((await readAppState(slug)).queueHeld).toBeFalsy()
+  }, 60000)
+
+  it('a note sent to a video kept closed by an engine that would not stop says why, and waits', async () => {
+    setupPaths()
+    const slug = await reel('closed')
+    const a = app()
+    a.jobs.keepClosed(slug)
+    await a.send(slug, 'first')
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await replies(slug)).at(-1)).toMatch(/Restart your computer/)
+    expect(await waitingTexts(slug)).toEqual(['first'])
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+  }, 60000)
+
+  it('a note still marked started by a run that crashed never starts again without Resume', async () => {
+    setupPaths()
+    const slug = await reel('stale')
+    await updateAppState(slug, (s) => void (s.queue = [entry('q1', 'first', true)]))
+    const a = app()
+    await a.send(slug, 'second')
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect(await waitingTexts(slug)).toEqual(['first', 'second'])
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+  }, 60000)
+
+  it('Stop pressed after its note already finished (the screen was behind) still holds the notes waiting', async () => {
+    setupPaths()
+    const slug = await reel('stop-late-screen')
+    const a = app()
+    const { jobId } = await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.send(slug, 'third')
+    await a.think(slug)
+    expect(await waitingTexts(slug)).toEqual(['second', 'third'])
+    await a.queue.stop(jobId!, slug)
+    await a.think(slug)
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect(await waitingTexts(slug)).toEqual(['third'])
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+  }, 60000)
+
+  it('while Reel Studio quits, a note that finishes does not start the next one', async () => {
+    setupPaths()
+    const slug = await reel('quitting')
+    const a = app()
+    await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    a.queue.quit()
+    await a.think(slug)
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect(await waitingTexts(slug)).toEqual(['second'])
+  }, 60000)
+
+  it('startup holds every video with waiting notes, even when another video cannot be read', async () => {
+    setupPaths()
+    const [bad, good] = [await reel('aaa-unreadable'), await reel('zzz-waiting')]
+    writeFileSync(join(projectDir(bad), 'app.json'), '{"chat": [')
+    await updateAppState(good, (s) => void (s.queue = [entry('q1', 'first', true)]))
+    await app().queue.recover()
+    const st = await readAppState(good)
+    expect(st.queueHeld).toBe(true)
+    expect(st.queue?.[0].attempt).toBeUndefined()
+  }, 60000)
+
+  it('a file staged for a video in one storage folder survives startup in another folder with a video of the same name', async () => {
+    setupPaths()
+    const slug = await reel('bread')
+    const staged = join(noteStagingDir(projectDir(slug)), 'work', 'assets', 'attach-1a2b3c4d-logo.png')
+    mkdirSync(join(staged, '..'), { recursive: true })
+    writeFileSync(staged, 'png')
+    const asset = { asset: 'work/assets/attach-1a2b3c4d-logo.png', name: 'logo.png', kind: 'image' as const, bytes: 3 }
+    await updateAppState(slug, (s) => void (s.queue = [{ ...entry('q1', 'first'), attachments: [asset] }]))
+    setRootOverride(join(reelStudioRoot(), '..', 'Other root', 'Reel Studio'))
+    await reel('bread')
+    await app().queue.recover()
+    expect(existsSync(staged)).toBe(true)
+  }, 60000)
 })
+

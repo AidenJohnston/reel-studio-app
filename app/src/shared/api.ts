@@ -383,7 +383,8 @@ export interface ReelApi {
     remove(slug: string, asset: string): Promise<void>
   }
   jobs: {
-    cancel(jobId: string): Promise<void>
+    /** `slug`: the video it runs on. If that job has already ended, its video's waiting notes are held. */
+    cancel(jobId: string, slug?: string): Promise<void>
     onEvent(cb: (e: JobEvent) => void): () => void
   }
   /** Notes waiting their turn on one reel (main/note-queue.ts). Only a note still waiting can change. */

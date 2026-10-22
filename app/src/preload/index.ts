@@ -64,7 +64,7 @@ const api: ReelApi = {
     remove: (slug, asset) => call('notes:removeAttachment', slug, asset)
   },
   jobs: {
-    cancel: (id) => call('jobs:cancel', id),
+    cancel: (id, slug) => call('jobs:cancel', id, slug),
     onEvent: (cb) => on<JobEvent>('job:event', cb)
   },
   queue: {
