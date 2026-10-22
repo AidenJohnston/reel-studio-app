@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, executeTool, loadProject, newToolState, runAgent, saveProject, StyleStore, ToolContext } from '../src';
+import { discardAssetCandidates } from '../src/tools';
 import { FakeHost, ScriptedModel, call, makeProject, tinyPng, tmpDir } from './helpers';
 
 /** fetch-image the way the engine does it: the file, plus its search credit in credits.json. */
@@ -18,6 +19,12 @@ class AssetHost extends FakeHost {
       }));
     }
     return result;
+  }
+  /** the animation renderer's sidecar (templates/animations/render.mjs), which a re-time reads back */
+  override async renderAnimation(template: string, params: Record<string, unknown>, outPath: string) {
+    await super.renderAnimation(template, params, outPath);
+    await fs.writeFile(outPath.replace(/\.mov$/, '.anim.json'), JSON.stringify({ kind: 'reelstudio-animation', version: 1, template, params, layout: 'top' }));
+    return outPath;
   }
 }
 const roots: string[] = [];
@@ -71,16 +78,76 @@ describe('frozen image assets', () => {
     expect((await executeTool(ctx, 'add_broll', { ...place(next.assetId), anchor: { from: 'w48', to: 'w52' } })).isError).toBe(false);
   });
 
-  it('fails if identical bytes are copied twice or their new intent is lost', async () => {
+  it('fails if the same bytes picked as a photo and as a logo are stored twice, or the second intent is lost', async () => {
     const { ctx, dir, root, local } = await setup();
     const a = await commit(ctx, (await candidates(ctx, local))[0].id);
     await fs.writeFile(path.join(root, 'Library/Images/loaf.png'), tinyPng());
-    const b = await commit(ctx, (await candidates(ctx, 'Library/Images/loaf.png'))[0].id);
+    const asLogo = await executeTool(ctx, 'resolve_asset', { kind: 'logo', intent: 'Library/Images/loaf.png' });
+    const b = JSON.parse((await executeTool(ctx, 'resolve_asset', { kind: 'logo', intent: 'loaf', phase: 'commit',
+      candidateId: JSON.parse(asLogo.content).candidates[0].id })).content).asset;
     expect(b.committedPath).toBe(a.committedPath);
-    expect(await fs.readFile(path.join(dir, a.committedPath))).toEqual(tinyPng());
-    expect((await fs.readdir(path.dirname(path.join(dir, a.committedPath))))).toHaveLength(1);
+    expect(await fs.readdir(path.join(dir, 'work/assets/frozen'))).toEqual(['image']);
     const records = (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     expect(records.map((r) => r.provenance.intent)).toEqual([local, 'Library/Images/loaf.png']);
+  });
+
+  it('fails if a ledger record can point a commit at a file outside the frozen folder', async () => {
+    const { ctx, dir, local } = await setup();
+    const transcript = await fs.readFile(path.join(dir, 'work/transcript.json'));
+    const [candidate] = await candidates(ctx, local);
+    await fs.mkdir(path.join(dir, 'work/assets'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'work/assets/manifest.jsonl'), `${JSON.stringify({ assetId: 'asset_x', kind: 'image', sha256: candidate.sha256,
+      committedPath: 'work/transcript.json', provenance: { intent: 'x', retrievedAt: '2026-01-01T00:00:00Z', provider: 'library' } })}\n`);
+    const asset = await commit(ctx, candidate.id);
+    expect(asset.committedPath).toMatch(/^work\/assets\/frozen\/image\//);
+    expect(await fs.readFile(path.join(dir, 'work/transcript.json'))).toEqual(transcript);
+  });
+
+  it('fails if logo-pop takes an uncommitted picture, loses its picture after the run, or drops its credit', async () => {
+    const { ctx, dir, host, local } = await setup();
+    host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];
+    const asset = await commit(ctx, (await candidates(ctx, 'bread photo'))[0].id);
+    const pop = (image: string) => ({ ...place(''), asset: null, animation: { template: 'logo-pop', params: { image, text: 'Bread' } } });
+    expect((await executeTool(ctx, 'add_broll', pop(local))).content).toMatch(/resolve_asset/);
+    const placed = await executeTool(ctx, 'add_broll', pop(asset.assetId));
+    expect(placed.isError, placed.content).toBe(false);
+    await discardAssetCandidates(ctx);
+    const retimed = await executeTool(ctx, 'update_broll', { id: 'b1', anchor: { from: 'w33', to: 'w34' }, treatment: null, asset: null, params: null });
+    expect(retimed.isError, retimed.content).toBe(false);
+    const post = await executeTool(ctx, 'write_post', { caption: 'Bread takes patience', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: ['bread'] });
+    expect(post.isError, post.content).toBe(false);
+    expect((await loadProject(dir)).post.caption).toContain('Bread by Baker (CC BY 4.0)');
+    // a logo-pop made before this change recorded a Library path; re-timing it still works
+    const side = path.join(dir, String((await loadProject(dir)).broll[0].asset).replace(/\.mov$/, '.anim.json'));
+    const sc = JSON.parse(await fs.readFile(side, 'utf8'));
+    await fs.writeFile(side, JSON.stringify({ ...sc, params: { ...sc.params, image: path.join(path.dirname(dir), '..', local) } }));
+    const legacy = await executeTool(ctx, 'update_broll', { id: 'b1', anchor: { from: 'w29', to: 'w30' }, treatment: null, asset: null, params: null });
+    expect(legacy.isError, legacy.content).toBe(false);
+  });
+
+  it('fails if a query that names a folder or starts with a slash never reaches search, or a missing backslash path is searched', async () => {
+    const { ctx, host, local } = await setup();
+    await commit(ctx, (await candidates(ctx, local))[0].id);
+    const searched = () => host.calls.filter((c) => c.command === 'search-images').map((c) => c.args[c.args.indexOf('--query') + 1]);
+    await candidates(ctx, 'frozen');
+    await candidates(ctx, '/r/aww photo');
+    expect(searched()).toEqual(['frozen', '/r/aww photo']);
+    const missing = await executeTool(ctx, 'resolve_asset', { kind: 'image', intent: 'Library\\Images\\missing.png' });
+    expect(missing.content).toMatch(/missing/);
+    expect(searched()).toHaveLength(2);
+  });
+
+  it('fails if a trademarked logo is exported without its trademark notice', async () => {
+    const { ctx, dir } = await setup();
+    await fs.mkdir(path.join(dir, 'work/assets'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'work/assets/brand.png'), tinyPng([0, 0, 200]));
+    await fs.writeFile(path.join(dir, 'work/assets/credits.json'), JSON.stringify({ 'brand.png': { title: 'Brand', provider: 'simpleicons',
+      license: 'CC0 1.0', attributionRequired: false, attribution: 'Brand via Simple Icons (CC0)', trademark: true, url: 'https://example.com/brand.svg' } }));
+    const [candidate] = await candidates(ctx, 'work/assets/brand.png');
+    await commit(ctx, candidate.id);
+    const r = await executeTool(ctx, 'export_asset_credits', { format: 'json', output: null });
+    const [credit] = JSON.parse(await fs.readFile(path.join(dir, JSON.parse(r.content).path), 'utf8'));
+    expect(credit.notice).toMatch(/trademark/);
   });
 
   it('fails if an uncommitted image can be placed in a reel', async () => {
@@ -153,9 +220,10 @@ describe('frozen image assets', () => {
     expect(await candidates(ctx, JSON.parse(fetched.content).asset, 'user-owned')).toEqual([]);
   });
 
-  it('fails if a failed note keeps the pictures it committed', async () => {
+  it.each([['one record', true], ['an empty ledger', false]])('fails if a failed note keeps the pictures it committed (%s)', async (_n, withRecord) => {
     const { ctx, dir, host, local } = await setup();
-    await commit(ctx, (await candidates(ctx, local))[0].id);
+    if (withRecord) await commit(ctx, (await candidates(ctx, local))[0].id);
+    else { await fs.mkdir(path.join(dir, 'work/assets'), { recursive: true }); await fs.writeFile(path.join(dir, 'work/assets/manifest.jsonl'), ''); }
     const ledger = await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8');
     host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];
     const model = new ScriptedModel([
@@ -169,6 +237,27 @@ describe('frozen image assets', () => {
     const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
     await expect(ai.applyNote(dir, 'show the bread', () => undefined)).rejects.toThrow();
     expect(await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).toBe(ledger);
+  });
+
+  it('fails if a note runs when it cannot list work/assets, and its rollback then deletes frozen pictures', async () => {
+    const { ctx, dir, host, local } = await setup();
+    const asset = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const assets = path.join(dir, 'work/assets');
+    const model = new ScriptedModel([
+      async () => {
+        await fs.chmod(assets, 0o755);             // readable again by the time the note fails
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] };
+      },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    host.failRender = true;
+    await fs.chmod(assets, 0o300);
+    try {
+      const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+      await expect(ai.applyNote(dir, 'put the price on screen', () => undefined)).rejects.toThrow();
+    } finally { await fs.chmod(assets, 0o755); }
+    expect(await fs.readFile(path.join(dir, asset.committedPath))).toEqual(tinyPng());
+    expect((await fs.readFile(path.join(assets, 'manifest.jsonl'), 'utf8')).trim()).not.toBe('');
   });
 
   it('fails if a frozen picture deleted from disk can never be committed again', async () => {

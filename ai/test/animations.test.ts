@@ -7,7 +7,7 @@ import { ANIMATION_TEMPLATES, ENGINE_FED, alignWordTimes, itemTimes } from '../s
 import { executeTool, newToolState, toolByName, ToolContext } from '../src/tools';
 import { loadProject } from '../src/project';
 import { StyleStore } from '../src/style';
-import { FakeHost, makeProject, tinyPng } from './helpers';
+import { FakeHost, commitImage, makeProject, tinyPng } from './helpers';
 
 const templatesDir = path.resolve(__dirname, '..', '..', 'templates', 'animations');
 
@@ -99,10 +99,10 @@ describe('make_animation', () => {
     expect(p.broll[0].treatment).toBe('animation');               // never pushed through a card
   });
 
-  it('logo-pop: resolves the image path; refuses a missing one', async () => {
+  it('logo-pop: resolves a committed image path; refuses a missing one', async () => {
     const { ctx, host, root } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'acme.png'), tinyPng());
-    const ok = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: 'acme.png', text: 'Acme' } });
+    const ok = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: await commitImage(ctx, 'acme.png'), text: 'Acme' } });
     expect(ok.isError).toBe(false);
     expect(path.isAbsolute(host.animations[0].params.image)).toBe(true);
     const missing = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: 'nope.png' } });

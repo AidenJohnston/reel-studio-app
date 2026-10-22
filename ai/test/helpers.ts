@@ -146,7 +146,11 @@ export class FakeHost implements EngineHost {
         const name = args.includes('--name') ? args[args.indexOf('--name') + 1] : 'image';
         await fsp.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
         await fsp.writeFile(path.join(dir, 'work', 'assets', `${name}.png`), tinyPng());
-        return { asset: `work/assets/${name}.png`, path: path.join(dir, 'work', 'assets', `${name}.png`) };
+        // like the engine: a still of the download, named after it
+        const thumb = path.join(dir, 'work', 'thumbs', `${name}.jpg`);
+        await fsp.mkdir(path.dirname(thumb), { recursive: true });
+        await fsp.writeFile(thumb, tinyPng());
+        return { asset: `work/assets/${name}.png`, path: path.join(dir, 'work', 'assets', `${name}.png`), thumb };
       }
       case 'analyze-music': {
         if (!this.engineAssets) throw { code: 'BAD_ARGS', userMessage: 'unknown command' };

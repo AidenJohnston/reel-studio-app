@@ -483,7 +483,15 @@ export async function captionWithCredits(projectDir: string, p: Project, caption
   let book: Record<string, any> = {};
   try { book = JSON.parse(await fsp.readFile(path.join(projectDir, 'work', 'assets', 'credits.json'), 'utf8')) ?? {}; } catch { /* no legacy credits */ }
   const used = new Set<string>();
-  for (const b of p.broll) assetRefs(b, used);
+  for (const b of p.broll) {
+    assetRefs(b, used);
+    // an animation's own pictures (logo-pop image) are in its sidecar, as absolute paths
+    if (!/\.(mov|webm)$/i.test(String(b.asset ?? ''))) continue;
+    const side = await fsp.readFile(path.join(projectDir, String(b.asset).replace(/\.(mov|webm)$/i, '.anim.json')), 'utf8').then(JSON.parse, () => null);
+    for (const v of Object.values(side?.params ?? {})) {
+      if (typeof v === 'string' && v.split(path.sep).join('/').includes('/work/assets/')) used.add(path.basename(v));
+    }
+  }
   const ledger = await readAssets({ projectDir, root: projectDir }).catch(() => []);
   const credits = [...used].map((n) => book[n]).concat(ledger.filter((a) => used.has(path.basename(a.committedPath))));
   const lines = [...new Set(credits.filter((c) => c && c.attributionRequired && c.attribution)
@@ -568,7 +576,7 @@ async function placementAsset(ctx: ToolContext, asset: string): Promise<string> 
 }
 interface ImageCredit {
   title?: string; provider?: string; source?: string; url?: string; creator?: string; license?: string; licenseUrl?: string;
-  attributionRequired?: boolean; attribution?: string; copyrighted?: boolean;
+  attributionRequired?: boolean; attribution?: string; copyrighted?: boolean; trademark?: boolean;
 }
 /** Where a candidate's bytes came from decides its rights; leftover fields never do. */
 interface Origin {
@@ -576,7 +584,8 @@ interface Origin {
   rights: AssetCandidate['rightsConfidence'];
   credit: ImageCredit;
   sourceUrl?: string;
-  owned: boolean;
+  /** the picture and the engine's still of it, when resolve_asset downloaded or captured them */
+  made: string[];
 }
 /** The engine's credits.json entry for a saved picture (fetch-image, register-capture), or {}. */
 async function imageCredit(ctx: ToolContext, ref: string): Promise<ImageCredit> {
@@ -591,19 +600,19 @@ async function imageCredit(ctx: ToolContext, ref: string): Promise<ImageCredit> 
   const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
   return { title: str(entry.title), provider: str(entry.provider), source: str(entry.source), url: str(entry.url), creator: str(entry.creator),
     license: str(entry.license), licenseUrl: str(entry.licenseUrl), attribution: str(entry.attribution),
-    attributionRequired: entry.attributionRequired === true, copyrighted: entry.copyrighted === true };
+    attributionRequired: entry.attributionRequired === true, copyrighted: entry.copyrighted === true, trademark: entry.trademark === true };
 }
-async function originOf(ctx: ToolContext, ref: string, owned = false): Promise<Origin> {
-  if (ref.startsWith('Library/') || await readAttachment(ctx.projectDir, ref)) return { source: 'library', rights: 'user-owned', credit: { provider: 'library' }, owned };
+async function originOf(ctx: ToolContext, ref: string, made: string[] = []): Promise<Origin> {
+  if (ref.startsWith('Library/') || await readAttachment(ctx.projectDir, ref)) return { source: 'library', rights: 'user-owned', credit: { provider: 'library' }, made };
   const known = (await readAssets(assetStore(ctx))).find((a) => a.committedPath === ref);
   if (known) {
-    return { source: known.source, rights: known.rightsConfidence, sourceUrl: known.sourceUrl, owned, credit: {
+    return { source: known.source, rights: known.rightsConfidence, sourceUrl: known.sourceUrl, made, credit: {
       title: known.title, provider: known.provider, source: known.landingUrl, creator: known.creator, license: known.license,
-      licenseUrl: known.licenseUrl, attribution: known.attribution, attributionRequired: known.attributionRequired } };
+      licenseUrl: known.licenseUrl, attribution: known.attribution, attributionRequired: known.attributionRequired, trademark: known.trademark } };
   }
   const credit = await imageCredit(ctx, ref);
-  if (credit.provider === 'capture') return { source: 'capture', rights: 'commentary', credit, sourceUrl: credit.url, owned };
-  return { source: 'open', rights: credit.license && !credit.copyrighted ? 'verified-metadata' : 'commentary', credit, sourceUrl: credit.url, owned };
+  if (credit.provider === 'capture') return { source: 'capture', rights: 'commentary', credit, sourceUrl: credit.url, made };
+  return { source: 'open', rights: credit.license && !credit.copyrighted ? 'verified-metadata' : 'commentary', credit, sourceUrl: credit.url, made };
 }
 function policyAllows(policy: string, o: Pick<Origin, 'source' | 'rights'>): boolean {
   if (policy === 'user-owned') return o.rights === 'user-owned';
@@ -630,7 +639,7 @@ type Offered = { candidate: AssetCandidate; images?: ImagePart[] } | null;
  * candidate of this request. A refused or failed download is removed at once. */
 async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string, requestId: string, policy: string, ref: string, o: Origin): Promise<Offered> {
   const store = assetStore(ctx);
-  const made = o.owned ? [ref] : [];
+  const made = [...o.made];
   try {
     if (!policyAllows(policy, o)) { await removeFiles(store, made); return null; }
     const { sha256, mime } = await hashImage(store, ref);
@@ -645,10 +654,11 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
       ...(c.creator ? { creator: c.creator } : {}), ...(c.license ? { license: c.license } : {}),
       ...(c.licenseUrl ? { licenseUrl: c.licenseUrl } : {}),
       attributionRequired: c.attributionRequired ?? false, ...(c.attribution ? { attribution: c.attribution } : {}),
+      ...(c.trademark ? { trademark: true } : {}),
     };
     const images = await previewCandidate(ctx, candidate);
     ctx.signal?.throwIfAborted();
-    (ctx.state.assetCandidates ??= new Map()).set(candidate.id, { candidate, requestId, intent, retrievedAt: new Date().toISOString(), owned: o.owned });
+    (ctx.state.assetCandidates ??= new Map()).set(candidate.id, { candidate, requestId, intent, retrievedAt: new Date().toISOString(), made: o.made });
     return { candidate, images };
   } catch (e) {
     await removeFiles(store, made);
@@ -658,9 +668,16 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
 async function resolveStill(ctx: ToolContext, kind: typeof STILL_KINDS[number], intent: string, policy: string): Promise<ToolOutput> {
   if (kind === 'website_screenshot' && policy !== 'commentary') throw new ToolInputError('Website screenshots require licensePolicy commentary. The page belongs to its owner.');
   const requestId = randomUUID();
-  const isUrl = /^https?:\/\//i.test(intent.trim());
-  const local = isUrl ? null : resolveAsset(ctx, intent);
-  if (!local && (/^(Library|work|media)\//.test(intent) || path.isAbsolute(intent))) throw new ToolInputError('That file is missing. Choose one from list_library or list_assets.');
+  const text = intent.trim().replace(/\\/g, '/');
+  const isUrl = /^https?:\/\//i.test(text);
+  const named = /^(Library|work|media)\//.test(text);
+  let local: { ref: string; abs: string } | null = null;
+  if (!isUrl) {
+    // an absolute path outside the project is refused; a query that only starts with "/" is searched
+    try { local = resolveAsset(ctx, text); } catch (e) { if (named || fs.existsSync(text)) throw e; }
+  }
+  if (local && !fs.statSync(local.abs).isFile()) local = null;
+  if (!local && named) throw new ToolInputError('That file is missing. Choose one from list_library or list_assets.');
   const offer = (ref: string, o: Origin, as = intent) => offerCandidate(ctx, kind, as, requestId, policy, ref, o);
   let offered: Offered[];
   const misses: string[] = [];
@@ -677,11 +694,11 @@ async function resolveStill(ctx: ToolContext, kind: typeof STILL_KINDS[number], 
     offered = [await offer(local.ref, o, local.ref)];
   } else if (kind === 'website_screenshot') {
     const got = await captureSite(ctx, intent, 'phone');
-    offered = [await offer(got.asset, { source: 'capture', rights: 'commentary', sourceUrl: got.url, owned: true, credit: {
+    offered = [await offer(got.asset, { source: 'capture', rights: 'commentary', sourceUrl: got.url, made: downloaded(got), credit: {
       title: `Screenshot of ${got.site}`, provider: 'capture', source: got.url, creator: got.site, attribution: `Screenshot of ${got.site}` } })];
   } else if (isUrl) {
-    const got = await fetchImageWithThumb(ctx, intent.trim());
-    offered = [await offer(got.asset, await originOf(ctx, got.asset, true))];
+    const got = await fetchImageWithThumb(ctx, text);
+    offered = [await offer(got.asset, await originOf(ctx, got.asset, downloaded(got)))];
   } else {
     const asked = intent.trim().toLowerCase();
     const same = [...new Set((await readAssets(assetStore(ctx))).filter((a) => a.kind === kind && a.provenance.intent.trim().toLowerCase() === asked).map((a) => a.committedPath))];
@@ -695,7 +712,7 @@ async function resolveStill(ctx: ToolContext, kind: typeof STILL_KINDS[number], 
           return hit ? offer(hit.ref, await originOf(ctx, hit.ref)) : null;
         }
         const got = await fetchImageWithThumb(ctx, r.url);
-        return offer(got.asset, await originOf(ctx, got.asset, true));
+        return offer(got.asset, await originOf(ctx, got.asset, downloaded(got)));
       })));
     }
   }
@@ -707,12 +724,14 @@ async function resolveStill(ctx: ToolContext, kind: typeof STILL_KINDS[number], 
       : asData(misses.join('; ') || 'No source with suitable rights was found. Try another query or choose a Library path.') }, images: images.length ? images : undefined };
 }
 
+const downloaded = (got: { asset: string; thumb?: string }) => [got.asset, ...(got.thumb ? [got.thumb] : [])];
+
 /** Candidates are valid for one request: at its end every uncommitted one loses its still, and a
  * picture resolve_asset downloaded or captured for it is deleted too. */
 export async function discardAssetCandidates(ctx: ToolContext): Promise<void> {
   const pending = [...(ctx.state.assetCandidates?.values() ?? [])];
   ctx.state.assetCandidates?.clear();
-  await removeFiles(assetStore(ctx), pending.flatMap((p) => [p.candidate.previewPath, ...(p.owned ? [p.candidate.localPath] : [])]));
+  await removeFiles(assetStore(ctx), pending.flatMap((p) => [p.candidate.previewPath, ...p.made]));
 }
 
 const SONG_HELP = 'songs[] is what each track SOUNDS like (measured by listening): energy, mood, bpm. Name the video\'s tone, then pick only '
@@ -781,15 +800,16 @@ export const ANIMATION_PLACEMENT = 'Animations are not cards: they always play a
 const DEFAULT_TOP_REGION = { x: 38, y: 180, w: 1004, h: 560 };
 
 async function makeAnimation(ctx: ToolContext, template: string, raw: Record<string, unknown>, anchor?: WordAnchor | null,
-  opts: { fullScreen?: boolean; topOnly?: boolean } = {}): Promise<{ asset: string; params: Record<string, unknown>; timing: string; layout: string; readable: { heroPx: number | null; note?: string } }> {
+  opts: { fullScreen?: boolean; topOnly?: boolean; replay?: boolean } = {}): Promise<{ asset: string; params: Record<string, unknown>; timing: string; layout: string; readable: { heroPx: number | null; note?: string } }> {
   const [params, problems] = cleanParams(template, raw);
   if (problems.length) throw new ToolInputError(problems.join('; '));
   const spec = templateSpec(template)!;
-  for (const [k, ps] of Object.entries(spec.params)) {     // file params (logo-pop image): a real path
+  for (const [k, ps] of Object.entries(spec.params)) {     // file params (logo-pop image): a committed picture
     if (ps.format !== 'file' || typeof params[k] !== 'string' || String(params[k]).startsWith('data:')) continue;
-    const r = resolveAsset(ctx, String(params[k]));
-    if (!r) throw new ToolInputError(`${template}: ${k} file not found: ${params[k]} (use a path from list_library or fetch_image)`);
-    params[k] = r.abs;
+    // a re-time replays the path its sidecar recorded, which may predate committed pictures
+    const ref = opts.replay ? resolveAsset(ctx, String(params[k]))?.ref : await placementAsset(ctx, String(params[k]));
+    if (!ref) throw new ToolInputError(`${template}: ${k} file not found: ${params[k]} (use an assetId from resolve_asset)`);
+    params[k] = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), ref).abs;
   }
   if (opts.fullScreen && params.layout === undefined) params.layout = 'full';
   if (opts.topOnly) params.layout = 'top';
@@ -1121,7 +1141,7 @@ const tools: ToolDef[] = [
         if (wantFull === (anim.layout === 'full') && !args.anchor) {
           return { content: { ok: true, unchanged: true, layout: anim.layout, placement: ANIMATION_PLACEMENT } };
         }
-        const made = await makeAnimation(ctx, anim.template, anim.params, anchor, wantFull ? { fullScreen: true } : { topOnly: true });
+        const made = await makeAnimation(ctx, anim.template, anim.params, anchor, { replay: true, ...(wantFull ? { fullScreen: true } : { topOnly: true }) });
         let says = '';
         await mutate(ctx, 'broll', (pp) => {
           const b = pp.broll.find((x) => x.id === args.id)!;
@@ -1166,7 +1186,7 @@ const tools: ToolDef[] = [
     name: 'resolve_asset',
     description: 'Get a picture ready to place. intent is a Library or project file, a search_images result url, a picture query, or (for website_screenshot) a web address. Returns candidates, each with a still: LOOK at it, then call again with phase commit and the matching candidateId; add_broll takes the committed assetId. Logos must be official marks.',
     parameters: S.obj({ kind: S.enum(STILL_KINDS), intent: S.str(), phase: S.opt(S.enum(['candidates', 'commit'])),
-      candidateId: S.opt(S.str()), licensePolicy: S.opt(S.enum(['commercial-safe', 'open-only', 'user-owned', 'commentary'])) }),
+      candidateId: S.opt(S.str()), licensePolicy: S.opt(S.enum(['commercial-safe', 'open-only', 'user-owned', 'commentary'], 'commercial-safe (default): the user\'s own files and openly licensed web pictures. commentary also allows screenshots and pictures that are copyrighted or have no licence: only while talking about them, and name them in the finish summary')) }),
     async run(ctx, args) {
       if (args.phase !== 'commit') return resolveStill(ctx, args.kind, args.intent, args.licensePolicy ?? (args.kind === 'website_screenshot' ? 'commentary' : 'commercial-safe'));
       const pending = ctx.state.assetCandidates?.get(args.candidateId);

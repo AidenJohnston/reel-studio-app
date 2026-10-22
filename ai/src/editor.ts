@@ -131,22 +131,23 @@ async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<voi
   state.styleRuleIds = []; state.styleRulesAdded = [];
 }
 
+/** The rollback deletes whatever is not in this list, so only a missing folder counts as empty. */
 async function listAssets(projectDir: string): Promise<Set<string>> {
   const dir = path.join(projectDir, 'work', 'assets');
-  return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
+  return new Set(await fsp.readdir(dir).catch((e) => { if (e?.code === 'ENOENT') return [] as string[]; throw e; }));
 }
 
-const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, () => 0);
+const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, () => null);
 
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
  * it added, the pictures it downloaded, and the asset records it appended. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number, state: ToolState): Promise<void> {
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
   await removeStyleRules(deps, state);
-  for (const f of await listAssets(projectDir)) {
+  for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
-  if (ledgerBefore) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
+  if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post

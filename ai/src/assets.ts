@@ -23,6 +23,7 @@ export interface AssetCandidate {
   creator?: string;
   attributionRequired: boolean;
   attribution?: string;
+  trademark?: boolean;
   rightsConfidence: 'user-owned' | 'verified-metadata' | 'commentary';
   sha256: string;
 }
@@ -42,8 +43,9 @@ export interface PendingAsset {
   requestId: string;
   intent: string;
   retrievedAt: string;
-  /** resolve_asset downloaded or captured candidate.localPath itself, so the request may delete it */
-  owned: boolean;
+  /** files resolve_asset downloaded or captured for this candidate (the picture and the engine's still
+   * of it): deleted once the picture is frozen or the run ends */
+  made: string[];
 }
 export interface AssetStore { projectDir: string; root: string }
 const MAX_BYTES = 40 * 1024 * 1024;
@@ -76,9 +78,11 @@ export async function hashImage(store: AssetStore, ref: string): Promise<{ sha25
   const { ext, sha256 } = await imageBytes(store, ref);
   return { sha256, mime: MIME[ext] };
 }
+/** Commit writes to a record's committedPath, so only the frozen shape is trusted. */
+const FROZEN_PATH = /^work\/assets\/frozen\/(image|logo|icon|website_screenshot)\/([0-9a-f]{64})\.(png|jpg|gif|webp)$/;
 function isRecord(v: any): v is FrozenAsset {
   return !!v && typeof v === 'object' && typeof v.assetId === 'string' && typeof v.committedPath === 'string'
-    && typeof v.sha256 === 'string' && STILL_KINDS.includes(v.kind) && typeof v.provenance?.intent === 'string';
+    && FROZEN_PATH.exec(v.committedPath)?.[2] === v.sha256 && STILL_KINDS.includes(v.kind) && typeof v.provenance?.intent === 'string';
 }
 /** Lines that do not parse are skipped wherever they are: a crash mid-append leaves a torn line,
  * and the next append (which starts on a fresh line) turns it into a middle line. */
@@ -114,7 +118,7 @@ export async function commitAsset(store: AssetStore, pending: PendingAsset): Pro
       ...(candidate.sourceUrl ? { sourceUrl: candidate.sourceUrl } : {}), ...(candidate.landingUrl ? { landingUrl: candidate.landingUrl } : {}) },
   };
   await appendRecord(store, asset);
-  if (pending.owned) await fs.rm(file(store, candidate.localPath, true), { force: true });
+  await removeFiles(store, pending.made);
   return asset;
 }
 export async function removeFiles(store: AssetStore, refs: string[]): Promise<void> {
@@ -133,7 +137,8 @@ export async function exportCredits(store: AssetStore, format: 'json' | 'text', 
   const credits = assets.map((a) => ({ assetId: a.assetId, path: a.committedPath, title: a.title,
     sourceUrl: a.sourceUrl, landingUrl: a.landingUrl, creator: a.creator, license: a.license, licenseUrl: a.licenseUrl,
     attribution: a.attribution, retrievedAt: a.provenance.retrievedAt, sha256: a.sha256,
-    ...(a.rightsConfidence === 'commentary' ? { notice: `The ${a.kind === 'website_screenshot' ? 'page' : 'image'} belongs to its owner. Use only as commentary; do not imply endorsement.` } : {}),
+    ...(a.rightsConfidence === 'commentary' ? { notice: `The ${a.kind === 'website_screenshot' ? 'page' : 'image'} belongs to its owner. Use only as commentary; do not imply endorsement.` }
+      : a.trademark ? { notice: 'A trademark of its owner: show it when talking about the brand; do not imply the brand made or endorses the video.' } : {}),
   }));
   const dest = safeResolve(store.projectDir, store.root, output ?? `work/credits/assets.${format === 'json' ? 'json' : 'txt'}`, 'write').ref;
   if (!dest.startsWith('work/credits/')) throw new Error('Save credits under work/credits/ to keep asset and project files intact.');
