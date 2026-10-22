@@ -777,6 +777,7 @@ const tools: ToolDef[] = [
     }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p) => {
+        if (args.highlight && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
         for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
           if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];

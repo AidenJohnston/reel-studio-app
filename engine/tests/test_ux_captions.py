@@ -41,14 +41,15 @@ def test_box_style_draws_an_opaque_box():
     assert float(f[16]) >= captions.BOX_PAD and float(f[17]) == 0.0
 
 
-def test_highlight_lights_each_spoken_word_in_turn_and_the_line_pops_once():
-    words = mkwords([(0.0, 0.3, "Make"), (0.4, 0.7, "it"), (0.8, 1.2, "pop.")])
+def test_highlight_lights_each_spoken_word_in_turn_and_the_pop_runs_once_across_them():
+    words = mkwords([(0.0, 0.07, "Make"), (0.08, 0.35, "it"), (0.4, 1.2, "pop.")])
     cap = {"style": {"highlight": "#FFD60A", "pop": True}}
     ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
     events = [l.split(",", 9) for l in ass.splitlines() if l.startswith("Dialogue:")]
     # one event per word, each ending where the next starts: the line never blinks between words
-    assert [(e[1], e[2]) for e in events] == [("0:00:00.00", "0:00:00.40"), ("0:00:00.40", "0:00:00.80"),
-                                              ("0:00:00.80", "0:00:01.20")]
+    assert [(e[1], e[2]) for e in events] == [("0:00:00.00", "0:00:00.08"), ("0:00:00.08", "0:00:00.40"),
+                                              ("0:00:00.40", "0:00:01.20")]
     assert [re.findall(r"\{\\1c&H0AD6FF&\}(\w+)", e[9]) for e in events] == [["MAKE"], ["IT"], ["POP"]]
     assert {re.sub(r"\{[^}]*\}", "", e[9]) for e in events} == {"MAKE IT POP"}
-    assert ["\\t(" in e[9] for e in events] == [True, False, False]
+    # the 120 ms grow carries on through the second word's event instead of restarting or stopping
+    assert [re.findall(r"\\t\((-?\d+),(\d+)", e[9]) for e in events] == [[("0", "120")], [("-80", "40")], []]

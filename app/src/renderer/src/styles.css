@@ -379,7 +379,9 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 /* SubtitleSample breaks the lines itself, the engine's way; the browser never wraps or splits a word. */
 .sub-sample > span { display: block; }
 /* captions.POP_IN: from 80% to full size in 120 ms, decelerating */
-.sub-sample.pop { animation: fade .15s ease-out, sub-pop .12s cubic-bezier(.25, .75, .5, 1); }
+@media (prefers-reduced-motion: no-preference) {
+  .sub-sample.pop { animation: fade .15s ease-out, sub-pop .12s cubic-bezier(.25, .75, .5, 1); }
+}
 @keyframes sub-pop { from { scale: .8; } }
 
 /* Instagram stand-in: faint, so you see what it would cover. */

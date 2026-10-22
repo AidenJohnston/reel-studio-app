@@ -60,6 +60,10 @@ const COLORS = [
   { key: 'white', label: 'White', color: '#FFFFFF' },
   { key: 'yellow', label: 'Yellow', color: '#FFD60A' }
 ]
+const HIGHLIGHTS = [
+  { key: 'yellow', label: 'Yellow', color: '#FFD60A' },
+  { key: 'green', label: 'Green', color: '#30D158' }
+]
 function sizeKey(st: CapStyle): string {
   const n = Number(st.size ?? 105)
   return n < 95 ? 'small' : n > 115 ? 'big' : 'medium'
@@ -70,12 +74,36 @@ function positionKey(st: CapStyle): string {
 function colorKey(st: CapStyle): string {
   return String(st.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow'
 }
+function highlightKey(st: CapStyle): string {
+  return String(st.highlight).toUpperCase() === '#30D158' ? 'green' : 'yellow'
+}
 
-function Seg({ value, options, onPick, testid }: { value: string; options: { key: string; label: string }[]; onPick: (k: string) => void; testid: string }) {
+/** A radio group is one Tab stop; the arrow keys move the choice (WAI-ARIA radio group). */
+function arrowPick(e: React.KeyboardEvent<HTMLElement>, keys: string[], value: string | null, onPick: (k: string) => void) {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+  if (!step) return
+  e.preventDefault()
+  const next = keys[(keys.indexOf(value ?? keys[0]) + step + keys.length) % keys.length]
+  onPick(next)
+  e.currentTarget.querySelector<HTMLElement>(`[data-key="${next}"]`)?.focus()
+}
+const tabStop = (key: string, value: string | null, keys: string[]): number => (key === (value ?? keys[0]) ? 0 : -1)
+
+function Seg({ value, options, onPick, testid, label }: { value: string; options: { key: string; label: string }[]; onPick: (k: string) => void; testid: string; label: string }) {
+  const keys = options.map((o) => o.key)
   return (
-    <div className="seg" role="radiogroup" data-testid={testid}>
+    <div className="seg" role="radiogroup" aria-label={label} data-testid={testid} onKeyDown={(e) => arrowPick(e, keys, value, onPick)}>
       {options.map((o) => (
-        <button key={o.key} role="radio" aria-checked={o.key === value} className={o.key === value ? 'on' : ''} onClick={() => onPick(o.key)} data-testid={`${testid}-${o.key}`}>
+        <button
+          key={o.key}
+          role="radio"
+          aria-checked={o.key === value}
+          tabIndex={tabStop(o.key, value, keys)}
+          data-key={o.key}
+          className={o.key === value ? 'on' : ''}
+          onClick={() => onPick(o.key)}
+          data-testid={`${testid}-${o.key}`}
+        >
           {o.label}
         </button>
       ))}
@@ -84,16 +112,19 @@ function Seg({ value, options, onPick, testid }: { value: string; options: { key
 }
 
 const SWATCH_WIDTH = 74
+const LOOK_KEYS = CAPTION_PRESETS.map((p) => p.key)
 
 /** The looks to start from, each drawn on a tiny phone frame with the sample line (delight 3). */
 function Swatches({ value, text, onPick }: { value: string | null; text: string; onPick: (k: string) => void }) {
   return (
-    <div className="swatches" role="radiogroup" aria-label="Subtitle look" data-testid="cap-look">
+    <div className="swatches" role="radiogroup" aria-label="Subtitle look" data-testid="cap-look" onKeyDown={(e) => arrowPick(e, LOOK_KEYS, value, onPick)}>
       {CAPTION_PRESETS.map((o) => (
         <button
           key={o.key}
           role="radio"
           aria-checked={o.key === value}
+          tabIndex={tabStop(o.key, value, LOOK_KEYS)}
+          data-key={o.key}
           className={`swatch${o.key === value ? ' on' : ''}`}
           onClick={() => onPick(o.key)}
           data-testid={`cap-look-${o.key}`}
@@ -128,7 +159,7 @@ function takes(words: Word[]): Word[][] {
 
 /** A sample line for the subtitle preview: kept words as the engine groups them (captions.chunk), up to
  * `maxWords` and never past a sentence end, shown at the moment its first word is spoken. */
-export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): { text: string; at: number } {
+export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): { text: string; at: number; words: number } {
   const k = words.filter((w) => kept.has(w.id) && /\w/.test(w.w))
   const start = k.length > 6 ? 2 : 0
   const pick: Word[] = []
@@ -136,9 +167,9 @@ export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): 
     pick.push(w)
     if (pick.length >= maxWords || /[.!?…]["')\]]*$/.test(w.w.trim())) break
   }
-  if (!pick.length) return { text: 'Your words here', at: 0.5 }
+  if (!pick.length) return { text: 'Your words here', at: 0.5, words: 3 }
   const text = pick.map((w) => w.w.trim()).join(' ').replace(/^[(\[{"¿¡]+/, '').replace(/[.,!?;:)\]}"…]+$/, '')
-  return { text, at: pick[0].s + 0.15 }
+  return { text, at: pick[0].s + 0.15, words: pick.length }
 }
 
 const LEVELS: { key: string; label: string }[] = [
@@ -303,9 +334,12 @@ export function ShowMeHow({
   const lookJson = JSON.stringify(capStyle)
   useEffect(() => {
     if (!onPreview) return
-    onPreview(tab === 'captions' && subsOn ? { look: lookFromStyle(capStyle), text: sample.text, at: sample.at } : null)
+    // captions.word_spans: a line whose words don't match its tokens one to one gets no highlight
+    const look = lookFromStyle(capStyle)
+    if (sample.text.split(' ').length !== sample.words) look.highlight = null
+    onPreview(tab === 'captions' && subsOn ? { look, text: sample.text, at: sample.at } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subsOn, lookJson, sample.text, sample.at])
+  }, [tab, subsOn, lookJson, sample.text, sample.at, sample.words])
 
   const coverTime = Number(p.cover?.atSourceTime ?? 0) || 0
   const sourceDuration = d.project.sources?.[0]?.duration ?? 60
@@ -428,6 +462,7 @@ export function ShowMeHow({
                   <h3>Size</h3>
                   <Seg
                     testid="cap-size"
+                    label="Size"
                     value={sizeKey(capStyle)}
                     options={SIZES}
                     onPick={(k) => setCapStyle({ size: SIZES.find((x) => x.key === k)!.size })}
@@ -435,14 +470,26 @@ export function ShowMeHow({
                   <h3>Position</h3>
                   <Seg
                     testid="cap-pos"
+                    label="Position"
                     value={positionKey(capStyle)}
                     options={POSITIONS}
                     onPick={(k) => setCapStyle({ position: POSITIONS.find((x) => x.key === k)!.position })}
                   />
-                  {!capStyle.highlight && (
+                  {capStyle.highlight ? (
+                    <>
+                      <h3>Spoken word</h3>
+                      <Seg
+                        testid="cap-highlight"
+                        label="Spoken word colour"
+                        value={highlightKey(capStyle)}
+                        options={HIGHLIGHTS}
+                        onPick={(k) => setCapStyle({ highlight: HIGHLIGHTS.find((x) => x.key === k)!.color })}
+                      />
+                    </>
+                  ) : (
                     <>
                       <h3>Colour</h3>
-                      <Seg testid="cap-color" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
+                      <Seg testid="cap-color" label="Colour" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
                     </>
                   )}
                   <p className="muted-sm">The phone on the left shows the new look. Press "Make a new version" to use it.</p>
