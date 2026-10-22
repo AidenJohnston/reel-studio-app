@@ -1,11 +1,12 @@
 // GitHub releases helpers (main/update-check.ts): version order, which releases count, the release-page
 // allowlist, and what one request sends.
 import { describe, expect, it } from 'vitest'
-import { RELEASES_API, allowedReleaseUrl, askGitHub, isNewer, newestRelease, parseTag, type FetchLike } from '../src/main/update-check'
+import { RELEASES_API, allowedReleaseUrl, appReleases, askGitHub, isNewer, parseTag, type FetchLike } from '../src/main/update-check'
 import { loadSettings, saveSettings } from '../src/main/settings'
 import { setupPaths } from './helpers'
 
 const PAGE = (tag: string) => `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`
+const newestRelease = (list: unknown) => appReleases(list)[0] ?? null
 const rel = (tag: string, extra: Record<string, unknown> = {}) => ({ tag_name: tag, draft: false, prerelease: true, html_url: PAGE(tag), ...extra })
 
 /** A release-page URL carrying credentials, which allowedReleaseUrl must refuse. */

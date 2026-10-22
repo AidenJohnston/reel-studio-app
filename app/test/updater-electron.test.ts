@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { electronUpdaterBackend, type UpdaterLike } from '../src/main/updater-electron'
+import { electronUpdaterBackend, macBundleCheck, windowsInstaller, type UpdaterLike } from '../src/main/updater-electron'
 import type { FetchLike } from '../src/main/update-check'
 
 class FakeUpdater extends EventEmitter implements UpdaterLike {
@@ -14,6 +14,7 @@ class FakeUpdater extends EventEmitter implements UpdaterLike {
   autoInstallOnAppQuit = true
   allowDowngrade = false
   disableDifferentialDownload = false
+  disableWebInstaller = false
   requestHeaders: UpdaterLike['requestHeaders'] = null
   forceDevUpdateConfig = false
   updateConfigPath: string | null = null
@@ -47,7 +48,8 @@ describe('the Mac backend', () => {
       releasesApi: 'https://api.github.com/repos/AidenJohnston/reel-studio-app/releases',
       releaseFolder: (tag) => `https://github.com/AidenJohnston/reel-studio-app/releases/download/${tag}`,
       log: () => {},
-      onError: () => {}
+      onError: () => {},
+      install: macBundleCheck('0.1.2')
     })
     await expect(backend.check()).rejects.toThrow(/0\.1\.4/)
   })
@@ -65,7 +67,7 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
       const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' }, zip)
       let installed = false
       updater.quitAndInstall = () => { installed = true }
-      const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {} })
+      const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {}, install: macBundleCheck('0.1.2') })
       await backend.check()
       await backend.download(() => {})
       if (version === '0.1.3') await backend.install()
@@ -75,4 +77,23 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+it('fails if Windows installs without its progress window or the Mac hands Squirrel an unchecked bundle', async () => {
+  const calls: { platform: string; args: unknown[] }[] = []
+  const checked: string[] = []
+  const mac = { ...macBundleCheck('0.1.2'), verify: async (file: string) => void checked.push(file) }
+  for (const [platform, install] of [['win32', windowsInstaller], ['darwin', mac]] as const) {
+    const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x', sha512: 'x', releaseDate: '2026-10-21' }, `${platform}-download`)
+    updater.quitAndInstall = (...args: unknown[]) => void calls.push({ platform, args })
+    const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {}, install })
+    await backend.check()
+    await backend.download(() => {})
+    await backend.install()
+  }
+  expect(calls).toEqual([
+    { platform: 'win32', args: [false, true] },
+    { platform: 'darwin', args: [true, true] }
+  ])
+  expect(checked).toEqual(['darwin-download'])
 })

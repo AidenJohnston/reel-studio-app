@@ -7,6 +7,7 @@ import {
   engineEnv,
   engineMode,
   initPaths,
+  legalFile,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -58,7 +59,7 @@ import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc
 import { RELEASES_API, releasePageBackend, type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
 import { autoUpdater } from 'electron-updater'
-import { electronUpdaterBackend } from './updater-electron'
+import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -210,7 +211,8 @@ const updates = createUpdater({
           releaseFolder: (tag) => (TEST_FEED ? `${TEST_FEED}/download/${tag}` : `https://github.com/${RELEASES_REPO}/releases/download/${tag}`),
           log,
           devFeedFile: TEST_FEED ? updateFeed ?? undefined : undefined,
-          onError: (e) => updates.installFailed(e)
+          onError: (e) => updates.installFailed(e),
+          install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
         })
       : releasePageBackend(githubFetch, app.getVersion()),
   load: loadSettings,
@@ -397,6 +399,11 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
+  handle('app:showLegal', (_e, doc: unknown) => {
+    const file = legalFile(doc)
+    if (!TEST) shell.showItemInFolder(file)
+  })
   ipcMain.on('app:startDrag', (e, file: string) => {
     try {
       startDragOut(e.sender, file, [reelStudioRoot(), projectsDir()])
@@ -653,7 +660,7 @@ function registerIpc(): void {
   handle('update:check', () => updates.check('button'))
   handle('update:download', () => updates.download())
   handle('update:install', () => updates.install())
-  handle('update:openRelease', () => updates.openRelease())
+  handle('update:openRelease', (_e, version?: unknown) => updates.openRelease(version))
   handle('update:busy', updateBusy)
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
   handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))

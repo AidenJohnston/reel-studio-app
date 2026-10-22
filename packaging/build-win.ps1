@@ -83,4 +83,30 @@ if ($code -ne 0) { throw "electron-builder failed ($code)" }
 Get-ChildItem (Join-Path $AppDir "release") -Filter "*.exe" | ForEach-Object {
   "{0}  {1:N1} MB" -f $_.FullName, ($_.Length / 1MB)
 }
+
+# 4. the update feed. Installed copies read latest.yml from the release, download the installer it names and
+# refuse it unless its SHA-512 matches. electron-builder writes latest.yml next to the installer because
+# make-config.js adds a publish block; --publish never only skips the upload.
+$Release = Join-Path $AppDir "release"
+$Version = (node -p "require(process.argv[1]).version" (Join-Path $AppDir "package.json")).Trim()
+$Feed = Join-Path $Release "latest.yml"
+if (-not (Test-Path $Feed)) { throw "latest.yml is missing from $Release; installed copies could not update to this build" }
+$yml = Get-Content $Feed -Raw
+$fields = @{}
+foreach ($name in "version", "path", "sha512") {
+  $m = [regex]::Match($yml, "(?m)^${name}: *'?([^'\r\n]+)'?\s*$")
+  if (-not $m.Success) { throw "latest.yml has no top-level ${name}:" }
+  $fields[$name] = $m.Groups[1].Value.Trim()
+}
+if ($fields.version -ne $Version) { throw "latest.yml is for $($fields.version), but this build is $Version" }
+$Installer = Join-Path $Release $fields.path
+if (-not (Test-Path $Installer)) { throw "latest.yml names $($fields.path), which is not in $Release" }
+$stream = [IO.File]::OpenRead($Installer)
+try { $digest = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($stream)) } finally { $stream.Close() }
+if ($digest -ne $fields.sha512) { throw "the SHA-512 in latest.yml does not match $($fields.path)" }
+$AppFeed = Join-Path $Release "win-unpacked\resources\app-update.yml"
+if (-not (Test-Path $AppFeed)) { throw "app-update.yml is missing from the app; the publish block did not reach the build" }
+"app-update.yml (where the installed app looks for updates):"
+Get-Content $AppFeed | ForEach-Object { "  $_" }
+"Upload BOTH to the GitHub release: $($fields.path) and latest.yml"
 "build-win done in {0:N0}s" -f $sw.Elapsed.TotalSeconds

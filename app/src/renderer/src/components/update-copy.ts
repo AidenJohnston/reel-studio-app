@@ -9,17 +9,16 @@ export function updateIcon(s: UpdateState): UpdateIcon {
 }
 
 const pct = (s: UpdateState): string => (typeof s.downloadPercent === 'number' ? ` ${Math.floor(s.downloadPercent)}%` : '')
+const offered = (s: UpdateState): string | null => s.downloadedVersion ?? s.availableVersion
 
 export function updateButtonLabel(s: UpdateState): string {
   if (s.status === 'downloading') return `Downloading${pct(s)}`
-  const a = updateAction(s)
-  if (a === 'install') return s.status === 'error' ? 'Try again' : 'Restart to update'
-  if (s.status === 'error') return 'Try again'
-  return 'Download update'
+  if (s.status === 'error') return s.errorContext === 'install' ? 'Update did not install' : 'Download stopped'
+  return updateAction(s) === 'install' ? 'Restart to update' : 'Download update'
 }
 
 export function updateSummary(s: UpdateState): string {
-  const v = s.downloadedVersion ?? s.availableVersion
+  const v = offered(s)
   switch (s.status) {
     case 'checking':
       return 'Checking for updates…'
@@ -46,20 +45,58 @@ export function updateSummary(s: UpdateState): string {
 
 export function updateHeadline(s: UpdateState): string {
   if (s.status === 'downloading') return `Downloading update${typeof s.downloadPercent === 'number' ? ` (${Math.floor(s.downloadPercent)}%)` : ''}`
-  if (s.status === 'error') return s.errorContext === 'install' ? 'The update did not install' : 'The download stopped'
+  if (s.status === 'error') return updateButtonLabel(s)
   if (updateAction(s) === 'install') return 'Update downloaded'
   return s.mode === 'page' ? 'Update available' : 'Update ready to download'
 }
 
 export function updateSubline(s: UpdateState): string {
-  if (s.status === 'error') return s.errorContext === 'install' ? 'It did not install' : 'Download stopped'
-  if (s.mode === 'page' && updateAction(s) === 'open-page') return 'Opens your browser'
-  return `Version ${s.downloadedVersion ?? s.availableVersion ?? ''}`
+  if (s.status === 'error') return s.message ?? updateSummary(s)
+  if (s.mode === 'page' && updateAction(s) === 'open-page') return `Reel Studio ${offered(s)}. Download opens your browser.`
+  return `Reel Studio ${offered(s)}`
+}
+
+export function notesHeading(n: ReleaseNotes, count: number): string {
+  return count === 1 ? "What's new" : `What's new in ${n.version}`
 }
 
 export function releaseLinkLabel(n: ReleaseNotes): string {
   const more = Math.max(0, n.totalItems - n.items.length)
-  return more === 0 ? 'Read more on GitHub' : `${more} more ${more === 1 ? 'change' : 'changes'} on GitHub`
+  return more === 0 ? 'View release on GitHub' : `${more} more ${more === 1 ? 'change' : 'changes'} on GitHub`
+}
+
+export function aboutStatus(s: UpdateState): string {
+  const v = offered(s)
+  const now = `Version ${s.currentVersion}`
+  switch (s.status) {
+    case 'checking':
+      return `${now} · Checking for updates…`
+    case 'up-to-date':
+      return `${now} · Up to date`
+    case 'available':
+      return `${now} · ${v} is ${s.mode === 'page' ? 'out' : 'ready to download'}`
+    case 'downloading':
+      return `${now} · Downloading ${v}${pct(s)}`
+    case 'downloaded':
+      return `${now} · ${v} is downloaded`
+    case 'installing':
+      return `${now} · Restarting to update…`
+    case 'error':
+      return updateAction(s) === 'install' ? `${now} · ${v} is downloaded` : updateAction(s) !== 'none' ? `${now} · ${v} is out` : now
+    default:
+      return now
+  }
+}
+
+export function aboutButton(s: UpdateState): string {
+  const action = updateAction(s)
+  if (action !== 'none') return s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download'
+  if (s.status === 'checking') return 'Checking…'
+  if (s.status === 'downloading') return 'Downloading…'
+  if (s.status === 'installing') return 'Restarting…'
+  if (s.status === 'up-to-date') return 'Check again'
+  if (s.status === 'error') return 'Try again'
+  return 'Check for updates'
 }
 
 export interface InstallQuestion {
@@ -85,7 +122,7 @@ export function installQuestion(s: Pick<UpdateState, 'availableVersion' | 'downl
       : ''
   return {
     title: `Install update${v ? ` ${v}` : ''} and restart Reel Studio?`,
-    body: `Reel Studio closes for a moment and opens again on the new version. Your videos and settings stay.${stops}`,
+    body: `Reel Studio closes, installs the new version and opens again. Your videos and settings stay.${stops}`,
     canInstall: true
   }
 }

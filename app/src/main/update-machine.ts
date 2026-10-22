@@ -1,4 +1,4 @@
-import type { ReleaseNotes, UpdateMode, UpdateState } from '../shared/update'
+import { validDate, type ReleaseEntry, type ReleaseNotes, type UpdateMode, type UpdateState } from '../shared/update'
 import { allowedReleaseUrl, isNewer } from './update-check'
 
 export const FIRST_CHECK_DELAY_MS = 15_000
@@ -25,7 +25,8 @@ export function isRateLimited(e: unknown): boolean {
 export interface RememberedRelease {
   version: string
   url: string
-  notes?: ReleaseNotes | null
+  notes?: ReleaseNotes[]
+  older?: number
 }
 
 export interface Dismissal {
@@ -38,22 +39,37 @@ export interface UpdateMemory {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
+  updateHistory: ReleaseEntry[] | null
 }
 
 export function stillNewer(remembered: unknown, current: string): RememberedRelease | null {
   if (!remembered || typeof remembered !== 'object' || !('version' in remembered) || !('url' in remembered)) return null
   const { version, url } = remembered
-  const notes = 'notes' in remembered ? remembered.notes : null
+  const notes = 'notes' in remembered && Array.isArray(remembered.notes) ? remembered.notes : []
+  const older = 'older' in remembered && Number.isInteger(remembered.older) ? Math.max(0, remembered.older as number) : 0
   const page = allowedReleaseUrl(url)
   if (typeof version !== 'string' || !isNewer(version, current) || !page) return null
-  return { version, url: page, notes: rememberedNotes(notes, version) }
+  return { version, url: page, notes: notes.flatMap((n) => rememberedNotes(n, current) ?? []), older }
 }
 
-function rememberedNotes(notes: unknown, version: string): ReleaseNotes | null {
-  if (!notes || typeof notes !== 'object' || !('items' in notes) || !('totalItems' in notes)) return null
-  const { items, totalItems } = notes
-  if (!Array.isArray(items) || !items.every((i) => typeof i === 'string') || typeof totalItems !== 'number') return null
+const strings = (a: unknown): a is string[] => Array.isArray(a) && a.every((i) => typeof i === 'string')
+
+function rememberedNotes(notes: unknown, current: string): ReleaseNotes | null {
+  if (!notes || typeof notes !== 'object' || !('version' in notes) || !('items' in notes) || !('totalItems' in notes)) return null
+  const { version, items, totalItems } = notes
+  if (typeof version !== 'string' || !isNewer(version, current) || !strings(items) || typeof totalItems !== 'number') return null
   return { version, items, totalItems }
+}
+
+export function validHistory(h: unknown): ReleaseEntry[] {
+  if (!Array.isArray(h)) return []
+  return h.flatMap((e): ReleaseEntry[] => {
+    if (!e || typeof e !== 'object') return []
+    const { version, date, summary, url } = e as Record<string, unknown>
+    const page = allowedReleaseUrl(url)
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version) || !page) return []
+    return [{ version, date: validDate(date), summary: typeof summary === 'string' ? summary : null, url: page }]
+  })
 }
 
 export function validDismissal(d: unknown): Dismissal | null {
@@ -82,12 +98,14 @@ export function disabledReason(env: UpdateEnv): string | null {
   if (env.test) return 'Updates are off in test runs.'
   if (!env.isPackaged) return 'Updates only work in the installed app, not in a development build.'
   if (env.platform !== 'darwin' && env.platform !== 'win32') return 'Update checks are available only on Mac and Windows.'
-  if (updateMode(env) === 'install' && !env.hasFeed) return 'This copy of Reel Studio was built without an update address. Download new versions from GitHub.'
   return null
 }
 
-export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications'>): UpdateMode {
-  return env.platform === 'darwin' && env.inApplications ? 'install' : 'page'
+// A Mac app outside Applications may run translocated or read-only. The Windows install is per-user, so its
+// installer runs without an admin prompt.
+export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications' | 'hasFeed'>): UpdateMode {
+  if (!env.hasFeed) return 'page'
+  return (env.platform === 'darwin' && env.inApplications) || env.platform === 'win32' ? 'install' : 'page'
 }
 
 export function plainError(context: 'check' | 'download' | 'install', e: unknown): string {

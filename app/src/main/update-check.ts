@@ -1,12 +1,19 @@
 // Preserve main's published vX.Y.Z selection, including GitHub prereleases.
 import { RELEASES_REPO } from '../shared/config'
+import { validDate } from '../shared/update'
 import type { UpdateBackend } from './updater'
 
-/** The newest app release on GitHub: its version, release page and raw markdown notes. */
+/** An app release on GitHub: its version, release page, raw markdown notes and publish time. */
 export interface FoundUpdate {
   version: string
   releaseUrl: string
   notes: string | null
+  publishedAt?: string | null
+}
+
+export interface ReleaseCheck {
+  update: FoundUpdate | null
+  releases: FoundUpdate[]
 }
 
 export const RELEASES_API = `https://api.github.com/repos/${RELEASES_REPO}/releases`
@@ -66,22 +73,29 @@ export function allowedReleaseUrl(url: unknown): string | null {
 
 export const pageFor = (tag: string): string => `${RELEASE_PAGE_ORIGIN}${RELEASE_PAGE_PREFIX}tag/${tag}`
 
-/** The newest app release in GitHub's releases list, or null. Drafts and non-app tags are ignored;
+/** Every app release in GitHub's releases list, newest first. Drafts and non-app tags are ignored;
  * pre-releases count (every release is a pre-release for now). Never throws on odd data. */
-export function newestRelease(list: unknown): FoundUpdate | null {
-  if (!Array.isArray(list)) return null
-  let best: { t: Triple; tag: string; url: unknown; body: unknown } | null = null
+export function appReleases(list: unknown): FoundUpdate[] {
+  if (!Array.isArray(list)) return []
+  const found: { t: Triple; release: FoundUpdate }[] = []
   for (const r of list) {
     if (!r || typeof r !== 'object') continue
-    const { draft, tag_name, html_url, body } = r as { draft?: unknown; tag_name?: unknown; html_url?: unknown; body?: unknown }
+    const { draft, tag_name, html_url, body, published_at } = r as { draft?: unknown; tag_name?: unknown; html_url?: unknown; body?: unknown; published_at?: unknown }
     if (draft !== false) continue // drafts, and anything that does not say it is not one
     const t = parseTag(tag_name)
-    if (!t) continue
-    if (!best || cmp(t, best.t) > 0) best = { t, tag: tag_name as string, url: html_url, body }
+    if (!t || found.some((f) => cmp(f.t, t) === 0)) continue
+    // The API's link is used only if it points at our releases; otherwise build the page link ourselves.
+    found.push({
+      t,
+      release: {
+        version: t.join('.'),
+        releaseUrl: allowedReleaseUrl(html_url) ?? pageFor(tag_name as string),
+        notes: typeof body === 'string' ? body : null,
+        publishedAt: validDate(published_at)
+      }
+    })
   }
-  if (!best) return null
-  // The API's link is used only if it points at our releases; otherwise build the page link ourselves.
-  return { version: best.t.join('.'), releaseUrl: allowedReleaseUrl(best.url) ?? pageFor(best.tag), notes: typeof best.body === 'string' ? best.body : null }
+  return found.sort((a, b) => cmp(b.t, a.t)).map((f) => f.release)
 }
 
 // ---- the request ---------------------------------------------------------------------------------
@@ -93,7 +107,7 @@ export type FetchLike = (url: string, init: { headers: Record<string, string>; s
   json(): Promise<unknown>
 }>
 
-export type AskResult = { kind: 'ok'; latest: FoundUpdate | null } | { kind: 'rate-limited' } | { kind: 'failed'; why: string }
+export type AskResult = { kind: 'ok'; releases: FoundUpdate[] } | { kind: 'rate-limited' } | { kind: 'failed'; why: string }
 
 /** The exact headers sent. Nothing else: no token, no cookie, no machine or user detail. */
 export function requestHeaders(appVersion: string): Record<string, string> {
@@ -110,23 +124,24 @@ export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutM
       return { kind: 'rate-limited' }
     }
     if (!res.ok) return { kind: 'failed', why: `HTTP ${res.status}` }
-    return { kind: 'ok', latest: newestRelease(await res.json()) }
+    return { kind: 'ok', releases: appReleases(await res.json()) }
   } catch (e) {
     return { kind: 'failed', why: (e as Error)?.name === 'TimeoutError' ? 'timeout' : String((e as Error)?.message ?? e).slice(0, 120) }
   }
 }
 
-/** The newest app release if it is newer than `appVersion`, else null. Throws when GitHub could not tell
+/** The app releases, and the newest one if it is newer than `appVersion`. Throws when GitHub could not tell
  * (a rate limit carries statusCode 429, so the updater waits a day). `url` is the releases list (a local
  * server in the update e2e). */
-export async function newerRelease(fetchFn: FetchLike, appVersion: string, url = RELEASES_API): Promise<FoundUpdate | null> {
+export async function newerRelease(fetchFn: FetchLike, appVersion: string, url = RELEASES_API): Promise<ReleaseCheck> {
   const r = await askGitHub(fetchFn, appVersion, TIMEOUT_MS, url)
   if (r.kind === 'rate-limited') throw Object.assign(new Error('GitHub rate limit'), { statusCode: 429 })
   if (r.kind === 'failed') throw new Error(r.why)
-  return r.latest && isNewer(r.latest.version, appVersion) ? r.latest : null
+  const newest = r.releases[0]
+  return { update: newest && isNewer(newest.version, appVersion) ? newest : null, releases: r.releases }
 }
 
-// Windows keeps the release-page route regardless of signing metadata.
+// Copies that cannot replace themselves (a Mac app outside Applications, a build without an update feed) open the page.
 export function releasePageBackend(fetchFn: FetchLike, appVersion: string): UpdateBackend {
   return {
     check: () => newerRelease(fetchFn, appVersion),

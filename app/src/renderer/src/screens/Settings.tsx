@@ -5,7 +5,7 @@ import { ConnectAI, DevProviders, ModelDownload, USING_CLAUDE_CODE } from '../co
 import { FOLDER_APP } from '../components/ui'
 import { Icon } from '../components/icons'
 import { useUpdateState } from '../components/update'
-import { UpdateSettingsRow } from '../components/UpdateSettings'
+import { AboutPanel, WhatsNew } from '../components/About'
 import { useNotify } from '../App'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
@@ -75,29 +75,14 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         </section>
       )}
 
-      <section className="panel">
-        <h2>About</h2>
-        <p className="muted" style={{ marginTop: 6 }}>
-          Reel Studio {info.version}. Free and open source (MIT). No accounts, no tracking.
-        </p>
-        {update !== null && (
-          <>
-            <label className="toggle" style={{ marginTop: 12 }}>
-              <input type="checkbox" checked={update.autoCheck} onChange={(e) => void toggleUpdates(e.target.checked)} data-testid="check-updates" />
-              Check for updates
-            </label>
-            <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
-              Once a day, Reel Studio asks GitHub if there is a newer version. Nothing about you or your videos is sent.
-            </p>
-          </>
-        )}
-        <UpdateSettingsRow />
-        {info.engine.mode === 'fake' && (
-          <p className="muted-sm" style={{ marginTop: 6 }}>
-            Test engine in use.
-          </p>
-        )}
-      </section>
+      {update && (
+        <>
+          <AboutPanel s={update} onToggle={(on) => void toggleUpdates(on)}>
+            {info.engine.mode === 'fake' && <p className="muted-sm">Test engine in use.</p>}
+          </AboutPanel>
+          <WhatsNew s={update} />
+        </>
+      )}
     </div>
   )
 }

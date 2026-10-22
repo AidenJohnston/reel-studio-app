@@ -10,6 +10,15 @@ export interface ReleaseNotes {
   totalItems: number
 }
 
+export interface ReleaseEntry {
+  version: string
+  date: string | null
+  summary: string | null
+  url: string
+}
+
+export const validDate = (d: unknown): string | null => (typeof d === 'string' && Number.isFinite(Date.parse(d)) ? d : null)
+
 export interface UpdateState {
   status: UpdateStatus
   mode: UpdateMode
@@ -17,7 +26,11 @@ export interface UpdateState {
   currentVersion: string
   availableVersion: string | null
   downloadedVersion: string | null
-  releaseNotes: ReleaseNotes | null
+  /** Only releases newer than the running one, newest first. */
+  releaseNotes: ReleaseNotes[]
+  /** Newer releases left out of releaseNotes. */
+  olderNotes: number
+  releases: ReleaseEntry[]
   releaseUrl: string | null
   downloadPercent: number | null
   message: string | null
@@ -44,7 +57,9 @@ export function initialUpdateState(currentVersion: string, mode: UpdateMode, aut
     currentVersion,
     availableVersion: null,
     downloadedVersion: null,
-    releaseNotes: null,
+    releaseNotes: [],
+    olderNotes: 0,
+    releases: [],
     releaseUrl: null,
     downloadPercent: null,
     message: disabledReason,

@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -8,7 +8,9 @@ import { createRequire } from 'node:module'
 import { APP_DIR, BASE, ROOT, USER_DATA, passFirstRun } from './helpers'
 
 const { latestMacYml } = createRequire(__filename)('../../packaging/latest-mac.js') as { latestMacYml(zip: string, version: string): string }
-const ZIP_NAME = 'Reel-Studio-0.1.3-arm64-mac.zip'
+const WIN = process.platform === 'win32'
+const PAYLOAD = WIN ? 'Reel-Studio-Setup-0.1.3-x64.exe' : 'Reel-Studio-0.1.3-arm64-mac.zip'
+const FEED = WIN ? 'latest.yml' : 'latest-mac.yml'
 const NOTES = [
   "## What's new",
   '',
@@ -22,14 +24,18 @@ const NOTES = [
 
 let server: Server
 let feed = ''
-let zip: Buffer
+let payload: Buffer
 let latest: 'old' | 'new' = 'old'
 
 test.beforeAll(async () => {
-  zip = randomBytes(3 * 1024 * 1024)
-  const zipFile = join(BASE, ZIP_NAME)
-  writeFileSync(zipFile, zip)
-  const yml = latestMacYml(zipFile, '0.1.3')
+  payload = randomBytes(3 * 1024 * 1024)
+  const file = join(BASE, PAYLOAD)
+  writeFileSync(file, payload)
+  const sha512 = createHash('sha512').update(payload).digest('base64')
+  // electron-builder's latest.yml for an NSIS installer has the same fields as latest-mac.yml
+  const yml = WIN
+    ? `version: 0.1.3\nfiles:\n  - url: ${PAYLOAD}\n    sha512: ${sha512}\n    size: ${payload.length}\npath: ${PAYLOAD}\nsha512: ${sha512}\nreleaseDate: '2026-10-21T00:00:00.000Z'\n`
+    : latestMacYml(file, '0.1.3')
   const release = (tag: string, extra: Record<string, unknown> = {}) => ({
     tag_name: tag,
     draft: false,
@@ -42,16 +48,16 @@ test.beforeAll(async () => {
     const path = (req.url ?? '').split('?')[0]
     if (path === '/releases') {
       const list = [release('v0.1.2')]
-      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES }))
+      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES, published_at: '2026-10-30T18:00:00Z' }))
       return void res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(list))
     }
-    if (path === '/download/v0.1.3/latest-mac.yml') return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
-    if (path === `/download/v0.1.3/${ZIP_NAME}`) {
-      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': zip.length })
+    if (path === `/download/v0.1.3/${FEED}`) return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
+    if (path === `/download/v0.1.3/${PAYLOAD}`) {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': payload.length })
       let at = 0
       const step = () => {
-        if (at >= zip.length || res.destroyed) return void res.end()
-        res.write(zip.subarray(at, (at += 48 * 1024)))
+        if (at >= payload.length || res.destroyed) return void res.end()
+        res.write(payload.subarray(at, (at += 48 * 1024)))
         setTimeout(step, 90)
       }
       return step()
@@ -65,7 +71,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-  rmSync(join(homedir(), 'Library', 'Caches', `reel-studio-e2e-updater-${basename(BASE)}`), { recursive: true, force: true })
+  const caches = WIN ? (process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')) : join(homedir(), 'Library', 'Caches')
+  rmSync(join(caches, `reel-studio-e2e-updater-${basename(BASE)}`), { recursive: true, force: true })
 })
 
 async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
@@ -88,29 +95,30 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   return { app, page }
 }
 
-test('fails if a prerelease update cannot be downloaded, declined or snoozed', async () => {
-  test.skip(process.platform !== 'darwin', 'the in-app download backend is macOS-only')
+test('fails if a prerelease update cannot be downloaded, declined or snoozed, or What\'s new misses it', async () => {
+  test.skip(process.platform !== 'darwin' && !WIN, 'in-app updates exist on Mac and Windows only')
   const { app, page } = await launch()
   try {
     await passFirstRun(page)
     await page.getByTestId('nav-settings').click()
     const row = page.getByTestId('update-settings')
-    await expect(row).toContainText('You have Reel Studio 0.1.2')
+    await expect(row).toContainText('Version 0.1.2')
     await expect(page.getByTestId('update-releases-link')).toHaveAttribute('href', 'https://github.com/AidenJohnston/reel-studio-app/releases')
     await row.scrollIntoViewIfNeeded()
     latest = 'new'
     await page.getByTestId('update-settings-button').click()
-    await expect(row).toContainText('Reel Studio 0.1.3 is ready to download.')
+    await expect(row).toContainText('0.1.3 is ready to download')
+    await expect(page.getByTestId('release-0.1.3')).toContainText('Updates install themselves. Fix: the update note no longer covers the AI status.')
     await row.scrollIntoViewIfNeeded()
     const button = page.getByTestId('update-button')
     await expect(button).toContainText('Download update')
-    await expect(button).toContainText('Version 0.1.3')
     await page.getByTestId('nav-home').click()
     await page.getByTestId('nav-settings').focus()
     await page.keyboard.press('Tab')
     const pop = page.getByTestId('update-popover')
     await expect(pop).toHaveAttribute('data-open', 'true')
     await expect(pop).toContainText('Update ready to download')
+    await expect(pop).toContainText('Reel Studio 0.1.3')
     await expect(pop).toContainText('Updates install themselves.')
     await expect(pop).toContainText('Fix: the update note no longer covers the AI status.')
     await expect(pop).not.toContainText('the disk image')
@@ -137,7 +145,7 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(confirm).toBeHidden()
 
     await page.getByTestId('nav-settings').click()
-    await expect(row).toContainText('Reel Studio 0.1.3 is downloaded.')
+    await expect(row).toContainText('0.1.3 is downloaded')
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
     await row.scrollIntoViewIfNeeded()
     await page.getByTestId('nav-settings').focus()
@@ -147,6 +155,9 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(button).toBeHidden()
     await expect(page.getByTestId('toast')).toContainText('Hidden until tomorrow. You can still update from Settings.')
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
+    // On Windows electron-updater runs the downloaded installer as soon as install() is called; the random-byte
+    // payload cannot be run, and the app would quit. The Mac backend refuses it at the bundle check first.
+    if (WIN) return
     const project = join(ROOT, 'Projects', 'update-export')
     mkdirSync(join(project, 'versions', 'v1'), { recursive: true })
     writeFileSync(join(project, 'project.json'), JSON.stringify({ title: 'Update export', sources: [] }))

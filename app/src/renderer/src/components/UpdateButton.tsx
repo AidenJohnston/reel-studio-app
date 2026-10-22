@@ -1,15 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { RELEASES_URL } from '../../../shared/config'
 import { showsUpdateButton, type UpdateState } from '../../../shared/update'
-import { releaseLinkLabel, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary } from './update-copy'
+import { notesHeading, releaseLinkLabel, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary } from './update-copy'
 import { reel } from '../api'
 import { useNotify } from '../App'
 import { Icon } from './icons'
+import { FadeScroll } from './ui'
 import { openReleasePage, useUpdateActions, useUpdateState } from './update'
 
-const R = 12
+const R = 14
 const RING = 2 * Math.PI * R
 const OPEN_DELAY_MS = 200
 const CLOSE_DELAY_MS = 150
+const GAP = 6
 
 function StatusIcon({ s }: { s: UpdateState }) {
   const kind = updateIcon(s)
@@ -17,19 +20,20 @@ function StatusIcon({ s }: { s: UpdateState }) {
   return (
     <span className={`update-icon ${kind}`} aria-hidden>
       {kind === 'downloading' && (
-        <svg className="update-ring" viewBox="0 0 28 28">
-          <circle cx="14" cy="14" r={R} className="track" />
-          <circle cx="14" cy="14" r={R} className="bar" strokeDasharray={RING} strokeDashoffset={RING * (1 - pct / 100)} />
+        <svg className="update-ring" viewBox="0 0 32 32">
+          <circle cx="16" cy="16" r={R} className="track" />
+          <circle cx="16" cy="16" r={R} className="bar" strokeDasharray={RING} strokeDashoffset={RING * (1 - pct / 100)} />
         </svg>
       )}
-      <Icon name={kind === 'downloaded' ? 'restart' : 'download'} size={16} stroke={1.75} />
-      {kind === 'available' && <span className="update-dot" />}
-      {kind === 'failed' && <span className="update-dot failed" />}
-      {kind === 'downloaded' && (
-        <span className="update-badge">
-          <Icon name="check" size={9} stroke={3.5} />
-        </span>
-      )}
+      <span className="update-glyph">
+        <Icon name={kind === 'downloaded' ? 'restart' : 'download'} size={16} stroke={1.75} />
+        {kind === 'available' && <span className="update-dot" />}
+        {kind === 'downloaded' && (
+          <span className="update-badge">
+            <Icon name="check" size={8} stroke={3.5} />
+          </span>
+        )}
+      </span>
     </span>
   )
 }
@@ -40,7 +44,7 @@ export function UpdateButton() {
   const { act, pending, dialog } = useUpdateActions()
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
+  const [pos, setPos] = useState<{ left: number; bottom: number; room: number } | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -74,8 +78,8 @@ export function UpdateButton() {
     if (!open) return
     const key = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
-      e.stopPropagation()
       const inside = !!pop.current?.contains(document.activeElement)
+      if (inside || document.activeElement === btn.current) e.stopPropagation()
       close()
       hovering.current = false
       if (inside) {
@@ -92,7 +96,7 @@ export function UpdateButton() {
   const openNow = (fromKeyboard: boolean): void => {
     clearTimer()
     const r = btn.current?.getBoundingClientRect()
-    if (r) setPos({ left: r.right + 10, bottom: window.innerHeight - r.bottom })
+    if (r) setPos({ left: r.left, bottom: window.innerHeight - r.top + GAP, room: r.top - GAP - 12 })
     setInstant(fromKeyboard)
     setOpen(true)
   }
@@ -130,9 +134,11 @@ export function UpdateButton() {
     maybeClose()
   }
 
-  const notes = s.releaseNotes
+  const kind = updateIcon(s)
   const busy = s.status === 'downloading' || pending
   const version = s.downloadedVersion ?? s.availableVersion
+  const notes = s.releaseNotes
+  const tab = open ? 0 : -1
   const notNow = async (): Promise<void> => {
     if (!version) return
     close()
@@ -145,69 +151,99 @@ export function UpdateButton() {
       notify('I could not hide the update note. Try again in a moment.', 'error')
     }
   }
+  const openVersion = (v: string): void =>
+    void reel.update.openRelease(v).catch(() => notify('I could not open the release page. Try again in a moment.', 'error'))
 
   return (
-    <div className="update-wrap" onFocus={focusIn} onBlur={focusOut} data-testid="update-button-wrap">
-      <button
-        ref={btn}
-        className={`update-pill ${updateIcon(s)}`}
-        onClick={() => !busy && void act(s)}
-        onPointerEnter={(e) => enter(e, true)}
-        onPointerLeave={leave}
-        aria-disabled={busy || undefined}
-        aria-describedby={summaryId}
-        data-testid="update-button"
-      >
-        <StatusIcon s={s} />
-        <span className="update-pill-text">
+    <>
+      <div className="update-strip" onFocus={focusIn} onBlur={focusOut} data-testid="update-button-wrap">
+        <button
+          ref={btn}
+          className={`update-pill ${kind}`}
+          onClick={() => !busy && void act(s)}
+          onPointerEnter={(e) => enter(e, true)}
+          onPointerLeave={leave}
+          aria-disabled={busy || undefined}
+          aria-describedby={summaryId}
+          data-testid="update-button"
+        >
           <span className="update-pill-label">{updateButtonLabel(s)}</span>
-          <span className="update-pill-sub">{updateSubline(s)}</span>
-        </span>
-      </button>
+          {kind === 'failed' ? <span className="update-pill-retry">Retry</span> : <StatusIcon s={s} />}
+        </button>
 
-      <span id={summaryId} className="sr-only">
-        {s.status === 'downloading' ? '' : updateSummary(s)}
-      </span>
-      <div
-        ref={pop}
-        className="update-pop"
-        data-open={open || undefined}
-        data-instant={instant || undefined}
-        style={pos ? { left: pos.left, bottom: pos.bottom } : undefined}
-        role="region"
-        aria-label={`What's new in Reel Studio ${s.downloadedVersion ?? s.availableVersion ?? ''}`}
-        aria-hidden={!open}
-        onPointerEnter={(e) => enter(e, false)}
-        onPointerLeave={leave}
-        data-testid="update-popover"
-      >
-        <div className="update-pop-head">
-          <div className="update-pop-title">{updateHeadline(s)}</div>
-          <div className="update-pop-sub">{s.status === 'error' ? updateSummary(s) : `Reel Studio ${s.downloadedVersion ?? s.availableVersion}`}</div>
-        </div>
-        {notes && (
-          <section className="update-pop-notes">
-            <h3>What's new</h3>
-            <ul>
-              {notes.items.map((t, i) => (
-                <li key={`${i}:${t}`}>{t}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        <div className="update-pop-foot">
-          <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => openReleasePage(notify)} data-testid="update-release-link">
-            {notes ? releaseLinkLabel(notes) : 'Read the release notes on GitHub'}
-            <Icon name="external" size={12} stroke={2} />
-          </button>
-          {s.status !== 'downloading' && (
-            <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => void notNow()} data-testid="update-not-now">
-              Not now
-            </button>
-          )}
+        <span id={summaryId} className="sr-only">
+          {s.status === 'downloading' ? '' : updateSummary(s)}
+        </span>
+        <div
+          ref={pop}
+          className="update-pop"
+          data-open={open || undefined}
+          data-instant={instant || undefined}
+          style={pos ? ({ left: pos.left, bottom: pos.bottom, '--room': `${pos.room}px` } as React.CSSProperties) : undefined}
+          role="region"
+          aria-label={`What's new in Reel Studio ${version ?? ''}`}
+          aria-hidden={!open}
+          onPointerEnter={(e) => enter(e, false)}
+          onPointerLeave={leave}
+          data-testid="update-popover"
+        >
+          <div className="update-pop-head">
+            <div className="update-pop-heading">
+              <div className="update-pop-title">{updateHeadline(s)}</div>
+              <div className={`update-pop-sub${s.status === 'error' ? ' failed' : ''}`}>{updateSubline(s)}</div>
+            </div>
+            {kind === 'failed' && (
+              <button className="update-pop-quiet" tabIndex={tab} onClick={() => !busy && void act(s)} data-testid="update-retry">
+                Retry
+              </button>
+            )}
+            {s.status !== 'downloading' && (
+              <button className="update-pop-quiet" tabIndex={tab} onClick={() => void notNow()} data-testid="update-not-now">
+                Not now
+              </button>
+            )}
+          </div>
+          <FadeScroll className="update-notes" testid="update-notes">
+            {notes.map((n, i) => (
+              <section key={n.version}>
+                <h3>{notesHeading(n, notes.length)}</h3>
+                <ul>
+                  {n.items.map((t, j) => (
+                    <li key={`${j}:${t}`}>{t}</li>
+                  ))}
+                </ul>
+                <button
+                  className="update-pop-link"
+                  tabIndex={tab}
+                  onClick={() => openVersion(n.version)}
+                  aria-label={`${releaseLinkLabel(n)}: Reel Studio ${n.version}`}
+                  data-testid={i === 0 ? 'update-release-link' : undefined}
+                >
+                  {releaseLinkLabel(n)}
+                  <Icon name="external" size={12} stroke={2} />
+                </button>
+              </section>
+            ))}
+            {!notes.length && (
+              <section>
+                <button className="update-pop-link" tabIndex={tab} onClick={() => openReleasePage(notify)} data-testid="update-release-link">
+                  Read the release notes on GitHub
+                  <Icon name="external" size={12} stroke={2} />
+                </button>
+              </section>
+            )}
+            {s.olderNotes > 0 && (
+              <section>
+                <a className="update-pop-link" tabIndex={tab} href={RELEASES_URL} target="_blank" rel="noreferrer">
+                  {s.olderNotes} older {s.olderNotes === 1 ? 'release' : 'releases'} on GitHub
+                  <Icon name="external" size={12} stroke={2} />
+                </a>
+              </section>
+            )}
+          </FadeScroll>
         </div>
       </div>
       {dialog}
-    </div>
+    </>
   )
 }

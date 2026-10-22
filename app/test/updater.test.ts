@@ -11,10 +11,13 @@ function setup(
 ) {
   const installs: number[] = []
   const opened: string[] = []
-  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
+  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null, ...opts.memory }
   let now = 1000
   const backend: UpdateBackend = {
-    check: found,
+    check: async () => {
+      const update = await found()
+      return { update, releases: update ? [update] : [] }
+    },
     download: opts.download ?? (async (p) => [0, 40, 100].forEach(p)),
     install: () => void installs.push(1)
   }
@@ -142,9 +145,9 @@ describe('remembered across launches', () => {
     const offline = async (): Promise<FoundUpdate | null> => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com'))
     const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
     const notes = { version: '0.1.3', items: ['Updates install themselves.'], totalItems: 1 }
-    const a = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: page, notes } } })
+    const a = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: page, notes: [notes] } } })
     await a.u.init()
-    expect(a.u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, releaseNotes: notes })
+    expect(a.u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, releaseNotes: [notes] })
     await a.u.download()
     expect(a.u.state()).toMatchObject({ status: 'error', errorContext: 'download', availableVersion: '0.1.3' })
 
@@ -201,8 +204,11 @@ describe('"Not now"', () => {
   })
 })
 
-it('fails if Windows offers in-app installation', () => {
-  expect(updateMode({ platform: 'win32', inApplications: true })).toBe('page')
+it('fails if Windows cannot install in-app, or a copy without an update feed tries to', () => {
+  expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true })).toBe('install')
+  expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true })).toBe('install')
+  expect(updateMode({ platform: 'darwin', inApplications: false, hasFeed: true })).toBe('page')
+  for (const platform of ['win32', 'darwin'] as const) expect(updateMode({ platform, inApplications: true, hasFeed: false })).toBe('page')
 })
 
 it('fails if Download or Restart is dropped during a background check', async () => {
@@ -232,7 +238,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   const { u } = setup(async () => v013, {
     prepareToQuit: () => new Promise((_resolve, reject) => { fail = reject }),
     load: () => new Promise((resolve) => {
-      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null })
+      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null })
       reading()
     })
   })
@@ -380,4 +386,51 @@ it.each(['opted out', 'test run', 'development build'])('fails if automatic netw
     u.stop()
     vi.useRealTimers()
   }
+})
+
+describe('release notes from the GitHub list', () => {
+  const page = (tag: string) => `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`
+  const whatsNew = (...items: string[]) => ["## What's new", '', ...items.map((i) => `* ${i}`), '', '## Download', '', '* Windows: the installer.'].join('\n')
+  const installOnly = '# Reel Studio 0.1.3 (preview)\n\nTurn a raw talking-head video into a finished, postable Reel. Drop in your takes.\n\n## First open\n\n* **Windows:** SmartScreen says "Windows protected your PC".'
+  const list = [
+    { tag_name: 'ffmpeg-7.1.1-rs3', draft: false, body: 'Source.', published_at: '2026-11-20T10:00:00Z' },
+    { tag_name: 'v0.1.6', draft: true, body: whatsNew('Draft.') },
+    { tag_name: 'v0.1.4', draft: false, html_url: page('v0.1.4'), body: whatsNew('**Send to my phone over a QR code.** Scan it once.'), published_at: '2026-11-09T18:00:00Z' },
+    { tag_name: 'v0.1.5', draft: false, html_url: page('v0.1.5'), body: whatsNew('**Captions you can drag.** Grab one.', 'Music ducks under your voice'), published_at: '2026-11-18T18:00:00Z' },
+    { tag_name: 'v0.1.3', draft: false, html_url: page('v0.1.3'), body: installOnly, published_at: '2026-10-30T18:00:00Z' },
+    { tag_name: 'v0.1.2', draft: false, html_url: page('v0.1.2'), body: whatsNew('**Use your own Claude.** Every installer offers it.'), published_at: '2026-10-21T00:47:16Z' }
+  ]
+  const github = (body: unknown): FetchLike => async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body })
+
+  it("fails if the update popover drops a skipped release's notes or shows install steps as changes", async () => {
+    const { u } = setup(async () => null, { backend: releasePageBackend(github(list), '0.1.2'), mode: 'page' })
+    await u.check('button')
+    expect(u.state().releaseNotes).toEqual([
+      { version: '0.1.5', items: ['Captions you can drag.', 'Music ducks under your voice'], totalItems: 2 },
+      { version: '0.1.4', items: ['Send to my phone over a QR code.'], totalItems: 1 }
+    ])
+    expect(JSON.stringify(u.state())).not.toContain('SmartScreen')
+  })
+
+  it("fails if What's new lists drafts or source tags, loses a release's date or headline, or is empty after an offline launch", async () => {
+    const first = setup(async () => null, { backend: releasePageBackend(github(list), '0.1.2'), mode: 'page' })
+    await first.u.check('button')
+    const releases = [
+      { version: '0.1.5', date: '2026-11-18T18:00:00Z', summary: 'Captions you can drag. Music ducks under your voice.', url: page('v0.1.5') },
+      { version: '0.1.4', date: '2026-11-09T18:00:00Z', summary: 'Send to my phone over a QR code.', url: page('v0.1.4') },
+      { version: '0.1.3', date: '2026-10-30T18:00:00Z', summary: 'Turn a raw talking-head video into a finished, postable Reel.', url: page('v0.1.3') },
+      { version: '0.1.2', date: '2026-10-21T00:47:16Z', summary: 'Use your own Claude.', url: page('v0.1.2') }
+    ]
+    expect(first.u.state().releases).toEqual(releases)
+    const offline = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com')), { memory: first.memory(), mode: 'page' })
+    await offline.u.init()
+    expect(offline.u.state().releases).toEqual(releases)
+  })
+})
+
+it('fails if a saved What\'s new date that is not a date reaches Settings', async () => {
+  const url = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
+  const { u } = setup(async () => null, { memory: { updateHistory: [{ version: '0.1.3', date: 'not-a-date', summary: 'Captions you can drag.', url }] } })
+  await u.init()
+  expect(u.state().releases).toEqual([{ version: '0.1.3', date: null, summary: 'Captions you can drag.', url }])
 })

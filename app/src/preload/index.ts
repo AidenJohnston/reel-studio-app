@@ -27,7 +27,9 @@ const api: ReelApi = {
     chooseFolder: () => call('app:chooseFolder'),
     setRoot: (p) => call('app:setRoot', p),
     onCommand: (cb) => on<AppCommand>('app:command', cb),
-    startDrag: (file) => ipcRenderer.send('app:startDrag', file)
+    startDrag: (file) => ipcRenderer.send('app:startDrag', file),
+    legal: (doc) => call('app:legal', doc),
+    showLegal: (doc) => call('app:showLegal', doc)
   },
   model: {
     status: () => call('model:status'),
@@ -97,7 +99,7 @@ const api: ReelApi = {
     check: () => call('update:check'),
     download: () => call('update:download'),
     install: () => call('update:install'),
-    openRelease: () => call('update:openRelease'),
+    openRelease: (version) => call('update:openRelease', version),
     busy: () => call('update:busy'),
     dismiss: (version) => call('update:dismiss', version),
     setEnabled: (on) => call('update:setEnabled', on)

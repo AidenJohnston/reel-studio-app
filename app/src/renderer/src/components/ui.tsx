@@ -10,6 +10,34 @@ export function Progress({ pct, done, label }: { pct: number; done?: boolean; la
   )
 }
 
+/** A bounded scroll box that fades out at an edge its content continues past (styles.css .fades). Edge
+ * sentinels and an IntersectionObserver set data-above / data-more, so scrolling reads no layout. */
+export function FadeScroll({ className, testid, children }: { className: string; testid?: string; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  const top = useRef<HTMLSpanElement>(null)
+  const end = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el || !top.current || !end.current) return
+    const seen = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) el.toggleAttribute(e.target === top.current ? 'data-above' : 'data-more', !e.isIntersecting)
+      },
+      { root: el }
+    )
+    seen.observe(top.current)
+    seen.observe(end.current)
+    return () => seen.disconnect()
+  }, [])
+  return (
+    <div ref={box} className={`${className} fades`} data-testid={testid}>
+      <span ref={top} className="fade-edge" aria-hidden />
+      {children}
+      <span ref={end} className="fade-edge" aria-hidden />
+    </div>
+  )
+}
+
 export function Spinner() {
   return <span className="spin" aria-hidden />
 }
