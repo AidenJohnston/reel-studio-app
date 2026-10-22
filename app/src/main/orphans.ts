@@ -76,7 +76,9 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           continue
         }
         engines.set(pid, project)
+        // a 0.1.x list names no video: which one it writes to is as unknown as with an unreadable list
         if (project) stillRunning.push(project)
+        else unknown = true
       }
       save()
       return { stopped, stillRunning: unknown ? [...new Set([...stillRunning, ...(await lockedProjects())])] : stillRunning, unknown }

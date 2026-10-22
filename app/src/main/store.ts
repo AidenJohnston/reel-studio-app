@@ -345,6 +345,8 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
   const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
   await cleanPartialVersions(dir)
+  // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
+  await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
   await updateAppState(slug, (st) => {
     st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
     if (saved) {

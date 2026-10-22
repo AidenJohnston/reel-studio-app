@@ -197,12 +197,14 @@ describe('project store', () => {
     expect(await recoverInterrupted()).toEqual([])
   })
 
-  it('a note that never got saved is not a version, before or after the app restarts', async () => {
+  it('a note that never got saved is not a version, and leaves no private copy, before or after the app restarts', async () => {
     setupPaths()
     await ensureRoot()
     const dir = fakeProject('zeta', { versions: [1] })
     mkdirSync(join(dir, 'versions', 'v2'), { recursive: true }) // the app closed between the final render and the save
     writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'never saved')
+    mkdirSync(join(dir, 'work', 'notes', 'j5'), { recursive: true })
+    writeFileSync(join(dir, 'work', 'notes', 'j5', 'edit.json'), '{}')
     expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
     await updateAppState('zeta', (s) => {
       s.job = { id: 'j5', kind: 'note', startedAt: new Date().toISOString() }
@@ -210,6 +212,7 @@ describe('project store', () => {
     await recoverInterrupted()
     expect((await readAppState('zeta')).chat.at(-1)?.text).toMatch(/closed before I finished/)
     expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
+    expect(existsSync(join(dir, 'work', 'notes', 'j5'))).toBe(false)
   })
 
   it('the app closed right after a note was saved: once project.json can be read, its reply and question are posted once', async () => {
