@@ -1,0 +1,45 @@
+# Refuse private material in the public repo (scripts/leak-check/check.py).
+#
+# pull_request_target runs THIS file and the checker from main, never from the pull request, so a pull request
+# cannot change or skip the check. The pull request is checked out as data only: the checker reads its files and
+# nothing from it is installed, built or run. The token can only read, and is not kept in either checkout.
+name: Leak check
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-check-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  leak-check:
+    name: Leak check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the checker from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the pull request (read as data, never run)
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Scan
+        env:
+          TARGET: ${{ github.event_name == 'pull_request_target' && 'candidate' || 'trusted' }}
+        run: python3 trusted/scripts/leak-check/check.py --root "$TARGET"
