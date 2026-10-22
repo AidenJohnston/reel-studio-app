@@ -7,6 +7,10 @@ export interface PlatformRule {
   maxSeconds: number
   maxBytes: number
   maxBitrate?: number
+  maxAudioBitrate?: number
+  noEditLists?: true
+  /** Seconds; a longer gap between keyframes needs a re-encode. */
+  maxKeyframeGap?: number
   captionLimit: number | null
   hashtagLimit: number | null
   width: number
@@ -19,14 +23,15 @@ export interface PlatformRule {
 
 // Offline targets checked 2026-10-22. Notes distinguish account-dependent and local limits.
 export const PLATFORM_RULES: readonly PlatformRule[] = [
-  { id: 'instagram', label: 'Instagram Reels', minSeconds: 3, maxSeconds: 900, maxBytes: 300_000_000, maxBitrate: 25_000_000, captionLimit: 2200, hashtagLimit: 30, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media',
+  { id: 'instagram', label: 'Instagram Reels', minSeconds: 3, maxSeconds: 900, maxBytes: 300_000_000, maxBitrate: 25_000_000, maxAudioBitrate: 128_000, noEditLists: true, captionLimit: 2200, hashtagLimit: 30, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media',
     tryTwo: { tests: 'video', source: 'https://creators.instagram.com/blog/instagram-trial-reels', steps: "Post each video as a trial reel. Before you share, turn on Trial and leave automatic sharing off. Instagram shows trial reels to people who don't follow you first. After about a day, compare their views, then tap Share with everyone on the one that did better. No Trial switch? Your account can't use trial reels yet, so post Try 1." } },
   { id: 'tiktok', label: 'TikTok', maxSeconds: 180, maxBytes: 4_000_000_000, captionLimit: 2200, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post', note: '3-minute offline target. Your account may allow more. Check its upload limit before posting.' },
   { id: 'youtube', label: 'YouTube Shorts', maxSeconds: 180, maxBytes: 256_000_000_000, captionLimit: 5000, hashtagLimit: 60, width: 1080, height: 1920, source: 'https://support.google.com/youtube/answer/15424877', note: 'The caption is a description. Add a separate title of up to 100 characters when you upload.' },
-  { id: 'facebook', label: 'Facebook Reels', minSeconds: 3, maxSeconds: 90, maxBytes: 1_000_000_000, captionLimit: null, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/video-api/guides/reels-publishing', note: '90-second Reels target. The current guide does not give a caption, hashtag or byte maximum; 1 GB is the local file ceiling.',
+  { id: 'facebook', label: 'Facebook Reels', minSeconds: 3, maxSeconds: 90, maxBytes: 1_000_000_000, maxKeyframeGap: 5, captionLimit: null, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/video-api/guides/reels-publishing', note: '90-second Reels target. The current guide does not give a caption, hashtag or byte maximum; 1 GB is the local file ceiling.',
     tryTwo: { tests: 'cover-caption', source: 'https://about.fb.com/news/2023/11/helping-creators-test-content-and-earn-rewards/', steps: "In the Facebook app, make the reel with the video. Before you share, add Try 2's cover and caption as a test. Facebook shows each to part of your audience and keeps the one that does better. No test option? Post Try 1." } },
-  { id: 'threads', label: 'Threads', maxSeconds: 300, maxBytes: 1_000_000_000, captionLimit: 500, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/threads/posts', note: 'Only one topic becomes a linked tag. Each emoji counts as its size in bytes, usually 4.' },
+  { id: 'threads', label: 'Threads', maxSeconds: 300, maxBytes: 1_000_000_000, maxAudioBitrate: 128_000, noEditLists: true, captionLimit: 500, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/threads/posts', note: 'Only one topic becomes a linked tag. Each emoji counts as its size in bytes, usually 4.' },
   { id: 'x', label: 'X', minSeconds: 0.5, maxSeconds: 1200, maxBytes: 8_000_000_000, captionLimit: 280, hashtagLimit: null, width: 720, height: 1280, source: 'https://docs.x.com/x-api/media/quickstart/best-practices', note: 'Standard account target. Every https:// link counts as 23. Confirm the caption length in X before posting.' },
+  // LinkedIn's caption limit is the composer's: "Posts can contain up to 3,000 characters." (linkedin.com/help/linkedin/answer/a528176)
   { id: 'linkedin', label: 'LinkedIn', minSeconds: 3, maxSeconds: 1800, maxBytes: 500_000_000, captionLimit: 3000, hashtagLimit: null, width: 1080, height: 1920, source: 'https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api', note: 'Uses the documented 500 MB video specification, below the larger multipart upload ceiling.' }
 ]
 
@@ -67,25 +72,23 @@ function parseSecondTry(value: unknown): PlatformTry | null {
   return { version: value.version, caption: value.caption, coverSeconds: value.coverSeconds }
 }
 
-/** `version` is Try 1's Version, the one being exported. */
-export function parsePlatformExportRequest(value: unknown, version: number): PlatformExportRequest {
+export function parsePlatformExportRequest(value: unknown): PlatformExportRequest {
   if (!value || typeof value !== 'object' || !('platforms' in value) || !Array.isArray(value.platforms) ||
       !value.platforms.length || value.platforms.length > PLATFORM_RULES.length ||
       !value.platforms.every((p): p is Platform => typeof p === 'string' && PLATFORM_RULES.some((r) => r.id === p)) ||
       !('caption' in value) || !validCaption(value.caption) || !('coverSeconds' in value) || !validCover(value.coverSeconds) ||
       !('second' in value)) throw badRequest()
-  const request: PlatformExportRequest = { platforms: [...new Set(value.platforms)], caption: value.caption, coverSeconds: value.coverSeconds, second: parseSecondTry(value.second) }
-  const problem = request.second && secondTryProblem(request.platforms, { version, caption: request.caption, coverSeconds: request.coverSeconds }, request.second)
-  if (problem) throw { code: 'BAD_EXPORT', userMessage: problem }
-  return request
+  return { platforms: [...new Set(value.platforms)], caption: value.caption, coverSeconds: value.coverSeconds, second: parseSecondTry(value.second) }
 }
 
 export type TryChange = 'video' | 'cover' | 'caption'
 
-export function tryChanges(first: PlatformTry, second: PlatformTry): TryChange[] {
+/** `fps` is the render's: two cover times on the same frame are the same cover. */
+export function tryChanges(first: PlatformTry, second: PlatformTry, fps: number): TryChange[] {
+  const frame = (seconds: number | null) => seconds === null ? null : Math.round(seconds * fps)
   const changes: TryChange[] = []
   if (second.version !== first.version) changes.push('video')
-  if (second.coverSeconds !== first.coverSeconds) changes.push('cover')
+  if (frame(second.coverSeconds) !== frame(first.coverSeconds)) changes.push('cover')
   if (second.caption !== first.caption) changes.push('caption')
   return changes
 }
@@ -99,8 +102,8 @@ export function secondTryPlatforms(platforms: Platform[], sameVideo: boolean): P
 }
 
 /** Why Try 2 cannot be exported, or null. */
-export function secondTryProblem(platforms: Platform[], first: PlatformTry, second: PlatformTry): string | null {
-  const changes = tryChanges(first, second)
+export function secondTryProblem(platforms: Platform[], first: PlatformTry, second: PlatformTry, fps: number): string | null {
+  const changes = tryChanges(first, second, fps)
   if (!changes.length) return 'Try 2 is the same as Try 1. Pick another version, cover or caption.'
   if (secondTryPlatforms(platforms, !changes.includes('video')).length) return null
   return changes.includes('video')
@@ -115,6 +118,7 @@ export interface ExportIssue {
   blocking: boolean
 }
 
+const LINK = /https?:\/\/\S+/gu
 const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u
 const utf8Length = (text: string): number => new TextEncoder().encode(text).length
 const graphemes = (text: string): string[] => [...new Intl.Segmenter().segment(text)].map((s) => s.segment)
@@ -137,9 +141,12 @@ export function checkPlatform(platform: Platform, caption: string, seconds: numb
       ? { kind: 'caption', blocking: false, message: `Probably ${count} of ${rule.captionLimit} once links are shortened. Shorten the caption, or check it in X before posting.` }
       : { kind: 'caption', blocking: true, message: `Post caption is ${count} of ${rule.captionLimit}. Shorten it before exporting.` })
   }
-  const tags = caption.match(/#[\p{L}\p{N}_]+/gu) ?? []
-  if (platform === 'instagram' && (caption.match(/@[a-zA-Z0-9_.]+/gu) ?? []).length > 20) issues.push({ kind: 'mentions', blocking: true, message: 'Instagram allows at most 20 mentions. Remove extra @mentions before exporting.' })
-  if (rule.hashtagLimit !== null && tags.length > rule.hashtagLimit) issues.push({ kind: 'hashtags', blocking: true, message: `${tags.length} hashtags; use at most ${rule.hashtagLimit}.` })
+  // A link's #fragment, an e-mail address or "issue#5" is not a tag or a mention; "#one#two" is two tags.
+  const words = caption.replace(LINK, ' ')
+  const tags = (words.match(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+(?:#[\p{L}\p{N}_]+)*/gu) ?? []).reduce((n, run) => n + run.split('#').length - 1, 0)
+  const mentions = (words.match(/(?<![\p{L}\p{N}_.])@[a-zA-Z0-9_.]+/gu) ?? []).length
+  if (platform === 'instagram' && mentions > 20) issues.push({ kind: 'mentions', blocking: true, message: 'Instagram allows at most 20 mentions. Remove extra @mentions before exporting.' })
+  if (rule.hashtagLimit !== null && tags > rule.hashtagLimit) issues.push({ kind: 'hashtags', blocking: true, message: `${tags} hashtags; use at most ${rule.hashtagLimit}.` })
   if (seconds > rule.maxSeconds) {
     issues.push(platform === 'tiktok'
       ? { kind: 'duration', blocking: false, message: `This video is ${seconds.toFixed(1)} s. Some TikTok accounts only take ${rule.maxSeconds} s; check yours before posting.` }
@@ -155,7 +162,8 @@ const X_LIGHT: [number, number][] = [[0, 4351], [8192, 8205], [8208, 8223], [824
 
 function xWeightedLength(text: string): number {
   let links = 0
-  const rest = text.replace(/https?:\/\/\S+/gu, (link) => {
+  // X counts after NFC normalization, so a decomposed "é" is one character.
+  const rest = text.normalize('NFC').replace(LINK, (link) => {
     links++
     return /[.,!?;:)]+$/u.exec(link)?.[0] ?? ''
   })
@@ -164,7 +172,7 @@ function xWeightedLength(text: string): number {
     : [...g].reduce((m, ch) => m + (X_LIGHT.some(([a, b]) => ch.codePointAt(0)! >= a && ch.codePointAt(0)! <= b) ? 1 : 2), 0)), 0)
 }
 
-/** What `probe` reports about the finished render. */
+/** What `export-probe` reports about the finished render. */
 export interface FinishedVideo {
   duration: number
   width: number
@@ -174,14 +182,24 @@ export interface FinishedVideo {
   acodec: string | null
   pixFmt: string | null
   sizeBytes: number
+  audioBitrate: number | null
+  editList: boolean
+  maxKeyframeGap: number
 }
 
-/** The final render (H.264 High at CRF 18, AAC; engine/reelengine/render.py) can be posted as it is. */
-export function usableAsIs(platform: Platform, video: FinishedVideo): boolean {
+/**
+ * How the final render (H.264 High at CRF 18, AAC 192k; engine/reelengine/render.py) becomes this platform's
+ * file: as it is, with only its audio redone and its edit list dropped (remux), or re-encoded.
+ */
+function preparation(platform: Platform, video: FinishedVideo): 'copy' | 'remux' | 'encode' {
   const rule = platformRule(platform)
-  return video.vcodec === 'h264' && video.acodec === 'aac' && video.pixFmt === 'yuv420p' &&
+  const pictureFits = video.vcodec === 'h264' && video.acodec === 'aac' && video.pixFmt === 'yuv420p' &&
     video.width === rule.width && video.height === rule.height && video.fps >= 24 && video.fps <= 60 &&
-    video.sizeBytes <= rule.maxBytes && (rule.maxBitrate === undefined || video.sizeBytes * 8 / video.duration <= rule.maxBitrate)
+    video.sizeBytes <= rule.maxBytes && (rule.maxBitrate === undefined || video.sizeBytes * 8 / video.duration <= rule.maxBitrate) &&
+    (rule.maxKeyframeGap === undefined || video.maxKeyframeGap <= rule.maxKeyframeGap)
+  if (!pictureFits) return 'encode'
+  const audioFits = rule.maxAudioBitrate === undefined || (video.audioBitrate !== null && video.audioBitrate <= rule.maxAudioBitrate)
+  return audioFits && !(rule.noEditLists && video.editList) ? 'copy' : 'remux'
 }
 
 export interface ExportSpec {
@@ -197,11 +215,13 @@ export function exportSpec(platform: Platform, seconds: number): ExportSpec {
   return { width: rule.width, height: rule.height, videoBitrate: Math.min(8_000_000, budget) }
 }
 
-/** Platforms that need their own encode, grouped so matching specs share one. */
-export function encodeGroups(platforms: Platform[], video: FinishedVideo): { platforms: Platform[]; spec: ExportSpec }[] {
-  const groups = new Map<string, { platforms: Platform[]; spec: ExportSpec }>()
-  for (const platform of platforms.filter((p) => !usableAsIs(p, video))) {
-    const spec = exportSpec(platform, video.duration)
+/** Platforms that need their own file, grouped so matching outputs share one. A null spec is a remux. */
+export function outputGroups(platforms: Platform[], video: FinishedVideo): { platforms: Platform[]; spec: ExportSpec | null }[] {
+  const groups = new Map<string, { platforms: Platform[]; spec: ExportSpec | null }>()
+  for (const platform of platforms) {
+    const how = preparation(platform, video)
+    if (how === 'copy') continue
+    const spec = how === 'encode' ? exportSpec(platform, video.duration) : null
     const key = JSON.stringify(spec)
     const group = groups.get(key)
     if (group) group.platforms.push(platform)

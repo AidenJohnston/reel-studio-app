@@ -639,7 +639,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
-      {platformPicker && version && <PlatformExportDialog slug={slug} version={version} versions={d.versions} post={d.project.post} jobId={job?.jobId || undefined} status={job?.message} onClose={() => setPlatformPicker(false)} />}
+      {platformPicker && version && <PlatformExportDialog slug={slug} version={version} versions={d.versions} fps={d.project.format?.fps ?? 30} post={d.project.post} jobId={job?.jobId || undefined} status={job?.message} onClose={() => setPlatformPicker(false)} />}
       {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
     </div>
   )

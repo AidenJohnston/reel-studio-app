@@ -12,10 +12,12 @@ type PlatformFile = PlatformExportResult['files'][number]
 const andList = (names: string[]): string => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
 const fileName = (path: string): string | undefined => path.split(/[\\/]/).pop()
 
-export function PlatformExportDialog({ slug, version, versions, post, jobId, status, onClose }: {
+export function PlatformExportDialog({ slug, version, versions, fps, post, jobId, status, onClose }: {
   slug: string
   version: VersionInfo
   versions: VersionInfo[]
+  /** The render's frame rate, to tell whether two cover times are the same frame. */
+  fps: number
   post: ProjectJson['post']
   jobId?: string
   /** What the export job is doing right now. */
@@ -51,7 +53,7 @@ export function PlatformExportDialog({ slug, version, versions, post, jobId, sta
   const secondVersion = second && versions.find((v) => v.n === second.version)
   const secondPlatforms = second ? secondTryPlatforms(selected, second.version === version.n) : []
   const secondDuration = second?.version === version.n ? seconds : secondSeconds
-  const secondProblem = second && selected.length ? secondTryProblem(selected, first, second) : null
+  const secondProblem = second && selected.length ? secondTryProblem(selected, first, second, fps) : null
   const issues = (platforms: Platform[], text: string, duration: number | null, prefix: string) => duration === null ? [] : platforms.flatMap((platform) =>
     checkPlatform(platform, text, duration).map((issue) => ({ ...issue, text: `${prefix}${platformRule(platform).label}: ${issue.message}` })))
   // A Try 2 on Try 1's video would only repeat Try 1's duration issues.
@@ -186,7 +188,7 @@ export function PlatformExportDialog({ slug, version, versions, post, jobId, sta
             })}
           </p>
           <p id="try-two-status" role="status" className={secondProblem ? 'platform-errors' : 'muted-sm'} data-testid="try-two-status">
-            {secondProblem ?? (tryChanges(first, second).length > 1 ? "You changed more than one thing. If Try 2 wins, you won't know which change helped." : null)}
+            {secondProblem ?? (tryChanges(first, second, fps).length > 1 ? "You changed more than one thing. If Try 2 wins, you won't know which change helped." : null)}
           </p>
         </fieldset>}
         <label className="platform-option">

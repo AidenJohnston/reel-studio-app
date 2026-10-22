@@ -285,7 +285,9 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
+    let stopped: AbortSignal | undefined
     jobs.start(slug, 'rerender', async (emit, signal) => {
+      stopped = signal
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
@@ -298,6 +300,7 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
       return { summary: '', version, quiet: true }
     })
     await jobs.forSlug(slug)?.done
+    if (stopped?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     versions = await listVersions(dir)
     v = versions[versions.length - 1]
     if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
@@ -533,14 +536,14 @@ function registerIpc(): void {
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
-    const request = parsePlatformExportRequest(value, n)
+    const request = parsePlatformExportRequest(value)
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
     const version = await finishedExportVersion(slug, n)
     const project = await readProject(slug)
     const exportTry = (v: VersionInfo, platforms: Platform[], { caption, coverSeconds }: Pick<PlatformTry, 'caption' | 'coverSeconds'>): ExportTry => {
       const chosenCover = join(dirname(v.videoPath), 'cover.png')
-      return { source: v.videoPath, chosenCover: existsSync(chosenCover) ? chosenCover : null,
+      return { version: v.n, source: v.videoPath, chosenCover: existsSync(chosenCover) ? chosenCover : null,
         name: `${safeFileName(project.title || slug)} - Version ${v.n}`, platforms, caption, coverSeconds }
     }
     const first = exportTry(version, request.platforms, request)

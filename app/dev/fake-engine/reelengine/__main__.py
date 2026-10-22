@@ -7,6 +7,7 @@ transcribe: the transcript is placeholder words spread over the take.
 Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
+  FAKE_ENGINE_SLOW_RENDER=<seconds>   a full-quality render waits this long first, in small steps (Stop tests)
 """
 from __future__ import annotations
 
@@ -260,6 +261,10 @@ def cmd_render(args: list[str]) -> dict:
     data = load(proj)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
+    slow = 0.0 if draft else float(os.environ.get("FAKE_ENGINE_SLOW_RENDER", "0") or 0)
+    for i in range(int(slow * 10)):
+        progress("render", i / slow, "Putting it all together")
+        time.sleep(0.1)
     # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
     n = int(data.get("version", 0)) + 1
     vdir = proj / "versions" / ("preview" if draft else f"v{n}")
@@ -295,6 +300,24 @@ def cmd_render(args: list[str]) -> dict:
 def cmd_probe(args: list[str]) -> dict:
     files = [a for a in args if not a.startswith("--")]
     return probe(files[0])
+
+
+def cmd_export_probe(args: list[str]) -> dict:
+    info = cmd_probe(args)
+    out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate", "-of", "csv=p=0", args[0]],
+                         capture_output=True, text=True).stdout.strip()
+    # The real engine reads the edit list and keyframes from the file; assume the worst, so platforms that care remux.
+    return {**info, "audioBitrate": int(out) if out.isdigit() else None, "editList": True, "maxKeyframeGap": info["duration"]}
+
+
+def cmd_export_media(args: list[str]) -> dict:
+    dest = take(args, "--dest")
+    width, height, bitrate = take(args, "--width"), take(args, "--height"), take(args, "--bitrate")
+    video = (["-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+              "-c:v", "libx264", "-preset", "ultrafast", "-b:v", bitrate, "-pix_fmt", "yuv420p"] if width else ["-c:v", "copy"])
+    run_ffmpeg([FFMPEG, "-y", "-v", "error", "-i", args[0], *video, "-c:a", "aac", "-b:a", "128k", "-use_editlist", "0", dest],
+               float(probe(args[0])["duration"]), "export", "Saving platform files", 0, 100)
+    return {"video": dest, "sizeBytes": Path(dest).stat().st_size}
 
 
 def cmd_export_cover(args: list[str]) -> dict:
@@ -351,7 +374,8 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach, "export-cover": cmd_export_cover,
+    "download-model": cmd_download_model, "attach": cmd_attach, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
+    "export-media": cmd_export_media,
 }
 
 
