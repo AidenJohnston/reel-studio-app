@@ -87,7 +87,7 @@ const BLOCKED = new net.BlockList();
 for (const [a, n] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
   ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
   ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv4');
-for (const [a, n] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['100::', 64], ['64:ff9b:1::', 48]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv6');
+for (const [a, n] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['2001::', 32], ['2002::', 16], ['100::', 64], ['64:ff9b:1::', 48]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv6');
 
 /** The IPv4 address inside a NAT64 (64:ff9b::/96) address. BlockList already checks IPv4-mapped ones as IPv4. */
 function nat64IPv4(v6: string): string | null {

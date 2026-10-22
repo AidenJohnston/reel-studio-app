@@ -185,6 +185,11 @@ describe('finding 5: downloads are http(s) to public hosts, capped, timed, and r
     } finally { site.close(); }
   });
 
+  it.each(['2002::1', '2002:0808:0808::1', '2001::1', '2001:0:808:808:0:0:f7f7:f7f7'])(
+    'refuses tunnel address %s even when its embedded IPv4 is public', (ip) => {
+      expect(isBlockedAddress(ip)).toBe(true);
+    });
+
   it('NAT64 and IPv4-mapped spellings of private addresses are refused, NAT64 of a public one is not', () => {
     for (const ip of ['64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '64:ff9b::127.0.0.1', '64:ff9b:1::a00:1', '::ffff:127.0.0.1', '::ffff:7f00:1']) expect(isBlockedAddress(ip), ip).toBe(true);
     expect(isBlockedAddress('64:ff9b::808:808')).toBe(false);
