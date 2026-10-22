@@ -413,7 +413,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .export-head { display: flex; gap: 18px; align-items: flex-start; }
 .platform-options { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
 .platform-options legend { font-weight: 600; margin-bottom: 8px; }
-.platform-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; min-height: 44px; cursor: pointer; }
+.platform-option { display: flex; flex: none; align-items: flex-start; gap: 10px; padding: 10px 0; min-height: 44px; cursor: pointer; }
 .platform-option input { margin-top: 5px; flex: none; }
 .platform-option span { min-width: 0; }
 .platform-option small { display: block; color: var(--ink-3); font-size: 13px; margin-top: 3px; }
