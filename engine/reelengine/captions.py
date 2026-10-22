@@ -3,6 +3,7 @@
 Caption doctrine (ported from a captions pipeline shipped across 80 reels):
   * up to `maxWords` words per cue, breaking early on a sentence end; commas never break a line
   * a number never opens a line and is never orphaned from its unit ("DAY 1", "3,000 USERS")
+  * the words one phrase correction wrote ("TypeScript Pro") stay on one line
   * cues are built per SPEECH RUN: no cue ever spans a long silence
   * gap-hold: a cue stays up until just before the next one, so the rail never blinks in a pause
   * uniform size, shrink-only for over-wide lines
@@ -280,6 +281,8 @@ def chunk(words: list, max_words: int = MAX_WORDS) -> list:
         if len(cur) < max_words:
             continue
         nxt = words[i] if i < len(words) else None
+        if nxt is not None and nxt.get("ids") and nxt.get("ids") == cur[-1].get("ids"):
+            continue    # the words one phrase correction wrote stay on one line
         if nxt is not None and len(cur) < max_words + 1:
             if is_number(nxt["w"]):
                 continue
@@ -601,10 +604,17 @@ def build_for_timeline(tl, proj: dict, width: int, height: int, words_out=None, 
     cues = build_cues(words_out if words_out is not None else tl.words_out, cap,
                       hidden_set(tl, cap), stats)
     ass, report, warns, font = render_ass(cues, cap, width, height, position_spans)
-    # the subtitle editor shows and edits each word as drawn, by the transcript words it came from
+    # the subtitle editor shows and edits each word as drawn, by the transcript words it came from; the
+    # words one phrase correction wrote share their ids and are edited as one
     for r, c in zip(report, cues):
         r["run"] = c["run"]
-        r["tokens"] = [{"w": w, "ids": [i for i in ids if i]} for w, ids in zip(c["words"], c["wids"])]
+        r["tokens"] = []
+        for w, ids in zip(c["words"], c["wids"]):
+            ids = [i for i in ids if i]
+            if r["tokens"] and r["tokens"][-1]["ids"] == ids:
+                r["tokens"][-1]["w"] += " " + w
+            else:
+                r["tokens"].append({"w": w, "ids": ids})
     unused = [k for k, v in stats.items() if v == 0]
     if unused:
         warns.append("caption corrections that matched nothing: " + ", ".join(unused))

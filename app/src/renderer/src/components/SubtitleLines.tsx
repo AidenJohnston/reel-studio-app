@@ -114,7 +114,7 @@ export function SubtitleLines({
                   e.preventDefault()
                   const next = typed(i)
                   const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next) })).filter((t) => t.shown)
-                  const k = breakAt(after, el.selectionStart ?? 0)
+                  const k = after.length ? breakAt(after, el.selectionStart ?? 0) : 0
                   if (k <= 0 || k >= after.length) return keepTyping(next)
                   setDraft(null)
                   caretTo.current = after[k].ids[0]

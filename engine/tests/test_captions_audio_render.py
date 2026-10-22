@@ -151,3 +151,7 @@ def test_the_subtitle_editor_gets_each_word_as_drawn_and_can_fix_one_made_of_two
     cap["corrections"] += [{"from": "TypeScript.", "to": "Typescript", "at": "w2"}, {"from": "TypeScript.", "to": "", "at": "w3"}]
     _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
     assert report[0]["tokens"][2] == {"w": "Typescript", "ids": ["w2"]}
+    # a correction that writes several words is one word to the editor
+    cap = {"corrections": [{"from": "type script", "to": "Type Script Pro"}]}
+    _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
+    assert {"w": "Type Script Pro.", "ids": ["w2", "w3"]} in [t for c in report for t in c["tokens"]]
