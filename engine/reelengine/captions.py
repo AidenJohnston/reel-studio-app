@@ -34,7 +34,9 @@ MIN_CUE = 0.30
 RUN_GAP = 0.80          # a silence longer than this splits caption runs
 MARGIN_FRAC = 0.065     # left/right safe margin, fraction of width
 MIN_SHRINK = 0.62       # below this fraction of the base size, wrap to two lines instead
-FADE = "\\fad(60,40)"
+FADE_IN, FADE_OUT = 60, 40
+# "pop": the line grows from 80% to full size over its first 120 ms, decelerating (accel 0.5)
+POP_IN = "\\fscx80\\fscy80\\t(0,120,0.5,\\fscx100\\fscy100)"
 DEFAULT_FONT = "Montserrat SemiBold"
 DEFAULT_SIZE = 105       # the proven size on a 1080x1920 canvas
 DEFAULT_OUTLINE = 8      # solid black; load-bearing on bright walls
@@ -255,6 +257,7 @@ def chunk(words: list, max_words: int = MAX_WORDS) -> list:
     def flush():
         if cur:
             cues.append({"s": cur[0]["s"], "e": cur[-1]["e"], "words": [w["w"] for w in cur],
+                         "starts": [w["s"] for w in cur],
                          "ids": [x for w in cur for x in w.get("ids", [w.get("id")]) if x]})
             cur.clear()
 
@@ -448,6 +451,36 @@ def ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
 
 
+def inline_color(hexcol: str) -> str:
+    """'#FFD60A' -> '&H0AD6FF&', the colour override form of ass_color (alpha left to the style)."""
+    return f"&H{ass_color(hexcol)[4:]}&"
+
+
+def word_spans(c: dict, text_lines: list):
+    """[(start, end)] of each spoken word of a cue, for the word-by-word highlight: a word is lit from
+    its start until the next one starts, the last one until the cue ends. None when the cue's text no
+    longer has one token per word (a word that was only punctuation was stripped from the line)."""
+    starts = c.get("starts") or []
+    if sum(len(t.split(" ")) for t in text_lines) != len(starts):
+        return None
+    ends = starts[1:] + [c["e"]]
+    return [(c["s"] if k == 0 else s, e) for k, (s, e) in enumerate(zip(starts, ends))]
+
+
+def line_text(text_lines: list, active: int, marks: tuple) -> str:
+    """The cue's lines with word number `active` in the highlight colour. Every event of a cue has
+    the same text and size, so libass lays it out identically and only the colour moves."""
+    on, off = marks
+    out, k = [], 0
+    for line in text_lines:
+        toks = []
+        for tok in line.split(" "):
+            toks.append(f"{{\\1c{on}}}{ass_escape(tok)}{{\\1c{off}}}" if k == active else ass_escape(tok))
+            k += 1
+        out.append(" ".join(toks))
+    return "\\N".join(out)
+
+
 def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, stats=None) -> list:
     style = cap.get("style") or {}
     max_words = int(style.get("maxWords") or MAX_WORDS)
@@ -524,12 +557,21 @@ def render_ass(cues: list, cap: dict, width: int, height: int, position_spans=No
     )
     lines = [head.rstrip("\n")]
     report = []
+    highlight = style.get("highlight")
+    marks = (inline_color(highlight), inline_color(style.get("color") or "#FFFFFF")) if highlight else None
+    pop = POP_IN if style.get("pop") else ""
     for c in cues:
         cx, cy = width / 2.0, height * cue_position(c, pos_y, position_spans)
         fs, text_lines = fit(c["t"], base, safe_w, outline, meas)
-        text = "\\N".join(ass_escape(t) for t in text_lines)
-        lines.append(f"Dialogue: 0,{ts(c['s'])},{ts(c['e'])},Cap,,0,0,0,,"
-                     f"{{\\an5\\pos({cx:.0f},{cy:.0f})\\fs{fs}{FADE}}}{text}")
+        spans = word_spans(c, text_lines) if marks else None
+        lit = spans is not None
+        spans = spans or [(c["s"], c["e"])]
+        last = len(spans) - 1
+        for k, (t0, t1) in enumerate(spans):
+            text = line_text(text_lines, k, marks) if lit else "\\N".join(ass_escape(t) for t in text_lines)
+            lines.append(f"Dialogue: 0,{ts(t0)},{ts(t1)},Cap,,0,0,0,,"
+                         f"{{\\an5\\pos({cx:.0f},{cy:.0f})\\fs{fs}\\fad({FADE_IN if k == 0 else 0},{FADE_OUT if k == last else 0})"
+                         f"{pop if k == 0 else ''}}}{text}")
         wpx = max(meas.width(t, fs, outline) for t in text_lines)
         hpx = fs * len(text_lines) + 2 * outline
         report.append({"s": round(c["s"], 3), "e": round(c["e"], 3), "text": c["t"], "size": fs,

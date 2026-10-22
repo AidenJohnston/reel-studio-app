@@ -210,6 +210,10 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
+    await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
+    expect(ctx.project!.captions.style.highlight).toBe('#34C759');
+    await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
+    expect(ctx.project!.captions.style).not.toHaveProperty('highlight');
     expect((await executeTool(ctx, 'add_caption_correction', { from: 'flower', to: 'flour' })).isError).toBe(false);
     // no note asking to remember: proposed once (deduped), nothing saved
     await executeTool(ctx, 'add_style_rule', { rule: 'keep music quieter under talking' });

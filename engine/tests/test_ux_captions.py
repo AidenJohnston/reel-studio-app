@@ -1,4 +1,7 @@
 """Caption defaults = the proven default look (grandma test: captions were small, grey and on the chest)."""
+import re
+
+from conftest import mkwords
 from reelengine import captions, project
 
 
@@ -36,3 +39,16 @@ def test_box_style_draws_an_opaque_box():
     f = _style_line(ass)
     assert f[15] == "3"                    # BorderStyle 3 = opaque box in the outline colour
     assert float(f[16]) >= captions.BOX_PAD and float(f[17]) == 0.0
+
+
+def test_highlight_lights_each_spoken_word_in_turn_and_the_line_pops_once():
+    words = mkwords([(0.0, 0.3, "Make"), (0.4, 0.7, "it"), (0.8, 1.2, "pop.")])
+    cap = {"style": {"highlight": "#FFD60A", "pop": True}}
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    events = [l.split(",", 9) for l in ass.splitlines() if l.startswith("Dialogue:")]
+    # one event per word, each ending where the next starts: the line never blinks between words
+    assert [(e[1], e[2]) for e in events] == [("0:00:00.00", "0:00:00.40"), ("0:00:00.40", "0:00:00.80"),
+                                              ("0:00:00.80", "0:00:01.20")]
+    assert [re.findall(r"\{\\1c&H0AD6FF&\}(\w+)", e[9]) for e in events] == [["MAKE"], ["IT"], ["POP"]]
+    assert {re.sub(r"\{[^}]*\}", "", e[9]) for e in events} == {"MAKE IT POP"}
+    assert ["\\t(" in e[9] for e in events] == [True, False, False]

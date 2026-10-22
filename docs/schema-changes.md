@@ -35,3 +35,12 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
   `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
   the field, so the project matches one that never had it.
+
+## 2026-10-22 (caption presets)
+
+- `captions.style.highlight` (`#RRGGBB`, absent = none): the word being spoken is drawn in this colour, one
+  word at a time. Each word is lit from its start until the next word starts. A line whose text lost a token
+  (a word that was only punctuation) is drawn without the highlight.
+- `captions.style.pop` (boolean, absent = false): each line grows from 80% to full size over its first 120 ms.
+- `captions.style.preset` names the look the line started from in "Edit it myself" (`clean`, `bold-pop`,
+  `karaoke`, `boxed`, `minimal`). The engine draws only the style fields; the name is for the picker.

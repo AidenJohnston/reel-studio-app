@@ -7,7 +7,8 @@ import { reel, userMessage } from '../api'
 import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
 import { Icon } from '../components/icons'
-import { SubtitleSample, lookFromStyle, type SubtitleLook } from '../components/Player'
+import { SubtitleSample } from '../components/Player'
+import { CAPTION_PRESETS, applyPreset, lookFromStyle, presetOf, type SubtitleLook } from '../../../shared/caption-presets'
 
 export type Tab = 'cut' | 'captions' | 'music' | 'broll' | 'cover' | 'post'
 const TABS: { key: Tab; label: string }[] = [
@@ -44,8 +45,7 @@ function brollDetail(b: NonNullable<ProjectJson['broll']>[number]): string {
   return [kind, text].filter(Boolean).join(' · ')
 }
 
-// Caption controls in plain words. Defaults = the proven look (engine DEFAULT_CAPTION_STYLE):
-// 105 px, line centre at 0.75 of the height (just under the chin), white with a solid black outline.
+// Caption fine-tuning in plain words, on top of the look picked (shared/caption-presets.ts).
 type CapStyle = Record<string, unknown>
 const SIZES = [
   { key: 'small', label: 'Small', size: 84 },
@@ -56,10 +56,9 @@ const POSITIONS = [
   { key: 'higher', label: 'Higher', position: 0.66 },
   { key: 'lower', label: 'Lower', position: 0.75 }
 ]
-const LOOKS: { key: string; label: string; style: CapStyle }[] = [
-  { key: 'white', label: 'Plain', style: { color: '#FFFFFF', outlineColor: '#000000', box: false } },
-  { key: 'yellow', label: 'Yellow', style: { color: '#FFD60A', outlineColor: '#000000', box: false } },
-  { key: 'box', label: 'Black box', style: { color: '#FFFFFF', outlineColor: '#000000', box: true } }
+const COLORS = [
+  { key: 'white', label: 'White', color: '#FFFFFF' },
+  { key: 'yellow', label: 'Yellow', color: '#FFD60A' }
 ]
 function sizeKey(st: CapStyle): string {
   const n = Number(st.size ?? 105)
@@ -68,8 +67,7 @@ function sizeKey(st: CapStyle): string {
 function positionKey(st: CapStyle): string {
   return Number(st.position ?? 0.75) < 0.69 ? 'higher' : 'lower'
 }
-function lookKey(st: CapStyle): string {
-  if (st.box) return 'box'
+function colorKey(st: CapStyle): string {
   return String(st.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow'
 }
 
@@ -85,29 +83,28 @@ function Seg({ value, options, onPick, testid }: { value: string; options: { key
   )
 }
 
-/** Style swatches: a tiny phone frame with a sample line in each look (delight 3). */
-function Swatches({ value, style, text, onPick }: { value: string; style: CapStyle; text: string; onPick: (k: string) => void }) {
+const SWATCH_WIDTH = 74
+
+/** The looks to start from, each drawn on a tiny phone frame with the sample line (delight 3). */
+function Swatches({ value, text, onPick }: { value: string | null; text: string; onPick: (k: string) => void }) {
   return (
-    <div className="swatches" role="radiogroup" aria-label="Subtitle style" data-testid="cap-look">
-      {LOOKS.map((o) => {
-        const look: SubtitleLook = { ...lookFromStyle({ ...style, ...o.style }), position: 0.5 }
-        return (
-          <button
-            key={o.key}
-            role="radio"
-            aria-checked={o.key === value}
-            className={`swatch${o.key === value ? ' on' : ''}`}
-            onClick={() => onPick(o.key)}
-            data-testid={`cap-look-${o.key}`}
-          >
-            {/* the name first: under the picture it fell below the drawer's footer (grandma3 #15) */}
-            <span className="swatch-label">{o.label}</span>
-            <span className="swatch-frame">
-              <SubtitleSample look={{ ...look, size: Math.min(look.size, 105) }} text={text} width={92} />
-            </span>
-          </button>
-        )
-      })}
+    <div className="swatches" role="radiogroup" aria-label="Subtitle look" data-testid="cap-look">
+      {CAPTION_PRESETS.map((o) => (
+        <button
+          key={o.key}
+          role="radio"
+          aria-checked={o.key === value}
+          className={`swatch${o.key === value ? ' on' : ''}`}
+          onClick={() => onPick(o.key)}
+          data-testid={`cap-look-${o.key}`}
+        >
+          {/* the name first: under the picture it fell below the drawer's footer (grandma3 #15) */}
+          <span className="swatch-label">{o.label}</span>
+          <span className="swatch-frame">
+            <SubtitleSample look={{ ...lookFromStyle(o.style), position: 0.5 }} text={text} width={SWATCH_WIDTH} />
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -129,13 +126,19 @@ function takes(words: Word[]): Word[][] {
   return out
 }
 
-/** A short sample line for the subtitle preview: three kept words, like the engine's maxWords. */
-export function sampleLine(words: Word[], kept: Set<string>): { text: string; at: number } {
+/** A sample line for the subtitle preview: kept words as the engine groups them (captions.chunk), up to
+ * `maxWords` and never past a sentence end, shown at the moment its first word is spoken. */
+export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): { text: string; at: number } {
   const k = words.filter((w) => kept.has(w.id) && /\w/.test(w.w))
   const start = k.length > 6 ? 2 : 0
-  const pick = k.slice(start, start + 3)
+  const pick: Word[] = []
+  for (const w of k.slice(start)) {
+    pick.push(w)
+    if (pick.length >= maxWords || /[.!?…]["')\]]*$/.test(w.w.trim())) break
+  }
   if (!pick.length) return { text: 'Your words here', at: 0.5 }
-  return { text: pick.map((w) => w.w.replace(/[.,!?;:]+$/, '')).join(' '), at: pick[0].s + 0.15 }
+  const text = pick.map((w) => w.w.trim()).join(' ').replace(/^[(\[{"¿¡]+/, '').replace(/[.,!?;:)\]}"…]+$/, '')
+  return { text, at: pick[0].s + 0.15 }
 }
 
 const LEVELS: { key: string; label: string }[] = [
@@ -294,7 +297,8 @@ export function ShowMeHow({
     notify(`${what} copied.`)
   }
 
-  const sample = useMemo(() => sampleLine(d.words, kept), [d.words, kept])
+  const maxWords = Number(capStyle.maxWords ?? 3)
+  const sample = useMemo(() => sampleLine(d.words, kept, maxWords), [d.words, kept, maxWords])
   const subsOn = p.captions?.enabled !== false
   const lookJson = JSON.stringify(capStyle)
   useEffect(() => {
@@ -418,7 +422,10 @@ export function ShowMeHow({
               </label>
               {p.captions?.enabled !== false && (
                 <div className="stack" data-testid="caption-controls">
-                  <h3 style={{ marginTop: 6 }}>Size</h3>
+                  <h3 style={{ marginTop: 6 }}>Look</h3>
+                  {/* two words: a whole line shrinks to fit 74 px and can't be read */}
+                  <Swatches value={presetOf(capStyle)} text={sample.text.split(' ').slice(0, 2).join(' ')} onPick={(k) => set('captions', { ...(p.captions ?? { enabled: true }), style: applyPreset(k) })} />
+                  <h3>Size</h3>
                   <Seg
                     testid="cap-size"
                     value={sizeKey(capStyle)}
@@ -432,8 +439,12 @@ export function ShowMeHow({
                     options={POSITIONS}
                     onPick={(k) => setCapStyle({ position: POSITIONS.find((x) => x.key === k)!.position })}
                   />
-                  <h3>Style</h3>
-                  <Swatches value={lookKey(capStyle)} style={capStyle} text={sample.text} onPick={(k) => setCapStyle(LOOKS.find((x) => x.key === k)!.style)} />
+                  {!capStyle.highlight && (
+                    <>
+                      <h3>Colour</h3>
+                      <Seg testid="cap-color" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
+                    </>
+                  )}
                   <p className="muted-sm">The phone on the left shows the new look. Press "Make a new version" to use it.</p>
                 </div>
               )}

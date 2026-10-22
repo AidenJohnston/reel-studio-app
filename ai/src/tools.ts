@@ -766,19 +766,22 @@ const tools: ToolDef[] = [
     description: 'Change caption look. Pass null for anything you are not changing.',
     parameters: S.obj({
       enabled: S.opt(S.bool()),
-      preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
+      preset: S.opt(S.str('leave null: the name of the look the person picked in Edit it myself; it does not change how captions are drawn')),
       size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80')),
       maxWords: S.opt(S.int('words per caption chunk, 1-4')),
       case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
       color: S.opt(S.str('hex color like #FFFFFF')),
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
+      highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
+      pop: S.opt(S.bool()),
     }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p) => {
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
-        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position']) {
+        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
           if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];
         }
+        if (args.highlight === 'none') delete p.captions.style.highlight;
       });
       return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };
     },

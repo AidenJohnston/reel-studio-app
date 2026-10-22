@@ -86,7 +86,9 @@
             "outlineColor": { "$ref": "#/$defs/color" },
             "shadow": { "type": "number", "minimum": 0, "maximum": 40 },
             "position": { "type": "number", "minimum": 0.05, "maximum": 0.95 },
-            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" }
+            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" },
+            "highlight": { "$ref": "#/$defs/color", "description": "colour of the word being spoken (absent = no word highlight)" },
+            "pop": { "type": "boolean", "description": "each line grows into place as it appears" }
           }
         },
         "corrections": {
