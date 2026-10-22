@@ -21,7 +21,7 @@ The engine setup commands work in PowerShell and on macOS without activating the
 npm ci
 npm run build -w ai
 cd engine
-uv venv --python 3.11
+uv venv --python 3.11 --managed-python
 uv pip install --python .venv -c requirements.txt -e ".[dev]"
 cd ..
 ```

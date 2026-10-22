@@ -131,7 +131,7 @@ Set up the engine (the app uses `engine/.venv` automatically when it exists):
 
 ```
 cd engine
-uv venv --python 3.11
+uv venv --python 3.11 --managed-python
 uv pip install --python .venv -c requirements.txt -e ".[dev]"
 cd ..
 ```
