@@ -53,6 +53,14 @@ Get the latest installer from the [Releases page](https://github.com/AidenJohnst
 | Windows 10/11, 64-bit | `Reel-Studio-Setup-<version>-x64.exe` | [Install on Windows](docs/install-windows.md) |
 | macOS 14+, Apple silicon | `Reel-Studio-<version>-arm64.dmg` | [Install on a Mac](docs/install-mac.md) |
 
+On a Mac with [Homebrew](https://brew.sh) you can install it from Terminal instead, and `brew upgrade` picks up
+each new release:
+
+```
+brew tap aidenjohnston/reel-studio-app https://github.com/AidenJohnston/reel-studio-app
+brew install --cask aidenjohnston/reel-studio-app/reel-studio
+```
+
 The Mac app is signed and notarized by Apple, so it opens with a double-click. The Windows installer is not
 signed with a paid certificate yet, so Windows SmartScreen warns the first time you open it; the Windows guide
 shows the two extra clicks. The first time you open the app it downloads its speech model (about 500 MB, once).
