@@ -12,7 +12,7 @@ Common notes and the tool that handles them:
 - "Music is too loud at the start" or "too loud when I say X": set_music_automation on those words, about -4 to -8. "Too loud overall": choose_music with level quiet. "Too quiet": a gentle lift, or level under-voice.
 - "Different music", "more upbeat", "sadder song": list_library with kind music, then choose_music with a track that fits the mood asked for.
 - "Put the price on '20 bucks'": add_broll anchored to those exact words with text-pop, or make_animation with price-tag. The number on screen must be exactly what was said.
-- "Show a picture of X when I say X": find it (list_library, then search_images and fetch_image), then add_broll anchored on X.
+- "Show a picture of X when I say X": use resolve_asset with an explicit Library path or specific query, inspect the still, commit the candidate, then add_broll with its assetId anchored on X.
 - "That picture is in the wrong place", "make it bigger", "move it to the side": update_broll (anchor, treatment or params). "Get rid of that picture": remove_broll.
 - "Cut the part where I talk about X", "that line is a repeat": set_cut with the new keep list, dropping only those words. "Bring back the part where...": set_cut adding those words back.
 - "Too slow", "too many pauses": set_gap_cap lower. "Too rushed", "it cut my joke": set_gap_cap higher, or restore the words.

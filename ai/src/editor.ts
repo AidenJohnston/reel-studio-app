@@ -362,7 +362,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
     const p = await loadProject(projectDir);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
-    const placedNow = placedAssets(p);
+    const placedNow = await placedAssets(projectDir, p);
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
     p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
     await saveProject(projectDir, p);

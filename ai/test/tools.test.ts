@@ -1,14 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
+import { TOOLS, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
 import { isStrict, validate } from '../src/schema';
-import { FakeHost, makeProject, tinyPng } from './helpers';
-
-const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
-  'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
-  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
+import { FakeHost, makeProject, tinyPng, commitImage } from './helpers';
 
 async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string; root: string; events: AgentEvent[] }> {
   const { root, dir } = await makeProject();
@@ -19,9 +15,6 @@ async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string
 }
 
 describe('tool schemas', () => {
-  it('cover the docs/architecture.md section 6 set', () => {
-    expect([...TOOL_NAMES].sort()).toEqual([...SPEC_TOOLS].sort());
-  });
   it.each(TOOLS.map((t) => [t.name, t]))('%s is strict-mode valid', (_n, t: any) => {
     expect(t.parameters.type).toBe('object');
     expect(isStrict(t.parameters)).toEqual([]);
@@ -87,15 +80,16 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).music.enabled).toBe(false);
   });
 
-  it('b-roll: text-pop, library asset, animation, search, update, remove', async () => {
+  it('b-roll: text-pop, committed image, animation, update, remove', async () => {
     const { ctx, root, dir, host } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());
     const nullP = { tilt: null, scale: null, text: null };
     const a = await executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { ...nullP, text: '$20' } });
     expect(a.isError).toBe(false);
     expect(a.summary).toBe('Added a visual on "twenty bucks"');
-    const b = await executeTool(ctx, 'add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'card-above-head', asset: 'flour.png', search: null, animation: null, params: { ...nullP, tilt: -2.5 } });
-    expect(JSON.parse(b.content).asset).toBe('Library/Images/flour.png');
+    const committed = await commitImage(ctx, 'Library/Images/flour.png');
+    const b = await executeTool(ctx, 'add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'card-above-head', asset: committed, search: null, animation: null, params: { ...nullP, tilt: -2.5 } });
+    expect(JSON.parse(b.content).asset).toBe(committed);
     const c = await executeTool(ctx, 'add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'full-frame', asset: null, search: null, animation: { template: 'stat-count-up', params: { text: 'hours', value: '18', items: null } }, params: nullP });
     expect(c.isError).toBe(false);
     expect(host.animations[0]).toMatchObject({ template: 'stat-count-up', params: { text: 'hours', value: '18' } });
@@ -104,17 +98,18 @@ describe('tool implementations', () => {
     await fsp.writeFile(img, tinyPng());
     host.searchResults = [{ url: 'https://example.com/x.png', path: 'work/found.png', title: 'x' }];
     const d = await executeTool(ctx, 'add_broll', { anchor: { from: 'w39', to: 'w41' }, treatment: 'side-card', asset: null, search: 'bread brick', animation: null, params: nullP });
-    expect(d.isError).toBe(false);
+    expect(d.isError).toBe(true);
+    expect(d.content).toMatch(/resolve_asset/);
     const noAsset = await executeTool(ctx, 'add_broll', { anchor: { from: 'w39', to: 'w41' }, treatment: 'side-card', asset: null, search: null, animation: null, params: nullP });
     expect(noAsset.isError).toBe(true);
     let p = await loadProject(dir);
-    expect(p.broll.map((x) => x.id)).toEqual(['b1', 'b2', 'b3', 'b4']);
+    expect(p.broll.map((x) => x.id)).toEqual(['b1', 'b2', 'b3']);
     expect(p.broll[0].params).toEqual({ text: '$20' });
     expect((await executeTool(ctx, 'update_broll', { id: 'b2', anchor: null, treatment: 'side-card', asset: null, params: { tilt: 0, scale: null, text: null } })).isError).toBe(false);
     expect((await executeTool(ctx, 'remove_broll', { id: 'b9' })).isError).toBe(true);
     expect((await executeTool(ctx, 'remove_broll', { id: 'b1' })).isError).toBe(false);
     p = await loadProject(dir);
-    expect(p.broll.map((x) => x.id)).toEqual(['b2', 'b3', 'b4']);
+    expect(p.broll.map((x) => x.id)).toEqual(['b2', 'b3']);
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
   });
 

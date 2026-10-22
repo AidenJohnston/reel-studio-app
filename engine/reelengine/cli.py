@@ -146,6 +146,24 @@ def _thumb(proj: Path, out: Path) -> str | None:
         return None
 
 
+def cmd_inspect_image(args):
+    from PIL import Image
+    from .safepath import safe_resolve
+    proj = _project(args)
+    out = safe_resolve(proj, args.asset, write=True, what="staged image")
+    if out.stat().st_size > 40 * 1024 * 1024:
+        raise EngineError("TOO_BIG", "staged image over 40 MB", "That picture is too large. Choose a smaller one.")
+    with Image.open(out) as im:
+        im.load()
+        width, height = im.size
+    safe_resolve(proj, "work/thumbs", write=True, what="asset preview")
+    safe_resolve(proj, f"work/thumbs/{out.stem}.jpg", write=True, what="asset preview")
+    thumb = _thumb(proj, out)
+    if not thumb:
+        raise EngineError("NOT_AN_IMAGE", "asset preview failed", "I couldn't make a still of that picture. Try another one.")
+    return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height, "mime": "image/jpeg"}
+
+
 def cmd_register_capture(args):
     """A website screenshot the app captured into <project>/work/assets: record its credit
     ("Screenshot of <site>") in credits.json and make the still the AI looks at."""
@@ -353,6 +371,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--copyrighted", action="store_true",
                     help="also posters/stills of shows and films (copyrighted; labelled as such)")
     sp.add_argument("words", nargs="*")
+    sp = add("inspect-image", cmd_inspect_image, "validate a staged picture and return its still")
+    sp.add_argument("--asset", required=True)
     sp = add("register-capture", cmd_register_capture, "credit a website screenshot saved in work/assets")
     sp.add_argument("--asset", required=True)
     sp.add_argument("--url", required=True)

@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { EngineHost, EngineProgress, ToolContext, executeTool, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -131,6 +131,7 @@ export class FakeHost implements EngineHost {
         for (const t of times) { const f = path.join(fd, `f_${t}.png`); await fsp.writeFile(f, tinyPng()); frames.push({ time: t, path: f }); }
         return { frames };
       }
+      case 'inspect-image': return { previewPath: args[args.indexOf('--asset') + 1], width: 1, height: 1, mime: 'image/png' };
       case 'search-images': return { results: this.searchResults };
       case 'fetch-image': {
         if (!this.engineAssets) throw { code: 'BAD_ARGS', userMessage: 'unknown command' };
@@ -168,3 +169,24 @@ export class ScriptedModel implements ModelProvider {
 }
 
 export const call = (name: string, args: Record<string, unknown> = {}) => ({ id: undefined as any, name, args });
+
+export async function commitImage(ctx: ToolContext, ref: string): Promise<string> {
+  const staged = await executeTool(ctx, 'resolve_asset', { kind: 'image', intent: ref });
+  if (staged.isError) throw new Error(staged.content);
+  const candidate = JSON.parse(staged.content).candidates[0];
+  const committed = await executeTool(ctx, 'resolve_asset', { kind: 'image', intent: ref, phase: 'commit', candidateId: candidate.id });
+  if (committed.isError) throw new Error(committed.content);
+  return JSON.parse(committed.content).asset.committedPath;
+}
+export function imageSteps(ref: string, placement: Record<string, unknown>) {
+  const result = (req: CompletionRequest) => {
+    const message = req.messages.at(-1);
+    if (message?.role !== 'tool' || message.results[0].isError) throw new Error('Expected a successful asset tool result');
+    return JSON.parse(message.results[0].content);
+  };
+  return [
+    { toolCalls: [call('resolve_asset', { kind: 'image', intent: ref })] },
+    (req: CompletionRequest) => ({ toolCalls: [call('resolve_asset', { kind: 'image', intent: ref, phase: 'commit', candidateId: result(req).candidates[0].id })] }),
+    (req: CompletionRequest) => ({ toolCalls: [call('add_broll', { ...placement, asset: result(req).asset.assetId })] }),
+  ];
+}

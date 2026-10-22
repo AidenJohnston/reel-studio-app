@@ -202,7 +202,7 @@ small TypeScript project API and then ask the main process to re-render. The set
 `set_gap_cap`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
 `remove_broll`, `set_mirror(on, source)` (flip a mirrored take; the editor calls it when text in the room reads
-backwards in the frames it looks at, or when a note says the video is mirrored), `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
+backwards in the frames it looks at, or when a note says the video is mirrored), `resolve_asset(kind, intent, phase, candidateId)`, `list_assets`, `preview_asset`, `export_asset_credits`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 
@@ -307,3 +307,20 @@ export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: bo
 With no provider connected, `firstEdit` still runs the deterministic path (engine `autocut`, default captions,
 music if a track is in the Library, a cover and a render) and returns a summary saying the AI is not connected.
 See `ai/README.md` for the extra methods beyond this list.
+
+### Frozen image assets
+
+`resolve_asset` stages images, logos, icons and website screenshots before placement. Its
+candidate IDs belong to one editing request. The image-capable agent must receive a still
+before committing the candidate, and commit verifies that the staged SHA-256 has not changed.
+`add_broll` accepts only committed image IDs or paths; existing video and inline animation
+placement stays compatible. The old search, fetch and capture tools remain available, but
+an image they save must go through the resolver before placement.
+
+`work/assets/manifest.jsonl` is the append-only provenance ledger. Frozen bytes live under
+`work/assets/frozen/<kind>/<sha256>.<ext>`; equal hashes reuse bytes while each new selection
+records its intent. `index.json` is a derived inventory. Reservation and ledger writes hold
+an exclusive project-local lock that recovers a confirmed dead owner. Credits exports go under `work/credits/` so they cannot
+overwrite project data or frozen media. Website captures require commentary policy and
+carry their ownership and non-endorsement notice in the export. This PR uses project-local
+reuse only; there is no shared cache or eviction policy yet.
