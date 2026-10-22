@@ -40,6 +40,7 @@ SEEK_PREROLL = 3.0
 
 BROLL_FAILED = "Some b-roll couldn't be added to this version. Try again, or pick a different picture."
 ZOOMS_FAILED = "The zoom-ins couldn't be added to this version."
+SFX_FAILED = "The sound effects couldn't be added to this version."
 
 
 def _opt_module(name: str):
@@ -771,6 +772,16 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     t = time.time()
     audio = build_audio(ctx, tl.segments, src_paths, rwork, warnings)
     timings["audio"] = round(time.time() - t, 2)
+    if proj.get("sfx"):
+        try:
+            from . import sfx as sfxmod
+            placed, left = sfxmod.plan(ctx)
+            warnings += [f"Sound effect {r['sound']} left out: {r['skipped']}." for r in left]
+            if placed and ctx.sfx_mixed is None:     # the effects, or the whole music step, failed
+                warnings.append(SFX_FAILED)
+        except Exception as exc:   # noqa: BLE001
+            log(f"# sound effects skipped: {exc!r}")
+            warnings.append(SFX_FAILED)
 
     # 2. b-roll layers + zooms (A2)
     t = time.time()

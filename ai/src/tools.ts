@@ -4,11 +4,12 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
+import { SFX_SOUNDS } from './sfx.generated';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
@@ -95,6 +96,17 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
 
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }
+}
+
+/** True when `wid` starts a kept range that the engine plays as a jump, not straight on from the range before
+ * (engine/reelengine/cut.py merge_contiguous joins ranges that sit back to back in the same take). */
+function isCut(p: Project, t: Transcript, wid: string): boolean {
+  const k = p.cut.keep.findIndex((r) => r.from === wid);
+  if (k <= 0) return false;
+  const { words, byId } = wordIndex(t);
+  const prev = byId.get(p.cut.keep[k - 1].to);
+  const here = byId.get(wid);
+  return prev === undefined || here === undefined || here !== prev + 1 || words[here].source !== words[prev].source;
 }
 
 function checkAnchor(t: Transcript, a: WordAnchor, what = 'anchor'): void {
@@ -1082,6 +1094,40 @@ const tools: ToolDef[] = [
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
       await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
+    },
+  },
+  {
+    name: 'set_sfx',
+    description: 'Replace all sound effects. Add them only when the user asks for sound effects, or on a few clear visual moments (a picture or animation appearing, a punch-in, a hard cut). Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
+    parameters: S.obj({
+      sfx: S.arr(S.obj({
+        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds, name and energy (how long it carries: 1 a tap, 2 a short swell, 3 long): ${SFX_SOUNDS.map((s) => `${s.id} ${s.energy}`).join(', ')}`),
+        at: S.obj({
+          word: S.opt(S.str('word id: the sound hits as this word starts (a zoom or caption lands there)')),
+          broll: S.opt(S.str('b-roll id: the sound hits as that b-roll appears')),
+          cut: S.opt(S.str('word id that starts a kept range after the first (cut.keep[].from): the sound hits on that cut')),
+        }),
+        gainDb: S.opt(S.num('null = the normal level under the voice; -6 softer, +6 the loudest it goes', { minimum: -12, maximum: 6 })),
+      })),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      type Entry = { sound: string; at: Record<'word' | 'broll' | 'cut', string | null>; gainDb: number | null };
+      const sfx = args.sfx.map((e: Entry, i: number) => {
+        const given = (['word', 'broll', 'cut'] as const).flatMap((kind) => {
+          const ref = e.at[kind];
+          return ref === null ? [] : [{ kind, ref }];
+        });
+        if (given.length !== 1) throw new ToolInputError(`sfx[${i}].at: give exactly one of word, broll or cut`);
+        const { kind, ref } = given[0];
+        if (kind === 'broll' && !p.broll.some((b) => b.id === ref)) throw new ToolInputError(`sfx[${i}].at.broll: there is no b-roll "${ref}"`);
+        if (kind === 'cut' && !isCut(p, t, ref)) throw new ToolInputError(`sfx[${i}].at.cut: "${ref}" is not a cut: use the first word of a kept range after the first, where the video jumps (cut.keep[].from)`);
+        if (kind !== 'broll') checkAnchor(t, { from: ref, to: ref }, `sfx[${i}].at.${kind}`);
+        const moment: Sfx['at'] = kind === 'word' ? { word: ref } : kind === 'broll' ? { broll: ref } : { cut: ref };
+        return { at: moment, sound: e.sound, ...(e.gainDb ? { gainDb: e.gainDb } : {}) };
+      });
+      await mutate(ctx, 'sfx', (q) => { if (sfx.length) q.sfx = sfx; else delete q.sfx; });
+      return { content: { ok: true, count: sfx.length }, summary: sfx.length ? `Added ${sfx.length === 1 ? 'a sound effect' : `${sfx.length} sound effects`}` : 'Took out the sound effects' };
     },
   },
   {
