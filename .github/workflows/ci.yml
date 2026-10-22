@@ -50,7 +50,6 @@ jobs:
     timeout-minutes: 20
     env:
       REELENGINE_NET_TESTS: '0'
-      REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -80,6 +79,9 @@ jobs:
           grep -w libx264 "$RUNNER_TEMP/ffmpeg-encoders.txt"
           ffprobe -version
       - run: uv run --no-project --python engine/.venv python -m pytest engine/tests -v -ra
+        env:
+          # runner.* is not available in a job-level env, only in a step's
+          REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
   animations:
     name: Animation rendering
     runs-on: ubuntu-24.04
