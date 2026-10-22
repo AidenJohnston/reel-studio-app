@@ -85,7 +85,7 @@ export function Library({ refreshKey = 0 }: { refreshKey?: number }) {
               </button>
             </div>
             {files.length === 0 ? (
-              <div className="empty-bin">Nothing here yet. {HELP[b.key]}</div>
+              <div className="empty-bin">Nothing here yet.</div>
             ) : (
               <div className="files">
                 {files.slice(0, 24).map((f) => (
