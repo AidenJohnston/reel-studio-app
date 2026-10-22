@@ -269,7 +269,8 @@ export interface ExportResult {
 
 export interface PlatformExportResult {
   folder: string
-  files: { platform: Platform; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
+  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPlatform } from '../src/shared/platforms'
+import { PLATFORM_RULES, checkPlatform, parsePlatformExportRequest, secondTryPlatforms } from '../src/shared/platforms'
 
 const captionIssue = (...args: Parameters<typeof checkPlatform>) => checkPlatform(...args).find((issue) => issue.kind === 'caption')
 const durationIssue = (...args: Parameters<typeof checkPlatform>) => checkPlatform(...args).find((issue) => issue.kind === 'duration')
@@ -42,5 +42,18 @@ describe('platform export rules', () => {
   it('fails if an Instagram caption contains more than 20 mentions', () => {
     const caption = Array.from({ length: 21 }, (_, index) => `@person${index}`).join(' ')
     expect(checkPlatform('instagram', caption, 30).some((issue) => issue.kind === 'mentions')).toBe(true)
+  })
+
+  it('fails if a platform without a test option gets Try 2, or Facebook gets a Try 2 with a different video', () => {
+    const all = PLATFORM_RULES.map((rule) => rule.id)
+    expect(secondTryPlatforms(all, true)).toEqual(['instagram', 'facebook'])
+    expect(secondTryPlatforms(all, false)).toEqual(['instagram'])
+  })
+
+  it('fails if a Try 2 identical to Try 1 is accepted', () => {
+    const request = { platforms: ['instagram'], caption: 'Hook first', coverSeconds: null }
+    expect(() => parsePlatformExportRequest({ ...request, second: { version: 2, caption: 'Hook first', coverSeconds: null } }, 2))
+      .toThrow(expect.objectContaining({ userMessage: 'Try 2 is the same as Try 1. Pick another version, cover or caption.' }))
+    expect(parsePlatformExportRequest({ ...request, second: { version: 2, caption: 'Hook first', coverSeconds: 4 } }, 2).second).toEqual({ version: 2, caption: 'Hook first', coverSeconds: 4 })
   })
 })

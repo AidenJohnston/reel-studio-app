@@ -68,7 +68,9 @@ def probe(path: str) -> dict:
     v = next((s for s in streams if s.get("codec_type") == "video" and s.get("disposition", {}).get("attached_pic") != 1), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
     dur = float(info.get("format", {}).get("duration") or 0)
-    res = {"path": str(p), "duration": dur, "hasAudio": a is not None}
+    res = {"path": str(p), "duration": dur, "hasAudio": a is not None, "sizeBytes": p.stat().st_size,
+           "vcodec": v.get("codec_name") if v else None, "acodec": a.get("codec_name") if a else None,
+           "pixFmt": v.get("pix_fmt") if v else None}
     if v:
         num, _, den = (v.get("avg_frame_rate") or "30/1").partition("/")
         fps = float(num) / float(den or 1) if float(den or 1) else 30.0
@@ -295,6 +297,14 @@ def cmd_probe(args: list[str]) -> dict:
     return probe(files[0])
 
 
+def cmd_export_cover(args: list[str]) -> dict:
+    dest = take(args, "--dest")
+    at = take(args, "--at")
+    subprocess.run([FFMPEG, "-y", "-v", "error", *(["-ss", at] if at else []), "-i", args[0], "-frames:v", "1", "-q:v", "2", dest],
+                   check=True, capture_output=True)
+    return {"cover": dest}
+
+
 def cmd_download_model(args: list[str]) -> dict:
     name = take(args, "--name") or "small.en"
     dest = Path(os.environ.get("REELENGINE_MODELS", "models")) / name
@@ -341,7 +351,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "export-cover": cmd_export_cover,
 }
 
 

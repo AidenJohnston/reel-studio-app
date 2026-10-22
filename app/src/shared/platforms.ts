@@ -13,14 +13,18 @@ export interface PlatformRule {
   height: number
   source: string
   note?: string
+  /** The platform's own test of two versions of one post: Instagram trial reels test any change, Facebook only a cover or caption. */
+  tryTwo?: { tests: 'video' | 'cover-caption'; steps: string; source: string }
 }
 
 // Offline targets checked 2026-10-22. Notes distinguish account-dependent and local limits.
 export const PLATFORM_RULES: readonly PlatformRule[] = [
-  { id: 'instagram', label: 'Instagram Reels', minSeconds: 3, maxSeconds: 900, maxBytes: 300_000_000, maxBitrate: 25_000_000, captionLimit: 2200, hashtagLimit: 30, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media' },
+  { id: 'instagram', label: 'Instagram Reels', minSeconds: 3, maxSeconds: 900, maxBytes: 300_000_000, maxBitrate: 25_000_000, captionLimit: 2200, hashtagLimit: 30, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media',
+    tryTwo: { tests: 'video', source: 'https://creators.instagram.com/blog/instagram-trial-reels', steps: "Post each video as a trial reel. Before you share, turn on Trial and leave automatic sharing off. Instagram shows trial reels to people who don't follow you first. After about a day, compare their views, then tap Share with everyone on the one that did better. No Trial switch? Your account can't use trial reels yet, so post Try 1." } },
   { id: 'tiktok', label: 'TikTok', maxSeconds: 180, maxBytes: 4_000_000_000, captionLimit: 2200, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post', note: '3-minute offline target. Your account may allow more. Check its upload limit before posting.' },
   { id: 'youtube', label: 'YouTube Shorts', maxSeconds: 180, maxBytes: 256_000_000_000, captionLimit: 5000, hashtagLimit: 60, width: 1080, height: 1920, source: 'https://support.google.com/youtube/answer/15424877', note: 'The caption is a description. Add a separate title of up to 100 characters when you upload.' },
-  { id: 'facebook', label: 'Facebook Reels', minSeconds: 3, maxSeconds: 90, maxBytes: 1_000_000_000, captionLimit: null, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/video-api/guides/reels-publishing', note: '90-second Reels target. The current guide does not give a caption, hashtag or byte maximum; 1 GB is the local file ceiling.' },
+  { id: 'facebook', label: 'Facebook Reels', minSeconds: 3, maxSeconds: 90, maxBytes: 1_000_000_000, captionLimit: null, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/video-api/guides/reels-publishing', note: '90-second Reels target. The current guide does not give a caption, hashtag or byte maximum; 1 GB is the local file ceiling.',
+    tryTwo: { tests: 'cover-caption', source: 'https://about.fb.com/news/2023/11/helping-creators-test-content-and-earn-rewards/', steps: "In the Facebook app, make the reel with the video. Before you share, add Try 2's cover and caption as a test. Facebook shows each to part of your audience and keeps the one that does better. No test option? Post Try 1." } },
   { id: 'threads', label: 'Threads', maxSeconds: 300, maxBytes: 1_000_000_000, captionLimit: 500, hashtagLimit: null, width: 1080, height: 1920, source: 'https://developers.facebook.com/documentation/threads/posts', note: 'Only one topic becomes a linked tag. Each emoji counts as its size in bytes, usually 4.' },
   { id: 'x', label: 'X', minSeconds: 0.5, maxSeconds: 1200, maxBytes: 8_000_000_000, captionLimit: 280, hashtagLimit: null, width: 720, height: 1280, source: 'https://docs.x.com/x-api/media/quickstart/best-practices', note: 'Standard account target. Every https:// link counts as 23. Confirm the caption length in X before posting.' },
   { id: 'linkedin', label: 'LinkedIn', minSeconds: 3, maxSeconds: 1800, maxBytes: 500_000_000, captionLimit: 3000, hashtagLimit: null, width: 1080, height: 1920, source: 'https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api', note: 'Uses the documented 500 MB video specification, below the larger multipart upload ceiling.' }
@@ -32,23 +36,76 @@ export function platformRule(platform: Platform): PlatformRule {
   return rule
 }
 
+/** One version of the post: which Version's video, which cover and which caption. */
+export interface PlatformTry {
+  version: number
+  caption: string
+  /** Seconds into the finished video, or null for that version's own cover. */
+  coverSeconds: number | null
+}
+
 export interface PlatformExportRequest {
   platforms: Platform[]
   caption: string
   /** Seconds into the finished video, or null for the project's own cover. */
   coverSeconds: number | null
+  /** Try 2, for the platforms that can test two versions themselves (`secondTryPlatforms`). */
+  second: PlatformTry | null
 }
 
-export function parsePlatformExportRequest(value: unknown): PlatformExportRequest {
+const validCover = (value: unknown): value is number | null =>
+  value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+const validCaption = (value: unknown): value is string => typeof value === 'string' && value.length <= 100_000
+const validVersion = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0
+
+const badRequest = () => ({ code: 'BAD_EXPORT', userMessage: 'Choose at least one platform and a valid cover frame, then try again.' })
+
+function parseSecondTry(value: unknown): PlatformTry | null {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || !('version' in value) || !validVersion(value.version) ||
+      !('caption' in value) || !validCaption(value.caption) || !('coverSeconds' in value) || !validCover(value.coverSeconds)) throw badRequest()
+  return { version: value.version, caption: value.caption, coverSeconds: value.coverSeconds }
+}
+
+/** `version` is Try 1's Version, the one being exported. */
+export function parsePlatformExportRequest(value: unknown, version: number): PlatformExportRequest {
   if (!value || typeof value !== 'object' || !('platforms' in value) || !Array.isArray(value.platforms) ||
       !value.platforms.length || value.platforms.length > PLATFORM_RULES.length ||
       !value.platforms.every((p): p is Platform => typeof p === 'string' && PLATFORM_RULES.some((r) => r.id === p)) ||
-      !('caption' in value) || typeof value.caption !== 'string' || value.caption.length > 100_000 ||
-      !('coverSeconds' in value) || (value.coverSeconds !== null &&
-        (typeof value.coverSeconds !== 'number' || !Number.isFinite(value.coverSeconds) || value.coverSeconds < 0))) {
-    throw { code: 'BAD_EXPORT', userMessage: 'Choose at least one platform and a valid cover frame, then try again.' }
-  }
-  return { platforms: [...new Set(value.platforms)], caption: value.caption, coverSeconds: value.coverSeconds }
+      !('caption' in value) || !validCaption(value.caption) || !('coverSeconds' in value) || !validCover(value.coverSeconds) ||
+      !('second' in value)) throw badRequest()
+  const request: PlatformExportRequest = { platforms: [...new Set(value.platforms)], caption: value.caption, coverSeconds: value.coverSeconds, second: parseSecondTry(value.second) }
+  const problem = request.second && secondTryProblem(request.platforms, { version, caption: request.caption, coverSeconds: request.coverSeconds }, request.second)
+  if (problem) throw { code: 'BAD_EXPORT', userMessage: problem }
+  return request
+}
+
+export type TryChange = 'video' | 'cover' | 'caption'
+
+export function tryChanges(first: PlatformTry, second: PlatformTry): TryChange[] {
+  const changes: TryChange[] = []
+  if (second.version !== first.version) changes.push('video')
+  if (second.coverSeconds !== first.coverSeconds) changes.push('cover')
+  if (second.caption !== first.caption) changes.push('caption')
+  return changes
+}
+
+/** The selected platforms that get Try 2. Every selected platform gets Try 1. */
+export function secondTryPlatforms(platforms: Platform[], sameVideo: boolean): Platform[] {
+  return platforms.filter((p) => {
+    const test = platformRule(p).tryTwo
+    return test !== undefined && (test.tests === 'video' || sameVideo)
+  })
+}
+
+/** Why Try 2 cannot be exported, or null. */
+export function secondTryProblem(platforms: Platform[], first: PlatformTry, second: PlatformTry): string | null {
+  const changes = tryChanges(first, second)
+  if (!changes.length) return 'Try 2 is the same as Try 1. Pick another version, cover or caption.'
+  if (secondTryPlatforms(platforms, !changes.includes('video')).length) return null
+  return changes.includes('video')
+    ? 'None of these platforms can test a different video. Choose Instagram, or turn off Try two versions.'
+    : 'None of these platforms can test two versions. Choose Instagram or Facebook, or turn off Try two versions.'
 }
 
 export interface ExportIssue {
