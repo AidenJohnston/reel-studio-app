@@ -112,6 +112,7 @@ export function SubtitleLines({
               onSelect={(e) => show(i, e.currentTarget)}
               onBlur={() => keepTyping(typed(i))}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
                 const el = e.currentTarget
                 if (e.key === 'Escape' && draft?.line === i) {
                   e.stopPropagation()

@@ -362,10 +362,13 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
   flex: 1; min-width: 0; font: inherit; font-size: 16px; line-height: 1.5; color: var(--ink); background: transparent;
   border: 0; border-radius: 8px; padding: 9px 10px; margin: 2px 0; transition: background-color .12s;
 }
-.sub-line-text:hover { background: var(--soft); }
-.sub-line-text:focus { outline: none; background: var(--panel); box-shadow: 0 0 0 1px var(--line-2), 0 0 0 4px rgba(29,27,24,.06); }
-.sub-join { opacity: 0; transition: opacity .12s; }
-.sub-line:hover .sub-join, .sub-join:focus-visible, .sub-line:focus-within .sub-join { opacity: 1; }
+.sub-line-text:focus { background: var(--panel); }
+/* With a mouse, Join shows on the row you point at or type in; on a touch screen it always shows. */
+@media (hover: hover) and (pointer: fine) {
+  .sub-line-text:hover:not(:focus) { background: var(--soft); }
+  .sub-join { opacity: 0; }
+  .sub-line:hover .sub-join, .sub-line:focus-within .sub-join { opacity: 1; }
+}
 .broll-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; background: var(--soft); }
 .broll-thumb.none { display: grid; place-items: center; color: var(--ink-3); }
 .list-item { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; }
