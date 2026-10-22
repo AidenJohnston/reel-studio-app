@@ -47,10 +47,10 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
-/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
 // Modals can stack (a Confirm over a dialog); the title bar stays dimmed until the last one closes.
 let openModals = 0
 
+/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
 export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
