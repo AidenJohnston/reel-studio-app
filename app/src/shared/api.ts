@@ -35,6 +35,14 @@ export interface Word {
   source?: string
 }
 
+/** A caption word as the engine drew it, the transcript words it came from, and its speech run (lines in
+ * different runs have a long silence between them). */
+export interface CaptionToken {
+  w: string
+  ids: string[]
+  run: number
+}
+
 export interface ChecklistItem {
   key: string
   label: string
@@ -89,8 +97,8 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
-  /** The caption lines of the last full render, each as its transcript word ids (engine work/captions.json). */
-  captionLines: string[][]
+  /** The caption lines of the last full render, word by word (engine work/captions.json). */
+  captionLines: CaptionToken[][]
   checklist: ChecklistItem[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null

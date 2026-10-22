@@ -307,11 +307,9 @@ export function ShowMeHow({
     onPreview(tab === 'captions' && subsOn ? { look: lookFromStyle(capStyle), text: line.text, at: line.at } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, subsOn, lookJson, line.text, line.at])
-  const lines = useMemo(
-    () => subtitleLines(d.captionLines, d.words, kept, d.project.captions, p.captions),
-    [d.captionLines, d.words, kept, d.project.captions, p.captions]
-  )
+  const lines = useMemo(() => subtitleLines(d.captionLines, kept, d.project.captions, p.captions), [d.captionLines, kept, d.project.captions, p.captions])
   const firstSource = d.project.sources?.[0]?.id
+  const wordById = useMemo(() => new Map(d.words.map((w) => [w.id, w])), [d.words])
 
   const coverTime = Number(p.cover?.atSourceTime ?? 0) || 0
   const sourceDuration = d.project.sources?.[0]?.duration ?? 60
@@ -458,11 +456,14 @@ export function ShowMeHow({
                       </p>
                       <SubtitleLines
                         lines={lines}
+                        saved={d.project.captions?.corrections ?? []}
                         corrections={p.captions?.corrections ?? []}
                         onEdit={(edit) => setPatch((x) => ({ ...x, captions: edit({ enabled: true, ...d.project.captions, ...x.captions }) }))}
-                        onShow={(text, w) =>
-                          setShown({ text: text.trim().replace(/^[(\[{"]+/, '').replace(/[.,!?;:)\]}"]+$/, ''), at: !w.source || w.source === firstSource ? w.s + 0.05 : line.at })
-                        }
+                        onShow={(text, token) => {
+                          const w = wordById.get(token.ids[0])
+                          const at = w && (!w.source || w.source === firstSource) ? w.s + 0.05 : line.at
+                          setShown({ text: text.trim().replace(/^[(\[{"]+/, '').replace(/[.,!?;:)\]}"]+$/, ''), at })
+                        }}
                       />
                     </>
                   ) : (

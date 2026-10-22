@@ -1,39 +1,36 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { ProjectJson, Word } from '../../../shared/api'
-import { retype, setBreak, wordText } from '../../../shared/subtitle-lines'
+import type { ProjectJson } from '../../../shared/api'
+import { canJoin, retype, setBreak, shownAs, type LineToken } from '../../../shared/subtitle-lines'
 
 type Captions = NonNullable<ProjectJson['captions']>
 type Correction = NonNullable<Captions['corrections']>[number]
 
-/** The words a line shows (a word fixed to nothing is off the captions) and where each starts in its text. */
-function shown(line: Word[], corrections: Correction[]): { words: Word[]; text: string; starts: number[] } {
-  const words: Word[] = []
-  const parts: string[] = []
-  const starts: number[] = []
+const lineText = (line: LineToken[]): string => line.map((t) => t.shown).join(' ')
+
+/** Where each word of a line starts in its text. */
+function starts(line: LineToken[]): number[] {
+  const out: number[] = []
   let at = 0
-  for (const w of line) {
-    const t = wordText(w, corrections)
-    if (!t) continue
-    words.push(w)
-    parts.push(t)
-    starts.push(at)
-    at += t.length + 1
+  for (const t of line) {
+    out.push(at)
+    at += t.shown.length + 1
   }
-  return { words, text: parts.join(' '), starts }
+  return out
 }
 
-/** The word the caret is in (or just after), by index into `starts`. */
-function wordAt(starts: number[], caret: number): number {
+/** The word the caret is in (or just after). */
+function wordAt(line: LineToken[], caret: number): number {
+  const s = starts(line)
   let k = 0
-  while (k + 1 < starts.length && starts[k + 1] <= caret) k++
+  while (k + 1 < s.length && s[k + 1] <= caret) k++
   return k
 }
 
 /** Where Enter breaks the line: the word boundary nearest the caret. */
-function breakAt(text: string, starts: number[], caret: number): number {
-  const k = wordAt(starts, caret)
-  const end = k + 1 < starts.length ? starts[k + 1] - 1 : text.length
-  return caret - starts[k] <= end - caret ? k : k + 1
+function breakAt(line: LineToken[], caret: number): number {
+  const k = wordAt(line, caret)
+  const s = starts(line)
+  return caret - s[k] <= s[k] + line[k].shown.length - caret ? k : k + 1
 }
 
 /**
@@ -43,16 +40,19 @@ function breakAt(text: string, starts: number[], caret: number): number {
  */
 export function SubtitleLines({
   lines,
+  saved,
   corrections,
   onEdit,
   onShow
 }: {
-  lines: Word[][]
+  lines: LineToken[][]
+  /** The corrections as saved (the render drew these), and with the edits not yet made into a version. */
+  saved: Correction[]
   corrections: Correction[]
   /** One edit to the project's captions, as a function of their current state. */
   onEdit: (edit: (c: Captions) => Captions) => void
   /** The line (as typed so far) and the word the caret is on. */
-  onShow: (text: string, word: Word) => void
+  onShow: (text: string, word: LineToken) => void
 }) {
   const [draft, setDraft] = useState<{ line: number; text: string } | null>(null)
   const inputs = useRef<(HTMLInputElement | null)[]>([])
@@ -63,17 +63,16 @@ export function SubtitleLines({
     const id = caretTo.current
     if (!id) return
     caretTo.current = null
-    const i = lines.findIndex((l) => l.some((w) => w.id === id))
+    const i = lines.findIndex((l) => l.some((t) => t.ids[0] === id))
     const el = inputs.current[i]
     if (!el) return
-    const s = shown(lines[i], corrections)
-    const at = s.starts[s.words.findIndex((w) => w.id === id)] ?? 0
+    const at = starts(lines[i])[lines[i].findIndex((t) => t.ids[0] === id)]
     el.focus()
     el.setSelectionRange(at, at)
   })
 
   /** The corrections with line i's typing in them. */
-  const typed = (i: number): Correction[] => (draft?.line === i ? retype(lines[i], corrections, draft.text) : corrections)
+  const typed = (i: number): Correction[] => (draft?.line === i ? retype(lines[i], corrections, saved, draft.text) : corrections)
   const fixed = (next: Correction[]) => (c: Captions): Captions => ({ ...c, corrections: next })
   const keepTyping = (next: Correction[]) => {
     setDraft(null)
@@ -81,22 +80,16 @@ export function SubtitleLines({
   }
   const join = (i: number, next: Correction[]) => {
     setDraft(null)
-    caretTo.current = lines[i][0].id
-    onEdit((c) => setBreak(fixed(next)(c), lines[i][0].id, false))
-  }
-
-  const show = (i: number, el: HTMLInputElement) => {
-    const s = shown(lines[i], corrections)
-    const w = s.words[Math.min(wordAt(s.starts, el.selectionStart ?? 0), s.words.length - 1)] ?? lines[i][0]
-    onShow(el.value, w)
+    caretTo.current = lines[i][0].ids[0]
+    onEdit((c) => setBreak(fixed(next)(c), lines[i][0].ids[0], false))
   }
 
   return (
     <div className="sub-lines" data-testid="sub-lines">
       {lines.map((line, i) => {
-        const s = shown(line, corrections)
+        const joinable = i > 0 && canJoin(lines[i - 1], line)
         return (
-          <div key={line[0].id} className="sub-line">
+          <div key={line[0].ids[0]} className="sub-line">
             <input
               ref={(el) => {
                 inputs.current[i] = el
@@ -104,12 +97,12 @@ export function SubtitleLines({
               className="sub-line-text"
               aria-label={`Subtitle line ${i + 1}`}
               spellCheck
-              value={draft?.line === i ? draft.text : s.text}
+              value={draft?.line === i ? draft.text : lineText(line)}
               onChange={(e) => {
                 setDraft({ line: i, text: e.target.value })
-                onShow(e.target.value, s.words[0] ?? line[0])
+                onShow(e.target.value, line[0])
               }}
-              onSelect={(e) => show(i, e.currentTarget)}
+              onSelect={(e) => onShow(e.currentTarget.value, line[wordAt(line, e.currentTarget.selectionStart ?? 0)])}
               onBlur={() => keepTyping(typed(i))}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return
@@ -120,19 +113,19 @@ export function SubtitleLines({
                 } else if (e.key === 'Enter') {
                   e.preventDefault()
                   const next = typed(i)
-                  const after = shown(line, next)
-                  const k = breakAt(after.text, after.starts, el.selectionStart ?? 0)
-                  if (k <= 0 || k >= after.words.length) return keepTyping(next)
+                  const after = line.map((t) => ({ ...t, shown: shownAs(t, saved, next) })).filter((t) => t.shown)
+                  const k = breakAt(after, el.selectionStart ?? 0)
+                  if (k <= 0 || k >= after.length) return keepTyping(next)
                   setDraft(null)
-                  caretTo.current = after.words[k].id
-                  onEdit((c) => setBreak(fixed(next)(c), after.words[k].id, true))
-                } else if (e.key === 'Backspace' && i > 0 && el.selectionStart === 0 && el.selectionEnd === 0) {
+                  caretTo.current = after[k].ids[0]
+                  onEdit((c) => setBreak(fixed(next)(c), after[k].ids[0], true))
+                } else if (e.key === 'Backspace' && joinable && el.selectionStart === 0 && el.selectionEnd === 0) {
                   e.preventDefault()
                   join(i, typed(i))
                 }
               }}
             />
-            {i > 0 && (
+            {joinable && (
               <button
                 className="btn small ghost sub-join"
                 title="Put this line onto the one above"

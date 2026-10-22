@@ -312,13 +312,13 @@ def _first_carrier(wids: list, k: int, before: list, wid: str) -> bool:
 
 def edit_lines(cues: list, split, join) -> list:
     """The subtitle editor's line edits, anchored on transcript word ids so they survive a recut: a
-    line starts at each word in `split`; a line starting at a word in `join` goes onto the line before.
-    Every other line stays as chunk() made it."""
+    line starts at each word in `split`; a line starting at a word in `join` goes onto the line before,
+    unless a long silence parts them (no cue spans one). Every other line stays as chunk() made it."""
     split, join = set(split or ()), set(join or ())
     merged: list = []
     for c in cues:
         prev = merged[-1] if merged else None
-        if prev and any(_first_carrier(c["wids"], 0, prev["wids"][-1], j) for j in join):
+        if prev and prev["run"] == c["run"] and any(_first_carrier(c["wids"], 0, prev["wids"][-1], j) for j in join):
             for key in ("words", "starts", "wids", "ids"):
                 prev[key] = prev[key] + c[key]
             prev["e"] = c["e"]
@@ -331,8 +331,8 @@ def edit_lines(cues: list, split, join) -> list:
         for a, b in zip(bounds, bounds[1:]):
             s = c["s"] if a == 0 else c["starts"][a]
             e = c["e"] if b == len(c["words"]) else max(s + 0.01, c["starts"][b] - GAP_LEAD)
-            out.append({"s": s, "e": e, "words": c["words"][a:b], "starts": c["starts"][a:b], "wids": c["wids"][a:b],
-                        "ids": [x for w in c["wids"][a:b] for x in w if x]})
+            out.append({"s": s, "e": e, "run": c["run"], "words": c["words"][a:b], "starts": c["starts"][a:b],
+                        "wids": c["wids"][a:b], "ids": [x for w in c["wids"][a:b] for x in w if x]})
     return out
 
 
@@ -500,8 +500,8 @@ def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, sta
     if cap.get("digits", True):
         words = digits_for_numbers(words)
     cues = []
-    for run in split_runs(words):
-        cues.extend(hold(chunk(run, max_words)))
+    for r, run in enumerate(split_runs(words)):
+        cues.extend(dict(c, run=r) for c in hold(chunk(run, max_words)))
     cues = edit_lines(cues, cap.get("split"), cap.get("join"))
     if hidden_ids:
         cues = [c for c in cues if not set(c["ids"]) <= hidden_ids]
@@ -601,6 +601,10 @@ def build_for_timeline(tl, proj: dict, width: int, height: int, words_out=None, 
     cues = build_cues(words_out if words_out is not None else tl.words_out, cap,
                       hidden_set(tl, cap), stats)
     ass, report, warns, font = render_ass(cues, cap, width, height, position_spans)
+    # the subtitle editor shows and edits each word as drawn, by the transcript words it came from
+    for r, c in zip(report, cues):
+        r["run"] = c["run"]
+        r["tokens"] = [{"w": w, "ids": [i for i in ids if i]} for w, ids in zip(c["words"], c["wids"])]
     unused = [k for k, v in stats.items() if v == 0]
     if unused:
         warns.append("caption corrections that matched nothing: " + ", ".join(unused))

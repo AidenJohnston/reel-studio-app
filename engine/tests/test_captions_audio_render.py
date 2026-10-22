@@ -134,3 +134,20 @@ def test_split_and_join_change_only_the_lines_they_touch():
     assert _lines(words, {"join": ["w6"]}) == ["YOU DON'T NEED", "A MIXER AT ALL"]
     cues = captions.build_cues(words, {"split": ["w1"]})
     assert cues[0]["e"] == 0.35 - captions.GAP_LEAD and cues[1]["s"] == 0.35
+    # no caption stays up through a long silence, joined or not
+    pause = mkwords([(0.0, 0.3, "Hold"), (0.35, 0.6, "on."), (2.0, 2.3, "Okay"), (2.35, 2.6, "go.")])
+    assert _lines(pause, {"join": ["w2"]}) == ["HOLD ON", "OKAY GO"]
+
+
+def test_the_subtitle_editor_gets_each_word_as_drawn_and_can_fix_one_made_of_two():
+    words = mkwords([(0.0, 0.3, "I"), (0.35, 0.6, "write"), (0.65, 0.9, "type"), (0.95, 1.2, "script."),
+                     (1.3, 1.6, "Three"), (1.65, 1.9, "users.")])
+    cap = {"corrections": [{"from": "type script", "to": "TypeScript"}]}
+    _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
+    assert [c["tokens"] for c in report] == [
+        [{"w": "I", "ids": ["w0"]}, {"w": "write", "ids": ["w1"]}, {"w": "TypeScript.", "ids": ["w2", "w3"]}],
+        [{"w": "3", "ids": ["w4"]}, {"w": "users.", "ids": ["w5"]}]]
+    # what the editor writes for "TypeScript." retyped as "Typescript": the first word's fix, the rest emptied
+    cap["corrections"] += [{"from": "TypeScript.", "to": "Typescript", "at": "w2"}, {"from": "TypeScript.", "to": "", "at": "w3"}]
+    _, report, _, _, _ = captions.build_for_timeline(None, {"captions": cap}, 1080, 1920, words_out=words)
+    assert report[0]["tokens"][2] == {"w": "Typescript", "ids": ["w2"]}

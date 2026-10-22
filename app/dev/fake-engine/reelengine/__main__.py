@@ -253,29 +253,34 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
 
 
 def write_captions(proj: Path, data: dict) -> None:
-    """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line,
-    then the subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
+    """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line
+    (one speech run), the one-word fixes applied, then the subtitle editor's split and join applied as the
+    engine does (captions.edit_lines)."""
     cap = data.get("captions") or {}
     if cap.get("enabled") is False:
         return
     words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
-    ids = [w["id"] for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
+    fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
+    tokens = [{"w": fixes.get(w["id"], w["w"]), "ids": [w["id"]]}
+              for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
+    tokens = [t for t in tokens if t["w"]]
     split, join = set(cap.get("split") or []), set(cap.get("join") or [])
     joined: list = []
-    for line in (ids[i:i + 3] for i in range(0, len(ids), 3)):
-        if joined and line[0] in join:
+    for line in (tokens[i:i + 3] for i in range(0, len(tokens), 3)):
+        if joined and line[0]["ids"][0] in join:
             joined[-1] += line
         else:
             joined.append(line)
     lines: list = []
     for line in joined:
         lines.append([line[0]])
-        for wid in line[1:]:
-            if wid in split:
+        for t in line[1:]:
+            if t["ids"][0] in split:
                 lines.append([])
-            lines[-1].append(wid)
-    (proj / "work" / "captions.json").write_text(json.dumps({"cues": [{"ids": ids} for ids in lines]}), "utf-8")
+            lines[-1].append(t)
+    cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines]
+    (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 
 def cmd_render(args: list[str]) -> dict:
