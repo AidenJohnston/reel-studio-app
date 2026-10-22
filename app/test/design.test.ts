@@ -84,9 +84,40 @@ describe('version messages', () => {
     ]
     for (const facts of receipts) {
       const title = versionTitle(facts, words)
-      expect(acceptRewrite({ title, summary: title }, facts, words), title).not.toBeNull()
+      expect(acceptRewrite({ title, summary: describeFacts(facts, words) }, facts, words), title).not.toBeNull()
       for (const other of receipts.filter((r) => r !== facts)) expect(acceptRewrite({ title, summary: title }, other, words), `${title} for ${other[0].kind}`).toBeNull()
     }
+  })
+  it('fails if a rewording that contradicts its receipt is kept', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const cutTwo = { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] }
+    const restoreTwo = { kind: 'cut.keep', before: [{ from: 'w2', to: 'w5' }], after: [{ from: 'w0', to: 'w5' }] }
+    const bigger = { kind: 'captions.style', field: 'size', before: 105, after: 126 }
+    const added = (id: string) => ({ kind: 'broll', id, before: null, after: { id } })
+    const contradictions: [string, unknown[]][] = [
+      ['New song', [{ kind: 'music.track', before: 'Library/Music/calm.mp3', after: null }]],
+      ['Added a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }]],
+      ['Trimmed 2 words', [restoreTwo]],
+      ['Subtitles removed', [bigger]],
+      ['Subtitles not bigger', [bigger]],
+      ['Cut 3 words, 2 pictures', [cutTwo, added('b1'), added('b2'), added('b3')]],
+      ['Twelve words cut', [cutTwo]],
+      ['Shorter cut, idiot', [cutTwo]]
+    ]
+    const kept = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: reply.toLowerCase() }, facts as never, words))
+    expect(kept.map(([reply]) => reply)).toEqual([])
+  })
+  it('fails if a fair rewording with "and more" or a song name is thrown away, or a made-up song name is kept', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 },
+      { kind: 'music.track', before: null, after: 'Library/Music/Picture Perfect.mp3' }
+    ]
+    expect(versionTitle(facts, words)).toBe('Shorter cut, bigger subtitles and more')
+    const fair = { title: 'Bigger captions, shorter cut and more', summary: 'new song “Picture Perfect”, cut two words and bigger subtitles' }
+    expect(acceptRewrite(fair, facts, words)).toEqual(fair)
+    expect(acceptRewrite({ ...fair, summary: 'new song "Smaller Captions", cut 2 words' }, facts, words)).toBeNull()
   })
   it('describes subtitle changes the way a person would', () => {
     const p = base()

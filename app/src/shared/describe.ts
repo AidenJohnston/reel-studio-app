@@ -184,26 +184,59 @@ function claims(text: string): Set<Group | null> {
 }
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
-// Words that say which way or how much something changed. A rewording may only use the ones the app's own words use.
-const AMOUNTS = new RegExp(`\\b(\\d+|${NUMBER_WORDS.join('|')}|bigger|larger|smaller|louder|quieter|softer|more|fewer|less|tighter|looser|longer|shorter|faster|slower|higher|lower|up|down|on|off|no|back)\\b`, 'g')
-const amounts = (text: string): Set<string> =>
-  new Set([...text.toLowerCase().matchAll(AMOUNTS)].map(([w]) => (NUMBER_WORDS.includes(w) ? String(NUMBER_WORDS.indexOf(w)) : w)))
+const SYNONYMS: Record<string, string> = { caption: 'subtitle', image: 'picture', photo: 'picture', larger: 'bigger', softer: 'quieter' }
+// Glue a rewording may add anywhere; every other word has to come from the change it describes.
+const GLUE = new Set(['a', 'an', 'the', 'and', 'your', 'of', 'in', 'to', 'now', 'made'])
+// A song's name, which the app writes in quotes: it is a name, not a claim, and is left out of every check.
+const QUOTED = /"[^"]*"/g
+
+/** Lower-case words, with number words as digits, plurals as singular and the few synonyms as the app's word. */
+function tokens(text: string): string[] {
+  return text.toLowerCase().replace(QUOTED, ' ').split(/[^a-z0-9-]+/).filter(Boolean).map((w) => {
+    const n = NUMBER_WORDS.indexOf(w)
+    const one = n >= 0 ? String(n) : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w
+    return SYNONYMS[one] ?? one
+  })
+}
 
 /**
- * A small model's rewording of a version's title and summary, kept only when it names at least one
- * change, every change it names is in the receipt facts, every direction or number it states is one
- * the app's own words state, and it reads like a title. null = keep the app's own words.
+ * A small model's rewording of a version's title and summary. Kept only when it reads like a title and
+ * says nothing the receipts don't: each comma- or "and"-separated part names one change in the receipt
+ * and uses only that change's own words (so its numbers and directions), the glue words and a few
+ * synonyms. A part that names nothing continues the change before it (the first such part: the change
+ * whose words it uses); a last "more" stands for changes not named.
+ * A quoted name must be the song's own. null = keep the app's own words.
  */
 export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
   const own = changes(facts, words)
-  const has = new Set<Group | null>(own.map((c) => c.group))
-  const ownAmounts = amounts(own.map((c) => `${c.title} ${c.said}`).join(' '))
+  const songs = new Set(own.flatMap((c) => c.said.match(QUOTED) ?? []))
+  const straight = (s: string): string => s.replace(/[“”]/g, '"')
   const title = text.title.trim()
   const summary = text.summary.trim().replace(/\.$/, '')
-  if (title.split(/\s+/).length > 6 || title.length > 48 || summary.length > 160 || /[\n—–:"“”]/.test(title + summary) || title.endsWith('.')) return null
-  for (const t of [title, summary]) {
-    const named = claims(t)
-    if (!named.size || [...named].some((g) => !has.has(g)) || [...amounts(t)].some((a) => !ownAmounts.has(a))) return null
+  if (title.split(/\s+/).length > 6 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
+  for (const t of [straight(title), straight(summary)]) {
+    if ((t.match(QUOTED) ?? []).some((q) => !songs.has(q))) return null
+    const parts = t.replace(QUOTED, ' ').split(/,|\band\b/i).map((p) => p.trim()).filter(Boolean)
+    const named = new Set<Group>()
+    let group: Group | null = null
+    for (const [i, part] of parts.entries()) {
+      if (i > 0 && i === parts.length - 1 && part.toLowerCase() === 'more') {
+        if (own.every((c) => named.has(c.group))) return null
+        continue
+      }
+      const said = [...claims(part)]
+      if (said.length > 1 || (said.length === 1 && !said[0])) return null
+      const candidates: (Group | null)[] = said.length ? said : group ? [group] : own.map((c) => c.group)
+      const fits = (g: Group | null): boolean => {
+        const mine = own.filter((c) => c.group === g)
+        const allowed = new Set([...GLUE, ...mine.flatMap((c) => tokens(`${c.title} ${c.said}`))])
+        return mine.length > 0 && tokens(part).every((w) => allowed.has(w))
+      }
+      group = candidates.find(fits) ?? null
+      if (!group) return null
+      named.add(group)
+    }
+    if (!named.size) return null
   }
   return { title, summary }
 }

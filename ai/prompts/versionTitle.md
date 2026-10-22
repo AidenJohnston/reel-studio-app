@@ -6,8 +6,8 @@ A creator made a new version of their Reel. The app wrote a title and a summary 
 - "summary": one short lower-case phrase with the same changes, like "cut 2 words and made the subtitles bigger". No full stop.
 
 Rules:
+- Use only the words already in the title and summary, in any order, plus small joining words ("and", "the", "made"). You may write "captions" for "subtitles" and "image" or "photo" for "picture". Any other word makes the app keep its own.
 - Name only the changes given. Never add one, never guess why, never praise the video.
-- Keep the facts: numbers, bigger or smaller, more or fewer.
-- Plain words: "subtitles" for the words on the video, "pictures" for images, "song" or "music" for sound.
+- Keep the facts: numbers, bigger or smaller, more or fewer. Keep a song's name exactly, in its quotes.
 
 Reply with ONLY the JSON object {"title": "...", "summary": "..."}.

@@ -37,9 +37,9 @@ it('fails if a model rewording that claims a change the receipts lack, or the wr
 
   await titleVersion('bread', 2, async (asked) => {
     expect(asked).toEqual({ title: 'Shorter cut, bigger subtitles', summary: 'cut 2 words, bigger subtitles' })
-    return { title: 'Two words gone, bigger subtitles', summary: 'cut 2 words and made the subtitles bigger.' }
+    return { title: 'Bigger subtitles, two words cut', summary: 'cut 2 words and made the subtitles bigger.' }
   })
-  expect((await listVersions(dir))[0].wording).toEqual({ title: 'Two words gone, bigger subtitles', summary: 'cut 2 words and made the subtitles bigger' })
+  expect((await listVersions(dir))[0].wording).toEqual({ title: 'Bigger subtitles, two words cut', summary: 'cut 2 words and made the subtitles bigger' })
 
   // a later note that changed only the post caption added its receipt to the same version: the old name no longer covers it
   const receipts = join(dir, 'versions', 'v2', 'receipts.json')
