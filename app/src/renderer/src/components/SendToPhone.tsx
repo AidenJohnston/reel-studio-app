@@ -326,6 +326,16 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
               </p>
             </div>
           )}
+          {!sent && !error && (
+            // Before the other ways, what usually stops the phone: not the same Wi-Fi, a guest Wi-Fi, a VPN.
+            <div className="phone-way" data-testid="phone-check-wifi">
+              <Glyph name="wifi" />
+              <div>
+                <b>{PHONE_HELP.checkTitle}</b>
+                <p className="muted-sm">{PHONE_HELP.check}</p>
+              </div>
+            </div>
+          )}
           {fallbackOrder(IS_MAC).map((way) => (
             <Fragment key={way}>{ways[way]}</Fragment>
           ))}

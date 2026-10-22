@@ -11,6 +11,9 @@ export const PHONE_WAIT_MS = 20_000
 export const PHONE_HELP = {
   title: 'Not opening on your phone?',
   why: 'School, work and hotel Wi-Fi often block this. Use one of these instead:',
+  /** First thing to check, on every computer: what actually stops the phone reaching it. */
+  checkTitle: 'Check your Wi-Fi',
+  check: 'Your phone and this computer need to be on the same Wi-Fi. A guest Wi-Fi, or a VPN on either one, also stops it. Fix that, then scan the code again.',
   /** After the phone did open the page, or when the link could not start at all. */
   other: 'Other ways to get it on your phone'
 } as const
