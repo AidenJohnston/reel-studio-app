@@ -35,8 +35,15 @@ def cmd_probe(args):
     return probe.probe(Path(args.file))
 
 
+def cmd_export_probe(args):
+    from . import export_media
+    return export_media.inspect(Path(args.file))
+
+
 def cmd_export_media(args):
     from . import export_media
+    if args.width is None and args.height is None and args.bitrate is None:
+        return export_media.remux(Path(args.file), Path(args.dest))
     return export_media.encode(Path(args.file), Path(args.dest), args.width, args.height, args.bitrate)
 
 
@@ -315,12 +322,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("probe", cmd_probe, "describe a media file")
     sp.add_argument("file")
-    sp = add("export-media", cmd_export_media, "encode a finished edit for a platform")
+    sp = add("export-probe", cmd_export_probe, "probe a finished edit against platform video rules")
+    sp.add_argument("file")
+    sp = add("export-media", cmd_export_media, "encode a finished edit for a platform, or only redo its audio")
     sp.add_argument("file")
     sp.add_argument("--dest", required=True)
-    sp.add_argument("--width", required=True, type=int)
-    sp.add_argument("--height", required=True, type=int)
-    sp.add_argument("--bitrate", required=True, type=int)
+    sp.add_argument("--width", type=int, help="with --height and --bitrate: re-encode; none of them: copy the video")
+    sp.add_argument("--height", type=int)
+    sp.add_argument("--bitrate", type=int)
     sp = add("export-cover", cmd_export_cover, "save a JPEG cover from a video frame or a picture")
     sp.add_argument("file")
     sp.add_argument("--dest", required=True)

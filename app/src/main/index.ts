@@ -285,7 +285,9 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
+    let stopped: AbortSignal | undefined
     jobs.start(slug, 'rerender', async (emit, signal) => {
+      stopped = signal
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
@@ -298,6 +300,7 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
       return { summary: '', version, quiet: true }
     })
     await jobs.forSlug(slug)?.done
+    if (stopped?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     versions = await listVersions(dir)
     v = versions[versions.length - 1]
     if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }

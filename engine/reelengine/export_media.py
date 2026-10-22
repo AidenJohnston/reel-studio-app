@@ -2,12 +2,72 @@
 from __future__ import annotations
 
 import math
+import struct
 from pathlib import Path
 from typing import Optional
 
 from . import tools
-from .probe import probe
+from .probe import ffprobe_json, probe
 from .proto import EngineError, progress
+
+# Instagram's and Threads' video specs say "no edit lists". ffmpeg writes one for the B-frame delay and
+# the AAC priming; without it the mov muxer stretches the first audio packet instead, so sync holds.
+NO_EDIT_LIST = ["-use_editlist", "0", "-movflags", "+faststart"]
+
+
+def inspect(source: Path) -> dict:
+    """`probe`, plus what the platform rules check: audio bitrate, edit lists, the longest keyframe gap."""
+    info = probe(source, quick=True)
+    audio = next((s for s in ffprobe_json(source).get("streams", []) if s.get("codec_type") == "audio"), {})
+    packets = tools.text_run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "packet=pts_time,flags", "-of", "csv=p=0", str(source)], 300, "keyframe scan").stdout
+    keyframes = [float(t) for t, _, flags in (line.partition(",") for line in packets.splitlines())
+                 if "K" in flags and t not in ("", "N/A")]
+    end = info["vduration"] or info["duration"]
+    gaps = [b - a for a, b in zip(keyframes, keyframes[1:] + [end])]
+    return {**info, "audioBitrate": int(audio.get("bit_rate") or 0) or None,
+            "editList": _has_edit_list(source), "maxKeyframeGap": round(max(gaps, default=end), 3)}
+
+
+def _has_edit_list(path: Path) -> bool:
+    with open(path, "rb") as fh:
+        while header := fh.read(8):
+            if len(header) < 8:
+                return False
+            size, kind = struct.unpack(">I4s", header)
+            if size == 1:
+                size = struct.unpack(">Q", fh.read(8))[0] - 8
+            if kind == b"moov":
+                return _contains(fh.read(size - 8), [b"trak", b"edts", b"elst"])
+            if size == 0:
+                return False
+            fh.seek(size - 8, 1)
+    return False
+
+
+def _contains(data: bytes, path: list) -> bool:
+    off = 0
+    while off + 8 <= len(data):
+        size, kind = struct.unpack(">I4s", data[off:off + 8])
+        if size < 8:
+            return False
+        if kind == path[0] and (len(path) == 1 or _contains(data[off + 8:off + size], path[1:])):
+            return True
+        off += size
+    return False
+
+
+def remux(source: Path, dest: Path) -> dict:
+    """The same video stream with 128 kb/s audio and no edit list."""
+    info = probe(source, quick=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tools.ffmpeg_progress([tools.ffmpeg(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                           "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "copy",
+                           "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", *NO_EDIT_LIST,
+                           "-progress", "pipe:1", "-nostats", str(dest)],
+                          info["duration"], lambda pct: progress("export", pct, "Saving platform files"),
+                          max(120, info["duration"] * 4), "platform remux")
+    return {"video": str(dest), "sizeBytes": dest.stat().st_size}
 
 
 def encode(source: Path, dest: Path, width: int, height: int, bitrate: int) -> dict:
@@ -22,7 +82,7 @@ def encode(source: Path, dest: Path, width: int, height: int, bitrate: int) -> d
                            "-c:v", "libx264", "-preset", "medium", "-profile:v", "high", "-b:v", str(bitrate),
                            "-maxrate", str(bitrate), "-bufsize", str(bitrate * 2), "-pix_fmt", "yuv420p",
                            "-g", "60", "-flags", "+cgop", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
-                           "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(dest)],
+                           *NO_EDIT_LIST, "-progress", "pipe:1", "-nostats", str(dest)],
                           info["duration"], lambda pct: progress("export", pct, "Saving platform files"),
                           max(600, info["duration"] * 40), "platform export")
     return {"video": str(dest), "sizeBytes": dest.stat().st_size}

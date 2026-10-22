@@ -39,6 +39,17 @@ describe('platform export rules', () => {
     expect(captionIssue('x', `https://example.com/${'a'.repeat(100)} ${'b'.repeat(256)}`, 30)).toBeUndefined()
   })
 
+  it('fails if an e-mail address or a link\'s #fragment counts as an Instagram mention or hashtag', () => {
+    const emails = Array.from({ length: 21 }, (_, i) => `person${i}@example.com`).join(' ')
+    const links = Array.from({ length: 31 }, (_, i) => `https://example.com/page#part${i}`).join(' ')
+    expect(checkPlatform('instagram', emails, 30).some((issue) => issue.kind === 'mentions')).toBe(false)
+    expect(checkPlatform('instagram', links, 30).some((issue) => issue.kind === 'hashtags')).toBe(false)
+  })
+
+  it('fails if X counts a decomposed é as two characters instead of normalizing it first', () => {
+    expect(captionIssue('x', 'e\u0301'.repeat(141), 30)).toBeUndefined()
+  })
+
   it('fails if an Instagram caption contains more than 20 mentions', () => {
     const caption = Array.from({ length: 21 }, (_, index) => `@person${index}`).join(' ')
     expect(checkPlatform('instagram', caption, 30).some((issue) => issue.kind === 'mentions')).toBe(true)
