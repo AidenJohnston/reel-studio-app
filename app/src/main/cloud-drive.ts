@@ -9,8 +9,13 @@ export async function detectCloudDrives({ platform, home, driveRoots = Array.fro
   driveRoots?: string[]
 }): Promise<CloudDrive[]> {
   const drives: CloudDrive[] = []
+  const seen = new Set<string>()
   const add = async (folder: string, label: CloudDrive['label']) => {
-    if ((await fs.stat(folder).catch(() => null))?.isDirectory()) drives.push({ folder, label })
+    if (!(await fs.stat(folder).catch(() => null))?.isDirectory()) return
+    const real = await fs.realpath(folder)
+    if (seen.has(real)) return
+    seen.add(real)
+    drives.push({ folder, label })
   }
   if (platform === 'darwin') {
     await add(join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'), 'iCloud Drive')
@@ -21,6 +26,7 @@ export async function detectCloudDrives({ platform, home, driveRoots = Array.fro
   } else if (platform === 'win32') {
     await add(join(home, 'iCloudDrive'), 'iCloud Drive')
     await add(join(home, 'Google Drive'), 'Google Drive')
+    await add(join(home, 'My Drive'), 'Google Drive')
     for (const root of driveRoots) await add(join(root, 'My Drive'), 'Google Drive')
   }
   return drives

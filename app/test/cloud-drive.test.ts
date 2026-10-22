@@ -28,12 +28,16 @@ it('fails if installed macOS cloud folders are not offered', async () => {
   expect((await detectCloudDrives({ platform: 'darwin', home })).map((drive) => drive.label)).toEqual(['Google Drive'])
 })
 
-it('fails if Windows cloud folders or the mounted Google Drive are missed', async () => {
+it('fails if Windows cloud folders, the mirrored My Drive or the mounted Google Drive are missed or listed twice', async () => {
   const home = await temp()
   const mounted = join(home, 'G drive')
-  const folders = [join(home, 'iCloudDrive'), join(home, 'Google Drive'), join(mounted, 'My Drive')]
+  const streamed = join(home, 'H drive')
+  const mirrored = join(home, 'My Drive')
+  const folders = [join(home, 'iCloudDrive'), join(home, 'Google Drive'), mirrored, join(mounted, 'My Drive')]
   for (const folder of folders) await fs.mkdir(folder, { recursive: true })
-  expect(await detectCloudDrives({ platform: 'win32', home, driveRoots: [mounted, join(home, 'missing drive')] })).toEqual(
+  await fs.mkdir(streamed)
+  await fs.symlink(mirrored, join(streamed, 'My Drive'), 'junction')
+  expect(await detectCloudDrives({ platform: 'win32', home, driveRoots: [mounted, streamed, join(home, 'missing drive')] })).toEqual(
     folders.map((folder, i) => ({ folder, label: i ? 'Google Drive' : 'iCloud Drive' }))
   )
 })
