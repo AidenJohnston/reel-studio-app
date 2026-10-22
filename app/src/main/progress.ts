@@ -89,7 +89,8 @@ export class ProgressTracker {
       }
       if (i > this.cur) {
         const t = this.now()
-        if (this.cur >= 0) this.spent[this.phases[this.cur]] = (t - this.phaseStart) / 1000
+        // a phase left while held ended when the hold began
+        if (this.cur >= 0) this.spent[this.phases[this.cur]] = ((this.heldAt ?? t) - this.phaseStart) / 1000
         // phases we jumped over (already transcribed; a fast note) cost nothing
         for (let k = Math.max(0, this.cur + 1); k < i; k++) this.spent[this.phases[k]] = 0
         this.cur = i

@@ -42,6 +42,18 @@ describe('honest progress', () => {
     expect(after.overdue).toBe(false)
     expect(after.etaSec).toBe(before.etaSec)
     expect(t.finish().final).toBe(3)
+
+    // the step changes while it waits: the earlier step still ends where the wait began
+    const u = new ProgressTracker('note', 60, empty(), () => now)
+    u.update('edit', 0)
+    now += 5_000
+    u.hold(true)
+    now += 60_000
+    u.update('final', 0)
+    now += 60_000
+    u.hold(false)
+    now += 2_000
+    expect(u.finish()).toEqual({ edit: 5, final: 2 })
   })
 
   it('estimates time left from the video length, and never says 0 while still working', () => {
