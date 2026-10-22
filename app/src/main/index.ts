@@ -15,6 +15,7 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
+import { logDuration } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -82,6 +83,25 @@ function log(line: string): void {
   } catch {
     /* logging must never break the app */
   }
+}
+
+app.on('render-process-gone', (_event, contents, details) => {
+  log(`[render-process-gone] type=Renderer webContentsId=${contents.id} reason=${details.reason} exitCode=${details.exitCode}`)
+})
+app.on('child-process-gone', (_event, details) => {
+  log(`[child-process-gone] type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
+})
+app.on('browser-window-created', (_event, window) => {
+  window.on('unresponsive', () => log(`[unresponsive] type=Renderer windowId=${window.id}`))
+  window.on('responsive', () => log(`[responsive] type=Renderer windowId=${window.id}`))
+})
+
+function showOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> {
+  return logDuration(`[dialog] ${options.title ?? 'Open folder'}`, log, async () => {
+    const result = await dialog.showOpenDialog(win!, options)
+    log(`[dialog] returned canceled=${result.canceled} selectedCount=${result.filePaths.length}`)
+    return result
+  })
 }
 
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
@@ -329,7 +349,7 @@ function registerIpc(): void {
     }
   })
   handle('app:chooseFolder', async () => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
+    const r = await showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
@@ -362,7 +382,7 @@ function registerIpc(): void {
       return null
     },
     choose: async (filters) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Attach a picture or a clip', properties: ['openFile', 'multiSelections'], filters })
+      const r = await showOpenDialog({ title: 'Attach a picture or a clip', properties: ['openFile', 'multiSelections'], filters })
       return r.canceled ? null : r.filePaths
     }
   })
@@ -532,7 +552,7 @@ function registerIpc(): void {
       kind === 'music'
         ? [{ name: 'Songs', extensions: ['mp3', 'm4a', 'wav', 'aac', 'flac', 'ogg'] }]
         : [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'heic'] }]
-    const r = await dialog.showOpenDialog(win!, {
+    const r = await showOpenDialog({
       title: kind === 'music' ? 'Pick a song' : 'Pick pictures',
       properties: ['openFile', 'multiSelections'],
       filters
@@ -638,6 +658,12 @@ app.on('second-instance', (_event, argv, cwd) => {
 })
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin' && process.execPath.startsWith('/Volumes/')) {
+    log('[start] executable is under /Volumes/ on macOS; running from a mounted volume that may be a read-only disk image')
+  }
+  if (process.platform === 'darwin' && process.execPath.includes('/AppTranslocation/')) {
+    log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
+  }
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
   if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
