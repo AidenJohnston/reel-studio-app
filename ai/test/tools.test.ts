@@ -206,7 +206,9 @@ describe('tool implementations', () => {
     const f = await executeTool(ctx, 'look_at_frames', { times: [1.0], words: ['w29'] });
     expect(f.images).toHaveLength(2);
     expect(f.images![0].mime).toBe('image/png');
-    expect((await executeTool(ctx, 'set_zoom', { zooms: [{ anchor: { from: 'w53', to: 'w56' }, scale: 1.12 }] })).isError).toBe(false);
+    const zooms = [{ anchor: { from: 'w33', to: 'w36' }, scale: 1.1, style: null }, { anchor: { from: 'w53', to: 'w56' }, scale: 1.12, style: 'snap' }];
+    expect((await executeTool(ctx, 'set_zoom', { zooms })).isError).toBe(false);
+    expect(ctx.project!.zooms).toEqual([{ anchor: { from: 'w33', to: 'w36' }, scale: 1.1 }, { anchor: { from: 'w53', to: 'w56' }, scale: 1.12, style: 'snap' }]);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
