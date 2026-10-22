@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
+import { describeFacts, versionMessage } from '../../../shared/describe'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
@@ -141,9 +142,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   const aiOff = !provider || !provider.connected || provider.id === 'none'
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
-  // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
-  const versionNote = new Map<number, string>()
-  for (const m of d.chat) if (m.from === 'editor' && m.version) versionNote.set(m.version, m.text)
 
   const send = async () => {
     const text = note.trim()
@@ -351,7 +349,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   aria-checked={v.n === version?.n}
                   className={`chip${v.n === version?.n ? ' active' : ''}`}
                   onClick={() => setSelected(v.n)}
-                  title={versionNote.get(v.n)}
+                  title={v.facts && versionMessage(v.n, describeFacts(v.facts, d.words))}
                 >
                   {v.n === 0 ? 'Preview' : `Version ${v.n}`}
                 </button>

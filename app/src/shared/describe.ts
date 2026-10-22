@@ -1,6 +1,7 @@
 // "Version 3: bigger yellow subtitles, moved up." Says in plain words what an "Edit it myself"
 // change did, so the chat and the version buttons mean something. Keep free of Node and DOM imports.
-import type { DropResult, ProjectJson } from './api'
+import type { DropResult, EditFact, ProjectJson, Word } from './api'
+import { keptIds } from './cut'
 import { isMirrored } from './mirror'
 
 type Style = Record<string, unknown>
@@ -58,6 +59,49 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
   }
   return parts.join(', ')
 }
+
+/** The same words for a version's receipt facts (engine project.net_changes), whoever made the change. */
+export function describeFacts(facts: EditFact[], words: Word[]): string {
+  // SAFETY: each fact's before/after is the project.json value at its `kind` (engine net_changes), so
+  // the casts below name the schema's own types for cut.keep, captions.* and sources.
+  const at = (kind: string): EditFact | undefined => facts.find((f) => f.kind === kind)
+  const parts: string[] = []
+  const flips = facts.filter((f) => f.kind === 'source').map((f) => (f.after as { mirror?: boolean } | null)?.mirror === true)
+  if (flips.length) parts.push(flips.every(Boolean) ? 'flipped the picture' : 'picture back the way you filmed it')
+  const keep = at('cut.keep')
+  if (keep) {
+    const delta = keptIds(words, keep.after as Range[]).length - keptIds(words, keep.before as Range[]).length
+    if (delta > 0) parts.push(delta === 1 ? 'brought back a word' : `brought back ${delta} words`)
+    if (delta < 0) parts.push(delta === -1 ? 'cut a word' : `cut ${-delta} words`)
+  }
+  const caps = facts.filter((f) => f.kind.startsWith('captions.'))
+  if (caps.length) {
+    const side = (k: 'before' | 'after'): NonNullable<ProjectJson['captions']> => {
+      const c: Record<string, unknown> = { style: {} }
+      for (const f of caps) {
+        if (f.kind === 'captions.style') (c.style as Style)[String(f.field)] = f[k]
+        else c[f.kind.slice('captions.'.length)] = f[k]
+      }
+      return c as NonNullable<ProjectJson['captions']>
+    }
+    parts.push(...subtitles(side('before'), side('after')))
+  }
+  const track = at('music.track')
+  const level = at('music.level')
+  if (at('music.enabled')?.after === false || (track && !track.after)) parts.push('no music')
+  else if (track) parts.push(`new song "${name(track.after as string)}"`)
+  else if (level) parts.push(level.after === 'quiet' ? 'quieter music' : 'music volume changed')
+  const broll = facts.filter((f) => f.kind === 'broll')
+  const n = broll.filter((f) => !f.before).length - broll.filter((f) => !f.after).length
+  if (n > 0) parts.push(n === 1 ? 'added a picture' : `added ${n} pictures`)
+  if (n < 0) parts.push(n === -1 ? 'removed a picture' : `removed ${-n} pictures`)
+  const text = at('cover.text')
+  if (text) parts.push(text.after ? 'new words on the cover' : 'no words on the cover')
+  else if (at('cover.atSourceTime')) parts.push('new cover')
+  return parts.join(', ')
+}
+
+type Range = { from: string; to: string }
 
 /** "Version 3: bigger yellow subtitles, moved up." */
 export function versionMessage(version: number, change: string): string {

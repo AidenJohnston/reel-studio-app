@@ -9,8 +9,8 @@ import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRen
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
-  Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
+  Analysis, EditReceipt, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, sameEdit,
+  saveProject, snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
 } from './project';
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
@@ -290,6 +290,14 @@ ${summary}
 export interface ApplyNoteOptions {
   /** files attached to this note: `work/assets/attach-*` refs (re-checked against the project's sidecars) */
   attachments?: string[];
+  /** the app's job id, recorded in the receipt of the version this note makes */
+  jobId?: string;
+}
+
+/** The receipt of the version a note made: only a final render made one (a failed final falls back to a draft). */
+function finalReceipt(ctx: ToolContext): EditReceipt | undefined {
+  const last = ctx.state.renders.at(-1);
+  return last && !last.draft ? last.result?.receipt : undefined;
 }
 
 /** What a note says in notes.md: its words, or what was attached when it has none. */
@@ -303,7 +311,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const attached = await validateAttachments(projectDir, opts.attachments);
   if (!note.trim() && !attached.length) throw new AIError('empty_note', 'Type what you would like me to change.');
   const refs = attached.map((a) => a.asset);
-  let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
+  let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note, jobId: opts.jobId };
   const { p: p0 } = await load(ctx);
   // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
   // project.json, My style and work/assets back as they were.
@@ -325,7 +333,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       try {
         const version = await finalize(deps, ctx, onEvent);
         const p = await loadProject(projectDir);
-        p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString() }];
+        p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), receipt: finalReceipt(ctx) }];
         await saveProject(projectDir, p);
         await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${fast.summary}\n`);
         onEvent({ type: 'status', message: 'Done', pct: 100 });
@@ -337,7 +345,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     }
     // the direct change did not fit this project: undo it and let the AI read the note
     await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
-    ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
+    ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note, jobId: opts.jobId };
     await load(ctx);
   }
   onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
@@ -350,10 +358,13 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const label = noteLabel(note, attached);
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
+    const undone = ctx.state.changed.size > 0 && sameEdit(p0, await loadProject(projectDir));
+    if ((!ctx.state.changed.size || undone) && !ctx.state.styleRulesAdded.length) {
+      // nothing to render: a proposed rule still goes back to the app to ask about. An edit that ends
+      // where it started (undone, or set to what it already was) is no change: never repeat its claim.
+      const reply = undone && !r.finished?.trim().endsWith('?') ? 'That leaves your video the same as before, so I did not make a new version.' : r.finished;
       return {
-        summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
+        summary: reply || 'I looked, but I was not sure what to change. Could you say it another way?',
         version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
@@ -364,7 +375,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
     const placedNow = placedAssets(p);
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
-    p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
+    p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}),
+      receipt: finalReceipt(ctx) }];
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });

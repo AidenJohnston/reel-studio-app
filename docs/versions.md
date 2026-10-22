@@ -7,7 +7,8 @@ never a pile of preview-only folders an AI run left behind.
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json
+                 (+ notes.md, receipts.json)
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -25,17 +26,36 @@ Rules:
    same edit overwrites it); otherwise it makes `v(N+1)`.
 5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
    `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+6. `frames --render-id <id>` reads that render and nothing else (see Render identity).
+
+## Render identity
+
+Every render returns a random `renderId` and an `inputFingerprint` (SHA-256 of the edit, transcript
+words, asset sizes and times, draft flag and window). The manifest next to the video (`render.json` or
+`render_draft.json`) records both, the video's SHA-256, and that render's own caption boxes
+(`captionsReport`), b-roll records (`layerItems`), segments and word times. `verify.json` repeats the id
+and fingerprint. `frames`, `verify` and `inspect-render --render-id <id>` refuse with `RENDER_MISMATCH`
+unless the manifest, the video and `verify.json` are one render, so a preview replaced by a newer one is
+never inspected in its place. A window slice has no manifest and cannot be inspected; neither can a
+render made with `--no-verify`.
+
+Every render after the first version also returns `receipt`: `{jobId, renderId, version, facts}`, what
+changed since the version `project.json` pointed at (`render --job-id` sets `jobId`). A final render
+that changed something appends it to `versions/vN/receipts.json`, which the version buttons read
+(docs/schema-changes.md). `verify` finds a copied video (an export in the Library) by its SHA-256
+among the project's renders.
 
 ## Render result (engine `done.result`)
 
 | field | meaning |
 |---|---|
+| `renderId`, `inputFingerprint` | this render's identity (see Render identity) |
 | `version` | final: the version written. Preview: the number this edit WILL get when it is finalised |
 | `preview` | `true` for drafts and windows (file is under `versions/preview/`) |
 | `versionDir` | absolute folder the files went to |
 | `file` | absolute path of the mp4 |
 | `broll` | b-roll items shown differently than asked (`fallback`, `shownAs`) or skipped (`skipped`) |
+| `receipt` | what changed since the last version; absent when there is no earlier version |
 
 ## What the app shows
 

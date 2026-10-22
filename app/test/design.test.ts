@@ -2,7 +2,7 @@
 // folder names, and the Library summary line.
 import { describe, expect, it } from 'vitest'
 import { STAGES, clock, estimateSecondsLeft, overallProgress, stageIndex, timeLeftText } from '../src/shared/progress'
-import { describeChange, describeSorted, versionMessage } from '../src/shared/describe'
+import { describeChange, describeFacts, describeSorted, versionMessage } from '../src/shared/describe'
 import { displayPath } from '../src/shared/display-path'
 import type { DropResult, ProjectJson } from '../src/shared/api'
 
@@ -50,6 +50,17 @@ describe('progress', () => {
 })
 
 describe('version messages', () => {
+  it('fails if a version button stops reading its receipt the way a manual edit is worded', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 },
+      { kind: 'captions.style', field: 'color', before: '#FFFFFF', after: '#FFD60A' },
+      { kind: 'music.level', before: 'under-voice', after: 'quiet' },
+      { kind: 'broll', id: 'b3', before: null, after: { id: 'b3' } }
+    ]
+    expect(versionMessage(4, describeFacts(facts, words))).toBe('Version 4: cut 2 words, bigger yellow subtitles, quieter music, added a picture.')
+  })
   it('describes subtitle changes the way a person would', () => {
     const p = base()
     const patch = { captions: { enabled: true, style: { size: 126, position: 0.66, color: '#FFD60A', box: false } } }

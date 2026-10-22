@@ -25,6 +25,17 @@ export interface VersionInfo {
   draft: boolean
   cover: string | null
   createdAt: string
+  /** what this version changed since the one before, from `versions/vN/receipts.json`; absent for versions made before receipts existed */
+  facts?: EditFact[]
+}
+
+/** One thing an edit changed (engine project.net_changes): `kind` is the project.json path. */
+export interface EditFact {
+  kind: string
+  field?: string
+  id?: string
+  before: unknown
+  after: unknown
 }
 
 export interface Word {
