@@ -143,6 +143,7 @@ export function PhonePlayer({
   const [t, setT] = useState(0)
   const [dur, setDur] = useState(0)
   const [started, setStarted] = useState(false)
+  const dragOrigin = useRef<EventTarget | null>(null)
 
   const toggle = useCallback(() => {
     const v = video.current
@@ -183,9 +184,14 @@ export function PhonePlayer({
       className={`phone${className ? ` ${className}` : ''}`}
       draggable={!!dragFile}
       title={dragFile ? 'Drag me out of the window to put your reel on the desktop or in an upload box' : undefined}
+      onPointerDown={(e) => {
+        dragOrigin.current = e.target
+      }}
       onDragStart={(e) => {
         e.preventDefault()
-        if (!dragFile || (e.target as HTMLElement).closest('.scrub')) return
+        const origin = dragOrigin.current
+        dragOrigin.current = null
+        if (!dragFile || !(origin instanceof HTMLElement) || origin.closest('.scrub, button')) return
         markDraggingOut()
         reel.app.startDrag(dragFile)
       }}
