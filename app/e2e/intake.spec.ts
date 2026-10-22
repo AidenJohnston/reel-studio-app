@@ -1,8 +1,8 @@
-import { test, expect } from '@playwright/test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { test, expect, _electron as electron } from '@playwright/test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { BASE, launch, makeMedia, passFirstRun } from './helpers'
+import { APP_DIR, BASE, launch, makeMedia, passFirstRun } from './helpers'
 
 const media = makeMedia()
 function profile() {
@@ -12,7 +12,30 @@ function profile() {
 
 for (const source of ['paste', 'open-file before ready', 'second-instance argv']) {
   test(`fails if ${source} does not start a reel`, async () => {
-    const { app, page } = await launch({ ...profile(), ...(source === 'open-file before ready' ? { RS_E2E_OPEN_FILE: media.video } : {}) })
+    const env = profile()
+    let opened
+    if (source === 'open-file before ready') {
+      const bootstrap = join(BASE, 'open-file.cjs')
+      writeFileSync(bootstrap, `
+        const { app } = require('electron')
+        app.on('will-finish-launching', () => {
+          if (app.isReady()) throw new Error('Expected open-file before ready')
+          app.emit('open-file', { preventDefault() {} }, ${JSON.stringify(media.video)})
+        })
+      `)
+      const launchEnv: Record<string, string> = {}
+      for (const [key, value] of Object.entries(process.env)) if (value !== undefined) launchEnv[key] = value
+      Object.assign(launchEnv, env, { REELSTUDIO_TEST: '1', REELSTUDIO_MOCK_AI: '1',
+        REELSTUDIO_ENGINE_DIR: join(APP_DIR, 'dev', 'fake-engine'),
+        REELSTUDIO_MODELS_DIR: join(BASE, 'models'), FAKE_ENGINE_SLOW: '3'
+      })
+      delete launchEnv.ELECTRON_RUN_AS_NODE
+      const app = await electron.launch({ args: ['-r', bootstrap, APP_DIR], cwd: APP_DIR, env: launchEnv })
+      const page = await app.firstWindow()
+      await page.setViewportSize({ width: 1280, height: 820 })
+      opened = { app, page }
+    } else opened = await launch(env)
+    const { app, page } = opened
     try {
       if (source === 'open-file before ready') {
         await expect(page.getByTestId('get-started')).toBeVisible()
@@ -40,12 +63,6 @@ for (const source of ['paste', 'open-file before ready', 'second-instance argv']
       expect(projects).toHaveLength(1)
       expect(projects[0].title).toBe('My first take')
     } finally {
-      const evidence = process.env.RS_INTAKE_EVIDENCE
-      if (evidence) {
-        mkdirSync(evidence, { recursive: true })
-        const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString('base64'))
-        writeFileSync(join(evidence, `${source.replaceAll(' ', '-')}.png`), Buffer.from(png, 'base64'))
-      }
       if (source === 'paste') await app.evaluate(async ({ clipboard }) => {
         if (globalThis.__intakeClipboard) await clipboard.write(globalThis.__intakeClipboard)
       })
