@@ -118,6 +118,14 @@ describe('tool implementations', () => {
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
   });
 
+  it('add_broll with a picture and no params places it', async () => {
+    const { ctx, root, dir } = await ctxFor();
+    await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());
+    const r = await executeTool(ctx, 'add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'card-above-head', asset: 'flour.png', search: null, animation: null });
+    expect(r.isError, r.content).toBe(false);
+    expect((await loadProject(dir)).broll[0]).toMatchObject({ asset: 'Library/Images/flour.png', params: {} });
+  });
+
   it('fetch_image downloads images only', async () => {
     const { ctx, dir } = await ctxFor();
     ctx.fetchImpl = (async (url: string) => url.endsWith('.png')

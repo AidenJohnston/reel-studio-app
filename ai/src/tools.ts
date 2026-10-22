@@ -899,7 +899,7 @@ const tools: ToolDef[] = [
         template: S.enum(ANIMATION_IDS),
         params: ANIM_PARAMS,
       }, 'Make an animation for these words (see make_animation); timed to the spoken words for you.')),
-      params: PARAMS,
+      params: S.opt(PARAMS),
     }),
     async run(ctx, args) {
       const { t } = await load(ctx);
