@@ -13,6 +13,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -214,23 +218,79 @@ def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None
     a, b = win
     cmd = [ffmpeg_bin(ctx), "-v", "error", "-nostdin", "-ss", f"{a:.3f}", "-i", str(path), "-t", f"{b - a:.3f}",
            "-an", "-vf", f"scale={w}:{h}:flags=area", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    proc = run(cmd, timeout=120, what="frame grab", binary=True)
     size = w * h * 3
-    n = len(proc.stdout) // size
-    if n == 0:
-        return
     t0 = round(a, 3)
-    for t in times:
-        k = min(n - 1, max(0, int(math.ceil((t - t0) * fps - 1e-6))))
-        yield t, np.frombuffer(proc.stdout[k * size:(k + 1) * size], np.uint8).reshape(h, w, 3)
+    # A separate file keeps stderr from filling a pipe while stdout is read one frame at a time.
+    with tempfile.TemporaryFile() as stderr:
+        try:
+            proc = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=stderr,
+                                    stdin=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise EngineError("NO_FFMPEG", f"{cmd[0]} not found",
+                              "A video tool is missing. Reinstall Reel Studio.") from None
+        timed_out = threading.Event()
+
+        def timeout():
+            if proc.poll() is None:
+                timed_out.set()
+                proc.kill()
+
+        remaining = 120.0
+        timer = threading.Timer(remaining, timeout)
+        index, buf, eof = -1, b"", False
+        try:
+            started = time.monotonic()
+            timer.start()
+            for t in times:
+                k = max(0, int(math.ceil((t - t0) * fps - 1e-6)))
+                while index < k and not eof:
+                    frame = proc.stdout.read(size)
+                    if len(frame) < size:
+                        eof = True
+                    else:
+                        buf = frame
+                        index += 1
+                # At EOF, repeat the final complete frame, as the buffered decoder did.
+                if buf:
+                    # Scoring time belongs to the consumer, not FFmpeg's timeout budget.
+                    timer.cancel()
+                    timer.join()
+                    remaining -= time.monotonic() - started
+                    # A later decode failure can raise after these partial frames were yielded.
+                    yield t, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+                    started = time.monotonic()
+                    timer = threading.Timer(max(0.0, remaining), timeout)
+                    timer.start()
+            while not eof:
+                eof = len(proc.stdout.read(size)) < size
+            proc.wait()
+            timer.cancel()
+            timer.join()
+            if timed_out.is_set():
+                raise EngineError("TIMEOUT", "frame grab exceeded 120s",
+                                  "This step took too long. Try a shorter video.")
+            if proc.returncode != 0:
+                stderr.seek(0, os.SEEK_END)
+                stderr.seek(max(0, stderr.tell() - 6000))
+                err = stderr.read().decode("utf-8", "replace")
+                raise EngineError("FFMPEG_FAILED", f"frame grab failed: {err[-1500:]}",
+                                  "Something went wrong while making your video. Try again.")
+        finally:
+            timer.cancel()
+            proc.kill()
+            proc.wait()
+            proc.stdout.close()
+            if timer.ident is not None:
+                timer.join()
 
 
 def grab_frame(path: Path, t: float, ctx=None, width: Optional[int] = None) -> np.ndarray:
     """One full-resolution (or `width`-scaled) BGR frame at t seconds."""
     info = probe(path, ctx)
     w = width or info["width"]
-    for _, fr in decode_frames(path, 1, w, ctx=ctx, times=[t]):
-        return fr
+    with closing(decode_frames(path, 1, w, ctx=ctx, times=[t])) as frames:
+        for _, fr in frames:
+            return fr
     raise EngineError("FRAME_FAILED", f"no frame at {t}s in {path}", "I couldn't read a picture from this video.")
 
 
