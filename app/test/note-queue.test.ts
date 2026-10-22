@@ -20,7 +20,7 @@ process.env.REELSTUDIO_MOCK_NOTE = '1'
 
 const CANCELLED = { code: 'CANCELLED', userMessage: 'Stopped.' }
 
-function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?: boolean } = {}) {
+function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?: boolean; afterEvent?: (e: JobEvent) => void } = {}) {
   const engine = createEngineRunner({
     python: () => PYTHON,
     env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, ...(opts.failRender ? { FAKE_ENGINE_FAIL: 'render' } : {}) })
@@ -60,6 +60,7 @@ function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?
     const p = queue.onJobEvent(e)
     pending.add(p)
     void p.finally(() => pending.delete(p))
+    opts.afterEvent?.(e)
   }, () => undefined)
   const ai = createMockAI({ host: { runEngine: slot.run, renderAnimation: async () => '', reelStudioRoot }, settingsDir: join(reelStudioRoot(), 'ai') })
   // as index.ts startNote
@@ -178,6 +179,19 @@ describe('note queue', () => {
     expect(a.waitingAt.saved.has(slug)).toBe(true)
     a.queue.stop(jobId!)
     await a.finishSave(slug)
+    expect(a.jobs.forSlug(slug)).toBeUndefined()
+    expect((await readProject(slug)).version).toBe(2)
+    expect(await waitingTexts(slug)).toEqual(['second'])
+    expect((await readAppState(slug)).queueHeld).toBe(true)
+  }, 60000)
+
+  it('Stop pressed just as the note finishes still holds the notes behind it', async () => {
+    setupPaths()
+    const slug = await reel('stop-at-end')
+    const a = app({ afterEvent: (e) => void (e.type === 'done' && a.queue.stop(e.jobId)) })
+    await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.think(slug)
     expect(a.jobs.forSlug(slug)).toBeUndefined()
     expect((await readProject(slug)).version).toBe(2)
     expect(await waitingTexts(slug)).toEqual(['second'])

@@ -29,9 +29,11 @@ const STARTED = { code: 'NOT_QUEUED', userMessage: 'That note already started, s
 export const STOPPED = 'Stopped. Nothing changed.'
 export const BACK_IN_QUEUE = 'That note is waiting below. Press Resume to try it again.'
 
+/** The saved notes' ids, or null when project.json can't be read or its notes are not a list. */
 async function committed(slug: string): Promise<{ version: number; ids: Set<string> } | null> {
-  const p = await readJson<{ version?: number; notes?: { id?: string }[] } | null>(join(projectDir(slug), 'project.json'), null)
-  return p && { version: Number(p.version) || 0, ids: new Set((p.notes ?? []).map((n) => n.id ?? '')) }
+  const p = await readJson<{ version?: number; notes?: { id?: unknown }[] } | null>(join(projectDir(slug), 'project.json'), null)
+  if (!p || (p.notes !== undefined && !Array.isArray(p.notes))) return null
+  return { version: Number(p.version) || 0, ids: new Set((p.notes ?? []).map((n) => (typeof n?.id === 'string' ? n.id : ''))) }
 }
 
 /** What the editor says when a queued note's job ends without its own reply. `savedAs`: the version it
@@ -43,6 +45,9 @@ function endLine(byStop: boolean, savedAs: number | null, readable: boolean, typ
   }
   return savedAs === null && type === 'error' ? { from: 'editor', text: BACK_IN_QUEUE } : null
 }
+
+/** Files the queue or the chat still shows. */
+const referenced = (s: AppState): NoteAttachment[] => [...(s.queue ?? []), ...s.chat].flatMap((x) => x.attachments ?? [])
 
 /** Entries that are not running wait again: they leave the chat and the queue holds. */
 function backToWaiting(s: AppState): void {
@@ -127,11 +132,11 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
     cancel(slug: string, id: string): Promise<void> {
       return lane(slug, async () => {
         let attached: NoteAttachment[] = []
-        await change(slug, (s) => {
+        const after = await change(slug, (s) => {
           attached = stillWaiting(s, id).attachments
           s.queue = (s.queue ?? []).filter((q) => q.id !== id)
         })
-        await dropStaged(noteStagingDir(slug), attached)
+        await dropStaged(noteStagingDir(slug), attached, referenced(after))
       })
     },
 
@@ -162,11 +167,11 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
     clear(slug: string): Promise<void> {
       return lane(slug, async () => {
         const before = (await readAppState(slug)).queue ?? []
-        await change(slug, (s) => {
+        const after = await change(slug, (s) => {
           s.queue = (s.queue ?? []).filter((q) => q.attempt)
           s.queueHeld = false
         })
-        await dropStaged(noteStagingDir(slug), before.filter((q) => !q.attempt).flatMap((q) => q.attachments))
+        await dropStaged(noteStagingDir(slug), before.filter((q) => !q.attempt).flatMap((q) => q.attachments), referenced(after))
       })
     },
 
@@ -180,9 +185,10 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
       if (!e.slug || (e.type !== 'done' && e.type !== 'error' && e.type !== 'cancelled')) return
       const slug = e.slug
       const ended = jobs.get(e.jobId)?.done ?? Promise.resolve()
-      const byStop = stopped.delete(e.jobId)
       await lane(slug, async () => {
         await ended
+        // read only now: a Stop can still land between the job's last event and its end
+        const byStop = stopped.delete(e.jobId)
         const st = await readAppState(slug)
         const ran = st.queue?.find((q) => q.attempt)
         const head = ran ? await committed(slug) : null
@@ -216,8 +222,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
             backToWaiting(s)
           }, { durable: true })
         }
-        const now = await readAppState(p.slug)
-        await pruneStaging(noteStagingDir(p.slug), [...(now.queue ?? []), ...now.chat].flatMap((x) => x.attachments ?? []))
+        await pruneStaging(noteStagingDir(p.slug), referenced(await readAppState(p.slug)))
       }
     }
   }

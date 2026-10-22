@@ -112,14 +112,17 @@ export async function unstage(dir: string, staging: string, list: NoteAttachment
   await dropStaged(staging, moved)
 }
 
-/** Deletes staged copies (a waiting note cancelled, or already copied into the project). */
-export async function dropStaged(staging: string, list: NoteAttachment[]): Promise<void> {
-  for (const rel of list.flatMap(filesOf)) await fs.rm(join(staging, ...rel.split('/')), { force: true })
+/** Deletes staged copies (a waiting note cancelled, or already copied into the project), except those
+ * `keep` still refers to. */
+export async function dropStaged(staging: string, list: NoteAttachment[], keep: NoteAttachment[] = []): Promise<void> {
+  const kept = new Set(keep.flatMap(filesOf))
+  for (const rel of list.flatMap(filesOf)) if (!kept.has(rel)) await fs.rm(join(staging, ...rel.split('/')), { force: true })
 }
 
 /** At startup: deletes staged files no waiting note or chat message refers to (attached, never sent). */
 export async function pruneStaging(staging: string, keep: NoteAttachment[]): Promise<void> {
   const wanted = new Set(keep.flatMap(filesOf))
+  if (!wanted.size) return fs.rm(staging, { recursive: true, force: true })
   for (const sub of ['work/assets', 'work/thumbs']) {
     const names = await fs.readdir(join(staging, ...sub.split('/'))).catch(() => [] as string[])
     for (const n of names) if (!wanted.has(`${sub}/${n}`)) await fs.rm(join(staging, ...sub.split('/'), n), { force: true })
