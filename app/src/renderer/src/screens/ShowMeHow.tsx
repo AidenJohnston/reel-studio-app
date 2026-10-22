@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryFile, ProjectDetail, ProjectJson, VersionInfo, Word } from '../../../shared/api'
 import { rangesKeepingOrder } from '../../../shared/cut'
 import { describeChange } from '../../../shared/describe'
+import { isMirrored, withMirror } from '../../../shared/mirror'
 import { reel, userMessage } from '../api'
 import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
@@ -158,8 +159,9 @@ export function ShowMeHow({
   initialTab?: Tab
   onClose: () => void
   onChanged: () => void
-  /** `change`: what changed, in plain words, for the chat and the version button. */
-  onRerender: (change: string) => void
+  /** `change`: what changed, in plain words, for the chat and the version button. `label`: what the
+   * progress bar says, when the open tab's own words would be wrong (a flip from the Cut tab). */
+  onRerender: (change: string, label?: string) => void
   /** The subtitle look to preview on the phone (Subtitles tab), or null. */
   onPreview?: (p: { look: SubtitleLook; text: string; at: number } | null) => void
   onTab?: (t: Tab) => void
@@ -278,7 +280,10 @@ export function ShowMeHow({
       if (onlyPost) {
         setPatch({})
         notify('Saved. Copy it when you post.')
-      } else onRerender(describeChange(d.project, patch, kept.size - d.keptIds.length))
+      } else {
+        const onlyFlip = !cutDirty && Object.keys(full).every((k) => k === 'sources' || k === 'post')
+        onRerender(describeChange(d.project, patch, kept.size - d.keptIds.length), onlyFlip ? 'Flipping your video' : undefined)
+      }
     } catch (e) {
       notify(userMessage(e), 'error')
     }
@@ -338,6 +343,17 @@ export function ShowMeHow({
         <div className="drawer-body">
           {tab === 'cut' && (
             <div className="stack">
+              {/* a front-camera take often comes out mirrored: writing behind you reads backwards */}
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={isMirrored(p)}
+                  onChange={(e) => set('sources', withMirror(p.sources, e.target.checked))}
+                  data-testid="mirror-on"
+                />
+                Flip picture (it's mirrored)
+              </label>
+              <p className="muted-sm" style={{ marginTop: -6 }}>Turn this on if writing behind you reads backwards. Your subtitles and pictures stay the right way round.</p>
               <p className="muted" style={{ fontSize: 16 }}>
                 <b>Crossed-out words are cut.</b> Click a word to bring it back, or click a kept word to cut it.
               </p>
