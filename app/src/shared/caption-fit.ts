@@ -6,6 +6,10 @@
 export const MARGIN_FRAC = 0.065
 /** captions.py MIN_SHRINK: below this fraction of the base size, wrap to two lines instead of shrinking. */
 export const MIN_SHRINK = 0.62
+/** verify.py ig_right_limit at 1080 wide: past this x a caption sits under Instagram's right-side buttons. */
+export const IG_RIGHT_LIMIT = 1080 * (1 - 0.13) + 40
+/** captions.render_ass at 1080 wide: a centred line fits the margins and ends a pixel inside IG_RIGHT_LIMIT. */
+export const SAFE_WIDTH = 2 * Math.min(540 - 1080 * MARGIN_FRAC, IG_RIGHT_LIMIT - 540 - 1)
 /** captions.py BOX_PAD: the "box" style's padding, which libass draws as the outline. */
 export const BOX_PAD = 18
 /**
@@ -23,17 +27,23 @@ export function fitCaption(text: string, base: number, safeW: number, outline: n
   const w = measure(text, base, outline)
   if (w <= safeW) return { size: Math.trunc(base), lines: [text] }
   let size = (base * safeW) / w
-  if (size >= base * MIN_SHRINK || !text.includes(' ')) return { size: Math.max(10, Math.trunc(size)), lines: [text] }
-  const parts = text.split(' ')
-  let best: { widest: number; lines: string[] } | null = null
-  for (let k = 1; k < parts.length; k++) {
-    const a = parts.slice(0, k).join(' ')
-    const b = parts.slice(k).join(' ')
-    const widest = Math.max(measure(a, base, outline), measure(b, base, outline))
-    if (!best || widest < best.widest) best = { widest, lines: [a, b] }
+  let lines = [text]
+  if (size < base * MIN_SHRINK && text.includes(' ')) {
+    const parts = text.split(' ')
+    let best: { widest: number; lines: string[] } | null = null
+    for (let k = 1; k < parts.length; k++) {
+      const a = parts.slice(0, k).join(' ')
+      const b = parts.slice(k).join(' ')
+      const widest = Math.max(measure(a, base, outline), measure(b, base, outline))
+      if (!best || widest < best.widest) best = { widest, lines: [a, b] }
+    }
+    // SAFETY: text has a space here, so parts has at least two entries and the loop ran at least once.
+    const split = best!
+    if (split.widest <= safeW) return { size: Math.trunc(base), lines: split.lines }
+    size = (base * safeW) / split.widest
+    lines = split.lines
   }
-  // SAFETY: text has a space here, so parts has at least two entries and the loop ran at least once.
-  const { widest, lines } = best!
-  size = widest <= safeW ? base : (base * safeW) / widest
-  return { size: Math.max(10, Math.trunc(size)), lines }
+  size = Math.max(10, Math.trunc(size))
+  while (size > 10 && Math.max(...lines.map((l) => measure(l, size, outline))) > safeW) size--
+  return { size, lines }
 }

@@ -3,7 +3,7 @@
 // Anything with a place in the video, a second request, a lasting preference or a word we are not
 // sure about goes to the full AI editor instead. Missing a fast path costs ~20 s; a wrong one costs
 // the user's trust, so this list stays short and strict.
-import type { Project } from './project';
+import { lowestCaptionPosition, type Project } from './project';
 
 export interface FastCall { name: string; args: Record<string, unknown> }
 export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
@@ -46,7 +46,7 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
       return { kind: 'captions-up', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions up a little.' };
     }
     if (/\b(lower|down|too high)\b/.test(n)) {
-      const next = Math.round(clamp(pos + 0.06, 0.5, 0.85) * 100) / 100;
+      const next = Math.round(clamp(pos + 0.06, 0.5, lowestCaptionPosition(p.format, style)) * 100) / 100;
       if (next <= pos) return null;
       return { kind: 'captions-down', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions down a little.' };
     }

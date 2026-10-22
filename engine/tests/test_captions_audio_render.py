@@ -50,7 +50,10 @@ def test_fit_shrinks_long_lines_and_never_grows():
     assert size == 76 and lines == ["HI"]
     size, lines = captions.fit("INTERNATIONALIZATION EVERYWHERE", 76, 940, 6, m)
     assert size <= 76
-    assert max(m.width(t, size, 6) for t in lines) <= 940 + 1
+    assert max(m.width(t, size, 6) for t in lines) <= 940
+    # a real cue the old size-by-ratio estimate left 1 px too wide
+    size, lines = captions.fit("AND IMPERSONATED BEING 7", 105, 939.6, 8, m)
+    assert m.width(lines[0], size, 8) <= 939.6
 
 
 def test_unknown_font_falls_back_with_a_warning():

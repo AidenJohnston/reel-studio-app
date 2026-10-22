@@ -210,6 +210,17 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
+    // an eval's first edit put them at 0.88, every line under Instagram's caption and username
+    const low = await executeTool(ctx, 'set_caption_style', { size: 105, position: 0.88 });
+    expect(low.isError).toBe(true);
+    expect(low.content).toMatch(/the lowest position is 0\.77/);
+    expect((await loadProject(ctx.projectDir)).captions.style).toMatchObject({ size: 70, position: 0.72 });
+    expect((await executeTool(ctx, 'set_caption_style', { size: 105, position: 0.77 })).isError).toBe(false);
+    // a reel left at 0.85 by an older version can still be moved up, even if not yet all the way
+    const older = await loadProject(ctx.projectDir);
+    older.captions.style.position = 0.85;
+    await saveProject(ctx.projectDir, older);
+    expect((await executeTool(ctx, 'set_caption_style', { position: 0.8 })).isError).toBe(false);
     await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
     expect(ctx.project!.captions.style.highlight).toBe('#34C759');
     expect((await executeTool(ctx, 'set_caption_style', { highlight: '#34C75980' })).isError).toBe(true); // the engine draws no see-through highlight

@@ -26,17 +26,29 @@ describe('caption presets', () => {
   // The same stand-in measurer was handed to engine captions.fit (with captions.apply_case and, for a box,
   // the outline raised to BOX_PAD as render_ass does); these are its results at 1080 wide.
   const measure: Measure = (text, size, outline) => [...text].reduce((w, ch) => w + (ch === ' ' ? 0.25 : 0.6), 0) * (size / 1.562) + 2 * outline
-  const ENGINE: Record<string, { size: number; lines: string[] }> = {
-    clean: { size: 67, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    'bold-pop': { size: 119, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
-    karaoke: { size: 67, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    boxed: { size: 66, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    minimal: { size: 67, lines: ['internationalization everywhere today'] }
+  const ENGINE: Record<string, Record<string, { size: number; lines: string[] }>> = {
+    'Internationalization everywhere today': {
+      clean: { size: 105, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      'bold-pop': { size: 111, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      karaoke: { size: 105, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      boxed: { size: 61, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
+      minimal: { size: 63, lines: ['internationalization everywhere today'] }
+    },
+    // the widest three-word line in the eval clips: it now ends clear of Instagram's right-side buttons
+    "Someone's personal brand": {
+      clean: { size: 98, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      'bold-pop': { size: 97, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      karaoke: { size: 98, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      boxed: { size: 95, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      minimal: { size: 84, lines: ["someone's personal brand"] }
+    }
   }
 
   it('the preview sizes and breaks each look\'s line where the engine does', () => {
-    for (const p of CAPTION_PRESETS) {
-      expect([p.key, fitLook(lookFromStyle(applyPreset(p.key)), 'Internationalization everywhere today', measure)]).toEqual([p.key, ENGINE[p.key]])
+    for (const [text, byLook] of Object.entries(ENGINE)) {
+      for (const p of CAPTION_PRESETS) {
+        expect([text, p.key, fitLook(lookFromStyle(applyPreset(p.key)), text, measure)]).toEqual([text, p.key, byLook[p.key]])
+      }
     }
   })
 })

@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
+  lowestCaptionPosition, nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -771,18 +771,25 @@ const tools: ToolDef[] = [
       maxWords: S.opt(S.int('words per caption chunk, 1-4')),
       case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
       color: S.opt(S.str('hex color like #FFFFFF')),
-      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
+      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.77 is as low as they go at the default size, less when bigger: any lower sits under Instagram\'s caption and username', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
     }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p) => {
+        const overhang = () => (p.captions.style.position ?? 0.75) - lowestCaptionPosition(p.format, p.captions.style);
+        const overhangBefore = overhang();
         if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
         for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
           if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];
         }
         if (args.highlight === 'none') delete p.captions.style.highlight;
+        // only a change that pushes them further under Instagram's caption is refused; moving an older, too-low
+        // line up or making it smaller still goes through
+        if (overhang() > Math.max(0, overhangBefore)) {
+          return `captions at position ${p.captions.style.position} would sit under Instagram's caption and username; at size ${p.captions.style.size} the lowest position is ${lowestCaptionPosition(p.format, p.captions.style)}`;
+        }
       });
       return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };
     },

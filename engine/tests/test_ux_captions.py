@@ -2,7 +2,7 @@
 import re
 
 from conftest import mkwords
-from reelengine import captions, project
+from reelengine import captions, project, verify
 
 
 def _style_line(ass: str) -> list:
@@ -32,6 +32,13 @@ def test_default_render_is_solid_outline_no_grey_shadow():
     x, y, w, h = report[0]["box"]
     assert abs((y + h / 2) - 1440) <= 2   # centred at 0.75 of 1920
     assert y + h <= 1920 - 415            # bottom clears the 425 px margin (+ outline)
+
+
+def test_the_widest_default_line_stays_clear_of_instagrams_right_buttons():
+    # the widest three-word cue in the eval clips; at the old 6.5% margins it ended at x 1007
+    words = mkwords([(0.0, 0.4, "someone's"), (0.4, 0.8, "personal"), (0.8, 1.3, "brand.")])
+    _, report, _, _ = captions.render_ass(captions.build_cues(words, {}), {}, 1080, 1920)
+    assert verify.caption_report(report, (1080, 1920))[0] == "PASS"
 
 
 def test_box_style_draws_an_opaque_box():

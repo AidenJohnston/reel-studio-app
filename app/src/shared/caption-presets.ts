@@ -1,7 +1,7 @@
 // Caption looks offered as starting points in "Edit it myself". Picking one writes exactly its style fields
 // (engine/reelengine/captions.py draws them); Size, Position and Colour, or a note to the AI editor, fine-tune
 // from there. All of them use the one subtitle face the engine ships and the preview loads.
-import { BOX_PAD, MARGIN_FRAC, fitCaption, type Measure } from './caption-fit'
+import { BOX_PAD, SAFE_WIDTH, fitCaption, type Measure } from './caption-fit'
 
 type CaptionStyle = Record<string, unknown>
 
@@ -80,5 +80,5 @@ function applyCase(text: string, c: string): string {
 /** The size and lines the engine gives `text` in this look (captions.render_ass at 1080 wide). */
 export function fitLook(look: SubtitleLook, text: string, measure: Measure): { size: number; lines: string[] } {
   const outline = look.box ? Math.max(look.outline, BOX_PAD) : look.outline
-  return fitCaption(applyCase(text, look.case), look.size, 1080 * (1 - 2 * MARGIN_FRAC), outline, measure)
+  return fitCaption(applyCase(text, look.case), look.size, SAFE_WIDTH, outline, measure)
 }
