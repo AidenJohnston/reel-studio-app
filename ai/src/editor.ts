@@ -5,7 +5,7 @@ import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore } from './style';
-import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
+import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
@@ -13,6 +13,7 @@ import {
   saveProject, snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
 } from './project';
 import { extractJson } from './providers/cli';
+import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
 import * as fsp from 'node:fs/promises';
 
 export interface EditorDeps {
@@ -37,6 +38,7 @@ export interface EditResult extends AgentResult {
   notice?: UserFacingError;
   /** set when the note took the no-model fast path (fastnote.ts): which one */
   fast?: string;
+  check?: CheckRecord;
 }
 
 const engineArgs = (dir: string, extra: string[] = []) => ['--project', dir, ...extra];
@@ -300,6 +302,59 @@ function finalReceipt(ctx: ToolContext): EditReceipt | undefined {
   return last && !last.draft ? last.result?.receipt : undefined;
 }
 
+const REPAIR_STEPS = 12;
+
+async function candidateRender(ctx: ToolContext): Promise<RenderInfo> {
+  const last = ctx.state.renders.at(-1);
+  return last?.draft && !ctx.state.dirty?.size ? last : doRender(ctx, true);
+}
+
+async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
+  Promise<{ record: CheckRecord; summary: string | null }> {
+  const started = Date.now();
+  const system = deps.prompts.render('checker');
+  const rounds: CheckRound[] = [];
+  let tokens = 0; let repairs = 0; let summary: string | null = null;
+  const done = (verdict: CheckRecord['verdict'], error?: string) => ({
+    record: { verdict, repairs, rounds, ...(error ? { error } : {}), cost: { tokens, seconds: Math.round((Date.now() - started) / 100) / 10 } },
+    summary,
+  });
+  for (;;) {
+    onEvent({ type: 'status', message: 'Double-checking your change', pct: 85, phase: 'edit' });
+    const candidate = await candidateRender(ctx);
+    let asked: Awaited<ReturnType<typeof askChecker>>;
+    try {
+      asked = await askChecker(provider, system, await checkerEvidence(ctx, note, candidate), candidate.result?.renderId ?? null, signal);
+    } catch (e: any) {
+      if (signal?.aborted) throw e;
+      return done('error', String(e?.message ?? e));
+    }
+    tokens += asked.tokens;
+    if (!asked.round) return done('error', `unusable reply: ${asked.problems.join('; ')}`);
+    rounds.push(asked.round);
+    if (asked.round.verdict === 'pass') return done('pass');
+    if (repairs === MAX_REPAIRS) return done('unresolved');
+    repairs++;
+    onEvent({ type: 'status', message: 'Fixing what the check found', pct: 87, phase: 'edit' });
+    const before = await fsp.readFile(path.join(ctx.projectDir, 'project.json'));
+    const p0 = await loadProject(ctx.projectDir);
+    const changed = new Set(ctx.state.changed);
+    ctx.state.finished = null;
+    try {
+      const r = await runAgent({ provider, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes), ctx, onEvent, signal,
+        maxSteps: REPAIR_STEPS, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+      tokens += r.tokens;
+      if (sameEdit(p0, await loadProject(ctx.projectDir))) return done('unresolved');
+      if (r.finished) summary = r.finished;
+    } catch (e: any) {
+      if (signal?.aborted) throw e;
+      await writeFileAtomic(path.join(ctx.projectDir, 'project.json'), before);
+      ctx.state.changed = changed;
+      return done('unresolved', String(e?.message ?? e));
+    }
+  }
+}
+
 /** What a note says in notes.md: its words, or what was attached when it has none. */
 function noteLabel(note: string, attached: AttachmentInfo[]): string {
   if (note.trim()) return note.trim();
@@ -368,9 +423,11 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
+    const review = undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, onEvent, signal);
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
     const version = await finalize(deps, ctx, onEvent);
-    const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
+    const said = review?.summary ?? honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.';
+    const summary = withStyleEcho(review?.record.verdict === 'unresolved' ? `${said} ${unresolvedLine(review.record.rounds.at(-1)!.fixes)}` : said, ctx.state);
     const p = await loadProject(projectDir);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
     const placedNow = placedAssets(p);
@@ -379,8 +436,10 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       receipt: finalReceipt(ctx) }];
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
+    if (review) await saveCheck(projectDir, version, review.record);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed],
+      ...(review ? { check: review.record } : {}) };
   } catch (e) {
     await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
     throw e;
