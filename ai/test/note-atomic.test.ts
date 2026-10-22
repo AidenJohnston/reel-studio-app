@@ -107,6 +107,23 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(notesLeft(dir)).toBe(0);
   });
 
+  it('part of the preview render would not stop: the note ends with that error at once, and nothing else runs or is saved', async () => {
+    const { dir, host, settingsDir, read, before } = await setup();
+    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
+    host.afterRenderFiles = ({ draft }) => {
+      if (draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    const m = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.4 }), call('render_draft')] },
+      finish('I gave the pauses more room.'),
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined, undefined, { owner: 'job-1' }))
+      .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(m.requests).toHaveLength(1);
+    expect(host.calls.map((c) => c.command)).toEqual(['render']);
+    expect(await read()).toBe(before);
+  });
+
   it('the dev CLI refuses a project Reel Studio has open, and changes nothing', async () => {
     const { dir, host, settingsDir, read, before } = await setup();
     await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'the app\'s job' }));

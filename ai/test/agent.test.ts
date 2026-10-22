@@ -129,6 +129,17 @@ describe('agent loop with a scripted model', () => {
     expect(r.finished).toBe('done');
   });
 
+  it('part of the first look would not stop: the first edit ends with that error and renders nothing more', async () => {
+    const { dir, host, settingsDir } = await setup();
+    let renders = 0;
+    host.afterRenderFiles = () => {
+      if (renders++ === 0) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    const ai = createAI({ host, settingsDir, providerOverride: firstEditScript() });
+    await expect(ai.firstEdit(dir, () => undefined)).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(host.calls.filter((c) => c.command === 'render')).toHaveLength(1);
+  });
+
   it('cancel stops the loop', async () => {
     const { dir, host, settingsDir } = await setup();
     const ac = new AbortController();
