@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Measure } from '../src/shared/caption-fit'
-import { CAPTION_PRESETS, applyPreset, fitLook, lookFromStyle, presetOf } from '../src/shared/caption-presets'
+import { CAPTION_PRESETS, applyPreset, fitLook, lookFromStyle, presetOf, sampleLine, sampleLook } from '../src/shared/caption-presets'
 
 describe('caption presets', () => {
   it('picking a look writes exactly its documented style fields', () => {
@@ -12,6 +12,20 @@ describe('caption presets', () => {
       { ...base, preset: 'boxed', size: 96, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, box: true },
       { ...base, preset: 'minimal', size: 84, maxWords: 4, case: 'lower', color: '#FFFFFF', outline: 5 }
     ])
+  })
+
+  it('picking a look keeps Position, and a Size the person picked', () => {
+    const clean = applyPreset('clean')
+    expect(applyPreset('bold-pop', { ...clean, position: 0.66 })).toMatchObject({ preset: 'bold-pop', size: 126, position: 0.66 })
+    expect(applyPreset('minimal', { ...clean, size: 126 })).toMatchObject({ preset: 'minimal', size: 126 })
+  })
+
+  it('the preview lights no word on a line the engine draws without its highlight', () => {
+    const words = ['so', '—', 'yeah'].map((w, i) => ({ id: `w${i}`, source: 's1', w, s: i * 0.4, e: i * 0.4 + 0.3 }))
+    const line = sampleLine(words, new Set(['w0', 'w1', 'w2']), 3)
+    expect(line.text).toBe('so — yeah') // the export draws "SO — YEAH"
+    expect(sampleLook(applyPreset('karaoke'), line).highlight).toBeNull()
+    expect(sampleLook(applyPreset('karaoke'), sampleLine(words, new Set(['w0', 'w2']), 3)).highlight).toBe('#FFD60A')
   })
 
   it('a reel keeps its look through fine-tuning, and reels made before presets open on the look they have', () => {

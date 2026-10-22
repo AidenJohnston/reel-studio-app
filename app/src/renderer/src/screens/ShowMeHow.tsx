@@ -8,7 +8,7 @@ import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
 import { Icon } from '../components/icons'
 import { SubtitleSample } from '../components/Player'
-import { CAPTION_PRESETS, applyPreset, lookFromStyle, presetOf, type SubtitleLook } from '../../../shared/caption-presets'
+import { CAPTION_PRESETS, applyPreset, lookFromStyle, presetOf, sampleLine, sampleLook, type SubtitleLook } from '../../../shared/caption-presets'
 
 export type Tab = 'cut' | 'captions' | 'music' | 'broll' | 'cover' | 'post'
 const TABS: { key: Tab; label: string }[] = [
@@ -155,21 +155,6 @@ function takes(words: Word[]): Word[][] {
   }
   if (cur.length) out.push(cur)
   return out
-}
-
-/** A sample line for the subtitle preview: kept words as the engine groups them (captions.chunk), up to
- * `maxWords` and never past a sentence end, shown at the moment its first word is spoken. */
-export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): { text: string; at: number; words: number } {
-  const k = words.filter((w) => kept.has(w.id) && /\w/.test(w.w))
-  const start = k.length > 6 ? 2 : 0
-  const pick: Word[] = []
-  for (const w of k.slice(start)) {
-    pick.push(w)
-    if (pick.length >= maxWords || /[.!?…]["')\]]*$/.test(w.w.trim())) break
-  }
-  if (!pick.length) return { text: 'Your words here', at: 0.5, words: 3 }
-  const text = pick.map((w) => w.w.trim()).join(' ').replace(/^[(\[{"¿¡]+/, '').replace(/[.,!?;:)\]}"…]+$/, '')
-  return { text, at: pick[0].s + 0.15, words: pick.length }
 }
 
 const LEVELS: { key: string; label: string }[] = [
@@ -334,10 +319,7 @@ export function ShowMeHow({
   const lookJson = JSON.stringify(capStyle)
   useEffect(() => {
     if (!onPreview) return
-    // captions.word_spans: a line whose words don't match its tokens one to one gets no highlight
-    const look = lookFromStyle(capStyle)
-    if (sample.text.split(' ').length !== sample.words) look.highlight = null
-    onPreview(tab === 'captions' && subsOn ? { look, text: sample.text, at: sample.at } : null)
+    onPreview(tab === 'captions' && subsOn ? { look: sampleLook(capStyle, sample), text: sample.text, at: sample.at } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, subsOn, lookJson, sample.text, sample.at, sample.words])
 
@@ -458,7 +440,7 @@ export function ShowMeHow({
                 <div className="stack" data-testid="caption-controls">
                   <h3 style={{ marginTop: 6 }}>Look</h3>
                   {/* two words: a whole line shrinks to fit 74 px and can't be read */}
-                  <Swatches value={presetOf(capStyle)} text={sample.text.split(' ').slice(0, 2).join(' ')} onPick={(k) => set('captions', { ...(p.captions ?? { enabled: true }), style: applyPreset(k) })} />
+                  <Swatches value={presetOf(capStyle)} text={sample.text.split(' ').slice(0, 2).join(' ')} onPick={(k) => set('captions', { ...(p.captions ?? { enabled: true }), style: applyPreset(k, capStyle) })} />
                   <h3>Size</h3>
                   <Seg
                     testid="cap-size"
