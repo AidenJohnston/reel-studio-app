@@ -18,10 +18,11 @@ describe('website capture: which links may be opened', () => {
 
   it('refuses this computer and the home network, in every spelling', async () => {
     for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '172.16.0.5', '169.254.169.254', '100.64.0.1', '0.0.0.0',
-      '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
+      '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '64:ff9b:1::a00:1']) {
       expect(isBlockedAddress(ip)).toBe(true)
     }
     expect(isBlockedAddress('93.184.215.14')).toBe(false)
+    expect(isBlockedAddress('64:ff9b::808:808')).toBe(false)
     expect(await hostIsPublic('localhost', publicDns)).toBe(false)
     expect(await hostIsPublic('printer.local', publicDns)).toBe(false)
     expect(await hostIsPublic('intranet', publicDns)).toBe(false)

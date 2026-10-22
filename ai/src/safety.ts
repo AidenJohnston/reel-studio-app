@@ -3,9 +3,12 @@
 // a tool is untrusted. Mirrors engine/reelengine/safepath.py and assets.check_url.
 import * as dns from 'node:dns/promises';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { Readable } from 'node:stream';
 
 // ---------------------------------------------------------------- paths
 
@@ -84,22 +87,26 @@ const BLOCKED = new net.BlockList();
 for (const [a, n] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
   ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
   ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv4');
-for (const [a, n] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['100::', 64]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv6');
+for (const [a, n] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['100::', 64], ['64:ff9b:1::', 48]] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv6');
 
-/** True for loopback, private (RFC 1918 / ULA), link-local, CGNAT, multicast, reserved, unspecified. */
+/** The IPv4 address inside a NAT64 (64:ff9b::/96) address. BlockList already checks IPv4-mapped ones as IPv4. */
+function nat64IPv4(v6: string): string | null {
+  const [head, tail] = new URL(`http://[${v6}]/`).hostname.slice(1, -1).split('::');
+  const h = head ? head.split(':') : []; const t = tail ? tail.split(':') : [];
+  const g = [...h, ...Array<string>(8 - h.length - t.length).fill('0'), ...t].map((x) => parseInt(x, 16));
+  return g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0) ? `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}` : null;
+}
+
+/** True for loopback, private (RFC 1918 / ULA), link-local, CGNAT, multicast, reserved, unspecified,
+ * and those IPv4 addresses written as IPv4-mapped or NAT64 IPv6. Local-use NAT64 (64:ff9b:1::/48)
+ * is refused whole: where its IPv4 address sits depends on the network's prefix length. */
 export function isBlockedAddress(ip: string): boolean {
   const bare = ip.replace(/^\[|\]$/g, '').split('%')[0];
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(bare) ?? /^64:ff9b::(\d+\.\d+\.\d+\.\d+)$/i.exec(bare);
-  if (mapped) return BLOCKED.check(mapped[1], 'ipv4');
   const fam = net.isIP(bare);
   if (fam === 4) return BLOCKED.check(bare, 'ipv4');
   if (fam === 6) {
-    const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(bare);   // ::ffff:7f00:1 form
-    if (hex) {
-      const a = parseInt(hex[1], 16); const b = parseInt(hex[2], 16);
-      return BLOCKED.check(`${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`, 'ipv4');
-    }
-    return BLOCKED.check(bare, 'ipv6');
+    const v4 = nat64IPv4(bare);
+    return v4 ? BLOCKED.check(v4, 'ipv4') : BLOCKED.check(bare, 'ipv6');
   }
   return true;                                    // not an address at all: refuse
 }
@@ -110,14 +117,7 @@ export class BlockedUrlError extends Error {
   }
 }
 
-/** Refuses anything but http(s) to a public address. Every resolved address must be public. */
-export async function assertPublicUrl(raw: string, lookup: LookupFn = defaultLookup): Promise<URL> {
-  let u: URL;
-  try { u = new URL(raw); } catch { throw new BlockedUrlError('url must be a full http:// or https:// link', 'BAD_URL'); }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new BlockedUrlError('url must start with http:// or https://', 'BAD_URL');
-  if (u.username || u.password) throw new BlockedUrlError('links with a user name or password are not allowed', 'BAD_URL');
-  const host = u.hostname.replace(/^\[|\]$/g, '');
-  if (!host) throw new BlockedUrlError('url has no host', 'BAD_URL');
+async function publicAddresses(host: string, lookup: LookupFn): Promise<string[]> {
   let addrs: string[];
   if (net.isIP(host)) addrs = [host];
   else {
@@ -126,11 +126,49 @@ export async function assertPublicUrl(raw: string, lookup: LookupFn = defaultLoo
   if (!addrs.length || addrs.some(isBlockedAddress)) {
     throw new BlockedUrlError('that link points at this computer or a private network, so it was not downloaded', 'BLOCKED_HOST');
   }
+  return addrs;
+}
+
+/** Refuses anything but http(s) to a public address. Every resolved address must be public. */
+export async function assertPublicUrl(raw: string, lookup: LookupFn = defaultLookup): Promise<URL> {
+  let u: URL;
+  try { u = new URL(raw); } catch { throw new BlockedUrlError('url must be a full http:// or https:// link', 'BAD_URL'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new BlockedUrlError('url must start with http:// or https://', 'BAD_URL');
+  if (u.username || u.password) throw new BlockedUrlError('links with a user name or password are not allowed', 'BAD_URL');
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (!host) throw new BlockedUrlError('url has no host', 'BAD_URL');
+  await publicAddresses(host, lookup);
   return u;
 }
 
+type FetchLike = (url: string, init: { headers?: Record<string, string>; signal?: AbortSignal; redirect?: 'manual' }) => Promise<Response>;
+
+/** A GET over node:http(s) that connects only to the addresses `resolve` returns for the host
+ * (TLS still verifies the host name). fetch() resolves the name itself, so a name checked by
+ * assertPublicUrl could answer with a different address when fetch connects. No redirects followed. */
+export function pinnedFetch(resolve: (host: string) => Promise<string[]>): FetchLike {
+  const lookup: net.LookupFunction = (host, opts, cb) => {
+    resolve(host).then((addrs) => {
+      const all = addrs.map((address) => ({ address, family: net.isIP(address) }));
+      if (opts.all) cb(null, all); else cb(null, all[0].address, all[0].family);
+    }, (e) => cb(e, ''));
+  };
+  return (url, init) => new Promise((ok, fail) => {
+    const req = (url.startsWith('https:') ? https : http).get(url, { headers: init.headers, signal: init.signal, lookup, agent: false }, (res) => {
+      const headers = new Headers();
+      for (let i = 0; i < res.rawHeaders.length; i += 2) headers.append(res.rawHeaders[i], res.rawHeaders[i + 1]);
+      const status = res.statusCode!;
+      if (status > 599) { res.destroy(); fail(new BlockedUrlError(`download failed with HTTP ${status}`, 'NETWORK')); return; }   // Response refuses it; LinkedIn sends 999
+      const noBody = status === 204 || status === 205 || status === 304;
+      if (noBody) res.resume();
+      ok(new Response(noBody ? null : (Readable.toWeb(res) as ReadableStream), { status, headers }));
+    });
+    req.on('error', fail);
+  });
+}
+
 export interface GuardedFetchOptions {
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchLike;
   lookup?: LookupFn;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -142,15 +180,15 @@ export interface GuardedFetchOptions {
 /** GET with every redirect hop re-checked (`redirect: 'manual'`), a whole-request timeout and a
  * byte counter while streaming (never buffers more than `maxBytes` + one chunk). */
 export async function guardedFetch(url: string, o: GuardedFetchOptions): Promise<{ res: Response; body: Buffer; url: string }> {
-  const f = o.fetchImpl ?? fetch;
+  const f = o.fetchImpl ?? pinnedFetch((host) => publicAddresses(host, o.lookup ?? defaultLookup));
   const timeout = AbortSignal.timeout(o.timeoutMs ?? 30_000);
   const signal = o.signal ? AbortSignal.any([o.signal, timeout]) : timeout;
   let cur = url;
   for (let hop = 0; ; hop++) {
-    await assertPublicUrl(cur, o.lookup);
+    const checked = await assertPublicUrl(cur, o.lookup);
     let res: Response;
     try {
-      res = await f(cur, { headers: o.headers, signal, redirect: 'manual' });
+      res = await f(checked.href, { headers: o.headers, signal, redirect: 'manual' });
     } catch (e: any) {
       if (timeout.aborted) throw new BlockedUrlError('the download took too long', 'TIMEOUT');
       throw e;
