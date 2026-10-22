@@ -409,28 +409,31 @@ class Measurer:
 
 def fit(text: str, base: float, safe_w: float, outline: float, meas: Measurer):
     """(size, lines). Shrink-only; wrap to two lines rather than shrink below MIN_SHRINK."""
+    def shrunk(fs: float, lines: list) -> int:
+        # The ratio scales the outline along with the letters, and drawn widths are not linear in size,
+        # so the estimate can still overhang by a few pixels.
+        fs = max(10, int(fs))
+        while fs > 10 and max(meas.width(t, fs, outline) for t in lines) > safe_w:
+            fs -= 1
+        return fs
+
     w = meas.width(text, base, outline)
     if w <= safe_w:
         return int(base), [text]
-    fs, lines = base * safe_w / w, [text]
-    if fs < base * MIN_SHRINK and " " in text:
-        parts = text.split(" ")
-        best = None
-        for k in range(1, len(parts)):
-            a, b = " ".join(parts[:k]), " ".join(parts[k:])
-            widest = max(meas.width(a, base, outline), meas.width(b, base, outline))
-            if best is None or widest < best[0]:
-                best = (widest, [a, b])
-        widest, lines = best
-        if widest <= safe_w:
-            return int(base), lines
-        fs = base * safe_w / widest
-    fs = max(10, int(fs))
-    # The ratio above scales the outline along with the letters, and drawn widths are not linear in
-    # size, so the estimate can still overhang by a few pixels.
-    while fs > 10 and max(meas.width(t, fs, outline) for t in lines) > safe_w:
-        fs -= 1
-    return fs, lines
+    fs = shrunk(base * safe_w / w, [text])
+    if fs >= base * MIN_SHRINK or " " not in text:
+        return fs, [text]
+    parts = text.split(" ")
+    best = None
+    for k in range(1, len(parts)):
+        a, b = " ".join(parts[:k]), " ".join(parts[k:])
+        widest = max(meas.width(a, base, outline), meas.width(b, base, outline))
+        if best is None or widest < best[0]:
+            best = (widest, [a, b])
+    widest, lines = best
+    if widest <= safe_w:
+        return int(base), lines
+    return shrunk(base * safe_w / widest, lines), lines
 
 
 # --- ASS --------------------------------------------------------------------------------------

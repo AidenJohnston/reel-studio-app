@@ -48,6 +48,17 @@ describe('fast notes (no model turns)', () => {
     expect((await loadProject(dir)).captions.style.position).toBe(0.77);
   });
 
+  it('makes captions bigger after they were moved as low as they go, still without the model', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const p = await loadProject(dir);
+    p.captions.style = { ...p.captions.style, size: 126, outline: 12, position: 0.77 }; // Bold pop, after "captions lower"
+    await saveProject(dir, p);
+    const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
+    const r: any = await createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'bigger captions', () => {});
+    expect(r.fast).toBe('captions-bigger');
+    expect((await loadProject(dir)).captions.style).toMatchObject({ size: 145, position: 0.76 });
+  });
+
   it('applies a simple note with one direct change and one final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);

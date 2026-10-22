@@ -37,7 +37,9 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
     if (/\b(bigger|larger|too small|too tiny|hard to read|enlarge)\b/.test(n)) {
       const next = Math.round(clamp(size * 1.15, 80, 160));
       if (next <= size) return null;
-      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the captions a bit bigger.' };
+      // a bigger line is taller: keep its bottom above Instagram's caption, as set_caption_style requires
+      const position = Math.min(Number(style.position) || 0.75, lowestCaptionPosition(p.format, { ...style, size: next }));
+      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, position, enabled: true } }], summary: 'I made the captions a bit bigger.' };
     }
     const pos = Number(style.position) || 0.75;
     if (/\b(higher|up|too low)\b/.test(n)) {

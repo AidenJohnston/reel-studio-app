@@ -24,26 +24,27 @@ export type Measure = (text: string, size: number, outline: number) => number
 
 /** (size, lines). Shrink-only; wrap to two lines rather than shrink below MIN_SHRINK. A port of captions.fit. */
 export function fitCaption(text: string, base: number, safeW: number, outline: number, measure: Measure): { size: number; lines: string[] } {
+  // The ratio scales the outline along with the letters, and drawn widths are not linear in size,
+  // so the estimate can still overhang by a few pixels.
+  const shrunk = (estimate: number, lines: string[]): number => {
+    let size = Math.max(10, Math.trunc(estimate))
+    while (size > 10 && Math.max(...lines.map((l) => measure(l, size, outline))) > safeW) size--
+    return size
+  }
   const w = measure(text, base, outline)
   if (w <= safeW) return { size: Math.trunc(base), lines: [text] }
-  let size = (base * safeW) / w
-  let lines = [text]
-  if (size < base * MIN_SHRINK && text.includes(' ')) {
-    const parts = text.split(' ')
-    let best: { widest: number; lines: string[] } | null = null
-    for (let k = 1; k < parts.length; k++) {
-      const a = parts.slice(0, k).join(' ')
-      const b = parts.slice(k).join(' ')
-      const widest = Math.max(measure(a, base, outline), measure(b, base, outline))
-      if (!best || widest < best.widest) best = { widest, lines: [a, b] }
-    }
-    // SAFETY: text has a space here, so parts has at least two entries and the loop ran at least once.
-    const split = best!
-    if (split.widest <= safeW) return { size: Math.trunc(base), lines: split.lines }
-    size = (base * safeW) / split.widest
-    lines = split.lines
+  const size = shrunk((base * safeW) / w, [text])
+  if (size >= base * MIN_SHRINK || !text.includes(' ')) return { size, lines: [text] }
+  const parts = text.split(' ')
+  let best: { widest: number; lines: string[] } | null = null
+  for (let k = 1; k < parts.length; k++) {
+    const a = parts.slice(0, k).join(' ')
+    const b = parts.slice(k).join(' ')
+    const widest = Math.max(measure(a, base, outline), measure(b, base, outline))
+    if (!best || widest < best.widest) best = { widest, lines: [a, b] }
   }
-  size = Math.max(10, Math.trunc(size))
-  while (size > 10 && Math.max(...lines.map((l) => measure(l, size, outline))) > safeW) size--
-  return { size, lines }
+  // SAFETY: text has a space here, so parts has at least two entries and the loop ran at least once.
+  const { widest, lines } = best!
+  if (widest <= safeW) return { size: Math.trunc(base), lines }
+  return { size: shrunk((base * safeW) / widest, lines), lines }
 }
