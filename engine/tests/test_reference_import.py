@@ -1,5 +1,6 @@
 import io
 import json
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def test_fcpxml_bundle_lists_what_the_adapter_drops():
     losses = record["losses"]
     assert {"title", "transition", "adjust-volume", "media-rep", "note"} <= {l.get("element") for l in losses}
     assert {'enabled="0"', "audioStart/audioDuration"} <= {l.get("attribute") for l in losses}
-    assert [l["event"] for l in losses if "event" in l] == ["Older cuts"]
+    assert [l["projects"] for l in losses if "projects" in l] == [["First try"]]
     assert {"path": "timelines[0].tracks[0].items[0].media",
             "reason": "the adapter found no media for this clip"} in losses
 
@@ -87,6 +88,8 @@ def test_fcpxml_timing_is_exact_at_29_97_and_lanes_sort_by_number():
     assert [_frames(i["trackRange"])[:2] for i in spine] == [(0, 30), (30, 45), (75, 30)]
     assert [_frames(i["sourceRange"])[0] for i in spine] == [120, 200, 300]
     assert [_frames(m["range"])[0] for m in spine[0]["markers"]] == [130]
+
+    assert record["rawMetadata"] == []
 
     (wide,) = timeline["tracks"][2]["items"]
     assert _frames(wide["trackRange"])[:2] == (15, 20)
@@ -122,8 +125,8 @@ def _compound_clips(levels, fanout, cycle=False):
             f'<project name="p"><sequence format="r1"><spine>{top}</spine></sequence></project></event></library></fcpxml>')
 
 
-def _premiere_file_references(refs, file_children):
-    definition = ('<file id="f"><name>a.mov</name><pathurl>file:///a.mov</pathurl>'
+def _premiere_file_references(refs, file_children=0, file_text=""):
+    definition = (f'<file id="f"><name>a.mov</name><pathurl>file:///a.mov</pathurl><comment>{file_text}</comment>'
                   + "<x/>" * file_children + "</file>")
     reference = '<file id="f"/>'
     clips = "".join(f'<clipitem id="c{i}"><name>a</name><in>0</in><out>1</out><start>{i}</start><end>{i + 1}</end>'
@@ -142,6 +145,88 @@ def test_references_that_expand_without_bound_are_refused(tmp_path, name, body, 
     source.write_text(body, encoding="utf-8")
     assert source.stat().st_size < 100 * 1024
     assert _code(source) == code
+
+
+def _event_clip_note(uses, note):
+    spine = "".join(f'<asset-clip ref="r2" offset="{i}s" duration="1s" name="a"/>' for i in range(uses))
+    return ('<fcpxml version="1.10"><resources><format id="r1" frameDuration="1/25s"/>'
+            '<asset id="r2" src="file:///a.mov" start="0s" duration="100s"/></resources>'
+            f'<event name="e"><asset-clip ref="r2" offset="0s" duration="1s" name="a"><note>{note}</note></asset-clip>'
+            f'<project name="p"><sequence format="r1"><spine>{spine}</spine></sequence></project></event></fcpxml>')
+
+
+@pytest.mark.parametrize("name,body", [
+    ("file-text.xml", _premiere_file_references(refs=20, file_text="x" * 5000)),
+    ("note.fcpxml", _event_clip_note(uses=20, note="x" * 5000)),
+], ids=["premiere-file-text", "fcpxml-event-clip-note"])
+def test_text_copied_once_per_reference_counts_against_the_budget(monkeypatch, tmp_path, name, body):
+    monkeypatch.setattr(reference_import, "MAX_EXPANDED_BYTES", 50_000)
+    source = tmp_path / name
+    source.write_text(body, encoding="utf-8")
+    assert source.stat().st_size < 10_000
+    assert _code(source) == "INPUT_TOO_LARGE"
+
+
+@pytest.mark.parametrize("limit,value", [("ADAPTER_SECONDS", 0), ("ADAPTER_MEMORY_BYTES", 1)],
+                         ids=["time", "memory"])
+def test_adapter_past_its_limit_is_stopped(monkeypatch, limit, value):
+    monkeypatch.setattr(reference_import, limit, value)
+    assert _code(FIXTURES / "talking-head.xml") == "INPUT_TOO_LARGE"
+    assert multiprocessing.active_children() == []
+
+
+_MIXED_RATES = """<fcpxml version="1.10"><resources>
+<format id="p25" frameDuration="1/25s"/><format id="p2997" frameDuration="1001/30000s"/>
+<asset id="a25" src="file:///talk.mov" start="0s" duration="100s" format="p25"/>
+<asset id="a2997" src="file:///phone.mov" start="0s" duration="100s" format="p2997"/>
+</resources><project name="mixed"><sequence format="p25"><spine>
+<asset-clip name="talk" ref="a25" offset="0s" start="0s" duration="40s"/>
+<asset-clip name="phone" ref="a2997" offset="40s" start="0s" duration="15015/30000s"/>
+<asset-clip name="talk again" ref="a25" offset="41s" start="50s" duration="2s"/>
+</spine></sequence></project></fcpxml>"""
+
+
+def test_mixed_frame_rates_keep_timeline_order(tmp_path):
+    source = tmp_path / "mixed.fcpxml"
+    source.write_text(_MIXED_RATES, encoding="utf-8")
+    (timeline,) = import_reference(source)["timelines"]
+    (track,) = timeline["tracks"]
+    assert [(i["name"], i["trackRange"]["start"]["value"]) for i in track["items"]] == [
+        ("talk", 0), ("phone", 1000), ("talk again", 1025)]
+    assert _frames(track["items"][1]["sourceRange"])[1:] == (15, 30000 / 1001)
+
+
+_TWO_PROJECTS = ('<fcpxml version="1.10"><resources><format id="r1" frameDuration="1/25s"/>'
+                 '<asset id="r2" src="file:///a.mov" start="0s" duration="10s"/></resources>'
+                 '<project name="Cut A"><sequence format="r1"><spine><asset-clip ref="r2" offset="0s" duration="1s" name="a"/>'
+                 '</spine></sequence></project><project name="Cut B"><sequence format="r1"><spine>'
+                 '<asset-clip ref="r2" offset="0s" duration="1s" name="b"/></spine></sequence></project></fcpxml>')
+
+
+def test_projects_the_adapter_skips_are_reported(tmp_path):
+    source = tmp_path / "two.fcpxml"
+    source.write_text(_TWO_PROJECTS, encoding="utf-8")
+    record = import_reference(source)
+    assert [t["name"] for t in record["timelines"]] == ["Cut A"]
+    assert [l["projects"] for l in record["losses"] if "projects" in l] == [["Cut B"]]
+
+
+def test_timeline_only_in_a_later_event_says_so(tmp_path):
+    source = tmp_path / "later.fcpxml"
+    source.write_text('<fcpxml version="1.10"><resources><format id="r1" frameDuration="1/25s"/>'
+                      '<asset id="r2" src="file:///a.mov" start="0s" duration="10s"/></resources><library>'
+                      '<event name="Clips"><asset-clip ref="r2" offset="0s" duration="1s" name="a"/></event>'
+                      '<event name="Edits"><project name="Cut"><sequence format="r1"><spine>'
+                      '<asset-clip ref="r2" offset="0s" duration="1s" name="a"/></spine></sequence></project></event>'
+                      '</library></fcpxml>', encoding="utf-8")
+    assert _code(source) == "TIMELINE_SKIPPED"
+
+
+def test_lane_that_is_not_a_number_is_bad_xml(tmp_path):
+    source = tmp_path / "lane.fcpxml"
+    source.write_text(_TWO_PROJECTS.replace('name="a"/>', 'name="a"/><asset-clip ref="r2" lane="x" offset="0s" duration="1s" name="c"/>', 1),
+                      encoding="utf-8")
+    assert _code(source) == "BAD_XML"
 
 
 _FCP7_BODY = ('<xmeml version="5"><sequence><name>&x;</name><rate><timebase>25</timebase></rate>'

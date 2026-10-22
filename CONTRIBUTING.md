@@ -17,7 +17,7 @@ See "Build from source" in the [README](README.md). The short version:
 
 ```
 npm install && npm run build -w ai
-cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
+cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev,reference]"    # Windows: .venv\Scripts\pip
 ```
 
 ## Checks to run

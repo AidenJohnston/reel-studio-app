@@ -24,9 +24,10 @@ dev = ["pytest>=8"]
 # packaging/requirements-extra.txt (see THIRD_PARTY.md).
 heic = ["pi-heif>=1.4"]
 # Reading Final Cut Pro and Premiere exports (`reelengine import-reference`). Not bundled yet: nothing
-# in the app calls it. Pinned exactly because reference_import.py mirrors these adapters' internals
-# (which FCPXML elements they read, how they walk lanes and ids); recheck those before bumping.
-reference = ["opentimelineio==0.18.1", "otio-fcpx-xml-adapter==1.0.0", "otio-fcp-adapter==1.0.0"]
+# in the app calls it. The adapters are pinned exactly because reference_import.py mirrors their
+# internals (which FCPXML elements they read, how they order lanes and swap ids); recheck those
+# before bumping. psutil watches the adapter process's memory.
+reference = ["opentimelineio==0.18.1", "otio-fcpx-xml-adapter==1.0.0", "otio-fcp-adapter==1.0.0", "psutil>=7"]
 
 [project.scripts]
 reelengine = "reelengine.cli:main"
