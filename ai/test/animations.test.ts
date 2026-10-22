@@ -78,6 +78,8 @@ describe('make_animation', () => {
     expect(sent.wordTimes[0]).toBeCloseTo(0.13, 2);                // the lead-in: the clip starts just before the word
     expect([...sent.wordTimes].sort((a: number, b: number) => a - b)).toEqual(sent.wordTimes);
     expect(host.animations[0].out.endsWith('.mov')).toBe(true);
+    const placed = await executeTool(ctx, 'add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'animation', asset: out.asset, params: {} });
+    expect(placed.isError, placed.content).toBe(false);
   });
 
   it('uses the engine region above the face and list timings', async () => {

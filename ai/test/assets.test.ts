@@ -213,11 +213,14 @@ describe('frozen image assets', () => {
     expect(candidate).toMatchObject({ sourceUrl: url, license: 'CC BY 4.0', rightsConfidence: 'verified-metadata' });
   });
 
-  it('fails if an existing local video needs the still-image resolver', async () => {
+  it('fails if adjusting a legacy video needs a new asset commit', async () => {
     const { ctx, dir } = await setup();
     const ref = 'work/clip.mkv';
     await fs.writeFile(path.join(dir, ref), 'local clip');
-    const r = await executeTool(ctx, 'add_broll', place(ref));
+    const p = await loadProject(dir);
+    p.broll = [{ ...place(ref), id: 'b1', leadIn: 0.13, treatment: 'side-card' }];
+    await saveProject(dir, p);
+    const r = await executeTool(ctx, 'update_broll', { id: 'b1', anchor: { from: 'w33', to: 'w34' } });
     expect(r.isError, r.content).toBe(false);
     expect((await loadProject(dir)).broll[0].asset).toBe(ref);
   });

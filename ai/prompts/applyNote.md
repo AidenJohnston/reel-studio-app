@@ -10,7 +10,7 @@ Call get_project and get_transcript to find the words the note points at. Then m
 
 Common notes and the tool that handles them:
 - "Music is too loud at the start" or "too loud when I say X": set_music_automation on those words, about -4 to -8. "Too loud overall": choose_music with level quiet. "Too quiet": a gentle lift, or level under-voice.
-- "Different music", "more upbeat", "sadder song": list_library with kind music, then choose_music with a track that fits the mood asked for.
+- "Different music", "more upbeat", "sadder song": list_library with kind music, then resolve_asset kind music for a track that fits the mood, inspect its waveform and measurements, commit it, and choose_music with its assetId.
 - "Put the price on '20 bucks'": add_broll anchored to those exact words with text-pop, or make_animation with price-tag. The number on screen must be exactly what was said.
 - "Show a picture of X when I say X": find it (list_library, then search_images), resolve_asset it, LOOK at the still and commit it, then add_broll with its assetId anchored on X.
 - "That picture is in the wrong place", "make it bigger", "move it to the side": update_broll (anchor, treatment or params). "Get rid of that picture": remove_broll.

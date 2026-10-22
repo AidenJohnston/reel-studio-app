@@ -162,6 +162,11 @@ def cmd_inspect_image(args):
     return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height}
 
 
+def cmd_inspect_media(args):
+    from .asset_preview import inspect
+    return inspect(_project(args), Path(args.root) if args.root else None, args.asset, args.command == 'inspect-video', args.preview)
+
+
 def cmd_register_capture(args):
     """A website screenshot the app captured into <project>/work/assets: record its credit
     ("Screenshot of <site>") in credits.json and make the still the AI looks at."""
@@ -372,6 +377,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("inspect-image", cmd_inspect_image, "a picture's size and a still of it for the AI to look at")
     sp.add_argument("--asset", required=True)
     sp.add_argument("--root")
+    for name in ('inspect-video', 'inspect-audio'):
+        sp = add(name, cmd_inspect_media, 'a local contact sheet or waveform for an asset candidate')
+        sp.add_argument('--asset', required=True)
+        sp.add_argument('--root')
+        sp.add_argument('--preview')
     sp = add("register-capture", cmd_register_capture, "credit a website screenshot saved in work/assets")
     sp.add_argument("--asset", required=True)
     sp.add_argument("--url", required=True)

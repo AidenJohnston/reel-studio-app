@@ -100,7 +100,7 @@ When you look at frames during an animation, you see its settled final frame (th
 ## Music
 
 - Choose by mood and energy, not by what is trending. Drums for hype, soft piano or strings for heartfelt, tense and staccato for drama. The wrong mood kills the video's credibility.
-- One song per video.
+- One song per video. Resolve it with resolve_asset kind music, inspect its waveform and measurements, then commit it before passing its assetId to choose_music.
 - Level: under-voice by default. quiet for intimate or emotional talk. loud-intro only when the opening is built around the music. The voice always wins.
 - Match the video's energy, not just its topic: an upbeat story or a rant wants drive (energetic, driving or hype), a reflective or heartfelt one wants calm (gentle, melancholic, dreamy), a chill explainer or a day story wants a medium steady groove or upbeat, comedy wants light or upbeat (never dramatic). list_library music measures each song's energy, mood and tempo by listening: choose by that, never by the file name.
 - startAt: leave it null unless the user named a moment. The engine listens to the song and enters on a calm bar before the first big hit, never on a loud first frame.

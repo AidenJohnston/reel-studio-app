@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { createAI, loadProject, runAgent, newToolState, StyleStore, CompletionRequest } from '../src';
 import { parseProtocolReply, parseXmlCalls } from '../src/providers/cli';
 import { captionWithCredits, toolSchemas } from '../src/tools';
-import { FakeHost, imageSteps, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
+import { FakeHost, assetSteps, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
 
 async function setup() {
   const { root, dir } = await makeProject();
@@ -176,8 +176,8 @@ describe('post caption credits', () => {
     }));
     const pop = { tilt: null, scale: null, text: null };
     const model = new ScriptedModel([
-      ...imageSteps('work/assets/oven.jpg', { anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', params: pop }),
-      ...imageSteps('work/assets/logo.png', { anchor: { from: 'w48', to: 'w52' }, treatment: 'card-above-head', params: pop }),
+      ...assetSteps('work/assets/oven.jpg', { anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', params: pop }),
+      ...assetSteps('work/assets/logo.png', { anchor: { from: 'w48', to: 'w52' }, treatment: 'card-above-head', params: pop }),
       { toolCalls: [
         call('write_post', { caption: 'Bread takes patience', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: ['bread'] }),
       ] },
