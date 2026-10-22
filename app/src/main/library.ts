@@ -5,6 +5,7 @@ import { BIN_FOLDERS, binDir, libraryDir, reelStudioRoot, type BinKey } from './
 import { mediaUrl } from './media-url'
 import type { DropResult, LibraryBin } from '../shared/api'
 import type { RunEngine } from './engine'
+import { logDuration } from './diagnostics'
 
 export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts'])
 export const AUDIO_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -104,7 +105,9 @@ export async function addToLibrary(files: string[], runEngine: RunEngine, log: (
   }
   if (!todo.length) return out
   try {
-    const res: any = await runEngine('classify', ['--root', reelStudioRoot(), ...todo])
+    const res: any = await logDuration(`[library] classify fileCount=${todo.length}`, log, () =>
+      runEngine('classify', ['--root', reelStudioRoot(), ...todo])
+    )
     const list: any[] = Array.isArray(res) ? res : Array.isArray(res?.files) ? res.files : []
     if (list.length !== todo.length) throw new Error(`classify returned ${list.length} results for ${todo.length} files`)
     for (const r of list) {

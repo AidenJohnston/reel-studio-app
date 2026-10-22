@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, promises as fs, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import {
   cleanPartialVersions,
   ensureRoot,
@@ -55,7 +56,7 @@ describe('titles and slugs', () => {
     expect(titleFromFile('/x/2026-07-18_talkinghead_morning-routine-tips_take01.mp4')).toBe('Morning routine tips')
     expect(titleFromFile('/x/IMG_4412.MOV')).toBe('My video')
     expect(titleFromFile('/x/20261017_093015.mp4')).toBe('My video')
-    expect(titleFromFile('C:\\a\\why so many apps.MOV')).toBe('Why so many apps')
+    expect(titleFromFile(join(tmpdir(), 'a', 'why so many apps.MOV'))).toBe('Why so many apps')
     expect(titleFromFile('/x/.mp4')).toBe('.mp4')
   })
   it('slugifies unicode safely', () => {

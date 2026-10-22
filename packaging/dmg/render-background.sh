@@ -2,7 +2,7 @@
 # Render packaging/dmg/background.svg into the disk image window background.
 #
 #   packaging/dmg/render-background.sh OUT_DIR
-#   -> OUT_DIR/background.png (640x432), background@2x.png (1280x864), background.tiff (both, for Retina)
+#   -> OUT_DIR/background.png (640x432), background-2x.png (1280x864), background.tiff (both, for Retina)
 #
 # Finder takes ONE background file, so the shipped window uses the TIFF: tiffutil stores the 1x and 2x images
 # together and Finder picks the sharp one on a Retina screen. electron-builder gets the same TIFF.
@@ -22,8 +22,8 @@ def inline(m):
 dst.write_text(re.sub(r'href="([^":]+\.(?:png|jpe?g))"', inline, src.read_text()))
 PY
 sips -s format png -z 432 640 "$OUT/background.svg" --out "$OUT/background.png" >/dev/null
-sips -s format png -z 864 1280 "$OUT/background.svg" --out "$OUT/background@2x.png" >/dev/null
+sips -s format png -z 864 1280 "$OUT/background.svg" --out "$OUT/background-2x.png" >/dev/null
 # tiffutil only pairs the images as 1x/2x when the big one says 144 dpi.
-sips -s dpiWidth 144 -s dpiHeight 144 "$OUT/background@2x.png" >/dev/null
-tiffutil -cathidpicheck "$OUT/background.png" "$OUT/background@2x.png" -out "$OUT/background.tiff" >/dev/null 2>&1
+sips -s dpiWidth 144 -s dpiHeight 144 "$OUT/background-2x.png" >/dev/null
+tiffutil -cathidpicheck "$OUT/background.png" "$OUT/background-2x.png" -out "$OUT/background.tiff" >/dev/null 2>&1
 [ -s "$OUT/background.tiff" ] || { echo "render-background: tiffutil wrote no $OUT/background.tiff" >&2; exit 1; }

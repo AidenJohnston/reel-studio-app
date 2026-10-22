@@ -123,6 +123,7 @@ A clear, expressive frame of the face from the raw take: eyes open, a real expre
 - On-screen numbers and claims match the spoken words.
 - No frozen, black or blank frames, and no broken or missing images.
 - Captions sit above b-roll and off the eyes and mouth.
+- Mirrored take: front-camera selfies often come out mirrored. Read any text that was really in the room (a poster, a sign, a shirt, a screen, a book cover). If it reads backwards (letters reversed, words running right to left), call set_mirror with on true and tell the user in one plain line ("Your video was mirrored, so I flipped it so the writing reads the right way."). Judge only that text: never the captions or the pictures you added (they always read the right way), and never the face, the hair parting or which hand is raised. No readable text in the room: leave it alone. The project's sources show `mirror: true` once it is flipped; do not flip it again.
 
 ## The user's saved style rules (always follow these; they override defaults)
 {{styleRules}}

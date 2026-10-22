@@ -110,7 +110,8 @@ export interface ProjectJson {
   updatedAt: string
   version: number
   format?: { width: number; height: number; fps: number }
-  sources?: { id: string; path: string; duration?: number }[]
+  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed) */
+  sources?: { id: string; path: string; duration?: number; rotation?: number; mirror?: boolean }[]
   transcript?: { file: string; language?: string }
   cut?: { keep: { from: string; to: string }[]; gapCap?: number; minSaving?: number }
   captions?: {
