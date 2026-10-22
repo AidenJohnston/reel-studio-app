@@ -58,9 +58,4 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
 * New dependencies need a license that fits the MIT app and, if they ship in the installer, an entry in
   `THIRD_PARTY.md`.
 
-## Agent skills
-
-Repository skills live in `.claude/skills/` as regular files for Windows compatibility.
-Use `test-audit` for tests, `deslop` for code review, `unslop` for prose, and `pr-writing` for PR descriptions.
-
 By contributing you agree your work is released under the [MIT License](LICENSE).
