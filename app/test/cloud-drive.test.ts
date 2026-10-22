@@ -69,3 +69,19 @@ it('fails if an interrupted copy exposes a partial reel or leaves its temporary 
   expect(await fs.readdir(join(cloud, 'Reel Studio'))).toEqual([])
   expect(await fs.readFile(source, 'utf8')).toBe('complete video')
 })
+
+it('fails if a failed copy deletes a file that replaced the reservation', async () => {
+  const dir = await temp()
+  const source = join(dir, 'Family reel.mp4')
+  const folder = join(dir, 'drive', 'Reel Studio')
+  const target = join(folder, 'Family reel.mp4')
+  await fs.writeFile(source, 'complete video')
+  vi.spyOn(fs, 'copyFile').mockImplementationOnce(async () => {
+    await fs.writeFile(join(folder, 'synced'), 'video from another device')
+    await fs.rename(join(folder, 'synced'), target)
+    throw Object.assign(new Error('disk full'), { code: 'ENOSPC' })
+  })
+  await expect(copyToCloudDrive(source, join(dir, 'drive'))).rejects.toThrow('disk full')
+  expect(await fs.readdir(folder)).toEqual(['Family reel.mp4'])
+  expect(await fs.readFile(target, 'utf8')).toBe('video from another device')
+})

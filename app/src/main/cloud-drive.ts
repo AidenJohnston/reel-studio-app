@@ -47,13 +47,17 @@ export async function copyToCloudDrive(source: string, folder: string): Promise<
       if (error instanceof Error && 'code' in error && error.code === 'EEXIST') continue
       throw error
     }
+    let placeholder
     try {
+      placeholder = await reservation.stat({ bigint: true })
       await reservation.close()
       await fs.copyFile(source, temp, constants.COPYFILE_EXCL)
       await fs.rename(temp, target)
       return target
     } catch (error) {
-      await Promise.all([fs.rm(temp, { force: true }), fs.rm(target, { force: true })])
+      const current = await fs.stat(target, { bigint: true }).catch(() => null)
+      const ours = placeholder && current && current.dev === placeholder.dev && current.ino === placeholder.ino && current.size === 0n
+      await Promise.all([fs.rm(temp, { force: true }), ours && fs.rm(target, { force: true })])
       throw error
     }
   }
