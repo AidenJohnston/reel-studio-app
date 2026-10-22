@@ -8,10 +8,23 @@ export function filesFromArgv(argv: string[], cwd: string, defaultApp: boolean):
 }
 
 export async function clipboardFiles(): Promise<string[]> {
+  return filesFromClipboardItems(await clipboard.read())
+}
+
+/** One entry of Electron's clipboard.read(). */
+export interface ClipboardEntry {
+  types: readonly string[]
+  getType(type: string): Promise<unknown>
+}
+
+export async function filesFromClipboardItems(items: readonly ClipboardEntry[]): Promise<string[]> {
   const paths: string[] = []
-  for (const item of await clipboard.read()) {
+  for (const item of items) {
     for (const type of item.types) {
-      if (type === 'electron application/osclipboard;format="public.file-url"') {
+      // A File Explorer copy reaches Electron 44 on Windows as text/uri-list (one file:// URL per line) plus the
+      // ANSI "FileName" format, which garbles non-ASCII paths and holds only the first file. CF_HDROP and
+      // FileNameW are not offered there, so without text/uri-list Ctrl+V finds no files on Windows.
+      if (type === 'electron application/osclipboard;format="public.file-url"' || type === 'text/uri-list') {
         const value = await item.getType(type)
         if (!(value instanceof Blob)) continue
         for (const url of (await value.text()).replace(/\0+$/, '').split(/[\r\n]+/)) {
