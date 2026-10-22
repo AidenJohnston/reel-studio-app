@@ -16,6 +16,8 @@ $ErrorActionPreference = "Stop"
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $Installer = (Resolve-Path $Installer).Path
 if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
+# The installer drops a copy of itself in %LOCALAPPDATA%\<name>-updater; uninstalling must take it away again.
+$updaterDirsBefore = @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue | ForEach-Object Name)
 $sw = [Diagnostics.Stopwatch]::StartNew()
 
 "Installing silently to: $InstallDir"
@@ -45,6 +47,15 @@ foreach ($c in $j.result.checks) {
 if (-not $KeepInstalled) {
   $un = Join-Path $InstallDir "Uninstall $([IO.Path]::GetFileNameWithoutExtension($ExeName)).exe"
   if (Test-Path $un) { Start-Process $un -ArgumentList @("/S") -Wait; "uninstalled" }
+  # The NSIS uninstaller re-launches itself from %TEMP%, so -Wait can return before it has finished.
+  for ($i = 0; $i -lt 120 -and (Test-Path $exe); $i++) { Start-Sleep -Milliseconds 500 }
+  Start-Sleep 2
+  $leftover = @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue | Where-Object { $updaterDirsBefore -notcontains $_.Name })
+  foreach ($d in $leftover) {
+    "UNINSTALL LEFT {0} ({1:N0} MB)" -f $d.FullName, ((Get-ChildItem $d.FullName -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
+  }
+  if ($leftover.Count) { "UNINSTALL CHECK FAILED"; exit 1 }
+  "uninstall left no *-updater folder"
 }
 if (-not $j.ok) { "SELF-TEST FAILED"; exit 1 }
 "SELF-TEST PASSED"
