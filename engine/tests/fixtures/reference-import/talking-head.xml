@@ -1,2 +1,74 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xmeml version="5"><sequence><name>Talking head cut</name><rate><timebase>25</timebase></rate><media><video><track><clipitem id="talk"><name>talking-head.mov</name><in>25</in><out>75</out><start>0</start><end>50</end><file id="file-1"><name>talking-head.mov</name><pathurl>file:///media/talking-head.mov</pathurl></file></clipitem></track></video></media></sequence></xmeml>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <sequence id="seq-1">
+    <name>Talking head cut</name>
+    <duration>100</duration>
+    <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+    <marker><name>hook</name><comment></comment><in>12</in><out>-1</out></marker>
+    <media>
+      <video>
+        <track>
+          <clipitem id="talk-1">
+            <name>talking-head.mov</name>
+            <duration>250</duration>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <in>25</in><out>75</out><start>0</start><end>-1</end>
+            <file id="file-1">
+              <name>talking-head.mov</name>
+              <pathurl>file:///media/talking-head.mov</pathurl>
+              <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+              <duration>250</duration>
+            </file>
+          </clipitem>
+          <transitionitem>
+            <start>40</start><end>60</end><alignment>center</alignment>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <effect>
+              <name>Cross Dissolve</name><effectid>Cross Dissolve</effectid>
+              <effectcategory>Dissolve</effectcategory><effecttype>transition</effecttype><mediatype>video</mediatype>
+            </effect>
+          </transitionitem>
+          <clipitem id="talk-2">
+            <name>talking-head.mov</name>
+            <duration>250</duration>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <in>100</in><out>150</out><start>-1</start><end>100</end>
+            <file id="file-1"/>
+          </clipitem>
+        </track>
+        <track>
+          <generatoritem id="title-1">
+            <name>Hook title</name>
+            <duration>3000</duration>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <in>0</in><out>30</out><start>10</start><end>40</end>
+            <effect>
+              <name>Text</name><effectid>Text</effectid><effectcategory>Text</effectcategory>
+              <effecttype>generator</effecttype><mediatype>video</mediatype>
+              <parameter><parameterid>str</parameterid><name>Text</name><value>Stop scrolling</value></parameter>
+            </effect>
+          </generatoritem>
+        </track>
+      </video>
+      <audio>
+        <track>
+          <clipitem id="talk-1-audio">
+            <name>talking-head.mov</name>
+            <duration>250</duration>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <in>25</in><out>75</out><start>0</start><end>50</end>
+            <file id="file-1"/>
+            <filter>
+              <effect>
+                <name>Audio Levels</name><effectid>audiolevels</effectid><effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype><mediatype>audio</mediatype>
+                <parameter><parameterid>level</parameterid><name>Level</name><value>0.5</value></parameter>
+              </effect>
+            </filter>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+  </sequence>
+</xmeml>

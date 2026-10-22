@@ -17,6 +17,7 @@ dependencies = [
   "yt-dlp>=2024.1",
   "opentimelineio==0.18.1",
   "otio-fcpx-xml-adapter==1.0.0",
+  "otio-fcp-adapter==1.0.0",
 ]
 
 [project.optional-dependencies]
