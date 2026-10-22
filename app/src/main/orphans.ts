@@ -4,17 +4,31 @@
 // startup stop whatever of ours is still running. A project with something we could not stop stays
 // closed, its lock file kept (owner.ts), until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs'
+import { uptime } from 'node:os'
 import { join } from 'node:path'
+import { lockedProjects } from './owner'
 import { groupAlive, isAlive, killTree } from './proctree'
 
 /** `stop` ends a pid's process tree and reports whether all of it is gone (proctree killTree). */
 export function createPidRegistry(dir: string, stop: (pid: number) => Promise<boolean> = killTree) {
   const file = join(dir, 'engines.json')
   const engines = new Map<number, string | null>()
+  // A list that cannot be read may hide engines that are still running: it is kept aside, and every
+  // project left locked stays closed, until the computer has restarted since it was written.
+  const unreadable = join(dir, 'engines.unreadable.json')
+  // Written whole or not at all: a crash mid-write must not leave a list the next start cannot read.
   const save = (): void => {
+    const tmp = `${file}.${process.pid}.tmp`
     try {
-      writeFileSync(file, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
+      const fd = openSync(tmp, 'w')
+      try {
+        writeSync(fd, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+      renameSync(tmp, file)
     } catch {
       /* best effort */
     }
@@ -29,14 +43,29 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       save()
     },
     /** Stops engines a previous run left behind. `stillRunning`: the projects of those that would not
-     * stop, which stay registered for the next start. */
-    async reap(): Promise<{ stopped: number; stillRunning: string[] }> {
+     * stop, which stay registered for the next start, and while the list was unreadable (`unknown`)
+     * every project still locked. */
+    async reap(): Promise<{ stopped: number; stillRunning: string[]; unknown: boolean }> {
       let old: { pid: number; project: string | null }[] = []
+      let unknown = false
       try {
         // a plain pid list was written by 0.1.x
         old = JSON.parse(readFileSync(file, 'utf8')).map((e: number | { pid: number; project: string | null }) => (typeof e === 'number' ? { pid: e, project: null } : e))
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+          unknown = true
+          try {
+            renameSync(file, unreadable) // keeps its time: when the last run last wrote it
+          } catch {
+            /* closed for this start only */
+          }
+        }
+      }
+      try {
+        if (statSync(unreadable).mtimeMs > Date.now() - uptime() * 1000) unknown = true
+        else rmSync(unreadable)
       } catch {
-        return { stopped: 0, stillRunning: [] }
+        /* nothing kept aside */
       }
       let stopped = 0
       const stillRunning: string[] = []
@@ -50,7 +79,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
         if (project) stillRunning.push(project)
       }
       save()
-      return { stopped, stillRunning }
+      return { stopped, stillRunning: unknown ? [...new Set([...stillRunning, ...(await lockedProjects())])] : stillRunning, unknown }
     }
   }
 }

@@ -655,8 +655,9 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const { stopped, stillRunning } = await pidRegistry.reap()
+  const { stopped, stillRunning, unknown } = await pidRegistry.reap()
   if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
+  if (unknown) log('[start] the list of engine processes from the last run could not be read; every video it had open stays closed until the computer restarts')
   // something there would not stop and may still be writing: the project stays closed, its lock kept
   const closed = stillRunning.map((dir) => basename(dir))
   for (const slug of closed) {
