@@ -37,7 +37,12 @@ def cmd_probe(args):
 
 def cmd_export_media(args):
     from . import export_media
-    return export_media.run(Path(args.file), Path(args.dest), args.width, args.height, args.bitrate, args.cover_at)
+    return export_media.encode(Path(args.file), Path(args.dest), args.width, args.height, args.bitrate)
+
+
+def cmd_export_cover(args):
+    from . import export_media
+    return export_media.cover(Path(args.file), Path(args.dest), args.at)
 
 
 def cmd_classify(args):
@@ -316,7 +321,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--width", required=True, type=int)
     sp.add_argument("--height", required=True, type=int)
     sp.add_argument("--bitrate", required=True, type=int)
-    sp.add_argument("--cover-at", required=True, type=float)
+    sp = add("export-cover", cmd_export_cover, "save a JPEG cover from a video frame or a picture")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--at", type=float, help="seconds into a video (default: the whole picture)")
     sp = add("classify", cmd_classify, "sort dropped files into the Library")
     sp.add_argument("--root", help="Reel Studio root (default REELENGINE_ROOT or ~/Documents/Reel Studio)")
     sp.add_argument("--move", action="store_true", help="move instead of copy")

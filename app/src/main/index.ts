@@ -50,7 +50,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, PlatformExportResult, ProjectJson, VersionInfo } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { parsePlatformExportRequest } from '../shared/platforms'
-import { exportPlatforms } from './platform-export'
+import { checkPlatformExport, exportPlatforms, sweepExportStaging } from './platform-export'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
@@ -283,7 +283,6 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This video is not ready yet. Wait for it to finish, then try again.' }
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Wait until it is done, then export.' }
   if (v.draft) {
-    let renderedVersion: number | null = null
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
     jobs.start(slug, 'rerender', async (emit, signal) => {
@@ -295,12 +294,10 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
         signal
       )
       const version = Number(r?.version ?? 0)
-      renderedVersion = version
       emit({ type: 'render', version, draft: false })
       return { summary: '', version, quiet: true }
     })
     await jobs.forSlug(slug)?.done
-    if (renderedVersion === null) throw { code: 'EXPORT_FAILED', userMessage: 'The full-quality render stopped. Try Export again.' }
     versions = await listVersions(dir)
     v = versions[versions.length - 1]
     if (!v || v.draft) throw { code: 'EXPORT_FAILED', userMessage: 'I could not make the full-quality video. Try Export again.' }
@@ -537,16 +534,21 @@ function registerIpc(): void {
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
-    if (!Number.isInteger(n) || n < 0) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
     if (!(await listVersions(projectDir(slug))).some((v) => v.n === n)) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
     const version = await finishedExportVersion(slug, n)
+    const video = await checkPlatformExport(version.videoPath, request, runEngine)
     const project = await readProject(slug)
+    const chosenCover = join(dirname(version.videoPath), 'cover.png')
     let result: PlatformExportResult | null = null
     let failure: unknown
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Saving platform files', pct: 1 })
       try {
-        result = await exportPlatforms({ source: version.videoPath, folder: binDir('exports'), name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal })
+        result = await exportPlatforms({
+          source: version.videoPath, video, chosenCover: existsSync(chosenCover) ? chosenCover : null, folder: binDir('exports'),
+          name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal,
+          onProgress: (message, pct) => emit({ type: 'status', message, pct })
+        })
         return { summary: '', quiet: true }
       } catch (e) { failure = e; throw e }
     })
@@ -690,6 +692,7 @@ app.whenReady().then(async () => {
     return []
   })
   if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  await sweepExportStaging(binDir('exports')).catch((e) => log(`[export] ${String(e)}`))
   const loaded = await loadAI(
     {
       host,

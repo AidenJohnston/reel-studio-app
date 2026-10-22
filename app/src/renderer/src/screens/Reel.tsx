@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
-import { PlatformExportDialog } from '../components/PlatformExportDialog'
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
@@ -8,6 +7,7 @@ import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
+import { PlatformExportDialog } from '../components/PlatformExportDialog'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
@@ -134,10 +134,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   // Cmd/Ctrl+E and File > Export.
   useEffect(() => {
-    const fn = () => { if (version && !job) setPlatformPicker(true) }
+    const fn = () => void doExport()
     window.addEventListener(EXPORT_EVENT, fn)
     return () => window.removeEventListener(EXPORT_EVENT, fn)
-  }, [version, job])
+  }, [doExport])
 
   if (!d) return <div className="page"><Spinner /></div>
 
@@ -292,7 +292,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const done = d.checklist.filter((c) => c.done)
 
   const many = d.versions.length > 1
-  const exportLabel = version && many ? `Export Version ${version.n}` : 'Export video'
+  const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
 
   return (
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
@@ -366,17 +366,15 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <Spinner /> Wait for this version to finish
             </p>
           )}
-          <button className="btn primary big export-btn" onClick={() => setPlatformPicker(true)} disabled={!version || !!job} data-testid="export-platforms" title={job ? 'Wait for this version to finish' : undefined}>
-            <Icon name="upload" /> Export for platforms
+          <button className="btn primary big export-btn" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export" title={job ? 'Wait for this version to finish' : undefined}>
+            <Icon name="upload" /> {exportLabel}
           </button>
-          <div className="export-alternatives">
-            <button className="btn small" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export">
-              {exportLabel}
-            </button>
-            <button className="btn small" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
-              Send to my phone
-            </button>
-          </div>
+          <button className="btn export-btn" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
+            <Icon name="send" /> Send to my phone
+          </button>
+          <button className="btn ghost small export-btn" onClick={() => setPlatformPicker(true)} disabled={!version || !!job} data-testid="export-platforms">
+            Export for other platforms
+          </button>
         </div>
 
         <div className="reel-right">
@@ -641,7 +639,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
-      {platformPicker && version && <PlatformExportDialog slug={slug} version={version} post={d.project.post} jobId={job?.jobId || undefined} onClose={() => setPlatformPicker(false)} />}
+      {platformPicker && version && <PlatformExportDialog slug={slug} version={version} post={d.project.post} jobId={job?.jobId || undefined} status={job?.message} onClose={() => setPlatformPicker(false)} />}
       {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
     </div>
   )

@@ -1,40 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import { checkPlatform, renderGroups } from '../src/shared/platforms'
+import { checkPlatform } from '../src/shared/platforms'
+
+const captionIssue = (...args: Parameters<typeof checkPlatform>) => checkPlatform(...args).find((issue) => issue.kind === 'caption')
+const durationIssue = (...args: Parameters<typeof checkPlatform>) => checkPlatform(...args).find((issue) => issue.kind === 'duration')
 
 describe('platform export rules', () => {
   it('fails if a TikTok caption exceeds the documented 2200 UTF-16 character limit', () => {
-    const issues = checkPlatform('tiktok', 'x'.repeat(2201), 30)
-    expect(issues.find((issue) => issue.kind === 'caption')?.blocking).toBe(true)
+    expect(captionIssue('tiktok', 'x'.repeat(2201), 30)?.blocking).toBe(true)
   })
 
-  it('uses the current three-minute Shorts limit, so a 70 second Short is not rejected for duration', () => {
-    expect(checkPlatform('youtube', 'A Short', 70).some((issue) => issue.kind === 'duration')).toBe(false)
+  it('fails if Shorts lose the current three-minute limit, in either direction', () => {
+    expect(durationIssue('youtube', 'A Short', 70)).toBeUndefined()
+    expect(durationIssue('youtube', 'A Short', 181)?.blocking).toBe(true)
   })
 
-  it('fails if a video over three minutes is offered as a Short', () => {
-    expect(checkPlatform('youtube', 'A Short', 181).some((issue) => issue.kind === 'duration')).toBe(true)
-  })
-
-  it('reuses one render when selected platforms have the same export spec', () => {
-    const groups = renderGroups(['instagram', 'tiktok', 'facebook'], 30)
-    expect(groups).toHaveLength(1)
-    expect(groups[0].platforms).toEqual(['instagram', 'tiktok', 'facebook'])
+  it('fails if TikTok’s conservative three-minute target blocks the export instead of warning', () => {
+    expect(durationIssue('tiktok', 'A reel', 200)?.blocking).toBe(false)
   })
 
   it('flags a YouTube description that fits 5000 characters but exceeds 5000 UTF-8 bytes', () => {
-    expect(checkPlatform('youtube', 'é'.repeat(2501), 30).some((issue) => issue.kind === 'caption')).toBe(true)
+    expect(captionIssue('youtube', 'é'.repeat(2501), 30)?.blocking).toBe(true)
+  })
+
+  it('fails if Threads counts every character by bytes instead of only emoji', () => {
+    expect(captionIssue('threads', 'é'.repeat(400), 30)).toBeUndefined()
+    expect(captionIssue('threads', '😀'.repeat(126), 30)?.blocking).toBe(true)
   })
 
   it('flags Instagram captions with more than 30 hashtags, including adjacent tags', () => {
     expect(checkPlatform('instagram', '#reel'.repeat(31), 30).some((issue) => issue.kind === 'hashtags')).toBe(true)
   })
 
-  it('fails if X treats trailing punctuation as part of the shortened URL allowance', () => {
-    expect(checkPlatform('x', `https://example.com/${'!'.repeat(280)}`, 30).some((issue) => issue.kind === 'caption')).toBe(true)
+  it('fails if X stops trimming punctuation after a short link, or its estimate blocks the export', () => {
+    expect(captionIssue('x', `https://x.co/a${'!'.repeat(258)}`, 30)?.blocking).toBe(false)
   })
 
-  it('fails if X accepts a short URL plus text beyond its weighted 280-character budget', () => {
-    expect(checkPlatform('x', `https://x.com/ ${'a'.repeat(265)}`, 30).some((issue) => issue.kind === 'caption')).toBe(true)
+  it('fails if X counts a long link by its length instead of 23', () => {
+    expect(captionIssue('x', `https://example.com/${'a'.repeat(100)} ${'b'.repeat(256)}`, 30)).toBeUndefined()
   })
 
   it('fails if an Instagram caption contains more than 20 mentions', () => {
