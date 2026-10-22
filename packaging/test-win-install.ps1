@@ -33,16 +33,20 @@ Remove-Item $out -ErrorAction SilentlyContinue
 $sw.Restart()
 $argList = @("--self-test", "--out", "`"$out`"")
 if ($UserDataDir) { $argList += "--user-data-dir=`"$UserDataDir`"" }
-$r = Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru
+$r = Start-Process -FilePath $exe -ArgumentList $argList -PassThru
+# A build without --self-test opens its normal window and never exits; stop it so the uninstall check still runs.
+if (-not $r.WaitForExit(300000)) { Stop-Process -Id $r.Id -Force; "self-test did not exit within 300 s; stopped it" }
 "self-test exit code $($r.ExitCode) after $([int]$sw.Elapsed.TotalSeconds)s"
-if (-not (Test-Path $out)) { throw "No result file written" }
-$j = Get-Content $out -Raw -Encoding UTF8 | ConvertFrom-Json
-"isPackaged=$($j.isPackaged) electron=$($j.electron) platform=$($j.platform)/$($j.arch)"
-"python: $($j.locations.python)"
-foreach ($c in $j.result.checks) {
-  $d = ($c.detail | ConvertTo-Json -Compress -Depth 6)
-  if ($d.Length -gt 220) { $d = $d.Substring(0, 220) + "..." }
-  "{0,-24} {1,-5} {2,6}s  {3}" -f $c.name, $(if ($c.ok) { "PASS" } else { "FAIL" }), $c.seconds, $d
+$j = $null
+if (Test-Path $out) { $j = Get-Content $out -Raw -Encoding UTF8 | ConvertFrom-Json } else { "No self-test result file written" }
+if ($j) {
+  "isPackaged=$($j.isPackaged) electron=$($j.electron) platform=$($j.platform)/$($j.arch)"
+  "python: $($j.locations.python)"
+  foreach ($c in $j.result.checks) {
+    $d = ($c.detail | ConvertTo-Json -Compress -Depth 6)
+    if ($d.Length -gt 220) { $d = $d.Substring(0, 220) + "..." }
+    "{0,-24} {1,-5} {2,6}s  {3}" -f $c.name, $(if ($c.ok) { "PASS" } else { "FAIL" }), $c.seconds, $d
+  }
 }
 if (-not $KeepInstalled) {
   $un = Join-Path $InstallDir "Uninstall $([IO.Path]::GetFileNameWithoutExtension($ExeName)).exe"
@@ -57,5 +61,5 @@ if (-not $KeepInstalled) {
   if ($leftover.Count) { "UNINSTALL CHECK FAILED"; exit 1 }
   "uninstall left no *-updater folder"
 }
-if (-not $j.ok) { "SELF-TEST FAILED"; exit 1 }
+if (-not $j -or -not $j.ok) { "SELF-TEST FAILED"; exit 1 }
 "SELF-TEST PASSED"
