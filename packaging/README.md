@@ -13,6 +13,7 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `make-config.js` | Fills the template's `${env.RS_*}` with absolute paths -> `.build/electron-builder.resolved.yml`. |
 | `after-pack.js` | electron-builder hook: pre-compiles Python bytecode inside the packed app before signing. |
 | `build-win.ps1` / `build-mac.sh` | One command each: fetch runtime, build the app JS, package. `-Spike` / `--spike` packages the spike instead of `app/`. |
+| `check-win-unpacked.ps1` | Fails if `release\win-unpacked\resources` holds a `.venv` (the README's engine dev venv). `build-win.ps1` runs it after packaging. |
 | `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls. |
 | `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
 | `entitlements.main.plist` / `entitlements.inherit.plist` | Hardened-runtime entitlements: `allow-jit` only, for the Electron main process and its helper apps. Python, ffmpeg and every dylib are signed with none. |
