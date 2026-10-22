@@ -443,6 +443,83 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
     return ",".join(parts), int(round(x)), int(round(y)), t0, t1, skip
 
 
+SHUTTER = 0.5        # of a frame: the film camera's 180-degree shutter
+TAP_PX = 2.0         # blur taps at most this far apart at the corner farthest from the zoom's fixed point
+MAX_DOUBLINGS = 4    # 16 taps: 8 left visible bands on hard edges in the fastest frame
+
+
+def _snap_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, scale_chain: str, fps: float,
+                t_shift: float, out_w: int, out_h: int, draft: bool) -> list:
+    """Chains turning [zs<zi>] (the base) into [zz<zi>]: output frames k0..k1-1 of snap zoom z.
+
+    Each frame crops the base to a rectangle between the full frame and the hold's crop, all sharing
+    one fixed point, so the picture grows out of that point like a camera punch-in. While the scale
+    moves, a frame averages 2^d taps spread across its shutter time, a radial blur as long as the
+    zoom's speed: the smallest-scale tap, then d passes that each average the image with a copy of
+    itself zoomed in about the fixed point (zooming in never needs pixels outside the frame). Held
+    frames use the plain crop and scale, unblurred."""
+    from .zoom import progress
+    cw, ch, x, y = crop
+    s_end = out_w / cw
+    fx, fy = x / (1 - cw / out_w), y / (1 - ch / out_h)
+    reach = max(math.hypot(cx - fx, cy - fy) for cx in (0, out_w) for cy in (0, out_h))
+
+    def scale(k, u):    # the zoom's scale u of the way through frame k's shutter
+        return 1 + (s_end - 1) * progress(z, k / fps + t_shift + u * SHUTTER / fps)
+
+    def shutter(k):     # (doublings, smallest tap's scale, scale ratio between taps); None = held
+        a, b = scale(k, 0), scale(k, 1)
+        if min(a, b) >= s_end - 1e-9:
+            return None
+        d = min(MAX_DOUBLINGS, max(0, math.ceil(math.log2(reach * (max(a, b) / min(a, b) - 1) / TAP_PX + 1))))
+        n = 1 << d
+        lo, hi = sorted((scale(k, 0.5 / n), scale(k, 1 - 0.5 / n)))
+        return d, lo, (hi / lo) ** (1 / (n - 1)) if n > 1 else 1.0
+
+    runs = []       # [doublings, first frame, end frame, [(lo, ratio) per frame]]
+    for k in range(k0, k1):
+        sh = shutter(k)
+        d = None if sh is None else sh[0]
+        if runs and runs[-1][0] == d:
+            runs[-1][2] = k + 1
+        else:
+            runs.append([d, k, k + 1, []])
+        if sh:
+            runs[-1][3].append(sh[1:])
+
+    def warp(vals, left, top, right, bottom, interp):
+        """perspective onto the source rectangle whose edges are e0 + e1 * vals[frame]."""
+        expr = f"{vals[-1]:.6f}"
+        for i in range(len(vals) - 2, -1, -1):      # perspective numbers its frames from 1
+            expr = f"if(eq(in,{i + 1}),{vals[i]:.6f},{expr})"
+        le, ri, to, bo = (f"'{e0}+{e1}*{expr}'" for e0, e1 in (left, right, top, bottom))
+        return (f"perspective=x0={le}:y0={to}:x1={ri}:y1={to}:x2={le}:y2={bo}:x3={ri}:y3={bo}:"
+                f"sense=source:eval=frame:interpolation={interp}")
+
+    chains, labels = [f"[zs{zi}]split={len(runs)}" + "".join(f"[zs{zi}r{ri}]" for ri in range(len(runs)))], []
+    for ri, (d, a, b, rows) in enumerate(runs):
+        chain = f"[zs{zi}r{ri}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS"
+        if d is None:
+            chains.append(f"{chain},{scale_chain}[zr{zi}r{ri}]")
+            labels.append(f"[zr{zi}r{ri}]")
+            continue
+        q = [(1 - 1 / lo) / (1 - 1 / s_end) for lo, _ in rows]
+        chain += "," + warp(q, (0, x), (0, y), (out_w, x + cw - out_w), (out_h, y + ch - out_h),
+                            "linear" if draft or d else "cubic")
+        for j in range(d):
+            v = [1 - r ** -(1 << j) for _, r in rows]
+            p = f"zd{zi}r{ri}p{j}"
+            chains.append(f"{chain},split=2[{p}a][{p}b]")
+            chains.append(f"[{p}b]" + warp(v, (0, fx), (0, fy), (out_w, fx - out_w), (out_h, fy - out_h), "linear")
+                          + f"[{p}z]")
+            chain = f"[{p}a][{p}z]mix=inputs=2"
+        chains.append(f"{chain}[zr{zi}r{ri}]")
+        labels.append(f"[zr{zi}r{ri}]")
+    pad = f",tpad=start={k0}" if k0 > 0 else ""
+    chains.append("".join(labels) + f"concat=n={len(runs)}:v=1:a=0,setpts=N/({fps}*TB),fps={fps}{pad}[zz{zi}]")
+    return chains
+
+
 def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
                     out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
                     audio: Path, audio_seek: float, dur: float, t_shift: float, encoder: str,
@@ -522,9 +599,14 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         k0 = int(math.ceil(t0 * fps - 1e-6))
         t0 = k0 / fps
         pad = f",fps={fps},tpad=start={k0}" if k0 > 0 else ""
-        chains.append(f"[zs{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,crop={cw}:{ch}:{x}:{y},"
-                      f"scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
-                      f"setsar=1{pad}[zz{zi}]")
+        scale_chain = (f"crop={cw}:{ch}:{x}:{y},scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
+                       f"setsar=1")
+        k1 = int(math.ceil(t1 * fps - 1e-6))
+        # a crop rounded to the full width or height has no fixed point to grow from
+        if (z.ramp_in or z.ramp_out) and cw < out_w and ch < out_h and k1 > k0:
+            chains += _snap_chain(zi, z, k0, k1, (cw, ch, x, y), scale_chain, fps, t_shift, out_w, out_h, ctx.draft)
+        else:
+            chains.append(f"[zs{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,{scale_chain}{pad}[zz{zi}]")
         chains.append(f"[zm{zi}][zz{zi}]overlay=0:0:eof_action=pass:repeatlast=0:"
                       f"enable='between(t,{_f(t0)},{_f(t1)})'[zb{zi}]")
         cur = f"zb{zi}"
