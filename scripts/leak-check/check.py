@@ -184,8 +184,13 @@ def read_tracked(root: Path) -> dict[str, bytes]:
     names = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
     tree = {}
     for n in names.decode("utf-8").split("\0"):
-        if n and (root / n).is_file():          # a deleted-but-staged file is not there to read
-            tree[n] = (root / n).read_bytes()
+        p = root / n
+        if not n:
+            continue
+        if p.is_symlink():                      # never follow a link out of the checkout: check its text instead
+            tree[n] = os.readlink(p).encode("utf-8", "replace")
+        elif p.is_file():                       # a deleted-but-staged file is not there to read
+            tree[n] = p.read_bytes()
     return tree
 
 
