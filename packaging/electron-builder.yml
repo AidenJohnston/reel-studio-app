@@ -72,6 +72,9 @@ extraResources:
       - "!**/tools/**"
       - "!**/package-lock.json"
       - "!**/.DS_Store"
+  # app/src/main/mac-permission-helper.ts shows the app icon
+  - from: ${env.RS_REPO_ROOT}/packaging/icons/icon.png
+    to: icon.png
   # app/resources/test-animation is read by the app from <resources>/test-animation (app/src/main/paths.ts)
   - from: ${env.RS_APP_DIR}/resources/test-animation
     to: test-animation
@@ -107,6 +110,7 @@ mac:
   identity: null
   extendInfo:
     NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+    NSDocumentsFolderUsageDescription: "Reel Studio keeps your videos, music and pictures in a Reel Studio folder in Documents."
 
 dmg:
   title: Reel Studio

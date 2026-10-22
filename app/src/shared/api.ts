@@ -245,7 +245,12 @@ export interface ModelStatus {
   name: string
   installed: boolean
   downloading: boolean
+  /** Checking a copy found on this computer before using it */
+  checking: boolean
+  reused: boolean
+  checkFailed: boolean
   pct: number
+  /** 0 when the size is not known */
   bytes: number
   total: number
   error: string | null
@@ -317,6 +322,8 @@ export interface ReelApi {
   model: {
     status(): Promise<ModelStatus>
     download(): Promise<ModelStatus>
+    /** Never downloads. */
+    find(): Promise<ModelStatus>
     cancel(): Promise<void>
     onProgress(cb: (s: ModelStatus) => void): () => void
   }
@@ -393,6 +400,14 @@ export interface ReelApi {
     /** Test builds only. `template` defaults to the bundled self-test template. */
     renderTestAnimation(outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>): Promise<string>
   }
+  perm: {
+    status(): Promise<PermissionStatus>
+    allowFolder(): Promise<PermissionStatus>
+    /** Turning it on shows one notification, which is when macOS asks. */
+    setNotifications(on: boolean): Promise<PermissionStatus>
+    /** macOS: the System Settings page for this, with the helper on it. */
+    openSettings(pane: SettingsPane): Promise<void>
+  }
   /** "Update available" notice (main/update-check.ts). Tells, never installs. */
   update: {
     status(): Promise<UpdateStatus>
@@ -406,6 +421,26 @@ export interface ReelApi {
     onChange(cb: (n: UpdateNotice | null) => void): () => void
   }
 }
+
+/**
+ * The folder for videos: `not-asked` = not touched yet (touching it is what makes macOS ask), `denied` = macOS
+ * privacy said no (EPERM), `unusable` = any other reason it cannot be used (read-only drive, ordinary file rights).
+ */
+export type FolderAccess = 'not-asked' | 'allowed' | 'denied' | 'unusable'
+/**
+ * `asking` = turned on, and macOS has not answered yet. `unverified` = turned on in Reel Studio; whether the system
+ * shows them cannot be read (main/permissions.ts notifyAccess).
+ */
+export type NotifyAccess = 'off' | 'asking' | 'unverified' | 'blocked' | 'unsupported'
+
+export interface PermissionStatus {
+  folder: FolderAccess
+  /** "Documents › Reel Studio" */
+  folderDisplay: string
+  notifications: NotifyAccess
+}
+
+export type SettingsPane = 'folder' | 'notifications'
 
 /** A newer Reel Studio is out. `url` is its release page on GitHub. */
 export interface UpdateNotice {

@@ -31,6 +31,7 @@ const api: ReelApi = {
   model: {
     status: () => call('model:status'),
     download: () => call('model:download'),
+    find: () => call('model:find'),
     cancel: () => call('model:cancel'),
     onProgress: (cb) => on<ModelStatus>('model:progress', cb)
   },
@@ -89,6 +90,12 @@ const api: ReelApi = {
   },
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)
+  },
+  perm: {
+    status: () => call('perm:status'),
+    allowFolder: () => call('perm:allowFolder'),
+    setNotifications: (on) => call('perm:setNotifications', on),
+    openSettings: (pane) => call('perm:openSettings', pane)
   },
   update: {
     status: () => call('update:status'),

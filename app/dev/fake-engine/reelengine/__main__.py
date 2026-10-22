@@ -7,6 +7,9 @@ transcribe: the transcript is placeholder words spread over the take.
 Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
+  FAKE_ENGINE_DOWNLOAD_STEP=<seconds>  pause per 10% of download-model (default 0.05)
+  FAKE_ENGINE_OFFLINE=1        download-model stops at 30% with the real engine's "no internet" error
+  FAKE_ENGINE_SPEECH_CHECK=<seconds>   how long speech-check takes (default 1)
 """
 from __future__ import annotations
 
@@ -299,12 +302,24 @@ def cmd_download_model(args: list[str]) -> dict:
     name = take(args, "--name") or "small.en"
     dest = Path(os.environ.get("REELENGINE_MODELS", "models")) / name
     for i in range(11):
+        if i == 3 and os.environ.get("FAKE_ENGINE_OFFLINE") == "1":
+            raise Fail("OFFLINE", "The download stopped. Check your internet connection and try again; it will "
+                                  "pick up where it left off.", "fake offline")
         progress("download", i * 10, f"Downloading the listening model ({i * 48} of 480 MB)")
-        time.sleep(0.05)
+        time.sleep(float(os.environ.get("FAKE_ENGINE_DOWNLOAD_STEP", "0.05")))
     dest.mkdir(parents=True, exist_ok=True)
     for f in ("model.bin", "config.json", "vocabulary.txt", ".fake"):
         (dest / f).write_text("fake", "utf-8")
     return {"model": name, "path": str(dest), "downloaded": True}
+
+
+def cmd_speech_check(_args: list[str]) -> dict:
+    steps = 10
+    for i in range(steps):
+        progress("speech-check", i * 100 / steps, "Getting the listening model ready for this computer")
+        time.sleep(float(os.environ.get("FAKE_ENGINE_SPEECH_CHECK", "1")) / steps)
+    return {"threads": 4, "default": 8, "device": "cpu",
+            "runs": [{"threads": 8, "seconds": 2.5, "sameWords": True}, {"threads": 4, "seconds": 1.4, "sameWords": True}]}
 
 
 def cmd_attach(args: list[str]) -> dict:
@@ -341,7 +356,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach,
 }
 
 
