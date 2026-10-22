@@ -36,7 +36,8 @@ describe('orphaned engine reaper', () => {
     mkdirSync(pkg, { recursive: true })
     writeFileSync(join(pkg, '__init__.py'), '')
     writeFileSync(join(pkg, '__main__.py'), ['import time', 'time.sleep(60)', ''].join('\n'))
-    const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'render'], { cwd: join(dir, 'engine'), stdio: 'ignore', windowsHide: true })
+    // detached like every engine the app starts (engine.ts): its own process group on macOS/Linux
+    const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'render'], { cwd: join(dir, 'engine'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
     // Somebody else's python that happens to get a recorded pid (pid reuse): must survive.
     const other = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore', windowsHide: true })
     await new Promise((r) => setTimeout(r, 500))
@@ -173,6 +174,31 @@ describe('orphaned engine reaper', () => {
     expect(unknown).toBe(false)
     expect(existsSync(join(open, OWNER_LOCK))).toBe(false)
   })
+
+  it.skipIf(process.platform === 'win32')('stopping an engine never signals a lone process that took over its pid', async () => {
+    // not detached: it leads no process group, like an unrelated process that was handed a dead engine's pid
+    const other = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore' })
+    await once(other, 'spawn')
+    await killTree(other.pid!)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(isAlive(other.pid!)).toBe(true)
+    other.kill()
+  })
+
+  it.skipIf(process.platform === 'win32')('an engine from a 0.1.x list (no video named) that would not stop keeps every video left open closed', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const open = join(projectsDir(), 'bread')
+    mkdirSync(join(open, 'work'), { recursive: true })
+    writeFileSync(join(open, OWNER_LOCK), '{"app":"Reel Studio"}')
+    const left = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', detached: true })
+    await once(left, 'spawn')
+    writeFileSync(join(settings, 'engines.json'), JSON.stringify([left.pid]))
+    const { stillRunning, unknown } = await createPidRegistry(settings, async () => false).reap()
+    expect(unknown).toBe(true)
+    expect(stillRunning).toEqual([open])
+    await killTree(left.pid!)
+  }, 60000)
 
   it('recognises only our engine command line', () => {
     expect(isOurEngine('"C:/x/python.exe" -s -E -X utf8 -u -m reelengine render --project p')).toBe(true)

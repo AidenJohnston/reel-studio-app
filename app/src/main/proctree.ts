@@ -19,15 +19,12 @@ async function goneWithin(pid: number, ms: number): Promise<boolean> {
   return !groupAlive(pid)
 }
 
+/** Only ever the group: once the engine and its group are gone, its pid may already be someone else's. */
 function signalGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal)
   } catch {
-    try {
-      process.kill(pid, signal)
-    } catch {
-      /* already gone */
-    }
+    /* the group is gone */
   }
 }
 

@@ -28,7 +28,6 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -40,7 +39,6 @@ import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
 import { createNoteQueue, type NoteToRun } from './note-queue'
 import { withRenderSlot } from './render-slot'
-import { clearStaleLocks } from './owner'
 import { createLiveVideos } from './live-video'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -51,6 +49,7 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
@@ -680,26 +679,9 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const { stopped, stillRunning, unknown } = await pidRegistry.reap()
-  if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
-  if (unknown) log('[start] the list of engine processes from the last run could not be read; every video it had open stays closed until the computer restarts')
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
   // an engine that would not stop may be encoding: no reel renders until they are all gone
   renderSlot.occupy(pidRegistry.drained())
-  // something there would not stop and may still be writing: the project stays closed, its lock kept
-  const closed = stillRunning.map((dir) => basename(dir))
-  for (const slug of closed) {
-    log(`[start] ${slug}: an engine process from the last run would not stop; the video stays closed`)
-    jobs.keepClosed(slug)
-  }
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  await clearStaleLocks(stillRunning).catch((e) => log(`[locks] ${String(e)}`))
-  const recovered = await recoverInterrupted(closed).catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
   await noteQueue.recover().catch((e) => log(`[queue] ${String(e)}`))
   const loaded = await loadAI(
     {

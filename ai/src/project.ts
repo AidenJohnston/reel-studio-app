@@ -175,7 +175,9 @@ export async function writeFileAtomic(file: string, data: string | Buffer, mode?
     await fh.close();
   }
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // The same wait as the app's own writes (app store.ts renameWithRetry, about 8 s): on Windows a reader
+  // such as antivirus can hold project.json that long, and a note that gives up here loses its whole edit.
+  for (let attempt = 0; attempt <= 40; attempt++) {
     try {
       await beforeRename?.();
       await fsp.rename(tmp, file);
@@ -183,7 +185,7 @@ export async function writeFileAtomic(file: string, data: string | Buffer, mode?
     } catch (err: any) {
       lastErr = err;
       if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) break;
-      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, Math.min(250, 10 + attempt * 10)));
     }
   }
   await fsp.rm(tmp, { force: true });
