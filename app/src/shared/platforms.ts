@@ -58,7 +58,7 @@ export interface ExportIssue {
   blocking: boolean
 }
 
-const EMOJI = /\p{Extended_Pictographic}/u
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u
 const utf8Length = (text: string): number => new TextEncoder().encode(text).length
 const graphemes = (text: string): string[] => [...new Intl.Segmenter().segment(text)].map((s) => s.segment)
 

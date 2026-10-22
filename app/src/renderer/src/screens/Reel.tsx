@@ -134,10 +134,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   // Cmd/Ctrl+E and File > Export.
   useEffect(() => {
-    const fn = () => void doExport()
+    const fn = () => { if (!platformPicker) void doExport() }
     window.addEventListener(EXPORT_EVENT, fn)
     return () => window.removeEventListener(EXPORT_EVENT, fn)
-  }, [doExport])
+  }, [doExport, platformPicker])
 
   if (!d) return <div className="page"><Spinner /></div>
 
@@ -372,7 +372,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           <button className="btn export-btn" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
             <Icon name="send" /> Send to my phone
           </button>
-          <button className="btn ghost small export-btn" onClick={() => setPlatformPicker(true)} disabled={!version || !!job} data-testid="export-platforms">
+          <button className="btn ghost export-btn" onClick={() => setPlatformPicker(true)} disabled={!version || !!job} data-testid="export-platforms" title={job ? 'Wait for this version to finish' : undefined}>
             Export for other platforms
           </button>
         </div>

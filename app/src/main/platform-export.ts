@@ -20,9 +20,6 @@ export async function checkPlatformExport(source: string, request: PlatformExpor
     const problem = checkPlatform(platform, request.caption, video.duration).find((issue) => issue.blocking)
     if (problem) throw { code: 'EXPORT_RULE', userMessage: `${platformRule(platform).label}: ${problem.message}` }
   }
-  if (request.coverSeconds !== null && request.coverSeconds >= video.duration) {
-    throw { code: 'EXPORT_RULE', userMessage: 'Choose a cover frame inside the finished video.' }
-  }
   return video as FinishedVideo
 }
 
@@ -47,7 +44,8 @@ export async function exportPlatforms({ source, video, chosenCover, folder, name
   const committed: string[] = []
   try {
     const cover = join(stage, 'cover.jpg')
-    const coverArgs = request.coverSeconds !== null ? [source, '--at', String(request.coverSeconds)]
+    // The scrub bar's end is the duration itself; the engine picks the last frame it can decode.
+    const coverArgs = request.coverSeconds !== null ? [source, '--at', String(Math.min(request.coverSeconds, video.duration))]
       : chosenCover ? [chosenCover]
       // the same frame the renderer falls back to (render.py fallback_cover)
       : [source, '--at', String(Math.min(video.duration * 0.25, 3))]
@@ -85,9 +83,10 @@ export async function exportPlatforms({ source, video, chosenCover, folder, name
     return { folder, files }
   } catch (error) {
     await Promise.all(committed.map((file) => fs.rm(file, { force: true })))
-    throw error
+    throw signal?.aborted ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
   } finally {
-    await fs.rm(stage, { recursive: true, force: true })
+    // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left.
+    await fs.rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
   }
 }
 

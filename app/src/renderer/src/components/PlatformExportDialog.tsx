@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PlatformExportResult, ProjectJson, VersionInfo } from '../../../shared/api'
 import { PLATFORM_RULES, captionLength, checkPlatform, platformRule, type Platform } from '../../../shared/platforms'
 import { clock } from '../../../shared/progress'
-import { reel, userMessage } from '../api'
+import { errorCode, reel, userMessage } from '../api'
 import { FOLDER_APP, Modal, Spinner } from './ui'
 import { SendToPhone } from './SendToPhone'
 
@@ -27,8 +27,10 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
   const [state, setState] = useState<ExportState>({ kind: 'choosing' })
   const [phoneFile, setPhoneFile] = useState<PlatformExportResult['files'][number] | null>(null)
   const [copied, setCopied] = useState<Platform | null>(null)
+  const saving = state.kind === 'saving'
   const video = useRef<HTMLVideoElement>(null)
   const body = useRef<HTMLDivElement>(null)
+  const stopButton = useRef<HTMLButtonElement>(null)
   const screen = phoneFile ? 'phone' : state.kind === 'saved' ? 'saved' : 'choose'
   // One dialog whose content changes: move focus into the new content, as the dialog does on open.
   useEffect(() => {
@@ -39,8 +41,11 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
   const checks = selected.flatMap((platform) => checkPlatform(platform, caption, seconds ?? 0).map((issue) => ({ ...issue, text: `${platformRule(platform).label}: ${issue.message}` })))
   const blocking = seconds === null ? [] : checks.filter((c) => c.blocking)
   const warnings = seconds === null ? [] : checks.filter((c) => !c.blocking)
+  // The Export button turns into progress, so focus moves to Stop once the job can be stopped.
+  useEffect(() => {
+    if (saving && jobId) stopButton.current?.focus()
+  }, [saving, jobId])
   const ready = selected.length > 0 && seconds !== null && blocking.length === 0 && safeChecked
-  const saving = state.kind === 'saving'
 
   const save = async () => {
     if (!ready) return
@@ -49,9 +54,13 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
     try {
       setState({ kind: 'saved', result: await reel.projects.exportPlatforms(slug, version.n, { platforms: selected, caption, coverSeconds }) })
     } catch (e) {
-      setError(userMessage(e))
+      if (errorCode(e) !== 'CANCELLED') setError(userMessage(e))
       setState({ kind: 'choosing' })
     }
+  }
+  // Pressing play after the end also seeks (to 0); only a scrub while paused picks the cover.
+  const pickCover = (v: HTMLVideoElement) => {
+    if (!saving && v.paused) setCoverSeconds(v.currentTime)
   }
   const useProjectCover = () => {
     setCoverSeconds(null)
@@ -90,7 +99,7 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
         </fieldset>
         {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.width} × {rule.height}. {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
         <label className="field-label" htmlFor="platform-caption">Post caption and hashtags</label>
-        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts" />
+        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts platform-issues" />
         <p className="muted-sm platform-counts" id="platform-caption-counts">
           {PLATFORM_RULES.map((rule) => {
             if (!selected.includes(rule.id) || rule.captionLimit === null) return null
@@ -100,14 +109,14 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
           <span>This caption does not replace your saved post caption.</span>
         </p>
         <div className="platform-cover">
-          <video ref={video} src={version.video} poster={version.cover ?? undefined} muted controls preload="metadata"
+          <video ref={video} aria-label="Cover frame" src={version.video} poster={version.cover ?? undefined} muted controls preload="metadata"
             onLoadedMetadata={(e) => setSeconds(e.currentTarget.duration)}
-            onSeeked={(e) => { if (!saving) setCoverSeconds(e.currentTarget.currentTime) }}
+            onSeeked={(e) => pickCover(e.currentTarget)}
             onError={() => setError('The video could not load. Close this dialog and render the version again.')} />
           <div className="stack" style={{ gap: 6 }}>
             <span className="field-label">Cover</span>
             <p className="muted-sm" data-testid="platform-cover-choice">
-              {coverSeconds !== null ? `The frame at ${clock(coverSeconds)}.` : version.cover ? 'Your reel’s cover.' : 'A frame from the first few seconds.'}
+              {coverSeconds !== null ? `The frame at ${clock(coverSeconds)}.` : version.cover ? "Your reel's cover." : 'A frame from the first few seconds.'}
               {' '}Scrub the video to use a different frame.
             </p>
             {coverSeconds !== null && version.cover && <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={useProjectCover} disabled={saving}>Use my cover</button>}
@@ -117,15 +126,17 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
           <input type="checkbox" checked={safeChecked} onChange={(e) => setSafeChecked(e.target.checked)} disabled={saving} />
           <span>I checked subtitles and important details near the edges.<small>Platform buttons and captions can cover them. Exports fit inside a vertical frame without cropping or moving baked-in text.</small></span>
         </label>
-        {blocking.length > 0 && <ul className="platform-errors" role="alert">{blocking.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
-        {warnings.length > 0 && <ul className="muted-sm platform-warnings" aria-live="polite">{warnings.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
+        <div id="platform-issues">
+          {blocking.length > 0 && <ul className="platform-errors">{blocking.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
+          {warnings.length > 0 && <ul className="muted-sm platform-warnings">{warnings.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
+        </div>
         {error && <p className="platform-errors" role="alert">{error}</p>}
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <div className="row platform-actions">
           {saving
-            ? <button className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
+            ? <button ref={stopButton} className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
             : <button className="btn ghost" onClick={onClose}>Cancel</button>}
           <button className="btn primary" onClick={() => void save()} disabled={saving || !ready} data-testid="export-selected">
-            {saving ? <><Spinner /> {status ?? 'Saving files'}</> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
+            {saving ? <><Spinner /> <span role="status">{status ?? 'Saving files'}</span></> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
           </button>
         </div>
         {version.draft && <p className="muted-sm">This is a preview. I will make the full-quality version before saving the platform files.</p>}

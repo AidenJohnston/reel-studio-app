@@ -33,7 +33,7 @@ def cover(source: Path, dest: Path, at: Optional[float]) -> dict:
     seek = []
     if at is not None:
         info = probe(source, quick=True)
-        if not math.isfinite(at) or not 0 <= at < info["duration"]:
+        if not math.isfinite(at) or not 0 <= at <= info["duration"]:
             raise EngineError("BAD_ARGS", "invalid cover timestamp", "Choose a cover frame inside the video.")
         # A seek onto the last frame or two decodes nothing, so the end of the scrub bar uses an earlier frame.
         end = info["vduration"] or info["duration"]
