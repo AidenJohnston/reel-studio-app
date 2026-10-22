@@ -13,6 +13,8 @@ export interface PermissionItem {
   description?: ReactNode
   optional?: boolean
   state: 'ask' | 'working' | 'allowed'
+  /** What the done state says; "Allowed" unless the Mac's answer can't be read. */
+  doneLabel?: string
   onAllow: () => void
   problem?: ReactNode
   actions?: ReactNode
@@ -41,13 +43,13 @@ export function PermissionChecklist({ items, busy = false }: { items: readonly P
           </div>
           {/* Mounted from the start, so a screen reader hears each change. */}
           <span className="sr-only" role="status">
-            {p.state === 'allowed' ? `${p.title}: allowed` : p.state === 'working' ? `${p.title}: waiting for your Mac` : ''}
+            {p.state === 'allowed' ? `${p.title}: ${(p.doneLabel ?? 'Allowed').toLowerCase()}` : p.state === 'working' ? `${p.title}: waiting for your Mac` : ''}
           </span>
           <div className="perm-end">
             {p.state === 'allowed' ? (
               <span className="perm-ok">
                 <Icon name="check" size={16} stroke={2.25} />
-                Allowed
+                {p.doneLabel ?? 'Allowed'}
               </span>
             ) : p.state === 'working' ? (
               <span className="perm-wait">

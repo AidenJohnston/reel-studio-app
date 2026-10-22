@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { AppInfo, NotifyAccess } from '../../../shared/api'
+import type { AppInfo, PermissionStatus } from '../../../shared/api'
 import { RELEASES_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { ConnectAI, DevProviders, ModelDownload, USING_CLAUDE_CODE } from '../components/connect'
+import { usePermissionStatus } from '../components/permissions'
 import { FOLDER_APP } from '../components/ui'
 import { Icon } from '../components/icons'
 import { useNotify } from '../App'
@@ -27,28 +28,24 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
     }
   }
 
-  // For anyone who skipped "Tell me when a video is ready" in setup.
-  const [alerts, setAlerts] = useState<NotifyAccess | null>(null)
-  // Only while a request is out. "asking" can also mean macOS never answered; the switch stays usable then.
-  const [requesting, setRequesting] = useState(false)
-  useEffect(() => {
-    reel.perm
-      .status()
-      .then((st) => setAlerts(st.notifications))
-      .catch(() => {})
-  }, [])
-  const toggleAlerts = async (on: boolean) => {
-    setAlerts(on ? 'asking' : 'off')
-    setRequesting(true)
+  // Re-checked while Settings is open, so a change made in System Settings shows here.
+  const { status: perm, apply } = usePermissionStatus()
+  // What a request that is still out asked for. "asking" can also mean macOS never answered; the switch stays usable.
+  const [pending, setPending] = useState<'folder' | { notifications: boolean } | null>(null)
+  const request = async (what: NonNullable<typeof pending>, fn: () => Promise<PermissionStatus>) => {
+    setPending(what)
     try {
-      setAlerts((await reel.perm.setNotifications(on)).notifications)
+      apply(await fn())
     } catch (e) {
-      setAlerts(on ? 'off' : 'on')
       notify(userMessage(e), 'error')
     } finally {
-      setRequesting(false)
+      setPending(null)
     }
   }
+  const toggleAlerts = (on: boolean) => request({ notifications: on }, () => reel.perm.setNotifications(on))
+  const alerts = perm?.notifications
+  const alertsOn = pending && pending !== 'folder' ? pending.notifications : alerts !== 'off'
+  const isMac = info.platform === 'darwin'
 
   const change = async () => {
     const p = await reel.app.chooseFolder()
@@ -88,7 +85,21 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <p className="folder-line" title={info.root} data-testid="root-display">
           <Icon name="folder" /> {info.rootDisplay}
         </p>
+        {perm && perm.folder !== 'allowed' && (
+          <p className="perm-problem" role="alert" style={{ margin: '0 0 12px' }} data-testid="folder-problem">
+            {perm.folder === 'unusable'
+              ? "I can't save in this folder. Choose another one."
+              : perm.folder === 'denied'
+                ? "Your Mac isn't letting Reel Studio use this folder. Press Allow to turn it on in System Settings."
+                : 'Press Allow so Reel Studio can use this folder.'}
+          </p>
+        )}
         <div className="row">
+          {perm && (perm.folder === 'denied' || perm.folder === 'not-asked') && (
+            <button className="btn primary" disabled={pending === 'folder'} onClick={() => void request('folder', () => reel.perm.allowFolder())} data-testid="folder-allow">
+              Allow
+            </button>
+          )}
           <button className="btn" onClick={() => reel.app.openFolder(info.root)}>
             Show in {FOLDER_APP}
           </button>
@@ -98,14 +109,14 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         </div>
       </section>
 
-      {alerts !== null && alerts !== 'unsupported' && (
+      {alerts !== undefined && alerts !== 'unsupported' && (
         <section className="panel">
           <h2>When a video is ready</h2>
           <label className="toggle" style={{ marginTop: 10 }}>
             <input
               type="checkbox"
-              checked={alerts !== 'off'}
-              disabled={requesting}
+              checked={alertsOn}
+              disabled={pending !== null && pending !== 'folder'}
               onChange={(e) => void toggleAlerts(e.target.checked)}
               data-testid="notifications-toggle"
             />
@@ -116,20 +127,27 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
               ? 'Your Mac asks in the top-right corner of the screen. Choose Allow.'
               : alerts === 'blocked'
                 ? 'Notifications are off for Reel Studio on this computer. Turn them on in your system settings, then press Try again.'
-                : 'So you can do other things while your video is being made.'}
+                : alerts === 'unverified' && isMac
+                  ? "Your Mac decides whether they show. If you don't see them, turn them on in System Settings."
+                  : 'So you can do other things while your video is being made.'}
           </p>
-          {alerts === 'asking' && !requesting && (
+          {alerts !== 'off' && (isMac || alerts === 'asking' || alerts === 'blocked') && (
             <div className="row" style={{ marginTop: 10, marginLeft: 30 }}>
-              <button className="btn small ghost" onClick={() => void toggleAlerts(true)}>
-                Ask again
-              </button>
-            </div>
-          )}
-          {alerts === 'blocked' && (
-            <div className="row" style={{ marginTop: 10, marginLeft: 30 }}>
-              <button className="btn small" onClick={() => void toggleAlerts(true)}>
-                Try again
-              </button>
+              {isMac && (
+                <button className="btn small" onClick={() => void reel.perm.openSettings('notifications')} data-testid="notifications-settings">
+                  Open System Settings
+                </button>
+              )}
+              {alerts === 'asking' && pending === null && (
+                <button className="btn small ghost" onClick={() => void toggleAlerts(true)}>
+                  Ask again
+                </button>
+              )}
+              {alerts === 'blocked' && (
+                <button className="btn small ghost" onClick={() => void toggleAlerts(true)}>
+                  Try again
+                </button>
+              )}
             </div>
           )}
         </section>

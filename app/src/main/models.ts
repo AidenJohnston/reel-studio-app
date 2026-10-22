@@ -47,6 +47,8 @@ export interface ModelDeps {
   saveCheck: (r: SpeechCheckResult) => Promise<void>
   useThreads: (n: number | null) => void
   gate: WorkGate
+  /** The check is stopped after this long and the usual thread count is kept. */
+  checkDeadlineMs: number
   log: (line: string) => void
 }
 
@@ -80,8 +82,16 @@ export function createModelManager(deps: ModelDeps) {
   function checkInBackground(): Promise<void> {
     timing ??= (async () => {
       if (!modelInstalled() || (await checkDone())) return
+      let exited!: () => void
+      const gone = new Promise<void>((resolve) => (exited = resolve))
+      const deadline = AbortSignal.timeout(deps.checkDeadlineMs)
       // Taken after the await above and spawned in the same tick, so a job that started meanwhile wins.
-      const run = deps.gate.runCheck((signal, exited) => runEngine('speech-check', ['--name', modelName()], undefined, signal, exited))
+      const run = deps.gate.runCheck((signal, onExit) =>
+        runEngine('speech-check', ['--name', modelName()], undefined, AbortSignal.any([signal, deadline]), () => {
+          onExit()
+          exited()
+        })
+      )
       if (!run) return
       try {
         const r = (await run) as {
@@ -98,9 +108,10 @@ export function createModelManager(deps: ModelDeps) {
         log(`[model] speech check: ${threads ?? 'usual'} thread(s)${complete ? '' : ' (cut short, not saved)'} ${JSON.stringify(r?.runs ?? [])}`)
       } catch (e) {
         const err = toUserError(e)
-        if (err.code === 'CANCELLED') return // a video started; try again on a later start
+        if (deadline.aborted) await gone
+        else if (err.code === 'CANCELLED') return // a video started; try again on a later start
         // A failure that would repeat: main's thread count (the engine's own rule), saved so it doesn't run again here.
-        log(`[model] speech check failed: ${err.code} ${err.message ?? ''}`)
+        log(`[model] speech check failed: ${deadline.aborted ? `still running after ${deps.checkDeadlineMs} ms` : `${err.code} ${err.message ?? ''}`}`)
         await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
         deps.useThreads(null)
         set({ checkFailed: true })
@@ -116,21 +127,21 @@ export function createModelManager(deps: ModelDeps) {
     if (modelInstalled() || !pin) return state
     const dest = join(modelsDir(), modelName())
     const copies = await findCachedCopies(hfHubCache(), pin)
-    for (const src of copies) {
+    for (const copy of copies) {
       set({ checking: true, pct: 0, error: null })
       try {
         if (existsSync(join(dest, '.fake')) && engineMode() === 'real') await fs.rm(dest, { recursive: true, force: true })
         const t0 = Date.now()
-        const r = await adoptCopy(src, dest, pin.files, (b) => set({ pct: Math.floor((b / total()) * 100) }))
+        const r = await adoptCopy(copy, dest, pin.files, (b) => set({ pct: Math.floor((b / total()) * 100) }))
         if (r.ok && modelInstalled()) {
-          log(`[model] reused ${src} (verified in ${Date.now() - t0} ms)`)
+          log(`[model] reused ${copy.dir} (verified in ${Date.now() - t0} ms)`)
           void checkInBackground()
           return set({ checking: false, installed: true, reused: true, pct: 100 })
         }
-        log(`[model] not using ${src}: ${r.ok ? 'incomplete' : `${r.file} ${r.reason}`}`)
+        log(`[model] not using ${copy.dir}: ${r.ok ? 'incomplete' : `${r.file} ${r.reason}`}`)
       } catch (e) {
         const code = (e as NodeJS.ErrnoException).code
-        log(`[model] could not copy ${src}: ${String(e)}`)
+        log(`[model] could not copy ${copy.dir}: ${String(e)}`)
         if (code === 'ENOSPC')
           return set({ checking: false, pct: 0, error: "There isn't enough free space for the listening model. Free up about 500 MB, then try again." })
       }

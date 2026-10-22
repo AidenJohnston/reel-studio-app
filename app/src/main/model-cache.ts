@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { constants, createReadStream, promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, posix, win32 } from 'node:path'
+import { join, posix, sep, win32 } from 'node:path'
 import { promisify } from 'node:util'
 
 export interface PinnedFile {
@@ -36,19 +36,34 @@ export function hfHubCache(env: NodeJS.ProcessEnv = process.env, home = homedir(
   return path.join(hfHome, 'hub')
 }
 
+/** A snapshot folder in the cache, with the real path of each pinned file (in `pin.files` order). */
+export interface CachedCopy {
+  dir: string
+  paths: string[]
+}
+
 /**
- * Snapshot folders of the model in the cache whose files all have the pinned sizes, the pinned revision first.
- * Sizes only: the contents are checked after copying (verifyFiles), so what is kept is what was checked.
+ * Snapshots of the model in the cache whose files all have the pinned sizes, the pinned revision first. Each file
+ * must resolve inside the cache: huggingface_hub links snapshot files to its own blobs folder, and a link that leads
+ * anywhere else is never read. Sizes only: the contents are checked after copying.
  */
-export async function findCachedCopies(cache: string, pin: PinnedModel): Promise<string[]> {
-  const found: string[] = []
+export async function findCachedCopies(cache: string, pin: PinnedModel): Promise<CachedCopy[]> {
+  const root = await fs.realpath(cache).catch(() => null)
+  if (!root) return []
+  const insideCache = async (path: string): Promise<string | null> => {
+    const real = await fs.realpath(path).catch(() => null)
+    return real?.startsWith(root + sep) ? real : null
+  }
+  const found: CachedCopy[] = []
   const snapshots = join(cache, `models--${pin.repo.replace(/\//g, '--')}`, 'snapshots')
   const revisions = await fs.readdir(snapshots).catch(() => [] as string[])
   revisions.sort((a, b) => Number(b === pin.revision) - Number(a === pin.revision))
   for (const rev of revisions) {
     const dir = join(snapshots, rev)
-    const sizes = await Promise.all(pin.files.map((f) => fs.stat(join(dir, f.name)).then((s) => s.size).catch(() => -1)))
-    if (sizes.every((s, i) => s === pin.files[i].size)) found.push(dir)
+    const paths = await Promise.all(pin.files.map((f) => insideCache(join(dir, f.name))))
+    if (!paths.every((p): p is string => p !== null)) continue
+    const sizes = await Promise.all(paths.map((p) => fs.stat(p).then((s) => s.size).catch(() => -1)))
+    if (sizes.every((s, i) => s === pin.files[i].size)) found.push({ dir, paths })
   }
   return found
 }
@@ -91,13 +106,13 @@ async function cloneOrCopy(src: string, dst: string): Promise<void> {
 }
 
 /** Copies, then verifies the copies, so Reel Studio stops depending on a cache the person might clean out. */
-export async function adoptCopy(src: string, dest: string, files: PinnedFile[], onBytes?: (done: number) => void, signal?: AbortSignal): Promise<VerifyResult> {
+export async function adoptCopy(copy: CachedCopy, dest: string, files: PinnedFile[], onBytes?: (done: number) => void, signal?: AbortSignal): Promise<VerifyResult> {
   const staging = `${dest}.found-${process.pid}`
   await fs.rm(staging, { recursive: true, force: true })
   await fs.mkdir(staging, { recursive: true })
   try {
-    for (const f of files) {
-      await cloneOrCopy(join(src, f.name), join(staging, f.name))
+    for (const [i, f] of files.entries()) {
+      await cloneOrCopy(copy.paths[i], join(staging, f.name))
       // The cache keeps its files read-only; a read-only file on Windows could not be replaced or deleted later.
       await fs.chmod(join(staging, f.name), 0o644)
     }

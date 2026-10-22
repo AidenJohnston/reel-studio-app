@@ -140,10 +140,37 @@ test('an existing install goes straight to Home, as before', async () => {
     expect(existsSync(join(d.root, 'Projects'))).toBe(true) // made at start, the way it always was
     // Notifications were on before this setup existed, so they still are.
     const st = await page.evaluate(() => (window as any).reel.perm.status())
-    expect(st).toMatchObject({ folder: 'allowed', notifications: 'on' })
+    expect(st).toMatchObject({ folder: 'allowed', notifications: 'unverified' })
     // Settings has the switch for anyone who skipped it in setup
     await page.getByTestId('nav-settings').click()
     await expect(page.getByTestId('notifications-toggle')).toBeChecked()
+    if (MAC) {
+      // macOS never says whether they show, so System Settings is always one press away.
+      await page.getByTestId('notifications-settings').click()
+      await expect.poll(() => opened(app)).toEqual(['x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=dev.reelstudio.app'])
+    }
+  } finally {
+    await app.close()
+  }
+})
+
+test('folder access taken away after setup can be given back from Settings', async () => {
+  test.skip(!MAC, 'macOS privacy only')
+  const d = fresh('revoked')
+  mkdirSync(d.userData, { recursive: true })
+  writeFileSync(join(d.userData, 'settings.json'), JSON.stringify({ firstRunDone: true, root: null }))
+  const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'folder=denied' })
+  try {
+    await page.getByTestId('nav-settings').click()
+    await expect(page.getByTestId('folder-problem')).toContainText("Your Mac isn't letting Reel Studio use this folder")
+    await page.getByTestId('folder-allow').click()
+    await expect.poll(() => opened(app)).toEqual(['x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders'])
+    await helperWindow(app, 'Set up Files and Folders')
+    await app.evaluate(() => {
+      delete (globalThis as { __reelPermFakes?: { folder?: string } }).__reelPermFakes!.folder
+    })
+    await expect.poll(() => app.windows().length, { timeout: 5000 }).toBe(1)
+    await expect(page.getByTestId('folder-problem')).toHaveCount(0, { timeout: 5000 })
   } finally {
     await app.close()
   }

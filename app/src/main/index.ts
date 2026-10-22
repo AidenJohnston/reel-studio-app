@@ -154,6 +154,9 @@ const models = createModelManager({
   saveCheck: async (speechCheck) => void (await saveSettings({ speechCheck })),
   useThreads: setAsrThreads,
   gate: workGate,
+  // The engine stops starting new counts after 15 s, and one count took at most about 7 s on a busy M4 Pro, so a
+  // check still running after a minute is stuck.
+  checkDeadlineMs: 60_000,
   log
 })
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
@@ -331,6 +334,7 @@ function registerIpc(): void {
   handle('app:finishFirstRun', async () => {
     // Windows and Linux skip the "Your Mac" stage, so their folder is made here (on a Mac it already exists).
     await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
+    perms.markTouched()
     const s = await loadSettings()
     // A new Mac user who never turned on "Tell me when a video is ready" said no (main/permissions.ts).
     const patch = process.platform === 'darwin' && s.notifications === null ? { notifications: false } : {}
@@ -368,6 +372,7 @@ function registerIpc(): void {
 
   handle('perm:status', () => perms.status())
   handle('perm:allowFolder', () => perms.allowFolder())
+  handle('perm:openSettings', (_e, pane: unknown) => perms.openSettings(pane))
   handle('perm:setNotifications', async (_e, on: unknown) => {
     const st = await perms.setNotifications(on === true)
     notificationsOn = notificationsWanted(await loadSettings(), process.platform)

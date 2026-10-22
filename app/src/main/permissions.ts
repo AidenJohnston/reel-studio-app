@@ -40,16 +40,16 @@ export function notificationsWanted(s: { notifications: boolean | null; firstRun
 export type NotifyResult = 'shown' | 'failed' | 'pending'
 
 /**
- * Electron cannot read the macOS notification setting. All Reel Studio learns is what happened to the notification
- * it showed when the person turned them on: shown, refused (Electron's `failed` event), or no answer yet. That
- * answer lives in memory, so after a restart "on" means "on in Reel Studio".
+ * Electron cannot read the macOS notification setting, and its `show` event fires when a notification is scheduled,
+ * not when macOS lets it appear. So Reel Studio can learn a refusal (the `failed` event) but never a yes: a wanted
+ * notification is `unverified`, including after a restart or a later change in System Settings.
  */
 export function notifyAccess(o: { supported: boolean; wanted: boolean; result: NotifyResult | null }): NotifyAccess {
   if (!o.supported) return 'unsupported'
   if (!o.wanted) return 'off'
   if (o.result === 'failed') return 'blocked'
   if (o.result === 'pending') return 'asking'
-  return 'on'
+  return 'unverified'
 }
 
 /** Test builds pretend macOS said no: REELSTUDIO_TEST_PERMISSIONS="folder=denied,notifications=failed". */
@@ -173,6 +173,10 @@ export function createPermissions(d: PermissionDeps) {
       const st = await status()
       if (st.notifications === 'blocked') openPane('notifications')
       return st
+    },
+    openSettings(pane: unknown): void {
+      if (pane !== 'folder' && pane !== 'notifications') throw new Error(`unknown settings page: ${String(pane)}`)
+      openPane(pane)
     }
   }
 }

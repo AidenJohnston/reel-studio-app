@@ -405,6 +405,8 @@ export interface ReelApi {
     allowFolder(): Promise<PermissionStatus>
     /** Turning it on shows one notification, which is when macOS asks. */
     setNotifications(on: boolean): Promise<PermissionStatus>
+    /** macOS: the System Settings page for this, with the helper on it. */
+    openSettings(pane: SettingsPane): Promise<void>
   }
   /** "Update available" notice (main/update-check.ts). Tells, never installs. */
   update: {
@@ -425,8 +427,11 @@ export interface ReelApi {
  * privacy said no (EPERM), `unusable` = any other reason it cannot be used (read-only drive, ordinary file rights).
  */
 export type FolderAccess = 'not-asked' | 'allowed' | 'denied' | 'unusable'
-/** `asking` = turned on, and macOS has not answered yet. */
-export type NotifyAccess = 'off' | 'asking' | 'on' | 'blocked' | 'unsupported'
+/**
+ * `asking` = turned on, and macOS has not answered yet. `unverified` = turned on in Reel Studio; whether the system
+ * shows them cannot be read (main/permissions.ts notifyAccess).
+ */
+export type NotifyAccess = 'off' | 'asking' | 'unverified' | 'blocked' | 'unsupported'
 
 export interface PermissionStatus {
   folder: FolderAccess

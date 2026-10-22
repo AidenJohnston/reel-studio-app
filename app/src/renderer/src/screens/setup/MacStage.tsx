@@ -33,19 +33,30 @@ function folderItem(s: PermissionStatus, busy: boolean, allow: () => void, choos
 function notifyItem(s: PermissionStatus, busy: boolean, turnOn: () => void): PermissionItem | null {
   if (s.notifications === 'unsupported') return null
   const asking = busy || s.notifications === 'asking'
+  // macOS never tells an app that notifications are allowed, only when they are refused.
+  const turnedOn = s.notifications === 'unverified' && !busy
   return {
     id: 'notifications',
     icon: <Icon name="bell" />,
     title: 'Tell me when a video is ready',
     optional: true,
-    description: asking ? 'Your Mac asks in the corner of the screen. Choose Allow.' : undefined,
-    state: s.notifications === 'on' ? 'allowed' : asking ? 'working' : 'ask',
+    description: asking
+      ? 'Your Mac asks in the corner of the screen. Choose Allow.'
+      : turnedOn
+        ? "If you didn't see a notification just now, turn them on in System Settings."
+        : undefined,
+    state: turnedOn ? 'allowed' : asking ? 'working' : 'ask',
+    doneLabel: 'Turned on',
     onAllow: turnOn,
     problem: s.notifications === 'blocked' ? 'Your Mac said no. Press Allow to turn it on in System Settings.' : undefined,
     actions:
       s.notifications === 'asking' && !busy ? (
         <button className="link inline" onClick={turnOn} data-testid="perm-notifications-retry">
           Ask again
+        </button>
+      ) : turnedOn ? (
+        <button className="link inline" onClick={() => void reel.perm.openSettings('notifications')} data-testid="perm-notifications-settings">
+          Open System Settings
         </button>
       ) : undefined
   }

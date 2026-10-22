@@ -47,6 +47,7 @@ it('a job that starts while the check reads its settings, or while it runs, neve
     saveCheck: async () => undefined,
     useThreads: () => undefined,
     gate,
+    checkDeadlineMs: 60_000,
     log: () => undefined
   })
   const runJob = async (): Promise<void> => {

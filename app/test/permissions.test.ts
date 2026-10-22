@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPermissions, notificationsWanted, probeFolder } from '../src/main/permissions'
+import { createPermissions, notificationsWanted, probeFolder, type PermissionDeps } from '../src/main/permissions'
 import { pollPermissions } from '../src/shared/permission-poll'
 
 const err = (code: string) => Object.assign(new Error(code), { code })
@@ -11,9 +11,8 @@ it('reads folder access from the error: EPERM is macOS privacy, EACCES is not', 
   expect(await probeFolder('/x', async () => Promise.reject(err('ENOENT')))).toBe('not-asked')
 })
 
-it('never looks at the folder before Allow, because looking is what makes macOS ask', async () => {
-  const probe = vi.fn(async () => [])
-  const p = createPermissions({
+const mac = (over: Partial<PermissionDeps> = {}) =>
+  createPermissions({
     platform: 'darwin',
     root: () => '/Users/z/Documents/Reel Studio',
     rootDisplay: () => 'Documents › Reel Studio',
@@ -24,10 +23,22 @@ it('never looks at the folder before Allow, because looking is what makes macOS 
     notificationsSupported: () => true,
     showTestNotification: async () => 'shown',
     openPane: async () => {},
-    probe
+    ...over
   })
-  expect((await p.status()).folder).toBe('not-asked')
+
+it('never looks at the folder before Allow, because looking is what makes macOS ask', async () => {
+  const probe = vi.fn(async () => [])
+  expect((await mac({ probe }).status()).folder).toBe('not-asked')
   expect(probe).not.toHaveBeenCalled()
+})
+
+it('never reports notifications as allowed, because a shown notification does not mean macOS let it appear', async () => {
+  let saved: boolean | null = null
+  const load = async () => ({ notifications: saved, firstRunDone: true })
+  const save = async (patch: { notifications: boolean }) => void (saved = patch.notifications)
+  expect((await mac({ load, save }).setNotifications(true)).notifications).toBe('unverified')
+  // after a restart
+  expect((await mac({ load, save }).status()).notifications).toBe('unverified')
 })
 
 it('notifications: on for older installs, Windows and Linux; a new Mac user decides in setup', () => {

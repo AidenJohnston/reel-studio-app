@@ -94,7 +94,8 @@ const api: ReelApi = {
   perm: {
     status: () => call('perm:status'),
     allowFolder: () => call('perm:allowFolder'),
-    setNotifications: (on) => call('perm:setNotifications', on)
+    setNotifications: (on) => call('perm:setNotifications', on),
+    openSettings: (pane) => call('perm:openSettings', pane)
   },
   update: {
     status: () => call('update:status'),

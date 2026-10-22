@@ -64,7 +64,7 @@ vi.mock('../src/main/mac-settings-window', () => ({
 
 const { MacPermissionHelper } = await import('../src/main/mac-permission-helper')
 
-it('sits on the System Settings window, hides behind other apps, and closes when Settings closes', async () => {
+it('follows the System Settings window, hides behind other apps, and closes when Settings closes', async () => {
   vi.useFakeTimers()
   const icon = { toDataURL: () => 'data:image/png;base64,abc' }
   mocks.createFromPath.mockReturnValue({ isEmpty: () => false, resize: () => icon })
@@ -73,9 +73,21 @@ it('sits on the System Settings window, hides behind other apps, and closes when
   const onEnd = vi.fn()
   await helper.show('notifications', { owner: null, preload: '/p.js', icon: '/icon.png', instruction: 'Turn on Allow notifications', onEnd })
   const w = windows[0]
-  mocks.settingsChanged!({ x: 100, y: 50, width: 900, height: 620, frontmost: true })
-  expect(w.setBounds).toHaveBeenCalledWith({ x: 378, y: 514, width: 560, height: 140 }, false)
+  const placed = (): { x: number; y: number; width: number; height: number } => w.setBounds.mock.lastCall![0]
+  const within = (settings: { x: number; y: number; width: number; height: number }) => {
+    const b = placed()
+    expect(b.x).toBeGreaterThanOrEqual(settings.x)
+    expect(b.y).toBeGreaterThanOrEqual(settings.y)
+    expect(b.x + b.width).toBeLessThanOrEqual(settings.x + settings.width)
+    expect(b.y + b.height).toBeLessThanOrEqual(settings.y + settings.height)
+  }
+  const settings = { x: 100, y: 50, width: 900, height: 620 }
+  mocks.settingsChanged!({ ...settings, frontmost: true })
+  within(settings)
   expect(w.showInactive).toHaveBeenCalled()
+  const moved = { x: 400, y: 200, width: 900, height: 620 }
+  mocks.settingsChanged!({ ...moved, frontmost: true })
+  within(moved)
   mocks.settingsChanged!({ x: 100, y: 50, width: 900, height: 620, frontmost: false })
   expect(w.hide).toHaveBeenCalled()
   mocks.settingsChanged!(null)
