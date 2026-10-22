@@ -14,7 +14,8 @@
       <project name="Cut">
         <sequence format="r1" duration="8s" tcStart="0s" tcFormat="NDF">
           <spine>
-            <asset-clip name="talking head" ref="r2" offset="0s" start="2s" duration="4s" format="r1">
+            <asset-clip name="talking head" ref="r2" offset="0s" start="2s" duration="4s" audioStart="1s" audioDuration="5s" format="r1">
+              <note>best take</note>
               <marker start="3s" duration="100/2500s" value="hook"/>
               <adjust-volume amount="-6dB"/>
               <title name="Hook title" lane="1" ref="r3" offset="2s" start="3600s" duration="2s">
@@ -25,7 +26,16 @@
             <transition name="Cross Dissolve" offset="3s" duration="1s">
               <filter-video ref="r4" name="Cross Dissolve"/>
             </transition>
-            <asset-clip name="talking head 2" ref="r2" offset="4s" start="6s" duration="4s" format="r1"/>
+            <asset-clip name="talking head 2" ref="r2" offset="4s" start="6s" duration="4s" enabled="0" format="r1"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+    <event name="Older cuts">
+      <project name="First try">
+        <sequence format="r1" duration="4s">
+          <spine>
+            <asset-clip name="talking head" ref="r2" offset="0s" start="0s" duration="4s" format="r1"/>
           </spine>
         </sequence>
       </project>

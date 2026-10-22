@@ -66,15 +66,6 @@ onnxruntime==1.31.0
     # via faster-whisper
 opencv-python-headless==5.0.0.93
     # via reelengine (pyproject.toml)
-opentimelineio==0.18.1
-    # via
-    #   reelengine (pyproject.toml)
-    #   otio-fcp-adapter
-    #   otio-fcpx-xml-adapter
-otio-fcp-adapter==1.0.0
-    # via reelengine (pyproject.toml)
-otio-fcpx-xml-adapter==1.0.0
-    # via reelengine (pyproject.toml)
 packaging==26.3
     # via
     #   huggingface-hub

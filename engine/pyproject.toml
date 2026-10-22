@@ -15,9 +15,6 @@ dependencies = [
   "opencv-python-headless>=4.9",
   "jsonschema>=4.21",
   "yt-dlp>=2024.1",
-  "opentimelineio==0.18.1",
-  "otio-fcpx-xml-adapter==1.0.0",
-  "otio-fcp-adapter==1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +23,10 @@ dev = ["pytest>=8"]
 # only libheif + libde265 (LGPL-3.0), no GPL x265. The packaged app installs it via
 # packaging/requirements-extra.txt (see THIRD_PARTY.md).
 heic = ["pi-heif>=1.4"]
+# Reading Final Cut Pro and Premiere exports (`reelengine import-reference`). Not bundled yet: nothing
+# in the app calls it. Pinned exactly because reference_import.py mirrors these adapters' internals
+# (which FCPXML elements they read, how they walk lanes and ids); recheck those before bumping.
+reference = ["opentimelineio==0.18.1", "otio-fcpx-xml-adapter==1.0.0", "otio-fcp-adapter==1.0.0"]
 
 [project.scripts]
 reelengine = "reelengine.cli:main"

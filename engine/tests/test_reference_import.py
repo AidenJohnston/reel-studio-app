@@ -1,10 +1,11 @@
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from reelengine import cli, proto
+from reelengine import cli, proto, reference_import
 from reelengine.proto import EngineError
 from reelengine.reference_import import import_reference
 
@@ -15,31 +16,45 @@ def _frames(r):
     return r["start"]["value"], r["duration"]["value"], r["start"]["rate"]
 
 
+def _code(path):
+    with pytest.raises(EngineError) as err:
+        import_reference(path)
+    return err.value.code
+
+
 def test_premiere_export_keeps_cut_transition_title_and_audio_levels():
     record = import_reference(FIXTURES / "talking-head.xml")
     assert record["source"]["adapter"] == "fcp_xml"
     assert record["mediaRefs"] == ["file:///media/talking-head.mov"]
     (timeline,) = record["timelines"]
-    assert [t["kind"] for t in timeline["tracks"]] == ["Video", "Video", "Audio"]
+    assert [t["kind"] for t in timeline["tracks"]] == ["Video", "Video", "Video", "Audio"]
     assert [(m["name"], _frames(m["range"])[0]) for m in timeline["markers"]] == [("hook", 12)]
 
     first, dissolve, second = timeline["tracks"][0]["items"]
     assert _frames(first["sourceRange"]) == (25, 50, 25)
     assert _frames(first["trackRange"])[:2] == (0, 50)
+    assert _frames(second["sourceRange"]) == (100, 50, 25)
     assert _frames(second["trackRange"])[:2] == (50, 50)
     assert dissolve["type"] == "transition" and dissolve["name"] == "Cross Dissolve"
     assert dissolve["inOffset"]["value"] == dissolve["outOffset"]["value"] == 10
 
-    gap, title = timeline["tracks"][1]["items"]
-    assert gap["type"] == "gap" and _frames(title["trackRange"])[:2] == (10, 30)
+    (title,) = timeline["tracks"][1]["items"]
+    assert _frames(title["trackRange"])[:2] == (10, 30)
     assert title["media"] == {"kind": "generator", "generator": "Text", "name": "Text"}
 
-    (audio,) = timeline["tracks"][2]["items"]
+    (audio,) = timeline["tracks"][3]["items"]
     assert [e["name"] for e in audio["effects"]] == ["Audio Levels"]
-    levels = next(l for l in record["losses"] if l["path"] == "timelines[0].tracks[2].items[0].effects[0]")
-    assert levels["metadata"]["fcp_xml"]["parameter"]["value"] == "0.5"
-    title_text = next(l for l in record["losses"] if l["path"] == "timelines[0].tracks[1].items[1].media")
-    assert title_text["metadata"]["fcp_xml"]["parameter"]["value"] == "Stop scrolling"
+
+    raw = {path: entry for entry in record["rawMetadata"] for path in entry["paths"]}
+    assert raw["timelines[0].tracks[3].items[0].effects[0]"]["metadata"]["fcp_xml"]["parameter"]["value"] == "0.5"
+    assert raw["timelines[0].tracks[1].items[0].media"]["metadata"]["fcp_xml"]["parameter"]["value"] == "Stop scrolling"
+    (file_entry,) = [e for e in record["rawMetadata"] if e["id"] == "file-1"]
+    assert len(file_entry["paths"]) == 3
+
+    assert {(l["path"], l["reason"]) for l in record["losses"]} == {
+        ("timelines[0].tracks[2].items[0]", "the adapter returned this nested sequence with nothing in it"),
+        ("source", "disabled in the editor but imported as enabled"),
+    }
 
 
 def test_fcpxml_bundle_lists_what_the_adapter_drops():
@@ -50,12 +65,83 @@ def test_fcpxml_bundle_lists_what_the_adapter_drops():
     assert _frames(first["sourceRange"]) == (50, 100, 25)
     assert _frames(second["trackRange"])[:2] == (100, 100)
     assert [(m["name"], _frames(m["range"])[0]) for m in first["markers"]] == [("hook", 75)]
-
-    dropped = {l["element"] for l in record["losses"] if l["path"] == "source"}
-    assert {"title", "transition", "adjust-volume", "media-rep"} <= dropped
     assert first["media"]["kind"] == "missing"
+
+    losses = record["losses"]
+    assert {"title", "transition", "adjust-volume", "media-rep", "note"} <= {l.get("element") for l in losses}
+    assert {'enabled="0"', "audioStart/audioDuration"} <= {l.get("attribute") for l in losses}
+    assert [l["event"] for l in losses if "event" in l] == ["Older cuts"]
     assert {"path": "timelines[0].tracks[0].items[0].media",
-            "reason": "the adapter found no media for this clip"} in record["losses"]
+            "reason": "the adapter found no media for this clip"} in losses
+
+
+def test_fcpxml_timing_is_exact_at_29_97_and_lanes_sort_by_number():
+    record = import_reference(FIXTURES / "ntsc-lanes.fcpxml")
+    (timeline,) = record["timelines"]
+    assert timeline["globalStart"]["value"] == 108000 and timeline["dropFrame"] is True
+    assert [t["name"] for t in timeline["tracks"]] == ["0", "1", "2", "10"]
+
+    spine = timeline["tracks"][0]["items"]
+    assert [i["name"] for i in spine] == ["intro", "point", "outro"]
+    assert {i["trackRange"]["start"]["rate"] for i in spine} == {30000 / 1001}
+    assert [_frames(i["trackRange"])[:2] for i in spine] == [(0, 30), (30, 45), (75, 30)]
+    assert [_frames(i["sourceRange"])[0] for i in spine] == [120, 200, 300]
+    assert [_frames(m["range"])[0] for m in spine[0]["markers"]] == [130]
+
+    (wide,) = timeline["tracks"][2]["items"]
+    assert _frames(wide["trackRange"])[:2] == (15, 20)
+    assert [l["path"] for l in record["losses"] if "deeper than one connection" in l["reason"]] == [
+        "timelines[0].tracks[1].items[0]"]
+
+
+@pytest.mark.parametrize("name,body", [
+    ("event-only.fcpxml", '<fcpxml version="1.10"><resources><format id="r1" frameDuration="1/25s"/>'
+                          '<asset id="r2" src="file:///a.mov" start="0s" duration="4s"/></resources>'
+                          '<event name="Clips"><asset-clip ref="r2" offset="0s" duration="4s" name="a"/></event></fcpxml>'),
+    ("clip-only.xml", '<xmeml version="5"><clip id="c"><name>a</name><duration>50</duration>'
+                      '<rate><timebase>25</timebase></rate></clip></xmeml>'),
+], ids=["fcpxml-event-only", "premiere-clip-only"])
+def test_export_without_a_timeline_is_refused(tmp_path, name, body):
+    source = tmp_path / name
+    source.write_text(body, encoding="utf-8")
+    assert _code(source) == "NO_TIMELINE"
+
+
+def _compound_clips(levels, fanout, cycle=False):
+    resources = ['<format id="r1" frameDuration="1/25s"/>',
+                 '<asset id="r2" src="file:///a.mov" start="0s" duration="10s"/>',
+                 '<media id="m0" name="m0"><sequence format="r1"><spine>'
+                 + ('<ref-clip ref="m0" offset="0s" duration="1s"/>' if cycle
+                    else '<asset-clip ref="r2" offset="0s" duration="1s" name="leaf"/>')
+                 + '</spine></sequence></media>']
+    for k in range(1, levels):
+        refs = "".join(f'<ref-clip ref="m{k - 1}" offset="{i}s" duration="1s"/>' for i in range(fanout))
+        resources.append(f'<media id="m{k}" name="m{k}"><sequence format="r1"><spine>{refs}</spine></sequence></media>')
+    top = "".join(f'<ref-clip ref="m{levels - 1}" offset="{i}s" duration="1s"/>' for i in range(fanout))
+    return (f'<fcpxml version="1.10"><resources>{"".join(resources)}</resources><library><event name="e">'
+            f'<project name="p"><sequence format="r1"><spine>{top}</spine></sequence></project></event></library></fcpxml>')
+
+
+def _premiere_file_references(refs, file_children):
+    definition = ('<file id="f"><name>a.mov</name><pathurl>file:///a.mov</pathurl>'
+                  + "<x/>" * file_children + "</file>")
+    reference = '<file id="f"/>'
+    clips = "".join(f'<clipitem id="c{i}"><name>a</name><in>0</in><out>1</out><start>{i}</start><end>{i + 1}</end>'
+                    f'{definition if i == 0 else reference}</clipitem>' for i in range(refs))
+    return (f'<xmeml version="5"><sequence><name>s</name><rate><timebase>25</timebase></rate>'
+            f'<media><video><track>{clips}</track></video></media></sequence></xmeml>')
+
+
+@pytest.mark.parametrize("name,body,code", [
+    ("nested.fcpxml", _compound_clips(levels=9, fanout=10), "INPUT_TOO_LARGE"),
+    ("cycle.fcpxml", _compound_clips(levels=1, fanout=1, cycle=True), "BAD_XML"),
+    ("file-refs.xml", _premiere_file_references(refs=500, file_children=5000), "INPUT_TOO_LARGE"),
+], ids=["nested-compound-clips", "compound-clip-cycle", "premiere-file-references"])
+def test_references_that_expand_without_bound_are_refused(tmp_path, name, body, code):
+    source = tmp_path / name
+    source.write_text(body, encoding="utf-8")
+    assert source.stat().st_size < 100 * 1024
+    assert _code(source) == code
 
 
 _FCP7_BODY = ('<xmeml version="5"><sequence><name>&x;</name><rate><timebase>25</timebase></rate>'
@@ -66,32 +152,49 @@ _FCP7_BODY = ('<xmeml version="5"><sequence><name>&x;</name><rate><timebase>25</
     ('<!DOCTYPE xmeml [<!ENTITY x "expanded">]>', "utf-8"),
     ('<!DOCTYPE xmeml [<!ENTITY x SYSTEM "file:///etc/passwd">]>', "utf-8"),
     ('<!DOCTYPE xmeml [<!ENTITY x "expanded">]>', "utf-16"),
-])
+], ids=["internal", "external", "internal-utf16"])
 def test_entity_declarations_are_refused_before_the_adapter_parses(tmp_path, doctype, encoding):
     source = tmp_path / "evil.xml"
     source.write_bytes(f'<?xml version="1.0" encoding="{encoding}"?>{doctype}{_FCP7_BODY}'.encode(encoding))
-    with pytest.raises(EngineError) as err:
-        import_reference(source)
-    assert err.value.code == "UNSAFE_XML"
+    assert _code(source) == "UNSAFE_XML"
 
 
-def test_bundle_rejects_symlink_escape(tmp_path):
+def _bundle(tmp_path, extra_files=0):
     bundle = tmp_path / "edit.fcpxmld"
     bundle.mkdir()
-    outside = tmp_path / "outside.fcpxml"
-    outside.write_bytes((FIXTURES / "cut.fcpxmld" / "Info.fcpxml").read_bytes())
-    (bundle / "Info.fcpxml").symlink_to(outside)
-    with pytest.raises(EngineError) as err:
-        import_reference(bundle)
-    assert err.value.code == "UNSAFE_INPUT"
+    (bundle / "Info.fcpxml").write_bytes((FIXTURES / "cut.fcpxmld" / "Info.fcpxml").read_bytes())
+    for i in range(extra_files):
+        (bundle / f"extra-{i}.bin").write_bytes(b"x")
+    return bundle
 
 
-def test_oversized_input_is_rejected(tmp_path):
-    source = tmp_path / "large.xml"
-    source.write_bytes(b"x" * (64 * 1024 * 1024 + 1))
-    with pytest.raises(EngineError) as err:
-        import_reference(source)
-    assert err.value.code == "INPUT_TOO_LARGE"
+@pytest.mark.parametrize("cap,value,make", [
+    ("MAX_FILE_BYTES", 1000, lambda tmp: FIXTURES / "talking-head.xml"),
+    ("MAX_BUNDLE_FILES", 2, lambda tmp: _bundle(tmp, extra_files=2)),
+    ("MAX_BUNDLE_BYTES", 1000, lambda tmp: _bundle(tmp)),
+    ("MAX_XML_DEPTH", 5, lambda tmp: FIXTURES / "talking-head.xml"),
+])
+def test_inputs_over_a_cap_are_refused(monkeypatch, tmp_path, cap, value, make):
+    monkeypatch.setattr(reference_import, cap, value)
+    assert _code(make(tmp_path)) == "INPUT_TOO_LARGE"
+
+
+@pytest.mark.parametrize("link", ["file", "folder"])
+def test_bundle_with_a_link_is_refused(tmp_path, link):
+    bundle = _bundle(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("x")
+    if link == "file":
+        (bundle / "notes.txt").symlink_to(outside / "secret.txt")
+    else:
+        (bundle / "Media").symlink_to(outside, target_is_directory=True)
+    assert _code(bundle) == "UNSAFE_INPUT"
+
+
+def test_missing_reference_extra_is_reported(monkeypatch):
+    monkeypatch.setitem(sys.modules, "opentimelineio", None)
+    assert _code(FIXTURES / "talking-head.xml") == "ADAPTER_MISSING"
 
 
 def test_cli_writes_the_record(tmp_path):

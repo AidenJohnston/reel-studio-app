@@ -295,7 +295,7 @@ def cmd_doctor(args):
 
 def cmd_import_reference(args):
     from . import reference_import
-    return reference_import.run(Path(args.input), Path(args.output) if args.output else None)
+    return reference_import.run(Path(args.file), Path(args.output) if args.output else None)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -353,8 +353,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("captions", cmd_captions, "write the caption file only (debug)")
     add("doctor", cmd_doctor, "check the install")
     sp = add("import-reference", cmd_import_reference, "import FCPXML or Premiere FCP7 XML")
-    sp.add_argument("input")
-    sp.add_argument("--output", help="write the normalized import record as JSON")
+    sp.add_argument("file")
+    sp.add_argument("--output", help="write the import record as JSON")
     sp = add("search-images", cmd_search_images, "find freely licensed pictures on the web")
     sp.add_argument("--query")
     sp.add_argument("--n", type=int, default=8)

@@ -13,7 +13,7 @@
             <name>talking-head.mov</name>
             <duration>250</duration>
             <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
-            <in>25</in><out>75</out><start>0</start><end>-1</end>
+            <in>25</in><out>85</out><start>0</start><end>-1</end>
             <file id="file-1">
               <name>talking-head.mov</name>
               <pathurl>file:///media/talking-head.mov</pathurl>
@@ -33,13 +33,14 @@
             <name>talking-head.mov</name>
             <duration>250</duration>
             <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
-            <in>100</in><out>150</out><start>-1</start><end>100</end>
+            <in>90</in><out>150</out><start>-1</start><end>100</end>
             <file id="file-1"/>
           </clipitem>
         </track>
         <track>
           <generatoritem id="title-1">
             <name>Hook title</name>
+            <enabled>FALSE</enabled>
             <duration>3000</duration>
             <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
             <in>0</in><out>30</out><start>10</start><end>40</end>
@@ -49,6 +50,32 @@
               <parameter><parameterid>str</parameterid><name>Text</name><value>Stop scrolling</value></parameter>
             </effect>
           </generatoritem>
+        </track>
+        <track>
+          <clipitem id="nest-1">
+            <name>B-roll nest</name>
+            <duration>50</duration>
+            <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+            <in>0</in><out>50</out><start>50</start><end>100</end>
+            <sequence id="seq-nest">
+              <name>B-roll nest</name>
+              <duration>50</duration>
+              <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+              <media>
+                <video>
+                  <track>
+                    <clipitem id="broll-1">
+                      <name>broll.mov</name>
+                      <duration>250</duration>
+                      <rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>
+                      <in>0</in><out>50</out><start>0</start><end>50</end>
+                      <file id="file-2"><name>broll.mov</name><pathurl>file:///media/broll.mov</pathurl></file>
+                    </clipitem>
+                  </track>
+                </video>
+              </media>
+            </sequence>
+          </clipitem>
         </track>
       </video>
       <audio>

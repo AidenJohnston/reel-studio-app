@@ -36,9 +36,6 @@ Licenses were read from each font's own `name` table (IDs 0, 13, 14), not assume
 | tokenizers, huggingface-hub, hf-xet | Apache 2.0 |
 | jsonschema, jsonschema-specifications, referencing, attrs, rpds-py | MIT |
 | yt-dlp | Unlicense (public domain) |
-| opentimelineio 0.18.1 | Apache-2.0 |
-| otio-fcpx-xml-adapter 1.0.0 | Apache-2.0 |
-| otio-fcp-adapter 1.0.0 | Apache-2.0 |
 | tqdm | MPL 2.0 + MIT |
 | numpy deps, click, colorama, filelock, fsspec, idna, packaging, pyyaml, protobuf, flatbuffers, anyio, h11, httpx2, httpcore2, truststore, typing-extensions | BSD / MIT / Apache 2.0 / PSF |
 
@@ -49,6 +46,11 @@ The packaging stream should generate the exact list with licenses from the insta
 `THIRD_PARTY.md`). A source install without it gets a plain message asking for JPG/PNG. Do not install
 `pillow-heif` into the bundle: its binary wheels also contain x265 (GPL 2.0). HEIC decoding involves HEVC,
 a patent-encumbered codec; whether to ship it is a legal decision, not a technical one.
+
+**Edit import (`reference` extra, not bundled):** `opentimelineio` 0.18.1, `otio-fcpx-xml-adapter` 1.0.0
+and `otio-fcp-adapter` 1.0.0 are Apache-2.0. OpenTimelineIO's compiled module also contains Imath
+(BSD-3-Clause) and RapidJSON (MIT), but the wheel ships only OpenTimelineIO's own LICENSE and NOTICE.
+A bundle that includes it must add those two license texts.
 
 ## FFmpeg / ffprobe (bundled by packaging, NOT part of this package)
 
