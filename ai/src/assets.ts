@@ -71,7 +71,16 @@ async function atomicWrite(store: AssetStore, ref: string, data: string | Buffer
   try {
     const handle = await fs.open(tmp, 'wx');
     try { await handle.writeFile(data); await handle.sync(); } finally { await handle.close(); }
-    await fs.rename(tmp, dest);
+    try {
+      await fs.rename(tmp, dest);
+    } catch (e) {
+      // Windows refuses rename-over-existing while another reader has the destination open.
+      // Concurrent commits of the same content are safe to coalesce; do not discard a
+      // different write that won the race.
+      if (!(e instanceof Error && 'code' in e && (e.code === 'EPERM' || e.code === 'EEXIST'))) throw e;
+      const current = await fs.readFile(dest).catch(() => null);
+      if (!current || !current.equals(Buffer.isBuffer(data) ? data : Buffer.from(data))) throw e;
+    }
   } finally { await fs.rm(tmp, { force: true }); }
 }
 export async function hashImage(store: AssetStore, ref: string): Promise<{ sha256: string; mime: string }> {

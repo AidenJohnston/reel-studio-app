@@ -150,6 +150,22 @@ describe('frozen image assets', () => {
     expect(credit.notice).toMatch(/trademark/);
   });
 
+  // What a concurrent commit of the same picture leaves for a moment: the frozen file without its ledger record. On
+  // Windows a reader holding that file makes rename-over-existing fail with EPERM.
+  it.runIf(process.platform === 'win32')('fails if a commit is refused while another reader holds the same frozen picture open', async () => {
+    const { ctx, dir, local } = await setup();
+    const [cand] = await candidates(ctx, local);
+    const frozen = path.join(dir, `work/assets/frozen/${cand.kind}/${cand.sha256}.png`);
+    await fs.mkdir(path.dirname(frozen), { recursive: true });
+    await fs.writeFile(frozen, tinyPng());
+    const reader = await fs.open(frozen, 'r');
+    try {
+      const asset = await commit(ctx, cand.id);
+      expect(asset.committedPath).toBe(`work/assets/frozen/${cand.kind}/${cand.sha256}.png`);
+    } finally { await reader.close(); }
+    expect(await fs.readFile(frozen)).toEqual(tinyPng());
+  });
+
   it('fails if an uncommitted image can be placed in a reel', async () => {
     const { ctx, dir, local } = await setup();
     const uncommitted = await executeTool(ctx, 'add_broll', place(local));
