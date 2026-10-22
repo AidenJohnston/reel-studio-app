@@ -71,6 +71,8 @@ const P: Record<string, ReactNode> = {
       <line x1="16" x2="22" y1="9" y2="15" />
     </>
   ),
+  up: <path d="m18 15-6-6-6 6" />,
+  down: <path d="m6 9 6 6 6-6" />,
   back: (
     <>
       <path d="m12 19-7-7 7-7" />

@@ -51,6 +51,35 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeJson(join(dir, 'project.json'), p) // retries on Windows locks (review 32)
   }
 
+  // Tests and walkthroughs only (REELSTUDIO_MOCK_NOTE=<ms>): a connected editor whose every note thinks
+  // for that long, then renders a new version, so notes can pile up behind each other and Stop lands mid-note.
+  // Like the real applyNote, it edits a private copy and publishes it in one project.json write that
+  // carries the note's id.
+  const noteMs = Number(process.env.REELSTUDIO_MOCK_NOTE || 0)
+  const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
+    const id = opts?.id ?? randomUUID()
+    const copy = join(dir, 'work', 'notes', id, 'edit.json')
+    const p = await readProject(dir)
+    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: ['note'], at: new Date().toISOString() }]
+    await fs.mkdir(join(copy, '..'), { recursive: true })
+    await writeJson(copy, p)
+    onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, noteMs)
+      signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+    })
+    onEvent({ type: 'status', message: 'Making the final video', pct: 0, phase: 'final' })
+    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final video', pct: pr.pct, phase: 'final' }), signal)
+    const version = Number(r?.version)
+    if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    const done = JSON.parse(await fs.readFile(copy, 'utf8'))
+    done.notes[done.notes.length - 1].version = version
+    await writeProject(dir, done)
+    onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
+    return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
+  }
+
   async function firstMusicTrack(): Promise<string | null> {
     const dir = join(host.reelStudioRoot(), 'Library', 'Music')
     if (!existsSync(dir)) return null
@@ -88,6 +117,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       ]
     },
     async active() {
+      if (noteMs > 0) return PRACTICE
       return claudeChosen && claudeState === 'ready' ? claudeProvider() : NOT_CONNECTED
     },
     async setActive(id) {
@@ -164,7 +194,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
-    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
+    async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
+      if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
       const added: string[] = []

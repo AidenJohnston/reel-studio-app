@@ -2,7 +2,7 @@
 // project.json belongs to the engine and the AI. The app keeps its own small state
 // (chat history, running job, last error) in app.json next to it.
 import { existsSync, promises as fs } from 'node:fs'
-import { join, basename, extname, relative, isAbsolute } from 'node:path'
+import { join, basename, dirname, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BIN_FOLDERS, binDir, projectsDir, libraryDir, reelStudioRoot } from './paths'
 import type {
@@ -15,7 +15,8 @@ import type {
   ScreenStatus,
   VersionInfo,
   Word,
-  JobKind
+  JobKind,
+  QueuedNote
 } from '../shared/api'
 import { mediaUrl } from './media-url'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
@@ -24,13 +25,18 @@ export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
 export interface AppState {
   chat: ChatMessage[]
-  job: { id: string; kind: JobKind; startedAt: string; note?: string } | null
+  /** `noteId`: what a note job saves its note under in project.json.notes (its queue entry's id). */
+  job: { id: string; kind: JobKind; startedAt: string; note?: string; noteId?: string } | null
   status: ScreenStatus
   lastError: { code: string; userMessage: string } | null
   /** Title chosen at creation, shown until project.json exists. */
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** Notes sent and not yet saved in project.json, oldest first; the first may be running (main/note-queue.ts). */
+  queue?: QueuedNote[]
+  /** The queue waits for "Run next": after Stop, a failed note, or a restart. */
+  queueHeld?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -119,10 +125,32 @@ export async function readJson<T>(path: string, fallback: T): Promise<T> {
  * On Windows a rename over a file that someone is reading fails with EPERM/EBUSY/EACCES for a few
  * milliseconds, so retry before giving up, and never leave the temp file behind.
  */
-export async function writeJson(path: string, data: unknown): Promise<void> {
+export async function writeJson(path: string, data: unknown, opts: { durable?: boolean } = {}): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  const text = JSON.stringify(data, null, 2) + '\n'
+  if (!opts.durable) await fs.writeFile(tmp, text, 'utf8')
+  else {
+    const fh = await fs.open(tmp, 'w')
+    try {
+      await fh.writeFile(text, 'utf8')
+      await fh.sync()
+    } finally {
+      await fh.close()
+    }
+  }
   await renameWithRetry(tmp, path)
+  if (opts.durable) await syncFolder(dirname(path))
+}
+
+/** Flushes a rename to disk. Windows cannot open a folder for this; NTFS journals the rename itself. */
+async function syncFolder(dir: string): Promise<void> {
+  if (process.platform === 'win32') return
+  const fh = await fs.open(dir, 'r')
+  try {
+    await fh.sync()
+  } finally {
+    await fh.close()
+  }
 }
 
 export async function renameWithRetry(from: string, to: string, tries = 40): Promise<void> {
@@ -176,12 +204,13 @@ export function readAppState(slug: string): Promise<AppState> {
   return serialized(file, () => readAppStateNow(file))
 }
 
-export function updateAppState(slug: string, fn: (s: AppState) => void): Promise<AppState> {
+/** `durable`: on disk before this resolves (fsync), for writes a creator was told happened (the note queue). */
+export function updateAppState(slug: string, fn: (s: AppState) => void, opts: { durable?: boolean } = {}): Promise<AppState> {
   const file = join(projectDir(slug), 'app.json')
   return serialized(file, async () => {
     const s = await readAppStateNow(file)
     fn(s)
-    await writeJson(file, s)
+    await writeJson(file, s, opts)
     return s
   })
 }
@@ -342,7 +371,7 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
   if (!existsSync(join(dir, 'app.json'))) return 'nothing'
   const s = await readAppState(slug)
   if (!s.job) return 'nothing'
-  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
+  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.noteId ?? s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
   await cleanPartialVersions(dir)
   await updateAppState(slug, (st) => {
@@ -350,6 +379,8 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
     if (saved) {
       const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
       st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
+    } else if (st.queue?.some((q) => q.id === st.job?.noteId)) {
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. It is waiting below. Press Run next when you want it.' }))
     } else if (st.status === 'ready' && st.job?.kind !== 'export') {
       st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.' }))
     }
@@ -471,7 +502,8 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
       updatedAt: now,
       version: 0,
       thumbnail: null,
-      status: st.job ? 'working' : st.status === 'ready' ? 'failed' : st.status
+      status: st.job ? 'working' : st.status === 'ready' ? 'failed' : st.status,
+      waiting: (st.queue ?? []).filter((q) => !q.attempt).length
     }
   }
   const versions = await listVersions(dir)
@@ -492,7 +524,8 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
     updatedAt: p.updatedAt,
     version: last?.n ?? 0,
     thumbnail: last?.cover ?? null,
-    status
+    status,
+    waiting: (st.queue ?? []).filter((q) => !q.attempt).length
   }
 }
 
@@ -554,6 +587,8 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,
+    queue: st.queue ?? [],
+    queueHeld: !!st.queueHeld,
     job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false } : null,
     aiEdited: !!st.aiEdited
   }
