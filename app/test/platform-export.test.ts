@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
-import { checkPlatformExport, exportPlatforms } from '../src/main/platform-export'
+import { checkPlatformExport, exportPlatforms, sweepExportStaging } from '../src/main/platform-export'
 import type { PlatformExportRequest } from '../src/shared/platforms'
 import { PYTHON } from './helpers'
 
