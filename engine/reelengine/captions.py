@@ -164,10 +164,13 @@ def digits_for_numbers(words: list) -> list:
 
 
 def normalize_corrections(corrections) -> dict:
-    """project.json's [{from, to}] -> {"single": {...}, "spans": [...]}"""
-    single, spans = {}, []
+    """project.json's [{from, to, at?}] -> {"single": {...}, "spans": [...], "at": {word id: text}}"""
+    single, spans, at = {}, [], {}
     for c in corrections or []:
         heard, meant = str(c.get("from", "")).strip(), str(c.get("to", "")).strip()
+        if c.get("at"):
+            at[str(c["at"])] = meant
+            continue
         if not heard:
             continue
         hw, mw = heard.split(), meant.split()
@@ -175,16 +178,23 @@ def normalize_corrections(corrections) -> dict:
             single[_bare(hw[0]).lower()] = mw[0]
         else:
             spans.append({"from": hw, "to": mw})
-    return {"single": single, "spans": spans}
+    return {"single": single, "spans": spans, "at": at}
 
 
 def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = None) -> list:
-    """Phrase corrections first, then single words, and a word a phrase already produced is never
-    corrected again: with "script" -> "TypeScript" AND "type script" -> "TypeScript", the single
-    word applied first used to leave "type TypeScript" on screen."""
+    """A fix made on one word ("at" its id, from the subtitle editor) first, then phrase corrections,
+    then single words. A word already fixed is never corrected again: with "script" -> "TypeScript"
+    AND "type script" -> "TypeScript", the single word applied first used to leave "type TypeScript"
+    on screen. A word fixed to nothing leaves the captions; it is still heard."""
     words = [dict(w) for w in words]
     single = corrections.get("single") or {}
     spans = corrections.get("spans") or []
+    for k, w in enumerate(words):
+        ids = w.get("ids", [w.get("id")])
+        prev = words[k - 1].get("ids", [words[k - 1].get("id")]) if k else []
+        fix = next((corrections["at"][i] for i in ids if i in (corrections.get("at") or {}) and i not in prev), None)
+        if fix is not None:
+            w.update(w=fix, _fixed=True)
     if spans:
         norm = [([_bare(x).lower() for x in sp["from"]], list(sp["to"])) for sp in spans]
         if stats is not None:
@@ -194,7 +204,7 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
         while i < len(words):
             for idx, (src, dst) in enumerate(norm):
                 n = len(src)
-                if n and [_bare(x["w"]).lower() for x in words[i:i + n]] == src:
+                if n and [_bare(x["w"]).lower() for x in words[i:i + n]] == src and not any(x.get("_fixed") for x in words[i:i + n]):
                     s, e = words[i]["s"], words[i + n - 1]["e"]
                     ids = [x for w in words[i:i + n] for x in w.get("ids", [w.get("id")])]
                     tail = re.search(_STRIP_TAIL, words[i + n - 1]["w"])
@@ -232,7 +242,7 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
                         stats[base.lower()] += 1
     for w in words:
         w.pop("_fixed", None)
-    return words
+    return [w for w in words if w["w"].strip()]
 
 
 def split_runs(words: list, max_gap: float = RUN_GAP) -> list:
@@ -255,6 +265,7 @@ def chunk(words: list, max_words: int = MAX_WORDS) -> list:
     def flush():
         if cur:
             cues.append({"s": cur[0]["s"], "e": cur[-1]["e"], "words": [w["w"] for w in cur],
+                         "starts": [w["s"] for w in cur], "wids": [w.get("ids", [w.get("id")]) for w in cur],
                          "ids": [x for w in cur for x in w.get("ids", [w.get("id")]) if x]})
             cur.clear()
 
@@ -291,6 +302,38 @@ def hold(cues: list) -> list:
             nxt_s = cues[k + 1]["s"] - GAP_LEAD if k + 1 < len(cues) else None
             c["e"] = c["s"] + MIN_CUE if nxt_s is None else max(c["e"], min(c["s"] + MIN_CUE, nxt_s))
     return cues
+
+
+def _first_carrier(wids: list, k: int, before: list, wid: str) -> bool:
+    """Word k is the first word carrying transcript word `wid` (a phrase correction gives every word
+    it writes the ids of all the words it replaced)."""
+    return wid in wids[k] and wid not in (wids[k - 1] if k else before)
+
+
+def edit_lines(cues: list, split, join) -> list:
+    """The subtitle editor's line edits, anchored on transcript word ids so they survive a recut: a
+    line starts at each word in `split`; a line starting at a word in `join` goes onto the line before.
+    Every other line stays as chunk() made it."""
+    split, join = set(split or ()), set(join or ())
+    merged: list = []
+    for c in cues:
+        prev = merged[-1] if merged else None
+        if prev and any(_first_carrier(c["wids"], 0, prev["wids"][-1], j) for j in join):
+            for key in ("words", "starts", "wids", "ids"):
+                prev[key] = prev[key] + c[key]
+            prev["e"] = c["e"]
+            continue
+        merged.append(dict(c))
+    out: list = []
+    for c in merged:
+        cuts = [k for k in range(1, len(c["words"])) if any(_first_carrier(c["wids"], k, [], x) for x in split)]
+        bounds = [0] + cuts + [len(c["words"])]
+        for a, b in zip(bounds, bounds[1:]):
+            s = c["s"] if a == 0 else c["starts"][a]
+            e = c["e"] if b == len(c["words"]) else max(s + 0.01, c["starts"][b] - GAP_LEAD)
+            out.append({"s": s, "e": e, "words": c["words"][a:b], "starts": c["starts"][a:b], "wids": c["wids"][a:b],
+                        "ids": [x for w in c["wids"][a:b] for x in w if x]})
+    return out
 
 
 def apply_case(text: str, case: str) -> str:
@@ -459,6 +502,7 @@ def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, sta
     cues = []
     for run in split_runs(words):
         cues.extend(hold(chunk(run, max_words)))
+    cues = edit_lines(cues, cap.get("split"), cap.get("join"))
     if hidden_ids:
         cues = [c for c in cues if not set(c["ids"]) <= hidden_ids]
     case = style.get("case") or "upper"

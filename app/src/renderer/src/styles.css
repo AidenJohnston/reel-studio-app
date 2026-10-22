@@ -354,6 +354,18 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .word:hover { background: var(--soft); }
 .word.cut { color: var(--ink-3); text-decoration: line-through; text-decoration-color: #c4492f; }
 .list { display: flex; flex-direction: column; gap: 10px; }
+/* The Subtitles list: one caption line per row, plain text until you point at it or type in it. */
+.sub-lines { display: flex; flex-direction: column; }
+.sub-line { display: flex; align-items: center; gap: 6px; border-radius: var(--radius-sm); }
+.sub-line + .sub-line { border-top: 1px solid var(--line); }
+.sub-line-text {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; line-height: 1.5; color: var(--ink); background: transparent;
+  border: 0; border-radius: 8px; padding: 9px 10px; margin: 2px 0; transition: background-color .12s;
+}
+.sub-line-text:hover { background: var(--soft); }
+.sub-line-text:focus { outline: none; background: var(--panel); box-shadow: 0 0 0 1px var(--line-2), 0 0 0 4px rgba(29,27,24,.06); }
+.sub-join { opacity: 0; transition: opacity .12s; }
+.sub-line:hover .sub-join, .sub-join:focus-visible, .sub-line:focus-within .sub-join { opacity: 1; }
 .broll-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; background: var(--soft); }
 .broll-thumb.none { display: grid; place-items: center; color: var(--ink-3); }
 .list-item { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; }

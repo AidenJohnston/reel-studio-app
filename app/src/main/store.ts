@@ -492,6 +492,10 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
+  const cues = (await readJson<{ cues?: { ids?: unknown }[] }>(join(dir, 'work', 'captions.json'), {})).cues
+  const captionLines = (Array.isArray(cues) ? cues : [])
+    .map((c) => (Array.isArray(c?.ids) ? c.ids.filter((x): x is string => typeof x === 'string') : []))
+    .filter((ids) => ids.length)
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
@@ -516,6 +520,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     versions,
     words,
     keptIds: kept,
+    captionLines,
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     // a note's attached files get a URL for their still here (never stored: the root folder can move)

@@ -110,3 +110,27 @@ def test_phrase_correction_wins_over_a_single_word_of_it():
     assert [x["w"] for x in out] == ["learn", "TypeScript,", "TypeScript"]
     assert stats["type script"] == 1 and stats["script"] == 1
     assert all("_fixed" not in x for x in out)
+
+
+def _lines(words_out, cap):
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words_out, cap), cap, 1080, 1920)
+    return [l.split(",", 9)[9].split("}", 1)[1] for l in ass.splitlines() if l.startswith("Dialogue:")]
+
+
+def test_word_fixes_and_line_splits_stay_on_their_words_through_a_recut():
+    words = mkwords([(0.0, 0.3, "Cloud"), (0.35, 0.6, "is"), (0.65, 0.9, "great."), (1.0, 1.3, "I"),
+                     (1.35, 1.6, "use"), (1.65, 1.9, "cloud"), (1.95, 2.2, "for"), (2.25, 2.5, "everything.")])
+    cap = {"corrections": [{"from": "cloud", "to": "Claude", "at": "w5"}], "split": ["w4"]}
+    assert _lines(words, cap) == ["CLOUD IS GREAT", "I", "USE CLAUDE", "FOR EVERYTHING"]
+    recut = [dict(w, s=w["s"] - 1.0, e=w["e"] - 1.0) for w in words[3:]]
+    assert _lines(recut, cap) == ["I", "USE CLAUDE", "FOR EVERYTHING"]
+
+
+def test_split_and_join_change_only_the_lines_they_touch():
+    words = mkwords([(0.0, 0.3, "You"), (0.35, 0.6, "don't"), (0.65, 0.9, "need"), (0.95, 1.2, "a"),
+                     (1.25, 1.5, "mixer"), (1.55, 1.8, "at"), (1.85, 2.1, "all.")])
+    assert _lines(words, {}) == ["YOU DON'T NEED", "A MIXER AT", "ALL"]
+    assert _lines(words, {"split": ["w1"]}) == ["YOU", "DON'T NEED", "A MIXER AT", "ALL"]
+    assert _lines(words, {"join": ["w6"]}) == ["YOU DON'T NEED", "A MIXER AT ALL"]
+    cues = captions.build_cues(words, {"split": ["w1"]})
+    assert cues[0]["e"] == 0.35 - captions.GAP_LEAD and cues[1]["s"] == 0.35

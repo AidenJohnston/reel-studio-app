@@ -89,6 +89,8 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
+  /** The caption lines of the last full render, each as its transcript word ids (engine work/captions.json). */
+  captionLines: string[][]
   checklist: ChecklistItem[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
@@ -117,7 +119,11 @@ export interface ProjectJson {
   captions?: {
     enabled: boolean
     style?: Record<string, unknown>
-    corrections?: { from: string; to: string }[]
+    /** `at`: fixes only that word (the Subtitles list). */
+    corrections?: { from: string; to: string; at?: string }[]
+    /** word ids that start a caption line, and word ids whose line goes onto the line before */
+    split?: string[]
+    join?: string[]
   }
   music?: {
     enabled: boolean

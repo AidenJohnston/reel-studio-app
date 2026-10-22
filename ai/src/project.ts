@@ -22,7 +22,8 @@ export interface CaptionStyle {
   case?: 'upper' | 'lower' | 'sentence' | 'as-is' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
   [k: string]: unknown;
 }
-export interface CaptionCorrection { from: string; to: string }
+/** at: a fix the person made to that one word in the Subtitles list (engine captions.py apply_corrections). */
+export interface CaptionCorrection { from: string; to: string; at?: string }
 /** vocabulary: names/jargon the user or the AI supplies; the engine respells sound-alikes to them after
  * transcription (engine/reelengine/vocab.py). */
 export interface Captions { enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; vocabulary?: string[]; [k: string]: unknown }

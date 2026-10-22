@@ -35,3 +35,12 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
   `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
   the field, so the project matches one that never had it.
+
+## 2026-10-22 (subtitle editing)
+
+- `captions.corrections[].at` (word id, optional): the fix applies to that one word only, whatever it says, and
+  before any other correction; `from` keeps what the transcript heard there. An empty `to` takes the word off the
+  captions (it is still heard). Written when a word is fixed in the Subtitles list of "Edit it myself".
+- `captions.split` (word ids): each starts a new caption line. `captions.join` (word ids): the line that starts
+  at each goes onto the line before. Both change only the lines they touch; every other line is grouped as
+  before. Anchored on word ids, so a recut keeps them.
