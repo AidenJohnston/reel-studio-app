@@ -53,3 +53,11 @@ def test_highlight_lights_each_spoken_word_in_turn_and_the_pop_runs_once_across_
     assert {re.sub(r"\{[^}]*\}", "", e[9]) for e in events} == {"MAKE IT POP"}
     # the 120 ms grow carries on through the second word's event instead of restarting or stopping
     assert [re.findall(r"\\t\((-?\d+),(\d+)", e[9]) for e in events] == [[("0", "120")], [("-80", "40")], []]
+
+
+def test_a_line_with_a_word_that_is_only_punctuation_is_drawn_without_the_highlight():
+    words = mkwords([(0.0, 0.3, "so"), (0.35, 0.5, "—"), (0.55, 1.0, "yeah")])
+    cap = {"style": {"highlight": "#FFD60A"}}
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    events = [l.split(",", 9)[9] for l in ass.splitlines() if l.startswith("Dialogue:")]
+    assert len(events) == 1 and "\\1c" not in events[0] and events[0].endswith("SO — YEAH")
