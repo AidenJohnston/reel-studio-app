@@ -495,7 +495,8 @@ def map_box(box, src_w, src_h, out_w, out_h):
 def reframe_rect(ctx, sid: str) -> tuple:
     """(x, y, cw, ch): the crop of source `sid` (display px) that the render scales to the output
     frame. Mirrors render.reframe_filter (A1) exactly, including its face-centred crop for sources
-    whose shape differs from the output. Decided once per ctx, before any face file is written by
+    whose shape differs from the output. The crop is the same for a mirrored take (`sources[].mirror`):
+    the render flips AFTER cropping, so map boxes through `map_box_rect(..., mirror=...)`. Decided once per ctx, before any face file is written by
     this module, so it matches what render decided at its start."""
     cache = getattr(ctx, "_a2_reframe", None)
     if cache is None:
@@ -532,18 +533,39 @@ def reframe_rect(ctx, sid: str) -> tuple:
     return cache[sid]
 
 
-def map_box_rect(box, rect, out_w: int, out_h: int):
-    """Source px box -> output px through a reframe crop rect."""
+def source_mirrored(ctx, sid: str) -> bool:
+    """True when source `sid` is flipped left to right at render (`sources[].mirror`, see
+    render.is_mirrored). Every reader of the face box in OUTPUT pixels must mirror x for it."""
+    s = source_entry(ctx, sid) or {}
+    return s.get("mirror") is True
+
+
+def any_mirrored(ctx) -> bool:
+    return any((s or {}).get("mirror") is True for s in (ctx.project.get("sources") or []))
+
+
+def mirror_box(box, out_w: float):
+    """An output px box (x, y, w, h) -> where it sits after the picture is flipped left to right."""
+    x, y, w, h = box
+    return (out_w - x - w, y, w, h)
+
+
+def map_box_rect(box, rect, out_w: int, out_h: int, mirror: bool = False):
+    """Source px box -> output px through a reframe crop rect (and the render's left-right flip when
+    the source is mirrored: the flip comes after the crop, so x' = W - x - w)."""
     x0, y0, cw, ch = rect
     sx, sy = out_w / cw, out_h / ch
     x, y, w, h = box
-    return ((x - x0) * sx, (y - y0) * sy, w * sx, h * sy)
+    out = ((x - x0) * sx, (y - y0) * sy, w * sx, h * sy)
+    return mirror_box(out, out_w) if mirror else out
 
 
 def reframe_vf(ctx, sid: str) -> str:
+    """The cut video's picture for source `sid` (display px in, output px out), as the render makes
+    it: the same crop, the same scale, and the flip last for a mirrored take."""
     W, H, _ = fmt_of(ctx)
     x, y, cw, ch = reframe_rect(ctx, sid)
-    return f"crop={cw}:{ch}:{x}:{y},scale={W}:{H}"
+    return f"crop={cw}:{ch}:{x}:{y},scale={W}:{H}" + (",hflip" if source_mirrored(ctx, sid) else "")
 
 
 def fmt_of(ctx) -> tuple[int, int, float]:

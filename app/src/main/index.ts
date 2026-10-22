@@ -49,6 +49,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
+import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -463,6 +464,11 @@ function registerIpc(): void {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     const p = await readProject(slug)
     for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+      // the "Flip picture" toggle: only each take's mirror flag, never its path or size
+      if (k === 'sources') {
+        p.sources = mergeSourcesPatch(p.sources, patch.sources)
+        continue
+      }
       if (!EDITABLE.includes(k)) continue
       ;(p as any)[k] = (patch as any)[k]
     }
