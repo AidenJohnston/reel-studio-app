@@ -201,20 +201,20 @@ export function createEngineRunner(cfg: RunnerConfig) {
           } satisfies EngineError)
         )
       })
-      child.on('close', (code) => {
+      child.on('close', (code, exitSignal) => {
         out.end()
         err.end()
+        log(`[engine ${command}] closed exitCode=${code} signal=${exitSignal ?? 'none'}`)
         void gone.then((clean) => finish(() => {
           const r = result as typeof result
           if (!clean) rejectPromise(stuck(child.pid))
-          else if (r?.ok === true && code === 0) resolvePromise(r.value)
-          else if (r?.ok === false) rejectPromise(r.err)
           else if (r?.ok === true) resolvePromise(r.value)
+          else if (r?.ok === false) rejectPromise(r.err)
           else
             rejectPromise({
               code: 'ENGINE_CRASHED',
               userMessage: GENERIC_ERROR,
-              message: `exit ${code}: ${stderrTail.slice(-8).join('\n')}`
+              message: `${exitSignal ? `signal ${exitSignal}` : `exit ${code}`}: ${stderrTail.slice(-8).join('\n')}`
             } satisfies EngineError)
         }))
       })
