@@ -92,15 +92,15 @@ it('fails if the checker can change the project, sees the editor conversation, o
   expect((req.messages[0] as { content: { type: string }[] }).content.filter((c) => c.type === 'image')).toHaveLength(2);
 });
 
-it('fails if a cut that only moves where a take ends, or a removed zoom, gets no frame', async () => {
+it('fails if a cut that only moves where a take or the video ends, or a removed zoom, gets no frame', async () => {
   const before = [{ from: 'w0', to: 'w8' }, { from: 'w16', to: 'w56' }];
   const { dir, host, mid } = await noteProject({ cut: { keep: before, gapCap: 0.25, minSaving: 0.08 }, zooms: [{ anchor: { from: 'w35', to: 'w41' }, scale: 1.1 }] });
-  const after = [{ from: 'w0', to: 'w7' }, { from: 'w16', to: 'w56' }];
+  const after = [{ from: 'w0', to: 'w7' }, { from: 'w16', to: 'w52' }];
   const model = new Roles([[call('set_cut', { keep: after }), call('set_zoom', { zooms: [] }), call('render_draft')], [call('finish', { summary_for_user: 'Done.' })]], [pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  await ai.applyNote(dir, 'drop the word bread at the start and the zoom on the brick line', () => {});
+  await ai.applyNote(dir, 'drop the word bread at the start, the last line and the zoom on the brick line', () => {});
   const frames = host.calls.find((c) => c.command === 'frames')!;
-  expect(frames.args[frames.args.indexOf('--times') + 1]).toBe([mid('w16', after), mid('w38', after)].join(','));
+  expect(frames.args[frames.args.indexOf('--times') + 1]).toBe([mid('w16', after), mid('w52', after), mid('w38', after)].join(','));
 });
 
 it('fails if a check whose frames could not be made is stored as if it saw them', async () => {

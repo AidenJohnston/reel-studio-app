@@ -88,7 +88,7 @@ A note's edit is checked before it becomes a version (`ai/src/checker.ts`, promp
    contains the note, the receipt's facts (with the words a cut removed or brought back), the
    candidate's `verify`, `warnings` and `broll` report, the words the video now says, and up to 6
    frames from `look_at_frames` at the moments the facts touch: each new cut join (a take that
-   now starts or ends elsewhere), each changed b-roll, each added or removed zoom, and the middle of
+   now starts or ends elsewhere, including the video's last word), each changed b-roll, each added or removed zoom, and the middle of
    the video for caption, mirror or pause changes. The facts are fenced as data. The reply is
    `{verdict: pass|fix, fixes: [{problem, request}], scores}` with 1-5 scores for `asked`,
    `nothingElse`, `hook`, `pacing`, `captions`, `visuals`, `sound`. An unreadable reply is asked
