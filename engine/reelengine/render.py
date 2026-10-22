@@ -560,7 +560,8 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         cmd += ["-ss", _f(audio_seek)]
     cmd += ["-t", _f(dur + 0.05), "-i", str(audio)]
     audio_idx = k
-    cmd += [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-map", f"{audio_idx}:a"]
+    cmd += [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-map", f"{audio_idx}:a",
+            "-af", "apad"]
     cmd += encoder_args(encoder, ctx.draft)
     cmd += ["-r", _f(fps), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
             "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
