@@ -297,15 +297,18 @@ def caption_band(frame: dict) -> Optional[tuple]:
 
 
 def _to_output(box, face_track: Optional[dict], frame: dict) -> tuple:
-    """A source-px box -> OUTPUT px (reframe crop or scale-to-cover, then any zoom)."""
+    """A source-px box -> OUTPUT px (reframe crop or scale-to-cover, then the left-right flip of a
+    mirrored take when frame["mirror"], then any zoom: the zoom acts on the flipped picture)."""
     W, H = int(frame.get("width", 1080)), int(frame.get("height", 1920))
     if frame.get("reframe"):
         from .compose_util import map_box_rect
-        fx, fy, fw, fh = map_box_rect(box, frame["reframe"], W, H)
+        fx, fy, fw, fh = map_box_rect(box, frame["reframe"], W, H, mirror=bool(frame.get("mirror")))
     else:
         sw = (face_track or {}).get("width", W)
         sh = (face_track or {}).get("height", H)
         fx, fy, fw, fh = map_box(box, sw, sh, W, H)
+        if frame.get("mirror"):
+            fx = W - fx - fw
     zoom = frame.get("zoom")
     if zoom:   # (scale, cx, cy): the video is magnified about (cx, cy) while the graphic shows
         s, cx, cy = zoom

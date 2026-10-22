@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto';
 export interface Format { width: number; height: number; fps: number }
 export interface Source {
   id: string; path: string; duration?: number; fps?: number; width?: number; height?: number; rotation?: number;
+  /** the take is mirrored (front camera: on-screen text reads backwards); the engine flips the picture. Absent = false */
+  mirror?: boolean;
   [k: string]: unknown;
 }
 export interface WordAnchor { from: string; to: string }

@@ -50,6 +50,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
+import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -469,6 +470,10 @@ function registerIpc(): void {
     jobs.hold(slug, async () => {
       const p = await readProject(slug)
       for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        if (k === 'sources') {
+          p.sources = mergeSourcesPatch(p.sources, patch.sources)
+          continue
+        }
         if (!EDITABLE.includes(k)) continue
         ;(p as any)[k] = (patch as any)[k]
       }

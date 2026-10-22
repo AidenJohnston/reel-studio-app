@@ -265,7 +265,7 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     title: p.title,
     version: p.version,
     format: p.format,
-    sources: p.sources.map((s) => ({ id: s.id, duration: s.duration })),
+    sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
     cut: cutSummary(t, p),
     captions: p.captions,
     music: p.music,
@@ -1137,6 +1137,31 @@ const tools: ToolDef[] = [
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
       await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
+    },
+  },
+  {
+    name: 'set_mirror',
+    description: 'Flip the video left to right when the take is MIRRORED (a front-camera selfie): text in the room (posters, shirts, signs, screens, book covers) reads backwards in the frames. Judge only text that was really in the room, never the captions or the pictures you added, and never the face. on false undoes it. Omit source to flip every take.',
+    parameters: S.obj({
+      on: S.bool('true = flip (the take is mirrored), false = show it as shot'),
+      source: S.opt(S.str('source id, e.g. "s1"; null = every take')),
+    }),
+    async run(ctx, args) {
+      const on = args.on === true;
+      const hit: string[] = [];
+      await mutate(ctx, 'mirror', (p) => {
+        const all = args.source === null || args.source === undefined;
+        if (!all && !p.sources.some((s) => s.id === args.source)) return `unknown source ${args.source}`;
+        for (const s of p.sources) {
+          if (!all && s.id !== args.source) continue;
+          hit.push(s.id);
+          if (on) s.mirror = true; else delete s.mirror;    // absent = as shot (old projects look the same)
+        }
+      });
+      return {
+        content: { ok: true, mirror: on, sources: hit, note: 'Only the picture of you is flipped; captions and pictures you placed are drawn on top and stay readable. Render a preview to see it.' },
+        summary: on ? 'Flipped your video (it was mirrored)' : 'Put your video back the way you filmed it',
+      };
     },
   },
   {
