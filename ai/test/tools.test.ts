@@ -213,6 +213,7 @@ describe('tool implementations', () => {
     await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
     expect(ctx.project!.captions.style.highlight).toBe('#34C759');
     expect((await executeTool(ctx, 'set_caption_style', { highlight: '#34C75980' })).isError).toBe(true); // the engine draws no see-through highlight
+    expect((await executeTool(ctx, 'set_caption_style', { highlight: '' })).isError).toBe(true);
     await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
     expect(ctx.project!.captions.style).not.toHaveProperty('highlight');
     expect((await executeTool(ctx, 'add_caption_correction', { from: 'flower', to: 'flour' })).isError).toBe(false);

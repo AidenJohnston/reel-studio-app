@@ -75,7 +75,7 @@ function colorKey(st: CapStyle): string {
   return String(st.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow'
 }
 function highlightKey(st: CapStyle): string {
-  return String(st.highlight).toUpperCase() === '#30D158' ? 'green' : 'yellow'
+  return HIGHLIGHTS.find((x) => x.color === String(st.highlight).toUpperCase())?.key ?? ''
 }
 
 /** A radio group is one Tab stop; the arrow keys move the choice (WAI-ARIA radio group). */
