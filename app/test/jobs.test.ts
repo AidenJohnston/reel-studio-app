@@ -32,6 +32,50 @@ async function stuckVideo() {
   return { slug, dir, partial, jobs, id, appJsonWhileRunning }
 }
 
+describe('project reservations', () => {
+  it('rejects an attachment admitted while a manual update holds the project', async () => {
+    setupPaths()
+    const slug = 'held-reel'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    const engineCalls: string[][] = []
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async (cmd, args) => {
+        engineCalls.push([cmd, ...args])
+        return null
+      },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.hold(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: () => void = () => undefined
+    const manualEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const manual = jobs.hold(slug, async () => {
+      entered()
+      await held
+    })
+    await manualEntered
+    const noEvent = {} as IpcMainInvokeEvent
+    await expect(handlers.get('notes:attachFiles')!(noEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject({ code: 'BUSY' })
+    expect(engineCalls).toEqual([])
+    release()
+    await manual
+  })
+})
+
 describe('a job whose engine would not stop', () => {
   it('keeps the video closed, its partial version in place and app.json as the job left it', async () => {
     const { slug, dir, partial, jobs, id, appJsonWhileRunning } = await stuckVideo()
@@ -65,8 +109,7 @@ describe('a job whose engine would not stop', () => {
       readProject: async () => {
         throw new Error('a closed video is never read')
       },
-      busy: (s) => jobs.isClosed(s),
-      refuse: (s) => jobs.refuseIfBusy(s),
+      reserve: (s, fn) => jobs.hold(s, fn),
       clipboardImage: async () => ({ mime: 'image/png', bytes: new Uint8Array([1]) }),
       choose: async () => ['/tmp/a.png']
     })
