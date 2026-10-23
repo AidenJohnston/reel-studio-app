@@ -16,7 +16,7 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls. |
 | `test-mac-install.sh` | Copies the app out of a `.dmg` into a folder with spaces, fails unless codesign, Gatekeeper (`spctl`) and the stapled ticket pass (`--unsigned` reports them for a local build), then runs `--self-test` with a time limit. The app (or the spike) uses a test profile next to the copy, kept between runs; `--fresh` empties it, so the spike downloads its speech model again. The app's `--self-test` (`app/src/main/self-test.ts`) runs the engine's `doctor`, from a throw-away profile when none is given, and opens no window. |
 | `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
-| `dmg/` | Finder install window, shared Retina background renderer and art provenance. `make-dmg.sh` builds the release image; `electron-builder.yml` uses the same art and icon positions. |
+| `dmg/` | Finder install window, shared Retina background renderer and art provenance. `make-dmg.sh` builds the release image; `electron-builder.yml` uses the same art and icon positions. `letter-background.py` writes the copy into `background.svg` as Inter outlines; run it after changing the copy. |
 | `entitlements.main.plist` / `entitlements.inherit.plist` | Hardened-runtime entitlements: `allow-jit` only, for the Electron main process and its helper apps. Python, ffmpeg and every dylib are signed with none. |
 | `spike/` | Minimal Electron app with `--self-test` that proves the bundled Python/ffmpeg/model/transcribe chain works from an INSTALLED copy. |
 

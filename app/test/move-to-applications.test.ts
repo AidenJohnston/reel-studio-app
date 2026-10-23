@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { moveReason, offerMoveToApplications, type MoveContext, type MoveDeps, type Question } from '../src/main/move-to-applications'
+import { applicationsDestination, moveReason, offerMoveToApplications, type MoveContext, type MoveDeps, type Question } from '../src/main/move-to-applications'
 
 const fromDisk: MoveContext = {
   platform: 'darwin', isPackaged: true, test: false, inApplications: false,
@@ -60,6 +60,23 @@ describe('offerMoveToApplications', () => {
     }
     expect(await offerMoveToApplications(fromDisk, deps)).toBe(allowed ? 'moving' : 'declined')
     expect(moved).toBe(allowed)
+  })
+
+  it('fails if the replace check looks for a different app name than the running bundle', async () => {
+    const checked: string[] = []
+    const deps: MoveDeps = {
+      destinationExists: (path) => { checked.push(path); return false },
+      ask: async () => 0, askNow: () => 0, move: () => true, log: () => {}
+    }
+    const renamed = '/Volumes/Reel Studio Installer/Reel Studio Beta.app/Contents/MacOS/Reel Studio Beta'
+    await offerMoveToApplications({ ...fromDisk, exePath: renamed }, deps)
+    expect(checked).toEqual(['/Applications/Reel Studio Beta.app'])
+  })
+
+  it('fails if the replace check has no destination when the path holds no bundle', () => {
+    expect(applicationsDestination('/private/var/folders/test/AppTranslocation/id/d/reel-studio')).toBe(
+      '/Applications/Reel Studio.app'
+    )
   })
 
   it('fails if a copy failure leaves the user without recovery instructions', async () => {
