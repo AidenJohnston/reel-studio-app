@@ -384,15 +384,16 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       const p = await loadProject(projectDir);
       p.notes = [...(p.notes ?? []), { text: note.trim(), applied: [], at: new Date().toISOString(), ...(refs.length ? { attachments: refs } : {}) }];
       await saveProject(projectDir, p);
-      const question = r.finished?.trim().endsWith('?') ? r.finished : null;
+      // only a reply that is nothing but a question passes: "I cut the intro. Want more?" still claims the cut
+      const question = /^[^.!]*\?$/.test(r.finished?.trim() ?? '') ? r.finished : null;
       const summary = withStyleEcho(question ?? UNDONE_REPLY, ctx.state);
       return { summary, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [] };
     }
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
+      // nothing to render, and no version is this reply's: a proposed rule still goes back to the app to ask about
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
-        version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
+        styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
