@@ -80,9 +80,24 @@ export function parsePlatformExportRequest(value: unknown): PlatformExportReques
 
 export type TryChange = 'video' | 'cover' | 'caption'
 
-/** `fps` is the render's: two cover times on the same frame are the same cover. */
-export function tryChanges(first: PlatformTry, second: PlatformTry, fps: number): TryChange[] {
-  const frame = (seconds: number | null) => seconds === null ? null : Math.round(seconds * fps)
+/** What decides which frame a cover time saves: the render's frame rate and where its picture ends, in seconds. */
+export interface CoverClock { fps: number; end: number }
+
+/**
+ * The frame `export-cover` saves for a cover `seconds` into a render. engine/reelengine/export_media.py cover() moves a
+ * time in the last two frames back to `end - 2 / fps`, where a seek still decodes a frame. ffmpeg's accurate seek then
+ * takes the first frame at or after that time, not the nearest one: with ffmpeg 9.0.1 on a 30 fps clip with B-frames
+ * and an edit list, 1.0 s saved frame 30, and 1.0001 s and 1.01 s both saved frame 31.
+ */
+export function coverFrame(seconds: number, { fps, end }: CoverClock): number {
+  const at = Math.min(seconds, end - 2 / fps)
+  // ffmpeg rounds the time to the stream's time base first, so a time a hair past a frame still lands on that frame.
+  return Math.max(0, Math.ceil(at * fps - 1e-3))
+}
+
+/** Two cover times count as the same cover when the engine saves the same frame for both. */
+export function tryChanges(first: PlatformTry, second: PlatformTry, clock: CoverClock): TryChange[] {
+  const frame = (seconds: number | null) => seconds === null ? null : coverFrame(seconds, clock)
   const changes: TryChange[] = []
   if (second.version !== first.version) changes.push('video')
   if (frame(second.coverSeconds) !== frame(first.coverSeconds)) changes.push('cover')
@@ -99,8 +114,8 @@ export function secondTryPlatforms(platforms: Platform[], sameVideo: boolean): P
 }
 
 /** Why Try 2 cannot be exported, or null. */
-export function secondTryProblem(platforms: Platform[], first: PlatformTry, second: PlatformTry, fps: number): string | null {
-  const changes = tryChanges(first, second, fps)
+export function secondTryProblem(platforms: Platform[], first: PlatformTry, second: PlatformTry, clock: CoverClock): string | null {
+  const changes = tryChanges(first, second, clock)
   if (!changes.length) return 'Try 2 is the same as Try 1. Pick another version, cover or caption.'
   if (secondTryPlatforms(platforms, !changes.includes('video')).length) return null
   return changes.includes('video')
@@ -171,8 +186,9 @@ function xWeightedLength(text: string): number {
 /** What `export-probe` reports about the finished render. */
 export interface FinishedVideo {
   duration: number
-  /** Frames per second, to tell whether two cover times land on the same frame. */
+  /** Frames per second and where the picture ends, to tell whether two cover times save the same frame. */
   fps: number
+  vduration: number
   sizeBytes: number
   audioBitrate: number | null
   editList: boolean

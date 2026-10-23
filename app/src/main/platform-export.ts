@@ -31,8 +31,8 @@ async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?:
   const label = (n: number) => tries.length > 1 ? `Try ${n}: ` : ''
   const first = { ...tries[0], video: await readFinishedVideo(tries[0].source, runEngine, label(1), signal) }
   if (!tries[1]) return [first]
-  // The cover frame needs the render's frame rate, so this runs after the probe.
-  const problem = secondTryProblem(first.platforms, first, tries[1], first.video.fps)
+  // The cover frame needs the render's frame rate and end, so this runs after the probe. The end is the one cover() uses.
+  const problem = secondTryProblem(first.platforms, first, tries[1], { fps: first.video.fps, end: first.video.vduration || first.video.duration })
   if (problem) throw { code: 'BAD_EXPORT', userMessage: problem }
   const second = tries[1].source === first.source ? first.video : await readFinishedVideo(tries[1].source, runEngine, label(2), signal)
   return [first, { ...tries[1], video: second }]
@@ -42,7 +42,7 @@ async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?:
 async function readFinishedVideo(source: string, runEngine: RunEngine, label: string, signal?: AbortSignal): Promise<FinishedVideo> {
   const video = await runEngine('export-probe', [source], undefined, signal) as Partial<FinishedVideo> | null
   if (typeof video?.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 || typeof video.fps !== 'number' ||
-      typeof video.sizeBytes !== 'number' || (video.audioBitrate !== null && typeof video.audioBitrate !== 'number') || typeof video.editList !== 'boolean') {
+      typeof video.vduration !== 'number' || typeof video.sizeBytes !== 'number' || (video.audioBitrate !== null && typeof video.audioBitrate !== 'number') || typeof video.editList !== 'boolean') {
     throw { code: 'EXPORT_FAILED', userMessage: `${label}I could not read the finished video. Render this version again before exporting.` }
   }
   return video as FinishedVideo

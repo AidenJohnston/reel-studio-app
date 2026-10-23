@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
 import { exportPlatforms, sweepExportStaging, type ExportTry } from '../src/main/platform-export'
-import { outputGroups, type Platform } from '../src/shared/platforms'
+import { coverFrame, outputGroups, type Platform } from '../src/shared/platforms'
 import { PYTHON } from './helpers'
 
 const scratch = mkdtempSync(join(tmpdir(), 'rs-platform-export-'))
@@ -78,7 +78,7 @@ describe('platform files through the real engine', () => {
   })
 
   it('fails if a render over a platform\'s size limit is not re-encoded under it, or one that fits is', () => {
-    const video = { duration: 600, sizeBytes: 400_000_000, audioBitrate: 128_000, editList: false }
+    const video = { duration: 600, vduration: 600, fps: 30, sizeBytes: 400_000_000, audioBitrate: 128_000, editList: false }
     // 300 MB × 0.94 × 8 bits / 600 s, less 128 kb/s for the audio
     expect(outputGroups(['instagram', 'facebook', 'x'], video)).toEqual([{ platforms: ['instagram'], bitrate: 3_632_000 }])
     // Edit lists and 192k audio matter only to Instagram and Threads.
@@ -168,14 +168,31 @@ describe('platform files through the real engine', () => {
     expect(await fs.readdir(folder)).toEqual(['earlier export.mp4'])
   })
 
-  it('fails if a Try 2 cover on the same frame as Try 1\'s counts as a change', async () => {
+  it('fails if a Try 2 cover that saves the same frame as Try 1\'s counts as a change', async () => {
     const source = finalRender(join(scratch, 'same frame.mp4'), 3)
     const platforms: Platform[] = ['instagram']
     const one = { version: 1, source, chosenCover: null, name: 'Frame - Version 1', platforms, caption: 'Same' }
-    // 1 s and 1.01 s are both frame 30 at 30 fps.
-    await expect(exportPlatforms({ tries: [{ ...one, coverSeconds: 1 }, { ...one, coverSeconds: 1.01 }], folder: join(scratch, 'same frame'), runEngine }))
+    // The very end and 2.97 s both save frame 88 of 90: the engine moves a time in the last two frames back to 3 - 2/30 s.
+    await expect(exportPlatforms({ tries: [{ ...one, coverSeconds: 3 }, { ...one, coverSeconds: 2.97 }], folder: join(scratch, 'same frame'), runEngine }))
       .rejects.toMatchObject({ code: 'BAD_EXPORT', userMessage: 'Try 2 is the same as Try 1. Pick another version, cover or caption.' })
   })
+
+  it('fails if coverFrame names a different frame from the one export-cover saves', async () => {
+    // Each frame's brightness is its number, so the saved JPEG says which frame the engine took. B-frames and an
+    // edit list, like a final render.
+    const clip = join(scratch, 'numbered.mp4')
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', "nullsrc=s=64x64:r=30:d=3,geq=lum='16+2*N':cb=128:cr=128",
+      '-f', 'lavfi', '-i', 'sine=duration=3', '-c:v', 'libx264', '-preset', 'medium', '-bf', '3', '-qp', '0', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-shortest', clip])
+    const saved = async (at: number): Promise<number> => {
+      const dest = join(scratch, `numbered ${at}.jpg`)
+      await runEngine('export-cover', [clip, '--at', String(at), '--dest', dest])
+      const [luma] = execFileSync('ffmpeg', ['-v', 'error', '-i', dest, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'])
+      return Math.round(luma * 219 / 255 / 2) // cover() saves full range: 2N limited-range steps become 2N × 255/219
+    }
+    const clock = { fps: 30, end: 3 }
+    for (const at of [0, 0.01, 1, 1.0001, 1.01, 1.03, 1.034, 2.9, 2.95, 2.97, 3]) expect([at, coverFrame(at, clock)]).toEqual([at, await saved(at)])
+  }, 60_000)
 
   it('fails if one export gives its sets different numbers', async () => {
     const source = finalRender(join(scratch, 'numbers.mp4'), 3)

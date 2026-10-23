@@ -3,7 +3,7 @@
 //
 // Run: npx playwright test e2e/try-two-versions.spec.ts (after npm run build).
 import { test, expect } from '@playwright/test'
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, launch, makeMedia, passFirstRun } from './helpers'
 
@@ -42,4 +42,44 @@ test('fails if the Saved screen leaves out Instagram\'s Trial steps or offers Tr
   const [caption] = saved.filter((name) => name.endsWith('Instagram Reels - Try 2 caption.txt'))
   expect(readFileSync(join(ROOT, 'Library', 'Exports', caption), 'utf8')).toBe('Open with the result\n')
   await app.close()
+})
+
+test('fails if clicking Try 2\'s chosen version again leaves Export disabled or drops the frame picked for its cover', async () => {
+  const media = makeMedia()
+  const mine = mkdtempSync(join(BASE, 'tries-again-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  const project = join(root, 'Projects', 'two-versions')
+  for (const n of [1, 2]) {
+    mkdirSync(join(project, 'versions', `v${n}`), { recursive: true })
+    copyFileSync(media.video, join(project, 'versions', `v${n}`, 'export.mp4'))
+  }
+  const now = new Date().toISOString()
+  writeFileSync(join(project, 'project.json'), JSON.stringify({
+    schemaVersion: 1, id: 'two-versions', title: 'Two versions', slug: 'two-versions', createdAt: now, updatedAt: now, version: 2,
+    format: { width: 1080, height: 1920, fps: 30 }, sources: [], post: { caption: 'A caption', hashtags: [], keywords: [] }
+  }))
+  writeFileSync(join(project, 'app.json'), JSON.stringify({ chat: [], job: null, status: 'ready', lastError: null }))
+
+  const { app, page } = await launch({ REELSTUDIO_ROOT: root, REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await page.getByText('Two versions', { exact: true }).first().click()
+    await page.getByTestId('export-more').click()
+    await page.getByRole('menuitem', { name: 'Other platforms…' }).click()
+    const dialog = page.getByTestId('platform-export-dialog')
+    await dialog.getByRole('checkbox', { name: /^Instagram Reels/ }).check()
+    await dialog.getByTestId('try-two').check()
+    const panel = dialog.getByTestId('try-two-panel')
+    await panel.getByRole('radio', { name: 'Version 1' }).click()
+    await expect(dialog.getByTestId('export-selected')).toBeEnabled()
+    await panel.getByLabel('Try 2 cover frame').evaluate((video: HTMLVideoElement) => { video.currentTime = 1 })
+    await expect(panel.getByTestId('try-two-cover-choice')).toContainText('The frame at')
+    const picked = await panel.getByTestId('try-two-cover-choice').textContent()
+
+    await panel.getByRole('radio', { name: 'Version 1' }).click()
+    await expect(panel.getByTestId('try-two-cover-choice')).toHaveText(picked!)
+    await expect(dialog.getByTestId('export-selected')).toBeEnabled()
+  } finally {
+    await app.close()
+  }
 })

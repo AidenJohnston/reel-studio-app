@@ -307,7 +307,7 @@ def cmd_export_probe(args: list[str]) -> dict:
     out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate", "-of", "csv=p=0", args[0]],
                          capture_output=True, text=True).stdout.strip()
     # The real engine reads the edit list from the file; assume one, so Instagram and Threads remux.
-    return {**info, "audioBitrate": int(out) if out.isdigit() else None, "editList": True}
+    return {**info, "vduration": info["duration"], "audioBitrate": int(out) if out.isdigit() else None, "editList": True}
 
 
 def cmd_export_media(args: list[str]) -> dict:

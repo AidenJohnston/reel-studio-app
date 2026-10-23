@@ -52,7 +52,9 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
   const secondVersion = second && versions.find((v) => v.n === second.version)
   const secondPlatforms = second ? secondTryPlatforms(selected, second.version === version.n) : []
   const secondDuration = second?.version === version.n ? seconds : secondSeconds
-  const secondProblem = second && selected.length ? secondTryProblem(selected, first, second, fps) : null
+  // Covers are compared only on one video, Try 1's; Export waits for its duration anyway.
+  const coverClock = { fps, end: seconds ?? Infinity }
+  const secondProblem = second && selected.length ? secondTryProblem(selected, first, second, coverClock) : null
   // Limits change and vary by account, so they warn next to each platform and never stop the export.
   const warningsFor = (platform: Platform): string[] => {
     if (!selected.includes(platform)) return []
@@ -90,6 +92,8 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
   }
   // A frame picked on one video means nothing on another, so a new version starts from its own cover.
   const pickVersion = (n: number) => {
+    // The same chip again: its video does not reload, so clearing its duration would leave Export disabled.
+    if (n === second?.version) return
     setSecondSeconds(null)
     editSecond({ version: n, coverSeconds: null })
   }
@@ -199,7 +203,7 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
             })}
           </p>
           <p id="try-two-status" role="status" className={secondProblem ? 'platform-errors' : 'muted-sm'} data-testid="try-two-status">
-            {secondProblem ?? (tryChanges(first, second, fps).length > 1 ? "You changed more than one thing. If Try 2 wins, you won't know which change helped." : null)}
+            {secondProblem ?? (tryChanges(first, second, coverClock).length > 1 ? "You changed more than one thing. If Try 2 wins, you won't know which change helped." : null)}
           </p>
         </fieldset>}
         {error && <p className="platform-errors" role="alert">{error}</p>}
