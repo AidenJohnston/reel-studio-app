@@ -4,7 +4,7 @@
 // startup stop whatever of ours is still running. A project with something we could not stop stays
 // closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
@@ -99,19 +99,31 @@ async function stillWorking(folders: string[]): Promise<string[] | null> {
   const procs = await processList()
   if (!procs) return null
   const working = procs.filter((p) => p.pid !== process.pid && (isOurEngine(p.cmdline) || FFMPEG.test(p.cmdline)))
-  return folders.filter((dir) => working.some((p) => namesFolder(p.cmdline, dir)))
+  // the engine names the folder as the app gave it; its ffmpeg names the real path the engine resolved,
+  // which differs when the storage folder is reached through a symlink or a junction
+  return folders.filter((dir) => [dir, realPath(dir)].some((name) => working.some((p) => namesFolder(p.cmdline, name))))
+}
+
+function realPath(dir: string): string {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return dir
+  }
 }
 
 const FFMPEG = /(^|[\\/"\s])ff(mpeg|probe)(\.exe)?("|\s|$)/i
 
-/** `dir` appears in the command line as a whole folder (`.../bread` never matches `.../bread-rolls`). */
+/** `dir` appears in the command line as a whole path: `.../bread` never matches `.../bread-rolls`, and
+ * `/var/x` never matches `/private/var/x`. An argument starts it, or `=`, `:` or `,` inside one. */
 function namesFolder(cmdline: string, dir: string): boolean {
   const norm = (s: string): string => (process.platform === 'win32' ? s.replace(/\//g, '\\').toLowerCase() : s)
   const line = norm(cmdline)
   const folder = norm(dir).replace(/[\\/]+$/, '')
   for (let i = line.indexOf(folder); i >= 0; i = line.indexOf(folder, i + 1)) {
+    const before = i === 0 ? undefined : line[i - 1]
     const next = line[i + folder.length]
-    if (next === undefined || /[\\/"'\s]/.test(next)) return true
+    if ((before === undefined || /["'\s=:,]/.test(before)) && (next === undefined || /[\\/"'\s]/.test(next))) return true
   }
   return false
 }

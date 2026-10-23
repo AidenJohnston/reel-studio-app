@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
@@ -124,8 +124,9 @@ describe('orphaned engine reaper', () => {
     // what an older version's crash in the middle of rewriting it left
     writeFileSync(join(settings, 'engines.json'), `[{"pid":4242,"project":${JSON.stringify(bread).slice(0, 12)}`)
     // the crashed run's engine still rendering bread, and an ffmpeg a dead engine left writing into cake
+    // (under the real path the engine resolved: on macOS the temp folder is behind a symlink)
     const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
-    const ffmpeg = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-re', '-f', 'lavfi', '-i', 'anullsrc=r=8000', '-t', '60', '-y', join(cake, 'work', 'mix.wav')], { stdio: 'ignore', windowsHide: true })
+    const ffmpeg = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-re', '-f', 'lavfi', '-i', 'anullsrc=r=8000', '-t', '60', '-y', join(realpathSync.native(cake), 'work', 'mix.wav')], { stdio: 'ignore', windowsHide: true })
     // an app opened from the Finder has no locale
     const locale = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LC_CTYPE: process.env.LC_CTYPE }
     for (const k of Object.keys(locale)) delete process.env[k]
