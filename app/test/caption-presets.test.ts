@@ -46,18 +46,18 @@ describe('caption presets', () => {
   const measure: Measure = (text, size, outline) => [...text].reduce((w, ch) => w + (ch === ' ' ? 0.25 : 0.6), 0) * (size / 1.562) + 2 * outline
   const ENGINE: Record<string, Record<string, { size: number; lines: string[] }>> = {
     'Internationalization everywhere today': {
-      clean: { size: 105, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
-      'bold-pop': { size: 111, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
-      karaoke: { size: 105, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
-      boxed: { size: 61, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-      minimal: { size: 63, lines: ['internationalization everywhere today'] }
+      clean: { size: 101, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      'bold-pop': { size: 100, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      karaoke: { size: 101, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      boxed: { size: 96, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      minimal: { size: 57, lines: ['internationalization everywhere today'] }
     },
     // the widest three-word line in the eval clips: it now ends clear of Instagram's right-side buttons
     "Someone's personal brand": {
-      clean: { size: 98, lines: ["SOMEONE'S PERSONAL BRAND"] },
-      'bold-pop': { size: 97, lines: ["SOMEONE'S PERSONAL BRAND"] },
-      karaoke: { size: 98, lines: ["SOMEONE'S PERSONAL BRAND"] },
-      boxed: { size: 95, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      clean: { size: 89, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      'bold-pop': { size: 88, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      karaoke: { size: 89, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      boxed: { size: 86, lines: ["SOMEONE'S PERSONAL BRAND"] },
       minimal: { size: 84, lines: ["someone's personal brand"] }
     }
   }

@@ -117,15 +117,23 @@ export function withDefaults(p: Partial<Project>): Project {
 }
 
 /**
- * The lowest the centre of a one-line caption can sit, as a fraction of the height, with its box still above
- * Instagram's caption and username (engine/reelengine/verify.py IG_BOTTOM_FRAC, the bottom 19%). The box is
- * captions.render_ass's: size plus the outline (box padding for a box) top and bottom, scaled from 1080 wide,
- * and a pixel more because the engine's cue report rounds it.
+ * The lowest the centre of a caption can sit, as a fraction of the height, with its box still above Instagram's
+ * caption and username (engine/reelengine/verify.py IG_BOTTOM_FRAC, the bottom 19%). The box is
+ * captions.render_ass's for a cue wrapped to two lines, the most `fit` makes: twice the size plus the outline
+ * (box padding for a box) top and bottom, scaled from 1080 wide, and a pixel more because the engine's cue
+ * report rounds it. Which cues wrap is only known at render time, so every position assumes two lines.
  */
 export function lowestCaptionPosition(format: Format, style: CaptionStyle): number {
   const outline = style.box ? Math.max(style.outline ?? 8, 18) : (style.outline ?? 8);
-  const half = (((style.size ?? 105) + 2 * outline) * format.width) / 1080 / 2;
+  const half = ((2 * (style.size ?? 105) + 2 * outline) * format.width) / 1080 / 2;
   return Math.floor(((0.81 * format.height - half - 1) / format.height) * 100) / 100;
+}
+
+/** The plain-words warning when captions reach Instagram's caption and username, or null when they stay clear. */
+export function captionsUnderInstagram(format: Format, style: CaptionStyle): string | null {
+  const lowest = lowestCaptionPosition(format, style);
+  if ((style.position ?? 0.75) <= lowest) return null;
+  return `At position ${style.position} and size ${style.size ?? 105}, a caption that wraps to two lines reaches under Instagram's caption and username, so it is partly hidden on Instagram. At this size, ${lowest} or higher stays clear.`;
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);

@@ -29,9 +29,9 @@ IG_TOP_FRAC = 0.07
 
 
 def ig_right_limit(width: float) -> float:
-    """x past which a caption sits under the right-side action column (40 px of overlap allowed).
+    """x past which a caption sits under the right-side action column, the like, comment and share icons.
     captions.render_ass fits a centred line inside it, so the layout and this check share one edge."""
-    return width * (1 - IG_RIGHT_FRAC) + 40
+    return width * (1 - IG_RIGHT_FRAC)
 
 
 def _fps(stream) -> float:

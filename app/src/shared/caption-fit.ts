@@ -7,7 +7,7 @@ export const MARGIN_FRAC = 0.065
 /** captions.py MIN_SHRINK: below this fraction of the base size, wrap to two lines instead of shrinking. */
 export const MIN_SHRINK = 0.62
 /** verify.py ig_right_limit at 1080 wide: past this x a caption sits under Instagram's right-side buttons. */
-export const IG_RIGHT_LIMIT = 1080 * (1 - 0.13) + 40
+export const IG_RIGHT_LIMIT = 1080 * (1 - 0.13)
 /** captions.render_ass at 1080 wide: a centred line fits the margins and ends a pixel inside IG_RIGHT_LIMIT. */
 export const SAFE_WIDTH = 2 * Math.min(540 - 1080 * MARGIN_FRAC, IG_RIGHT_LIMIT - 540 - 1)
 /** captions.py BOX_PAD: the "box" style's padding, which libass draws as the outline. */

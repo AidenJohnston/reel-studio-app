@@ -54,7 +54,7 @@ def test_fit_shrinks_long_lines_and_never_grows():
     # a real cue the old size-by-ratio estimate left 1 px too wide
     size, lines = captions.fit("AND IMPERSONATED BEING 7", 105, 939.6, 8, m)
     assert m.width(lines[0], size, 8) <= 939.6
-    # stepping down past 62% of the size wraps the line instead (render_ass's safe width at 1080)
+    # stepping down past 62% of the size wraps the line instead (at 877.2 the first guess is just above 62%)
     size, lines = captions.fit("INTERNATIONALIZATION EVERYWHERE", 105, 877.2, 8, m)
     assert lines == ["INTERNATIONALIZATION", "EVERYWHERE"] and size >= 105 * captions.MIN_SHRINK
 

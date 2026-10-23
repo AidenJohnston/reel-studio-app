@@ -3,7 +3,7 @@
 // Anything with a place in the video, a second request, a lasting preference or a word we are not
 // sure about goes to the full AI editor instead. Missing a fast path costs ~20 s; a wrong one costs
 // the user's trust, so this list stays short and strict.
-import { lowestCaptionPosition, type Project } from './project';
+import { captionsUnderInstagram, lowestCaptionPosition, type Project } from './project';
 
 export interface FastCall { name: string; args: Record<string, unknown> }
 export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
@@ -37,9 +37,12 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
     if (/\b(bigger|larger|too small|too tiny|hard to read|enlarge)\b/.test(n)) {
       const next = Math.round(clamp(size * 1.15, 80, 160));
       if (next <= size) return null;
-      // a bigger line is taller: keep its bottom above Instagram's caption, as set_caption_style requires
-      const position = Math.min(Number(style.position) || 0.75, lowestCaptionPosition(p.format, { ...style, size: next }));
-      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, position, enabled: true } }], summary: 'I made the captions a bit bigger.' };
+      // a bigger line is taller and can reach Instagram's caption: say so, but never move them unasked
+      const under = !captionsUnderInstagram(p.format, style) && captionsUnderInstagram(p.format, { ...style, size: next });
+      const summary = under
+        ? 'I made the captions a bit bigger. Where they sit, a two-line caption now reaches under Instagram\'s own caption and username, so part of it can be hidden on Instagram. Say "captions higher" to move them up.'
+        : 'I made the captions a bit bigger.';
+      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     const pos = Number(style.position) || 0.75;
     if (/\b(higher|up|too low)\b/.test(n)) {

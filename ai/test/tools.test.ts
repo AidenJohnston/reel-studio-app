@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
-import { saveProject } from '../src/project';
+import { lowestCaptionPosition, saveProject } from '../src/project';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
-import { applyPreset, presetOf } from '../../app/src/shared/caption-presets';
+import { CAPTION_PRESETS, applyPreset, presetOf } from '../../app/src/shared/caption-presets';
 import { describeChange } from '../../app/src/shared/describe';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
@@ -212,17 +212,12 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
-    // an eval's first edit put them at 0.88, every line under Instagram's caption and username
+    // an eval's first edit put them at 0.88, under Instagram's caption and username: done, with a warning to pass on
     const low = await executeTool(ctx, 'set_caption_style', { size: 105, position: 0.88 });
-    expect(low.isError).toBe(true);
-    expect(low.content).toMatch(/the lowest position is 0\.77/);
-    expect((await loadProject(ctx.projectDir)).captions.style).toMatchObject({ size: 70, position: 0.72 });
-    expect((await executeTool(ctx, 'set_caption_style', { size: 105, position: 0.77 })).isError).toBe(false);
-    // a reel left at 0.85 by an older version can still be moved up, even if not yet all the way
-    const older = await loadProject(ctx.projectDir);
-    older.captions.style.position = 0.85;
-    await saveProject(ctx.projectDir, older);
-    expect((await executeTool(ctx, 'set_caption_style', { position: 0.8 })).isError).toBe(false);
+    expect(low.isError).toBe(false);
+    expect(JSON.parse(low.content).warning).toMatch(/partly hidden on Instagram\. At this size, 0\.75 or higher stays clear\. Tell the person/);
+    expect((await loadProject(ctx.projectDir)).captions.style).toMatchObject({ size: 105, position: 0.88 });
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { position: 0.75 })).content)).not.toHaveProperty('warning');
     await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
     expect(ctx.project!.captions.style.highlight).toBe('#34C759');
     expect((await executeTool(ctx, 'set_caption_style', { highlight: '#34C75980' })).isError).toBe(true); // the engine draws no see-through highlight
@@ -279,6 +274,13 @@ describe('tool implementations', () => {
     await executeTool(ctx, 'set_caption_style', { size: 107 }); // "smaller captions"
     expect(ctx.project!.captions.style).not.toHaveProperty('sizePicked');
     expect(applyPreset('minimal', ctx.project!.captions.style).size).toBe(84);
+  });
+
+  it('the lowest caption position leaves room for a cue wrapped to two lines in every look', () => {
+    // engine/tests/test_ux_captions.py renders a wrapped cue at each of these and checks it clears the band
+    const fmt = { width: 1080, height: 1920, fps: 30 };
+    expect(Object.fromEntries(CAPTION_PRESETS.map((x) => [x.key, lowestCaptionPosition(fmt, x.style)])))
+      .toEqual({ clean: 0.75, 'bold-pop': 0.73, karaoke: 0.75, boxed: 0.75, minimal: 0.76 });
   });
 
   it('engine errors come back as readable tool errors', async () => {

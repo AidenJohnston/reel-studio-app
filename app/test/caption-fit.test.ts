@@ -6,20 +6,20 @@ import { SAFE_WIDTH, SIZE_PER_EM, fitCaption, type Measure } from '../src/shared
 
 // Each character 0.6 em wide, a space 0.25 em, em = size / 1.562; the same function was handed to captions.fit.
 const measure: Measure = (text, size, outline) => [...text].reduce((w, ch) => w + (ch === ' ' ? 0.25 : 0.6), 0) * (size / 1.562) + 2 * outline
-const SAFE = SAFE_WIDTH // 877.2, captions.render_ass at 1080 wide
+const SAFE = SAFE_WIDTH // 797.2, captions.render_ass at 1080 wide
 
 const ENGINE: [text: string, base: number, outline: number, size: number, lines: string[]][] = [
   ['HI', 105, 8, 105, ['HI']],
-  ['PLACEHOLDER TEXT FROM', 105, 8, 105, ['PLACEHOLDER TEXT FROM']],
+  ['PLACEHOLDER TEXT FROM', 105, 8, 102, ['PLACEHOLDER TEXT FROM']],
   // walkthrough 16: Big subtitles shrink to stay on one line; the old preview wrapped and split "PLACEHOLDE / R"
-  ['PLACEHOLDER TEXT FROM', 140, 8, 113, ['PLACEHOLDER TEXT FROM']],
-  ['INTERNATIONALIZATION', 140, 8, 112, ['INTERNATIONALIZATION']],
-  ['A VERY LONG LINE OF WORDS', 140, 18, 99, ['A VERY LONG LINE OF WORDS']],
-  ['SUPERCALIFRAGILISTIC EXPIALIDOCIOUS', 140, 8, 112, ['SUPERCALIFRAGILISTIC', 'EXPIALIDOCIOUS']],
-  ['ONE TWO THREE FOUR FIVE SIX SEVEN', 140, 8, 137, ['ONE TWO THREE FOUR', 'FIVE SIX SEVEN']],
-  ['WWWWWWWWWWWWWWWWW WWWWWWWWWWWWWWWWWWWWW WW', 140, 8, 95, ['WWWWWWWWWWWWWWWWW', 'WWWWWWWWWWWWWWWWWWWWW WW']],
-  // one line would end just under 62% of the size (Boxed 59 of 96, Clean 65 of 105, Bold pop 78 of 126): wrap instead
-  ['WWWWWWWWWWWW WWWWWWWWWWWW WWWWWWWWWWWW', 96, 18, 89, ['WWWWWWWWWWWW', 'WWWWWWWWWWWW WWWWWWWWWWWW']],
+  ['PLACEHOLDER TEXT FROM', 140, 8, 102, ['PLACEHOLDER TEXT FROM']],
+  ['INTERNATIONALIZATION', 140, 8, 101, ['INTERNATIONALIZATION']],
+  ['A VERY LONG LINE OF WORDS', 140, 18, 89, ['A VERY LONG LINE OF WORDS']],
+  ['SUPERCALIFRAGILISTIC EXPIALIDOCIOUS', 140, 8, 101, ['SUPERCALIFRAGILISTIC', 'EXPIALIDOCIOUS']],
+  ['ONE TWO THREE FOUR FIVE SIX SEVEN', 140, 8, 125, ['ONE TWO THREE FOUR', 'FIVE SIX SEVEN']],
+  ['WWWWWWWWWWWWWWWWW WWWWWWWWWWWWWWWWWWWWW WW', 140, 8, 86, ['WWWWWWWWWWWWWWWWW', 'WWWWWWWWWWWWWWWWWWWWW WW']],
+  // one line would end under 62% of the size in Boxed, Clean and Bold pop: wrap instead
+  ['WWWWWWWWWWWW WWWWWWWWWWWW WWWWWWWWWWWW', 96, 18, 81, ['WWWWWWWWWWWW', 'WWWWWWWWWWWW WWWWWWWWWWWW']],
   ['WWWWWWWWWWWWWWWWW WWWWWWWWWWWWWWWWW', 105, 8, 105, ['WWWWWWWWWWWWWWWWW', 'WWWWWWWWWWWWWWWWW']],
   ['WWWWWWWWWWWWWW WWWWWWWWWWWWWW', 126, 12, 126, ['WWWWWWWWWWWWWW', 'WWWWWWWWWWWWWW']]
 ]
