@@ -219,9 +219,10 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
             text, through = fix
             # "at" through "through" become one word, as the phrase correction that drew them as one did
             j = next((j for j in range(k, len(words)) if through in words[j].get("ids", [words[j].get("id")])), k) if through else k
+            # Removed spans must keep their sentence ending for chunk() to preserve later lines.
             merged = [x for w in words[k:j + 1] for x in w.get("ids", [w.get("id")])]
             words[k:j + 1] = [dict(words[k], e=words[j]["e"], ids=list(dict.fromkeys(merged)), _fixed=True,
-                                   **({"w": text} if text else {"gone": True}))]
+                                   **({"w": text} if text else {"w": " ".join(w["w"] for w in words[k:j + 1]), "gone": True}))]
         k += 1
     if spans:
         norm = [([_bare(x).lower() for x in sp["from"]], list(sp["to"])) for sp in spans]
@@ -351,7 +352,8 @@ def edit_lines(cues: list, split, join, gone=frozenset()) -> list:
     for c in cues:
         prev = merged[-1] if merged else None
         last = next((w for w in reversed(prev["wids"]) if tuple(w) not in gone), []) if prev else []
-        if prev and prev["run"] == c["run"] and any(f in last and _first_carrier(c["wids"], 0, last, t) for f, t in joins):
+        first = next((k for k, w in enumerate(c["wids"]) if tuple(w) not in gone), None)
+        if prev and first is not None and prev["run"] == c["run"] and any(f in last and _first_carrier(c["wids"], first, last, t) for f, t in joins):
             for key in ("words", "starts", "wids", "ids"):
                 prev[key] = prev[key] + c[key]
             prev["e"] = c["e"]

@@ -26,7 +26,11 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   if (words.length) out.push(`${words.join(' ')} subtitles`)
   if (pos(b) < pos(a) - 0.01) out.push(out.length ? 'moved up' : 'subtitles moved up')
   if (pos(b) > pos(a) + 0.01) out.push(out.length ? 'moved down' : 'subtitles moved down')
-  const fixes = (after.corrections?.length ?? 0) - (before?.corrections?.length ?? 0)
+  const fixes = (after.corrections ?? []).filter((fix) =>
+    !(before?.corrections ?? []).some((old) =>
+      old.from === fix.from && old.to === fix.to && old.at === fix.at && old.through === fix.through
+    )
+  ).length
   if (fixes > 0) out.push(fixes === 1 ? 'fixed a word' : `fixed ${fixes} words`)
   if ((['split', 'join'] as const).some((k) => JSON.stringify(after[k] ?? []) !== JSON.stringify(before?.[k] ?? []))) out.push('new subtitle lines')
   return out

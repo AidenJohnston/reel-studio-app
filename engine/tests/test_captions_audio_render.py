@@ -1,6 +1,6 @@
 import numpy as np
 
-from conftest import mkwords
+from conftest import mkwords, sentence_words
 from reelengine import audio_env, captions, render
 from reelengine.render_ctx import Segment
 
@@ -199,3 +199,26 @@ def test_a_join_lets_go_when_a_recut_takes_away_the_line_it_joined():
     assert _lines(words, cap) == ["RED GREEN BLUE", "PINK GRAY TAN GOLD JADE NAVY"]
     recut = words[:3] + [dict(w, s=w["s"] - 0.9, e=w["e"] - 0.9) for w in words[6:]]  # on the output clock
     assert _lines(recut, cap) == ["RED GREEN BLUE", "GOLD JADE NAVY"]
+
+
+def test_removing_a_phrase_token_preserves_the_following_sentence_lines():
+    words = sentence_words("Learn type script. We should go.", 0)
+    cap = {"corrections": [{"from": "type script", "to": "TypeScript"}]}
+    assert _lines(words, cap) == ["LEARN TYPESCRIPT", "WE SHOULD GO"]
+    cap["corrections"].append({"from": "type script.", "to": "", "at": "w1", "through": "w2"})
+    assert _lines(words, cap) == ["LEARN", "WE SHOULD GO"]
+
+
+def test_removing_a_number_token_preserves_the_following_sentence_lines():
+    words = sentence_words("Saved sixty four percent. We should go.", 0)
+    assert _lines(words, {}) == ["SAVED 64%", "WE SHOULD GO"]
+    cap = {"corrections": [{"from": "sixty four percent.", "to": "", "at": "w1", "through": "w3"}]}
+    assert _lines(words, cap) == ["SAVED", "WE SHOULD GO"]
+
+
+def test_a_join_starts_at_the_first_word_still_on_the_subtitles():
+    words = sentence_words("I like tea and warm milk", 0)
+    cap = {"corrections": [{"from": "and", "to": "", "at": "w3"}]}
+    assert _lines(words, cap) == ["I LIKE TEA", "WARM MILK"]
+    cap["join"] = [{"from": "w2", "to": "w4"}]
+    assert _lines(words, cap) == ["I LIKE TEA WARM MILK"]
