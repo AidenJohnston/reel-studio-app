@@ -1,12 +1,15 @@
-"""Snap zooms (`zooms[].style: "snap"`), measured on rendered frames of a take whose only detail is
-one light box centred in the frame, so the zoom's scale is the box's width over its unzoomed width."""
+"""Snap zooms (`zooms[].style: "snap"`), measured on rendered frames. Most tests use a take whose only
+detail is one light box centred in the frame, so the zoom's scale is the box's width over its
+unzoomed width. The face-drift test uses a take with a fine-grained patch where the face is."""
 from __future__ import annotations
 
+import json
 import math
 import subprocess
 
 import numpy as np
 import pytest
+from PIL import Image
 
 import fixtures as fx
 from reelengine import render
@@ -112,3 +115,65 @@ def test_default_zoom_render_is_unchanged(renders):
         "scale=1080:1920:flags=lanczos,setsar=1,fps=30.0,tpad=start=28[zz0]",
         "[zm0][zz0]overlay=0:0:eof_action=pass:repeatlast=0:enable='between(t,0.933333,3.666667)'[zb0]",
     ]
+
+
+# The face box of the real take the snap zoom was checked on: left of centre, its eyes (EYE_BIAS above
+# the box's middle) at (480, 960).
+FACE = [380.0, 960 + 0.12 * 260 - 130, 200.0, 260.0]
+ROI = (180, 780, 520, 600)          # x, y, w: every place the patch reaches during both zooms
+
+
+@pytest.fixture(scope="module")
+def face_render(tmp_path_factory):
+    """One render of a take with a fine random patch on the face, and two snap zooms at scale 1.15 placed
+    like the real-footage check: fixed point on the right edge (the eyes travel about 90 px, read as a
+    quick dolly-in), then in the top-right corner (about 170 px, streaked the eyes)."""
+    d = tmp_path_factory.mktemp("snap face")
+    frame = np.full((H, W), 64, np.uint8)
+    x, y, w, h = (int(round(v)) for v in FACE)
+    blocks = np.random.default_rng(7).integers(40, 220, (h // 4 + 1, w // 4 + 1), dtype=np.uint8)
+    frame[y:y + h, x:x + w] = np.kron(blocks, np.ones((4, 4), np.uint8))[:h, :w]
+    Image.fromarray(frame).convert("RGB").save(d / "face.png")
+    take = d / "face.mp4"
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-loop", "1", "-framerate", str(FPS), "-i", str(d / "face.png"),
+                    "-f", "lavfi", "-i", "sine=f=220:d=8:sample_rate=48000", "-t", "8",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                    str(take)], check=True)
+    pdir = d / "p"
+    fx.make_project(pdir, take, keep=((0.5, 7.5),))
+    samples = [{"t": t / 2, "box": FACE} for t in range(17)]
+    (pdir / "work" / "face-s1.json").write_text(json.dumps(
+        {"width": W, "height": H, "detector": "test", "samples": samples, "median": FACE}), encoding="utf-8")
+    ctx = fx.make_ctx(pdir)
+    zooms = [{"anchor": {"from": fx.word_near(ctx, a), "to": fx.word_near(ctx, b)}, "scale": 1.15,
+              "focus": focus, "style": "snap"}
+             for a, b, focus in ((1.0, 2.6, [1.0, 0.5]), (4.0, 5.6, [1.0, 0.0]))]
+    fx.set_project(ctx, zooms=zooms, captions={"enabled": False})
+    res = render.run(pdir, draft=False, root=d, verify=False, cover=False)
+    rx, ry, rw, rh = ROI
+    raw = subprocess.run([fx.FFMPEG, "-v", "error", "-i", res["file"], "-vf", f"crop={rw}:{rh}:{rx}:{ry}",
+                          "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, rh, rw).astype(float)
+
+
+def _detail(img):
+    """Mean step between neighbouring pixels: the patch's fine grain, which motion blur averages away."""
+    return np.abs(np.diff(img, axis=1)).mean() + np.abs(np.diff(img, axis=0)).mean()
+
+
+def test_snap_zoom_never_sweeps_the_face_from_a_corner(face_render):
+    frames = face_render
+    moved = [np.abs(f - frames[0]).mean() > 2 for f in frames]
+    starts = [k for k in range(1, len(frames)) if moved[k] and not moved[k - 1]]
+    assert len(starts) == 2, starts
+    side, corner = starts
+
+    # an off-centre face with the fixed point on the frame's side still snaps: its first frame is blurred
+    assert _detail(frames[side]) < 0.6 * _detail(frames[side + 15])
+
+    # with the fixed point in the corner it punches in hard: the face is already where the hold has it,
+    # as sharp as the hold, from the zoom's first frame
+    held = frames[corner + 15]
+    for k in range(corner, corner + 8):
+        assert _detail(frames[k]) > 0.9 * _detail(held), k
+        assert np.abs(frames[k] - held).mean() < 1.5, k

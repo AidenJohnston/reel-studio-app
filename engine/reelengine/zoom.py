@@ -12,6 +12,7 @@ pipeline's zooms.py, keeping its rules:
 
 `style: "snap"` eases the punch in and the release back out instead of cutting. Motion never runs
 across a cut: a release that would is made on the cut instead, the way a b-roll exit hides one.
+A snap that would sweep the face across the frame (MAX_FACE_DRIFT) punches in hard instead.
 
 A1's render applies each span as a crop-and-scale of the cut video about (cx, cy).
 """
@@ -43,6 +44,11 @@ EYE_BIAS = 0.12       # centre this fraction of a face-height above the face's m
 SNAP_IN = 0.22        # judged by eye on rendered frames between 0.18 and 0.26 s, no measurement behind it
 SNAP_OUT = 0.30       # slower than the punch: the release should not draw the eye
 SPRING = 7.0          # stiffness per ramp length, also judged by eye
+# How far a snap may carry the eyes across the frame, as a fraction of its width; past it the zoom
+# punches in hard. On a real night take at scale 1.15 (1080 px wide), a fixed point on the frame's
+# side moved the eyes about 90 px and read as a quick dolly-in; one in the top corner moved them
+# about 170 px, streaked them diagonally and read as a tilt. Nothing in between was checked.
+MAX_FACE_DRIFT = 0.09
 
 
 def punch(u: float) -> float:
@@ -73,6 +79,18 @@ def clamp_centre(scale: float, cx: float, cy: float, W: int, H: int) -> tuple[fl
     return min(max(cx, hw), W - hw), min(max(cy, hh), H - hh)
 
 
+def face_drift(scale: float, cx: float, cy: float, eyes: tuple, W: int, H: int) -> float:
+    """Output pixels the eyes travel while a zoom about (cx, cy) pushes in from full frame.
+
+    Every crop between the full frame and the zoom's shares one fixed point, the point the picture
+    grows out of (render._snap_chain). It sits scale / (scale - 1) times as far from the frame's
+    centre as (cx, cy) does, 7.7x at scale 1.15, so a face only a little high and off centre puts it
+    in a corner. A point at distance r from it travels (scale - 1) * r."""
+    k = scale / (scale - 1)
+    fx, fy = W / 2 + k * (cx - W / 2), H / 2 + k * (cy - H / 2)
+    return (scale - 1) * math.hypot(eyes[0] - fx, eyes[1] - fy)
+
+
 def build_zooms(ctx, with_broll: bool = True) -> list:
     """project.zooms -> [ZoomSpan] on the output clock, sorted, non-overlapping."""
     W, H, fps = fmt_of(ctx)
@@ -90,14 +108,21 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
         if scale <= 1.001 or t1 - t0 < 1.0 / fps:
             continue
         focus = z.get("focus")
+        snap = z.get("style") == "snap"
+        eyes = None
+        if snap or not focus:
+            from .broll import output_face_union
+            fx, fy, fw, fh = output_face_union(ctx, t0, t1)
+            eyes = (fx + fw / 2, fy + fh / 2 - EYE_BIAS * fh)
         if focus:      # [fx, fy] as fractions of the frame
             cx, cy = float(focus[0]) * W, float(focus[1]) * H
         else:
-            from .broll import output_face_union
-            fx, fy, fw, fh = output_face_union(ctx, t0, t1)
-            cx, cy = fx + fw / 2, fy + fh / 2 - EYE_BIAS * fh
+            cx, cy = eyes
         cx, cy = clamp_centre(scale, cx, cy, W, H)
-        ramps = (round(SNAP_IN * fps) / fps, round(SNAP_OUT * fps) / fps) if z.get("style") == "snap" else ()
+        if snap and face_drift(scale, cx, cy, eyes, W, H) > MAX_FACE_DRIFT * W:
+            log(f"zoom {i}: its fixed point is too far from the face to snap; punching in hard")
+            snap = False
+        ramps = (round(SNAP_IN * fps) / fps, round(SNAP_OUT * fps) / fps) if snap else ()
         spans.append(ZoomSpan(round(t0 * fps) / fps, round(t1 * fps) / fps, scale, round(cx, 1), round(cy, 1),
                               *ramps))
     spans.sort(key=lambda s: s.t0)
