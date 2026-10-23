@@ -32,3 +32,13 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   engine renders that exact frame and does no search around it. The app clears it when the slider moves,
   and the AI's `set_cover` clears it. `cover.exact` (the AI looked at this frame; search 0.2 s around it)
   is unchanged.
+
+## 2026-10-20 (mirror)
+
+- `sources[].mirror` (boolean, absent = false): the take is mirrored (a front-camera selfie: posters, shirts and
+  signs read backwards), so the engine flips the picture left to right. The flip is the LAST step of the face
+  picture's chain (after crop, scale and the upright turn) in both the software and the CUDA draft path, so the
+  crop window is the same and the output is its mirror image. B-roll, zooms and captions are drawn on top and are
+  never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
+  `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
+  the field, so the project matches one that never had it.

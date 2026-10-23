@@ -36,7 +36,8 @@
           "height": { "type": "integer", "minimum": 0 },
           "rotation": { "type": "integer" },
           "originalName": { "type": "string" },
-          "hdr": { "type": "boolean" }
+          "hdr": { "type": "boolean" },
+          "mirror": { "type": "boolean", "description": "the take is mirrored (a front-camera selfie: on-screen text reads backwards): the render flips the picture left to right. Absent = false" }
         }
       }
     },

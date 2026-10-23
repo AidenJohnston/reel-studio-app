@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from .compose_util import (EngineError, ctx_words, decode_frames, fmt_of, grab_frame, log, probe, reframe_rect,
-                           report, source_path)
+                           report, source_mirrored, source_path)
 from . import placement
 
 SEARCH_HALF = 1.5        # seconds either side of atSourceTime
@@ -137,17 +137,20 @@ def _mark_reasons(good: list[dict]) -> None:
                                               ("still", top["still"])) if on]
 
 
-def _fit_frame(bgr: np.ndarray, W: int, H: int, rect=None):
-    """Fit the frame exactly as the video is fitted (render's reframe crop, else cover). -> PIL RGBA."""
-    from PIL import Image
+def _fit_frame(bgr: np.ndarray, W: int, H: int, rect=None, mirror: bool = False):
+    """Fit the frame exactly as the video is fitted (render's reframe crop, else cover, then the
+    left-right flip of a mirrored take, as render does it: after the crop). -> PIL RGBA."""
+    from PIL import Image, ImageOps
     img = Image.fromarray(bgr[:, :, ::-1].copy()).convert("RGBA")
     if rect:
         x, y, cw, ch = rect
-        return img.crop((x, y, x + cw, y + ch)).resize((W, H), Image.LANCZOS)
-    s = max(W / img.width, H / img.height)
-    img = img.resize((max(W, round(img.width * s)), max(H, round(img.height * s))), Image.LANCZOS)
-    x, y = (img.width - W) // 2, (img.height - H) // 2
-    return img.crop((x, y, x + W, y + H))
+        img = img.crop((x, y, x + cw, y + ch)).resize((W, H), Image.LANCZOS)
+    else:
+        s = max(W / img.width, H / img.height)
+        img = img.resize((max(W, round(img.width * s)), max(H, round(img.height * s))), Image.LANCZOS)
+        x, y = (img.width - W) // 2, (img.height - H) // 2
+        img = img.crop((x, y, x + W, y + H))
+    return ImageOps.mirror(img) if mirror else img
 
 
 def render(ctx, out_png) -> Path:
@@ -177,7 +180,7 @@ def render(ctx, out_png) -> Path:
     rect = reframe_rect(ctx, sid)
     if frame.shape[1] < rect[0] + rect[2] or frame.shape[0] < rect[1] + rect[3]:
         rect = None                          # source metadata disagrees with the decoded frame
-    img = _fit_frame(frame, W, H, rect)
+    img = _fit_frame(frame, W, H, rect, source_mirrored(ctx, sid))
     text = cov.get("text")
     if text:
         img = _draw_text(ctx, img, str(text), frame, W, H)
@@ -210,7 +213,7 @@ def candidates(ctx, sid: str, moments: list[float], out_dir, width: int = 360) -
         best = max(rows, key=lambda r: r["score"])
         frame = grab_frame(source_path(ctx, sid), best["t"], ctx)
         rc = rect if rect and frame.shape[1] >= rect[0] + rect[2] and frame.shape[0] >= rect[1] + rect[3] else None
-        img = _fit_frame(frame, W, H, rc).convert("RGB")
+        img = _fit_frame(frame, W, H, rc, source_mirrored(ctx, sid)).convert("RGB")
         img = img.resize((width, round(width * H / W)))
         f = out_dir / f"cover_{best['t']:08.3f}.jpg"
         img.save(f, "JPEG", quality=85)
