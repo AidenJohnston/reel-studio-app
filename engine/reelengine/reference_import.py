@@ -243,7 +243,8 @@ def _fcp7_expanded(root: ET.Element) -> tuple[int, int, int]:
                 definition = frame["definitions"][frame["index"]]
                 frame["index"] += 1
                 stack.append({"kind": "own", "element": definition, "depth": depth, "index": 0,
-                              "clips": 0, "elements": 0, "size": 0})
+                              "clips": int(definition.tag in ("clipitem", "generatoritem")),
+                              "elements": 1, "size": _own_bytes(definition)})
                 continue
             result = tuple(max(cost[i] for cost in frame["costs"]) for i in range(3))
             memo[e.get("id")] = result
@@ -379,9 +380,13 @@ class _Fcpx:
         memo: dict[str, tuple[int, int, int]] = {}
         open_ids: set[str] = set()
 
+        def sequence_frame(sequence: ET.Element, depth: int) -> dict:
+            return {"kind": "sequence", "value": sequence, "depth": depth, "index": 0,
+                    "composable": [c for c in sequence.iter() if c.tag in _FCPX_COMPOSABLE],
+                    "clips": 0, "elements": size[sequence][0], "bytes": size[sequence][1]}
+
         def walk(sequence: ET.Element, depth: int) -> tuple[int, int, int]:
-            stack = [{"kind": "sequence", "value": sequence, "depth": depth, "index": 0,
-                      "clips": 0, "elements": size[sequence][0], "bytes": size[sequence][1]}]
+            stack = [sequence_frame(sequence, depth)]
             result = None
             while stack:
                 frame = stack[-1]
@@ -409,9 +414,7 @@ class _Fcpx:
                         else:
                             open_ids.add(key)
                             frame["kind"] = "compound_result"
-                            stack.append({"kind": "sequence", "value": seq, "depth": frame["depth"],
-                                          "index": 0, "clips": 0, "elements": size[seq][0],
-                                          "bytes": size[seq][1]})
+                            stack.append(sequence_frame(seq, frame["depth"]))
                             continue
                 elif frame["kind"] == "compound_result":
                     result = frame["clips"], frame["elements"], frame["bytes"]
@@ -419,7 +422,7 @@ class _Fcpx:
                     open_ids.remove(frame["value"])
                     stack.pop()
                 else:
-                    composable = [c for c in frame["value"].iter() if c.tag in _FCPX_COMPOSABLE]
+                    composable = frame["composable"]
                     if frame["index"] >= len(composable):
                         result = frame["clips"], frame["elements"], frame["bytes"]
                         stack.pop()
@@ -621,30 +624,57 @@ class _Record:
             out.append(entry)
         return out
 
-    def timeline(self, tl, where: str, fcpx: _Fcpx | None = None, project: ET.Element | None = None) -> dict:
+    def timeline(self, tl, where: str, fcpx: _Fcpx | None = None,
+                 project: ET.Element | None = None, sequence: ET.Element | None = None) -> dict:
         self.keep_raw(tl, where)
         self.keep_raw(tl.tracks, f"{where}.stack")
         tracks = list(tl.tracks)
         lanes = None
+        duration = _time(tl.duration())
         if fcpx is None:
             global_start, drop_frame = _time(tl.global_start_time), None
+            # fcp_xml 1.0.0 ignores sequence duration, so OTIO loses a trailing gap.
+            if sequence is not None and sequence.findtext("duration") is not None:
+                try:
+                    rate = Fraction(sequence.findtext("rate/timebase"))
+                    if (sequence.findtext("rate/ntsc") or "").lower() == "true":
+                        rate *= Fraction(1000, 1001)
+                    duration = {"value": float(sequence.findtext("duration")), "rate": float(rate)}
+                except (TypeError, ValueError, ZeroDivisionError):
+                    raise _fail("BAD_XML", "sequence duration needs a numeric duration and frame rate")
         else:
             tracks.sort(key=lambda track: int(track.name))
             lanes = fcpx.lanes(project)
             global_start, drop_frame = fcpx.global_start(project)
+            sequence = project.find("sequence")
+            if sequence.get("duration") is not None:
+                duration = _frames(_secs(sequence.get("duration")), fcpx.rate(sequence.get("format")))
         out = []
         for k, track in enumerate(tracks):
             tw = f"{where}.tracks[{k}]"
             self.keep_raw(track, tw)
             out.append({"name": track.name, "kind": track.kind,
                         "items": self.items(track, tw, None if lanes is None else lanes[track.name])})
-        return {"name": tl.name, "globalStart": global_start, "dropFrame": drop_frame,
+        return {"name": tl.name, "duration": duration, "globalStart": global_start, "dropFrame": drop_frame,
                 "markers": self.markers(tl.tracks, where), "tracks": out}
 
 
 def _build(data: bytes, adapter: str) -> dict:
-    """Read with the adapter and normalize. Runs in the child process."""
+    """Check expansion, read with the adapter and normalize, all in the watched child."""
     import opentimelineio as otio
+    root = ET.fromstring(data)
+    fcpx = None
+    if adapter == "fcpx_xml":
+        fcpx = _Fcpx(root)
+        projects = fcpx.projects()
+        if not projects:
+            code = "TIMELINE_SKIPPED" if fcpx.skipped(projects) else "NO_TIMELINE"
+            raise _fail(code, "no project the fcpx_xml adapter reads")
+        _check_expansion(*fcpx.expanded(projects))
+    else:
+        if root.find("sequence") is None and root.find(".//children/sequence") is None:
+            raise _fail("NO_TIMELINE", "no top-level sequence")
+        _check_expansion(*_fcp7_expanded(root))
     try:
         result = otio.adapters.read_from_string(
             data, adapter_name=adapter,
@@ -653,14 +683,19 @@ def _build(data: bytes, adapter: str) -> dict:
         raise _fail("OTIO_READ_FAILED", f"{adapter}: {type(exc).__name__}: {exc}")
     timelines = ([result] if isinstance(result, otio.schema.Timeline)
                  else list(result.find_children(descended_from_type=otio.schema.Timeline)))
-    root = ET.fromstring(data)
     record = _Record(otio)
     if adapter == "fcp_xml":
-        records = [record.timeline(tl, f"timelines[{i}]") for i, tl in enumerate(timelines)]
+        # Match FCP7XMLParser.top_level_sequences, including its first-seen id rule.
+        sequences = root.findall("sequence") + root.findall(".//children/sequence")
+        by_id = {}
+        sequences = [by_id.setdefault(seq.get("id"), seq) if seq.get("id") is not None else seq
+                     for seq in sequences]
+        if len(timelines) != len(sequences):
+            raise _fail("OTIO_READ_FAILED", "the fcp_xml adapter and source disagree on sequences")
+        records = [record.timeline(tl, f"timelines[{i}]", sequence=seq)
+                   for i, (tl, seq) in enumerate(zip(timelines, sequences))]
         record.losses.extend(_fcp7_losses(root))
     else:
-        fcpx = _Fcpx(root)
-        projects = fcpx.projects()
         if len(timelines) != len(projects):
             raise _fail("OTIO_READ_FAILED", f"fcpx_xml returned {len(timelines)} timelines for {len(projects)} projects")
         records = [record.timeline(tl, f"timelines[{i}]", fcpx, project)
@@ -669,7 +704,10 @@ def _build(data: bytes, adapter: str) -> dict:
     return {"timelines": records, "losses": record.losses, "rawMetadata": record.raw}
 
 
-def _child(conn, data: bytes, adapter: str) -> None:
+def _child(conn, data: bytes, adapter: str, expansion_limits: tuple[int, int, int, int]) -> None:
+    # Spawn imports this module afresh; carry the parent's configured caps into the child.
+    global MAX_EXPANDED_CLIPS, MAX_EXPANDED_ELEMENTS, MAX_EXPANDED_BYTES, MAX_EXPANDED_DEPTH
+    MAX_EXPANDED_CLIPS, MAX_EXPANDED_ELEMENTS, MAX_EXPANDED_BYTES, MAX_EXPANDED_DEPTH = expansion_limits
     try:
         conn.send(("ok", _build(data, adapter)))
     except EngineError as exc:
@@ -691,7 +729,8 @@ def _read_bounded(data: bytes, adapter: str) -> dict:
         raise _fail("ADAPTER_MISSING", f"OTIO adapter {adapter} is not installed: {exc}")
     ctx = multiprocessing.get_context("spawn")
     receiver, sender = ctx.Pipe(duplex=False)
-    child = ctx.Process(target=_child, args=(sender, data, adapter), daemon=True)
+    expansion_limits = (MAX_EXPANDED_CLIPS, MAX_EXPANDED_ELEMENTS, MAX_EXPANDED_BYTES, MAX_EXPANDED_DEPTH)
+    child = ctx.Process(target=_child, args=(sender, data, adapter, expansion_limits), daemon=True)
     child.start()
     sender.close()
     deadline = time.monotonic() + ADAPTER_SECONDS
@@ -728,17 +767,6 @@ def import_reference(path: Path) -> dict:
     path = Path(path)
     data, adapter, sha256 = _load(path)
     root = _parse(data, path)
-    if adapter == "fcpx_xml":
-        fcpx = _Fcpx(root)
-        projects = fcpx.projects()
-        if not projects:
-            code = "TIMELINE_SKIPPED" if fcpx.skipped(projects) else "NO_TIMELINE"
-            raise _fail(code, f"no project the fcpx_xml adapter reads: {path}")
-        _check_expansion(*fcpx.expanded(projects))
-    else:
-        if root.find("sequence") is None and root.find(".//children/sequence") is None:
-            raise _fail("NO_TIMELINE", f"no top-level sequence: {path}")
-        _check_expansion(*_fcp7_expanded(root))
     record = _read_bounded(data, adapter)
     urls = {item["media"]["url"] for tl in record["timelines"] for track in tl["tracks"] for item in track["items"]
             if item.get("media", {}).get("kind") == "file"}

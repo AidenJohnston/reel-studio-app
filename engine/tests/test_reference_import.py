@@ -2,6 +2,7 @@ import io
 import json
 import multiprocessing
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -139,8 +140,11 @@ def _premiere_file_references(refs, file_children=0, file_text=""):
     ("nested.fcpxml", _compound_clips(levels=9, fanout=10), "INPUT_TOO_LARGE"),
     ("cycle.fcpxml", _compound_clips(levels=1, fanout=1, cycle=True), "BAD_XML"),
     ("file-refs.xml", _premiere_file_references(refs=500, file_children=5000), "INPUT_TOO_LARGE"),
-], ids=["nested-compound-clips", "compound-clip-cycle", "premiere-file-references"])
-def test_references_that_expand_without_bound_are_refused(tmp_path, name, body, code):
+    ("clip-ids.xml", _premiere_file_references(refs=20), "INPUT_TOO_LARGE"),
+], ids=["nested-compound-clips", "compound-clip-cycle", "premiere-file-references", "premiere-clip-ids"])
+def test_references_that_expand_without_bound_are_refused(monkeypatch, tmp_path, name, body, code):
+    if name == "clip-ids.xml":
+        monkeypatch.setattr(reference_import, "MAX_EXPANDED_CLIPS", 10)
     source = tmp_path / name
     source.write_text(body, encoding="utf-8")
     assert source.stat().st_size < 100 * 1024
@@ -194,12 +198,55 @@ def test_text_copied_once_per_reference_counts_against_the_budget(monkeypatch, t
     assert _code(source) == "INPUT_TOO_LARGE"
 
 
-@pytest.mark.parametrize("limit,value", [("ADAPTER_SECONDS", 0), ("ADAPTER_MEMORY_BYTES", 1)],
+def _sleeping_child(conn, *args):
+    # A module-level target survives spawn; a patched _build in the parent would not.
+    time.sleep(6)
+
+
+@pytest.mark.parametrize("limit,value", [("ADAPTER_SECONDS", 0.5), ("ADAPTER_MEMORY_BYTES", 1)],
                          ids=["time", "memory"])
 def test_adapter_past_its_limit_is_stopped(monkeypatch, limit, value):
     monkeypatch.setattr(reference_import, limit, value)
+    monkeypatch.setattr(reference_import, "_child", _sleeping_child)
+    started = time.monotonic()
     assert _code(FIXTURES / "talking-head.xml") == "INPUT_TOO_LARGE"
+    assert time.monotonic() - started < 3
     assert multiprocessing.active_children() == []
+
+
+def test_fcpxml_expansion_checks_are_time_limited(monkeypatch, tmp_path):
+    source = tmp_path / "filler.fcpxml"
+    source.write_text(_event_clip_note(uses=5000, note="").replace(
+        "</spine>", "<x/>" * 100_000 + "</spine>"), encoding="utf-8")
+    monkeypatch.setattr(reference_import, "ADAPTER_SECONDS", 0.1)
+    started = time.monotonic()
+    assert _code(source) == "INPUT_TOO_LARGE"
+    assert time.monotonic() - started < 3
+    assert multiprocessing.active_children() == []
+
+
+@pytest.mark.parametrize("kind", ["fcpxml", "premiere"])
+def test_timeline_duration_keeps_a_trailing_gap(tmp_path, kind):
+    if kind == "fcpxml":
+        body = (FIXTURES / "ntsc-lanes.fcpxml").read_text().replace(
+            'duration="105105/30000s"', 'duration="150150/30000s"').replace(
+            "</spine>\n    </sequence>",
+            '<gap offset="105105/30000s" duration="45045/30000s"/>'
+            '</spine>\n    </sequence>')
+        expected = {"value": 150, "rate": 30000 / 1001}
+        suffix = ".fcpxml"
+    else:
+        body = (FIXTURES / "talking-head.xml").read_text().replace(
+            "<duration>100</duration>", "<duration>150</duration>", 1)
+        expected = {"value": 150, "rate": 25}
+        suffix = ".xml"
+    source = tmp_path / f"trailing{suffix}"
+    source.write_text(body, encoding="utf-8")
+    (timeline,) = import_reference(source)["timelines"]
+    assert timeline["duration"] == expected
+    last_end = max(item["trackRange"]["start"]["value"] + item["trackRange"]["duration"]["value"]
+                   for track in timeline["tracks"] for item in track["items"] if "trackRange" in item)
+    assert last_end < timeline["duration"]["value"]
 
 
 _MIXED_RATES = """<fcpxml version="1.10"><resources>
