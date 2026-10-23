@@ -66,6 +66,7 @@ describe('a job whose engine would not stop', () => {
       readProject: async () => {
         throw new Error('a closed video is never read')
       },
+      queue: (_slug, fn) => fn(),
       reserve: (s, fn) => jobs.hold(s, fn),
       refuse: (s) => jobs.refuseIfKeptClosed(s),
       stagingDir: (s) => noteStagingDir(projectDir(s)),

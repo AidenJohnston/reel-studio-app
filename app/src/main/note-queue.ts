@@ -7,13 +7,14 @@
 // their back. A stopped note that was not saved waits again at the top, to edit or try again.
 // A note shows in one place: a waiting row, or from the moment it starts, a "you" message in the chat.
 import { randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent, NoteAttachment, QueuedNote } from '../shared/api'
 import type { JobManager } from './jobs'
 import { toUserError } from './engine'
 import { dropStaged, pruneStaging } from './attachments'
 import type { ChatLine } from './style-consent'
-import { noteStagingDir } from './paths'
+import { noteStagingDir, noteStagingRoot } from './paths'
 import { listProjects, projectDir, readAppState, readJson, serialized, stamp, updateAppState, type AppState } from './store'
 
 export interface NoteToRun {
@@ -128,18 +129,27 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
   }
 
   return {
+    /** Attachment changes share note admission's lane; sent files stay until their note releases them. */
+    run<T>(slug: string, fn: () => Promise<T>, removing?: unknown): Promise<T> {
+      return lane(slug, async () => {
+        if (typeof removing === 'string' && referenced(await readAppState(slug)).some((a) => a.asset === removing)) {
+          throw { code: 'IN_USE', userMessage: 'That file belongs to a sent note. Cancel the note before removing it.' }
+        }
+        return fn()
+      })
+    },
     /** A note from the Reel screen. `seenVersion`: the version on screen when it was written. */
-    async send(slug: string, note: Omit<NoteToRun, 'id'>, seenVersion: number): Promise<{ jobId: string | null; queued?: boolean }> {
-      const entry: QueuedNote = { id: randomUUID(), ...note, seenVersion }
+    async send(slug: string, note: Omit<NoteToRun, 'id'> | (() => Promise<Omit<NoteToRun, 'id'>>), seenVersion: number): Promise<{ jobId: string | null; queued?: boolean }> {
       let first = false
-      await lane(slug, () =>
-        change(slug, (s) => {
+      await lane(slug, async () => {
+        const entry: QueuedNote = { id: randomUUID(), ...(typeof note === 'function' ? await note() : note), seenVersion }
+        return change(slug, (s) => {
           // a send to an empty queue starts it again: the hold is about notes that were already waiting
           first = !s.queue?.length
           if (first) s.queueHeld = false
           s.queue = [...(s.queue ?? []), entry]
         })
-      )
+      })
       const started = await pump(slug)
       return started && first ? { jobId: started } : { jobId: null, queued: true }
     },
@@ -265,6 +275,19 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
      * Staged files no entry or message needs are deleted. A video that can't be settled now is skipped;
      * a note it still marks started holds its queue when it would run (pump). */
     async recover(): Promise<void> {
+      const root = noteStagingRoot()
+      // A storage-root switch leaves valid staging outside listProjects(). Legacy folders have no
+      // source path, so keep them rather than delete another root's waiting attachments.
+      for (const name of await fs.readdir(root).catch((e) => { if (e.code === 'ENOENT') return []; throw e })) {
+        const dir = join(root, name)
+        const meta = await readJson<{ sourceProject?: string } | null>(join(dir, 'project.json'), null).catch(() => null)
+        if (typeof meta?.sourceProject !== 'string' || noteStagingDir(meta.sourceProject) !== dir) continue
+        try {
+          await fs.stat(join(meta.sourceProject, 'project.json'))
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') await fs.rm(dir, { recursive: true, force: true })
+        }
+      }
       for (const p of await listProjects()) {
         try {
           const st = await readAppState(p.slug)

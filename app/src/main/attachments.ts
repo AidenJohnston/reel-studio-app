@@ -100,7 +100,10 @@ const filesOf = (a: NoteAttachment): string[] => [a.asset, ...(a.thumb ? [a.thum
 export async function unstage(dir: string, staging: string, list: NoteAttachment[]): Promise<void> {
   const moved: NoteAttachment[] = []
   for (const a of list) {
-    if (await readSidecar(dir, a.asset)) continue
+    if (await readSidecar(dir, a.asset)) {
+      moved.push(a)
+      continue
+    }
     if (!(await readSidecar(staging, a.asset))) throw MISSING
     for (const rel of filesOf(a)) {
       const to = join(dir, ...rel.split('/'))
@@ -226,6 +229,8 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
+  /** Serialize attachment admission and removal with note admission and unstage. */
+  queue: <T>(slug: string, fn: () => Promise<T>, removing?: unknown) => Promise<T>
   /** Project-file removal uses the same reservation as jobs and manual edits. */
   reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
   /** Throws while the video is kept closed, in the job lane's words (jobs.ts refuseIfKeptClosed): part
@@ -249,42 +254,53 @@ function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: str
 
 /** New attachments always enter staging, so a job cannot start between admission and the attachment write. */
 async function attachDir(deps: AttachIpcDeps, name: unknown): Promise<string> {
-  const { slug } = projectOf(deps, name)
+  const { slug, dir } = projectOf(deps, name)
   const staging = deps.stagingDir(slug)
   await fs.mkdir(join(staging, 'work', 'assets'), { recursive: true })
-  // engine attach refuses a folder without one; nothing reads it
-  if (!existsSync(join(staging, 'project.json'))) await fs.writeFile(join(staging, 'project.json'), '{}\n')
+  // The engine requires project.json; startup uses the source path to identify orphaned staging.
+  await fs.writeFile(join(staging, 'project.json'), JSON.stringify({ sourceProject: dir }) + '\n')
   return staging
 }
 
 export function registerAttachmentIpc(deps: AttachIpcDeps): void {
   deps.handle('notes:attachFiles', async (_e, slug: unknown, paths: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
-    return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
+      return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:attachData', async (_e, slug: unknown, file: unknown) => {
-    const dir = await attachDir(deps, slug)
-    return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    })
   })
   deps.handle('notes:attachClipboard', async (_e, slug: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const img = await deps.clipboardImage().catch(() => null)
-    if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
-    return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const img = await deps.clipboardImage().catch(() => null)
+      if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
+      return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    })
   })
   deps.handle('notes:chooseAttachment', async (_e, slug: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
-    if (!picked?.length) return { attached: [], errors: [] }
-    return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
+      if (!picked?.length) return { attached: [], errors: [] }
+      return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:removeAttachment', async (_e, name: unknown, asset: unknown) => {
-    const { slug, dir } = projectOf(deps, name)
-    const staging = deps.stagingDir(slug)
-    if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
-    await deps.reserve(slug, async () => {
-      await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
-    })
+    const slug = typeof name === 'string' ? name : String(name)
+    return deps.queue(slug, async () => {
+      const { dir } = projectOf(deps, name)
+      const staging = deps.stagingDir(slug)
+      if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
+      await deps.reserve(slug, async () => {
+        await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+      })
+    }, asset)
   })
 }

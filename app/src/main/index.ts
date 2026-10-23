@@ -170,11 +170,17 @@ const jobs = createJobManager(
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
 async function startNote(slug: string, { id: noteId, text, attachments }: NoteToRun, record: (s: AppState) => void): Promise<string> {
   const dir = projectDir(slug)
-  return jobs.start(
+  let prepared!: () => void
+  const preparing = new Promise<void>((resolve) => { prepared = resolve })
+  const jobId = jobs.start(
     slug,
     'note',
     async (emit, signal, { owner }) => {
-      await unstage(dir, noteStagingDir(dir), attachments)
+      try {
+        await unstage(dir, noteStagingDir(dir), attachments)
+      } finally {
+        prepared()
+      }
       // saved under its queue entry's id (note-queue.ts); the app asks before anything goes into My style
       const opts = { attachments: attachments.map((f) => f.asset), id: noteId, saveStyleRules: false, ...(owner ? { owner } : {}) }
       const r: AgentResult = await ai.applyNote(dir, text, (e) => emit(e), signal, opts)
@@ -183,6 +189,9 @@ async function startNote(slug: string, { id: noteId, text, attachments }: NoteTo
     },
     { note: text || attachments.map((f) => f.name).join(', '), record }
   )
+  // pump holds the queue lane until preparation ends, including jobs that fail before their callback.
+  await Promise.race([preparing, jobs.get(jobId)!.done])
+  return jobId
 }
 const noteQueue = createNoteQueue({ jobs, startNote, changed: (slug) => broadcast('queue:change', slug), log })
 
@@ -402,6 +411,7 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
+    queue: (slug, fn, removing) => noteQueue.run(slug, fn, removing),
     reserve: (slug, fn) => jobs.hold(slug, fn),
     refuse: (slug) => jobs.refuseIfKeptClosed(slug),
     stagingDir: (slug) => noteStagingDir(projectDir(slug)),
@@ -489,18 +499,23 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, onVersion?: unknown) => {
-    const { note, files } = await takeNote(jobs, slug, text, attachments)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
       // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
-      const reply = noAiReply(note, files.length)
-      await addChat(slug, 'editor', reply.text, undefined, reply.actions)
-      return { jobId: null }
+      return noteQueue.run(slug, async () => {
+        const { note, files } = await takeNote(jobs, slug, text, attachments)
+        await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
+        const reply = noAiReply(note, files.length)
+        await addChat(slug, 'editor', reply.text, undefined, reply.actions)
+        return { jobId: null }
+      })
     }
     const seen = Number.isInteger(onVersion) ? Number(onVersion) : ((await readProject(slug)).version ?? 0)
-    return noteQueue.send(slug, { text: note, attachments: files.map(forChat) }, seen)
+    return noteQueue.send(slug, async () => {
+      const { note, files } = await takeNote(jobs, slug, text, attachments)
+      return { text: note, attachments: files.map(forChat) }
+    }, seen)
   })
   handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
     jobs.hold(slug, async () => {

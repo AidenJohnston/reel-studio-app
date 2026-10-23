@@ -271,6 +271,7 @@ describe('main: the IPC handlers', () => {
       log: () => undefined,
       projectDir: () => dir,
       readProject: async () => ({ broll: [] }) as any,
+      queue: (_slug, fn) => fn(),
       reserve: async (_slug, fn) => {
         if (typeof busy === 'function' ? busy() : busy) throw { code: 'BUSY' }
         return fn('test-owner')
