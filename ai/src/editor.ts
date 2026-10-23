@@ -374,17 +374,19 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     const undone = ctx.state.changed.size > 0 && sameEdit(p0, await loadProject(projectDir));
-    if (undone && !ctx.state.styleRulesAdded.length) {
+    if (undone) {
       // An edit that ends where it started (undone, or set to what it already was) is no change: never
-      // repeat its claim, make no version, and keep the attempt in the notes with no version.
+      // repeat its claim, make no version, and keep the attempt in the notes with no version. A My style
+      // rule the note saved changes no video, so it only adds its line to the reply.
       // While no vN exists the app plays versions/preview/draft.mp4, which this run's render_draft
       // overwrote with the discarded edit: put the restored edit back there.
       if (ctx.state.renders.some((x) => x.draft) && !(await hasFinishedVersion(projectDir))) await doRender(ctx, true);
       const p = await loadProject(projectDir);
       p.notes = [...(p.notes ?? []), { text: note.trim(), applied: [], at: new Date().toISOString(), ...(refs.length ? { attachments: refs } : {}) }];
       await saveProject(projectDir, p);
-      const summary = r.finished?.trim().endsWith('?') ? r.finished : UNDONE_REPLY;
-      return { summary, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [] };
+      const question = r.finished?.trim().endsWith('?') ? r.finished : null;
+      const summary = withStyleEcho(question ?? UNDONE_REPLY, ctx.state);
+      return { summary, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [] };
     }
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
       // nothing to render: a proposed rule still goes back to the app to ask about
