@@ -1,6 +1,6 @@
 // After a note makes a version, the creator's own AI connection may reword its title and summary
-// with one small-model call. The app's own words (shared/describe.ts) stay unless the rewording names
-// only changes in the version's receipts. Nothing waits for it: the version is already done.
+// with one small-model call. The app's own words (shared/describe.ts) stay unless every part of the
+// rewording claims what the receipts claim (acceptRewrite). Nothing waits for it: the version is already done.
 import { join } from 'node:path'
 import type { EditFact } from '../shared/api'
 import { acceptRewrite, describeFacts, versionTitle } from '../shared/describe'
