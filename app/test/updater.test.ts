@@ -11,7 +11,7 @@ function setup(
 ) {
   const installs: number[] = []
   const opened: string[] = []
-  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
+  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null, ...opts.memory }
   let now = 1000
   const backend: UpdateBackend = {
     check: async () => {
@@ -239,7 +239,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   const { u } = setup(async () => v013, {
     prepareToQuit: () => new Promise((_resolve, reject) => { fail = reject }),
     load: () => new Promise((resolve) => {
-      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null })
+      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null })
       reading()
     })
   })
@@ -413,6 +413,27 @@ describe('release notes from the GitHub list', () => {
     expect(JSON.stringify(u.state())).not.toContain('SmartScreen')
   })
 
+  it("fails if What's new lists drafts or source tags, loses a release's date or headline, or is empty after an offline launch", async () => {
+    const first = setup(async () => null, { backend: releasePageBackend(github(list), '0.1.2'), mode: 'page' })
+    await first.u.check('button')
+    const releases = [
+      { version: '0.1.5', date: '2026-11-18T18:00:00Z', summary: 'Captions you can drag. Music ducks under your voice.', url: page('v0.1.5') },
+      { version: '0.1.4', date: '2026-11-09T18:00:00Z', summary: 'Send to my phone over a QR code.', url: page('v0.1.4') },
+      { version: '0.1.3', date: '2026-10-30T18:00:00Z', summary: 'Turn a raw talking-head video into a finished, postable Reel.', url: page('v0.1.3') },
+      { version: '0.1.2', date: '2026-10-21T00:47:16Z', summary: 'Use your own Claude.', url: page('v0.1.2') }
+    ]
+    expect(first.u.state().releases).toEqual(releases)
+    const offline = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com')), { memory: first.memory(), mode: 'page' })
+    await offline.u.init()
+    expect(offline.u.state().releases).toEqual(releases)
+  })
+})
+
+it('fails if a saved What\'s new date that is not a date reaches Settings', async () => {
+  const url = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
+  const { u } = setup(async () => null, { memory: { updateHistory: [{ version: '0.1.3', date: 'not-a-date', summary: 'Captions you can drag.', url }] } })
+  await u.init()
+  expect(u.state().releases).toEqual([{ version: '0.1.3', date: null, summary: 'Captions you can drag.', url }])
 })
 
 it('fails if a download that does not pass its check stops a video or cannot be downloaded again', async () => {

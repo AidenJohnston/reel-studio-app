@@ -1,12 +1,14 @@
 // Preserve main's published vX.Y.Z selection, including GitHub prereleases.
 import { RELEASES_REPO } from '../shared/config'
+import { validDate } from '../shared/update'
 import type { UpdateBackend } from './updater'
 
-/** An app release on GitHub: its version, release page and raw markdown notes. */
+/** An app release on GitHub: its version, release page, raw markdown notes and publish time. */
 export interface FoundUpdate {
   version: string
   releaseUrl: string
   notes: string | null
+  publishedAt?: string | null
 }
 
 export interface ReleaseCheck {
@@ -80,7 +82,7 @@ export function appReleases(list: unknown): FoundUpdate[] {
   const found: { t: Triple; release: FoundUpdate }[] = []
   for (const r of list) {
     if (!r || typeof r !== 'object') continue
-    const { draft, tag_name, html_url, body } = r as { draft?: unknown; tag_name?: unknown; html_url?: unknown; body?: unknown }
+    const { draft, tag_name, html_url, body, published_at } = r as { draft?: unknown; tag_name?: unknown; html_url?: unknown; body?: unknown; published_at?: unknown }
     if (draft !== false) continue // drafts, and anything that does not say it is not one
     const t = parseTag(tag_name)
     if (!t || found.some((f) => cmp(f.t, t) === 0)) continue
@@ -90,7 +92,8 @@ export function appReleases(list: unknown): FoundUpdate[] {
       release: {
         version: t.join('.'),
         releaseUrl: allowedReleaseUrl(html_url) ?? pageFor(tag_name as string),
-        notes: typeof body === 'string' ? body : null
+        notes: typeof body === 'string' ? body : null,
+        publishedAt: validDate(published_at)
       }
     })
   }

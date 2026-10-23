@@ -42,7 +42,7 @@ test.beforeAll(async () => {
     const path = (req.url ?? '').split('?')[0]
     if (path === '/releases') {
       const list = [release('v0.1.2')]
-      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES }))
+      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES, published_at: '2026-10-30T18:00:00Z' }))
       return void res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(list))
     }
     if (path === '/download/v0.1.3/latest-mac.yml') return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
@@ -88,19 +88,20 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   return { app, page }
 }
 
-test('fails if a prerelease update cannot be downloaded, declined or snoozed', async () => {
+test('fails if a prerelease update cannot be downloaded, declined or snoozed, or What\'s new misses it', async () => {
   test.skip(process.platform !== 'darwin', 'the in-app download backend is macOS-only')
   const { app, page } = await launch()
   try {
     await passFirstRun(page)
     await page.getByTestId('nav-settings').click()
     const row = page.getByTestId('update-settings')
-    await expect(row).toContainText('You have Reel Studio 0.1.2')
+    await expect(row).toContainText('Version 0.1.2')
     await expect(page.getByTestId('update-releases-link')).toHaveAttribute('href', 'https://github.com/AidenJohnston/reel-studio-app/releases')
     await row.scrollIntoViewIfNeeded()
     latest = 'new'
     await page.getByTestId('update-settings-button').click()
-    await expect(row).toContainText('Reel Studio 0.1.3 is ready to download.')
+    await expect(row).toContainText('0.1.3 is ready to download')
+    await expect(page.getByTestId('release-0.1.3')).toContainText('Updates install themselves. Fix: the update note no longer covers the AI status.')
     await row.scrollIntoViewIfNeeded()
     const button = page.getByTestId('update-button')
     await expect(button).toContainText('Download update')
@@ -133,7 +134,7 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(confirm).toBeHidden()
 
     await page.getByTestId('nav-settings').click()
-    await expect(row).toContainText('Reel Studio 0.1.3 is downloaded.')
+    await expect(row).toContainText('0.1.3 is downloaded')
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
     await row.scrollIntoViewIfNeeded()
     await page.getByTestId('nav-settings').focus()

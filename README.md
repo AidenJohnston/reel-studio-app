@@ -112,7 +112,7 @@ crash reporting.
 Update checks run once a day (an hour later if the request failed), when you click "Check for updates", and when
 you click **Download update** for an update found before the app last started or after a failed download, to
 confirm it is still the newest.
-Turn the daily check off in Settings with "Check for updates". A check makes these requests, with no cookies,
+Turn the daily check off in Settings with "Check for updates automatically". A check makes these requests, with no cookies,
 account or ID:
 
 1. GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only

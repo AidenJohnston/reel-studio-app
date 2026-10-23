@@ -1,4 +1,4 @@
-import type { ReleaseNotes, UpdateMode, UpdateState } from '../shared/update'
+import { validDate, type ReleaseEntry, type ReleaseNotes, type UpdateMode, type UpdateState } from '../shared/update'
 import { allowedReleaseUrl, isNewer } from './update-check'
 
 export const FIRST_CHECK_DELAY_MS = 15_000
@@ -39,6 +39,7 @@ export interface UpdateMemory {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
+  updateHistory: ReleaseEntry[] | null
 }
 
 export function stillNewer(remembered: unknown, current: string): RememberedRelease | null {
@@ -58,6 +59,17 @@ function rememberedNotes(notes: unknown, current: string): ReleaseNotes | null {
   const { version, items, totalItems } = notes
   if (typeof version !== 'string' || !isNewer(version, current) || !strings(items) || typeof totalItems !== 'number') return null
   return { version, items, totalItems }
+}
+
+export function validHistory(h: unknown): ReleaseEntry[] {
+  if (!Array.isArray(h)) return []
+  return h.flatMap((e): ReleaseEntry[] => {
+    if (!e || typeof e !== 'object') return []
+    const { version, date, summary, url } = e as Record<string, unknown>
+    const page = allowedReleaseUrl(url)
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version) || !page) return []
+    return [{ version, date: validDate(date), summary: typeof summary === 'string' ? summary : null, url: page }]
+  })
 }
 
 export function validDismissal(d: unknown): Dismissal | null {

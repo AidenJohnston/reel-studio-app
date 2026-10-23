@@ -65,6 +65,40 @@ export function releaseLinkLabel(n: ReleaseNotes): string {
   return more === 0 ? 'View release on GitHub' : `${more} more ${more === 1 ? 'change' : 'changes'} on GitHub`
 }
 
+export function aboutStatus(s: UpdateState): string {
+  const v = offered(s)
+  const now = `Version ${s.currentVersion}`
+  switch (s.status) {
+    case 'checking':
+      return `${now} · Checking for updates…`
+    case 'up-to-date':
+      return `${now} · Up to date`
+    case 'available':
+      return `${now} · ${v} is ${s.mode === 'page' ? 'out' : 'ready to download'}`
+    case 'downloading':
+      return `${now} · Downloading ${v}${pct(s)}`
+    case 'downloaded':
+      return `${now} · ${v} is downloaded`
+    case 'installing':
+      return `${now} · Restarting to update…`
+    case 'error':
+      return updateAction(s) === 'install' ? `${now} · ${v} is downloaded` : updateAction(s) !== 'none' ? `${now} · ${v} is out` : now
+    default:
+      return now
+  }
+}
+
+export function aboutButton(s: UpdateState): string {
+  const action = updateAction(s)
+  if (action !== 'none') return s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download'
+  if (s.status === 'checking') return 'Checking…'
+  if (s.status === 'downloading') return 'Downloading…'
+  if (s.status === 'installing') return 'Restarting…'
+  if (s.status === 'up-to-date') return 'Check again'
+  if (s.status === 'error') return 'Try again'
+  return 'Check for updates'
+}
+
 export interface InstallQuestion {
   title: string
   body: string
