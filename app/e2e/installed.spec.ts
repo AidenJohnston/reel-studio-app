@@ -220,7 +220,7 @@ TAKES.forEach((take, i) => {
         await page.getByTestId('edit-myself').click()
         await page.getByTestId('tab-captions').click()
         await expect(page.getByTestId('caption-controls')).toBeVisible()
-        await page.getByTestId('cap-look-yellow').click()
+        await page.getByTestId('cap-color-yellow').click()
         await page.getByTestId('make-version').click()
         await expect(page.getByTestId('note-progress')).toContainText('Updating your subtitles')
         result.manualLabel = await page.getByTestId('note-progress').innerText()
