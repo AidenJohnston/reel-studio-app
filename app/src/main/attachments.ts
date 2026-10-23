@@ -183,6 +183,7 @@ export async function attachPaths(deps: AttachDeps, dir: string, files: { path: 
       out.attached.push(withThumbUrl(dir, a))
     } catch (e) {
       deps.log(`[attach] ${name}: ${(e as { code?: string })?.code ?? ''} ${(e as { message?: string })?.message ?? ''}`)
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') throw e
       out.errors.push(friendly(e))
     }
   }
