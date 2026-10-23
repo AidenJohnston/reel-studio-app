@@ -310,8 +310,10 @@ See `ai/README.md` for the extra methods beyond this list.
 
 ### Frozen image assets
 
-Pictures reach the edit through `resolve_asset`. It offers candidates, each with a still, read where they
-are (the Library, an attachment, or a fresh download), and only a committed candidate can be placed.
+Web and found pictures reach the edit through `resolve_asset`. It offers candidates, each with a still,
+read where they are (an attachment or a fresh download), and only a committed candidate can be placed.
 Commit copies the bytes to `work/assets/frozen/<kind>/<sha256>.<ext>` (reusing a file with the same hash)
-and appends one record of source, licence, credit and intent to `work/assets/manifest.jsonl`. `add_broll`
+and appends one record of source, licence, credit and intent to `work/assets/manifest.jsonl`. The user's
+own Library pictures skip the candidate turn: `add_broll`, `update_broll` and `logo-pop` take a
+`Library/...` path and freeze it with its record in the same call, unseen by the model. `add_broll` also
 takes a committed picture's `assetId` or path; video clips and animations are placed as before.

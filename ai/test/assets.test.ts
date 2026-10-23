@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, executeTool, loadProject, newToolState, runAgent, saveProject, StyleStore, ToolContext } from '../src';
+import { createAI, executeTool, loadProject, newToolState, RecordingProvider, ReplayProvider, runAgent, saveProject, StyleStore, ToolContext } from '../src';
 import { discardAssetCandidates } from '../src/tools';
-import { FakeHost, ScriptedModel, call, makeProject, tinyPng, tmpDir } from './helpers';
+import { FakeHost, ScriptedModel, call, assetSteps, makeProject, tinyPng, tmpDir } from './helpers';
 
 /** fetch-image the way the engine does it: the file, plus its search credit in credits.json. */
 class AssetHost extends FakeHost {
@@ -50,6 +50,16 @@ async function commit(ctx: ToolContext, candidateId: string) {
   return JSON.parse(r.content).asset;
 }
 const place = (asset: string) => ({ anchor: { from: 'w29', to: 'w30' }, treatment: 'side-card', asset, animation: null, params: {} });
+const FROZEN = /^work\/assets\/frozen\/(image|logo)\/[0-9a-f]{64}\.png$/;
+async function ledgerRecords(dir: string) {
+  return (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+}
+/** a picture fetch_image saved earlier, with no resolve_asset commit */
+async function uncommittedDownload(dir: string) {
+  await fs.mkdir(path.join(dir, 'work/assets'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'work/assets/download.png'), tinyPng([20, 20, 220]));
+  return 'work/assets/download.png';
+}
 
 describe('frozen image assets', () => {
   it('fails if a torn ledger line or a newer record field breaks a note, drops a credit, or swallows the next commit', async () => {
@@ -103,12 +113,12 @@ describe('frozen image assets', () => {
     expect(await fs.readFile(path.join(dir, 'work/transcript.json'))).toEqual(transcript);
   });
 
-  it('fails if logo-pop takes an uncommitted picture, loses its picture after the run, or drops its credit', async () => {
+  it('fails if logo-pop takes an uncommitted download, loses its picture after the run, or drops its credit', async () => {
     const { ctx, dir, host, local } = await setup();
     host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];
     const asset = await commit(ctx, (await candidates(ctx, 'bread photo'))[0].id);
     const pop = (image: string) => ({ ...place(''), asset: null, animation: { template: 'logo-pop', params: { image, text: 'Bread' } } });
-    expect((await executeTool(ctx, 'add_broll', pop(local))).content).toMatch(/resolve_asset/);
+    expect((await executeTool(ctx, 'add_broll', pop(await uncommittedDownload(dir)))).content).toMatch(/resolve_asset/);
     const placed = await executeTool(ctx, 'add_broll', pop(asset.assetId));
     expect(placed.isError, placed.content).toBe(false);
     await discardAssetCandidates(ctx);
@@ -166,17 +176,68 @@ describe('frozen image assets', () => {
     expect(await fs.readFile(frozen)).toEqual(tinyPng());
   });
 
-  it('fails if an uncommitted image can be placed in a reel', async () => {
-    const { ctx, dir, local } = await setup();
-    const uncommitted = await executeTool(ctx, 'add_broll', place(local));
+  it('fails if an uncommitted web or project picture can be placed in a reel', async () => {
+    const { ctx, dir } = await setup();
+    const download = await uncommittedDownload(dir);
+    const uncommitted = await executeTool(ctx, 'add_broll', place(download));
     expect(uncommitted.isError).toBe(true);
     expect(uncommitted.content).toMatch(/commit/);
     expect((await loadProject(dir)).broll).toEqual([]);
-    const asset = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const asset = await commit(ctx, (await candidates(ctx, download, 'commentary'))[0].id);
     expect((await executeTool(ctx, 'add_broll', place(asset.assetId))).isError).toBe(false);
     expect((await loadProject(dir)).broll[0].asset).toBe(asset.committedPath);
-    expect((await executeTool(ctx, 'update_broll', { id: 'b1', asset: local })).isError).toBe(true);
+    await fs.writeFile(path.join(dir, 'work/assets/other.png'), tinyPng([220, 220, 20]));
+    expect((await executeTool(ctx, 'update_broll', { id: 'b1', asset: 'work/assets/other.png' })).isError).toBe(true);
     expect((await executeTool(ctx, 'update_broll', { id: 'b1', asset: asset.assetId })).isError).toBe(false);
+  });
+
+  it('fails if a Library picture placed by its path needs a resolve turn, or lands without a frozen copy and its record', async () => {
+    const { ctx, dir, root, host, local } = await setup();
+    const placed = await executeTool(ctx, 'add_broll', place(local));
+    expect(placed.isError, placed.content).toBe(false);
+    const [b1] = (await loadProject(dir)).broll;
+    expect(b1.asset).toMatch(FROZEN);
+    expect(await fs.readFile(path.join(dir, String(b1.asset)))).toEqual(tinyPng());
+    // a later change to the Library file does not change the edit
+    await fs.writeFile(path.join(root, local), tinyPng([1, 2, 3]));
+    expect(await fs.readFile(path.join(dir, String(b1.asset)))).toEqual(tinyPng());
+
+    const loaf = 'Library/Images/loaf.png';
+    await fs.writeFile(path.join(root, loaf), tinyPng([200, 160, 90]));
+    expect((await executeTool(ctx, 'update_broll', { id: 'b1', asset: loaf })).isError).toBe(false);
+    const pop = await executeTool(ctx, 'add_broll', { ...place(''), anchor: { from: 'w48', to: 'w52' }, asset: null,
+      animation: { template: 'logo-pop', params: { image: loaf, text: 'Loaf' } } });
+    expect(pop.isError, pop.content).toBe(false);
+    expect(String(host.animations[0].params.image).endsWith(path.normalize((await ledgerRecords(dir))[2].committedPath))).toBe(true);
+
+    expect((await ledgerRecords(dir)).map((a) => [a.provenance.intent, a.source, a.rightsConfidence, a.kind])).toEqual([
+      [local, 'library', 'user-owned', 'image'], [loaf, 'library', 'user-owned', 'image'], [loaf, 'library', 'user-owned', 'logo'],
+    ]);
+    expect(host.calls.filter((c) => c.command === 'inspect-image')).toEqual([]);
+    expect((await loadProject(dir)).broll[0].asset).toBe((await ledgerRecords(dir))[1].committedPath);
+  });
+
+  it('fails if a provider whose dispose throws leaves the run\'s candidate stills behind', async () => {
+    const { ctx, dir, local } = await setup();
+    class ClosedSocket extends ScriptedModel { dispose(): void { throw new Error('socket already closed'); } }
+    const model = new ClosedSocket([
+      { toolCalls: [call('resolve_asset', { kind: 'image', intent: local })] },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    await expect(runAgent({ provider: model, system: 's', task: 't', ctx, onEvent: () => undefined })).rejects.toThrow(/socket already closed/);
+    expect(await fs.readdir(path.join(dir, 'work/thumbs'))).toEqual([]);
+  });
+
+  it('fails if a recorded resolve and commit cannot replay, because each run mints new candidate and asset IDs', async () => {
+    const first = await setup();
+    const fixture = path.join(first.root, 'session.json');
+    const steps = [...assetSteps(first.local, place('')), { toolCalls: [call('finish', { summary_for_user: 'ok' })] }];
+    await runAgent({ provider: new RecordingProvider(new ScriptedModel(steps), fixture, 'resolve'), system: 's', task: 't', ctx: first.ctx, onEvent: () => undefined });
+    const again = await setup();
+    const replay = new ReplayProvider(fixture);
+    await runAgent({ provider: replay, system: 's', task: 't', ctx: again.ctx, onEvent: () => undefined });
+    expect(replay.remaining).toBe(0);
+    expect((await loadProject(again.dir)).broll.map((b) => b.asset)).toEqual([(await ledgerRecords(again.dir))[0].committedPath]);
   });
 
   it('fails if a request leaves uncommitted downloads or stills behind, or deletes a picture it did not download', async () => {
@@ -256,9 +317,29 @@ describe('frozen image assets', () => {
     const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
     await expect(ai.applyNote(dir, 'show the bread', () => undefined)).rejects.toThrow();
     expect(await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).toBe(ledger);
+    // the note froze the same bytes as the earlier record, so that file is still the earlier record's
+    for (const r of withRecord ? await ledgerRecords(dir) : []) expect(await fs.readFile(path.join(dir, r.committedPath))).toEqual(tinyPng());
   });
 
-  it('fails if a note runs when it cannot list work/assets, and its rollback then deletes frozen pictures', async () => {
+  it('fails if a failed note leaves a picture it froze inside a frozen folder that already existed', async () => {
+    const { ctx, dir, root, host, local } = await setup();
+    const earlier = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const loaf = 'Library/Images/loaf.png';
+    await fs.writeFile(path.join(root, loaf), tinyPng([200, 160, 90]));
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { ...place(loaf), anchor: { from: 'w48', to: 'w52' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added the loaf.' })] },
+    ]);
+    host.failRender = true;
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await expect(ai.applyNote(dir, 'show the loaf', () => undefined)).rejects.toThrow();
+    const frozen = path.join(dir, 'work/assets/frozen/image');
+    expect(await fs.readdir(frozen)).toEqual([path.basename(earlier.committedPath)]);
+    expect((await ledgerRecords(dir)).map((r) => r.assetId)).toEqual([earlier.assetId]);
+  });
+
+  // Windows ignores POSIX modes, so chmod cannot make work/assets unreadable there; Linux and macOS cover it.
+  it.skipIf(process.platform === 'win32')('fails if a note runs when it cannot list work/assets, and its rollback then deletes frozen pictures', async () => {
     const { ctx, dir, host, local } = await setup();
     const asset = await commit(ctx, (await candidates(ctx, local))[0].id);
     const assets = path.join(dir, 'work/assets');
@@ -277,6 +358,77 @@ describe('frozen image assets', () => {
     } finally { await fs.chmod(assets, 0o755); }
     expect(await fs.readFile(path.join(dir, asset.committedPath))).toEqual(tinyPng());
     expect((await fs.readFile(path.join(assets, 'manifest.jsonl'), 'utf8')).trim()).not.toBe('');
+  });
+
+  // Windows ignores POSIX modes; Linux and macOS cover both cases.
+  it.skipIf(process.platform === 'win32')('fails if a note starts when it cannot read the ledger, and its rollback then deletes earlier frozen pictures', async () => {
+    const { ctx, dir, host, local } = await setup();
+    const asset = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const assets = path.join(dir, 'work/assets');
+    const model = new ScriptedModel([
+      async () => {
+        await fs.chmod(assets, 0o755);
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] };
+      },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    host.failRender = true;
+    await fs.chmod(assets, 0o600);                 // listable, but the ledger inside cannot be stat'ed
+    try {
+      const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+      await expect(ai.applyNote(dir, 'put the price on screen', () => undefined)).rejects.toThrow();
+    } finally { await fs.chmod(assets, 0o755); }
+    expect(await fs.readFile(path.join(dir, asset.committedPath))).toEqual(tinyPng());
+  });
+
+  it.skipIf(process.platform === 'win32')('fails if a rollback that could not restore project.json deletes the picture that project still uses', async () => {
+    const { dir, root, host } = await setup();
+    const loaf = 'Library/Images/loaf.png';
+    await fs.writeFile(path.join(root, loaf), tinyPng([200, 160, 90]));
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { ...place(loaf), anchor: { from: 'w48', to: 'w52' } })] },
+      async () => { await fs.chmod(dir, 0o555); return { toolCalls: [call('finish', { summary_for_user: 'Added the loaf.' })] }; },
+    ]);
+    host.failRender = true;
+    try {
+      const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+      await expect(ai.applyNote(dir, 'show the loaf', () => undefined)).rejects.toThrow();
+    } finally { await fs.chmod(dir, 0o755); }
+    const [b] = (await loadProject(dir)).broll;
+    expect(b.asset).toMatch(FROZEN);
+    expect(await fs.readFile(path.join(dir, String(b.asset)))).toEqual(tinyPng([200, 160, 90]));
+  });
+
+  it.skipIf(process.platform === 'win32')('fails if a rollback follows a symlinked frozen folder and deletes a file outside the project', async () => {
+    const { dir, root, host } = await setup();
+    const outside = path.join(root, 'elsewhere');
+    await fs.mkdir(outside);
+    await fs.mkdir(path.join(dir, 'work/assets/frozen'), { recursive: true });
+    await fs.symlink(outside, path.join(dir, 'work/assets/frozen/image'), 'dir');
+    const model = new ScriptedModel([
+      async () => {
+        await fs.writeFile(path.join(outside, 'mine.png'), tinyPng());   // the user saves a file there meanwhile
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] };
+      },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    host.failRender = true;
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await expect(ai.applyNote(dir, 'put the price on screen', () => undefined)).rejects.toThrow();
+    expect(await fs.readdir(outside)).toEqual(['mine.png']);
+  });
+
+  it('fails if a stray file in the frozen folder stops every later note', async () => {
+    const { dir, host } = await setup();
+    await fs.mkdir(path.join(dir, 'work/assets/frozen'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'work/assets/frozen/.DS_Store'), '');
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added the price.' })] },
+    ]);
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await ai.applyNote(dir, 'put the price on screen', () => undefined);
+    expect((await loadProject(dir)).broll).toHaveLength(1);
   });
 
   it('fails if a frozen picture deleted from disk can never be committed again', async () => {

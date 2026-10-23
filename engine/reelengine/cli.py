@@ -129,11 +129,12 @@ def cmd_search_images(args):
 def _thumb(proj: Path, out: Path, stem: str | None = None) -> str | None:
     """A small still the AI LOOKS at before placing a picture: a matching title can hide a wrong one."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
         tdir = proj / "work" / "thumbs"
         tdir.mkdir(parents=True, exist_ok=True)
         with Image.open(out) as im:
-            im = im.convert("RGBA")
+            # upright, as the renderer's open_image shows it: phone JPEGs store pixels sideways plus an EXIF turn
+            im = ImageOps.exif_transpose(im).convert("RGBA")
             bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
             bg.alpha_composite(im)
             bg = bg.convert("RGB")
@@ -150,12 +151,12 @@ def _thumb(proj: Path, out: Path, stem: str | None = None) -> str | None:
 def cmd_inspect_image(args):
     """A picture the AI is choosing (Library, attachment or download), read where it is: its size and
     a still of its own, so candidates inspected side by side never share one."""
-    from PIL import Image
+    from PIL import Image, ImageOps
     from .safepath import safe_resolve
     proj = _project(args)
     src = safe_resolve(proj, args.asset, root=Path(args.root) if args.root else None, what="image")
     with Image.open(src) as im:
-        width, height = im.size
+        width, height = ImageOps.exif_transpose(im).size  # the size the video shows, as the still is drawn
     thumb = _thumb(proj, src, stem=f"candidate-{uuid.uuid4().hex}")
     if not thumb:
         raise EngineError("NOT_AN_IMAGE", f"no still for {src.name}", "I couldn't open that picture. Try another one.")

@@ -169,7 +169,7 @@ export class ScriptedModel implements ModelProvider {
   readonly supportsImages = true;
   requests: CompletionRequest[] = [];
   private i = 0;
-  constructor(private readonly steps: (Partial<CompletionResponse> | ((req: CompletionRequest) => Partial<CompletionResponse>) | Error)[]) {}
+  constructor(private readonly steps: (Partial<CompletionResponse> | ((req: CompletionRequest) => Partial<CompletionResponse> | Promise<Partial<CompletionResponse>>) | Error)[]) {}
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
     this.requests.push(structuredClone({ ...req, signal: undefined }));
     const s = this.steps[this.i++];

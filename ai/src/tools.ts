@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AssetCandidate, AssetKind, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, hashAsset, readAssets, removeFiles } from './assets';
+import { AssetCandidate, AssetKind, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryPicture, hashAsset, readAssets, removeFiles } from './assets';
 import { readAttachment } from './attachments';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
@@ -568,10 +568,17 @@ async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: str
 function assetStore(ctx: ToolContext) {
   return { projectDir: ctx.projectDir, root: ctx.host.reelStudioRoot() };
 }
-async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video']): Promise<string> {
+/** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
+ * the user's own Library picture frozen and recorded in the same call, and anything else only once
+ * resolve_asset committed it as one of `kinds`. */
+async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], libraryKind: AssetKind = 'image'): Promise<string> {
   const ref = /^asset_[0-9a-f-]{36}$/.test(asset) ? asset : resolveAsset(ctx, asset)?.ref;
   if (!ref) throw new ToolInputError(`asset not found: ${asset}`);
   if (kinds.includes('video') && ctx.state.animationsMade?.has(ref)) return ref;
+  if (ref.startsWith('Library/') && kinds.includes(libraryKind) && /\.(png|jpe?g|gif|webp)$/i.test(ref)) {
+    try { return (await freezeLibraryPicture(assetStore(ctx), ref, libraryKind)).committedPath; }
+    catch (e) { throw new ToolInputError(`${ref}: ${e instanceof Error ? e.message : String(e)}`); }
+  }
   const committed = await committedAsset(assetStore(ctx), ref);
   if (!kinds.includes(committed.kind)) throw new ToolInputError(`This placement needs ${kinds.join(' or ')}. Choose that kind with resolve_asset.`);
   return committed.committedPath;
@@ -823,8 +830,8 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   for (const [k, ps] of Object.entries(spec.params)) {     // file params (logo-pop image): a committed picture
     if (ps.format !== 'file' || typeof params[k] !== 'string' || String(params[k]).startsWith('data:')) continue;
     // a re-time replays the path its sidecar recorded, which may predate committed pictures
-    const ref = opts.replay ? resolveAsset(ctx, String(params[k]))?.ref : await placementAsset(ctx, String(params[k]), STILL_KINDS);
-    if (!ref) throw new ToolInputError(`${template}: ${k} file not found: ${params[k]} (use an assetId from resolve_asset)`);
+    const ref = opts.replay ? resolveAsset(ctx, String(params[k]))?.ref : await placementAsset(ctx, String(params[k]), STILL_KINDS, 'logo');
+    if (!ref) throw new ToolInputError(`${template}: ${k} file not found: ${params[k]} (use a Library/... path or an assetId from resolve_asset)`);
     params[k] = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), ref).abs;
   }
   if (opts.fullScreen && params.layout === undefined) params.layout = 'full';
@@ -1096,11 +1103,11 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset (a picture or video assetId from resolve_asset commit) or animation. text-pop needs only params.text.',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture path from list_library (placed at once), or the assetId of a clip, or of a web or project picture, committed with resolve_asset. text-pop needs only params.text.',
     parameters: S.obj({
       anchor: ANCHOR,
       treatment: S.enum(TREATMENTS),
-      asset: S.opt(S.str('picture or video assetId from resolve_asset commit')),
+      asset: S.opt(S.str('a Library/... picture path, or a picture or video assetId from resolve_asset commit')),
       animation: S.opt(S.obj({
         template: S.enum(ANIMATION_IDS),
         params: ANIM_PARAMS,
@@ -1135,7 +1142,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'update_broll',
-    description: 'Change an existing b-roll by id. Replacement pictures and videos require a committed assetId or path from resolve_asset. Pass null for anything you are not changing.',
+    description: 'Change an existing b-roll by id. A replacement picture is a Library/... path or a committed assetId from resolve_asset; a replacement video is a committed assetId. Pass null for anything you are not changing.',
     parameters: S.obj({
       id: S.str(),
       anchor: S.opt(ANCHOR),
@@ -1208,7 +1215,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'resolve_asset',
-    description: 'Get an asset ready to place. Video, music and sfx use local Library or project files; previews are contact sheets or waveforms with duration and LUFS. intent is a Library or project file, a search_images result url, a picture query, or (for website_screenshot) a web address. Returns candidates, each with a still: LOOK at it, then call again with phase commit and the matching candidateId; add_broll takes the committed assetId. Logos must be official marks.',
+    description: 'Get an asset ready to place (a Library picture needs none of this: give add_broll its path). Video, music and sfx use local Library or project files; previews are contact sheets or waveforms with duration and LUFS. intent is a Library or project file, a search_images result url, a picture query, or (for website_screenshot) a web address. Returns candidates, each with a still: LOOK at it, then call again with phase commit and the matching candidateId; add_broll takes the committed assetId. Logos must be official marks.',
     parameters: S.obj({ kind: S.enum(ASSET_KINDS), intent: S.str(), phase: S.opt(S.enum(['candidates', 'commit'])),
       candidateId: S.opt(S.str()), licensePolicy: S.opt(S.enum(['commercial-safe', 'open-only', 'user-owned', 'commentary'], 'commercial-safe (default): the user\'s own files and openly licensed web pictures. commentary also allows screenshots and pictures that are copyrighted or have no licence: only while talking about them, and name them in the finish summary')) }),
     async run(ctx, args) {
@@ -1222,7 +1229,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'list_assets',
-    description: 'List committed frozen assets and their provenance. Use list_library to choose an existing local file, then resolve_asset to inspect and commit it.',
+    description: 'List committed frozen assets and their provenance, including Library pictures already placed.',
     parameters: S.obj({ kind: S.opt(S.enum(ASSET_KINDS)), query: S.opt(S.str()) }),
     async run(ctx, args) {
       const assets = (await readAssets(assetStore(ctx))).filter((a) => (!args.kind || a.kind === args.kind)
@@ -1262,7 +1269,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'fetch_image',
-    description: 'Download an image from a url into this project. Prefer resolve_asset with the url: add_broll takes a picture only once resolve_asset commits it. Returns the saved path (resolve_asset accepts it) and a small still: LOOK at it (a matching title can carry a wrong picture).',
+    description: 'Download an image from a url into this project. Prefer resolve_asset with the url: add_broll takes a web picture only once resolve_asset commits it. Returns the saved path (resolve_asset accepts it) and a small still: LOOK at it (a matching title can carry a wrong picture).',
     parameters: S.obj({ url: S.str(), name: S.opt(S.str('short file name hint')) }),
     async run(ctx, args) {
       const got = await fetchImageWithThumb(ctx, args.url, args.name ?? undefined);

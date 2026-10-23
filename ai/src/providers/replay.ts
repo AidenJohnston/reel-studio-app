@@ -13,6 +13,62 @@ export interface Fixture {
   steps: { response: { text: string; toolCalls: { id: string; name: string; args: Record<string, unknown> }[]; repaired?: string; malformed?: boolean }; lastMessage?: string; /** how long the model took to answer */ ms?: number }[];
 }
 
+/** An argument a tool minted during the session (resolve_asset's candidateId and assetId are random UUIDs).
+ * The fixture stores where it came from, `{ "$result": "<callId>", "path": "candidates.0.id" }`, and the
+ * replay reads it from that call's result in this run. */
+export interface ResultRef { $result: string; path: string }
+const MINTED = /^(asset_)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const isRef = (v: unknown): v is ResultRef => !!v && typeof v === 'object' && !Array.isArray(v)
+  && Object.keys(v).sort().join() === '$result,path' && typeof (v as any).$result === 'string' && typeof (v as any).path === 'string';
+
+function toolResults(messages: CompletionRequest['messages']) {
+  return messages.flatMap((m) => (m.role === 'tool' ? m.results : []));
+}
+/** A tool result's JSON. Its first line only: the agent appends "(earlier images removed)" to old results
+ * (pruneImages), and JSON.stringify never writes a raw newline. */
+function parsed(content: string): unknown {
+  try { return JSON.parse(content.split('\n')[0]); } catch { return undefined; }
+}
+function findPath(v: unknown, want: string, at: string[] = []): string[] | null {
+  if (v === want) return at;
+  if (!v || typeof v !== 'object') return null;
+  for (const [k, child] of Object.entries(v)) {
+    const hit = findPath(child, want, [...at, k]);
+    if (hit) return hit;
+  }
+  return null;
+}
+/** Recording: a minted string becomes a ResultRef to the first result that holds it, the call that minted
+ * it. A later copy (list_assets, a commit echoing its candidate) can be in a different order on replay. */
+export function refsForMinted(args: unknown, messages: CompletionRequest['messages']): unknown {
+  if (typeof args === 'string' && MINTED.test(args)) {
+    for (const r of toolResults(messages)) {
+      const at = findPath(parsed(r.content), args);
+      if (at) return { $result: r.callId, path: at.join('.') } satisfies ResultRef;
+    }
+    return args;
+  }
+  if (Array.isArray(args)) return args.map((a) => refsForMinted(a, messages));
+  if (args && typeof args === 'object') return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, refsForMinted(v, messages)]));
+  return args;
+}
+/** Replay: each ResultRef becomes the value at its path in this run's result of that call. */
+export function fillRefs(args: unknown, messages: CompletionRequest['messages']): unknown {
+  if (isRef(args)) {
+    const result = toolResults(messages).find((r) => r.callId === args.$result);
+    if (!result) throw new AIError('replay_ref', 'The recorded session refers to a tool result this run does not have.', { detail: `no result for ${args.$result}` });
+    let v: unknown = parsed(result.content);
+    for (const key of args.path.split('.')) v = v && typeof v === 'object' ? (v as Record<string, unknown>)[key] : undefined;
+    if (typeof v !== 'string') {
+      throw new AIError('replay_ref', 'The recorded session refers to a tool result this run does not have.', { detail: `${args.$result} has no string at ${args.path}: ${result.content.slice(0, 300)}` });
+    }
+    return v;
+  }
+  if (Array.isArray(args)) return args.map((a) => fillRefs(a, messages));
+  if (args && typeof args === 'object') return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, fillRefs(v, messages)]));
+  return args;
+}
+
 export class RecordingProvider implements ModelProvider {
   readonly id: ModelProvider['id'];
   readonly supportsImages: boolean;
@@ -27,7 +83,7 @@ export class RecordingProvider implements ModelProvider {
     const res = await this.inner.complete(req);
     const last = req.messages.at(-1);
     this.fixture.steps.push({
-      response: { text: res.text, toolCalls: res.toolCalls.map(({ id, name, args }) => ({ id, name, args })),
+      response: { text: res.text, toolCalls: res.toolCalls.map(({ id, name, args }) => ({ id, name, args: refsForMinted(args, req.messages) as Record<string, unknown> })),
         ...(res.repaired ? { repaired: res.repaired } : {}), ...(res.malformed ? { malformed: true } : {}) },
       ms: Date.now() - t0,
       lastMessage: last ? (last.role === 'tool' ? last.results.map((r) => r.name).join(',') : last.role) : undefined,
@@ -49,10 +105,10 @@ export class ReplayProvider implements ModelProvider {
     this.supportsImages = opts.supportsImages ?? true;
   }
   get remaining(): number { return this.fixture.steps.length - this.i; }
-  async complete(_req: CompletionRequest): Promise<CompletionResponse> {
+  async complete(req: CompletionRequest): Promise<CompletionResponse> {
     const step = this.fixture.steps[this.i++];
     if (!step) throw new AIError('replay_exhausted', 'The recorded session has no more replies.', { detail: `step ${this.i}` });
-    return { text: step.response.text, toolCalls: step.response.toolCalls.map((c) => ({ ...c, args: structuredClone(c.args) })) };
+    return { text: step.response.text, toolCalls: step.response.toolCalls.map((c) => ({ ...c, args: fillRefs(c.args, req.messages) as Record<string, unknown> })) };
   }
 }
 

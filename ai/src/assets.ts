@@ -30,7 +30,9 @@ export interface AssetCandidate {
   rightsConfidence: 'user-owned' | 'verified-metadata' | 'commentary';
   sha256: string;
 }
-export interface FrozenAsset extends AssetCandidate {
+/** A Library picture placed by its path is frozen without a candidate, so it has no still. */
+export interface FrozenAsset extends Omit<AssetCandidate, 'previewPath'> {
+  previewPath?: string;
   assetId: string;
   committedPath: string;
   provenance: {
@@ -142,22 +144,36 @@ async function appendRecord(store: AssetStore, asset: FrozenAsset): Promise<void
     await handle.sync();
   } finally { await handle.close(); }
 }
-export async function commitAsset(store: AssetStore, pending: PendingAsset): Promise<FrozenAsset> {
-  const candidate = pending.candidate;
-  const { bytes, ext, sha256 } = await assetBytes(store, candidate.localPath, candidate.kind);
-  if (sha256 !== candidate.sha256) throw new Error('The asset changed after its preview. Resolve it again.');
+/** Copies the bytes to their frozen path (reusing an intact file with the same hash) and appends the record. */
+async function freeze(store: AssetStore, candidate: Omit<AssetCandidate, 'previewPath'> & { previewPath?: string },
+  read: Awaited<ReturnType<typeof assetBytes>>, intent: string, retrievedAt: string): Promise<FrozenAsset> {
+  const { bytes, ext, sha256 } = read;
   const existing = (await readAssets(store)).find((r) => r.sha256 === sha256);
   const committedPath = existing?.committedPath ?? `work/assets/frozen/${candidate.kind}/${sha256}${ext}`;
   const intact = existing && await assetBytes(store, committedPath, candidate.kind).then((f) => f.sha256 === sha256, () => false);
   if (!intact) await atomicWrite(store, committedPath, bytes);
   const asset: FrozenAsset = {
     ...candidate, localPath: committedPath, committedPath, assetId: `asset_${randomUUID()}`,
-    provenance: { intent: pending.intent, retrievedAt: pending.retrievedAt, provider: candidate.provider,
+    provenance: { intent, retrievedAt, provider: candidate.provider,
       ...(candidate.sourceUrl ? { sourceUrl: candidate.sourceUrl } : {}), ...(candidate.landingUrl ? { landingUrl: candidate.landingUrl } : {}) },
   };
   await appendRecord(store, asset);
+  return asset;
+}
+export async function commitAsset(store: AssetStore, pending: PendingAsset): Promise<FrozenAsset> {
+  const read = await assetBytes(store, pending.candidate.localPath, pending.candidate.kind);
+  if (read.sha256 !== pending.candidate.sha256) throw new Error('The asset changed after its preview. Resolve it again.');
+  const asset = await freeze(store, pending.candidate, read, pending.intent, pending.retrievedAt);
   await removeFiles(store, pending.made);
   return asset;
+}
+/** The user's own Library picture, placed by its path: frozen and recorded in the same call, with no
+ * candidate turn. `ref` must already be a resolved `Library/...` path. */
+export async function freezeLibraryPicture(store: AssetStore, ref: string, kind: AssetKind): Promise<FrozenAsset> {
+  if (!ref.startsWith('Library/')) throw new Error(`Only a Library picture is frozen by its path: ${ref}`);
+  const read = await assetBytes(store, ref, kind);
+  return freeze(store, { id: randomUUID(), kind, source: 'library', provider: 'library', title: path.basename(ref), localPath: ref,
+    mime: read.mime, sha256: read.sha256, rightsConfidence: 'user-owned', attributionRequired: false }, read, ref, new Date().toISOString());
 }
 export async function removeFiles(store: AssetStore, refs: string[]): Promise<void> {
   await Promise.allSettled(refs.map(async (ref) => fs.rm(file(store, ref, true), { force: true })));

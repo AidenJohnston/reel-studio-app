@@ -149,7 +149,10 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { o.provider.dispose?.(); await discardAssetCandidates(o.ctx); }
+  try { return await agentLoop(o); } finally {
+    // a provider whose dispose throws must not leave this run's candidate stills and downloads on disk
+    try { o.provider.dispose?.(); } finally { await discardAssetCandidates(o.ctx); }
+  }
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {

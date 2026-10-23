@@ -261,3 +261,27 @@ def test_cli_inspect_image_reads_the_library_in_place_and_gives_each_picture_its
     for bad in ("work/../../outside.png", str(tmp_path / "outside.png")):
         with pytest.raises((EngineError, CliError)):
             inspect(bad)
+
+
+def test_cli_inspect_image_turns_a_sideways_phone_photo_upright(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.delenv("REELENGINE_EXTRA_READ_DIRS", raising=False)
+    proj, root = tmp_path / "p", tmp_path / "root"
+    (proj / "work" / "assets").mkdir(parents=True)
+    (root / "Library" / "Images").mkdir(parents=True)
+    # a portrait phone photo as cameras store it: landscape pixels plus EXIF orientation 6 (turn 90 degrees clockwise)
+    stored = Image.new("RGB", (80, 40), "blue")
+    stored.paste((255, 0, 0), (0, 0, 40, 40))  # red on the stored left, which is the top once upright
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    stored.save(root / "Library" / "Images" / "portrait.jpg", "JPEG", exif=exif)
+    p = cli.build_parser()
+
+    got = cli.cmd_inspect_image(p.parse_args(["inspect-image", "--project", str(proj), "--root", str(root),
+                                              "--asset", "Library/Images/portrait.jpg"]))
+    assert (got["width"], got["height"]) == (40, 80)
+    with Image.open(proj / got["previewPath"]) as still:
+        assert still.size == (40, 80)
+        top, bottom = still.convert("RGB").getpixel((20, 10)), still.convert("RGB").getpixel((20, 70))
+    assert top[0] > 200 and top[2] < 80
+    assert bottom[2] > 200 and bottom[0] < 80
