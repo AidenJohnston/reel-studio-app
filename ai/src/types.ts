@@ -32,14 +32,21 @@ export interface EngineHost {
 }
 export interface CaptureResult { path: string; url: string; site: string; title: string; width: number; height: number }
 
-export type ProviderId = 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none';
-export interface ProviderStatus { id: ProviderId; connected: boolean; label: string; detail?: string; error?: UserFacingError }
+/** custom = a connection to the person's own Anthropic- or OpenAI-compatible server (providers/connection.ts) */
+export type ProviderId = 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none';
+export interface ProviderStatus {
+  id: ProviderId; connected: boolean; label: string; detail?: string; error?: UserFacingError;
+  /** id === 'custom': which saved connection */
+  connectionId?: string;
+}
 
 /** Mirrors Electron's safeStorage. The app passes `safeStorage`; tests pass a fake. */
 export interface SecretStore {
   isEncryptionAvailable(): boolean;
   encryptString(plain: string): Buffer;
   decryptString(encrypted: Buffer): string;
+  /** Linux only in Electron */
+  getSelectedStorageBackend?(): string;
 }
 
 export interface UserFacingError { code: string; userMessage: string; link?: string; retryable?: boolean }

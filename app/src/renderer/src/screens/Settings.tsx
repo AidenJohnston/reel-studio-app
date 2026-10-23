@@ -57,7 +57,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <p className="muted" style={{ margin: '6px 0 12px' }}>
           Turns your voice into words. About 500 MB, one time only.
         </p>
-        <ModelDownload />
+        <ModelDownload secondary />
       </section>
 
       <section className="panel">
