@@ -265,8 +265,9 @@ function ownClaims(c: Change): Map<string, number | undefined> {
  * (kind of change, direction, number) in that kind's own words, and the receipt's change of that kind
  * must make the same claim. A number must be the app's own; "a" counts as one. In the summary, a
  * direction the app gives a number to must keep that number. A part that names no kind continues the
- * kind before it, or is any kind it is true of; a last "more" stands for changes not named.
- * A quoted name must be the song's own. null = keep the app's own words.
+ * kind before it, or is any kind it is true of. Every kind must be named in the summary; only a title
+ * may end in the app's "and more" form for kinds left unnamed. A quoted name must be the song's own.
+ * null = keep the app's own words.
  */
 export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
   const own = changes(facts, words)
@@ -287,10 +288,12 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
     if ((t.match(QUOTED) ?? []).some((q) => !songs.has(q))) return null
     const parts = splitParts(t)
     const named = new Set<Group>()
+    let andMore = false
     let group: Group | null = null
     for (const [i, part] of parts.entries()) {
       if (i > 0 && i === parts.length - 1 && part.toLowerCase() === 'more') {
-        if (own.every((c) => named.has(c.group))) return null
+        if (inSummary || !/\band more$/i.test(t) || own.every((c) => named.has(c.group))) return null
+        andMore = true
         continue
       }
       const w = tokens(part)
@@ -304,7 +307,7 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
       group = claim.group
       named.add(claim.group)
     }
-    if (!named.size) return null
+    if (!named.size || (!andMore && own.some((c) => !named.has(c.group)))) return null
   }
   return { title, summary }
 }

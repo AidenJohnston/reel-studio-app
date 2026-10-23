@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import { acceptRewrite, describeFacts, versionTitle, versionTooltip } from '../src/shared/describe'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { listVersions, projectDir } from '../src/main/store'
@@ -22,6 +23,44 @@ function versionTwo(slug: string): string {
   writeFileSync(join(v2, 'receipts.json'), JSON.stringify([{ jobId: 'j', renderId: 'r', version: 2, facts }]))
   return dir
 }
+
+const cutWords = Array.from({ length: 24 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+const cutAndMusic = [
+  { kind: 'cut.keep', before: [{ from: 'w0', to: 'w23' }], after: [{ from: 'w20', to: 'w23' }] },
+  { kind: 'music.enabled', before: true, after: false }
+]
+
+it.each([
+  { title: 'Shorter cut', summary: 'cut 20 words' },
+  { title: 'Shorter cut, no music', summary: 'cut 20 words' },
+  { title: 'Shorter cut', summary: 'cut 20 words, no music' },
+  { title: 'Shorter cut and more', summary: 'cut 20 words and more' },
+  { title: 'Shorter cut, more', summary: 'cut 20 words, no music' }
+])('rejects an incomplete rewording: $title / $summary', (reply) => {
+  expect(describeFacts(cutAndMusic, cutWords)).toBe('cut 20 words, no music')
+  expect(acceptRewrite(reply, cutAndMusic, cutWords)).toBeNull()
+})
+
+it('keeps a complete rewording or a title ending in the app\'s own "and more" form', () => {
+  const facts = [...cutAndMusic, { kind: 'post.caption', before: '', after: 'Bread' }]
+  const summary = 'cut 20 words, no music, new post caption'
+  expect(versionTitle(facts, cutWords)).toBe('Shorter cut, no music and more')
+  for (const title of ['Shorter cut, no music, new post caption', versionTitle(facts, cutWords)]) {
+    expect(acceptRewrite({ title, summary }, facts, cutWords)).toEqual({ title, summary })
+  }
+})
+
+it('keeps the app\'s own name and music removal in the tooltip when the model omits them', async () => {
+  setupPaths()
+  const dir = versionTwo('bread')
+  writeFileSync(join(dir, 'work', 'transcript.json'), JSON.stringify({ words: cutWords }))
+  writeFileSync(join(dir, 'versions', 'v2', 'receipts.json'), JSON.stringify([{ jobId: 'j', renderId: 'r', version: 2, facts: cutAndMusic }]))
+  await titleVersion('bread', 2, async () => ({ title: 'Shorter cut', summary: 'cut 20 words' }))
+  const version = (await listVersions(dir))[0]
+  expect(version.wording).toBeUndefined()
+  expect(versionTitle(version.facts!, cutWords)).toBe('Shorter cut, no music')
+  expect(versionTooltip(version, [], cutWords)).toBe('Version 2: cut 20 words, no music.')
+})
 
 it('fails if a model rewording that claims a change the receipts lack, or the wrong direction or amount, is kept instead of the app’s own title', async () => {
   setupPaths()
