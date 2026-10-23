@@ -226,8 +226,12 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** a job is running on this video: files go to staging, and a file in the project stays */
+  /** Nothing else may write to this video now (jobs.ts isClosed). After `refuse`, that means a job runs
+   * on it: files go to staging, and a file in the project stays. */
   busy: (slug: string) => boolean
+  /** Throws while the video is kept closed, in the job lane's words (jobs.ts refuseIfKeptClosed): part
+   * of its engine may still be writing, so not even its staging folder takes a file. */
+  refuse: (slug: string) => void
   stagingDir: (slug: string) => string
   /** the picture on the system clipboard (null = none) */
   clipboardImage: () => Promise<{ mime: string; bytes: Uint8Array } | null>
@@ -237,10 +241,12 @@ export interface AttachIpcDeps extends AttachDeps {
 
 const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
 
+/** The video and its folder; refused while it is kept closed. */
 function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: string } {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video.' }
   const dir = deps.projectDir(slug)
   if (!existsSync(join(dir, 'project.json'))) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video. It may have been moved or deleted.' }
+  deps.refuse(slug)
   return { slug, dir }
 }
 

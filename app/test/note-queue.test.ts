@@ -340,6 +340,17 @@ describe('note queue', () => {
     expect((await readAppState(slug)).queueHeld).toBe(true)
   }, 60000)
 
+  it('deleting a video kept closed is refused, and its folders stay', async () => {
+    setupPaths()
+    const slug = 'closed-delete'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const a = app()
+    a.jobs.keepClosed(slug)
+    let removed = false
+    await expect(a.queue.remove(slug, async () => void (removed = true))).rejects.toMatchObject({ code: 'ENGINE_STILL_RUNNING' })
+    expect(removed).toBe(false)
+  })
+
   it('a note still marked started by a run that crashed never starts again without Resume', async () => {
     setupPaths()
     const slug = await reel('stale')

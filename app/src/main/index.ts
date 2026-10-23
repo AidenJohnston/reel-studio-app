@@ -58,7 +58,8 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc, unstage } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc, unstage } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -401,7 +402,8 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    busy: (slug) => jobs.isClosed(slug),
+    refuse: (slug) => jobs.refuseIfKeptClosed(slug),
     stagingDir: (slug) => noteStagingDir(projectDir(slug)),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
@@ -487,11 +489,7 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, onVersion?: unknown) => {
-    const note = String(text ?? '').trim()
-    const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars (or its staging)
-    const files = await checkNoteAttachments(dir, attachments, noteStagingDir(dir))
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+    const { note, files } = await takeNote(jobs, slug, text, attachments)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead

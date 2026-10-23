@@ -271,6 +271,7 @@ describe('main: the IPC handlers', () => {
       projectDir: () => dir,
       readProject: async () => ({ broll: [] }) as any,
       busy: () => busy,
+      refuse: () => undefined,
       stagingDir: () => staging,
       clipboardImage: async () => null,
       choose: async () => null

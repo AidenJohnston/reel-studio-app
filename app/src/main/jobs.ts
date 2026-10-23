@@ -67,14 +67,24 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   const stuck = new Map<string, { code: string; userMessage: string }>()
   const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
 
-  function refuseIfBusy(slug: string): void {
+  function refuseIfKeptClosed(slug: string): void {
     const s = stuck.get(slug)
     if (s) throw s
+  }
+
+  function refuseIfBusy(slug: string): void {
+    refuseIfKeptClosed(slug)
     if (forSlug(slug) || held.has(slug)) throw BUSY
   }
 
   function forSlug(slug: string): Running | undefined {
     return [...jobs.values()].find((j) => j.slug === slug)
+  }
+
+  /** Nothing else may write to the project: a job runs on it, or it is kept closed. A manual edit
+   * (`hold`) does not count: it is quick, and only refuses jobs and other edits meanwhile. */
+  function isClosed(slug: string): boolean {
+    return stuck.has(slug) || !!forSlug(slug)
   }
 
   /** `record`: more changes to app.json, saved in the same write that records the job as running. */
@@ -256,6 +266,14 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   return {
     start,
     hold,
+    /** Throws while a job runs on the project, a manual edit holds it, or it is kept closed: deleting
+     * the video must wait. */
+    refuseIfBusy,
+    /** Throws while the project is kept closed, with the reason. A note or an attachment sent while a
+     * job runs waits for that job (note-queue.ts, attachments.ts staging); one sent to a video kept
+     * closed is refused instead. */
+    refuseIfKeptClosed,
+    isClosed,
     keepClosed,
     reopen,
     forSlug,

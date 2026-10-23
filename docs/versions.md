@@ -95,6 +95,10 @@ any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and t
 project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
 children when it exits (`engine/reelengine/contain.py`).
 
+A closed project refuses everything that would write to it: jobs, manual edits, attachments, notes
+and deleting the video. Each refusal asks the creator to restart Reel Studio first
+(`app/src/main/jobs.ts`).
+
 The app records each engine's pid and project in `engines.json` (in its settings folder) until the
 engine's whole group is gone, and at startup stops engines a crashed run left behind. A project whose
 engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the

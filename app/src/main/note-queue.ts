@@ -195,7 +195,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
     },
 
     /** Deletes a video inside its queue lane, after its job (if any) has ended, so no queue write lands in
-     * the folder while it goes. */
+     * the folder while it goes. A video still closed after that is refused (jobs.ts refuseIfBusy). */
     remove(slug: string, removeFolders: () => Promise<void>): Promise<void> {
       return lane(slug, async () => {
         const running = jobs.forSlug(slug)
@@ -204,6 +204,8 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           jobs.cancel(running.id)
           await running.done
         }
+        // a video kept closed stays: part of its engine may still be writing into the folder
+        jobs.refuseIfBusy(slug)
         await removeFolders()
       })
     },
