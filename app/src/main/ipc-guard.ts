@@ -1,12 +1,24 @@
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { isAbsolute } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+function sameRendererPath(actual: string, expected: string): boolean {
+  try {
+    const windows = process.platform === 'win32'
+    const a = fileURLToPath(actual, { windows })
+    const e = fileURLToPath(expected, { windows })
+    return windows ? a.toLowerCase() === e.toLowerCase() : a === e
+  } catch {
+    return false
+  }
+}
 
 export function assertIpcSender(e: IpcMainInvokeEvent | IpcMainEvent, contents: WebContents | undefined, rendererUrl: string): void {
   const denied = { code: 'FORBIDDEN', userMessage: 'This page cannot control Reel Studio.' }
   if (!contents || contents.isDestroyed() || e.sender !== contents || e.senderFrame !== contents.mainFrame) throw denied
   const actual = new URL(e.senderFrame.url)
   const expected = new URL(rendererUrl)
-  if (actual.protocol !== expected.protocol || actual.origin !== expected.origin || (expected.protocol === 'file:' && actual.pathname !== expected.pathname)) throw denied
+  if (actual.protocol !== expected.protocol || actual.origin !== expected.origin || (expected.protocol === 'file:' && !sameRendererPath(actual.href, expected.href))) throw denied
 }
 
 const text = (v: unknown): v is string => typeof v === 'string' && !v.includes('\0')
@@ -27,10 +39,16 @@ function validPatch(patch: unknown): boolean {
         (v.corrections === undefined || (Array.isArray(v.corrections) && v.corrections.every(anchor)))
       case 'music': return object(v) && typeof v.enabled === 'boolean' && (v.track === null || text(v.track)) &&
         (v.startAt === undefined || finite(v.startAt)) && (v.fadeOut === undefined || finite(v.fadeOut))
+      // project.schema.json requires only id, anchor and treatment; asset and params are optional.
       case 'broll': return Array.isArray(v) && v.every((b) => object(b) && text(b.id) && anchor(b.anchor) && text(b.treatment) &&
-        (b.asset === null || text(b.asset)) && (b.params === undefined || object(b.params)))
+        (b.asset === undefined || b.asset === null || text(b.asset)) && (b.params === undefined || object(b.params)))
       case 'zooms': return Array.isArray(v)
-      case 'cover': return object(v) && finite(v.atSourceTime) && v.atSourceTime >= 0 && text(v.source) && (v.text === null || text(v.text))
+      // The schema permits an absent or null frame until the creator or AI picks one.
+      case 'cover': return v === null || (object(v) &&
+        (v.atSourceTime === undefined || v.atSourceTime === null || (finite(v.atSourceTime) && v.atSourceTime >= 0)) &&
+        (v.source === undefined || v.source === null || text(v.source)) &&
+        (v.text === undefined || v.text === null || text(v.text)) &&
+        (v.exact === undefined || v.exact === null || typeof v.exact === 'boolean'))
       case 'post': return object(v) && text(v.caption) && strings(v.hashtags) && strings(v.keywords)
       default: return true
     }

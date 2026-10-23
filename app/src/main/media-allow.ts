@@ -1,22 +1,21 @@
 import { promises as fs } from 'node:fs'
-import { dirname, sep } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
+import { BIN_FOLDERS, libraryDir } from './paths'
 
-// A Library link grants access only while it still points to the registered file.
-const linked = new Map<string, string>()
-
-export function allowLinkedMedia(entry: string, target: string): void {
-  linked.set(entry, target)
+function inside(file: string, root: string): boolean {
+  const rel = relative(root, file)
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))
 }
 
 export async function isLinkedMedia(realPath: string, roots: string[]): Promise<boolean> {
-  let ok = false
-  for (const [entry, target] of linked) {
-    if (target !== realPath) continue
-    const parent = await fs.realpath(dirname(entry)).catch(() => null)
-    const allowed = parent !== null && roots.some((root) => parent === root || parent.startsWith(root.endsWith(sep) ? root : root + sep))
-    const still = allowed && (await fs.lstat(entry).catch(() => null))?.isSymbolicLink() && (await fs.realpath(entry).catch(() => null)) === target
-    if (still) ok = true
-    else linked.delete(entry)
+  const library = await fs.realpath(libraryDir()).catch(() => null)
+  if (library === null || !roots.some((root) => inside(library, root))) return false
+  // Only direct Library bins grant access outside the root. Re-resolve each link on every request.
+  for (const name of Object.values(BIN_FOLDERS)) {
+    const bin = join(library, name)
+    if (!(await fs.lstat(bin).catch(() => null))?.isSymbolicLink()) continue
+    const target = await fs.realpath(bin).catch(() => null)
+    if (target !== null && inside(realPath, target)) return true
   }
-  return ok
+  return false
 }
