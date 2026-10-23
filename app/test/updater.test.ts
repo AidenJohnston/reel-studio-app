@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createUpdater, type UpdateBackend } from '../src/main/updater'
 import { disabledReason, updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction } from '../src/shared/update'
+import { updateButtonLabel } from '../src/renderer/src/components/update-copy'
 
 function setup(
   found: () => Promise<FoundUpdate | null>,
@@ -415,11 +416,12 @@ describe('release notes from the GitHub list', () => {
 
 })
 
-it('fails if a download that does not pass its check stops a video or cannot be downloaded again', async () => {
+it('fails if a download that does not pass its check stops a video or offers the same cached file again', async () => {
   let jobs!: ReturnType<typeof createJobManager>
-  let bad = true
-  const { u, installs } = setup(async () => v013, {
-    verify: async () => { if (bad) throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
+  let downloads = 0
+  const { u, installs, opened } = setup(async () => v013, {
+    download: async () => void downloads++,
+    verify: async () => { throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
     prepareToQuit: () => jobs.cancelAll()
   })
   jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
@@ -428,12 +430,18 @@ it('fails if a download that does not pass its check stops a video or cannot be 
   jobs.start(null, 'rerender', (_emit, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('stopped')))))
   await u.install()
   expect(jobs.runningCount()).toBe(1)
-  expect(u.state()).toMatchObject({ status: 'error', errorContext: 'download', downloadedVersion: null })
   expect(installs).toHaveLength(0)
-  expect(updateAction(u.state())).toBe('download')
-  bad = false
-  await u.download()
-  expect(u.state()).toMatchObject({ status: 'downloaded', downloadedVersion: '0.1.3' })
+  expect(u.state()).toMatchObject({ status: 'error', mode: 'page', availableVersion: '0.1.3', downloadedVersion: null })
+  expect(u.state().message).toContain('download page')
+  expect(updateAction(u.state())).toBe('open-page')
+  expect(updateButtonLabel(u.state())).toBe('Open download page')
+  expect(showsUpdateButton(u.state())).toBe(true)
+  expect((await u.download()).accepted).toBe(false)
+  await u.check('later')
+  expect(updateAction(u.state())).toBe('open-page')
+  await u.openRelease()
+  expect(opened).toEqual([v013.releaseUrl])
+  expect(downloads).toBe(1)
 })
 
 it('fails if a download started with automatic checks off, or after Not now, leaves no strip to restart from', async () => {

@@ -2,9 +2,12 @@ import { updateAction, type UpdateState, type UpdateBusy, type ReleaseNotes } fr
 
 export type UpdateIcon = 'available' | 'downloading' | 'downloaded' | 'failed'
 
+// Page mode only opens the release page in the browser, so no copy may promise a download or a retry.
+const opensPage = (s: UpdateState): boolean => updateAction(s) === 'open-page'
+
 export function updateIcon(s: UpdateState): UpdateIcon {
   if (s.status === 'downloading') return 'downloading'
-  if (s.status === 'error') return 'failed'
+  if (s.status === 'error' && !opensPage(s)) return 'failed'
   return updateAction(s) === 'install' ? 'downloaded' : 'available'
 }
 
@@ -13,6 +16,7 @@ const offered = (s: UpdateState): string | null => s.downloadedVersion ?? s.avai
 
 export function updateButtonLabel(s: UpdateState): string {
   if (s.status === 'downloading') return `Downloading${pct(s)}`
+  if (opensPage(s)) return 'Open download page'
   if (s.status === 'error') return s.errorContext === 'install' ? 'Update did not install' : 'Download stopped'
   return updateAction(s) === 'install' ? 'Restart to update' : 'Download update'
 }
@@ -23,7 +27,7 @@ export function updateSummary(s: UpdateState): string {
     case 'checking':
       return 'Checking for updates…'
     case 'available':
-      return s.mode === 'page' ? `Reel Studio ${v} is out. Download opens its page in your browser.` : `Reel Studio ${v} is ready to download.`
+      return s.mode === 'page' ? `Reel Studio ${v} is out. Click to open its download page in your browser.` : `Reel Studio ${v} is ready to download.`
     case 'downloading':
       return `Downloading Reel Studio ${v}${pct(s)}.`
     case 'installing':
@@ -31,6 +35,7 @@ export function updateSummary(s: UpdateState): string {
     case 'downloaded':
       return `Reel Studio ${v} is downloaded. Click to restart and install it.`
     case 'error':
+      if (opensPage(s)) return `${s.message ?? `Reel Studio ${v} is out.`} Click to open its download page in your browser.`
       if (s.errorContext === 'download' && s.availableVersion) return `The download of ${s.availableVersion} stopped. Click to try again.`
       if (s.errorContext === 'install' && s.downloadedVersion) return `Reel Studio ${s.downloadedVersion} did not install. Click to try again.`
       return s.message ?? 'I could not check for updates.'
@@ -45,14 +50,14 @@ export function updateSummary(s: UpdateState): string {
 
 export function updateHeadline(s: UpdateState): string {
   if (s.status === 'downloading') return `Downloading update${typeof s.downloadPercent === 'number' ? ` (${Math.floor(s.downloadPercent)}%)` : ''}`
-  if (s.status === 'error') return updateButtonLabel(s)
+  if (s.status === 'error' && !opensPage(s)) return updateButtonLabel(s)
   if (updateAction(s) === 'install') return 'Update downloaded'
   return s.mode === 'page' ? 'Update available' : 'Update ready to download'
 }
 
 export function updateSubline(s: UpdateState): string {
   if (s.status === 'error') return s.message ?? updateSummary(s)
-  if (s.mode === 'page' && updateAction(s) === 'open-page') return `Reel Studio ${offered(s)}. Download opens your browser.`
+  if (opensPage(s)) return `Reel Studio ${offered(s)}. Its download page opens in your browser.`
   return `Reel Studio ${offered(s)}`
 }
 
