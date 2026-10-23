@@ -8,6 +8,7 @@ import { BIN_FOLDERS, binDir, projectsDir, libraryDir, reelStudioRoot } from './
 import type {
   ChatMessage,
   ChecklistItem,
+  EditFact,
   NoteAttachment,
   ProjectDetail,
   ProjectJson,
@@ -221,7 +222,12 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const push = async (n: number, d: string, video: string): Promise<void> => {
     const st = await fs.stat(video)
     const cover = join(d, 'cover.png')
+    const receipts = await readJson<{ facts: EditFact[] }[] | null>(join(d, 'receipts.json'), null)
+    // an engine that records receipts gives every render an id (render_identity.py)
+    const manifest = receipts || n === 0 ? null : await readJson<{ renderId?: unknown } | null>(join(d, 'render.json'), null)
     out.push({
+      ...(receipts ? { facts: receipts.flatMap((r) => r.facts) } : {}),
+      ...(n > 0 && !receipts && typeof manifest?.renderId !== 'string' ? { beforeReceipts: true as const } : {}),
       n,
       video: mediaUrl(video, st.mtimeMs),
       videoPath: video,

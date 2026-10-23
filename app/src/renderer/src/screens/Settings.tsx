@@ -17,6 +17,22 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
       .then((st) => setCheckUpdates(st.enabled))
       .catch(() => {})
   }, [])
+  const [checkEdits, setCheckEdits] = useState<boolean | null>(null)
+  useEffect(() => {
+    reel.ai
+      .checkEdits()
+      .then(setCheckEdits)
+      .catch(() => {})
+  }, [])
+  const toggleCheckEdits = async (on: boolean) => {
+    setCheckEdits(on)
+    try {
+      setCheckEdits(await reel.ai.setCheckEdits(on))
+    } catch (e) {
+      setCheckEdits(!on)
+      notify(userMessage(e), 'error')
+    }
+  }
   const toggleUpdates = async (on: boolean) => {
     setCheckUpdates(on)
     try {
@@ -50,6 +66,17 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
           It picks your best takes, adds pictures that match what you say, and changes your video from your notes.
         </p>
         <ConnectAI onConnected={(p) => notify(p.id === 'claude-cli' ? USING_CLAUDE_CODE : `Connected to ${p.label}.`)} />
+        {checkEdits !== null && (
+          <>
+            <label className="toggle" style={{ marginTop: 12 }}>
+              <input type="checkbox" checked={checkEdits} onChange={(e) => void toggleCheckEdits(e.target.checked)} data-testid="check-edits" />
+              Double-check each edit
+            </label>
+            <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
+              After each note, your AI editor looks at the change again and fixes what it missed. Notes take longer and use more of your AI plan.
+            </p>
+          </>
+        )}
       </section>
 
       <section className="panel">

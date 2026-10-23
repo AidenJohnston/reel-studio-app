@@ -20,7 +20,7 @@ export interface ProgressDeps {
 
 /** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
-export type JobFn = (emit: Emit, signal: AbortSignal) => Promise<{ summary: string; version?: number; quiet?: boolean }>
+export type JobFn = (emit: Emit, signal: AbortSignal, jobId: string) => Promise<{ summary: string; version?: number; quiet?: boolean }>
 
 interface Running {
   id: string
@@ -115,7 +115,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal)
+        }, abort.signal, id)
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
