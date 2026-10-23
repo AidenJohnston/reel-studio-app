@@ -83,6 +83,7 @@ const api: ReelApi = {
     rules: () => call('style:rules'),
     remove: (id) => call('style:remove', id),
     damaged: () => call('style:damaged'),
+    update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes)
   },
   script: {

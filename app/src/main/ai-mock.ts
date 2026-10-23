@@ -41,6 +41,15 @@ async function keepDamagedCopy(file: string): Promise<string> {
   }
 }
 
+/** A rule's words as the real store keeps them (cleanRuleText in ai/src/style.ts): one sentence, capitalised,
+ * ending in a full stop. */
+function cleanRule(text: string): string {
+  let clean = text.replace(/\s*—\s*/g, ', ').replace(/\s+/g, ' ').trim()
+  if (!clean) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Remove.' }
+  if (!/[.!?]$/.test(clean)) clean += '.'
+  return clean[0].toUpperCase() + clean.slice(1)
+}
+
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
 type StyleData = { rules: StyleRule[]; damaged?: string; [field: string]: unknown }
 
@@ -233,6 +242,17 @@ export const createMockAI: CreateAI = ({ host }) => {
       const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
       await withStyle((s) => saveRules(s, [...s.rules, rule]))
       return rule
+    },
+    async updateStyleRule(id, patch) {
+      return withStyle(async (s) => {
+        const rule = s.rules.find((r) => r.id === id)
+        if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' }
+        if (patch.text !== undefined) rule.text = cleanRule(patch.text)
+        if (patch.paused === true) rule.paused = true
+        if (patch.paused === false) delete rule.paused
+        await saveRules(s, s.rules)
+        return rule
+      })
     },
     async removeStyleRule(id) {
       await withStyle((s) => saveRules(s, s.rules.filter((r) => r.id !== id)))

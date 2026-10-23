@@ -562,6 +562,12 @@ function registerIpc(): void {
   handle('style:rules', () => ai.styleRules())
   handle('style:remove', (_e, id: string) => ai.removeStyleRule(id))
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  handle('style:update', (_e, id: string, patch: { text?: unknown; paused?: unknown }) => {
+    if (!ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'I could not change that in My style. Try again later.' }
+    const text = typeof patch?.text === 'string' ? patch.text : undefined
+    if (text !== undefined && !text.trim()) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Remove.' }
+    return ai.updateStyleRule(id, { text, paused: typeof patch?.paused === 'boolean' ? patch.paused : undefined })
+  })
   // "Remember this for next time?" Yes saves the rule; either answer replaces the buttons with a plain reply.
   handle('style:answer', async (_e, slug: string, messageId: string, yes: boolean) => {
     const st = await readAppState(slug)

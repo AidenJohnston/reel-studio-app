@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { styleFile, writeFileAtomic } from './project';
 
-export interface StyleRule { id: string; text: string; createdAt: string }
+/** `paused`: listed in My style, but left out of what the AI reads. */
+export interface StyleRule { id: string; text: string; createdAt: string; paused?: boolean }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over. */
 export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string }
 
@@ -115,6 +116,20 @@ export class StyleStore {
     return { added: true, rule };
   }
 
+  /** My style: the person changed a rule's words, or paused or resumed it. */
+  async update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule> {
+    return this.serial(async () => {
+      const data = await this.read();
+      const rule = data.rules.find((r) => r.id === id);
+      if (!rule) throw new Error('that rule is not in My style any more');
+      if (patch.text !== undefined) rule.text = cleanRuleText(patch.text);
+      if (patch.paused === true) rule.paused = true;
+      if (patch.paused === false) delete rule.paused;
+      await this.write(data);
+      return rule;
+    });
+  }
+
   async remove(id: string): Promise<void> {
     return this.serial(async () => {
       const data = await this.read();
@@ -123,7 +138,7 @@ export class StyleStore {
   }
 
   async asPromptText(): Promise<string> {
-    const rules = await this.list();
+    const rules = (await this.list()).filter((r) => !r.paused);
     return rules.length ? rules.map((r) => `- ${r.text}`).join('\n') : '(none yet)';
   }
 }
