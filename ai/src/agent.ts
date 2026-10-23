@@ -121,8 +121,18 @@ export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'list_lib
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
-  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  // once a call has failed no new one starts: the batch is lost anyway
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const i = next++;
+      try { out[i] = await fn(items[i], i); } catch (e) { failed = true; throw e; }
+    }
+  };
+  // every started call ends before this returns or throws: a Stop must not leave a download writing
+  const ran = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const rejected = ran.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (rejected) throw rejected.reason;
   return out;
 }
 
@@ -148,7 +158,7 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { o.provider.dispose?.(); }
+  try { return await agentLoop(o); } finally { await o.provider.dispose?.(); }
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
