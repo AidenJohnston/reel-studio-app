@@ -1,4 +1,3 @@
-import { CloudSave } from '../components/CloudSave'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
@@ -752,7 +751,6 @@ function ExportDialog({
           <button className="btn primary big" onClick={() => setPhone(true)} data-testid="send-to-phone">
             <Icon name="send" size={16} /> Send to my phone
           </button>
-          <CloudSave video={result.video} />
           <a className="btn small" href={INSTAGRAM_URL} target="_blank" rel="noreferrer" data-testid="open-instagram">
             <Icon name="instagram" size={16} /> Open Instagram
           </a>

@@ -1,4 +1,3 @@
-import { CloudSave } from './CloudSave'
 // "Send to my phone": the finished video is on the computer, Instagram is on the phone. A QR code opens
 // the video on the phone (over the home Wi-Fi, from a temporary link only this video answers on), and
 // if the phone cannot reach it (school, work and hotel Wi-Fi often block it), plain fallbacks, best first:
@@ -8,6 +7,7 @@ import type { PhoneShare } from '../../../shared/api'
 import { fallbackOrder, PHONE_HELP, waitForPhone, type PhoneFallback } from '../../../shared/phone-help'
 import { qrSvg } from '../../../shared/qr'
 import { reel, userMessage } from '../api'
+import { CloudSave } from './CloudSave'
 import { Icon } from './icons'
 import { FOLDER_APP, IS_MAC, Spinner } from './ui'
 import './SendToPhone.css'
@@ -28,6 +28,7 @@ const G: Record<string, ReactNode> = {
       <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
     </>
   ),
+  cloud: <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />,
   cable: (
     <>
       <path d="M17 21v-2a1 1 0 0 1-1-1v-1a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1" />
@@ -146,7 +147,7 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
         </button>
       </div>
     ),
-    cloud: <CloudSave video={video} fallback />,
+    cloud: <CloudSave video={video} icon={<Glyph name="cloud" />} />,
     email: (
       <div className="phone-way">
         <Glyph name="mail" />

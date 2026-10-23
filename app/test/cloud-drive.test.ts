@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { copyToCloudDrive, detectCloudDrives } from '../src/main/cloud-drive'
+import { driveNames } from '../src/shared/cloud-drive-names'
 
 const scratch: string[] = []
 async function temp() {
@@ -70,7 +71,7 @@ it('fails if an interrupted copy exposes a partial reel or leaves its temporary 
   expect(await fs.readFile(source, 'utf8')).toBe('complete video')
 })
 
-it('fails if a failed copy deletes a file that replaced the reservation', async () => {
+it('fails if a failed copy deletes a file the sync client put at the reel\'s name', async () => {
   const dir = await temp()
   const source = join(dir, 'Family reel.mp4')
   const folder = join(dir, 'drive', 'Reel Studio')
@@ -84,4 +85,77 @@ it('fails if a failed copy deletes a file that replaced the reservation', async 
   await expect(copyToCloudDrive(source, join(dir, 'drive'))).rejects.toThrow('disk full')
   expect(await fs.readdir(folder)).toEqual(['Family reel.mp4'])
   expect(await fs.readFile(target, 'utf8')).toBe('video from another device')
+})
+
+it('fails if one unresponsive drive letter holds up checking the others', async () => {
+  const home = await temp()
+  const slow = join(home, 'A drive')
+  const fast = join(home, 'G drive')
+  await fs.mkdir(join(slow, 'My Drive'), { recursive: true })
+  await fs.mkdir(join(fast, 'My Drive'), { recursive: true })
+  let fastChecked!: () => void
+  const checked = new Promise<void>((resolve) => (fastChecked = resolve))
+  const stat = fs.stat.bind(fs)
+  // A disconnected network drive answers only after the other letters were looked at; checking one letter at a
+  // time never gets there.
+  vi.spyOn(fs, 'stat').mockImplementation((async (path: string, ...rest: []) => {
+    if (path === join(slow, 'My Drive')) await checked
+    if (path === join(fast, 'My Drive')) fastChecked()
+    return stat(path, ...rest)
+  }) as typeof fs.stat)
+  const drives = await detectCloudDrives({ platform: 'win32', home, driveRoots: [slow, fast] })
+  expect(drives.map((drive) => drive.folder)).toEqual([join(slow, 'My Drive'), join(fast, 'My Drive')])
+}, 5000)
+
+it('fails if a save replaces a file the sync client put at the reel\'s name while copying', async () => {
+  const dir = await temp()
+  const source = join(dir, 'Family reel.mp4')
+  const folder = join(dir, 'drive', 'Reel Studio')
+  const taken = join(folder, 'Family reel.mp4')
+  await fs.writeFile(source, 'complete video')
+  const copyFile = fs.copyFile.bind(fs)
+  vi.spyOn(fs, 'copyFile').mockImplementationOnce(async (from, to, mode) => {
+    await copyFile(from, to, mode)
+    await fs.writeFile(join(folder, 'synced'), 'video from another device')
+    await fs.rename(join(folder, 'synced'), taken)
+  })
+  const saved = await copyToCloudDrive(source, join(dir, 'drive'))
+  expect(basename(saved)).toBe('Family reel (2).mp4')
+  expect(await fs.readFile(taken, 'utf8')).toBe('video from another device')
+  expect(await fs.readFile(saved, 'utf8')).toBe('complete video')
+  expect((await fs.readdir(folder)).sort()).toEqual(['Family reel (2).mp4', 'Family reel.mp4'])
+})
+
+it('fails if, on a drive without hard links, a save renames over a file that replaced its reservation', async () => {
+  const dir = await temp()
+  const source = join(dir, 'Family reel.mp4')
+  const folder = join(dir, 'drive', 'Reel Studio')
+  const taken = join(folder, 'Family reel.mp4')
+  await fs.writeFile(source, 'complete video')
+  vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }))
+  const stat = fs.stat.bind(fs)
+  let replaced = false
+  vi.spyOn(fs, 'stat').mockImplementation((async (path: string, ...rest: []) => {
+    if (path === taken && !replaced) {
+      replaced = true
+      await fs.writeFile(join(folder, 'synced'), 'video from another device')
+      await fs.rename(join(folder, 'synced'), taken)
+    }
+    return stat(path, ...rest)
+  }) as typeof fs.stat)
+  const saved = await copyToCloudDrive(source, join(dir, 'drive'))
+  expect(basename(saved)).toBe('Family reel (2).mp4')
+  expect(await fs.readFile(taken, 'utf8')).toBe('video from another device')
+  expect(await fs.readFile(saved, 'utf8')).toBe('complete video')
+  expect((await fs.readdir(folder)).sort()).toEqual(['Family reel (2).mp4', 'Family reel.mp4'])
+})
+
+it('fails if a button names a drive by its raw path or full email, or two buttons read the same', () => {
+  const names = (...folders: string[]) => driveNames(folders.map((folder) => ({ folder, label: folder.includes('CloudDocs') || folder.endsWith('iCloudDrive') ? 'iCloud Drive' : 'Google Drive' })))
+  const mac = '/Users/zoe/Library/CloudStorage'
+  expect(names('/Users/zoe/Library/Mobile Documents/com~apple~CloudDocs', `${mac}/GoogleDrive-zoe.m@gmail.com/My Drive`)).toEqual(['iCloud Drive', 'Google Drive'])
+  expect(names(`${mac}/GoogleDrive-zoe.m@gmail.com/My Drive`, `${mac}/GoogleDrive-studio@reels.co/My Drive`)).toEqual(['Google Drive (zoe.m)', 'Google Drive (studio)'])
+  expect(names(`${mac}/GoogleDrive-zoe@gmail.com/My Drive`, `${mac}/GoogleDrive-zoe@reels.co/My Drive`)).toEqual(['Google Drive (zoe@gmail.com)', 'Google Drive (zoe@reels.co)'])
+  expect(names('C:\\Users\\Zoe\\iCloudDrive', 'G:\\My Drive', 'h:\\My Drive')).toEqual(['iCloud Drive', 'Google Drive (G:)', 'Google Drive (H:)'])
+  expect(names('C:\\Users\\Zoe\\Google Drive', 'G:\\My Drive')).toEqual(['Google Drive (Google Drive folder)', 'Google Drive (G:)'])
 })

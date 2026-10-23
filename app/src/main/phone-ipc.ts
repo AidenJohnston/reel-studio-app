@@ -5,7 +5,7 @@ import { realpathSync, statSync } from 'node:fs'
 import { basename, extname, resolve, sep } from 'node:path'
 import type { PhoneEvent, PhoneShare } from '../shared/api'
 import { PHONE_WAIT_MS } from '../shared/phone-help'
-import { detectCloudDrives, copyToCloudDrive } from './cloud-drive'
+import { cloudDriveAt, copyToCloudDrive, detectCloudDrives } from './cloud-drive'
 import { lanAddresses, startShare, type LanAddress, type ShareServer } from './phone-share'
 
 type Handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown) => void
@@ -59,18 +59,34 @@ export async function stopPhoneShare(): Promise<void> {
   await s?.stop()
 }
 
+// Drive saves still copying. Quitting waits for them (index.ts, before-quit): a process that exits mid-save
+// leaves a hidden temporary file in a folder that syncs to the phone.
+const saving = new Set<Promise<unknown>>()
+
+export function cloudSavesRunning(): number {
+  return saving.size
+}
+
+export async function cloudSavesSettled(): Promise<void> {
+  await Promise.allSettled([...saving])
+}
+
 export function registerPhoneIpc(d: PhoneIpcDeps): void {
-  const drives = () => detectCloudDrives({ platform: process.platform, home: app.getPath('home') })
-  d.handle('cloud:drives', drives)
+  const where = () => ({ platform: process.platform, home: app.getPath('home') })
+  d.handle('cloud:drives', () => detectCloudDrives(where()))
   d.handle('cloud:save', async (_e, video: unknown, folder: unknown) => {
     const file = checkedVideo(video, d.roots())
-    const drive = (await drives()).find((drive) => drive.folder === folder)
+    const drive = typeof folder === 'string' ? await cloudDriveAt(folder, where()) : null
     if (!drive) throw { code: 'CLOUD_MISSING', userMessage: 'That drive is no longer available. Open iCloud Drive or Google Drive on this computer, then try again.' }
+    const save = copyToCloudDrive(file, drive.folder)
+    saving.add(save)
     try {
-      return await copyToCloudDrive(file, drive.folder)
+      return await save
     } catch (error) {
       d.log(`[cloud] save failed: ${error instanceof Error ? error.message : String(error)}`)
       throw { code: 'CLOUD_SAVE', userMessage: `I could not save to ${drive.label}. Check that the drive has space and is connected, then try again.` }
+    } finally {
+      saving.delete(save)
     }
   })
 
