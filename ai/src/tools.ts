@@ -37,6 +37,8 @@ export interface ToolState {
   dirty?: Set<string>;
   /** render_draft was skipped (nothing visible changed): look_at_frames looks at the current version instead */
   previewSkipped?: boolean;
+  /** an undone repair's preview overwrote versions/preview/: no earlier preview is on disk (editor.ts finalize) */
+  previewReplaced?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
 }

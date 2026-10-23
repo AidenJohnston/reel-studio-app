@@ -208,7 +208,7 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
   if (deps.finalRender !== false) {
     try { return (await doRender(ctx, false)).version; } catch (e) {
       if (ctx.signal?.aborted) throw e;
-      if (ctx.state.renders.length) return ctx.state.renders.at(-1)!.version;
+      if (ctx.state.renders.length && !ctx.state.previewReplaced) return ctx.state.renders.at(-1)!.version;
       throw e;
     }
   }
@@ -315,7 +315,8 @@ async function candidateRender(ctx: ToolContext): Promise<RenderInfo> {
   return made;
 }
 
-async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
+/** `start` is the project before the note: a repair that ends there took the whole note back. */
+async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, start: Project, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
   Promise<{ record: CheckRecord; summary: string | null }> {
   const started = Date.now();
   const system = deps.prompts.render('checker');
@@ -371,7 +372,9 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
       await rollbackNote(deps, ctx.projectDir, before, assets, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules) });
       ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
       ctx.state.changed = changed;
-      // a failed final render falls back to the last preview: never one of the undone repair
+      // a failed final render falls back to the last preview: never one of the undone repair, and never
+      // an earlier one once the repair's preview has replaced it on disk
+      if (ctx.state.renders.length > renders) ctx.state.previewReplaced = true;
       ctx.state.renders.splice(renders);
       ctx.project = await loadProject(ctx.projectDir);
       summary = said;
@@ -380,8 +383,9 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     try {
       const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes), ctx, onEvent, signal,
         maxSteps: REPAIR_STEPS, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-      if (sameEdit(p0, await loadProject(ctx.projectDir))) {
-        // the edit is as it was, but a download or a saved rule may not be
+      const after = await loadProject(ctx.projectDir);
+      if (sameEdit(p0, after) || sameEdit(start, after)) {
+        // the edit is as it was (a download or a saved rule may not be), or the repair took the note back
         await undoRepair();
         return done('unresolved');
       }
@@ -490,7 +494,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
-    const review = !opts.checkEdit || undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, onEvent, signal);
+    const review = !opts.checkEdit || undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, p0, onEvent, signal);
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
     const version = await finalize(deps, ctx, onEvent);
     const said = review?.summary ?? honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.';

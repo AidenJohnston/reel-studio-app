@@ -342,3 +342,31 @@ it("fails if the creator-facing check refuses ordinary words, or lets the editor
   expect(problemTextIssue('set_cut left the flour line in.')).not.toBeNull();
   expect(problemTextIssue('The captions.style size changed.')).not.toBeNull();
 });
+
+it('fails if a repair that takes the whole note back is kept as the version', async () => {
+  const { dir, host } = await noteProject();
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('set_cut', { keep: [{ from: 'w0', to: 'w56' }] })],
+    [call('finish', { summary_for_user: 'I put everything back.' })],
+  ], [fix('Your first take is gone.', 'Bring back w0 to w15.')]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(r.check).toMatchObject({ verdict: 'unresolved', repairs: 1 });
+  expect((await loadProject(dir)).cut.keep).toEqual([{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }]);
+  expect(r.summary).toMatch(/^I cut the flour part\. /);
+});
+
+it("fails if a failed final render falls back to a preview that an undone repair's preview replaced on disk", async () => {
+  const { dir, host } = await noteProject();
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('set_caption_style', { size: 90 }), call('render_draft')],
+    () => { host.failRender = true; throw new AIError('cli_limited', 'The AI hit its usage limit. Try again later.'); },
+  ], [fix('The captions are hard to read.', 'Make the captions bigger.')]);
+  const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
+  await expect(createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK))
+    .rejects.toMatchObject({ code: 'RENDER_FAILED' });
+  expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
+});
