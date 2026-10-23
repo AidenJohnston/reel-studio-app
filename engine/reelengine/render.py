@@ -57,7 +57,7 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
     """{path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
     song or picture was REPLACED under the same name."""
     refs = [s.get("path") for s in proj.get("sources") or []]
-    refs.append(((proj.get("music") or {}).get("track")))
+    refs.append(projmod.song_ref(proj.get("music") or {}))
     for b in proj.get("broll") or []:
         refs.append(b.get("asset"))
         refs += [x for x in ((b.get("params") or {}).get("items") or []) if isinstance(x, str)]

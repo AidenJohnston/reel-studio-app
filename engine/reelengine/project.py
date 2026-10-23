@@ -193,6 +193,18 @@ def load_transcript(project_dir: Path, proj: dict) -> dict:
     return data
 
 
+def song_ref(music: dict) -> Optional[str]:
+    """The file the mix plays: music.frozen.path, the AI's frozen copy of the Library song music.track
+    names, while frozen.track still equals track; otherwise track itself (older projects, songs the
+    user picked). The app's Music tab switches songs by rewriting track and keeps every other field,
+    so a frozen copy of another song is ignored."""
+    track = music.get("track")
+    frozen = music.get("frozen")
+    if track and isinstance(frozen, dict) and frozen.get("track") == track and frozen.get("path"):
+        return frozen["path"]
+    return track
+
+
 def source_meta(proj: dict) -> dict:
     return {s["id"]: {"duration": s.get("duration") or 0.0, "fps": s.get("fps") or 30.0,
                       "path": s["path"]} for s in proj.get("sources", [])}

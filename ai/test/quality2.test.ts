@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { createAI, loadProject, runAgent, newToolState, StyleStore, CompletionRequest } from '../src';
 import { parseProtocolReply, parseXmlCalls } from '../src/providers/cli';
 import { captionWithCredits, toolSchemas } from '../src/tools';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
+import { FakeHost, assetSteps, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
 
 async function setup() {
   const { root, dir } = await makeProject();
@@ -168,21 +168,21 @@ describe('post caption credits', () => {
   it('credits the CC BY pictures the edit uses, and drops a credit when its picture goes', async () => {
     const { dir, host, settingsDir } = await setup();
     await fsp.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
-    await fsp.writeFile(path.join(dir, 'work', 'assets', 'oven.jpg'), 'x');
-    await fsp.writeFile(path.join(dir, 'work', 'assets', 'logo.png'), 'x');
+    await fsp.writeFile(path.join(dir, 'work', 'assets', 'oven.jpg'), tinyPng());
+    await fsp.writeFile(path.join(dir, 'work', 'assets', 'logo.png'), Buffer.concat([tinyPng(), Buffer.from('logo')]));
     await fsp.writeFile(path.join(dir, 'work', 'assets', 'credits.json'), JSON.stringify({
-      'oven.jpg': { attributionRequired: true, attribution: '"Old oven" by Jo, CC BY 2.0, via Openverse' },
-      'logo.png': { attributionRequired: false, attribution: 'Bread via Simple Icons (CC0)' },
+      'oven.jpg': { license: 'CC BY 2.0', attributionRequired: true, attribution: '"Old oven" by Jo, CC BY 2.0, via Openverse' },
+      'logo.png': { license: 'CC0', attributionRequired: false, attribution: 'Bread via Simple Icons (CC0)' },
     }));
     const pop = { tilt: null, scale: null, text: null };
     const model = new ScriptedModel([
+      ...assetSteps('work/assets/oven.jpg', { anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', params: pop }),
+      ...assetSteps('work/assets/logo.png', { anchor: { from: 'w48', to: 'w52' }, treatment: 'card-above-head', params: pop }),
       { toolCalls: [
-        call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'card-above-head', asset: 'work/assets/oven.jpg', search: null, animation: null, params: pop }),
-        call('add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'card-above-head', asset: 'work/assets/logo.png', search: null, animation: null, params: pop }),
         call('write_post', { caption: 'Bread takes patience', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: ['bread'] }),
       ] },
       (req) => {
-        expect((req.messages.at(-1) as any).results[2].content).toMatch(/credit line/);
+        expect((req.messages.at(-1) as any).results[0].content).toMatch(/credit line/);
         return { toolCalls: [call('remove_broll', { id: 'b1' }), call('finish', { summary_for_user: 'ok' })] };
       },
     ]);

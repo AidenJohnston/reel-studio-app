@@ -38,6 +38,7 @@ import numpy as np
 
 from .compose_util import (EngineError, ffmpeg_bin, log, probe, report, resolve_asset, run, word_end,
                            word_start)
+from .project import song_ref
 
 SR = 48000
 TARGET_LUFS = -14.0
@@ -336,7 +337,7 @@ def build_audio(ctx, voice_wav) -> Path:
     offset = float(win[0]) if win and abs((win[1] - win[0]) - dur) < 0.5 else 0.0
     track = None
     if mcfg.get("enabled", True) and mcfg.get("track"):
-        track = resolve_asset(ctx, mcfg["track"])
+        track = resolve_asset(ctx, song_ref(mcfg))
         if not track.exists():
             raise EngineError("MUSIC_MISSING", f"music not found: {track}",
                               "The song for this video is missing. Pick another song.")

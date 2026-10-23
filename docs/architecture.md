@@ -105,6 +105,8 @@ anchors to output time at render.
   "music": {
     "enabled": true,
     "track": "Library/Music/my-song.mp3",     // path relative to the Reel Studio root, or null
+    "frozen": { "track": "Library/Music/my-song.mp3", "path": "work/assets/frozen/music/<sha256>.mp3" },
+                                              // optional: the AI's frozen copy, played while its track matches
     "startAt": 0.0,                           // offset into the track
     "level": "under-voice",                   // "under-voice" | "quiet" | "loud-intro"
     "automation": [ { "fromWord": "w0", "toWord": "w30", "gainDb": -6 } ],
@@ -202,7 +204,7 @@ small TypeScript project API and then ask the main process to re-render. The set
 `set_gap_cap`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
 `remove_broll`, `set_mirror(on, source)` (flip a mirrored take; the editor calls it when text in the room reads
-backwards in the frames it looks at, or when a note says the video is mirrored), `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
+backwards in the frames it looks at, or when a note says the video is mirrored), `resolve_asset(kind, intent, phase, candidateId)`, `list_assets`, `preview_asset`, `export_asset_credits`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 
@@ -307,3 +309,26 @@ export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: bo
 With no provider connected, `firstEdit` still runs the deterministic path (engine `autocut`, default captions,
 music if a track is in the Library, a cover and a render) and returns a summary saying the AI is not connected.
 See `ai/README.md` for the extra methods beyond this list.
+
+### Frozen assets (pictures, clips and songs)
+
+Web and found pictures, and clips or songs that are not in the Library (an attachment, a download), reach
+the edit through `resolve_asset`. It offers candidates read where they are, each with a preview: a still for
+a picture, a 3x3 contact sheet for a clip, a waveform with duration and loudness (LUFS) for a song. Only a
+committed candidate can be placed. The user's own Library pictures, clips and songs skip the candidate
+turn: `add_broll`, `update_broll`, `choose_music` and `logo-pop` take a `Library/...` path and freeze it
+with its record in the same call, unseen by the model. A Library song keeps its `Library/...` path in
+`music.track`, whether it was placed by its path or committed through `resolve_asset`, and its frozen copy
+goes in `music.frozen`, which the engine plays. A song from anywhere else keeps its frozen path in
+`music.track`, and the app names it by its ledger title.
+
+Freezing happens in the engine, because the AI package never reads media. `freeze-asset` copies the file to
+`work/assets/frozen/<kind>/<sha256>.<ext>`, or reuses a frozen file with the same bytes. It clones where
+the disk supports it (APFS `clonefile`, Linux `FICLONE`), so a frozen copy of a Library clip costs no extra
+disk on a Mac, and makes a plain copy elsewhere. It hashes the copy in chunks, never holding a whole file
+in memory. Clips and songs may be up to 200 MB (clips match the app's attachment limit); pictures up to 40 MB. The AI
+then appends one record of source, licence, credit and intent to `work/assets/manifest.jsonl`. Before a
+placement the AI checks that a frozen file still has its recorded hash: `hash-asset` reads it once, and
+the AI reuses that hash while the file's size and modification time stay the same. A failed note deletes
+the frozen files that were not on disk when it started and truncates the ledger back. Animations made in
+the same run are placed as they are.

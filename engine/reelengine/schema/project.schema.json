@@ -109,6 +109,15 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "track": { "anyOf": [{ "$ref": "#/$defs/relPath" }, { "type": "null" }] },
+        "frozen": {
+          "type": "object",
+          "description": "the AI's frozen copy of a Library song; the engine plays path instead of track only while this track equals music.track",
+          "required": ["track", "path"],
+          "properties": {
+            "track": { "$ref": "#/$defs/relPath" },
+            "path": { "$ref": "#/$defs/relPath" }
+          }
+        },
         "startAt": { "type": "number", "minimum": 0 },
         "level": { "type": "string" },
         "automation": {

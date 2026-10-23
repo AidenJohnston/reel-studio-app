@@ -23,6 +23,7 @@ import {
 } from '../src/main/store'
 import { classifyByExtension } from '../src/main/library'
 import { binDir, projectsDir, reelStudioRoot } from '../src/main/paths'
+import { pathFromMediaUrl } from '../src/main/media-url'
 import { setupPaths } from './helpers'
 import type { Word } from '../src/shared/api'
 
@@ -202,6 +203,31 @@ describe('project store', () => {
     await writeJson(f, { x: 2 })
     expect(JSON.parse(await fs.readFile(f, 'utf8'))).toEqual({ x: 2 })
     expect((await fs.readdir(home)).filter((n) => n.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('shows an attached clip the AI placed, now its frozen copy, with the attachment\'s still', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('zeta', { versions: [1] })
+    const clip = `work/assets/frozen/video/${'a'.repeat(64)}.mp4`
+    const other = `work/assets/frozen/video/${'b'.repeat(64)}.mp4`
+    const p = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8'))
+    p.broll = [clip, other].map((asset, i) => ({ id: `b${i + 1}`, anchor: { from: 'w0', to: 'w1' }, treatment: 'side-card', asset }))
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(p))
+    mkdirSync(join(dir, 'work', 'thumbs'), { recursive: true })
+    mkdirSync(join(dir, 'work', 'assets'), { recursive: true })
+    const still = join(dir, 'work', 'thumbs', 'attach-0a1b2c3d-dance.jpg')
+    writeFileSync(still, 'still')
+    writeFileSync(join(dir, 'work', 'thumbs', 'secret.jpg'), 'not a still')
+    // the AI's asset ledger: a torn line, and a record whose source is not an attachment
+    const ledger = [
+      { committedPath: clip, provenance: { intent: 'work/assets/attach-0a1b2c3d-dance.mp4' } },
+      { committedPath: other, provenance: { intent: 'work/thumbs/secret.jpg' } }
+    ]
+    writeFileSync(join(dir, 'work', 'assets', 'manifest.jsonl'), `{"committedPath":\n${ledger.map((r) => JSON.stringify(r)).join('\n')}\n`)
+    const d = await detail('zeta')
+    expect(pathFromMediaUrl(d.brollThumbs.b1)).toBe(still)
+    expect(d.brollThumbs.b2).toBeUndefined()
   })
 
   it('stores Library paths relative to the root', () => {

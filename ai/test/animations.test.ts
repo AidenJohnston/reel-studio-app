@@ -7,7 +7,7 @@ import { ANIMATION_TEMPLATES, ENGINE_FED, alignWordTimes, itemTimes } from '../s
 import { executeTool, newToolState, toolByName, ToolContext } from '../src/tools';
 import { loadProject } from '../src/project';
 import { StyleStore } from '../src/style';
-import { FakeHost, makeProject, tinyPng } from './helpers';
+import { FakeHost, commitImage, makeProject, tinyPng } from './helpers';
 
 const templatesDir = path.resolve(__dirname, '..', '..', 'templates', 'animations');
 
@@ -78,6 +78,8 @@ describe('make_animation', () => {
     expect(sent.wordTimes[0]).toBeCloseTo(0.13, 2);                // the lead-in: the clip starts just before the word
     expect([...sent.wordTimes].sort((a: number, b: number) => a - b)).toEqual(sent.wordTimes);
     expect(host.animations[0].out.endsWith('.mov')).toBe(true);
+    const placed = await executeTool(ctx, 'add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'animation', asset: out.asset, params: {} });
+    expect(placed.isError, placed.content).toBe(false);
   });
 
   it('uses the engine region above the face and list timings', async () => {
@@ -89,7 +91,7 @@ describe('make_animation', () => {
         words: [{ id: 'w42', w: 'so', t: 0.13 }, { id: 'w43', w: 'I', t: 0.3 }, { id: 'w44', w: 'tried', t: 0.5 },
           { id: 'w45', w: 'the', t: 0.8 }, { id: 'w46', w: 'slow', t: 0.95 }, { id: 'w47', w: 'method', t: 1.3 }] };
     };
-    const r = await executeTool(ctx, 'add_broll', { anchor: { from: 'w42', to: 'w47' }, treatment: 'card-above-head', asset: null, search: null,
+    const r = await executeTool(ctx, 'add_broll', { anchor: { from: 'w42', to: 'w47' }, treatment: 'card-above-head', asset: null,
       animation: { template: 'list-reveal', params: { items: ['slow', 'method'] } }, params: {} });
     expect(r.isError).toBe(false);
     const sent = host.animations[0].params;
@@ -99,10 +101,10 @@ describe('make_animation', () => {
     expect(p.broll[0].treatment).toBe('animation');               // never pushed through a card
   });
 
-  it('logo-pop: resolves the image path; refuses a missing one', async () => {
+  it('logo-pop: resolves a committed image path; refuses a missing one', async () => {
     const { ctx, host, root } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'acme.png'), tinyPng());
-    const ok = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: 'acme.png', text: 'Acme' } });
+    const ok = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: await commitImage(ctx, 'acme.png'), text: 'Acme' } });
     expect(ok.isError).toBe(false);
     expect(path.isAbsolute(host.animations[0].params.image)).toBe(true);
     const missing = await executeTool(ctx, 'make_animation', { template: 'logo-pop', anchor: null, params: { image: 'nope.png' } });

@@ -1,23 +1,56 @@
 // Recorded real-model sessions (claude-cli) replayed through the real agent loop, so CI and the
 // macOS box can test end to end without a login. Re-record with:  RECORD_LIVE=1 npx vitest run test/fixtures.test.ts
+// IDs a tool mints (resolve_asset's candidateId, assetId) are stored as `$result` references, so a replay
+// reads this run's IDs.
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, loadProject, ReplayProvider, RecordingProvider, ClaudeCliProvider, pickTakes, ModelProvider } from '../src';
-import { FakeHost, makeProject, tinyPng, tmpDir } from './helpers';
+import { createAI, loadProject, ReplayProvider, RecordingProvider, ClaudeCliProvider, pickTakes, ModelProvider, CompletionRequest } from '../src';
+import { FakeHost, makeProject, tinyPng, tmpDir, tinyMp3 } from './helpers';
 
 const FIX = path.join(__dirname, '..', 'fixtures');
 const LIVE = process.env.RECORD_LIVE === '1';
 const fakeFetch = (async () => new Response(tinyPng(), { headers: { 'content-type': 'image/png' } })) as any;
+const BRICK = 'https://example.com/dense-sourdough-brick.png';
+
+/** fetch-image as the engine does it: the file, its still, and its search credit in credits.json. */
+class BreadHost extends FakeHost {
+  override async runEngine(command: string, args: string[], onProgress?: Parameters<FakeHost['runEngine']>[2]) {
+    const result = await super.runEngine(command, args, onProgress);
+    if (command === 'fetch-image') {
+      await fsp.writeFile(path.join(args[args.indexOf('--project') + 1], 'work', 'assets', 'credits.json'), JSON.stringify({
+        [path.basename(result.asset)]: { title: 'Dense sourdough loaf', creator: 'A Baker', provider: 'commons', license: 'CC BY 4.0',
+          attributionRequired: true, attribution: 'Dense sourdough loaf by A Baker (CC BY 4.0)', url: args[args.indexOf('--url') + 1] },
+      }));
+    }
+    return result;
+  }
+}
+
+/** Every tool error the model was shown: a recording that no longer fits the tools fails here, not silently. */
+function failingCalls(inner: ModelProvider): { provider: ModelProvider; errors: string[] } {
+  const errors: string[] = [];
+  const provider: ModelProvider = {
+    id: inner.id, supportsImages: inner.supportsImages, model: inner.model,
+    async complete(req: CompletionRequest) {
+      const last = req.messages.at(-1);
+      if (last?.role === 'tool') for (const r of last.results) if (r.isError) errors.push(`${r.name}: ${r.content}`);
+      return inner.complete(req);
+    },
+  };
+  return { provider, errors };
+}
 
 async function breadSetup() {
   const { root, dir, transcript } = await makeProject();
-  await fsp.writeFile(path.join(root, 'Library', 'Music', 'gentle piano.mp3'), 'x');
+  await fsp.writeFile(path.join(root, 'Library', 'Music', 'gentle piano.mp3'), tinyMp3());
   await fsp.writeFile(path.join(root, 'Library', 'Music', 'upbeat drums.mp3'), 'x');
   await fsp.writeFile(path.join(root, 'Library', 'Images', 'sourdough loaf.png'), tinyPng([200, 160, 90]));
   await fsp.writeFile(path.join(root, 'Library', 'Images', 'bag of flour.png'), tinyPng([240, 240, 230]));
-  const host = new FakeHost(root);
+  const host = new BreadHost(root);
+  host.engineAssets = true;
+  host.searchResults = [{ url: BRICK, title: 'Dense sourdough loaf', kind: 'photo', license: 'CC BY 4.0' }];
   return { root, dir, transcript, host };
 }
 
@@ -32,8 +65,10 @@ const have = (name: string) => LIVE || fs.existsSync(path.join(FIX, `${name}.jso
 describe('recorded sessions (replay)', () => {
   it.runIf(have('firstEdit-bread'))('firstEdit picks the later hook take and builds a full edit', async () => {
     const { dir, host } = await breadSetup();
-    const ai = createAI({ host, settingsDir: tmpDir(), providerOverride: model('firstEdit-bread'), fetch: fakeFetch, lookup: async () => ['93.184.215.14'] });
+    const { provider, errors } = failingCalls(model('firstEdit-bread'));
+    const ai = createAI({ host, settingsDir: tmpDir(), providerOverride: provider, fetch: fakeFetch, lookup: async () => ['93.184.215.14'] });
     const r = await ai.firstEdit(dir, () => undefined);
+    expect(errors).toEqual([]);
     const p = await loadProject(dir);
     const kept = new Set(p.cut.keep.flatMap((a) => {
       const i = Number(a.from.slice(1)); const j = Number(a.to.slice(1));
@@ -43,9 +78,21 @@ describe('recorded sessions (replay)', () => {
     expect(kept.has('w0')).toBe(false);      // earlier hook take dropped
     expect(kept.has('w10')).toBe(false);     // "let me try that again" dropped
     expect(kept.has('w56')).toBe(true);      // ending kept
-    expect(p.music.track).toMatch(/^Library\/Music\//);
+    expect(p.music.track).toBe('Library/Music/gentle piano.mp3');
+    expect(p.music.frozen?.path).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
     expect(p.post.hashtags).toHaveLength(5);
-    expect(p.broll.length).toBeGreaterThan(0);
+    // two Library pictures placed by path and one web picture resolved, seen and committed: all frozen, all recorded
+    const pictures = p.broll.filter((b) => b.treatment !== 'text-pop');
+    expect(pictures).toHaveLength(3);
+    for (const b of pictures) expect(b.asset).toMatch(/^work\/assets\/frozen\/image\/[0-9a-f]{64}\.png$/);
+    const ledger = (await fsp.readFile(path.join(dir, 'work', 'assets', 'manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(ledger.map((a) => [a.provenance.intent, a.rightsConfidence])).toEqual([
+      [BRICK, 'verified-metadata'],
+      ['Library/Music/gentle piano.mp3', 'user-owned'],
+      ['Library/Images/bag of flour.png', 'user-owned'],
+      ['Library/Images/sourdough loaf.png', 'user-owned'],
+    ]);
+    expect(p.post.caption).toContain('Dense sourdough loaf by A Baker (CC BY 4.0)');
     expect(r.summary.length).toBeGreaterThan(20);
     expect(r.summary).not.toMatch(/—/);
   }, LIVE ? 900_000 : 20_000);

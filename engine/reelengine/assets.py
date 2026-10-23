@@ -1014,11 +1014,12 @@ def credit_for(url: str) -> Optional[dict]:
 
 def _write_credit(saved: Path, url: str) -> Optional[dict]:
     """<folder>/credits.json maps each saved file name -> its licence + credit line, so the post
-    caption can credit the pictures that need it (attributionRequired)."""
+    caption can credit the pictures that need it (attributionRequired). A file with no credit drops
+    any entry left under its name: the AI deletes downloads it doesn't keep, so names come back."""
     c = credit_for(url)
-    if not c:
-        return None
     book_path = saved.parent / "credits.json"
+    if not c and not book_path.exists():
+        return None
     try:
         with _FileLock(book_path):
             try:
@@ -1027,7 +1028,10 @@ def _write_credit(saved: Path, url: str) -> Optional[dict]:
                     book = {}
             except (OSError, ValueError):
                 book = {}
-            book[saved.name] = {**c, "url": url}
+            if c:
+                book[saved.name] = {**c, "url": url}
+            elif book.pop(saved.name, None) is None:
+                return None
             _write_json(book_path, book)
     except OSError as e:
         log(f"credit not written for {saved.name}: {e}")
