@@ -21,20 +21,41 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
   // start looks for them among the running processes (stillWorking) until a look finds none.
   const unreadable = join(dir, 'engines.unreadable.json')
   // Written whole or not at all: a crash mid-write must not leave a list the next start cannot read.
-  const save = (): void => {
+  const write = (): void => {
     const tmp = `${file}.${process.pid}.tmp`
+    const fd = openSync(tmp, 'w')
     try {
-      const fd = openSync(tmp, 'w')
-      try {
-        writeSync(fd, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
-        fsyncSync(fd)
-      } finally {
-        closeSync(fd)
-      }
-      renameSync(tmp, file)
-    } catch {
-      /* best effort */
+      writeSync(fd, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
     }
+    renameSync(tmp, file)
+  }
+  // On Windows the rename fails (EPERM, EBUSY, EACCES) while another program, such as a virus scanner or an
+  // indexer, has engines.json open. The first attempt stays synchronous; a refused one is retried from a timer
+  // with the latest list, so the main process never waits on the file. A newer save replaces a pending retry.
+  // The schedule matches store.ts renameWithRetry: 40 retries, about 7 s in all.
+  let retry: ReturnType<typeof setTimeout> | null = null
+  const attempt = (tries: number): void => {
+    try {
+      write()
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? ''
+      if (tries < 40 && ['EPERM', 'EBUSY', 'EACCES'].includes(code)) {
+        retry = setTimeout(() => {
+          retry = null
+          attempt(tries + 1)
+        }, Math.min(250, 10 + tries * 10))
+        retry.unref?.()
+      }
+      /* otherwise best effort */
+    }
+  }
+  const save = (): void => {
+    if (retry) clearTimeout(retry)
+    retry = null
+    attempt(0)
   }
   return {
     add(pid: number, project: string | null): void {
