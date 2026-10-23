@@ -180,13 +180,13 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
 
   /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
    * on it, and no job can start on it until `fn` is done. */
-  async function hold<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+  async function hold<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
     refuseIfBusy(slug)
     held.add(slug)
     try {
       const owner = await claimProject(projectDir(slug))
       try {
-        return await fn()
+        return await fn(owner.token)
       } finally {
         await owner.release()
       }

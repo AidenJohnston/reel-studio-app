@@ -259,15 +259,21 @@ describe('main: bytes with no file (paste of a screenshot)', () => {
 describe('main: the IPC handlers', () => {
   function wire(dir: string, busy = false) {
     const h = new Map<string, (...a: any[]) => any>()
-    const runEngine: any = async () => ({ asset: fakeAttach(dir) })
+    const calls: string[][] = []
+    const runEngine: any = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args])
+      return { asset: fakeAttach(dir) }
+    }
     registerAttachmentIpc({
       handle: (ch, fn) => h.set(ch, fn as any),
       runEngine,
       log: () => undefined,
       projectDir: () => dir,
       readProject: async () => ({ broll: [] }) as any,
-      busy: () => busy,
-      refuse: () => undefined,
+      reserve: async (slug, fn) => {
+        if (busy) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+        return fn('test-owner')
+      },
       clipboardImage: async () => null,
       choose: async () => null
     })
