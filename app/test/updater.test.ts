@@ -205,11 +205,11 @@ describe('"Not now"', () => {
   })
 })
 
-it('fails if Windows offers in-app installation, or a copy without an update feed tries to', () => {
-  expect(updateMode({ platform: 'win32', inApplications: true, hasFeed: true })).toBe('page')
+it('fails if Windows cannot install in-app, or a copy without an update feed tries to', () => {
+  expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: false, hasFeed: true })).toBe('page')
-  expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: false })).toBe('page')
+  for (const platform of ['win32', 'darwin'] as const) expect(updateMode({ platform, inApplications: true, hasFeed: false })).toBe('page')
 })
 
 it('fails if Download or Restart is dropped during a background check', async () => {

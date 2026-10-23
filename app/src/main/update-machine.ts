@@ -89,9 +89,11 @@ export function disabledReason(env: UpdateEnv): string | null {
   return null
 }
 
-// A Mac app outside Applications may run translocated or read-only. Windows keeps the release page.
+// A Mac app outside Applications may run translocated or read-only. The Windows install is per-user, so its
+// installer runs without an admin prompt.
 export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications' | 'hasFeed'>): UpdateMode {
-  return env.hasFeed && env.platform === 'darwin' && env.inApplications ? 'install' : 'page'
+  if (!env.hasFeed) return 'page'
+  return (env.platform === 'darwin' && env.inApplications) || env.platform === 'win32' ? 'install' : 'page'
 }
 
 export function plainError(context: 'check' | 'download' | 'install', e: unknown): string {

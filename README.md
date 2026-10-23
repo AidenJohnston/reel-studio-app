@@ -117,15 +117,16 @@ account or ID:
 
 1. GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only
    `User-Agent: ReelStudio/<version>` and `Accept: application/vnd.github+json`.
-2. On a Mac copy in Applications, when that list has a newer version: the release's `latest-mac.yml` from
+2. On a Mac copy in Applications or an installed Windows copy, when that list has a newer version: the release's
+   `latest-mac.yml` (Mac) or `latest.yml` (Windows) from
    `github.com/AidenJohnston/reel-studio-app/releases/download/v<version>/`, fetched by electron-updater in its own
    session. It sends electron-updater's `User-Agent: electron-builder` and the header
    `x-user-staging-id: 00000000-0000-0000-0000-000000000000`, the same for every copy.
 
-Nothing is downloaded or installed without a click. When you click **Download update**, the Mac app downloads the
-update zip that `latest-mac.yml` names from the same release, with the same headers; it installs only after you
-click **Restart to update** and confirm. Other copies, including Windows, open the release page in your browser
-instead.
+Nothing is downloaded or installed without a click. When you click **Download update**, the app downloads the
+file the feed names from the same release, with the same headers: the update zip on a Mac, the installer on
+Windows. It installs only after you click **Restart to update** and confirm; on Windows that runs the downloaded
+installer. Other copies open the release page in your browser instead.
 
 ## Build from source
 
