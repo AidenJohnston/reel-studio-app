@@ -44,4 +44,9 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 - `captions.style.pop` (boolean, absent = false): each line grows from 80% to full size over its first 120 ms,
   carrying on across the word events of a highlighted line.
 - `captions.style.preset` names the look the line started from in "Edit it myself" (`clean`, `bold-pop`,
-  `karaoke`, `boxed`, `minimal`). The engine draws only the style fields; the name is for the picker.
+  `karaoke`, `boxed`, `minimal`). The engine draws only the style fields; the name is for the picker. The AI's
+  `set_caption_style` removes it when it changes the look itself (pop, the highlight on or off, case, words per
+  line), so the picker then matches the look by its fields.
+- `captions.style.sizePicked` (boolean, absent = false): the person picked `size` in the Size row of "Edit it
+  myself". Picking a look then keeps that size; without it the look's own size applies. `set_caption_style` removes
+  it when it changes the size. The engine ignores it.

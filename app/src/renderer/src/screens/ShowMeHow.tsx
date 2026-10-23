@@ -72,7 +72,7 @@ function positionKey(st: CapStyle): string {
   return Number(st.position ?? 0.75) < 0.69 ? 'higher' : 'lower'
 }
 function colorKey(st: CapStyle): string {
-  return String(st.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow'
+  return COLORS.find((x) => x.color === String(st.color ?? '#FFFFFF').toUpperCase())?.key ?? ''
 }
 function highlightKey(st: CapStyle): string {
   return HIGHLIGHTS.find((x) => x.color === String(st.highlight).toUpperCase())?.key ?? ''
@@ -83,11 +83,13 @@ function arrowPick(e: React.KeyboardEvent<HTMLElement>, keys: string[], value: s
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
   if (!step) return
   e.preventDefault()
-  const next = keys[(keys.indexOf(value ?? keys[0]) + step + keys.length) % keys.length]
+  const next = keys[(keys.indexOf(focusKey(keys, value)) + step + keys.length) % keys.length]
   onPick(next)
   e.currentTarget.querySelector<HTMLElement>(`[data-key="${next}"]`)?.focus()
 }
-const tabStop = (key: string, value: string | null, keys: string[]): number => (key === (value ?? keys[0]) ? 0 : -1)
+// With nothing checked (a colour the AI picked that is neither option), the first button holds the Tab stop.
+const focusKey = (keys: string[], value: string | null): string => (value != null && keys.includes(value) ? value : keys[0])
+const tabStop = (key: string, value: string | null, keys: string[]): number => (key === focusKey(keys, value) ? 0 : -1)
 
 function Seg({ value, options, onPick, testid, label }: { value: string; options: { key: string; label: string }[]; onPick: (k: string) => void; testid: string; label: string }) {
   const keys = options.map((o) => o.key)
@@ -447,7 +449,7 @@ export function ShowMeHow({
                     label="Size"
                     value={sizeKey(capStyle)}
                     options={SIZES}
-                    onPick={(k) => setCapStyle({ size: SIZES.find((x) => x.key === k)!.size })}
+                    onPick={(k) => setCapStyle({ size: SIZES.find((x) => x.key === k)!.size, sizePicked: true })}
                   />
                   <h3>Position</h3>
                   <Seg
@@ -457,6 +459,8 @@ export function ShowMeHow({
                     options={POSITIONS}
                     onPick={(k) => setCapStyle({ position: POSITIONS.find((x) => x.key === k)!.position })}
                   />
+                  <h3>Colour</h3>
+                  <Seg testid="cap-color" label="Colour" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
                   {capStyle.highlight ? (
                     <>
                       <h3>Spoken word</h3>
@@ -468,12 +472,7 @@ export function ShowMeHow({
                         onPick={(k) => setCapStyle({ highlight: HIGHLIGHTS.find((x) => x.key === k)!.color })}
                       />
                     </>
-                  ) : (
-                    <>
-                      <h3>Colour</h3>
-                      <Seg testid="cap-color" label="Colour" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />
-                    </>
-                  )}
+                  ) : null}
                   <p className="muted-sm">The phone on the left shows the new look. Press "Make a new version" to use it.</p>
                 </div>
               )}

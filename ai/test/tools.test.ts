@@ -5,6 +5,8 @@ import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, 
 import { saveProject } from '../src/project';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
+import { applyPreset, presetOf } from '../../app/src/shared/caption-presets';
+import { describeChange } from '../../app/src/shared/describe';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
@@ -237,6 +239,35 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'nope', {})).content).toMatch(/unknown tool/);
     // namespaced name is accepted
     expect((await executeTool(ctx, 'reel_editor.get_project', {})).isError).toBe(false);
+  });
+
+  it('set_caption_style forgets the look picked in Edit it myself once a note changes that look', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.captions.style = applyPreset('karaoke');
+    await saveProject(dir, p);
+    const before = JSON.parse(JSON.stringify(p));
+    // "make the highlighted word green" only fine-tunes Karaoke, as the Spoken word row does
+    await executeTool(ctx, 'set_caption_style', { highlight: '#30D158' });
+    expect(ctx.project!.captions.style.preset).toBe('karaoke');
+    // "turn off the word highlight": what is left is drawn exactly like Clean, so the picker shows Clean
+    await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
+    const style = ctx.project!.captions.style;
+    expect(style).not.toHaveProperty('preset');
+    expect(presetOf(style)).toBe('clean');
+    expect(describeChange(before, { captions: ctx.project!.captions } as any)).toBe('clean subtitles');
+  });
+
+  it('set_caption_style drops the Size the person picked once a note changes the size', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.captions.style = { ...applyPreset('clean'), size: 126, sizePicked: true }; // Big in the Size row
+    await saveProject(dir, p);
+    await executeTool(ctx, 'set_caption_style', { size: 126, color: '#FFD60A' });
+    expect(ctx.project!.captions.style.sizePicked).toBe(true);
+    await executeTool(ctx, 'set_caption_style', { size: 107 }); // "smaller captions"
+    expect(ctx.project!.captions.style).not.toHaveProperty('sizePicked');
+    expect(applyPreset('minimal', ctx.project!.captions.style).size).toBe(84);
   });
 
   it('engine errors come back as readable tool errors', async () => {

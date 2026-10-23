@@ -14,10 +14,14 @@ describe('caption presets', () => {
     ])
   })
 
-  it('picking a look keeps Position, and a Size the person picked', () => {
+  it('picking a look keeps Position, and a Size the person picked through every switch', () => {
     const clean = applyPreset('clean')
     expect(applyPreset('bold-pop', { ...clean, position: 0.66 })).toMatchObject({ preset: 'bold-pop', size: 126, position: 0.66 })
-    expect(applyPreset('minimal', { ...clean, size: 126 })).toMatchObject({ preset: 'minimal', size: 126 })
+    // Big in the Size row (ShowMeHow writes size and sizePicked), then Bold pop, whose own size is Big, then Minimal
+    const minimal = applyPreset('minimal', applyPreset('bold-pop', { ...clean, size: 126, sizePicked: true }))
+    expect(minimal).toMatchObject({ preset: 'minimal', size: 126, sizePicked: true })
+    // a size nobody picked follows the look, even one the AI editor set
+    expect(applyPreset('minimal', { ...clean, size: 126 }).size).toBe(84)
   })
 
   it('the preview lights no word on a line the engine draws without its highlight', () => {
