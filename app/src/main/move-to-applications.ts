@@ -30,6 +30,15 @@ export function moveReason(c: MoveContext): 'installer-disk' | 'temporary-copy' 
   return c.writeError(dirname(c.exePath.slice(0, app + '.app'.length))) === 'EROFS' ? 'installer-disk' : null
 }
 
+const DEFAULT_DESTINATION ='/Applications/Reel Studio.app'
+
+// Electron's mover copies to /Applications under the running bundle's own folder name, so a renamed product or
+// bundle is checked under its real name. The default covers an executable path with no bundle in it.
+export function applicationsDestination(exePath: string): string {
+  const bundle = /\/([^/]+\.app)\/Contents\/MacOS\/[^/]+$/.exec(exePath)
+  return bundle ? `/Applications/${bundle[1]}` : DEFAULT_DESTINATION
+}
+
 export interface Question {
   type: 'question' | 'warning'
   message: string
@@ -40,7 +49,7 @@ export interface Question {
 }
 
 export interface MoveDeps {
-  destinationExists(): boolean
+  destinationExists(path: string): boolean
   ask(q: Question): Promise<number>
   /** dialog.showMessageBoxSync: moveToApplicationsFolder's conflictHandler has to answer synchronously. */
   askNow(q: Question): number
@@ -90,7 +99,7 @@ export async function offerMoveToApplications(c: MoveContext, deps: MoveDeps): P
   if ((await deps.ask(reason === 'temporary-copy' ? MOVE_QUESTION_TEMPORARY_COPY : MOVE_QUESTION)) !== 0) return 'declined'
   // Electron's privileged copy can bypass conflictHandler, so confirm before invoking it.
   let replaceConfirmed = false
-  if (deps.destinationExists()) {
+  if (deps.destinationExists(applicationsDestination(c.exePath))) {
     if ((await deps.ask(REPLACE_QUESTION)) !== 0) return 'declined'
     replaceConfirmed = true
   }

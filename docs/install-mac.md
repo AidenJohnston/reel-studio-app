@@ -8,13 +8,13 @@ This takes about two minutes. Nothing else needs to be installed first.
 
 ## 1. Download
 
-Download **Reel-Studio-0.1.1-arm64.dmg** (the numbers may be a little different). It lands in your **Downloads** folder.
+Download **Reel-Studio-0.1.2-arm64.dmg** (the numbers may be a little different). It lands in your **Downloads** folder.
 
 ## 2. Put the app in Applications
 
 1. Double-click the downloaded file. A window opens showing the Reel Studio icon, an arrow and an **Applications** folder.
 2. Drag the **Reel Studio** icon onto the **Applications** folder.
-3. When it finishes copying, close that window. Then drag the little disk called **Reel Studio 0.1.3 Installer** (the number may be different) on your desktop to the Trash (this "ejects" it).
+3. When it finishes copying, close that window. Then drag the little disk called **Reel Studio 0.1.2 Installer** (the number may be different) on your desktop to the Trash (this "ejects" it).
 
 If you open Reel Studio straight from that window instead, it asks **Move Reel Studio to Applications?** Click **Move**:
 it copies itself into Applications and opens again from there. From the disk it runs slower and can stop working when the disk is ejected.

@@ -11,14 +11,17 @@
 #                        The test profile <dir>-profile is kept between runs, so a downloaded model is reused.
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
-[ $# -ge 1 ] || { sed -n '2,12p' "$0" >&2; exit 2; }
+usage() { sed -n '2,11p' "$0" >&2; exit 2; }
+[ $# -ge 1 ] || usage
 DMG="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; shift
 FRESH=0; UNSIGNED=0; TIMEOUT=300
 while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH=1 ;;
     --unsigned) UNSIGNED=1 ;;
-    --timeout) TIMEOUT="$2"; shift ;;
+    --timeout)
+      [[ "${2-}" =~ ^[0-9]+$ ]] || { echo "--timeout needs a number of seconds" >&2; usage; }
+      TIMEOUT="$2"; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -81,7 +84,9 @@ done
 if [ -z "$CODE" ]; then
   echo "self-test            FAIL: still running after ${TIMEOUT}s, stopping it"
   kill -TERM "$PID" 2>/dev/null || true; sleep 5; kill -KILL "$PID" 2>/dev/null || true
-  pkill -KILL -f "$APP/Contents/Resources/python" 2>/dev/null || true   # the engine runs in its own process group
+  # The engine leads its own process group and its ffmpeg and ffprobe children join it, but their command lines do
+  # not name python, so kill each engine's whole group.
+  for p in $(pgrep -f "$APP/Contents/Resources/python" || true); do kill -KILL -- "-$p" 2>/dev/null || true; done
   tail -n 20 "$WORK/app.log" | sed 's/^/    /'
   FAILED+=("self-test timeout")
 else
