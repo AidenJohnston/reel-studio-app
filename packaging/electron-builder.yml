@@ -94,6 +94,12 @@ mac:
   target:
     - target: dmg
       arch: [arm64]
+  fileAssociations:
+    - ext: [mp4, mov, m4v, mkv, webm, avi, mts]
+      name: Video
+      role: Viewer
+      # Offer Open With without taking over the person's default video app.
+      rank: Alternate
   category: public.app-category.video
   icon: ${env.RS_REPO_ROOT}/packaging/icons/icon.icns
   minimumSystemVersion: "14.0"
@@ -133,4 +139,5 @@ nsis:
   runAfterFinish: true
   deleteAppDataOnUninstall: false   # never delete the user's videos or settings
   differentialPackage: false
+  include: ${env.RS_REPO_ROOT}/packaging/installer.nsh   # "Open with Reel Studio" for videos (see the file for why not fileAssociations)
   artifactName: Reel-Studio-Setup-${version}-${arch}.${ext}

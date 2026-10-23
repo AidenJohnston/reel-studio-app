@@ -1,3 +1,4 @@
+import { clipboardFiles, filesFromArgv } from './intake'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -328,6 +329,8 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 // ---- IPC ----------------------------------------------------------------------------------------
 function registerIpc(): void {
   handle('app:info', () => appInfo())
+  handle('app:clipboardFiles', () => clipboardFiles())
+  handle('app:takeOpenFiles', async () => (await loadSettings()).firstRunDone ? pendingOpenFiles.splice(0) : [])
   handle('app:finishFirstRun', async () => {
     await saveSettings({ firstRunDone: true })
   })
@@ -633,9 +636,30 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+const pendingOpenFiles: string[] = []
+let setupDone = false
+function queueOpenFiles(files: string[]): void {
+  pendingOpenFiles.push(...files)
+  // Early open-file events must wait until IPC and the app's services are ready.
+  if (!setupDone) return
+  if (!win || win.isDestroyed()) {
+    createWindow() // The new renderer drains pendingOpenFiles on mount.
+  } else {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    win.webContents.send('app:filesAvailable')
+  }
+}
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  queueOpenFiles([path])
+})
+if (process.platform === 'win32') queueOpenFiles(filesFromArgv(process.argv, process.cwd(), !!process.defaultApp))
+
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv, cwd) => {
+  queueOpenFiles(filesFromArgv(argv, cwd, !!process.defaultApp))
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()
@@ -675,6 +699,7 @@ app.whenReady().then(async () => {
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()
+  setupDone = true
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower
   app.on('activate', () => {

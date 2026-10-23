@@ -94,9 +94,43 @@ export function App() {
     return () => window.removeEventListener('keydown', key)
   }, [go])
 
+  const intake = useCallback((paths: string[]) => {
+    if (!paths.length) return
+    if (screenRef.current.name === 'library') {
+      reel.library
+        .add(paths)
+        .then((r) => {
+          notify(describeSorted(r) || 'Done.')
+          setLibraryTick((t) => t + 1)
+        })
+        .catch((err) => notify(userMessage(err), 'error'))
+    } else void createFromFiles(paths, go, notify)
+  }, [go, notify])
+
+  const firstRunDone = !!info?.firstRunDone
+  useEffect(() => {
+    if (!firstRunDone) return
+    const open = () => {
+      void reel.app.takeOpenFiles().then((paths) => {
+        if (paths.length) void createFromFiles(paths, go, notify)
+      }).catch((err) => notify(userMessage(err), 'error'))
+    }
+    const off = reel.app.onFilesAvailable(open)
+    open()
+    const paste = (event: ClipboardEvent) => {
+      const target = event.target
+      if (event.defaultPrevented || (target instanceof Element && target.closest('input, textarea, [contenteditable], [data-note-drop]'))) return
+      void reel.app.clipboardFiles().then(intake).catch((err) => notify(userMessage(err), 'error'))
+    }
+    window.addEventListener('paste', paste)
+    return () => {
+      off()
+      window.removeEventListener('paste', paste)
+    }
+  }, [firstRunDone, go, notify, intake])
+
   // The whole window is a drop target (critique 3): a video makes a reel, anything on the Library
   // screen goes into the Library. Also: a dropped file must never navigate the window to the file.
-  const firstRunDone = !!info?.firstRunDone
   useEffect(() => {
     let depth = 0
     const enter = (e: DragEvent) => {
@@ -136,15 +170,7 @@ export function App() {
       if (!firstRunDone || !e.dataTransfer) return
       const paths = Array.from(e.dataTransfer.files).map((f) => reel.app.pathForFile(f)).filter(Boolean)
       if (!paths.length) return
-      if (screenRef.current.name === 'library') {
-        reel.library
-          .add(paths)
-          .then((r) => {
-            notify(describeSorted(r) || 'Done.')
-            setLibraryTick((t) => t + 1)
-          })
-          .catch((err) => notify(userMessage(err), 'error'))
-      } else void createFromFiles(paths, go, notify)
+      intake(paths)
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -158,7 +184,7 @@ export function App() {
       window.removeEventListener('dragleave', leave)
       window.removeEventListener('drop', drop)
     }
-  }, [firstRunDone, go, notify])
+  }, [firstRunDone, intake])
 
   if (!info) return null
   const platform = `platform-${info.platform}`

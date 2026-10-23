@@ -304,6 +304,9 @@ export interface UserError {
 export interface ReelApi {
   app: {
     info(): Promise<AppInfo>
+    clipboardFiles(): Promise<string[]>
+    takeOpenFiles(): Promise<string[]>
+    onFilesAvailable(cb: () => void): () => void
     finishFirstRun(): Promise<void>
     openFolder(path: string): Promise<void>
     copyText(text: string): Promise<void>
