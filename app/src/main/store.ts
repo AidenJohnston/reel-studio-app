@@ -493,10 +493,13 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
   const brollThumbs: Record<string, string> = {}
-  for (const b of project.broll ?? []) {
-    const a = typeof b.asset === 'string' ? b.asset : ''
+  const assets = (project.broll ?? []).map((b) => (typeof b.asset === 'string' ? b.asset : ''))
+  const clipSources = assets.some((a) => FROZEN_CLIP.test(a)) ? await frozenClipSources(dir) : new Map<string, string>()
+  for (const [i, b] of (project.broll ?? []).entries()) {
+    // a clip the AI placed is its frozen copy; the attachment it was frozen from has the still
+    const a = clipSources.get(assets[i]) ?? assets[i]
     // an attached clip or GIF (work/assets/attach-*.mp4) shows the still `engine attach` made of it
-    const clip = /^work\/assets\/(attach-[a-f0-9]{8}-[a-z0-9-]+)\.(mp4|mov|m4v|webm)$/.exec(a)
+    const clip = ATTACHED_CLIP.exec(a)
     if (clip) {
       const t = join(dir, 'work', 'thumbs', `${clip[1]}.jpg`)
       if (existsSync(t)) brollThumbs[b.id] = mediaUrl(t)
@@ -524,6 +527,28 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false } : null,
     aiEdited: !!st.aiEdited
   }
+}
+
+const ATTACHED_CLIP = /^work\/assets\/(attach-[a-f0-9]{8}-[a-z0-9-]+)\.(mp4|mov|m4v|webm)$/
+const FROZEN_CLIP = /^work\/assets\/frozen\/video\/[0-9a-f]{64}\.[a-z0-9]+$/
+
+/** Frozen clip path -> the attached clip it was frozen from, read from the AI's asset ledger (a record's
+ * provenance.intent is the path the clip came from). Other intents are ignored. */
+async function frozenClipSources(dir: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const text = await fs.readFile(join(dir, 'work', 'assets', 'manifest.jsonl'), 'utf8').catch(() => '')
+  for (const line of text.split('\n')) {
+    let r: { committedPath?: unknown; provenance?: { intent?: unknown } }
+    try {
+      r = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (typeof r?.committedPath === 'string' && FROZEN_CLIP.test(r.committedPath) && typeof r.provenance?.intent === 'string' && ATTACHED_CLIP.test(r.provenance.intent)) {
+      out.set(r.committedPath, r.provenance.intent)
+    }
+  }
+  return out
 }
 
 function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {
