@@ -251,9 +251,15 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
   if (stageMessage) ctx.emit({ type: 'status', message: stageMessage });
   return ctx.host.runEngine(command, ['--project', ctx.projectDir, ...extra], (pr) => {
+    // A render's last step says the video is ready, but a render inside an AI task is a preview or the
+    // final before the task's own end: "Your video is ready" would show while the AI is still working.
+    if (command === 'render' && RENDER_DONE.test(pr.message)) return;
     ctx.emit({ type: 'status', message: pr.message || stageMessage || 'Working', pct: pr.pct });
   }, ctx.signal);
 }
+
+/** The engine's (and the dev engine's) last render step. */
+const RENDER_DONE = /^(your video is ready|done)\.?$/i;
 
 /** Stretches of the cut where nothing changes on screen (no b-roll, no zoom; the opening hook title
  * does not count), longer than `min` seconds, with the words said in each. The model's own count of
@@ -416,6 +422,64 @@ export async function doRender(ctx: ToolContext, draft: boolean): Promise<Render
   ctx.state.renders.push(info);
   ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
   return info;
+}
+
+/** What one edit is about to do, in plain words from its own arguments and the project it changes
+ * ("Cutting 3 words at 0:31"), for the status line. Undefined when there is nothing more specific to
+ * say than the tool's step. The arguments are the model's, not yet validated. */
+export function operationStatus(ctx: ToolContext, name: string, args: any): string | undefined {
+  const p = ctx.project; const t = ctx.transcript;
+  if (!p || !t) return undefined;
+  const times = approxOutputTimes(t, p.cut.keep, p.cut.gapCap);
+  const at = (id: unknown): string => {
+    const s = typeof id === 'string' ? times.get(id)?.s : undefined;
+    if (s === undefined) return '';
+    const r = Math.round(s);
+    return ` at ${Math.floor(r / 60)}:${String(r % 60).padStart(2, '0')}`;
+  };
+  const words = (n: number) => (n === 1 ? 'a word' : `${n} words`);
+  const broll = typeof args?.id === 'string' ? p.broll.find((b) => b.id === args.id) : undefined;
+  switch (name) {
+    case 'set_gap_cap':
+      if (typeof args?.seconds !== 'number' || args.seconds === p.cut.gapCap) return undefined;
+      return args.seconds < p.cut.gapCap ? 'Tightening the pauses' : 'Giving the pauses more room';
+    case 'set_cut': {
+      if (!Array.isArray(args?.keep)) return undefined;
+      const next = normalizeKeep(t, args.keep);
+      if (next.problems.length) return undefined;
+      const before = keptWords(t, p.cut.keep).map((w) => w.id);
+      if (!before.length) return undefined; // the first pick of takes
+      const after = new Set(keptWords(t, next.keep).map((w) => w.id));
+      const gone = before.flatMap((id, i) => (after.has(id) ? [] : [i]));
+      const back = after.size - (before.length - gone.length);
+      // one stretch taken out at one moment; anything bigger is picking takes
+      if (gone.length && !back && gone.at(-1)! - gone[0] === gone.length - 1) return `Cutting ${words(gone.length)}${at(before[gone[0]])}`;
+      if (back > 0 && !gone.length) return `Bringing back ${words(back)}`;
+      return undefined;
+    }
+    case 'add_broll':
+      return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : args?.treatment === 'text-pop' ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
+    case 'update_broll':
+      return broll ? `Changing the picture${at(broll.anchor.from)}` : undefined;
+    case 'remove_broll':
+      return broll ? `Taking out the picture${at(broll.anchor.from)}` : undefined;
+    case 'set_caption_style': {
+      const size = p.captions.style.size;
+      const shown = p.captions.enabled || args?.enabled === true;
+      if (shown && typeof args?.size === 'number' && typeof size === 'number' && args.size !== size) return `Making the subtitles ${args.size > size ? 'bigger' : 'smaller'}`;
+      if (args?.enabled === false && p.captions.enabled) return 'Turning the subtitles off';
+      return p.captions.enabled ? 'Changing how the subtitles look' : args?.enabled === true ? 'Turning the subtitles on' : undefined;
+    }
+    case 'choose_music':
+      // null + a level keeps the song (choose_music): only null alone takes it out
+      if (args?.track === null && !args.level && p.music.track) return 'Taking out the music';
+      if (typeof args?.track === 'string' && args.track !== p.music.track) return `Adding the song "${path.basename(args.track, path.extname(args.track))}"`;
+      return args?.level && args.level !== p.music.level ? 'Changing the music volume' : undefined;
+    case 'set_zoom':
+      return Array.isArray(args?.zooms) && !args.zooms.length && p.zooms.length ? 'Taking out the zooms' : undefined;
+    default:
+      return undefined;
+  }
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
