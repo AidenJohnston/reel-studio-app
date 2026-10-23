@@ -71,9 +71,8 @@ describe('fast notes (no model turns)', () => {
     const r: any = await ai.applyNote(dir, 'the music is too loud at the start', () => undefined);
     expect(r.fast).toBeUndefined();
     expect((model.requests[0].messages[0] as any).content[0].text).toMatch(/result of get_project/);
-    const results = model.requests[1].messages.flatMap((m) => (m.role === 'tool' ? m.results : []));
-    expect(results.find((x) => x.name === 'render_draft')!.content).toMatch(/skipped/);
-    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([true, false]);
+    // only the music changed, which a preview cannot show: no draft, just the final render
+    expect(host.calls.filter((c) => c.command === 'render').map((c) => c.args.includes('--draft'))).toEqual([false]);
   });
 });
 

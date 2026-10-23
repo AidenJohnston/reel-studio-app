@@ -43,7 +43,9 @@ const api: ReelApi = {
     signOutChatGPT: () => call('ai:signOutChatGPT'),
     setClaudeKey: (k) => call('ai:setClaudeKey', k),
     claudeCodeStatus: () => call('ai:claudeCodeStatus'),
-    openClaudeSignIn: () => call('ai:openClaudeSignIn')
+    openClaudeSignIn: () => call('ai:openClaudeSignIn'),
+    checkEdits: () => call('ai:checkEdits'),
+    setCheckEdits: (on) => call('ai:setCheckEdits', on)
   },
   projects: {
     list: () => call('projects:list'),

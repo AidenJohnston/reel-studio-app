@@ -12,9 +12,12 @@ export interface Settings extends UpdateState {
   aiAutoPicked: boolean
   /** ai-carryover.ts already ran (it kept, or left alone, what an old local-Claude-Code install was using) */
   aiCarriedOver: boolean
+  /** Settings > "Double-check each edit": passed to every AI note as `checkEdit`. Off by default until
+   * the eval harness measures the tokens and time it adds. */
+  checkEdits: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkEdits: false, ...UPDATE_DEFAULTS }
 
 export async function loadSettings(): Promise<Settings> {
   try {

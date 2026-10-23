@@ -15,7 +15,11 @@ import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types'
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
-export interface RenderInfo { version: number; draft: boolean; result: any }
+export interface RenderInfo {
+  version: number; draft: boolean; result: any;
+  /** a preview the checker asked for (editor.ts candidateRender): it does not use up the editor's previews */
+  checker?: boolean;
+}
 
 export interface ToolState {
   changed: Set<string>;
@@ -1207,7 +1211,7 @@ const tools: ToolDef[] = [
     description: 'Render a quick preview of the current edit. Needed before look_at_frames.',
     parameters: S.obj({}),
     async run(ctx) {
-      const drafts = ctx.state.renders.filter((r) => r.draft).length;
+      const drafts = ctx.state.renders.filter((r) => r.draft && !r.checker).length;
       if (ctx.maxDraftRenders !== undefined && drafts >= ctx.maxDraftRenders) {
         throw new ToolInputError('No more previews for this task. Call finish now. The final full-quality video includes every change. If you SAW a problem you could not fix, say so plainly in your summary; small fixes the checks asked for (a longer anchor, a removed or moved card, a zoom) need no mention.');
       }

@@ -22,6 +22,21 @@ export interface CheckRecord {
 export const MAX_REPAIRS = 2;
 const MAX_FRAMES = 6;
 const MAX_FIXES = 3;
+// A fix's `problem` is shown to the creator as written (unresolvedLine). checker.md asks for one or two
+// plain sentences; these caps hold it to that. 180 characters is a ceiling for two short sentences,
+// not a measured number.
+const MAX_PROBLEM_CHARS = 180;
+const MAX_PROBLEM_SENTENCES = 2;
+
+/** Why a fix's `problem` can't be shown to the creator as written, or null. */
+export function problemTextIssue(problem: string): string | null {
+  const t = problem.trim();
+  if (t.length > MAX_PROBLEM_CHARS) return `at most ${MAX_PROBLEM_CHARS} characters`;
+  if ((t.match(/[.!?]+(\s|$)/g) ?? []).length > MAX_PROBLEM_SENTENCES) return `at most ${MAX_PROBLEM_SENTENCES} sentences`;
+  // word ids (w12) and tool or field names (set_cut, captions.style, gapCap) are the editor's words, not the creator's
+  if (/\bw\d+\b|\b[a-z]+_[a-z_]+\b|\b[a-z]+\.[a-z]+\b|\b[a-z]+[A-Z][a-zA-Z]*\b/.test(t)) return 'plain words only: no word ids, tool names or field names';
+  return null;
+}
 
 function implicatedWords(facts: EditFact[], p: Project, t: Transcript): string[] {
   const kept = keptWords(t, p.cut.keep);
@@ -113,6 +128,10 @@ function verdictProblems(j: any): string[] {
     if (j.verdict === 'fix' && (fixes.length < 1 || fixes.length > MAX_FIXES)) out.push(`a fix verdict has 1 to ${MAX_FIXES} fixes`);
     fixes.forEach((f: any, i: number) => {
       if (typeof f?.problem !== 'string' || !f.problem.trim()) out.push(`fixes[${i}].problem must be a sentence`);
+      else {
+        const issue = problemTextIssue(f.problem);
+        if (issue) out.push(`fixes[${i}].problem is shown to the creator: ${issue}`);
+      }
       if (typeof f?.request !== 'string' || !f.request.trim()) out.push(`fixes[${i}].request must be a sentence`);
     });
   }

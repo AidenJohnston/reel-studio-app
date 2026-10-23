@@ -398,6 +398,11 @@ function registerIpc(): void {
   // The person's own Claude Code app: the page gets the state only; the sign-in happens in Anthropic's CLI.
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
+  handle('ai:checkEdits', async () => (await loadSettings()).checkEdits)
+  handle('ai:setCheckEdits', async (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
+    return (await saveSettings({ checkEdits: on })).checkEdits
+  })
   handle('ai:openClaudeSignIn', async () => {
     const st = await claudeCode()
     if (st.state === 'ready') return
@@ -471,7 +476,7 @@ function registerIpc(): void {
       slug,
       'note',
       async (emit, signal, id) => {
-        const opts = { jobId: id, ...(files.length ? { attachments: files.map((f) => f.asset) } : {}) }
+        const opts = { jobId: id, checkEdit: (await loadSettings()).checkEdits, ...(files.length ? { attachments: files.map((f) => f.asset) } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(slug, r, r.summary + extra)

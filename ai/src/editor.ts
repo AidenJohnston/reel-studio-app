@@ -294,6 +294,9 @@ export interface ApplyNoteOptions {
   attachments?: string[];
   /** the app's job id, recorded in the receipt of the version this note makes */
   jobId?: string;
+  /** Settings > "Double-check each edit": a second request checks the edit before it becomes a version
+   * (checkAndRepair). Off unless the app passes true: its added tokens and time are not measured yet. */
+  checkEdit?: boolean;
 }
 
 /** The receipt of the version a note made: only a final render made one (a failed final falls back to a draft). */
@@ -306,7 +309,10 @@ const REPAIR_STEPS = 12;
 
 async function candidateRender(ctx: ToolContext): Promise<RenderInfo> {
   const last = ctx.state.renders.at(-1);
-  return last?.draft && !ctx.state.dirty?.size ? last : doRender(ctx, true);
+  if (last?.draft && !ctx.state.dirty?.size) return last;
+  const made = await doRender(ctx, true);
+  made.checker = true;
+  return made;
 }
 
 async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
@@ -328,9 +334,19 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     record: { verdict, repairs, rounds, ...(error ? { error } : {}), cost: { tokens, seconds: Math.round((Date.now() - started) / 100) / 10 } },
     summary,
   });
+  // puts back the project, files, rules and summary from before the last repair run
+  let undoRepair: (() => Promise<void>) | null = null;
   for (;;) {
     onEvent({ type: 'status', message: 'Double-checking your change', pct: 85, phase: 'edit' });
-    const candidate = await candidateRender(ctx);
+    let candidate: RenderInfo;
+    try {
+      candidate = await candidateRender(ctx);
+    } catch (e: any) {
+      // A preview that will not render ends the check, never the note: the edit before any repair stands.
+      if (signal?.aborted) throw e;
+      await undoRepair?.();
+      return done('error', `preview failed: ${String(e?.userMessage ?? e?.message ?? e)}`);
+    }
     let asked: Awaited<ReturnType<typeof askChecker>>;
     try {
       asked = await askChecker(counted, system, await checkerEvidence(ctx, note, candidate), candidate.result?.renderId ?? null, signal);
@@ -349,6 +365,13 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     const assets = await listAssets(ctx.projectDir);
     const changed = new Set(ctx.state.changed);
     const [rules, saved, proposed] = [ctx.state.styleRuleIds.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length];
+    const said = summary;
+    undoRepair = async () => {
+      await rollbackNote(deps, ctx.projectDir, before, assets, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules) });
+      ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
+      ctx.state.changed = changed;
+      summary = said;
+    };
     ctx.state.finished = null;
     try {
       const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes), ctx, onEvent, signal,
@@ -357,9 +380,7 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
       if (r.finished) summary = r.finished;
     } catch (e: any) {
       if (signal?.aborted) throw e;
-      await rollbackNote(deps, ctx.projectDir, before, assets, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules) });
-      ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
-      ctx.state.changed = changed;
+      await undoRepair();
       return done('unresolved', String(e?.message ?? e));
     }
   }
@@ -458,7 +479,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
-    const review = undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, onEvent, signal);
+    const review = !opts.checkEdit || undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, onEvent, signal);
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
     const version = await finalize(deps, ctx, onEvent);
     const said = review?.summary ?? honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.';

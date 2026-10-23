@@ -74,16 +74,21 @@ among the project's renders.
 
 - `render_draft` = engine `render --draft` (preview). The agent caps previews per task (3 per first
   edit, 2 per note).
-- After the agent calls `finish` on a note that changed the edit, a checker reviews it before the final
-  render (see Checker below).
+- With Settings > "Double-check each edit" on, after the agent calls `finish` on a note that changed
+  the edit, a checker reviews it before the final render (see Checker below).
 - Then the loop runs one final `render`: that is the only step that adds a version.
 
 ## Checker
 
-A note's edit is checked before it becomes a version (`ai/src/checker.ts`, prompt `ai/prompts/checker.md`).
+A note's edit is checked before it becomes a version (`ai/src/checker.ts`, prompt `ai/prompts/checker.md`)
+when Settings > "Double-check each edit" is on (`settings.json` `checkEdits`, passed to `applyNote` as
+`checkEdit`). It is off by default until the eval harness measures the tokens and time it adds; with it
+off a note runs exactly as without a checker.
 
 1. **Candidate.** The editor's last preview when nothing changed after it, otherwise a new
-   `render --draft`. A draft carries the receipt and `verify`, and never adds a version.
+   `render --draft`. A draft carries the receipt and `verify`, and never adds a version. The checker's
+   drafts don't count against the editor's preview cap. A draft that fails to render ends the check
+   with `error` (after undoing the repair it was meant to show, if any); the note still makes its version.
 2. **Check.** One request to the editor's model with no tools and no earlier conversation. It
    contains the note, the receipt's facts (with the words a cut removed or brought back), the
    candidate's `verify`, `warnings` and `broll` report, the words the video now says, and up to 6
@@ -92,7 +97,8 @@ A note's edit is checked before it becomes a version (`ai/src/checker.ts`, promp
    the video for caption, mirror or pause changes. The facts are fenced as data. The reply is
    `{verdict: pass|fix, fixes: [{problem, request}], scores}` with 1-5 scores for `asked`,
    `nothingElse`, `hook`, `pacing`, `captions`, `visuals`, `sound`. An unreadable reply is asked
-   for once more.
+   for once more. So is one whose `problem` (shown to the creator) is over 180 characters or two
+   sentences, or names word ids, tools or fields.
 3. **Repair.** A `fix` sends the requests and the note to the editor in a new run on the same
    project, which says the reviewer is not the user. At most 2 repair rounds; each is followed by a
    new check of a new candidate. A repair that changes nothing, or that stops with an AI error (its

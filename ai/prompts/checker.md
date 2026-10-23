@@ -20,7 +20,7 @@ ONE JSON object, nothing else:
 {"verdict": "pass" or "fix", "fixes": [{"problem": "...", "request": "..."}], "scores": {"asked": n, "nothingElse": n, "hook": n, "pacing": n, "captions": n, "visuals": n, "sound": n}}
 
 - `fixes`: empty for a pass; 1 to 3 for a fix, the most important first.
-  - `problem`: one plain sentence for the creator. No word ids, no tool names, no jargon.
+  - `problem`: one or two short plain sentences for the creator, at most 180 characters. No word ids, no tool names, no jargon.
   - `request`: one sentence for the editor saying exactly what to change. Word ids and quoted words are welcome.
 - `scores`: whole numbers from 1 to 5. 1 unusable, 2 major repair, 3 usable with fixes, 4 minor fixes, 5 ready to share.
   - `asked`: the note is done, exactly.

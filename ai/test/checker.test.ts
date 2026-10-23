@@ -68,6 +68,8 @@ async function noteProject(start: Partial<Project> = {}) {
 }
 
 const NOTE = 'cut my first take and the part about the fancy flour';
+// Settings > "Double-check each edit" on
+const CHECK = { checkEdit: true };
 const CUT = call('set_cut', { keep: [{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }] });
 const text = (req: CompletionRequest) => req.messages.flatMap((m) => (m.role === 'user' ? m.content : [])).map((c) => (c.type === 'text' ? c.text : '')).join('\n');
 
@@ -75,7 +77,7 @@ it('fails if the checker can change the project, sees the editor conversation, o
   const { dir, host, mid } = await noteProject();
   const model = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]], [pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  await ai.applyNote(dir, NOTE, () => {});
+  await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   expect(model.checkerRequests).toHaveLength(1);
   const req = model.checkerRequests[0];
   expect(req.tools).toEqual([]);
@@ -98,7 +100,7 @@ it('fails if a cut that only moves where a take or the video ends, or a removed 
   const after = [{ from: 'w0', to: 'w7' }, { from: 'w16', to: 'w52' }];
   const model = new Roles([[call('set_cut', { keep: after }), call('set_zoom', { zooms: [] }), call('render_draft')], [call('finish', { summary_for_user: 'Done.' })]], [pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  await ai.applyNote(dir, 'drop the word bread at the start, the last line and the zoom on the brick line', () => {});
+  await ai.applyNote(dir, 'drop the word bread at the start, the last line and the zoom on the brick line', () => {}, undefined, CHECK);
   const frames = host.calls.find((c) => c.command === 'frames')!;
   expect(frames.args[frames.args.indexOf('--times') + 1]).toBe([mid('w16', after), mid('w52', after), mid('w38', after)].join(','));
 });
@@ -112,7 +114,7 @@ it('fails if a check whose frames could not be made is stored as if it saw them'
   };
   const model = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]], [pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  await ai.applyNote(dir, NOTE, () => {});
+  await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   const stored = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v2', 'check.json'), 'utf8'));
   expect(stored.rounds[0].frames).toMatchObject({ asked: 2, seen: 0, error: expect.stringContaining('replaced by a newer one') });
 });
@@ -121,7 +123,7 @@ it("fails if a passing check's rubric scores are not stored with the version it 
   const { dir, host } = await noteProject();
   const model = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]], [pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   expect(r.version).toBe(2);
   expect(r.summary).toBe('I cut the flour part.');
   const stored = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v2', 'check.json'), 'utf8'));
@@ -138,7 +140,7 @@ it('fails if a fix request does not reach the editor or the re-check looks at th
     [call('finish', { summary_for_user: 'I cut your first take and the flour part.' })],
   ], [fix('The captions got smaller, which you did not ask for.', `Set caption size back to ${size}.`), pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   const repairTask = text(model.editorRequests[2]);
   expect(repairTask).toContain(`Set caption size back to ${size}.`);
   expect(repairTask).toContain(NOTE);
@@ -159,7 +161,7 @@ it('fails if more than two repair rounds run or an unresolved disagreement is re
     ...sizes.flatMap((s) => [[call('set_caption_style', { size: s })], [call('finish', { summary_for_user: 'I cut the flour part.' })]]),
   ], [0, 1, 2, 3].map(() => fix('The video still opens on the flour line.', 'Cut w27 to w34.')));
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   expect(model.checkerRequests).toHaveLength(3);
   expect(r.check).toMatchObject({ verdict: 'unresolved', repairs: 2 });
   expect(r.summary).toContain('The video still opens on the flour line.');
@@ -177,7 +179,7 @@ it("fails if the editor declining a fix is reported as success or its reason rep
     [call('finish', { summary_for_user: 'Putting the first take back would undo the note.' })],
   ], [fix('Your first take is gone.', 'Bring back w0 to w15.'), pass()]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   expect(r.check).toMatchObject({ verdict: 'unresolved', repairs: 1 });
   expect(r.summary).toMatch(/^I cut the flour part\. /);
   expect(r.summary).toContain('Your first take is gone.');
@@ -188,7 +190,7 @@ it('fails if an unreadable checker reply blocks the version or is recorded as a 
   const model = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]],
     ['looks good to me', '{"verdict": "pass"}']);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   expect(r.version).toBe(2);
   expect(r.summary).toBe('I cut the flour part.');
   expect(r.check?.verdict).toBe('error');
@@ -205,7 +207,7 @@ it('fails if a repair run that stops with an AI error loses the checked edit, ke
     new AIError('cli_limited', 'The AI hit its usage limit. Try again later.'),
   ], [fix('The captions are hard to read.', 'Make the captions bigger.')]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
-  const r = await ai.applyNote(dir, NOTE, () => {});
+  const r = await ai.applyNote(dir, NOTE, () => {}, undefined, CHECK);
   const p = await loadProject(dir);
   expect(p.cut.keep).toEqual([{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }]);
   expect(p.captions.style.size).toBe(size);
@@ -214,4 +216,93 @@ it('fails if a repair run that stops with an AI error loses the checked edit, ke
   expect(r.version).toBe(2);
   expect(r.check).toMatchObject({ verdict: 'unresolved', repairs: 1 });
   expect(r.summary).toContain('The captions are hard to read.');
+});
+
+it('fails if a note checks its edit while "Double-check each edit" is off', async () => {
+  const { dir, host } = await noteProject();
+  const model = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]], []);
+  const said: string[] = [];
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model })
+    .applyNote(dir, NOTE, (e) => { if (e.type === 'status') said.push(e.message); });
+  expect(model.checkerRequests).toEqual([]);
+  expect(said).not.toContain('Double-checking your change');
+  expect([r.version, r.summary, r.check]).toEqual([2, 'I cut the flour part.', undefined]);
+  expect(fs.existsSync(path.join(dir, 'versions', 'v2', 'check.json'))).toBe(false);
+});
+
+/** Fails the next draft render after `arm()`, once. */
+function failNextDraft(host: FakeHost): () => void {
+  let armed = false;
+  const run = host.runEngine.bind(host);
+  host.runEngine = async (command, args, onProgress, signal) => {
+    if (armed && command === 'render' && args.includes('--draft')) {
+      armed = false;
+      throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' };
+    }
+    return run(command, args, onProgress, signal);
+  };
+  return () => { armed = true; };
+}
+
+it("fails if a check preview that won't render throws away the note instead of keeping its version", async () => {
+  const { dir, host } = await noteProject();
+  const arm = failNextDraft(host);
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    () => { arm(); return [call('set_caption_style', { size: 84 }), call('finish', { summary_for_user: 'I cut the flour part and made the captions smaller.' })]; },
+  ], []);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(model.checkerRequests).toEqual([]);
+  expect(r.version).toBe(2);
+  expect(r.summary).toBe('I cut the flour part and made the captions smaller.');
+  expect(r.check?.verdict).toBe('error');
+  const p = await loadProject(dir);
+  expect([p.cut.keep, p.captions.style.size]).toEqual([[{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }], 84]);
+});
+
+it("fails if a repair whose check preview won't render is kept, or its summary replaces the note's", async () => {
+  const { dir, host, size } = await noteProject();
+  const arm = failNextDraft(host);
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    () => { arm(); return [call('set_caption_style', { size: 90 })]; },
+    [call('finish', { summary_for_user: 'I made the captions bigger.' })],
+  ], [fix('The captions are hard to read.', 'Make the captions bigger.')]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(r.version).toBe(2);
+  expect(r.check).toMatchObject({ verdict: 'error', repairs: 1 });
+  expect(r.summary).toBe('I cut the flour part.');
+  const p = await loadProject(dir);
+  expect([p.cut.keep, p.captions.style.size]).toEqual([[{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }], size]);
+});
+
+it("fails if the checker's own previews use up the preview a repair run needs to see its change", async () => {
+  const { dir, host, size } = await noteProject();
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('set_caption_style', { size: 84 }), call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('set_caption_style', { size }), call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part and put the captions back.' })],
+  ], [fix('The captions got smaller, which you did not ask for.', `Set caption size back to ${size}.`), pass()]);
+  await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  const results = model.editorRequests[3].messages.flatMap((m) => (m.role === 'tool' ? m.results : []));
+  const preview = results.findLast((x) => x.name === 'render_draft')!;
+  expect(preview.isError, preview.content).toBeFalsy();
+});
+
+it("fails if a checker sentence the creator will read runs past two sentences or uses the editor's words", async () => {
+  const { dir, host } = await noteProject();
+  const long = 'The captions are small. They are hard to read on a phone. People will scroll past.';
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+  ], [fix(long, 'Make the captions bigger.'), fix('Word w27 is still in set_cut.', 'Cut w27.'), pass()]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(model.checkerRequests).toHaveLength(2);
+  expect(JSON.stringify(model.checkerRequests[1].messages.at(-1))).toContain('at most 2 sentences');
+  // a refused second reply ends the check; a kept one would have run a repair
+  expect(r.check?.verdict).toBe('error');
+  expect(r.summary).toBe('I cut the flour part.');
 });
