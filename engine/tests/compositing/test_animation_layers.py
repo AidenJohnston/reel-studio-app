@@ -144,7 +144,7 @@ def test_animation_the_cut_moved_onto_the_face_asks_for_a_remake(tmp_path, video
     recs = {r["id"]: r for r in json.loads((ctx.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"]}
     assert "remake" not in recs["ok"] and "clash" not in recs["ok"]
     assert "face" in recs["stale"]["clash"] and "your face" in recs["stale"]["remake"]
-    rows = {r["id"]: r for r in render.read_broll_report(pdir)}
+    rows = {r["id"]: r for r in render.read_broll_report(list(recs.values()))}
     assert rows["stale"]["remake"] and "face" in rows["stale"]["clash"]
     assert "remake" not in rows["ok"]
     # check_layers (the verify-side check) agrees with the flag

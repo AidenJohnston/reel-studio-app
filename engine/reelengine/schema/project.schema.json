@@ -183,6 +183,30 @@
             "maxItems": 4,
             "description": "files the user attached to this note (work/assets/attach-*), placed by the AI with add_broll",
             "items": { "$ref": "#/$defs/relPath" }
+          },
+          "receipt": {
+            "type": "object",
+            "description": "what the render that made this note's version changed since the version before it",
+            "required": ["jobId", "renderId", "version", "facts"],
+            "properties": {
+              "jobId": { "type": ["string", "null"] },
+              "renderId": { "type": "string" },
+              "version": { "type": "integer" },
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["kind", "before", "after"],
+                  "properties": {
+                    "kind": { "type": "string", "description": "the project.json path that changed, e.g. cut.keep, captions.style, broll" },
+                    "field": { "type": "string", "description": "captions.style only: the style key" },
+                    "id": { "type": "string", "description": "broll and source only: the item's id" },
+                    "before": {},
+                    "after": {}
+                  }
+                }
+              }
+            }
           }
         }
       }

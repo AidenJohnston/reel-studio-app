@@ -154,8 +154,9 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
 | `cover` | renders cover.png only |
-| `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
-| `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |
+| `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
+| `frames --render-id <id> --times t1,t2,...` | extracts PNG frames from that render (for the AI to look at); refuses a render a newer one replaced |
+| `inspect-render --render-id <id>` | that render's own verify result, caption boxes, b-roll records, segments and word times (docs/versions.md) |
 | `search-images`, `fetch-image`, `download-media` | find a freely licensed image, fetch one by URL, download a video or song from a link |
 | `attach --project <dir> <file> [--name N]` | a picture, GIF or short clip the user attached to a note -> `work/assets/attach-<id>-<stem>.<ext>` + sidecar `<asset>.attach.json` (name, kind, bytes, size, duration, sound, thumb) + a 320 px still in `work/thumbs/`. JPG/PNG copied; HEIC, still GIF/WebP, BMP -> PNG; animated GIF/WebP -> silent H.264 mp4 (looped to at least 3 s); clips copied. Limits: pictures 25 MB, clips and GIFs 200 MB and 60 s; anything else is refused with a plain message and nothing is written |
 | `doctor` | checks ffmpeg, the speech model, fonts, GPU; prints a human report |

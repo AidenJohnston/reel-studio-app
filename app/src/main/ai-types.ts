@@ -13,7 +13,8 @@ export interface UserFacingError {
 
 export interface AgentResult {
   summary: string
-  version: number
+  /** Absent when a note changed nothing (no edit, no saved My style rule) or its edit ended where it started: its reply belongs to no version. */
+  version?: number
   styleRulesAdded: string[]
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */
@@ -73,7 +74,7 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; jobId?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
@@ -84,6 +85,8 @@ export interface AI {
   cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** One small-model call that rewords a version's title and summary; null when the connection has no small model. Optional: older packages lack it. */
+  rewordVersion?(text: { title: string; summary: string }, signal?: AbortSignal): Promise<{ title: string; summary: string } | null>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void
 }
