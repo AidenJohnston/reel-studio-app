@@ -2,7 +2,6 @@
 import { existsSync, promises as fs } from 'node:fs'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { BIN_FOLDERS, binDir, libraryDir, reelStudioRoot, type BinKey } from './paths'
-import { allowLinkedMedia } from './media-allow'
 import { mediaUrl } from './media-url'
 import type { DropResult, LibraryBin } from '../shared/api'
 import type { RunEngine } from './engine'
@@ -40,20 +39,12 @@ export async function listLibrary(): Promise<LibraryBin[]> {
       const p = join(dir, name)
       const st = await fs.stat(p).catch(() => null)
       if (!st?.isFile()) continue
-      files.push({ name, path: p, url: await libraryMediaUrl(p, st.mtimeMs), size: st.size, modifiedAt: st.mtime.toISOString() })
+      files.push({ name, path: p, url: mediaUrl(p, st.mtimeMs), size: st.size, modifiedAt: st.mtime.toISOString() })
     }
     files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     out.push({ key, label: LABELS[key], dir, files })
   }
   return out
-}
-
-export async function libraryMediaUrl(p: string, bust?: number): Promise<string> {
-  if (binForFolder(p) !== null && (await fs.lstat(p).catch(() => null))?.isSymbolicLink()) {
-    const target = await fs.realpath(p).catch(() => null)
-    if (target) allowLinkedMedia(p, target)
-  }
-  return mediaUrl(p, bust)
 }
 
 export function binForFolder(dest: string): BinKey | null {
