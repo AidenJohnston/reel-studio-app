@@ -187,8 +187,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       const owner = await claimProject(projectDir(slug))
       try {
         return await fn(owner.token)
+      } catch (e) {
+        const err = e as { code?: string; userMessage?: string }
+        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
+        throw e
       } finally {
-        await owner.release()
+        if (!stuck.has(slug)) await owner.release()
       }
     } finally {
       held.delete(slug)

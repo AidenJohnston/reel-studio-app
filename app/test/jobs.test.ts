@@ -33,6 +33,29 @@ async function stuckVideo() {
 }
 
 describe('project reservations', () => {
+  it('keeps a project closed when an attachment engine cannot stop', async () => {
+    setupPaths()
+    const slug = 'stuck-attachment'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async () => { throw STUCK },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.hold(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    await expect(handlers.get('notes:attachFiles')!({} as IpcMainInvokeEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject(STUCK)
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
+    expect(() => jobs.start(slug, 'rerender', async () => ({ summary: 'never' }))).toThrow(expect.objectContaining(STUCK))
+    await expect(jobs.hold(slug, async () => undefined)).rejects.toMatchObject(STUCK)
+  })
   it('rejects an attachment admitted while a manual update holds the project', async () => {
     setupPaths()
     const slug = 'held-reel'
