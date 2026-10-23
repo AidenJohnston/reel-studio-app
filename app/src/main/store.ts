@@ -192,12 +192,14 @@ export async function addChat(
   version?: number,
   actions?: ChatMessage['actions'],
   suggestion?: string,
-  attachments?: ChatMessage['attachments']
+  attachments?: ChatMessage['attachments'],
+  proposal?: ChatMessage['proposal']
 ): Promise<void> {
   await updateAppState(slug, (s) => {
     s.chat.push({
       id: randomUUID(), from, text, at: new Date().toISOString(), version,
-      ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
+      ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {}),
+      ...(proposal ? { proposal } : {})
     })
   })
 }
