@@ -350,8 +350,11 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-    if (r.stoppedBy !== 'finish') throw unfinished(ctx.state);
-    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length) {
+    const nothing = !ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length;
+    // A note that stopped before finish (step limit, or replies with no tool call) is not applied, and
+    // says so when that throws work away. With nothing to throw away it gets the reply below.
+    if (r.stoppedBy !== 'finish' && !nothing) throw unfinished(ctx.state);
+    if (nothing) {
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
         version: baseVersion, styleRulesAdded: [], styleSuggestions: [], changed: [],

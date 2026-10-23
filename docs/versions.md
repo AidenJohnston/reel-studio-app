@@ -69,8 +69,8 @@ Rules:
   copy of `project.json`, renders its drafts into that folder and its final into `v(N+1)`, then writes
   the snapshot and `notes.md` into `v(N+1)` and replaces `project.json` in one rename, after checking
   that `project.json` is still what the note started from and Stop was not pressed. A note that fails,
-  is stopped, hits its step limit, or whose final render fails changes nothing the user can see; its
-  downloads stay in `work/assets` but are not offered again.
+  is stopped, hits its step limit with something changed, or whose final render fails changes nothing
+  the user can see; its downloads stay in `work/assets` but are not offered again.
 
 ## One writer per project
 

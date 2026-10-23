@@ -88,6 +88,16 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(await listVersions(dir)).toEqual([1]);
   });
 
+  it('a model that answers in words and never calls a tool gets the "not sure" reply, and nothing changes', async () => {
+    const { dir, host, settingsDir, read, before } = await setup();
+    const m = new ScriptedModel(Array.from({ length: 6 }, () => ({ text: 'The music suits your bread nicely.' })));
+    const r = await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'what do you think of the music?', () => undefined);
+    expect(r).toMatchObject({ summary: 'I looked, but I was not sure what to change. Could you say it another way?', version: 1, changed: [] });
+    expect(await read()).toBe(before);
+    expect(host.calls).toEqual([]);
+    expect(notesLeft(dir)).toBe(0);
+  });
+
   it('a project with only a preview keeps that preview when a note fails at the final render', async () => {
     const { dir, host, settingsDir, read, before } = await setup({ firstVersion: false });
     const preview = path.join(dir, 'versions', 'preview', 'draft.mp4');
