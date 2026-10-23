@@ -1098,7 +1098,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_sfx',
-    description: 'Replace all sound effects. Add them only when the user asks for sound effects, or on a few clear visual moments (a picture or animation appearing, a punch-in, a hard cut). Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
+    description: 'Replace all sound effects. Add them only when the user\'s note asks for sound effects. Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
     parameters: S.obj({
       sfx: S.arr(S.obj({
         sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds, name and energy (how long it carries: 1 a tap, 2 a short swell, 3 long): ${SFX_SOUNDS.map((s) => `${s.id} ${s.energy}`).join(', ')}`),

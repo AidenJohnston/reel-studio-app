@@ -89,8 +89,9 @@ def hit_time(ctx, at: dict) -> Optional[float]:
     t = None
     if at.get("word"):
         w = ctx_words(ctx).get(at["word"])
-        # word_start maps a cut-out word to the next kept one; a point sound must not move with it
-        if w and any(s.source == w["source"] and s.src_start - 1e-3 <= w["s"] <= s.src_end for s in ctx.out_timeline):
+        # Use timeline membership: snapping can move a kept segment's start past its first word.
+        # word_start maps a cut-out word to the next kept one; a point sound must not move with it.
+        if w and ctx.is_kept(at["word"]):
             t = word_start(ctx, at["word"])
     elif at.get("broll"):
         from .broll import plan_windows

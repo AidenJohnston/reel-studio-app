@@ -634,7 +634,7 @@ def make_ctx(project_dir: Path, proj: dict, tl, draft: bool, root: Path, rwork: 
     return RenderCtx(project=proj, project_dir=project_dir, root=root, out_timeline=tl.segments,
                      word_out_time=tl.word_out_time, duration=tl.duration, fmt=dict(proj["format"]),
                      draft=draft, work=project_dir / "work", ffmpeg=tools.ffmpeg(),
-                     ffprobe=tools.ffprobe(), progress=_progress, word_out_end=tl.word_out_end,
+                     ffprobe=tools.ffprobe(), progress=_progress, word_out_end=tl.word_out_end, is_kept=tl.is_kept,
                      words=tl.words)
 
 

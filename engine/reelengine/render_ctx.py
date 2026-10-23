@@ -79,6 +79,7 @@ class RenderCtx:
     root: Path                                   # Reel Studio root (resolves "Library/...")
     out_timeline: list[Segment]                  # cut segments in output order
     word_out_time: Callable[[str], float]        # word id -> output seconds (word start)
+    is_kept: Callable[[str], bool]               # whether the timeline keeps a word
     duration: float                              # output duration, seconds
     fmt: dict                                    # {"width", "height", "fps"} of the output
     draft: bool

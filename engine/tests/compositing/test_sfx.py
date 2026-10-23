@@ -57,6 +57,32 @@ def test_hit_lands_on_its_moment_within_a_frame(tmp_path, take):
         assert abs(got - want) <= 1 / FPS, (got, want)
 
 
+def test_effect_on_first_kept_word_survives_a_snapped_cut(tmp_path, take):
+    pdir = tmp_path / "proj"
+    proj = fx.make_project(pdir, take)
+    # Continuous speech: the removed word ends exactly where the kept word starts.
+    # At 30 fps, snapping 2.02 s moves the segment start past that word's source start.
+    words = [
+        {"id": "w0", "source": "s1", "s": 0.05, "e": 0.8, "w": "Keep"},
+        {"id": "w1", "source": "s1", "s": 1.0, "e": 2.02, "w": "remove"},
+        {"id": "w2", "source": "s1", "s": 2.02, "e": 2.4, "w": "this"},
+        {"id": "w3", "source": "s1", "s": 2.4, "e": 3.0, "w": "too"},
+    ]
+    proj["cut"]["keep"] = [{"from": "w0", "to": "w0"}, {"from": "w2", "to": "w3"}]
+    proj["sfx"] = [{"at": {"word": "w2"}, "sound": "pop-plop"}]
+    (pdir / "work" / "transcript.json").write_text(json.dumps({"words": words}), encoding="utf-8")
+    tl = projmod.timeline(pdir, proj, words)
+    assert tl.segments[1].src_start > words[2]["s"] + 0.001
+    ctx = render.make_ctx(pdir, proj, tl, True, pdir, pdir / "work" / "render")
+
+    placed, left = sfx.plan(ctx)
+
+    assert left == []
+    assert len(placed) == 1
+    assert placed[0]["at"] == {"word": "w2"}
+    assert placed[0]["t"] == pytest.approx(tl.segments[1].out_start)
+
+
 def test_two_effects_closer_than_the_limit_play_once(tmp_path, take):
     ctx = project(tmp_path, take)
     first, second = fx.word_near(ctx, 4.0), fx.word_near(ctx, 4.0 + sfx.MIN_GAP - 0.4)
