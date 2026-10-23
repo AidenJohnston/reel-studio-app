@@ -192,7 +192,8 @@ describe('note queue', () => {
   it('Stop pressed just as the note finishes still holds the notes behind it', async () => {
     setupPaths()
     const slug = await reel('stop-at-end')
-    const a = app({ afterEvent: (e) => void (e.type === 'done' && a.queue.stop(e.jobId)) })
+    // as the Reel screen sends it: with the video, since the job may be gone by the time it lands
+    const a = app({ afterEvent: (e) => void (e.type === 'done' && a.queue.stop(e.jobId, slug)) })
     await a.send(slug, 'first')
     await a.send(slug, 'second')
     await a.think(slug)

@@ -161,4 +161,28 @@ describe('job manager (main): the contract on the wire', () => {
     await jobs.forSlug(slug)?.done
     await expect(jobs.hold(slug, async () => 'saved')).resolves.toBe('saved')
   })
+
+  it('when a job\'s last event arrives the job is gone and the video let go, so a screen reloading on it shows no job', async () => {
+    setupPaths()
+    const slug = 'last-event'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const seen: { type: string; running: boolean; locked: boolean }[] = []
+    const jobs = createJobManager((e) => {
+      if (e.type !== 'done' && e.type !== 'error' && e.type !== 'cancelled') return
+      seen.push({ type: e.type, running: !!jobs.forSlug(slug), locked: existsSync(join(projectDir(slug), 'work', '.owner.lock')) })
+    }, () => undefined)
+    jobs.start(slug, 'note', async () => ({ summary: 'ok' }))
+    await jobs.forSlug(slug)?.done
+    jobs.start(slug, 'note', async () => { throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' } })
+    await jobs.forSlug(slug)?.done
+    const id = jobs.start(slug, 'note', (_emit, signal) => new Promise((_r, reject) => {
+      const stop = (): void => reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
+      if (signal.aborted) stop()
+      else signal.addEventListener('abort', stop)
+    }))
+    const stopping = jobs.forSlug(slug)?.done
+    jobs.cancel(id)
+    await stopping
+    expect(seen).toEqual(['done', 'error', 'cancelled'].map((type) => ({ type, running: false, locked: false })))
+  })
 })

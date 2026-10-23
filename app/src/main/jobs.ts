@@ -89,6 +89,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
+    let ended: JobEvent | null = null
     // after a failure or Stop, a render still being copied is never shown
     let open = true
     const tracker = new ProgressTracker(kind, 0, history)
@@ -175,7 +176,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           }).catch((e) => log(`[job ${kind}] saved, but app.json was not updated: ${String(e)}`))
         }
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
-        send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
+        ended = { jobId: id, slug, type: 'done', summary: res.summary, version: res.version }
       } catch (e) {
         open = false
         await Promise.allSettled(pending)
@@ -195,11 +196,14 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           }).catch(() => {})
         }
         if (slug && !cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
-        send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
+        ended = cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage }
       } finally {
         clearInterval(tick)
         if (!(slug && stuck.has(slug))) await owner?.release().catch((e) => log(`[job ${kind}] could not let go of the project: ${String(e)}`))
         jobs.delete(id)
+        // The job's last event goes out only now: a screen that reloads on it must find no job running
+        // (projects:get reads forSlug), or it shows the progress row again after the note is done.
+        if (ended) send(ended)
         if (slug) freed(slug)
       }
     })()

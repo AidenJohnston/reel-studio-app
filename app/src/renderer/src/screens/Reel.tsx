@@ -69,9 +69,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const load = useCallback(
     async (selectLatest = false) => {
       try {
+        const startedBefore = lastJob.current
         const next = await reel.projects.get(slug)
         setD(next)
         if (next.job) setJob((cur) => (cur?.jobId === next.job!.id ? cur : liveFromDetail(next.job!)))
+        // Nothing runs: a progress row left from a job that has ended goes (it also keeps Export waiting).
+        // A job that started while this answer was on its way is newer than the answer, and stays.
+        else if (lastJob.current === startedBefore) setJob(null)
         const latest = next.versions[next.versions.length - 1]?.n ?? null
         setSelected((cur) => (selectLatest || cur === null || !next.versions.some((v) => v.n === cur) ? latest : cur))
       } catch (e) {
