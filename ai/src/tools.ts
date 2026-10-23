@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   lowestCaptionPosition, nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
@@ -717,6 +717,11 @@ const PARAMS = S.obj({
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
 });
 
+// What sets a caption look in Edit it myself apart (app/src/shared/caption-presets.ts). Size, Position, Colour
+// and the colour of the spoken word fine-tune a look; turning the highlight on or off changes it.
+const captionLook = (st: CaptionStyle): string =>
+  JSON.stringify([!!st.box, !!st.pop, !!st.highlight, st.case ?? null, st.maxWords ?? null, st.outline ?? null, st.outlineColor ?? null]);
+
 const tools: ToolDef[] = [
   {
     name: 'get_project',
@@ -781,14 +786,21 @@ const tools: ToolDef[] = [
         const overhangBefore = overhang();
         if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
+        const style = p.captions.style;
+        const before = captionLook(style);
+        // sizePicked means the person picked this size in Edit it myself; a note that changes it makes it the AI's
+        if (args.size != null && args.size !== style.size) delete style.sizePicked;
         for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
-          if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];
+          if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
-        if (args.highlight === 'none') delete p.captions.style.highlight;
+        if (args.highlight === 'none') delete style.highlight;
+        // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
+        // and without it the picker matches the look by its fields.
+        if (captionLook(style) !== before) delete style.preset;
         // only a change that pushes them further under Instagram's caption is refused; moving an older, too-low
         // line up or making it smaller still goes through
         if (overhang() > Math.max(0, overhangBefore)) {
-          return `captions at position ${p.captions.style.position} would sit under Instagram's caption and username; at size ${p.captions.style.size} the lowest position is ${lowestCaptionPosition(p.format, p.captions.style)}`;
+          return `captions at position ${style.position} would sit under Instagram's caption and username; at size ${style.size} the lowest position is ${lowestCaptionPosition(p.format, style)}`;
         }
       });
       return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };

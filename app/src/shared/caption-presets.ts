@@ -18,16 +18,15 @@ export const CAPTION_PRESETS: { key: string; label: string; style: CaptionStyle 
 ]
 
 /**
- * The style after picking look `key` over `current`. Position always carries over; so does a Size the person
- * set themselves, one that differs from the size of the look the reel was drawn as.
+ * The style after picking look `key` over `current`. Position always carries over. Size carries over only
+ * when the person picked it in the Size row (`sizePicked`); otherwise the look's own size applies.
  */
 export function applyPreset(key: string, current: CaptionStyle = {}): CaptionStyle {
   const preset = CAPTION_PRESETS.find((p) => p.key === key)
   if (!preset) throw new Error(`no caption preset "${key}"`)
   const style: CaptionStyle = { ...preset.style, preset: key }
   if (current.position != null) style.position = current.position
-  const lookSize = CAPTION_PRESETS.find((p) => p.key === presetOf(current))?.style.size ?? DRAWN_AS.size
-  if (current.size != null && current.size !== lookSize) style.size = current.size
+  if (current.sizePicked === true && current.size != null) Object.assign(style, { size: current.size, sizePicked: true })
   return style
 }
 
