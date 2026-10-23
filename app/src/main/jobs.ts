@@ -59,6 +59,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
+  /** Nothing else may write to the project: a job runs on it, or it is kept closed. A manual edit
+   * (`hold`) does not count: it is quick, and only refuses jobs and other edits meanwhile. */
+  function isClosed(slug: string): boolean {
+    return stuck.has(slug) || !!forSlug(slug)
+  }
+
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
     if (slug) refuseIfBusy(slug)
     const id = randomUUID()
@@ -197,6 +203,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   return {
     start,
     hold,
+    /** Throws while a job runs on the project, a manual edit holds it, or it is kept closed: a note or
+     * deleting the video must wait. */
+    refuseIfBusy,
+    isClosed,
     keepClosed,
     forSlug,
     get: (id: string) => jobs.get(id),
