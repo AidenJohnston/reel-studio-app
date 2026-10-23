@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { settleLastRun } from '../src/main/last-run'
 import { createPidRegistry } from '../src/main/orphans'
+import { OWNER_LOCK } from '../src/main/owner'
 import { settingsDir } from '../src/main/paths'
 import { killTree } from '../src/main/proctree'
 import { saveSettings } from '../src/main/settings'
@@ -17,6 +18,8 @@ describe('the start after a crash', () => {
     await saveSettings({ root: chosen })
     const bread = join(chosen, 'Projects', 'bread')
     mkdirSync(join(bread, 'work'), { recursive: true })
+    const lock = join(bread, OWNER_LOCK)
+    writeFileSync(lock, '{"app":"Reel Studio"}')
     // what an older version's crash in the middle of rewriting it left
     writeFileSync(join(settingsDir(), 'engines.json'), '[{"pid":4242,"proj')
     const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
@@ -25,6 +28,7 @@ describe('the start after a crash', () => {
       const closed: string[] = []
       await settleLastRun(createPidRegistry(settingsDir()), (slug) => closed.push(slug), () => undefined)
       expect(closed).toEqual(['bread'])
+      expect(existsSync(lock)).toBe(true)
     } finally {
       await killTree(engine.pid!)
     }

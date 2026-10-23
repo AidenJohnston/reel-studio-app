@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall, OWNER_LOCK } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -96,6 +96,10 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
+    // like engine/reelengine/owner.py: run by hand (no --owner) while Reel Studio has the project open
+    if (!args.includes('--owner') && fs.existsSync(path.join(dir, OWNER_LOCK))) {
+      throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
+    }
     const pj = path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });

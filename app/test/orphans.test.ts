@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
+import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
 import { engineEnv, projectsDir } from '../src/main/paths'
 import { APP_DIR, PYTHON, setupPaths } from './helpers'
 
@@ -54,13 +55,16 @@ describe('orphaned engine reaper', () => {
   }, 60000)
 
   // Windows has no process groups: there the engine's Job Object ends its children with it (contain.py)
-  it.skipIf(process.platform === 'win32')('an engine is registered until all it started is gone, and a project whose engine would not stop stays closed at the next start', async () => {
+  it.skipIf(process.platform === 'win32')('an engine is registered until all it started is gone, and a project whose engine would not stop stays locked at the next start', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
     const sleeper = join(APP_DIR, 'test', 'fixtures', 'sleeper')
     const project = join(projectsDir(), 'bread')
     const other = join(projectsDir(), 'cake')
-    for (const p of [project, other]) mkdirSync(join(p, 'work'), { recursive: true })
+    for (const p of [project, other]) {
+      mkdirSync(join(p, 'work'), { recursive: true })
+      writeFileSync(join(p, OWNER_LOCK), '{"app":"Reel Studio"}')
+    }
     const registry = createPidRegistry(settings)
 
     // the engine crashes and leaves a child: its entry goes only once that child is gone
@@ -84,7 +88,10 @@ describe('orphaned engine reaper', () => {
     registry.add(left.pid!, project)
     const next = createPidRegistry(settings, async () => false)
     const { stillRunning } = await next.reap()
+    await clearStaleLocks(stillRunning)
     expect(stillRunning).toEqual([project])
+    expect(existsSync(join(project, OWNER_LOCK))).toBe(true)
+    expect(existsSync(join(other, OWNER_LOCK))).toBe(false)
     expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project }])
     await killTree(left.pid!)
   }, 60000)

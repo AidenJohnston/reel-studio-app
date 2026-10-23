@@ -351,6 +351,7 @@ def main() -> int:
               "userMessage": "Reel Studio asked for something I do not know how to do."})
         return 1
     cmd, args = sys.argv[1], sys.argv[2:]
+    take(args, "--owner")       # the real engine checks it (reelengine/owner.py); the stand-in has no lock
     if os.environ.get("FAKE_ENGINE_FAIL") == cmd:
         emit({"event": "error", "code": "TEST_FAILURE", "message": "forced", "userMessage": "Test failure. Try again."})
         return 1
