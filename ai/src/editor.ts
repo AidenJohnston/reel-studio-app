@@ -131,17 +131,18 @@ async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<voi
   state.styleRuleIds = []; state.styleRulesAdded = [];
 }
 
-const missingIsEmpty = (e: any): string[] => { if (e?.code === 'ENOENT') return []; throw e; };
+const entries = (dir: string) => fsp.readdir(dir, { withFileTypes: true }).catch((e) => { if (e?.code === 'ENOENT') return []; throw e; });
 
 /** The rollback deletes whatever is not in this list, so only a missing folder counts as empty. Frozen
- * pictures are listed one by one (`frozen/<kind>/<file>`): the folder outlives a note, the files it froze don't. */
+ * pictures are listed one by one (`frozen/<kind>/<file>`): the folder outlives a note, the files it froze
+ * don't. Only real folders are entered, never a symlink, so the rollback never deletes outside the project. */
 async function listAssets(projectDir: string): Promise<Set<string>> {
   const dir = path.join(projectDir, 'work', 'assets');
-  const top = await fsp.readdir(dir).catch(missingIsEmpty);
-  const frozen = top.includes('frozen') ? await fsp.readdir(path.join(dir, 'frozen')).catch(missingIsEmpty) : [];
-  const files = await Promise.all(frozen.map(async (kind) =>
-    (await fsp.readdir(path.join(dir, 'frozen', kind)).catch(missingIsEmpty)).map((f) => `frozen/${kind}/${f}`)));
-  return new Set([...top, ...files.flat()]);
+  const top = await entries(dir);
+  const frozen = top.find((e) => e.name === 'frozen')?.isDirectory() ? await entries(path.join(dir, 'frozen')) : [];
+  const files = await Promise.all(frozen.filter((k) => k.isDirectory()).map(async (kind) =>
+    (await entries(path.join(dir, 'frozen', kind.name))).map((f) => `frozen/${kind.name}/${f.name}`)));
+  return new Set([...top.map((e) => e.name), ...files.flat()]);
 }
 
 /** The ledger's size before a note, or null when it does not exist yet. Any other error stops the note:
@@ -151,16 +152,18 @@ const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGE
 });
 
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, the pictures it downloaded or froze, and the asset records it appended. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<void> {
+ * it added, the pictures it downloaded or froze, and the asset records it appended. Returns false when
+ * project.json could not be put back. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<boolean> {
   const restored = await writeFileAtomic(path.join(projectDir, 'project.json'), before).then(() => true, () => false);
   await removeStyleRules(deps, state);
   // a project.json that could not be put back may still use this note's pictures and their records
-  if (!restored) return;
+  if (!restored) return false;
   for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
   if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
+  return true;
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -355,7 +358,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
-    await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
+    if (!await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state)) {
+      throw new AIError('rollback_failed', 'I could not undo a change to this project, so I stopped. Try the note again.', { detail: 'project.json could not be restored after the fast note' });
+    }
     ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
     await load(ctx);
   }

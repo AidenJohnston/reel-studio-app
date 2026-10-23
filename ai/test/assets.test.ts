@@ -396,6 +396,38 @@ describe('frozen image assets', () => {
     expect(await fs.readFile(path.join(dir, String(b.asset)))).toEqual(tinyPng([200, 160, 90]));
   });
 
+  it.skipIf(process.platform === 'win32')('fails if a rollback follows a symlinked frozen folder and deletes a file outside the project', async () => {
+    const { dir, root, host } = await setup();
+    const outside = path.join(root, 'elsewhere');
+    await fs.mkdir(outside);
+    await fs.mkdir(path.join(dir, 'work/assets/frozen'), { recursive: true });
+    await fs.symlink(outside, path.join(dir, 'work/assets/frozen/image'), 'dir');
+    const model = new ScriptedModel([
+      async () => {
+        await fs.writeFile(path.join(outside, 'mine.png'), tinyPng());   // the user saves a file there meanwhile
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] };
+      },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    host.failRender = true;
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await expect(ai.applyNote(dir, 'put the price on screen', () => undefined)).rejects.toThrow();
+    expect(await fs.readdir(outside)).toEqual(['mine.png']);
+  });
+
+  it('fails if a stray file in the frozen folder stops every later note', async () => {
+    const { dir, host } = await setup();
+    await fs.mkdir(path.join(dir, 'work/assets/frozen'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'work/assets/frozen/.DS_Store'), '');
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added the price.' })] },
+    ]);
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await ai.applyNote(dir, 'put the price on screen', () => undefined);
+    expect((await loadProject(dir)).broll).toHaveLength(1);
+  });
+
   it('fails if a frozen picture deleted from disk can never be committed again', async () => {
     const { ctx, dir, local } = await setup();
     const first = await commit(ctx, (await candidates(ctx, local))[0].id);
