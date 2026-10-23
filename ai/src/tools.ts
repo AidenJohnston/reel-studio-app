@@ -410,6 +410,8 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 
 export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
+  // a skipped preview stood for the edit as it was then: from here on only this render does
+  ctx.state.previewSkipped = false;
   ctx.state.dirty = new Set();
   const args = [...(draft ? ['--draft'] : []), ...(ctx.jobId ? ['--job-id', ctx.jobId] : [])];
   const result = await engine(ctx, 'render', args, draft ? 'Making a preview' : 'Making the final video');

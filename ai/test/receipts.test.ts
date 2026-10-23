@@ -171,3 +171,18 @@ it("fails if a note that changed nothing gives its reply a version, or a took-ba
   const undone = await createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: claim }).applyNote(dir, 'try tighter pauses', () => {});
   expect(undone.summary).toBe("That left your video the same as before, so I didn't make a new version.");
 });
+
+it('fails if look_at_frames, after a skipped preview and then a preview that failed, shows the old version as the current edit', async () => {
+  const { root, dir } = await makeProject();
+  const host = new FakeHost(root);
+  await host.runEngine('render', ['--project', dir]);
+  const ctx: ToolContext = { projectDir: dir, host, style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
+  await executeTool(ctx, 'write_post', { caption: 'Bread', hashtags: ['a', 'b', 'c', 'd', 'e'], keywords: [] });
+  expect(JSON.parse((await executeTool(ctx, 'render_draft', {})).content).skipped).toBeTruthy();
+  await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
+  host.failRender = true;
+  expect((await executeTool(ctx, 'render_draft', {})).isError).toBe(true);
+  const r = await executeTool(ctx, 'look_at_frames', { times: [1], words: null });
+  expect(r.isError, String(r.content)).toBe(true);
+  expect(host.calls.some((c) => c.command === 'frames')).toBe(false);
+});
