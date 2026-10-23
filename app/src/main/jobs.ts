@@ -54,6 +54,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
+  /** Nothing else may write to the project: a job runs on it, or it is kept closed. */
+  function isClosed(slug: string): boolean {
+    return stuck.has(slug) || !!forSlug(slug)
+  }
+
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
     if (slug) refuseIfBusy(slug)
     const id = randomUUID()
@@ -172,6 +177,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     start,
     /** Throws while a job runs on the project or it is kept closed: a manual edit must wait. */
     refuseIfBusy,
+    isClosed,
     keepClosed,
     forSlug,
     get: (id: string) => jobs.get(id),
