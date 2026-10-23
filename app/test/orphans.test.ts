@@ -116,6 +116,24 @@ describe('orphaned engine reaper', () => {
     expect(torn).toBe(0)
   }, 60000)
 
+  // A virus scanner or indexer reading engines.json at the moment of a rewrite makes Windows refuse the rename
+  // (EPERM). The engine just registered must still reach the file once the reader lets go, or a crash then
+  // leaves it running unseen.
+  it.runIf(process.platform === 'win32')('an engine registered while another program reads the list is written once it lets go', async () => {
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const file = join(settings, 'engines.json')
+    const registry = createPidRegistry(settings)
+    registry.add(4242, '/projects/bread')
+    const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+      `$f = [IO.File]::Open('${file.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'held'; Start-Sleep -Milliseconds 600; $f.Close()`])
+    await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve()))
+    registry.add(4243, '/projects/cake')
+    await once(holder, 'exit')
+    const pids = (): number[] => JSON.parse(readFileSync(file, 'utf8')).map((e: { pid: number }) => e.pid)
+    for (let i = 0; i < 100 && !pids().includes(4243); i++) await new Promise((r) => setTimeout(r, 50))
+    expect(pids()).toEqual([4242, 4243])
+  }, 20000)
+
   it('a start that cannot read the engine list keeps closed only the videos an engine or ffmpeg is still working in', async () => {
     setupPaths() // its folders have spaces and non-ASCII names, like real users'
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
