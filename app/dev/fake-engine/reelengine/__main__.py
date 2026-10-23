@@ -306,15 +306,14 @@ def cmd_export_probe(args: list[str]) -> dict:
     info = cmd_probe(args)
     out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate", "-of", "csv=p=0", args[0]],
                          capture_output=True, text=True).stdout.strip()
-    # The real engine reads the edit list and keyframes from the file; assume the worst, so platforms that care remux.
-    return {**info, "audioBitrate": int(out) if out.isdigit() else None, "editList": True, "maxKeyframeGap": info["duration"]}
+    # The real engine reads the edit list from the file; assume one, so Instagram and Threads remux.
+    return {**info, "audioBitrate": int(out) if out.isdigit() else None, "editList": True}
 
 
 def cmd_export_media(args: list[str]) -> dict:
     dest = take(args, "--dest")
-    width, height, bitrate = take(args, "--width"), take(args, "--height"), take(args, "--bitrate")
-    video = (["-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-              "-c:v", "libx264", "-preset", "ultrafast", "-b:v", bitrate, "-pix_fmt", "yuv420p"] if width else ["-c:v", "copy"])
+    bitrate = take(args, "--bitrate")
+    video = ["-c:v", "libx264", "-preset", "ultrafast", "-b:v", bitrate, "-pix_fmt", "yuv420p"] if bitrate else ["-c:v", "copy"]
     run_ffmpeg([FFMPEG, "-y", "-v", "error", "-i", args[0], *video, "-c:a", "aac", "-b:a", "128k", "-use_editlist", "0", dest],
                float(probe(args[0])["duration"]), "export", "Saving platform files", 0, 100)
     return {"video": dest, "sizeBytes": Path(dest).stat().st_size}

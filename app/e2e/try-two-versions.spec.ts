@@ -17,15 +17,15 @@ test('fails if the Saved screen leaves out Instagram\'s Trial steps or offers Tr
   await passFirstRun(page)
   await page.getByTestId('new-video').click()
   await page.getByTestId('file-input').setInputFiles([media.video])
-  await expect(page.getByTestId('export-platforms')).toBeEnabled({ timeout: 10 * 60_000 })
+  await expect(page.getByTestId('export-more')).toBeEnabled({ timeout: 10 * 60_000 })
 
-  await page.getByTestId('export-platforms').click()
+  await page.getByTestId('export-more').click()
+  await page.getByRole('menuitem', { name: 'Other platforms…' }).click()
   const dialog = page.getByTestId('platform-export-dialog')
   for (const name of ['Instagram Reels', 'TikTok']) await dialog.getByRole('checkbox', { name: new RegExp(`^${name}`) }).check()
   await dialog.getByTestId('try-two').check()
   await expect(dialog.getByTestId('try-two-status')).toHaveText('Try 2 is the same as Try 1. Pick another version, cover or caption.')
   await dialog.locator('#platform-caption-2').fill('Open with the result')
-  await dialog.getByRole('checkbox', { name: /I checked subtitles/ }).check()
   await dialog.getByTestId('export-selected').click()
 
   await expect(dialog.getByTestId('export-saved')).toBeVisible({ timeout: 120_000 })

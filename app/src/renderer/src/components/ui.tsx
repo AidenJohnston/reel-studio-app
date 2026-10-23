@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths } from '../api'
-import { Icon } from './icons'
+import { Icon, type IconName } from './icons'
 
 export function Progress({ pct, done, label }: { pct: number; done?: boolean; label?: string }) {
   return (
@@ -94,12 +94,25 @@ export function Confirm(props: { title: string; body: string; yes: string; no: s
   )
 }
 
-/** A small "more" menu for things that should not sit next to the main action (Delete). */
-export function MoreMenu({ items, label = 'More' }: { items: { label: string; run: () => void; danger?: boolean; testid?: string; disabled?: boolean }[]; label?: string }) {
+/**
+ * A small menu behind a button: "More" for things that should not sit next to the main action (Delete), or the
+ * other half of a split button. Focus moves into the menu when it opens; arrow keys move between items.
+ */
+export function MoreMenu({ items, label = 'More', icon = 'more', triggerClassName = 'icon-btn', testid = 'more', disabled }: {
+  items: { label: string; run: () => void; danger?: boolean; testid?: string; disabled?: boolean }[]
+  label?: string
+  icon?: IconName
+  triggerClassName?: string
+  testid?: string
+  disabled?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
+    const enabled = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)') ?? [])]
+    enabled()[0]?.focus()
     const away = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false)
     }
@@ -107,7 +120,13 @@ export function MoreMenu({ items, label = 'More' }: { items: { label: string; ru
       if (e.key === 'Escape') {
         e.stopPropagation()
         setOpen(false)
-      }
+        trigger.current?.focus()
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const list = enabled()
+        const at = list.indexOf(document.activeElement as HTMLButtonElement)
+        list[(at + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]?.focus()
+      } else if (e.key === 'Tab') setOpen(false)
     }
     window.addEventListener('mousedown', away)
     window.addEventListener('keydown', key, true)
@@ -118,11 +137,11 @@ export function MoreMenu({ items, label = 'More' }: { items: { label: string; ru
   }, [open])
   return (
     <div className="more" ref={ref}>
-      <button className="icon-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="more">
-        <Icon name="more" />
+      <button ref={trigger} className={triggerClassName} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)} data-testid={testid}>
+        <Icon name={icon} />
       </button>
       {open && (
-        <div className="more-menu" role="menu">
+        <div className="more-menu" role="menu" aria-label={label}>
           {items.map((it) => (
             <button
               key={it.label}

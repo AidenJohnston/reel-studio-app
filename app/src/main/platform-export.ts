@@ -1,6 +1,6 @@
 import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
-import { checkPlatform, outputGroups, platformRule, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
+import { outputGroups, platformRule, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
 import type { PlatformExportResult } from '../shared/api'
 import type { RunEngine } from './engine'
 
@@ -24,32 +24,25 @@ type CheckedTry = ExportTry & { video: FinishedVideo }
 type Tries<T> = [T] | [T, T]
 
 /**
- * Reads each try's render and refuses an export any platform would reject for its try, or a Try 2 that changes
- * nothing. Runs before the export job.
+ * Reads each try's render and refuses a Try 2 that changes nothing or that no selected platform can test. Platform
+ * limits only warn in the dialog, so nothing here refuses a caption or a length.
  */
-export async function checkPlatformExport(tries: Tries<ExportTry>, runEngine: RunEngine): Promise<Tries<CheckedTry>> {
-  const check = async (item: ExportTry, n: number, probed?: CheckedTry): Promise<CheckedTry> => {
-    const label = tries.length > 1 ? `Try ${n}: ` : ''
-    const video = probed?.source === item.source ? probed.video : await probe(item.source, runEngine, label)
-    for (const platform of item.platforms) {
-      const problem = checkPlatform(platform, item.caption, video.duration).find((issue) => issue.blocking)
-      if (problem) throw { code: 'EXPORT_RULE', userMessage: `${tries.length > 1 ? `Try ${n} on ` : ''}${platformRule(platform).label}: ${problem.message}` }
-    }
-    return { ...item, video }
-  }
-  const first = await check(tries[0], 1)
+async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?: AbortSignal): Promise<Tries<CheckedTry>> {
+  const label = (n: number) => tries.length > 1 ? `Try ${n}: ` : ''
+  const first = { ...tries[0], video: await readFinishedVideo(tries[0].source, runEngine, label(1), signal) }
   if (!tries[1]) return [first]
   // The cover frame needs the render's frame rate, so this runs after the probe.
   const problem = secondTryProblem(first.platforms, first, tries[1], first.video.fps)
   if (problem) throw { code: 'BAD_EXPORT', userMessage: problem }
-  return [first, await check(tries[1], 2, first)]
+  const second = tries[1].source === first.source ? first.video : await readFinishedVideo(tries[1].source, runEngine, label(2), signal)
+  return [first, { ...tries[1], video: second }]
 }
 
-async function probe(source: string, runEngine: RunEngine, label: string): Promise<FinishedVideo> {
-  const video = await runEngine('export-probe', [source]) as Partial<FinishedVideo> | null
-  if (typeof video?.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 ||
-      typeof video.width !== 'number' || typeof video.height !== 'number' || typeof video.fps !== 'number' || typeof video.sizeBytes !== 'number' ||
-      typeof video.editList !== 'boolean' || typeof video.maxKeyframeGap !== 'number') {
+/** What the export needs to know about a finished render. Refuses only a render it cannot read. */
+async function readFinishedVideo(source: string, runEngine: RunEngine, label: string, signal?: AbortSignal): Promise<FinishedVideo> {
+  const video = await runEngine('export-probe', [source], undefined, signal) as Partial<FinishedVideo> | null
+  if (typeof video?.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 || typeof video.fps !== 'number' ||
+      typeof video.sizeBytes !== 'number' || (video.audioBitrate !== null && typeof video.audioBitrate !== 'number') || typeof video.editList !== 'boolean') {
     throw { code: 'EXPORT_FAILED', userMessage: `${label}I could not read the finished video. Render this version again before exporting.` }
   }
   return video as FinishedVideo
@@ -64,17 +57,19 @@ function freeNumber(folder: string, bases: string[]): string {
 }
 
 /**
- * One video, cover and caption file per platform and try. The render is copied as it is wherever it already
- * meets the platform's rule; the rest is remuxed or encoded. A Try 2 on Try 1's video gets a cover and caption only.
+ * One video, cover and caption file per platform and try. The render is copied as it is unless a platform needs its
+ * audio redone or the file is over its size limit. A Try 2 on Try 1's video gets a cover and caption only.
  * Nothing is left behind if this fails or stops.
  */
-export async function exportPlatforms({ tries, folder, runEngine, signal, onProgress }: {
-  tries: Tries<CheckedTry>
+export async function exportPlatforms({ tries: requested, folder, runEngine, signal, onProgress }: {
+  tries: Tries<ExportTry>
   folder: string
   runEngine: RunEngine
   signal?: AbortSignal
   onProgress?: (message: string, pct: number) => void
 }): Promise<PlatformExportResult> {
+  // Read under the export's signal: on a slow drive this takes a while, and Stop must end it too.
+  const tries = await readTries(requested, runEngine, signal)
   await fs.mkdir(folder, { recursive: true })
   const stage = await fs.mkdtemp(join(folder, STAGE_PREFIX))
   const placed: string[] = []
@@ -95,9 +90,8 @@ export async function exportPlatforms({ tries, folder, runEngine, signal, onProg
       for (const [index, group] of (sharedVideo ? [] : outputGroups(item.platforms, item.video)).entries()) {
         const output = join(stage, `video-${t + 1}-${index}.mp4`)
         const message = `Making the ${group.platforms.map((p) => platformRule(p).label).join(' and ')} video${two ? ` for Try ${t + 1}` : ''}`
-        const encode = group.spec ? ['--width', String(group.spec.width), '--height', String(group.spec.height), '--bitrate', String(group.spec.videoBitrate)] : []
         onProgress?.(message, 0)
-        await runEngine('export-media', [item.source, '--dest', output, ...encode], (p) => onProgress?.(message, p.pct), signal)
+        await runEngine('export-media', [item.source, '--dest', output, ...(group.bitrate === null ? [] : ['--bitrate', String(group.bitrate)])], (p) => onProgress?.(message, p.pct), signal)
         const size = (await fs.stat(output)).size
         for (const platform of group.platforms) {
           const rule = platformRule(platform)
@@ -135,7 +129,8 @@ export async function exportPlatforms({ tries, folder, runEngine, signal, onProg
     return { folder, files }
   } catch (error) {
     // Windows can hold a just-written file for a moment; a removal that still fails must not hide why we stopped.
-    await Promise.allSettled(placed.map((file) => fs.rm(file, { force: true, maxRetries: 5, retryDelay: 200 })))
+    // Node documents maxRetries as ignored unless recursive is true, so it is set even for a single file.
+    await Promise.allSettled(placed.map((file) => fs.rm(file, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })))
     throw signal?.aborted ? { code: 'CANCELLED', userMessage: 'Stopped.' } : error
   } finally {
     // Windows keeps a stopped ffmpeg's output locked for a moment; the startup sweep removes what is left.

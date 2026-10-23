@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROOT, launch, makeMedia, passFirstRun } from './helpers'
 
-test('Stop while a preview is made full quality for a platform export ends quietly', async () => {
+test('Stop while a preview is made full quality for a platform export ends quietly, and a caption warning does not block Export', async () => {
   const media = makeMedia()
   // A project whose only version is a preview: exporting it makes the full-quality version first.
   const project = join(ROOT, 'Projects', 'my-reel')
@@ -23,10 +23,13 @@ test('Stop while a preview is made full quality for a platform export ends quiet
   try {
     await passFirstRun(page)
     await page.getByText('My reel', { exact: true }).first().click()
-    await page.getByTestId('export-platforms').click()
+    await page.getByTestId('export-more').click()
+    await page.getByRole('menuitem', { name: 'Other platforms…' }).click()
     const dialog = page.getByTestId('platform-export-dialog')
     await dialog.getByRole('checkbox', { name: /^TikTok\b/ }).check()
-    await dialog.getByRole('checkbox', { name: /I checked subtitles/ }).check()
+    // A limit warns next to its platform and leaves Export enabled.
+    await dialog.locator('#platform-caption').fill('x'.repeat(2201))
+    await expect(dialog.getByTestId('platform-warnings-tiktok')).toHaveText('Caption is 2201 of 2200. Shorten it before posting.')
     await dialog.getByTestId('export-selected').click()
     await dialog.getByRole('button', { name: 'Stop export' }).click()
     await expect(dialog.getByTestId('export-selected')).toBeEnabled()

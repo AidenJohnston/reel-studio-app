@@ -50,7 +50,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, PlatformExportResult, ProjectJson, VersionInfo } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { parsePlatformExportRequest, secondTryPlatforms, type Platform, type PlatformTry } from '../shared/platforms'
-import { checkPlatformExport, exportPlatforms, sweepExportStaging, type ExportTry } from './platform-export'
+import { exportPlatforms, sweepExportStaging, type ExportTry } from './platform-export'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
@@ -549,13 +549,13 @@ function registerIpc(): void {
     const first = exportTry(version, request.platforms, request)
     const { second } = request
     const secondVersion = second && (second.version === n ? version : await finishedExportVersion(slug, second.version))
-    const tries = await checkPlatformExport(second && secondVersion
+    const tries: [ExportTry] | [ExportTry, ExportTry] = second && secondVersion
       ? [first, exportTry(secondVersion, secondTryPlatforms(request.platforms, second.version === n), second)]
-      : [first], runEngine)
+      : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
     jobs.start(slug, 'export', async (emit, signal) => {
-      emit({ type: 'status', message: 'Saving platform files', pct: 1 })
+      emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
         result = await exportPlatforms({
           tries, folder: binDir('exports'), runEngine, signal, onProgress: (message, pct) => emit({ type: 'status', message, pct })

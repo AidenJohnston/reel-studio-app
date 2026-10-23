@@ -29,7 +29,6 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
   const [seconds, setSeconds] = useState<number | null>(null)
   // null: the project's own cover. A number: the frame the person scrubbed to.
   const [coverSeconds, setCoverSeconds] = useState<number | null>(null)
-  const [safeChecked, setSafeChecked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [state, setState] = useState<ExportState>({ kind: 'choosing' })
   // Try 2: null while Try two versions is off.
@@ -54,18 +53,20 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
   const secondPlatforms = second ? secondTryPlatforms(selected, second.version === version.n) : []
   const secondDuration = second?.version === version.n ? seconds : secondSeconds
   const secondProblem = second && selected.length ? secondTryProblem(selected, first, second, fps) : null
-  const issues = (platforms: Platform[], text: string, duration: number | null, prefix: string) => duration === null ? [] : platforms.flatMap((platform) =>
-    checkPlatform(platform, text, duration).map((issue) => ({ ...issue, text: `${prefix}${platformRule(platform).label}: ${issue.message}` })))
-  // A Try 2 on Try 1's video would only repeat Try 1's duration issues.
-  const secondChecks = second ? issues(secondPlatforms, second.caption, secondDuration, 'Try 2 on ').filter((c) => c.kind !== 'duration' || second.version !== version.n) : []
-  const checks = [...issues(selected, caption, seconds, second ? 'Try 1 on ' : ''), ...secondChecks]
-  const blocking = checks.filter((c) => c.blocking)
-  const warnings = checks.filter((c) => !c.blocking)
+  // Limits change and vary by account, so they warn next to each platform and never stop the export.
+  const warningsFor = (platform: Platform): string[] => {
+    if (!selected.includes(platform)) return []
+    const firstWarnings = seconds === null ? [] : checkPlatform(platform, caption, seconds).map((issue) => `${second ? 'Try 1: ' : ''}${issue.message}`)
+    if (!second || !secondPlatforms.includes(platform) || secondDuration === null) return firstWarnings
+    // A Try 2 on Try 1's video would only repeat Try 1's duration warnings.
+    const secondWarnings = checkPlatform(platform, second.caption, secondDuration).filter((issue) => issue.kind !== 'duration' || second.version !== version.n)
+    return [...firstWarnings, ...secondWarnings.map((issue) => `Try 2: ${issue.message}`)]
+  }
   // The Export button turns into progress, so focus moves to Stop once the job can be stopped.
   useEffect(() => {
     if (saving && jobId) stopButton.current?.focus()
   }, [saving, jobId])
-  const ready = selected.length > 0 && seconds !== null && blocking.length === 0 && safeChecked && (!second || (secondDuration !== null && !secondProblem))
+  const ready = selected.length > 0 && seconds !== null && (!second || (secondDuration !== null && !secondProblem))
   const editSecond = (change: Partial<PlatformTry>) => setSecond((current) => current && { ...current, ...change })
 
   const save = async () => {
@@ -120,14 +121,24 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
         <p className="muted">Choose where Version {version.n} is going. Each platform gets a named video, cover and caption file. Nothing is posted.</p>
         <fieldset className="platform-options" disabled={saving}>
           <legend>Platforms</legend>
-          {PLATFORM_RULES.map((rule, i) => <label className="platform-option" key={rule.id}>
-            <input type="checkbox" checked={selected.includes(rule.id)} onChange={() => toggle(rule.id)} data-autofocus={i === 0 || undefined} />
-            <span><strong>{rule.label}</strong><small>Up to {rule.maxSeconds >= 60 ? `${rule.maxSeconds / 60} min` : `${rule.maxSeconds} s`}{rule.captionLimit !== null ? ` · caption ${rule.captionLimit}` : ''}</small></span>
-          </label>)}
+          {PLATFORM_RULES.map((rule, i) => {
+            const warnings = warningsFor(rule.id)
+            return <label className="platform-option" key={rule.id}>
+              <input type="checkbox" checked={selected.includes(rule.id)} onChange={() => toggle(rule.id)} data-autofocus={i === 0 || undefined}
+                aria-describedby={warnings.length ? `platform-warnings-${rule.id}` : undefined} />
+              <span>
+                <strong>{rule.label}</strong>
+                <small>Up to {rule.maxSeconds >= 60 ? `${rule.maxSeconds / 60} min` : `${rule.maxSeconds} s`}{rule.captionLimit !== null ? ` · caption ${rule.captionLimit}` : ''}</small>
+                {warnings.length > 0 && <span className="platform-warnings" id={`platform-warnings-${rule.id}`} data-testid={`platform-warnings-${rule.id}`}>
+                  {warnings.map((w) => <span key={w}>{w}</span>)}
+                </span>}
+              </span>
+            </label>
+          })}
         </fieldset>
-        {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.width} × {rule.height}. {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
+        {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
         <label className="field-label" htmlFor="platform-caption">{second ? 'Try 1 post caption and hashtags' : 'Post caption and hashtags'}</label>
-        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts platform-issues" />
+        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts" />
         <p className="muted-sm platform-counts" id="platform-caption-counts">
           {PLATFORM_RULES.map((rule) => {
             if (!selected.includes(rule.id) || rule.captionLimit === null) return null
@@ -178,7 +189,7 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
             </div>
           </div>
           <label className="field-label" htmlFor="platform-caption-2">Post caption and hashtags</label>
-          <textarea id="platform-caption-2" className="textarea" value={second.caption} aria-invalid={secondChecks.some((c) => c.blocking) || undefined} onChange={(e) => editSecond({ caption: e.target.value })} aria-describedby="platform-caption-2-counts try-two-status platform-issues" />
+          <textarea id="platform-caption-2" className="textarea" value={second.caption} onChange={(e) => editSecond({ caption: e.target.value })} aria-describedby="platform-caption-2-counts try-two-status" />
           <p className="muted-sm platform-counts" id="platform-caption-2-counts">
             {secondPlatforms.map((platform) => {
               const rule = platformRule(platform)
@@ -191,22 +202,17 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
             {secondProblem ?? (tryChanges(first, second, fps).length > 1 ? "You changed more than one thing. If Try 2 wins, you won't know which change helped." : null)}
           </p>
         </fieldset>}
-        <label className="platform-option">
-          <input type="checkbox" checked={safeChecked} onChange={(e) => setSafeChecked(e.target.checked)} disabled={saving} />
-          <span>I checked subtitles and important details near the edges.<small>Platform buttons and captions can cover them. Exports fit inside a vertical frame without cropping or moving baked-in text.</small></span>
-        </label>
-        <div id="platform-issues">
-          {blocking.length > 0 && <ul className="platform-errors">{blocking.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
-          {warnings.length > 0 && <ul className="muted-sm platform-warnings">{warnings.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
-        </div>
         {error && <p className="platform-errors" role="alert">{error}</p>}
-        <div className="row platform-actions">
-          {saving
-            ? <button ref={stopButton} className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
-            : <button className="btn ghost" onClick={onClose}>Cancel</button>}
-          <button className="btn primary" onClick={() => void save()} disabled={saving || !ready} data-testid="export-selected">
-            {saving ? <><Spinner /> <span role="status">{status ?? 'Saving files'}</span></> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
-          </button>
+        <div className="platform-actions">
+          <p className="muted-sm" data-testid="platform-edges">Each app puts its buttons and the caption over the edges of the video. Check that your subtitles and other details stay clear.</p>
+          <div className="row">
+            {saving
+              ? <button ref={stopButton} className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
+              : <button className="btn ghost" onClick={onClose}>Cancel</button>}
+            <button className="btn primary" onClick={() => void save()} disabled={saving || !ready} data-testid="export-selected">
+              {saving ? <><Spinner /> <span role="status">{status ?? 'Saving files'}</span></> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
+            </button>
+          </div>
         </div>
         {version.draft && <p className="muted-sm">This is a preview. I will make the full-quality version before saving the platform files.</p>}
       </>}

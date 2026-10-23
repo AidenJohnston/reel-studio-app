@@ -16,17 +16,10 @@ NO_EDIT_LIST = ["-use_editlist", "0", "-movflags", "+faststart"]
 
 
 def inspect(source: Path) -> dict:
-    """`probe`, plus what the platform rules check: audio bitrate, edit lists, the longest keyframe gap."""
+    """`probe`, plus what the export decides on: the file size, the audio bitrate and whether there are edit lists."""
     info = probe(source, quick=True)
     audio = next((s for s in ffprobe_json(source).get("streams", []) if s.get("codec_type") == "audio"), {})
-    packets = tools.text_run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0", "-show_entries",
-                              "packet=pts_time,flags", "-of", "csv=p=0", str(source)], 300, "keyframe scan").stdout
-    keyframes = [float(t) for t, _, flags in (line.partition(",") for line in packets.splitlines())
-                 if "K" in flags and t not in ("", "N/A")]
-    end = info["vduration"] or info["duration"]
-    gaps = [b - a for a, b in zip(keyframes, keyframes[1:] + [end])]
-    return {**info, "audioBitrate": int(audio.get("bit_rate") or 0) or None,
-            "editList": _has_edit_list(source), "maxKeyframeGap": round(max(gaps, default=end), 3)}
+    return {**info, "audioBitrate": int(audio.get("bit_rate") or 0) or None, "editList": _has_edit_list(source)}
 
 
 def _has_edit_list(path: Path) -> bool:
@@ -70,18 +63,17 @@ def remux(source: Path, dest: Path) -> dict:
     return {"video": str(dest), "sizeBytes": dest.stat().st_size}
 
 
-def encode(source: Path, dest: Path, width: int, height: int, bitrate: int) -> dict:
-    if (width, height) not in ((1080, 1920), (720, 1280)) or not 128_000 <= bitrate <= 8_000_000:
-        raise EngineError("BAD_ARGS", "invalid export dimensions or bitrate", "The export settings are invalid.")
+def encode(source: Path, dest: Path, bitrate: int) -> dict:
+    """The same picture size at a lower bitrate, for a render over a platform's size limit."""
+    if not 128_000 <= bitrate <= 8_000_000:
+        raise EngineError("BAD_ARGS", "invalid export bitrate", "The export settings are invalid.")
     info = probe(source, quick=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
-          f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30")
     tools.ffmpeg_progress([tools.ffmpeg(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-                           "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?", "-vf", vf,
+                           "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
                            "-c:v", "libx264", "-preset", "medium", "-profile:v", "high", "-b:v", str(bitrate),
                            "-maxrate", str(bitrate), "-bufsize", str(bitrate * 2), "-pix_fmt", "yuv420p",
-                           "-g", "60", "-flags", "+cgop", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+                           "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
                            *NO_EDIT_LIST, "-progress", "pipe:1", "-nostats", str(dest)],
                           info["duration"], lambda pct: progress("export", pct, "Saving platform files"),
                           max(600, info["duration"] * 40), "platform export")
