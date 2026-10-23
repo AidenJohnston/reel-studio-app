@@ -1,11 +1,12 @@
 // The job event contract (shared/api.ts JobUpdate -> JobEvent) end to end without Electron: what a job
 // emits, what main adds (overall, secondsLeft, thinking kept across ticks, a playable `video` for every
 // render), and how the renderer folds it (shared/live.ts).
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { performance } from 'node:perf_hooks'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent } from '../src/shared/api'
-import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
+import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../src/shared/live'
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
@@ -27,6 +28,12 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(s.message).toBe('Watching your video and planning the edit')
     // the AI answered with a tool call: no longer thinking
     expect(fold([{ ...J, type: 'tool', name: 'set_captions', summary: 'Added subtitles' }], s)).toMatchObject({ thinking: false, tools: ['Added subtitles'] })
+  })
+
+  it('clears a shown ETA when the next status has no usable estimate', () => {
+    const s = fold([status({ secondsLeft: 120 }), status({ secondsLeft: null })])
+    expect(s.secondsLeft).toBeNull()
+    expect(timeLeftWords(s)).toBeNull()
   })
 
   it('first look plays, then the AI draft replaces it, never the other way round', () => {
@@ -137,5 +144,42 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses[0]).toMatchObject({ secondsLeft: null })
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
+  })
+
+  it('clears an expired estimate in broadcasts and reopened jobs', async () => {
+    setupPaths()
+    const slug = 'eta-reopen'
+    mkdirSync(projectDir(slug), { recursive: true })
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const wall = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, {
+      loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined,
+      mediaSeconds: async () => 60
+    })
+    let shown: string | null = null
+    let reopened: string | null = null
+    jobs.start(slug, 'rerender', async (emit) => {
+      const status = () => emit({ type: 'status', message: 'Updating your video', phase: 'final', pct: 0 })
+      status()
+      await Promise.resolve()
+      status()
+      const running = jobs.forSlug(slug)!
+      shown = timeLeftWords(liveFromDetail(running))
+      now = 120_000
+      status()
+      reopened = timeLeftWords(liveFromDetail(running))
+      return { summary: 'ok', quiet: true }
+    })
+    try {
+      await jobs.forSlug(slug)!.done
+      expect(shown).not.toBeNull()
+      expect(reopened).toBe('Still working, almost there')
+      expect(events.filter((e) => e.type === 'status').at(-1)).toMatchObject({ secondsLeft: null, overdue: true })
+    } finally {
+      clock.mockRestore()
+      wall.mockRestore()
+    }
   })
 })
