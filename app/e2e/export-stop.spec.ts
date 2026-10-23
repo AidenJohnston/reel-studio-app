@@ -34,6 +34,9 @@ test('Stop while a preview is made full quality for a platform export ends quiet
     await dialog.getByRole('button', { name: 'Stop export' }).click()
     await expect(dialog.getByTestId('export-selected')).toBeEnabled()
     await expect(dialog.locator('.platform-errors')).toHaveCount(0)
+    // Closing the dialog returns focus to the menu button that opened it.
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.getByTestId('export-more')).toBeFocused()
   } finally {
     await app.close()
   }

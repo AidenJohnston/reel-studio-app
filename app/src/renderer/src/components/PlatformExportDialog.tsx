@@ -107,7 +107,7 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
         </fieldset>
         {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
         <label className="field-label" htmlFor="platform-caption">Post caption and hashtags</label>
-        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts" />
+        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby={['platform-caption-counts', ...selected.filter((p) => warningsFor(p).length).map((p) => `platform-warnings-${p}`)].join(' ')} />
         <p className="muted-sm platform-counts" id="platform-caption-counts">
           {PLATFORM_RULES.map((rule) => {
             if (!selected.includes(rule.id) || rule.captionLimit === null) return null

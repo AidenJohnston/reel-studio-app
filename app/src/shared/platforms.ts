@@ -134,10 +134,12 @@ function preparation(platform: Platform, video: FinishedVideo): 'copy' | 'remux'
   return audioFits && !(rule.noEditLists && video.editList) ? 'copy' : 'remux'
 }
 
-/** The video bitrate that brings a re-encode under the platform's size limit. */
+/** The video bitrate that brings a re-encode under the platform's size limit, within what the engine accepts. */
 function exportBitrate(platform: Platform, seconds: number): number {
-  // Leave 6% for container overhead and 128 kb/s for the audio; the bytes are checked after encoding.
-  return Math.min(8_000_000, Math.floor(platformRule(platform).maxBytes * 0.94 * 8 / Math.max(seconds, 1) - 128_000))
+  // Leave 6% for container overhead and 128 kb/s for the audio. A video too long for any bitrate the engine accepts
+  // still gets 128 kb/s; the bytes are checked after encoding and refused if they are over.
+  const budget = Math.floor(platformRule(platform).maxBytes * 0.94 * 8 / Math.max(seconds, 1) - 128_000)
+  return Math.max(128_000, Math.min(8_000_000, budget))
 }
 
 /** Platforms that need their own file, grouped so matching outputs share one. A null bitrate is a remux. */

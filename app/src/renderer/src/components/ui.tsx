@@ -151,6 +151,8 @@ export function MoreMenu({ items, label = 'More', icon = 'more', triggerClassNam
               className={it.danger ? 'danger' : ''}
               disabled={it.disabled}
               onClick={() => {
+                // Back on the button first, so a dialog the item opens returns focus there when it closes.
+                trigger.current?.focus()
                 setOpen(false)
                 it.run()
               }}
