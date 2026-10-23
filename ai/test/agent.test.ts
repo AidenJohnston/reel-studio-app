@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, loadProject, AgentEvent, AIError, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
+import { createAI, loadProject, AgentEvent, AIError, ChatMessage, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
 
 const nullP = { tilt: null, scale: null, text: null };
@@ -216,6 +216,15 @@ describe('record + replay', () => {
     expect(r.summary).toMatch(/best take/);
     expect(replay.remaining).toBe(0);
     expect((await loadProject(again.dir)).cut.keep).toEqual((await loadProject(dir)).cut.keep);
+  });
+
+  it('fails if a recorded ID reference this run cannot fill is replayed instead of stopping the run', async () => {
+    const replay = new ReplayProvider({ version: 1, recordedWith: { provider: 'fake' }, task: 't', createdAt: '', steps: [
+      { response: { text: '', toolCalls: [{ id: 'c2', name: 'resolve_asset', args: { candidateId: { $result: 'c1', path: 'candidates.0.id' } } }] } },
+    ] });
+    const results = (content: string) => [{ role: 'tool' as const, results: [{ callId: 'c1', name: 'resolve_asset', content }] }];
+    const ask = (messages: ChatMessage[]) => replay.complete({ system: '', messages, tools: [] });
+    await expect(ask(results('{"status":"no_match","candidates":[]}'))).rejects.toMatchObject({ code: 'replay_ref' });
   });
 });
 
