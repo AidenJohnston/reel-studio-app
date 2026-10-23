@@ -315,25 +315,25 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
 
       {help && (
         <div className="phone-fallbacks" data-testid="phone-fallbacks">
-          {sent || error ? (
-            <h3>{PHONE_HELP.other}</h3>
-          ) : (
-            // The Wi-Fi reason is only true while the page has not opened; once it has, only the heading stays.
-            <div>
-              <h3>{PHONE_HELP.title}</h3>
+          <h3>{sent || error ? PHONE_HELP.other : PHONE_HELP.title}</h3>
+          {/* The Wi-Fi advice is only true while the page has not opened; once it has, only the heading stays. */}
+          {!sent && !error && (
+            <>
+              <div className="phone-way" data-testid="phone-check-wifi">
+                <Glyph name="wifi" />
+                <div>
+                  <b>{PHONE_HELP.checkTitle}</b>
+                  <p className="muted-sm">{PHONE_HELP.check}</p>
+                </div>
+                {/* phone:start reads the addresses again, so a code made after switching Wi-Fi carries the new one. */}
+                <button className="btn small" onClick={() => setAttempt((n) => n + 1)} data-testid="phone-wifi-renew">
+                  Make a new code
+                </button>
+              </div>
               <p className="muted-sm" data-testid="phone-why">
                 {PHONE_HELP.why}
               </p>
-            </div>
-          )}
-          {!sent && !error && (
-            <div className="phone-way" data-testid="phone-check-wifi">
-              <Glyph name="wifi" />
-              <div>
-                <b>{PHONE_HELP.checkTitle}</b>
-                <p className="muted-sm">{PHONE_HELP.check}</p>
-              </div>
-            </div>
+            </>
           )}
           {fallbackOrder(IS_MAC).map((way) => (
             <Fragment key={way}>{ways[way]}</Fragment>
