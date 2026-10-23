@@ -55,3 +55,36 @@ Rules:
   edit, 2 per note).
 - After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
   version.
+
+## One writer per project
+
+The running app is the only writer of its projects. Electron's single-instance lock is held by the OS
+until the app process dies, and inside the app the job lane runs one job or manual edit per project.
+Everything a job runs, the AI edit and each engine command, gets the job's token (`--owner`) and never
+decides ownership itself. `<project>/work/.owner.lock` only tells tools run by hand that the app has
+the project open: the engine CLI and the AI dev CLI refuse while it exists ("Reel Studio may be using
+this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
+app removes leftover lock files when it starts (`app/src/main/owner.ts`).
+
+Every AI edit, the app's and the dev CLI's alike, also holds `<project>/work/.ai-edit.lock` for its
+whole run, so two edits in different processes never run on one project at once (`ai/src/index.ts`
+`withEditLock`). A lock whose process has died, or that is 3 hours old, is taken over.
+
+## Engine processes
+
+An engine call settles only after the engine and everything it started have exited. On macOS and
+Linux the engine runs as its own process group and the host stops what is left of the group after
+any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
+project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
+children when it exits (`engine/reelengine/contain.py`).
+
+A closed project refuses everything that would write to it: jobs, manual edits, attachments, notes
+and deleting the video. Each refusal asks the creator to restart Reel Studio first
+(`app/src/main/jobs.ts`).
+
+The app records each engine's pid and project in `engines.json` (in its settings folder) until the
+engine's whole group is gone, and at startup stops engines a crashed run left behind. A project whose
+engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
+running processes: a project stays closed only while an engine or ffmpeg names its folder in its
+arguments, and every other project opens. It keeps looking at each start until it finds none
+(`app/src/main/orphans.ts`).

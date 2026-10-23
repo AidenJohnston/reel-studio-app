@@ -66,14 +66,15 @@ export interface AI {
   signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>
   signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
-  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { owner?: string }): Promise<AgentResult>
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again).
+   * `opts.owner`: the job's owner token, which the note joins instead of taking the project. */
   applyNote(
     projectDir: string,
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[] }
+    opts?: { attachments?: string[]; owner?: string }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
