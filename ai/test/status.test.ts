@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
-import { approxOutputTimes, createAI, loadProject } from '../src';
+import { approxOutputTimes, createAI, loadProject, newToolState, saveProject, StyleStore } from '../src';
+import { load, operationStatus, ToolContext } from '../src/tools';
 import { call, FakeHost, makeProject, ScriptedModel, tmpDir } from './helpers';
 
 it('fails if a note’s status line names the wrong words, moment or direction (music turned down read as taken out), drops the render’s own steps, or says the video is ready mid-note', async () => {
@@ -26,4 +27,20 @@ it('fails if a note’s status line names the wrong words, moment or direction (
   // the Working screen moves its step list on the render's own steps
   expect(said).toContain('Making your cover');
   expect(said).not.toContain('Your video is ready');
+});
+
+it('fails if a status line names a picture for words on screen, a smaller size for subtitles turned off, or music the call does not change', async () => {
+  const { root, dir } = await makeProject();
+  const p = await loadProject(dir);
+  p.cut.keep = [{ from: 'w0', to: 'w56' }];
+  p.broll = [{ id: 'b1', anchor: { from: 'w2', to: 'w4' }, treatment: 'text-pop', asset: null } as any];
+  p.music = { ...p.music, enabled: true, track: 'Library/Music/gentle.mp3' };
+  await saveProject(dir, p);
+  const ctx: ToolContext = { projectDir: dir, host: new FakeHost(root), style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
+  await load(ctx);
+  expect(operationStatus(ctx, 'remove_broll', { id: 'b1' })).toMatch(/^Taking out the words on screen/);
+  expect(operationStatus(ctx, 'set_caption_style', { enabled: false, size: 84 })).toBe('Turning the subtitles off');
+  expect(operationStatus(ctx, 'choose_music', {})).toBe('Taking out the music');
+  ctx.project!.music.track = null;
+  expect(operationStatus(ctx, 'choose_music', { track: null, level: 'quiet' })).toBeUndefined();
 });

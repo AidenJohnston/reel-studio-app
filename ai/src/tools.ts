@@ -424,6 +424,11 @@ export async function doRender(ctx: ToolContext, draft: boolean): Promise<Render
   return info;
 }
 
+/** What a b-roll item is, in a status line: the treatment decides, never the word "picture" for all. */
+function shownAs(treatment: string | undefined): string {
+  return treatment === 'animation' ? 'animation' : treatment === 'text-pop' ? 'words on screen' : 'picture';
+}
+
 /** What one edit is about to do, in plain words from its own arguments and the project it changes
  * ("Cutting 3 words at 0:31"), for the status line. Undefined when there is nothing more specific to
  * say than the tool's step. The arguments are the model's, not yet validated. */
@@ -460,21 +465,23 @@ export function operationStatus(ctx: ToolContext, name: string, args: any): stri
     case 'add_broll':
       return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : args?.treatment === 'text-pop' ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
     case 'update_broll':
-      return broll ? `Changing the picture${at(broll.anchor.from)}` : undefined;
+      return broll ? `Changing the ${shownAs(broll.treatment)}${at(broll.anchor.from)}` : undefined;
     case 'remove_broll':
-      return broll ? `Taking out the picture${at(broll.anchor.from)}` : undefined;
+      return broll ? `Taking out the ${shownAs(broll.treatment)}${at(broll.anchor.from)}` : undefined;
     case 'set_caption_style': {
       const size = p.captions.style.size;
+      if (args?.enabled === false) return p.captions.enabled ? 'Turning the subtitles off' : undefined;
       const shown = p.captions.enabled || args?.enabled === true;
       if (shown && typeof args?.size === 'number' && typeof size === 'number' && args.size !== size) return `Making the subtitles ${args.size > size ? 'bigger' : 'smaller'}`;
-      if (args?.enabled === false && p.captions.enabled) return 'Turning the subtitles off';
       return p.captions.enabled ? 'Changing how the subtitles look' : args?.enabled === true ? 'Turning the subtitles on' : undefined;
     }
-    case 'choose_music':
-      // null + a level keeps the song (choose_music): only null alone takes it out
-      if (args?.track === null && !args.level && p.music.track) return 'Taking out the music';
-      if (typeof args?.track === 'string' && args.track !== p.music.track) return `Adding the song "${path.basename(args.track, path.extname(args.track))}"`;
-      return args?.level && args.level !== p.music.level ? 'Changing the music volume' : undefined;
+    case 'choose_music': {
+      // missing arguments are null (executeTool's fillNulls); null + a level keeps the song: only null alone takes it out
+      const track = args?.track ?? null; const level = args?.level ?? null;
+      if (track === null && !level) return p.music.track ? 'Taking out the music' : undefined;
+      if (typeof track === 'string' && track !== p.music.track) return `Adding the song "${path.basename(track, path.extname(track))}"`;
+      return level && level !== p.music.level && (track || p.music.track) ? 'Changing the music volume' : undefined;
+    }
     case 'set_zoom':
       return Array.isArray(args?.zooms) && !args.zooms.length && p.zooms.length ? 'Taking out the zooms' : undefined;
     default:

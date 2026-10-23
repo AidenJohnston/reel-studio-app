@@ -139,6 +139,27 @@ describe('job manager (main): the contract on the wire', () => {
     expect(existsSync(projectDir(slug))).toBe(true)
   })
 
+  it('fails if a preview still being copied when Stop lands arrives after the job is cancelled', async () => {
+    setupPaths()
+    const slug = 'late-render'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, () => new Promise((r) => setTimeout(() => r('reel-media://f/late'), 30)))
+    let rendered!: () => void
+    const preview = new Promise<void>((r) => (rendered = r))
+    const id = jobs.start(slug, 'note', (emit, signal) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' }))
+      emit({ type: 'render', version: 2, draft: true, file: join(projectDir(slug), 'x.mp4') })
+      rendered()
+    }))
+    const done = jobs.get(id)!.done
+    await preview
+    jobs.cancel(id)
+    await done
+    await new Promise((r) => setTimeout(r, 60))
+    expect(events.at(-1)?.type).toBe('cancelled')
+  })
+
   it('fails if a render still reporting after Stop puts its step back over the stopped note', async () => {
     const events: JobEvent[] = []
     const jobs = createJobManager((e) => events.push(e), () => undefined)
