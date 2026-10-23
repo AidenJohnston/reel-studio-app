@@ -11,6 +11,10 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   `zooms`, ...). `captions.style` facts name the style key in `field`; `broll` and `source` facts name the
   item in `id`, with `before: null` for an added item and `after: null` for a removed one. Facts compare
   the two versions, never the steps between them, so a change made and undone is not a fact.
+- `notes[].version` may now be absent. Such a note changed the video and then took the change back, so it
+  made no version; the app answered "That left your video the same as before, so I didn't make a new
+  version." (or passed on the AI's question). The schema never listed `version` as required, so only the
+  TypeScript types change.
 - Outside project.json: `versions/vN/receipts.json` lists the receipts of every final render that wrote
   into `vN` and changed something. Versions made before this have none.
 

@@ -13,7 +13,8 @@ export interface UserFacingError {
 
 export interface AgentResult {
   summary: string
-  version: number
+  /** Absent when a note's edit ended where it started: its reply belongs to no version. */
+  version?: number
   styleRulesAdded: string[]
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */

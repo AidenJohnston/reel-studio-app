@@ -223,8 +223,11 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     const st = await fs.stat(video)
     const cover = join(d, 'cover.png')
     const receipts = await readJson<{ facts: EditFact[] }[] | null>(join(d, 'receipts.json'), null)
+    // an engine that records receipts gives every render an id (render_identity.py)
+    const manifest = await readJson<{ renderId?: unknown } | null>(join(d, 'render.json'), null)
     out.push({
       ...(receipts ? { facts: receipts.flatMap((r) => r.facts) } : {}),
+      ...(n > 0 && !receipts && typeof manifest?.renderId !== 'string' ? { beforeReceipts: true as const } : {}),
       n,
       video: mediaUrl(video, st.mtimeMs),
       videoPath: video,

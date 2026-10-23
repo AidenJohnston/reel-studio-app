@@ -2,9 +2,9 @@
 // folder names, and the Library summary line.
 import { describe, expect, it } from 'vitest'
 import { STAGES, clock, estimateSecondsLeft, overallProgress, stageIndex, timeLeftText } from '../src/shared/progress'
-import { describeChange, describeFacts, describeSorted, versionMessage } from '../src/shared/describe'
+import { describeChange, describeFacts, describeSorted, versionMessage, versionTooltip } from '../src/shared/describe'
 import { displayPath } from '../src/shared/display-path'
-import type { DropResult, ProjectJson } from '../src/shared/api'
+import type { ChatMessage, DropResult, ProjectJson } from '../src/shared/api'
 
 const base = (extra: Partial<ProjectJson> = {}): ProjectJson =>
   ({
@@ -60,6 +60,19 @@ describe('version messages', () => {
       { kind: 'broll', id: 'b3', before: null, after: { id: 'b3' } }
     ]
     expect(versionMessage(4, describeFacts(facts, words))).toBe('Version 4: cut 2 words, bigger yellow subtitles, quieter music, added a picture.')
+  })
+  it("fails if a version button shows the AI's chat reply when a receipt exists, or for a version made after receipts", () => {
+    const chat: ChatMessage[] = [
+      { id: '1', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 1 },
+      { id: '2', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 2 },
+      { id: '3', from: 'editor', text: 'I tightened your pauses.', at: '', version: 3 },
+      { id: '4', from: 'you', text: 'try tighter pauses', at: '' },
+      { id: '5', from: 'editor', text: "That left your video the same as before, so I didn't make a new version.", at: '' }
+    ]
+    const size = [{ kind: 'captions.style', field: 'size', before: 105, after: 126 }]
+    expect(versionTooltip({ n: 1, facts: size }, chat, [])).toBe('Version 1: bigger subtitles.')
+    expect(versionTooltip({ n: 2 }, chat, [])).toBeUndefined()
+    expect(versionTooltip({ n: 3, beforeReceipts: true }, chat, [])).toBe('I tightened your pauses.')
   })
   it('describes subtitle changes the way a person would', () => {
     const p = base()

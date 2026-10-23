@@ -53,7 +53,8 @@ export interface EditFact { kind: string; field?: string; id?: string; before: u
 /** What the render that made a version changed since the version before it (docs/schema-changes.md). */
 export interface EditReceipt { jobId: string | null; renderId: string; version: number; facts: EditFact[] }
 export interface NoteEntry {
-  version: number; text: string; applied: string[]; at: string;
+  /** the version this note made; absent for a note whose edit ended where it started (docs/schema-changes.md) */
+  version?: number; text: string; applied: string[]; at: string;
   /** files the user attached to this note (`work/assets/attach-*`), 0.1.2 */
   attachments?: string[];
   receipt?: EditReceipt;
