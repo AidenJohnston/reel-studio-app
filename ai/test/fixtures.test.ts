@@ -78,7 +78,8 @@ describe('recorded sessions (replay)', () => {
     expect(kept.has('w0')).toBe(false);      // earlier hook take dropped
     expect(kept.has('w10')).toBe(false);     // "let me try that again" dropped
     expect(kept.has('w56')).toBe(true);      // ending kept
-    expect(p.music.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
+    expect(p.music.track).toBe('Library/Music/gentle piano.mp3');
+    expect(p.music.frozen?.path).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
     expect(p.post.hashtags).toHaveLength(5);
     // two Library pictures placed by path and one web picture resolved, seen and committed: all frozen, all recorded
     const pictures = p.broll.filter((b) => b.treatment !== 'text-pop');

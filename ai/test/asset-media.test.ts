@@ -66,7 +66,10 @@ describe('media assets', () => {
     expect(song.isError, song.content).toBe(false);
     const p = await loadProject(dir);
     expect(p.broll[0].asset).toMatch(/^work\/assets\/frozen\/video\/[0-9a-f]{64}\.mp4$/);
-    expect(p.music.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.wav$/);
+    // the song keeps its Library path, which the app names and checks it by; the engine plays the frozen copy
+    expect(p.music.track).toBe(music);
+    expect(p.music.frozen).toEqual({ track: music, path: expect.stringMatching(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.wav$/) });
+    expect(await fs.readFile(path.join(dir, p.music.frozen!.path))).toEqual(await fs.readFile(path.join(root, music)));
     const records = (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
     expect(records.map((r) => [r.kind, r.provenance.intent, r.rightsConfidence])).toEqual([['video', video, 'user-owned'], ['music', music, 'user-owned']]);
     expect(host.calls.filter((c) => c.command.startsWith('inspect-'))).toEqual([]);

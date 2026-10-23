@@ -105,6 +105,8 @@ anchors to output time at render.
   "music": {
     "enabled": true,
     "track": "Library/Music/my-song.mp3",     // path relative to the Reel Studio root, or null
+    "frozen": { "track": "Library/Music/my-song.mp3", "path": "work/assets/frozen/music/<sha256>.mp3" },
+                                              // optional: the AI's frozen copy, played while its track matches
     "startAt": 0.0,                           // offset into the track
     "level": "under-voice",                   // "under-voice" | "quiet" | "loud-intro"
     "automation": [ { "fromWord": "w0", "toWord": "w30", "gainDb": -6 } ],
@@ -315,13 +317,14 @@ the edit through `resolve_asset`. It offers candidates read where they are, each
 a picture, a 3x3 contact sheet for a clip, a waveform with duration and loudness (LUFS) for a song. Only a
 committed candidate can be placed. The user's own Library pictures, clips and songs skip the candidate
 turn: `add_broll`, `update_broll`, `choose_music` and `logo-pop` take a `Library/...` path and freeze it
-with its record in the same call, unseen by the model.
+with its record in the same call, unseen by the model. A Library song keeps its `Library/Music/...` path in
+`music.track`, and its frozen copy goes in `music.frozen`, which the engine plays.
 
 Freezing happens in the engine, because the AI package never reads media. `freeze-asset` copies the file to
 `work/assets/frozen/<kind>/<sha256>.<ext>`, or reuses a frozen file with the same bytes. It clones where
 the disk supports it (APFS `clonefile`, Linux `FICLONE`), so a frozen copy of a Library clip costs no extra
 disk on a Mac, and makes a plain copy elsewhere. It hashes the copy in chunks, never holding a whole file
-in memory. Clips may be up to 200 MB, the app's attachment limit; pictures and songs up to 40 MB. The AI
+in memory. Clips and songs may be up to 200 MB (clips match the app's attachment limit); pictures up to 40 MB. The AI
 then appends one record of source, licence, credit and intent to `work/assets/manifest.jsonl`. Before a
 placement the AI checks that a frozen file still has its recorded hash: `hash-asset` reads it once, and
 the AI reuses that hash while the file's size and modification time stay the same. A failed note deletes

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { AssetCandidate, AssetKind, MediaEngine, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryFile, readAssets, removeFiles } from './assets';
 import { readAttachment } from './attachments';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
@@ -1067,21 +1067,30 @@ const tools: ToolDef[] = [
         // a level change without naming the song keeps the current song (null + level never means "remove")
         args = { ...args, track: cur.track }
       }
-      // the song already playing: freezing a legacy Library path changes ref, not the song
+      // the song already playing: freezing a legacy Library song adds its frozen copy, not a new song
       let sameSong = false;
+      let frozen: MusicFrozen | undefined;
       if (args.track) {
-        const current = (await loadProject(ctx.projectDir)).music.track;
-        const legacy = current && resolveAsset(ctx, current);
-        const same = args.track === current || (legacy && !String(args.track).startsWith('asset_') && resolveAsset(ctx, args.track)?.ref === legacy.ref);
-        // a song an older project placed outside the Library and the frozen folder stays as it is; a
-        // Library song is frozen like any other placement
-        const chosen = same && legacy && !legacy.ref.startsWith('work/assets/frozen/') && !legacy.ref.startsWith('Library/')
-          ? legacy.ref : await placementAsset(ctx, args.track, ['music']);
+        const cur = (await loadProject(ctx.projectDir)).music;
+        const current = cur.track ? resolveAsset(ctx, cur.track) : null;
+        const asked = String(args.track).startsWith('asset_') ? null : resolveAsset(ctx, args.track);
+        const kept = cur.frozen?.track === cur.track ? cur.frozen : undefined;
+        const same = args.track === cur.track || (!!asked && (asked.ref === current?.ref || asked.ref === kept?.path));
+        let chosen: string;
+        // the current song keeps its frozen copy (its hash checked again), even if the Library file changed since
+        if (same && kept) chosen = await placementAsset(ctx, kept.path, ['music']);
+        // a song an older project placed outside the Library and the frozen folder stays as it is
+        else if (same && current && !current.ref.startsWith('work/assets/frozen/') && !current.ref.startsWith('Library/')) chosen = current.ref;
+        else chosen = await placementAsset(ctx, args.track, ['music']);
         const r = resolveAsset(ctx, chosen);
         if (!r) throw new ToolInputError(`no such song "${args.track}"; call list_library with kind music`);
-        ref = r.ref;
         abs = r.abs;
-        sameSong = !!same;
+        // A Library song stays Library/Music/<name> in track: the app's checklist names the song and its Music
+        // tab checks it by that path. The engine plays music.frozen.
+        const library = same && kept ? kept.track : asked?.ref.startsWith('Library/') ? asked.ref : null;
+        ref = library ?? r.ref;
+        frozen = library ? { track: library, path: r.ref } : undefined;
+        sameSong = same;
       }
       const prev = (await loadProject(ctx.projectDir)).music;
       const newSong = ref !== prev.track && !sameSong;
@@ -1091,13 +1100,14 @@ const tools: ToolDef[] = [
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (newSong ? 0 : undefined));
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
+        if (frozen) p.music.frozen = frozen; else delete p.music.frozen;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
         if (args.level) p.music.level = args.level as MusicLevel;
         // hand edits end the song WITH the last word (a ~0.3 s tail), not a long fade under it
         if (ref !== null && newSong) p.music.fadeOut = MUSIC_TAIL_S;
       });
-      const record = ref ? (await readAssets(assetStore(ctx))).find((a) => a.committedPath === ref) : null;
+      const record = ref ? (await readAssets(assetStore(ctx))).find((a) => a.committedPath === (frozen?.path ?? ref)) : null;
       const title = record?.title ?? ref;
       const name = title ? path.basename(title, path.extname(title)) : null;
       const levelWord: Record<string, string> = { quiet: 'Turned the music down', 'under-voice': 'Set the music under your voice', 'loud-intro': 'Made the music louder at the start' };

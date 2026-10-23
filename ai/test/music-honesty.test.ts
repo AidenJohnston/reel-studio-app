@@ -37,10 +37,25 @@ describe('choose_music honesty', () => {
     expect(r.summary).toBe('Turned the music down');
     const after = (await loadProject(dir)).music;
     // a project from before frozen songs: the level change freezes its Library song and records it
-    expect(after.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
+    expect(after.track).toBe('Library/Music/calm.mp3');
+    expect(after.frozen).toEqual({ track: 'Library/Music/calm.mp3', path: expect.stringMatching(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/) });
     expect(JSON.parse(await fsp.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8'))).toMatchObject({ provenance: { intent: 'Library/Music/calm.mp3' } });
     expect(after.level).toBe('quiet');
     // the same song in a new place: its start point and fade stay
     expect([after.startAt, after.fadeOut]).toEqual([12.5, 2]);
+  });
+
+  it('choosing the current Library song again keeps its frozen copy and start, even after the Library file changed', async () => {
+    const { ctx, dir, root } = await ctxFor();
+    const song = 'Library/Music/calm.mp3';
+    await fsp.writeFile(path.join(root, song), tinyMp3());
+    expect((await executeTool(ctx, 'choose_music', { track: song, startAt: 12, level: null })).isError).toBe(false);
+    const first = (await loadProject(dir)).music;
+    await fsp.writeFile(path.join(root, song), Buffer.concat([tinyMp3(), Buffer.from('edited later')]));
+    for (const again of [song, first.frozen!.path]) {
+      const r = await executeTool(ctx, 'choose_music', { track: again, startAt: null, level: 'quiet' });
+      expect(r.summary).not.toMatch(/Added the song/);
+      expect((await loadProject(dir)).music).toMatchObject({ track: song, frozen: first.frozen, startAt: 12, level: 'quiet' });
+    }
   });
 });

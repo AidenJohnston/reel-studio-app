@@ -29,9 +29,12 @@ export interface Captions { enabled: boolean; style: CaptionStyle; corrections: 
 
 export type MusicLevel = 'under-voice' | 'quiet' | 'loud-intro';
 export interface MusicAutomation { fromWord: string; toWord: string; gainDb: number }
+/** The frozen copy of the Library song `track` names. It counts only while `track` still equals
+ * music.track: the app switches songs by rewriting track and keeps every other field. */
+export interface MusicFrozen { track: string; path: string }
 export interface Music {
   enabled: boolean; track: string | null; startAt: number; level: MusicLevel | string;
-  automation: MusicAutomation[]; fadeOut: number; [k: string]: unknown;
+  automation: MusicAutomation[]; fadeOut: number; frozen?: MusicFrozen; [k: string]: unknown;
 }
 
 export const TREATMENTS = [
