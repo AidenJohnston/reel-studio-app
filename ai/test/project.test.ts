@@ -99,4 +99,15 @@ describe('project API', () => {
     p.broll = [{ id: 'b2', anchor: { from: 'w0', to: 'w0' }, treatment: 'text-pop', asset: null, params: {} }];
     expect(nextBrollId(p)).toBe('b3');
   });
+
+  it('a save waits out a Windows lock on project.json of a few seconds instead of giving up', async () => {
+    const dir = tmpDir('atomic ');
+    const file = path.join(dir, 'project.json');
+    fs.writeFileSync(file, 'old');
+    const lockedUntil = Date.now() + 2000;
+    await writeFileAtomic(file, 'new', undefined, async () => {
+      if (Date.now() < lockedUntil) throw Object.assign(new Error('locked'), { code: 'EPERM' });
+    });
+    expect(fs.readFileSync(file, 'utf8')).toBe('new');
+  });
 });

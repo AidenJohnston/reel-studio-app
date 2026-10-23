@@ -111,8 +111,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       throw { code: 'NOT_READY', userMessage: 'Claude keys are not ready in this build yet. Your videos still work without it.' }
     },
 
-    async firstEdit(projectDir, onEvent, signal): Promise<AgentResult> {
-      const args = ['--project', projectDir]
+    async firstEdit(projectDir, onEvent, signal, opts): Promise<AgentResult> {
+      const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}) })
       const changed: string[] = []
@@ -167,25 +167,20 @@ export const createMockAI: CreateAI = ({ host }) => {
     async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
-      const added: string[] = []
-      if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
-        added.push(note.trim())
-      }
+      // a rule to remember is only proposed: the app asks before anything goes into My style
+      const proposed = /\b(always|never|every video|from now on|in general)\b/i.test(note) ? [note.trim()] : []
+      const summary = proposed.length
+        ? 'Connect ChatGPT in Settings and I can change this video from your notes too.'
+        : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".'
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
-      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
+      // saved under the job's id with its reply, so a crash right after is finished at the next start (store.ts settleInterrupted)
+      p.notes = [...(p.notes ?? []), {
+        version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments,
+        ...(opts?.id ? { id: opts.id } : {}), reply: summary, ...(proposed.length ? { styleSuggestions: proposed } : {})
+      }]
       await writeProject(projectDir, p)
       onEvent({ type: 'status', message: 'Done', pct: 100 })
-      return {
-        summary: added.length
-          ? 'I saved that to My style. Connect ChatGPT in Settings and I can change this video from your notes too.'
-          : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".',
-        version: p.version ?? 0,
-        styleRulesAdded: added,
-        changed: []
-      }
+      return { summary, version: p.version ?? 0, styleRulesAdded: [], styleSuggestions: proposed, changed: [] }
     },
 
     async writeScript(): Promise<ScriptResult> {

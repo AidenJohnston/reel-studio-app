@@ -1012,25 +1012,32 @@ def credit_for(url: str) -> Optional[dict]:
         return None
 
 
-def _write_credit(saved: Path, url: str) -> Optional[dict]:
-    """<folder>/credits.json maps each saved file name -> its licence + credit line, so the post
-    caption can credit the pictures that need it (attributionRequired)."""
-    c = credit_for(url)
-    if not c:
-        return None
+def _add_credit(saved: Path, entry: dict) -> None:
+    """One entry in <folder>/credits.json under the saved file's name. A book that cannot be read is
+    left alone (rewriting it as empty would drop every other picture's credit) and the picture is
+    refused: it must not reach a caption without its credit."""
     book_path = saved.parent / "credits.json"
     try:
         with _FileLock(book_path):
             try:
                 book = json.loads(book_path.read_text(encoding="utf-8"))
-                if not isinstance(book, dict):
-                    book = {}
-            except (OSError, ValueError):
+            except FileNotFoundError:
                 book = {}
-            book[saved.name] = {**c, "url": url}
+            if not isinstance(book, dict):
+                raise ValueError("credits.json is not an object")
+            book[saved.name] = entry
             _write_json(book_path, book)
-    except OSError as e:
-        log(f"credit not written for {saved.name}: {e}")
+    except (OSError, ValueError) as e:
+        raise EngineError("CREDIT_NOT_SAVED", f"credit not written for {saved.name}: {e}",
+                          "I couldn't note who made that picture, so I didn't keep it. Try another one.") from None
+
+
+def _write_credit(saved: Path, url: str) -> Optional[dict]:
+    """<folder>/credits.json maps each saved file name -> its licence + credit line, so the post
+    caption can credit the pictures that need it (attributionRequired)."""
+    c = credit_for(url)
+    if c:
+        _add_credit(saved, {**c, "url": url})
     return c
 
 
@@ -1056,19 +1063,7 @@ def register_capture(saved: Path, url: str, title: Optional[str] = None) -> dict
          "license": "Screenshot (your own capture)", "licenseUrl": "", "licenseKind": "screenshot",
          "attributionRequired": False, "attribution": label, "trademark": True, "copyrighted": True,
          "kind": "screenshot", "note": SCREENSHOT_NOTE.format(site=site)}
-    book_path = saved.parent / "credits.json"
-    try:
-        with _FileLock(book_path):
-            try:
-                book = json.loads(book_path.read_text(encoding="utf-8"))
-                if not isinstance(book, dict):
-                    book = {}
-            except (OSError, ValueError):
-                book = {}
-            book[saved.name] = {**c, "url": url}
-            _write_json(book_path, book)
-    except OSError as e:
-        log(f"credit not written for {saved.name}: {e}")
+    _add_credit(saved, {**c, "url": url})
     return c
 
 
@@ -1135,13 +1130,13 @@ def fetch_image(url: str, dest, name: Optional[str] = None) -> Path:
                 img.convert("RGB").save(tmp, "JPEG", quality=92)
             else:
                 img.save(tmp, "PNG")
+        _write_credit(out, url)       # before the picture appears: a kill never leaves it uncredited
         tmp.replace(out)
     except BaseException:
         tmp.unlink(missing_ok=True)
         if out.exists() and out.stat().st_size == 0:
             out.unlink(missing_ok=True)       # the claimed name, never filled
         raise
-    _write_credit(out, url)
     return out
 
 
