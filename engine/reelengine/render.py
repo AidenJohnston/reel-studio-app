@@ -56,8 +56,10 @@ def _opt_module(name: str):
 
 def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
     """{path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
-    song or picture was REPLACED under the same name."""
+    song or picture was REPLACED under the same name, or that the words changed: the transcript sets
+    the cut's timings and the burned-in subtitles."""
     refs = [s.get("path") for s in proj.get("sources") or []]
+    refs.append(projmod.TRANSCRIPT_REL)
     refs.append(((proj.get("music") or {}).get("track")))
     for b in proj.get("broll") or []:
         refs.append(b.get("asset"))

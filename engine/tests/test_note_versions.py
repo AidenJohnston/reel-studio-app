@@ -59,6 +59,21 @@ def test_the_same_edit_gets_its_saved_version_back_untouched(project):
     assert {f.name: f.read_bytes() for f in v1.iterdir() if f.is_file()} == before
 
 
+def test_changed_words_make_a_new_version_with_their_subtitles(project):
+    p = json.loads((project / "project.json").read_text())
+    p["captions"]["enabled"] = True
+    (project / "project.json").write_text(json.dumps(p))
+    assert engine(project, "render")["version"] == 1
+    t = json.loads((project / "work" / "transcript.json").read_text())
+    t["words"][2]["w"] = "loaves"          # the words were heard again; the edit is the same
+    (project / "work" / "transcript.json").write_text(json.dumps(t))
+
+    again = engine(project, "render")
+    assert again["version"] == 2 and not again.get("reused")
+    shown = lambda v: " ".join(c["text"] for c in json.loads((project / "versions" / v / "captions.json").read_text())["cues"]).lower()
+    assert "loaves" in shown("v2") and "loaves" not in shown("v1")
+
+
 def test_a_leftover_attempt_above_the_saved_version_is_replaced(project):
     stale = project / "versions" / "v1"           # a note that crashed before it was saved
     stale.mkdir(parents=True)
