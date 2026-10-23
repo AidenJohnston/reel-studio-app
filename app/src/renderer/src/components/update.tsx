@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useId, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { updateAction, type UpdateState } from '../../../shared/update'
 import { installQuestion, type InstallQuestion } from './update-copy'
 import { reel, userMessage } from '../api'
@@ -37,6 +37,7 @@ const COULD_NOT_OPEN = 'I could not open the download page. Try again in a momen
 
 export function useUpdateActions(): { act: (s: UpdateState) => Promise<void>; pending: boolean; dialog: ReactNode } {
   const notify = useNotify()
+  const titleId = useId()
   const [question, setQuestion] = useState<InstallQuestion | null>(null)
   const [pending, setPending] = useState(false)
 
@@ -84,8 +85,8 @@ export function useUpdateActions(): { act: (s: UpdateState) => Promise<void>; pe
     (question.canInstall ? (
       <Confirm title={question.title} body={question.body} yes="Restart and update" no="Not now" onYes={install} onNo={() => setQuestion(null)} />
     ) : (
-      <Modal onClose={() => setQuestion(null)} testid="confirm">
-        <h2>{question.title}</h2>
+      <Modal onClose={() => setQuestion(null)} testid="confirm" labelledBy={titleId}>
+        <h2 id={titleId}>{question.title}</h2>
         <p className="muted">{question.body}</p>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn primary" onClick={() => setQuestion(null)} data-autofocus data-testid="confirm-no">
