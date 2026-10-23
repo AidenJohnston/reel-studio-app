@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
+import { OWNER_LOCK } from '../src/main/owner'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
@@ -42,6 +43,8 @@ describe('a job whose engine would not stop', () => {
     expect(existsSync(join(partial, '.rendering'))).toBe(true)
     expect(readFileSync(join(dir, 'app.json'), 'utf8')).toBe(appJsonWhileRunning)
     expect(JSON.parse(appJsonWhileRunning).job.id).toBe(id)
+    // the job never lets go of the project, so the engine and AI CLIs run by hand stay out too
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
     // other videos are not affected
     expect(jobs.isClosed('another-reel')).toBe(false)
   })
