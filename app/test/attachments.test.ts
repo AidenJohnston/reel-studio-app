@@ -258,9 +258,10 @@ describe('main: bytes with no file (paste of a screenshot)', () => {
 })
 
 describe('main: the IPC handlers', () => {
-  function wire(dir: string, busy = false, staging = join(dir, '..', '..', 'note-staging', 'my réel')) {
+  function wire(dir: string, busy: boolean | (() => boolean) = false, staging = join(dir, '..', '..', 'note-staging', 'my réel'), onEngine: () => void = () => undefined) {
     const h = new Map<string, (...a: any[]) => any>()
     const runEngine: any = async (_c: string, args: string[]) => {
+      onEngine()
       mkdirSync(join(args[1], 'work', 'thumbs'), { recursive: true })
       return { asset: fakeAttach(args[1]) }
     }
@@ -271,7 +272,7 @@ describe('main: the IPC handlers', () => {
       projectDir: () => dir,
       readProject: async () => ({ broll: [] }) as any,
       reserve: async (_slug, fn) => {
-        if (busy) throw { code: 'BUSY' }
+        if (typeof busy === 'function' ? busy() : busy) throw { code: 'BUSY' }
         return fn('test-owner')
       },
       refuse: () => undefined,
@@ -290,6 +291,18 @@ describe('main: the IPC handlers', () => {
     expect(await call('notes:chooseAttachment', 'slug')).toEqual({ attached: [], errors: [] })
     await call('notes:removeAttachment', 'slug', r.attached[0].asset)
     expect(existsSync(join(dir, ...r.attached[0].asset.split('/')))).toBe(false)
+  })
+  it('keeps an attachment staged when a job starts after admission', async () => {
+    const dir = project()
+    const staging = join(dir, '..', 'staging-race')
+    let busy = false
+    const call = wire(dir, () => busy, staging, () => {
+      busy = true
+    })
+    const r = await call('notes:attachFiles', 'slug', ['C:\\a.png'])
+    const a = r.attached[0]
+    expect(existsSync(join(staging, ...a.asset.split('/')))).toBe(true)
+    expect(existsSync(join(dir, ...a.asset.split('/')))).toBe(false)
   })
   it('while a job runs, a file goes to staging and reaches the project only when its note runs', async () => {
     const dir = project()
