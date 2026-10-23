@@ -1,18 +1,21 @@
 // At startup, before any job: settles what the last run left behind. The storage root comes first,
 // because an engine list that can't be read sends the app looking for engines in the videos under
 // the root this run uses.
-import { basename } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import type { createPidRegistry } from './orphans'
-import { clearStaleLocks } from './owner'
+import { clearStaleLocks, OWNER_LOCK } from './owner'
 import { setRootOverride } from './paths'
 import { loadSettings, type Settings } from './settings'
 import { ensureRoot, recoverInterrupted } from './store'
 
-/** `keepClosed`: a video something of the last run's may still write to (jobs.ts). */
+/** `keepClosed`: a video something of the last run's may still write to (jobs.ts). `reopen`: one whose
+ * leftover engine has exited since; only that video ever waited for it, never the others. */
 export async function settleLastRun(
   registry: ReturnType<typeof createPidRegistry>,
   keepClosed: (slug: string) => void,
-  log: (line: string) => void
+  log: (line: string) => void,
+  reopen: (slug: string) => void = () => undefined
 ): Promise<Settings> {
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
@@ -27,6 +30,13 @@ export async function settleLastRun(
     keepClosed(slug)
   }
   await clearStaleLocks(stillRunning).catch((e) => log(`[locks] ${String(e)}`))
+  for (const dir of stillRunning) {
+    void registry.drained(dir)?.then(async () => {
+      await rm(join(dir, OWNER_LOCK), { force: true }).catch(() => undefined)
+      log(`[start] ${basename(dir)}: the engine process from the last run has exited; the video opens again`)
+      reopen(basename(dir))
+    })
+  }
   const recovered = await recoverInterrupted(closed).catch((e) => {
     log(`[recover] ${String(e)}`)
     return []

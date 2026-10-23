@@ -6,10 +6,8 @@ import { isEngineError, type RunEngine } from './engine'
 /** How many renders may run at once across all reels. */
 export const RENDER_SLOTS = 1
 
-/** `onWait(owner, waiting)`: a job's render (by its `--owner` token) started or stopped waiting.
- * `occupy(gone)`: something outside this run renders (engines a crashed run left that would not stop):
- * it holds a slot until `gone` settles. */
-export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: boolean) => void): { run: RunEngine; occupy: (gone: Promise<unknown>) => void } {
+/** `onWait(owner, waiting)`: a job's render (by its `--owner` token) started or stopped waiting. */
+export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: boolean) => void): { run: RunEngine } {
   let busy = 0
   const waiters: (() => void)[] = []
 
@@ -39,11 +37,6 @@ export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: 
     waiters.shift()?.()
   }
 
-  function occupy(gone: Promise<unknown>): void {
-    busy++
-    void gone.finally(release)
-  }
-
   // every argument goes through as it came: later runner arguments (an exit callback) must reach the runner
   const slotted: RunEngine = async (...call) => {
     const [command, args, , signal] = call
@@ -69,5 +62,5 @@ export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: 
       if (drained) release()
     }
   }
-  return { run: slotted, occupy }
+  return { run: slotted }
 }

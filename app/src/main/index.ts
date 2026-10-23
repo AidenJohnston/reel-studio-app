@@ -677,9 +677,8 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
-  // an engine that would not stop may be encoding: no reel renders until they are all gone
-  renderSlot.occupy(pidRegistry.drained())
+  // an engine that would not stop may be encoding: only its own video waits for it, the others render
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log, (slug) => jobs.reopen(slug))
   await noteQueue.recover().catch((e) => log(`[queue] ${String(e)}`))
   const loaded = await loadAI(
     {

@@ -13,8 +13,10 @@ import { groupAlive, isAlive, killTree } from './proctree'
 export function createPidRegistry(dir: string, stop: (pid: number) => Promise<boolean> = killTree) {
   const file = join(dir, 'engines.json')
   const engines = new Map<number, string | null>()
-  /** Engines of a previous run that reap could not stop. */
-  const leftover = new Set<number>()
+  /** Engines of a previous run that reap could not stop, and the project each works in. */
+  const leftover = new Map<number, string>()
+  /** Projects reap kept closed only because the process scan found something working in them. */
+  const scanned = new Set<string>()
   // A list that cannot be read may hide engines that are still running. It is kept aside, and every
   // start looks for them among the running processes (stillWorking) until a look finds none.
   const unreadable = join(dir, 'engines.unreadable.json')
@@ -71,7 +73,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           continue
         }
         engines.set(pid, project)
-        leftover.add(pid)
+        if (project) leftover.set(pid, project)
         // a 0.1.x list names no video: which one it writes to is as unknown as with an unreadable list
         if (project) stillRunning.push(project)
         else unknown = true
@@ -81,20 +83,34 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       const folders = projectFolders()
       const working = await stillWorking(folders)
       if (working && !working.length) rmSync(unreadable, { force: true })
+      for (const d of working ?? []) scanned.add(d)
       // with no process list nothing says which videos are safe: none opens at this start
       return { stopped, stillRunning: [...new Set([...stillRunning, ...(working ?? folders)])], unknown }
     },
-    /** Resolves once every engine reap could not stop has exited (checked every `everyMs`). */
-    async drained(everyMs = 2000): Promise<void> {
-      while (leftover.size) {
-        for (const pid of [...leftover]) {
-          if (await mayStillRun(pid)) continue
-          leftover.delete(pid)
-          engines.delete(pid)
-          save()
+    /** Resolves once nothing reap kept `project` closed for is still running (checked every `everyMs`):
+     * every engine there that would not stop has exited, and the process scan, when it found something
+     * there, finds nothing naming its folder any more. Null when reap did not keep it closed for either
+     * (with no process list at all, nothing says when a video is safe again). */
+    drained(project: string, everyMs = 2000): Promise<void> | null {
+      const mine = (): number[] => [...leftover].filter(([, p]) => p === project).map(([pid]) => pid)
+      if (!mine().length && !scanned.has(project)) return null
+      const pause = (): Promise<void> => new Promise((r) => setTimeout(r, everyMs))
+      return (async () => {
+        while (mine().length) {
+          for (const pid of mine()) {
+            if (await mayStillRun(pid)) continue
+            leftover.delete(pid)
+            engines.delete(pid)
+            save()
+          }
+          if (mine().length) await pause()
         }
-        if (leftover.size) await new Promise((r) => setTimeout(r, everyMs))
-      }
+        while (scanned.has(project)) {
+          const working = await stillWorking([project])
+          if (working && !working.length) scanned.delete(project)
+          else await pause()
+        }
+      })()
     }
   }
 }
@@ -175,9 +191,12 @@ async function leftRunning(pid: number): Promise<boolean> {
 /** For an engine reap already found to be ours: alive with a command line that can't be read (a slow
  * or failed `ps`/PowerShell) still counts as running, so its render slot is never freed early. */
 async function mayStillRun(pid: number): Promise<boolean> {
-  if (!isAlive(pid)) return process.platform !== 'win32' && groupAlive(pid)
+  // what is left in a dead engine's process group (macOS/Linux) still counts, even when its pid now
+  // shows another program
+  const group = process.platform !== 'win32' && groupAlive(pid)
+  if (!isAlive(pid)) return group
   const cmdline = await processCommandLine(pid)
-  return cmdline === null || isOurEngine(cmdline)
+  return cmdline === null || isOurEngine(cmdline) || group
 }
 
 /** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */

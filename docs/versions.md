@@ -116,5 +116,8 @@ it was saved waits again at the top, so it can be edited or tried again without 
 to `<userData>/note-staging/<slug>/` and is copied into `work/assets` by its own note's job.
 
 Notes on different videos run side by side, but only one engine `render` runs at a time across all of
-them (`app/src/main/render-slot.ts`). A render that ends with `ENGINE_STUCK`, or an engine a crashed run
-left that would not stop, keeps the slot until it is gone.
+them (`app/src/main/render-slot.ts`). A render that ends with `ENGINE_STUCK` keeps the slot until Reel
+Studio restarts. An engine a crashed run left that would not stop holds only its own video, which stays
+closed until that engine exits (`app/src/main/last-run.ts`); other videos render as usual. A video kept
+closed because the startup process scan found an engine or ffmpeg naming it opens once a later look finds
+none.
