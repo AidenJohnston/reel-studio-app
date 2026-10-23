@@ -159,3 +159,15 @@ it('fails if a button names a drive by its raw path or full email, or two button
   expect(names('C:\\Users\\Zoe\\iCloudDrive', 'G:\\My Drive', 'h:\\My Drive')).toEqual(['iCloud Drive', 'Google Drive (G:)', 'Google Drive (H:)'])
   expect(names('C:\\Users\\Zoe\\Google Drive', 'G:\\My Drive')).toEqual(['Google Drive (Google Drive folder)', 'Google Drive (G:)'])
 })
+
+it('fails if a save gives up when linking fails with an error other than EEXIST', async () => {
+  const dir = await temp()
+  const source = join(dir, 'Family reel.mp4')
+  await fs.writeFile(source, 'complete video')
+  // libuv's code for a file system without hard links, such as FAT32 or Google Drive's streaming drive letter.
+  vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('illegal operation on a directory'), { code: 'EISDIR' }))
+  const saved = await copyToCloudDrive(source, join(dir, 'drive'))
+  expect(saved).toBe(join(dir, 'drive', 'Reel Studio', 'Family reel.mp4'))
+  expect(await fs.readFile(saved, 'utf8')).toBe('complete video')
+  expect(await fs.readdir(join(dir, 'drive', 'Reel Studio'))).toEqual(['Family reel.mp4'])
+})

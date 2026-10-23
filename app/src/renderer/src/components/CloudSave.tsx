@@ -52,6 +52,7 @@ export function CloudSave({ video, icon }: { video: string; icon: ReactNode }) {
       {icon}
       <div>
         <b>Put it in iCloud Drive or Google Drive</b>
+        {drives === null && <p className="muted-sm">Looking for your drives…</p>}
         {drives && (
           <p className="muted-sm">
             {buttons

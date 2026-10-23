@@ -67,8 +67,16 @@ export function cloudSavesRunning(): number {
   return saving.size
 }
 
+// Quitting waits at most 15 s for drive saves. A stalled network or streaming drive must not keep a windowless
+// process holding the single-instance lock, which makes reopening the app do nothing. Because the save
+// publishes with a hard link, giving up only leaves a hidden temporary file, never a partial reel at the real name.
+const QUIT_WAIT_MS = 15_000
+
 export async function cloudSavesSettled(): Promise<void> {
-  await Promise.allSettled([...saving])
+  let timer: NodeJS.Timeout | undefined
+  const capped = new Promise<void>((resolve) => (timer = setTimeout(resolve, QUIT_WAIT_MS)))
+  await Promise.race([Promise.allSettled([...saving]), capped])
+  clearTimeout(timer)
 }
 
 export function registerPhoneIpc(d: PhoneIpcDeps): void {

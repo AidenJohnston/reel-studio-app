@@ -636,6 +636,9 @@ function createWindow(): void {
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 app.on('second-instance', () => {
+  // The window is destroyed but the app still running when it was closed on macOS, or when closing it on Windows
+  // or Linux started a quit that is waiting for a drive save. A null window means startup has not opened it yet.
+  if (win?.isDestroyed()) return createWindow()
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()
@@ -689,8 +692,8 @@ app.on('before-quit', (e) => {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project, and let drive saves finish so the
-  // synced folder is not left with a temporary file.
+  // Stop running work cleanly so the next start finds a tidy project, and give drive saves time to finish so
+  // the synced folder is not left with a temporary file. Both waits are capped (jobs.ts, phone-ipc.ts).
   e.preventDefault()
   quitting = true
   void Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled()]).finally(() => app.quit())

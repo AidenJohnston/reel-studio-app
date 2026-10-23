@@ -71,10 +71,6 @@ function errorCode(error: unknown): unknown {
   return error instanceof Error && 'code' in error ? error.code : undefined
 }
 
-// fs.link fails with these where the drive's file system has no hard links (Google Drive's streaming drive
-// letter on Windows is the expected case).
-const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EXDEV'])
-
 /**
  * Copies `source` into `<folder>/Reel Studio/`, numbering the name when it is taken, and returns the new file.
  * The video is copied in full under a hidden temporary name first, so the drive never syncs a partial reel,
@@ -98,7 +94,9 @@ export async function copyToCloudDrive(source: string, folder: string): Promise<
           return target
         } catch (error) {
           if (errorCode(error) === 'EEXIST') continue
-          if (!NO_HARD_LINKS.has(errorCode(error) as string)) throw error
+          // Any other failure falls back to reserving the name. The code a drive without hard links returns is not
+          // predictable (libuv reports FAT32's, and Google Drive's streaming drive letter's, as EISDIR), and a real
+          // error such as a full disk or a missing folder still fails in the fallback.
           hardLinks = false
         }
       }
