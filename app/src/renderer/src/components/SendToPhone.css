@@ -19,3 +19,10 @@
 .phone-way { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .phone-way > .icon { margin-top: 2px; color: var(--ink-2); }
 .phone-way p { margin-top: 2px; }
+.cloud-buttons { gap: 6px; margin-top: 10px; }
+.cloud-buttons .btn[aria-disabled='true'] { opacity: .5; cursor: default; }
+.cloud-saving { margin-top: 10px; }
+.cloud-saved { margin-top: 10px; color: var(--green-ink); background: var(--green-soft); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 14px; }
+.cloud-error { margin-top: 10px; }
+.cloud-saved b { font-weight: 650; }
+.cloud-saved .link { color: inherit; padding-bottom: 0; }

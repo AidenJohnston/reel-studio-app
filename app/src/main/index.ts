@@ -52,7 +52,7 @@ import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
-import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
+import { cloudSavesRunning, cloudSavesSettled, registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
@@ -636,6 +636,9 @@ function createWindow(): void {
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 app.on('second-instance', () => {
+  // The window is destroyed but the app still running when it was closed on macOS, or when closing it on Windows
+  // or Linux started a quit that is waiting for a drive save. A null window means startup has not opened it yet.
+  if (win?.isDestroyed()) return createWindow()
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()
@@ -685,17 +688,15 @@ app.whenReady().then(async () => {
 let quitting = false
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
-  if (quitting || !jobs.runningCount()) {
+  if (quitting || (!jobs.runningCount() && !cloudSavesRunning())) {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project.
+  // Stop running work cleanly so the next start finds a tidy project, and give drive saves time to finish so
+  // the synced folder is not left with a temporary file. Both waits are capped (jobs.ts, phone-ipc.ts).
   e.preventDefault()
   quitting = true
-  void jobs
-    .cancelAll()
-    .then(() => killAllEngines())
-    .finally(() => app.quit())
+  void Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled()]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

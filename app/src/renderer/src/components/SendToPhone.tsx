@@ -7,12 +7,11 @@ import type { PhoneShare } from '../../../shared/api'
 import { fallbackOrder, PHONE_HELP, waitForPhone, type PhoneFallback } from '../../../shared/phone-help'
 import { qrSvg } from '../../../shared/qr'
 import { reel, userMessage } from '../api'
+import { CloudSave } from './CloudSave'
 import { Icon } from './icons'
 import { FOLDER_APP, IS_MAC, Spinner } from './ui'
 import './SendToPhone.css'
 
-const ICLOUD_URL = 'https://www.icloud.com/iclouddrive/'
-const GDRIVE_URL = 'https://drive.google.com/drive/my-drive'
 const EMAIL_LIMIT = 20_000_000
 
 // Lucide (ISC), like components/icons.tsx; kept here so the shared icon set stays as it is.
@@ -148,25 +147,7 @@ export function SendToPhone({ video, caption, onBack }: { video: string; caption
         </button>
       </div>
     ),
-    cloud: (
-      <div className="phone-way">
-        <Glyph name="cloud" />
-        <div>
-          <b>Put it in iCloud Drive or Google Drive</b>
-          <p className="muted-sm">
-            Upload the video at icloud.com/iclouddrive or drive.google.com (the buttons open them). Then open the Files app (iPhone) or Drive app (Android) on your phone and save it from there.
-          </p>
-        </div>
-        <div className="stack" style={{ gap: 6 }}>
-          <a className="btn small" href={ICLOUD_URL} target="_blank" rel="noreferrer" data-testid="phone-icloud">
-            iCloud Drive
-          </a>
-          <a className="btn small" href={GDRIVE_URL} target="_blank" rel="noreferrer" data-testid="phone-gdrive">
-            Google Drive
-          </a>
-        </div>
-      </div>
-    ),
+    cloud: <CloudSave video={video} icon={<Glyph name="cloud" />} />,
     email: (
       <div className="phone-way">
         <Glyph name="mail" />
