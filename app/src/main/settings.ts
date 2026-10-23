@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
 import { settingsFile } from './paths'
 import { writeJson } from './store'
-import type { ReleaseEntry } from '../shared/update'
 import type { Dismissal, RememberedRelease } from './update-machine'
 
 export interface Settings {
@@ -11,7 +10,6 @@ export interface Settings {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
-  updateHistory: ReleaseEntry[] | null
   firstRunDone: boolean
   root: string | null
   /** Written by the 0.1.0/0.1.1 local-Claude-Code builds (a one-time automatic AI pick); read once by ai-carryover.ts. */
@@ -20,7 +18,7 @@ export interface Settings {
   aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }
 
 export async function loadSettings(): Promise<Settings> {
   try {

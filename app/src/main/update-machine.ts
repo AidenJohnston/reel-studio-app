@@ -1,4 +1,4 @@
-import { validDate, type ReleaseEntry, type ReleaseNotes, type UpdateMode, type UpdateState } from '../shared/update'
+import type { ReleaseNotes, UpdateMode, UpdateState } from '../shared/update'
 import { allowedReleaseUrl, isNewer } from './update-check'
 
 export const FIRST_CHECK_DELAY_MS = 15_000
@@ -39,7 +39,6 @@ export interface UpdateMemory {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
-  updateHistory: ReleaseEntry[] | null
 }
 
 export function stillNewer(remembered: unknown, current: string): RememberedRelease | null {
@@ -59,17 +58,6 @@ function rememberedNotes(notes: unknown, current: string): ReleaseNotes | null {
   const { version, items, totalItems } = notes
   if (typeof version !== 'string' || !isNewer(version, current) || !strings(items) || typeof totalItems !== 'number') return null
   return { version, items, totalItems }
-}
-
-export function validHistory(h: unknown): ReleaseEntry[] {
-  if (!Array.isArray(h)) return []
-  return h.flatMap((e): ReleaseEntry[] => {
-    if (!e || typeof e !== 'object') return []
-    const { version, date, summary, url } = e as Record<string, unknown>
-    const page = allowedReleaseUrl(url)
-    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version) || !page) return []
-    return [{ version, date: validDate(date), summary: typeof summary === 'string' ? summary : null, url: page }]
-  })
 }
 
 export function validDismissal(d: unknown): Dismissal | null {
@@ -101,11 +89,9 @@ export function disabledReason(env: UpdateEnv): string | null {
   return null
 }
 
-// A Mac app outside Applications may run translocated or read-only. The Windows install is per-user, so its
-// installer runs without an admin prompt.
+// A Mac app outside Applications may run translocated or read-only. Windows keeps the release page.
 export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications' | 'hasFeed'>): UpdateMode {
-  if (!env.hasFeed) return 'page'
-  return (env.platform === 'darwin' && env.inApplications) || env.platform === 'win32' ? 'install' : 'page'
+  return env.hasFeed && env.platform === 'darwin' && env.inApplications ? 'install' : 'page'
 }
 
 export function plainError(context: 'check' | 'download' | 'install', e: unknown): string {

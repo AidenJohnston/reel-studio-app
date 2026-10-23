@@ -1,13 +1,11 @@
-import type { ReleaseEntry, ReleaseNotes } from '../shared/update'
+import type { ReleaseNotes } from '../shared/update'
 import { isNewer, type FoundUpdate } from './update-check'
 
 const MAX_ITEMS = 6
 const MAX_ITEM_LENGTH = 140
-const MAX_SUMMARY_LENGTH = 240
 export const MAX_NOTES = 5
-export const MAX_RELEASES = 20
 
-const HEADING = /^(#{1,6})\s+(.*)$/
+const HEADING = /^#{1,6}\s+(.*)$/
 const BULLET = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/
 const WHATS_NEW = /^what'?s\s+(new|changed)\b|^changes\b|^new\b/i
 
@@ -28,27 +26,21 @@ function itemText(raw: string): string {
 
 interface Section {
   heading: string | null
-  level: number
   items: string[]
-  paragraphs: string[]
 }
 
 function sections(text: string): Section[] {
-  const out: Section[] = [{ heading: null, level: 0, items: [], paragraphs: [] }]
+  const out: Section[] = [{ heading: null, items: [] }]
   let open: string | null = null // the bullet being read: wrapped lines continue it
-  let para: string | null = null
   const close = () => {
-    const s = out[out.length - 1]
-    if (open !== null) s.items.push(open)
-    if (para !== null) s.paragraphs.push(para)
+    if (open !== null) out[out.length - 1].items.push(open)
     open = null
-    para = null
   }
   for (const line of text.split(/\r?\n/)) {
     const h = HEADING.exec(line.trim())
     if (h) {
       close()
-      out.push({ heading: h[2].replace(/\*\*/g, '').trim(), level: h[1].length, items: [], paragraphs: [] })
+      out.push({ heading: h[1].replace(/\*\*/g, '').trim(), items: [] })
       continue
     }
     const b = BULLET.exec(line)
@@ -57,8 +49,6 @@ function sections(text: string): Section[] {
       open = b[1]
     } else if (open !== null && line.trim()) {
       open += ' ' + line.trim()
-    } else if (line.trim()) {
-      para = para === null ? line.trim() : `${para} ${line.trim()}`
     } else {
       close()
     }
@@ -82,23 +72,8 @@ export function releaseNotesFrom(raw: string | null, version: string): ReleaseNo
   return { version, items: items.slice(0, MAX_ITEMS), totalItems: items.length }
 }
 
-export function releaseSummary(raw: string | null): string | null {
-  if (!usable(raw)) return null
-  const all = sections(raw)
-  const items = changeItems(all)
-  if (items.length) return clip(items.map((i) => (/[.!?:]$/.test(i) ? i : `${i}.`)).join(' '), MAX_SUMMARY_LENGTH)
-  const intro = all.find((s) => s.level <= 1 && s.paragraphs.length)?.paragraphs[0]
-  if (!intro) return null
-  const text = plain(intro)
-  return clip(/^.+?[.!?](?=\s|$)/.exec(text)?.[0] ?? text, MAX_SUMMARY_LENGTH)
-}
-
 export function notesSince(releases: FoundUpdate[], current: string): { notes: ReleaseNotes[]; older: number } {
   const newer = releases.filter((r) => isNewer(r.version, current))
   const notes = newer.slice(0, MAX_NOTES).flatMap((r) => releaseNotesFrom(r.notes, r.version) ?? [])
   return { notes, older: Math.max(0, newer.length - MAX_NOTES) }
-}
-
-export function releaseEntries(releases: FoundUpdate[]): ReleaseEntry[] {
-  return releases.slice(0, MAX_RELEASES).map((r) => ({ version: r.version, date: r.publishedAt ?? null, summary: releaseSummary(r.notes), url: r.releaseUrl }))
 }

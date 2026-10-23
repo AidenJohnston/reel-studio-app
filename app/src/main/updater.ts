@@ -1,6 +1,6 @@
 import type { MessageBoxOptions } from 'electron'
 import { allowedReleaseUrl, pageFor, type ReleaseCheck } from './update-check'
-import { notesSince, releaseEntries } from './release-notes'
+import { notesSince } from './release-notes'
 import {
   FIRST_CHECK_DELAY_MS,
   isRateLimited,
@@ -11,7 +11,6 @@ import {
   SNOOZE_MS,
   stillNewer,
   validDismissal,
-  validHistory,
   type CheckOutcome,
   type Dismissal,
   type UpdateMemory
@@ -21,7 +20,9 @@ import { initialUpdateState, updateAction, type UpdateActionResult, type UpdateB
 export interface UpdateBackend {
   check(): Promise<ReleaseCheck>
   download(onProgress: (percent: number) => void): Promise<void>
-  install(): void | Promise<void>
+  /** Checks the downloaded update. Runs before anything is stopped for the restart. */
+  verify(): Promise<void>
+  install(): void
 }
 
 export interface UpdaterDeps {
@@ -73,27 +74,26 @@ export function createUpdater(d: UpdaterDeps) {
     snoozeEnd.unref?.()
   }
 
-  function applyFound({ update: found, releases: all }: ReleaseCheck): void {
-    const releases = releaseEntries(all)
+  function applyFound({ update: found, releases: all, pageOnly }: ReleaseCheck): void {
     if (found) {
       const url = allowedReleaseUrl(found.releaseUrl) ?? pageFor(`v${found.version}`)
       const { notes, older } = notesSince(all, d.version)
       const downloaded = state.downloadedVersion === found.version
       set({
-        ...state, status: downloaded ? 'downloaded' : 'available', availableVersion: found.version,
-        downloadedVersion: downloaded ? found.version : null, releaseNotes: notes, olderNotes: older, releases,
+        ...state, status: downloaded ? 'downloaded' : 'available', mode: downloaded ? state.mode : pageOnly ? 'page' : d.mode, availableVersion: found.version,
+        downloadedVersion: downloaded ? found.version : null, releaseNotes: notes, olderNotes: older,
         releaseUrl: url, downloadPercent: downloaded ? 100 : null, message: null, errorContext: null
       })
-      remember({ updateLatest: { version: found.version, url, notes, older }, updateHistory: releases })
+      remember({ updateLatest: { version: found.version, url, notes, older } })
       d.log(`[update] ${found.version} is available`)
     } else {
       set(state.downloadedVersion
-        ? { ...state, status: 'downloaded', availableVersion: state.downloadedVersion, downloadPercent: 100, message: null, errorContext: null, releases }
-        : { ...initialUpdateState(d.version, d.mode, state.autoCheck, null), status: 'up-to-date', releases })
-      remember(state.status === 'up-to-date' ? { updateLatest: null, updateHistory: releases } : { updateHistory: releases })
+        ? { ...state, status: 'downloaded', availableVersion: state.downloadedVersion, downloadPercent: 100, message: null, errorContext: null }
+        : { ...initialUpdateState(d.version, d.mode, state.autoCheck, null), status: 'up-to-date' })
+      if (state.status === 'up-to-date') remember({ updateLatest: null })
       d.log('[update] up to date')
     }
-    fresh = found !== null
+    fresh = found !== null && !pageOnly
   }
   const enabled = (): boolean => d.disabledReason === null && d.backend !== null
 
@@ -182,14 +182,14 @@ export function createUpdater(d: UpdaterDeps) {
     async init(): Promise<void> {
       const mem = await d.load().catch((e) => {
         d.log(`[update] could not read settings: ${why(e)}`)
-        return { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null }
+        return { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }
       })
       const at = mem.updateCheckedAt
       lastAnswered = typeof at === 'number' && Number.isFinite(at) ? at : null
       dismissed = validDismissal(mem.updateDismissed)
       const kept = stillNewer(mem.updateLatest, d.version)
       if (mem.updateLatest && !kept) remember({ updateLatest: null })
-      const first: UpdateState = { ...state, autoCheck: mem.checkUpdates, releases: validHistory(mem.updateHistory) }
+      const first: UpdateState = { ...state, autoCheck: mem.checkUpdates }
       set(mem.checkUpdates ? offerRemembered(first, mem.updateLatest) : first)
       armSnoozeEnd()
     },
@@ -214,7 +214,7 @@ export function createUpdater(d: UpdaterDeps) {
       try {
         if (!fresh) {
           const result = await d.backend!.check()
-          if (result.update?.version !== version) {
+          if (result.update?.version !== version || result.pageOnly) {
             applyFound(result)
             return { accepted: true, state }
           }
@@ -244,8 +244,9 @@ export function createUpdater(d: UpdaterDeps) {
       d.log(`[update] installing ${state.downloadedVersion}`)
       stop()
       try {
+        await d.backend!.verify()
         await d.prepareToQuit()
-        await d.backend!.install()
+        d.backend!.install()
       } catch (e) {
         installFailed(e)
       }
@@ -255,8 +256,7 @@ export function createUpdater(d: UpdaterDeps) {
     async openRelease(version?: unknown): Promise<void> {
       if (version !== undefined) {
         if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) return
-        const listed = state.releases.find((r) => r.version === version)
-        await d.openExternal((listed && allowedReleaseUrl(listed.url)) ?? pageFor(`v${version}`))
+        await d.openExternal(pageFor(`v${version}`))
         return
       }
       const v = state.downloadedVersion ?? state.availableVersion

@@ -90,8 +90,7 @@ extraResources:
 # Where the installed app looks for updates (main/updater.ts): make-config.js appends the publish block from
 # RELEASES_REPO in app/src/shared/config.ts. electron-builder writes it into the app as resources/app-update.yml even
 # with --publish never; nothing is uploaded by the build. The Mac update zip and latest-mac.yml come from
-# packaging/sign-mac.sh, after signing (docs/signing-mac.md, "Release"). On Windows electron-builder writes
-# release/latest.yml next to the installer; build-win.ps1 checks it (packaging/README.md, "Release files").
+# packaging/sign-mac.sh, after signing (docs/signing-mac.md, "Release").
 
 # afterPack (packaging/after-pack.js: compiles .pyc for python/ and engine/ BEFORE signing, so the bundle is
 # never written to at runtime and engine start-up stays fast) is appended by make-config.js.
@@ -129,9 +128,6 @@ win:
     - target: nsis
       arch: [x64]
   # Unsigned for now. A real certificate removes the SmartScreen warning; see docs/install-windows.md.
-  # Unsigned, app-update.yml has no publisherName, so electron-updater installs an update without checking who
-  # signed it. When signing starts, set signtoolOptions.publisherName to the certificate's CN: installed copies then
-  # refuse an update installer not signed by that publisher.
 
 nsis:
   oneClick: true              # one click, no wizard pages

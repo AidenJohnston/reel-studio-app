@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { electronUpdaterBackend, macBundleCheck, windowsInstaller, type UpdaterLike } from '../src/main/updater-electron'
+import { electronUpdaterBackend, macBundleCheck, type UpdaterLike } from '../src/main/updater-electron'
 import type { FetchLike } from '../src/main/update-check'
+import { createUpdater } from '../src/main/updater'
+import { showsUpdateButton, updateAction } from '../src/shared/update'
 
 class FakeUpdater extends EventEmitter implements UpdaterLike {
   logger: UpdaterLike['logger'] = null
@@ -14,7 +16,6 @@ class FakeUpdater extends EventEmitter implements UpdaterLike {
   autoInstallOnAppQuit = true
   allowDowngrade = false
   disableDifferentialDownload = false
-  disableWebInstaller = false
   requestHeaders: UpdaterLike['requestHeaders'] = null
   forceDevUpdateConfig = false
   updateConfigPath: string | null = null
@@ -38,20 +39,45 @@ const github: FetchLike = async () => ({
   json: async () => [{ tag_name: 'v0.1.3', draft: false, html_url: 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3' }]
 })
 
-describe('the Mac backend', () => {
-  it('fails if a manifest names a different version than its release tag', async () => {
-    const updater = new FakeUpdater({ version: '0.1.4', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' })
+describe('a release whose update feed this copy cannot use', () => {
+  async function offer(updater: FakeUpdater) {
+    const lines: string[] = []
     const backend = electronUpdaterBackend({
       updater,
       version: '0.1.2',
       fetch: github,
       releasesApi: 'https://api.github.com/repos/AidenJohnston/reel-studio-app/releases',
       releaseFolder: (tag) => `https://github.com/AidenJohnston/reel-studio-app/releases/download/${tag}`,
-      log: () => {},
+      log: (line) => void lines.push(line),
       onError: () => {},
-      install: macBundleCheck('0.1.2')
+      verifyDownload: macBundleCheck('0.1.2')
     })
-    await expect(backend.check()).rejects.toThrow(/0\.1\.4/)
+    const u = createUpdater({
+      version: '0.1.2', mode: 'install', disabledReason: null, backend,
+      load: async () => ({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }),
+      save: async () => undefined, busy: () => ({ exporting: false, working: 0 }), prepareToQuit: async () => undefined,
+      openExternal: async () => undefined, send: () => {}, log: () => {}, now: () => 1000
+    })
+    await u.init()
+    await u.check('button')
+    return { s: u.state(), lines }
+  }
+
+  it('fails if a release uploaded without this platform\'s feed hides the update', async () => {
+    const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' })
+    updater.checkForUpdates = async () => { throw new Error('Cannot find latest-mac.yml in the latest release artifacts: HttpError: 404') }
+    const { s, lines } = await offer(updater)
+    expect(s).toMatchObject({ status: 'available', availableVersion: '0.1.3', mode: 'page' })
+    expect(updateAction(s)).toBe('open-page')
+    expect(showsUpdateButton(s)).toBe(true)
+    expect(lines.join('\n')).toMatch(/v0\.1\.3: its update feed could not be read.*404/)
+  })
+
+  it('fails if a feed naming another version hides the update or installs that version', async () => {
+    const { s, lines } = await offer(new FakeUpdater({ version: '0.1.4', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' }))
+    expect(s).toMatchObject({ status: 'available', availableVersion: '0.1.3', mode: 'page' })
+    expect(updateAction(s)).toBe('open-page')
+    expect(lines.join('\n')).toMatch(/its update feed is for version 0\.1\.4/)
   })
 })
 
@@ -67,33 +93,16 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
       const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' }, zip)
       let installed = false
       updater.quitAndInstall = () => { installed = true }
-      const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {}, install: macBundleCheck('0.1.2') })
+      const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {}, verifyDownload: macBundleCheck('0.1.2') })
       await backend.check()
       await backend.download(() => {})
-      if (version === '0.1.3') await backend.install()
-      else await expect(Promise.resolve().then(() => backend.install())).rejects.toThrow(/bundle version/)
+      if (version === '0.1.3') {
+        await backend.verify()
+        backend.install()
+      } else await expect(backend.verify()).rejects.toThrow(/bundle version/)
       expect(installed).toBe(version === '0.1.3')
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
-})
-
-it('fails if Windows installs without its progress window or the Mac hands Squirrel an unchecked bundle', async () => {
-  const calls: { platform: string; args: unknown[] }[] = []
-  const checked: string[] = []
-  const mac = { ...macBundleCheck('0.1.2'), verify: async (file: string) => void checked.push(file) }
-  for (const [platform, install] of [['win32', windowsInstaller], ['darwin', mac]] as const) {
-    const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x', sha512: 'x', releaseDate: '2026-10-21' }, `${platform}-download`)
-    updater.quitAndInstall = (...args: unknown[]) => void calls.push({ platform, args })
-    const backend = electronUpdaterBackend({ updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3', log: () => {}, onError: () => {}, install })
-    await backend.check()
-    await backend.download(() => {})
-    await backend.install()
-  }
-  expect(calls).toEqual([
-    { platform: 'win32', args: [false, true] },
-    { platform: 'darwin', args: [true, true] }
-  ])
-  expect(checked).toEqual(['darwin-download'])
 })

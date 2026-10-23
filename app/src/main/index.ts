@@ -7,7 +7,6 @@ import {
   engineEnv,
   engineMode,
   initPaths,
-  legalFile,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -59,7 +58,7 @@ import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc
 import { RELEASES_API, releasePageBackend, type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
 import { autoUpdater } from 'electron-updater'
-import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
+import { electronUpdaterBackend, macBundleCheck } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -212,7 +211,7 @@ const updates = createUpdater({
           log,
           devFeedFile: TEST_FEED ? updateFeed ?? undefined : undefined,
           onError: (e) => updates.installFailed(e),
-          install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+          verifyDownload: macBundleCheck(app.getVersion())
         })
       : releasePageBackend(githubFetch, app.getVersion()),
   load: loadSettings,
@@ -399,11 +398,6 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
-  handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
-  handle('app:showLegal', (_e, doc: unknown) => {
-    const file = legalFile(doc)
-    if (!TEST) shell.showItemInFolder(file)
-  })
   ipcMain.on('app:startDrag', (e, file: string) => {
     try {
       startDragOut(e.sender, file, [reelStudioRoot(), projectsDir()])
@@ -695,10 +689,14 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
   installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, () =>
+    // On Mac the menu outlives a closed window, so the window may be gone when this runs.
     void menuCheckForUpdates(updates, {
-      focus: () => win?.show(),
+      focus: () => {
+        if (!win || win.isDestroyed()) createWindow()
+        win?.show()
+      },
       show: (o) => (win && !win.isDestroyed() ? dialog.showMessageBox(win, o) : dialog.showMessageBox(o))
-    })
+    }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
   )
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.

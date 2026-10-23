@@ -10,15 +10,6 @@ export interface ReleaseNotes {
   totalItems: number
 }
 
-export interface ReleaseEntry {
-  version: string
-  date: string | null
-  summary: string | null
-  url: string
-}
-
-export const validDate = (d: unknown): string | null => (typeof d === 'string' && Number.isFinite(Date.parse(d)) ? d : null)
-
 export interface UpdateState {
   status: UpdateStatus
   mode: UpdateMode
@@ -30,7 +21,6 @@ export interface UpdateState {
   releaseNotes: ReleaseNotes[]
   /** Newer releases left out of releaseNotes. */
   olderNotes: number
-  releases: ReleaseEntry[]
   releaseUrl: string | null
   downloadPercent: number | null
   message: string | null
@@ -59,7 +49,6 @@ export function initialUpdateState(currentVersion: string, mode: UpdateMode, aut
     downloadedVersion: null,
     releaseNotes: [],
     olderNotes: 0,
-    releases: [],
     releaseUrl: null,
     downloadPercent: null,
     message: disabledReason,
@@ -77,6 +66,11 @@ export function updateAction(s: UpdateState): UpdateAction {
   return s.mode === 'page' ? 'open-page' : 'download'
 }
 
+// Nothing downloads by itself, so a download in any state was started by the person: its strip stays even with
+// automatic checks off, because the "Restart from the update button in the sidebar" copy points at it.
 export function showsUpdateButton(s: UpdateState | null): boolean {
-  return !!s && (s.status === 'downloading' || (s.autoCheck && updateAction(s) !== 'none' && !s.snoozed))
+  if (!s) return false
+  if (s.status === 'downloading') return true
+  const started = !!s.downloadedVersion || (s.status === 'error' && s.errorContext !== 'check')
+  return (s.autoCheck || started) && updateAction(s) !== 'none' && !s.snoozed
 }

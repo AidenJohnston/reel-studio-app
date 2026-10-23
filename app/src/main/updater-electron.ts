@@ -17,7 +17,6 @@ export type UpdaterLike = Pick<
   | 'autoInstallOnAppQuit'
   | 'allowDowngrade'
   | 'disableDifferentialDownload'
-  | 'disableWebInstaller'
   | 'requestHeaders'
   | 'forceDevUpdateConfig'
   | 'updateConfigPath'
@@ -31,11 +30,8 @@ export type UpdaterLike = Pick<
   removeListener(event: 'download-progress', listener: (p: ProgressInfo) => void): unknown
 }
 
-export interface InstallStep {
-  verify(file: string, selected: string): Promise<void>
-  /** Windows: show the NSIS progress window while it installs. Squirrel.Mac ignores it. */
-  showInstaller: boolean
-}
+/** Throws if the downloaded file must not be installed as `selected`. */
+export type VerifyDownload = (file: string, selected: string) => Promise<void>
 
 export function electronUpdaterBackend(opts: {
   updater: UpdaterLike
@@ -46,7 +42,7 @@ export function electronUpdaterBackend(opts: {
   log(line: string): void
   devFeedFile?: string
   onError(e: unknown): void
-  install: InstallStep
+  verifyDownload: VerifyDownload
 }): UpdateBackend {
   const u = opts.updater
   let selected: string | null = null
@@ -59,11 +55,9 @@ export function electronUpdaterBackend(opts: {
   u.autoDownload = false
   u.autoInstallOnAppQuit = false
   u.allowDowngrade = false
-  // Releases carry no .blockmap files (packaging/sign-mac.sh zips the signed app itself; the Windows release
-  // uploads only the installer and latest.yml), so a differential download could only fail first and then
-  // fetch the whole file.
+  // Releases carry no .blockmap files (packaging/sign-mac.sh zips the signed app itself), so a differential
+  // download could only fail first and then fetch the whole zip.
   u.disableDifferentialDownload = true
-  u.disableWebInstaller = true
   u.requestHeaders = { ...SAME_FOR_EVERYONE }
   if (opts.devFeedFile) {
     u.forceDevUpdateConfig = true
@@ -78,18 +72,27 @@ export function electronUpdaterBackend(opts: {
       // Main accepts published vX.Y.Z prereleases and ignores ffmpeg tags; the GitHub provider does neither.
       const result = await newerRelease(opts.fetch, opts.version, opts.releasesApi)
       const found = result.update
+      selected = null
       if (!found) return result
-      u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
-      const r = await u.checkForUpdates()
-      if (!r) throw new Error('The updater is not active in this build.')
-      // The checksum only proves the download matches latest-mac.yml or latest.yml, not that the yml belongs to
-      // this release: a yml naming another version (a stale or mixed-up upload) would install that version instead.
-      if (r.updateInfo.version !== found.version) {
-        throw new Error(`The update feed in release v${found.version} is for version ${r.updateInfo.version}`)
+      let problem: string
+      try {
+        u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
+        const r = await u.checkForUpdates()
+        if (!r) throw new Error('the updater is not active in this build')
+        // The checksum only proves the zip matches latest-mac.yml, not that the yml belongs to this release: a yml
+        // naming another version (a stale or mixed-up upload) would install that version instead.
+        if (r.updateInfo.version === found.version) {
+          if (!r.isUpdateAvailable) return { ...result, update: null }
+          selected = found.version
+          return result
+        }
+        problem = `its update feed is for version ${r.updateInfo.version}`
+      } catch (e) {
+        problem = `its update feed could not be read (${String(e instanceof Error ? e.message : e).slice(0, 200)})`
       }
-      if (!r.isUpdateAvailable) return { ...result, update: null }
-      selected = found.version
-      return result
+      // A release uploaded without this platform's feed, or with it late, must not hide the update.
+      opts.log(`[update] v${found.version}: ${problem}; offering its release page instead`)
+      return { ...result, pageOnly: true }
     },
     async download(onProgress) {
       const progress = (p: ProgressInfo): void => onProgress(p.percent)
@@ -101,40 +104,34 @@ export function electronUpdaterBackend(opts: {
         u.removeListener('download-progress', progress)
       }
     },
-    async install() {
+    async verify() {
       if (!downloaded || !selected) throw new Error('No downloaded update is selected.')
-      await opts.install.verify(downloaded, selected)
-      u.quitAndInstall(!opts.install.showInstaller, true)
+      await opts.verifyDownload(downloaded, selected)
+    },
+    install() {
+      u.quitAndInstall(true, true)
     }
   }
 }
 
 /** Squirrel.Mac installs whatever app the ZIP holds, so read its version before handing it over. */
-export function macBundleCheck(running: string): InstallStep {
-  return {
-    showInstaller: false,
-    async verify(zip, selected) {
-      const exec = promisify(execFile)
-      const { stdout: listing } = await exec('/usr/bin/unzip', ['-Z1', zip, '*.app/Contents/Info.plist'])
-      const plists = listing.split('\n').filter((name) => /^[^/]+\.app\/Contents\/Info\.plist$/.test(name))
-      if (plists.length !== 1) throw new Error('The update must contain one app bundle version.')
-      // Read only the bundle plist, without unpacking executable code or trusting ZIP paths.
-      const { stdout: plist } = await exec('/usr/bin/unzip', ['-p', zip, plists[0]], { encoding: 'buffer', maxBuffer: 1024 * 1024 })
-      const dir = await fs.mkdtemp(join(tmpdir(), 'rs-update-plist-'))
-      try {
-        const file = join(dir, 'Info.plist')
-        await fs.writeFile(file, plist)
-        const { stdout } = await exec('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', file])
-        const version = stdout.trim()
-        if (version !== selected || !isNewer(version, running)) throw new Error(`Update bundle version ${version} does not match the newer release ${selected}.`)
-      } finally {
-        await fs.rm(dir, { recursive: true, force: true })
-      }
+export function macBundleCheck(running: string): VerifyDownload {
+  return async (zip, selected) => {
+    const exec = promisify(execFile)
+    const { stdout: listing } = await exec('/usr/bin/unzip', ['-Z1', zip, '*.app/Contents/Info.plist'])
+    const plists = listing.split('\n').filter((name) => /^[^/]+\.app\/Contents\/Info\.plist$/.test(name))
+    if (plists.length !== 1) throw new Error('The update must contain one app bundle version.')
+    // Read only the bundle plist, without unpacking executable code or trusting ZIP paths.
+    const { stdout: plist } = await exec('/usr/bin/unzip', ['-p', zip, plists[0]], { encoding: 'buffer', maxBuffer: 1024 * 1024 })
+    const dir = await fs.mkdtemp(join(tmpdir(), 'rs-update-plist-'))
+    try {
+      const file = join(dir, 'Info.plist')
+      await fs.writeFile(file, plist)
+      const { stdout } = await exec('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', file])
+      const version = stdout.trim()
+      if (version !== selected || !isNewer(version, running)) throw new Error(`Update bundle version ${version} does not match the newer release ${selected}.`)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
     }
   }
 }
-
-// The NSIS installer is checked by electron-updater itself: its SHA-512 must match latest.yml, which electron-builder
-// writes from the same build, and check() above requires that yml's version to equal the release tag. Unsigned
-// builds carry no publisherName in app-update.yml, so electron-updater skips the Authenticode check.
-export const windowsInstaller: InstallStep = { showInstaller: true, verify: async () => {} }
