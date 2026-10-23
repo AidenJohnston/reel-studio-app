@@ -1,4 +1,5 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import * as checker from '../src/checker';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -6,7 +7,7 @@ import { problemTextIssue } from '../src/checker';
 import {
   AIError, approxOutputTimes, CompletionRequest, CompletionResponse, createAI, EditFact, EngineProgress, loadProject, ModelProvider, Project, saveProject,
 } from '../src';
-import { call, FakeHost, makeProject, tmpDir } from './helpers';
+import { call, FakeHost, makeProject, tmpDir, tinyPng } from './helpers';
 
 type Calls = ReturnType<typeof call>[];
 
@@ -369,4 +370,80 @@ it("fails if a failed final render falls back to a preview that an undone repair
   await expect(createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK))
     .rejects.toMatchObject({ code: 'RENDER_FAILED' });
   expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
+});
+
+it('keeps the committed note and logs the failure when saveCheck throws', async () => {
+  const { dir, host } = await noteProject();
+  const failure = new Error('check.json is locked');
+  const save = vi.spyOn(checker, 'saveCheck').mockRejectedValueOnce(failure);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const model = new Roles([[CUT], [call('finish', { summary_for_user: 'I cut the flour part.' })]], [pass()]);
+    const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+    expect(save).toHaveBeenCalledWith(dir, 2, expect.objectContaining({ verdict: 'pass' }));
+    expect(r).toMatchObject({ version: 2, summary: 'I cut the flour part.', check: { verdict: 'pass' } });
+    const p = await loadProject(dir);
+    expect(p.version).toBe(2);
+    expect(p.cut.keep).toEqual([{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }]);
+    expect(p.notes?.at(-1)?.version).toBe(2);
+    expect(fs.existsSync(path.join(dir, 'versions', 'v2', 'export.mp4'))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('check.json'), failure);
+  } finally {
+    save.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+it('carries the original attachment section and stills into a repair and names the attachment in checker evidence', async () => {
+  const { dir, host } = await noteProject();
+  const asset = 'work/assets/attach-1a2b3c00-flour.png';
+  const thumb = 'work/thumbs/attach-1a2b3c00-flour.jpg';
+  await fsp.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
+  await fsp.mkdir(path.join(dir, 'work', 'thumbs'), { recursive: true });
+  await fsp.writeFile(path.join(dir, asset), tinyPng());
+  await fsp.writeFile(path.join(dir, thumb), tinyPng());
+  await fsp.writeFile(path.join(dir, `${asset}.attach.json`), JSON.stringify({
+    asset, name: 'flour.png', kind: 'image', bytes: 2048, width: 480, height: 270, thumb, createdAt: new Date().toISOString(),
+  }));
+  const model = new Roles([
+    [CUT], [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('set_caption_style', { size: 90 })], [call('finish', { summary_for_user: 'I made the captions bigger.' })],
+  ], [fix('The attached photo is missing.', 'Add the attached photo.'), pass()]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, { ...CHECK, attachments: [asset] });
+  expect(r.check?.repairs).toBe(1);
+  const first = model.editorRequests[0];
+  const repair = model.editorRequests[2];
+  const section = text(first).split('\n\n## Already loaded for you')[0].slice(text(first).indexOf('## Attached to this note'));
+  expect(section).toContain(asset);
+  expect(text(repair)).toContain(section);
+  const images = (req: CompletionRequest) => req.messages.flatMap((m) => m.role === 'user' ? m.content.filter((c) => c.type === 'image') : []);
+  expect(images(first)).toHaveLength(1);
+  expect(images(repair)).toEqual(images(first));
+  expect(text(model.checkerRequests[0])).toContain(asset);
+});
+
+it.each([
+  ['a thrown checker request', [new Error('checker unavailable')]],
+  ['two unreadable answers', ['not JSON', 'still not JSON']],
+] as const)('undoes the repair after %s and preserves the editor summary', async (_reason, replies) => {
+  const { dir, host, size } = await noteProject();
+  const model = new Roles([
+    [CUT], [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('set_caption_style', { size: 90 })], [call('finish', { summary_for_user: 'I made the captions bigger.' })],
+  ], [fix('The captions are hard to read.', 'Make the captions bigger.'), ...replies]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(r.version).toBe(2);
+  expect(r.check).toMatchObject({ verdict: 'error', repairs: 1 });
+  expect(r.summary).toBe('I cut the flour part.');
+  const p = await loadProject(dir);
+  expect(p.version).toBe(2);
+  expect(p.cut.keep).toEqual([{ from: 'w16', to: 'w26' }, { from: 'w35', to: 'w56' }]);
+  expect(p.captions.style.size).toBe(size);
+  const stored = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v2', 'check.json'), 'utf8'));
+  expect(stored).toMatchObject({ verdict: 'error', repairs: 1 });
+});
+
+it.each(['e.g.', 'i.e.', 'approx.', 'etc.'])('does not count %s as a sentence ending', (abbreviation) => {
+  expect(problemTextIssue(`The photo, ${abbreviation} the flour bag, is missing. Add it back.`)).toBeNull();
+  expect(problemTextIssue(`The photo, ${abbreviation} the flour bag, is missing. Add it back. Keep the cut.`)).toBe('at most 2 sentences');
 });

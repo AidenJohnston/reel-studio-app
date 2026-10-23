@@ -1,6 +1,6 @@
 // High-level editor tasks: firstEdit, applyNote, writeScript, pickTakes, and the no-AI path.
 import * as path from 'node:path';
-import { AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Phase, ScriptResult, UserFacingError } from './types';
+import { AgentEvent, AgentResult, AIError, EngineHost, ImagePart, ModelProvider, Phase, ScriptResult, UserFacingError } from './types';
 import { effectiveTokens, runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
@@ -316,7 +316,8 @@ async function candidateRender(ctx: ToolContext): Promise<RenderInfo> {
 }
 
 /** `start` is the project before the note: a repair that ends there took the whole note back. */
-async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, start: Project, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
+async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, note: string, start: Project,
+  attachments: { files: string; images: ImagePart[]; assets: string[] }, onEvent: (e: AgentEvent) => void, signal?: AbortSignal):
   Promise<{ record: CheckRecord; summary: string | null }> {
   const started = Date.now();
   const system = deps.prompts.render('checker');
@@ -335,7 +336,8 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     record: { verdict, repairs, rounds, ...(error ? { error } : {}), cost: { tokens, seconds: Math.round((Date.now() - started) / 100) / 10 } },
     summary,
   });
-  // puts back the project, files, rules and summary from before the last repair run
+  // Undo any repair whose check cannot complete: an unchecked repair would replace the editor's
+  // summary with claims nobody verified. Restore its project, files, rules and summary together.
   let undoRepair: (() => Promise<void>) | null = null;
   for (;;) {
     onEvent({ type: 'status', message: 'Double-checking your change', pct: 85, phase: 'edit' });
@@ -350,12 +352,16 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     }
     let asked: Awaited<ReturnType<typeof askChecker>>;
     try {
-      asked = await askChecker(counted, system, await checkerEvidence(ctx, note, candidate), candidate.result?.renderId ?? null, signal);
+      asked = await askChecker(counted, system, await checkerEvidence(ctx, note, candidate, attachments.assets), candidate.result?.renderId ?? null, signal);
     } catch (e: any) {
       if (signal?.aborted) throw e;
+      await undoRepair?.();
       return done('error', String(e?.message ?? e));
     }
-    if (!asked.round) return done('error', `unusable reply: ${asked.problems.join('; ')}`);
+    if (!asked.round) {
+      await undoRepair?.();
+      return done('error', `unusable reply: ${asked.problems.join('; ')}`);
+    }
     rounds.push(asked.round);
     if (asked.round.verdict === 'pass') return done('pass');
     if (repairs === MAX_REPAIRS) return done('unresolved');
@@ -381,7 +387,7 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     };
     ctx.state.finished = null;
     try {
-      const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes), ctx, onEvent, signal,
+      const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes, attachments.files), taskImages: attachments.images, ctx, onEvent, signal,
         maxSteps: REPAIR_STEPS, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
       const after = await loadProject(ctx.projectDir);
       if (sameEdit(p0, after) || sameEdit(start, after)) {
@@ -494,7 +500,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }
-    const review = !opts.checkEdit || undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, p0, onEvent, signal);
+    const review = !opts.checkEdit || undone || !ctx.state.changed.size ? null : await checkAndRepair(deps, provider, ctx, label, p0,
+      { files, images, assets: [...attached, ...earlier].map((a) => a.asset) }, onEvent, signal);
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
     const version = await finalize(deps, ctx, onEvent);
     const said = review?.summary ?? honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.';
@@ -507,7 +514,13 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       receipt: finalReceipt(ctx) }];
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
-    if (review) await saveCheck(projectDir, version, review.record);
+    if (review) {
+      try {
+        await saveCheck(projectDir, version, review.record);
+      } catch (e) {
+        console.warn(`Could not save check.json for v${version}; keeping the committed note.`, e);
+      }
+    }
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed],
       ...(review ? { check: review.record } : {}) };
