@@ -283,6 +283,29 @@ def test_snap_zoom_on_a_short_word_after_a_cut_still_shows(tmp_path, media):
     assert z.ramp_out == 0
 
 
+@pytest.mark.parametrize("fps", [24, 30])
+def test_snap_zoom_keeps_a_short_last_word_starting_on_a_cut(monkeypatch, fps):
+    """A cut on the last word must not end a multi-word zoom before that word plays."""
+    from types import SimpleNamespace
+
+    starts, ends = {"first": 8.0, "last": 10.0}, {"first": 8.3, "last": 10.04}
+    ctx = SimpleNamespace(
+        project={"zooms": [{"anchor": {"from": "first", "to": "last"}, "scale": 1.12, "style": "snap"}]},
+        fmt={"width": W, "height": H, "fps": fps}, duration=12.0,
+        out_timeline=[SimpleNamespace(out_start=0.0), SimpleNamespace(out_start=10.0)],
+        word_out_time=starts.__getitem__, word_out_end=ends.__getitem__)
+    monkeypatch.setattr(broll, "output_face_union", lambda *args: (440, 884, 200, 200))
+
+    [z] = zoom.build_zooms(ctx, with_broll=False)
+
+    assert z.t0 == 8.0
+    assert z.t1 == pytest.approx(round((ends["last"] + zoom.TAIL) * fps) / fps)
+    assert z.t1 > ends["last"]
+    assert z.ramp_in > 0
+    assert z.ramp_out == 0
+    assert zoom.progress(z, starts["last"]) == 1.0
+
+
 # --- music -------------------------------------------------------------------------------------
 
 def test_loudness_matches_ffmpeg(media):

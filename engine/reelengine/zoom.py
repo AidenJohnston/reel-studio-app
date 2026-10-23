@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover
         cy: float
         ramp_in: float = 0.0
         ramp_out: float = 0.0
+        last_word_end: float = 0.0
 
 DEFAULT_SCALE = 1.12
 MAX_SCALE = 2.0
@@ -103,6 +104,7 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
         if t0 is None or t1 is None:
             log(f"zoom {i}: anchor {a}..{b} is not in the cut; skipped")
             continue
+        last_word_end = t1
         t1 += TAIL
         scale = min(MAX_SCALE, max(1.0, float(z.get("scale", DEFAULT_SCALE) or DEFAULT_SCALE)))
         if scale <= 1.001 or t1 - t0 < 1.0 / fps:
@@ -124,7 +126,7 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
             snap = False
         ramps = (round(SNAP_IN * fps) / fps, round(SNAP_OUT * fps) / fps) if snap else ()
         spans.append(ZoomSpan(round(t0 * fps) / fps, round(t1 * fps) / fps, scale, round(cx, 1), round(cy, 1),
-                              *ramps))
+                              *ramps, last_word_end=last_word_end))
     spans.sort(key=lambda s: s.t0)
     if with_broll and spans:
         try:
@@ -137,7 +139,7 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
         except Exception as e:
             log(f"zoom/broll handoff skipped: {e}")
     dur = float(getattr(ctx, "duration", 0.0) or 0.0)
-    cuts = [round(seg.out_start * fps) / fps for seg in ctx.out_timeline[1:]]
+    cuts = {round(seg.out_start * fps) / fps: seg.out_start for seg in ctx.out_timeline[1:]}
     out = []
     for k, s in enumerate(spans):
         if k + 1 < len(spans) and s.t1 >= spans[k + 1].t0:
@@ -148,8 +150,8 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
             s.ramp_in = 0.0
         cut = max((c for c in cuts if s.t1 - s.ramp_out < c < s.t1), default=None) if s.ramp_out else None
         if cut is not None:
-            # the cut comes after the last word (t1 and the cut each round to a frame: up to one apart)
-            if cut > s.t0 and cut >= s.t1 - TAIL - 1.0 / fps - 1e-9:
+            # Compare unrounded times: frame rounding can put the cut before a short last word ends.
+            if cut > s.t0 and cuts[cut] >= s.last_word_end - 1e-9:
                 s.t1 = cut
             s.ramp_out = 0.0
         if s.ramp_in and (s.t1 - s.t0 < s.ramp_in + 1.0 / fps or any(s.t0 < c < s.t0 + s.ramp_in for c in cuts)):
