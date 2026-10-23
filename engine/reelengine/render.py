@@ -22,10 +22,11 @@ import math
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
-from . import captions as capmod, cut as cutmod, project as projmod, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, render_identity, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -101,18 +102,6 @@ def preview_dir(project_dir: Path) -> Path:
     """versions/preview/: the ONE scratch folder every draft and window preview overwrites.
     Only a final render makes a user-visible version folder (docs/versions.md)."""
     return Path(project_dir) / "versions" / PREVIEW_DIR
-
-
-def latest_render(project_dir: Path) -> Optional[Path]:
-    vroot = Path(project_dir) / "versions"
-    best = None
-    if vroot.exists():
-        for f in vroot.glob("*/*.mp4"):
-            if f.name.startswith("window_"):      # a preview slice has its own clock
-                continue
-            if best is None or f.stat().st_mtime > best.stat().st_mtime:
-                best = f
-    return best
 
 
 # --- geometry -----------------------------------------------------------------------------------
@@ -665,15 +654,11 @@ def unknown_anchor_skips(proj: dict, tl) -> tuple:
     return rows, warns
 
 
-def read_broll_report(project_dir: Path) -> list:
-    """Per b-roll item, from A2's work/layers/layers.json: how it was actually shown. Items that
-    could not be shown as asked carry `fallback` (and `shownAs`) or `skipped`, in plain words the
-    editor can repeat to the user ("no room on the left of the face; shown above you instead")."""
-    side = Path(project_dir) / "work" / "layers" / "layers.json"
-    try:
-        items = projmod.read_json(side).get("items") or []
-    except (ValueError, OSError):
-        return []
+def read_broll_report(items: list) -> list:
+    """Per b-roll item, from the layers.json items this render's build_layers wrote: how it was
+    actually shown. Items that could not be shown as asked carry `fallback` (and `shownAs`) or
+    `skipped`, in plain words the editor can repeat to the user ("no room on the left of the face;
+    shown above you instead")."""
     out = []
     for it in items:
         row = {"id": it.get("id"), "treatment": it.get("treatment")}
@@ -721,7 +706,7 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, job_id: Optional[str] = None) -> dict:
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
@@ -738,6 +723,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if win:
         draft = True        # a window is a preview: always the fast encoder
 
+    committed = project_dir / "versions" / f"v{int(proj.get('version') or 0)}" / "project.json"
+    baseline = projmod.read_json(committed) if committed.exists() else None
     version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
     vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
@@ -751,6 +738,10 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     rwork = project_dir / "work" / "render"
     rwork.mkdir(parents=True, exist_ok=True)
     warnings: list = []
+    render_id = "r_" + uuid.uuid4().hex
+    input_fp = render_identity.fingerprint({
+        "edit": projmod.edit_signature(proj), "words": words, "assets": asset_fingerprint(project_dir, proj, root),
+        "draft": draft, "window": win})
 
     src_meta = {s["id"]: s for s in proj["sources"]}
     src_paths = {s["id"]: projmod.source_path(project_dir, s) for s in proj["sources"]}
@@ -774,12 +765,13 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     # 2. b-roll layers + zooms (A2)
     t = time.time()
-    layers, zooms = [], []
+    layers, zooms, layer_items = [], [], []
     broll = _opt_module("broll")
     if broll is not None and proj.get("broll"):
         progress(STAGE, 12, "Placing your pictures", force=True)
         try:
             layers = list(broll.build_layers(ctx) or [])
+            layer_items = projmod.read_json(project_dir / "work" / "layers" / "layers.json").get("items") or []
         except EngineError as exc:
             log(f"# b-roll skipped: {exc.message}")
             warnings.append(f"The b-roll was left out of this version: {exc.user_message}")
@@ -787,7 +779,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             # dev detail goes to the log, never into a warning the app may show
             log(f"# broll.build_layers crashed: {exc!r}")
             warnings.append(BROLL_FAILED)
-    broll_report = read_broll_report(project_dir) if proj.get("broll") and broll is not None else []
+    broll_report = read_broll_report(layer_items)
     gone_rows, gone_warns = unknown_anchor_skips(proj, tl)
     broll_report = [r for r in broll_report if r.get("id") not in {g["id"] for g in gone_rows}] + gone_rows
     warnings += gone_warns
@@ -894,7 +886,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
+    result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps,
+              "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
               "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
@@ -917,17 +910,27 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         rep = verifymod.check(out, expect_duration=dur, expect_w=out_w, expect_h=out_h, expect_fps=fps,
                               captions=cap_report if not win else None, fmt=(W, H),
                               draft=draft)
+        rep.update(renderId=render_id, inputFingerprint=input_fp)
         projmod.write_json(vdir / ("verify.json" if not win else f"verify_{name[:-4]}.json"), rep)
         result["verify"] = {"ok": rep["ok"], "fails": rep["fails"], "warns": rep["warns"]}
         timings["verify"] = round(time.time() - t, 2)
 
     timings["total"] = round(time.time() - t_start, 2)
     result["timings"] = timings
+    if baseline is not None:
+        result["receipt"] = {"jobId": job_id, "renderId": render_id, "version": version,
+                             "facts": projmod.net_changes(baseline, proj)}
     if not win:
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
-        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
+        manifest = dict(result, file=out.name, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], words=tl.words_out,
+                        captionsReport=cap_report, format=[W, H], layerItems=layer_items, videoSha256=render_identity.video_digest(out))
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
+        if not preview and result.get("receipt", {}).get("facts"):
+            receipts = vdir / "receipts.json"
+            # a new number starts a new list: a render stopped before project.version moved left a stale one
+            kept = projmod.read_json(receipts) if receipts.exists() and version == int(proj.get("version") or 0) else []
+            projmod.write_json(receipts, [*kept, result["receipt"]])
         if not preview:
             projmod.write_json(vdir / "assets.json", asset_fingerprint(project_dir, proj, root))
         if not preview and int(proj.get("version") or 0) != version:
