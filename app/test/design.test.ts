@@ -73,6 +73,7 @@ describe('version messages', () => {
     const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
     const receipts = [
       [{ kind: 'source', id: 's1', before: { id: 's1', mirror: false }, after: { id: 's1', mirror: true } }],
+      [{ kind: 'source', id: 's1', before: { id: 's1', mirror: true }, after: { id: 's1', mirror: false } }],
       [{ kind: 'cut.keep', before: [{ from: 'w0', to: 'w3' }], after: [{ from: 'w0', to: 'w5' }] }],
       [{ kind: 'cut.gapCap', before: 0.25, after: 0.12 }],
       [{ kind: 'captions.corrections', before: [], after: [{ from: 'bred', to: 'bread' }] }],
@@ -82,6 +83,17 @@ describe('version messages', () => {
       [{ kind: 'cover.text', before: null, after: 'Bread' }],
       [{ kind: 'post.caption', before: '', after: 'My bread' }]
     ]
+    // the app's own name and summary pass for any three changes together ("A, B and more")
+    for (const [i, a] of receipts.entries()) {
+      for (const [j, b] of receipts.entries()) {
+        for (const c of receipts.slice(Math.max(i, j) + 1)) {
+          if (j <= i) continue
+          const facts = [...a, ...b, ...c]
+          const own = { title: versionTitle(facts, words), summary: describeFacts(facts, words) }
+          expect(acceptRewrite(own, facts, words), own.title).toEqual(own)
+        }
+      }
+    }
     for (const facts of receipts) {
       const title = versionTitle(facts, words)
       expect(acceptRewrite({ title, summary: describeFacts(facts, words) }, facts, words), title).not.toBeNull()
@@ -110,7 +122,8 @@ describe('version messages', () => {
       ['Removed a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }, { kind: 'broll', id: 'b2', before: { id: 'b2' }, after: null }]],
       ['Cut 2 takes', [cutTwo]],
       ['New cover words', [{ kind: 'cover.atSourceTime', before: 1, after: 2 }]],
-      ['Subtitles off and back on', [{ kind: 'captions.enabled', before: true, after: false }, { kind: 'music.enabled', before: false, after: true }]]
+      ['Subtitles off and back on', [{ kind: 'captions.enabled', before: true, after: false }, { kind: 'music.enabled', before: false, after: true }]],
+      ['Added 2 animations', [added('b1'), added('b2')]]
     ]
     expect(versionTitle([restoreTwo], words)).toBe('More words back')
     const kept = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: reply.toLowerCase() }, facts as never, words))

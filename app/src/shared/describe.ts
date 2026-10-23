@@ -189,9 +189,10 @@ const LEXICON: [Group, Lexicon][] = [
     nouns: ['music', 'song', 'soundtrack', 'volume'],
     dirs: { no: 'none', off: 'none', new: 'new', different: 'new', back: 'on', on: 'on', louder: 'louder', quieter: 'quieter', adjusted: 'adjusted', changed: 'adjusted' }
   }],
+  // receipts don't say which kind of b-roll an item is, so only the app's own word for all of them
   ['pictures', {
-    markers: ['picture', 'b-roll', 'clip', 'gif', 'animation'],
-    nouns: ['picture', 'b-roll', 'clip', 'gif', 'animation'],
+    markers: ['picture', 'b-roll'],
+    nouns: ['picture', 'b-roll'],
     dirs: { new: 'more', added: 'more', more: 'more', fewer: 'fewer', removed: 'fewer', changed: 'changed' }
   }],
   ['zooms', {
@@ -273,7 +274,7 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
   const straight = (s: string): string => s.replace(/[“”]/g, '"')
   const title = text.title.trim()
   const summary = text.summary.trim().replace(/\.$/, '')
-  if (title.split(/\s+/).length > 7 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
+  if (title.split(/\s+/).length > 8 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
   const meant = new Map(own.map((c) => [c.group, ownClaims(c)]))
   const holds = (c: Claim, inSummary: boolean): boolean => {
     const mine = meant.get(c.group)
