@@ -327,11 +327,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         const p = await loadProject(projectDir);
         p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString() }];
         await saveProject(projectDir, p);
-        await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${fast.summary}\n`);
+        // a version the engine reused (the same video) is saved already, and is never rewritten
+        if (version > p0.version) await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${fast.summary}\n`);
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+        if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
         throw e;
       }
     }
@@ -366,14 +367,18 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
     p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
     await saveProject(projectDir, p);
-    await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
+    if (version > p0.version) await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
     throw e;
   }
 }
+
+/** Part of the engine would not stop and may still be writing to the project (index.ts editHost): a
+ * rollback would race it, so the project is left as it is and the app keeps it closed. */
+const engineStuck = (e: unknown): boolean => (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK';
 
 // ---------------------------------------------------------------- idea -> script
 

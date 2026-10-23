@@ -111,8 +111,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       throw { code: 'NOT_READY', userMessage: 'Claude keys are not ready in this build yet. Your videos still work without it.' }
     },
 
-    async firstEdit(projectDir, onEvent, signal): Promise<AgentResult> {
-      const args = ['--project', projectDir]
+    async firstEdit(projectDir, onEvent, signal, opts): Promise<AgentResult> {
+      const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}) })
       const changed: string[] = []
