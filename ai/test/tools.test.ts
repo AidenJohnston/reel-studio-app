@@ -35,6 +35,14 @@ describe('tool schemas', () => {
     const post = TOOLS.find((t) => t.name === 'write_post')!;
     expect(validate(post.parameters, { caption: 'x', hashtags: ['a', 'b'], keywords: [] }).join()).toMatch(/at least 5/);
   });
+  it('explains when a correction word was cut', async () => {
+    const { ctx } = await ctxFor();
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w27', to: 'w56' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Nobody', to: 'Someone' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('was cut');
+    expect(result.content).not.toContain('not in the transcript');
+  });
 });
 
 describe('tool implementations', () => {
