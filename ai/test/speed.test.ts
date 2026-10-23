@@ -40,6 +40,11 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('quieter music', p)).toBeNull();
   });
 
+  it('"lower case captions" means the letters, so it goes to the AI instead of moving the captions down', async () => {
+    const { dir } = await setup();
+    expect(planFastNote('make the captions lower case', await loadProject(dir))).toBeNull();
+  });
+
   it('applies a simple note with one direct change and one final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
