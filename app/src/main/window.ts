@@ -3,7 +3,8 @@
 // in text fields), Dock / taskbar progress, and the "your reel is ready" notification.
 import { app, BrowserWindow, Menu, nativeImage, Notification, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join, resolve, sep } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { isStrictlyInsideFolder } from './inside-folder'
 import type { AppCommand, JobEvent } from '../shared/api'
 import { RELEASES_REPO } from '../shared/config'
 
@@ -240,10 +241,7 @@ export function createJobFeedback(opts: {
  */
 export function startDragOut(sender: WebContents, file: string, roots: string[]): void {
   const f = resolve(String(file))
-  const inside = roots.some((r) => {
-    const root = resolve(r)
-    return f.startsWith(root.endsWith(sep) ? root : root + sep)
-  })
+  const inside = roots.some((r) => isStrictlyInsideFolder(f, r))
   if (!inside || !existsSync(f)) return
   const cover = join(dirname(f), 'cover.png')
   let icon = existsSync(cover) ? nativeImage.createFromPath(cover) : nativeImage.createEmpty()
