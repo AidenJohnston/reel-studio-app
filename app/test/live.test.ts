@@ -144,19 +144,25 @@ describe('job manager (main): the contract on the wire', () => {
     const slug = 'late-render'
     mkdirSync(projectDir(slug), { recursive: true })
     const events: JobEvent[] = []
-    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, () => new Promise((r) => setTimeout(() => r('reel-media://f/late'), 30)))
-    let rendered!: () => void
-    const preview = new Promise<void>((r) => (rendered = r))
+    let resolveVideo!: () => void
+    const videoReady = new Promise<void>((resolve) => { resolveVideo = resolve })
+    let resolveRenderStarted!: () => void
+    const renderStarted = new Promise<void>((resolve) => { resolveRenderStarted = resolve })
+    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, async () => {
+      resolveRenderStarted()
+      await videoReady
+      return 'reel-media://f/late'
+    })
     const id = jobs.start(slug, 'note', (emit, signal) => new Promise((_, reject) => {
       signal.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' }))
       emit({ type: 'render', version: 2, draft: true, file: join(projectDir(slug), 'x.mp4') })
-      rendered()
     }))
     const done = jobs.get(id)!.done
-    await preview
+    await renderStarted
     jobs.cancel(id)
     await done
-    await new Promise((r) => setTimeout(r, 60))
+    resolveVideo()
+    await new Promise((r) => setTimeout(r, 0))
     expect(events.at(-1)?.type).toBe('cancelled')
   })
 

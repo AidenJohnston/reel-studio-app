@@ -478,9 +478,12 @@ export function operationStatus(ctx: ToolContext, name: string, args: any): stri
     case 'choose_music': {
       // missing arguments are null (executeTool's fillNulls); null + a level keeps the song: only null alone takes it out
       const track = args?.track ?? null; const level = args?.level ?? null;
+      const existingTrack = (ref: string | null): boolean => {
+        try { return !!ref && !!resolveAsset(ctx, ref); } catch { return false; }
+      };
       if (track === null && !level) return p.music.track ? 'Taking out the music' : undefined;
-      if (typeof track === 'string' && track !== p.music.track) return `Adding the song "${path.basename(track, path.extname(track))}"`;
-      return level && level !== p.music.level && (track || p.music.track) ? 'Changing the music volume' : undefined;
+      if (typeof track === 'string' && track !== p.music.track && existingTrack(track)) return `Adding the song "${path.basename(track, path.extname(track))}"`;
+      return level && level !== p.music.level && p.music.enabled && existingTrack(p.music.track) ? 'Changing the music volume' : undefined;
     }
     case 'set_zoom':
       return Array.isArray(args?.zooms) && !args.zooms.length && p.zooms.length ? 'Taking out the zooms' : undefined;

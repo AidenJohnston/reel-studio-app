@@ -36,11 +36,17 @@ it('fails if a status line names a picture for words on screen, a smaller size f
   p.broll = [{ id: 'b1', anchor: { from: 'w2', to: 'w4' }, treatment: 'text-pop', asset: null } as any];
   p.music = { ...p.music, enabled: true, track: 'Library/Music/gentle.mp3' };
   await saveProject(dir, p);
+  await fsp.writeFile(`${root}/Library/Music/gentle.mp3`, 'x');
   const ctx: ToolContext = { projectDir: dir, host: new FakeHost(root), style: new StyleStore(() => root), emit: () => undefined, state: newToolState(), supportsImages: true };
   await load(ctx);
   expect(operationStatus(ctx, 'remove_broll', { id: 'b1' })).toMatch(/^Taking out the words on screen/);
   expect(operationStatus(ctx, 'set_caption_style', { enabled: false, size: 84 })).toBe('Turning the subtitles off');
   expect(operationStatus(ctx, 'choose_music', {})).toBe('Taking out the music');
+  expect(operationStatus(ctx, 'choose_music', { track: 'Library/Music/gentle.mp3' })).toBeUndefined();
+  expect(operationStatus(ctx, 'choose_music', { track: 'Library/Music/missing.mp3' })).toBeUndefined();
+  expect(operationStatus(ctx, 'choose_music', { track: null, level: 'quiet' })).toBe('Changing the music volume');
+  ctx.project!.music.enabled = false;
+  expect(operationStatus(ctx, 'choose_music', { track: null, level: 'loud-intro' })).toBeUndefined();
   ctx.project!.music.track = null;
   expect(operationStatus(ctx, 'choose_music', { track: null, level: 'quiet' })).toBeUndefined();
 });
