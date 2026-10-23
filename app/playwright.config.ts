@@ -5,6 +5,6 @@ export default defineConfig({
   timeout: 300_000,
   expect: { timeout: 30_000 },
   workers: 1,
-  reporter: [['list']],
+  reporter: [['list'], ['./e2e/cleanup-reporter.ts']],
   outputDir: './test-results'
 })
