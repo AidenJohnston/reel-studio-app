@@ -161,4 +161,6 @@ export function macBundleCheck(running: string): InstallStep {
 // The NSIS installer is checked by electron-updater itself: its SHA-512 must match latest.yml, which electron-builder
 // writes from the same build, and check() above requires that yml's version to equal the release tag. Unsigned
 // builds carry no publisherName in app-update.yml, so electron-updater skips the Authenticode check.
+// Signing turns that check on through win.signtoolOptions.publisherName in packaging/electron-builder.yml; verify
+// stays empty because electron-updater then refuses an installer signed by anyone else before install() runs.
 export const windowsInstaller: InstallStep = { showInstaller: true, verify: async () => {} }
