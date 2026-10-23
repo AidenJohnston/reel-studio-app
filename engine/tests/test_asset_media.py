@@ -72,15 +72,47 @@ def test_fails_if_a_one_frame_video_cannot_produce_a_complete_contact_sheet(tmp_
                 assert sheet.convert('RGB').getpixel((x * 320 + 160, y * 180 + 90))[0] > 240
 
 
-def test_fails_if_longer_audio_sends_contact_sheet_seeks_past_the_video(tmp_path):
+# WebM and MKV streams carry no duration of their own, so the container's (the 2 s audio) is all ffprobe reports
+@pytest.mark.parametrize('ext,codecs', [('mp4', ['-c:v', 'libx264', '-c:a', 'aac']),
+                                        ('webm', ['-c:v', 'libvpx-vp9', '-c:a', 'libopus'])])
+def test_fails_if_longer_audio_sends_contact_sheet_seeks_past_the_video(tmp_path, ext, codecs):
     project, root = tmp_path / 'project', tmp_path / 'root'
     folder = root / 'Library' / 'B-roll'
     folder.mkdir(parents=True)
     ffmpeg('-f', 'lavfi', '-i', 'color=red:s=96x54:r=30:d=0.2', '-f', 'lavfi', '-i',
-           'sine=frequency=1000:duration=2', '-c:v', 'libx264', '-c:a', 'aac', folder / 'short-video.mp4')
-    result = inspect(project, root, 'inspect-video', 'Library/B-roll/short-video.mp4')
-    assert result['durationSec'] == pytest.approx(0.2)
-    assert (project / result['previewPath']).is_file()
+           'sine=frequency=1000:duration=2', *codecs, folder / f'short-video.{ext}')
+    result = inspect(project, root, 'inspect-video', f'Library/B-roll/short-video.{ext}')
+    assert result['durationSec'] == pytest.approx(0.2, abs=0.01)
+    with Image.open(project / result['previewPath']) as sheet:
+        # the last cell is the clip's last frame, not black
+        assert sheet.convert('RGB').getpixel((2 * 320 + 160, 2 * 180 + 90))[0] > 200
+
+
+def test_fails_if_a_contact_sheet_seek_that_writes_nothing_is_not_retried_earlier(tmp_path, monkeypatch):
+    from reelengine import asset_preview
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    folder = root / 'Library' / 'B-roll'
+    folder.mkdir(parents=True)
+    ffmpeg('-f', 'lavfi', '-i', 'color=red:s=96x54:r=30:d=2', '-c:v', 'libx264', folder / 'clip.mp4')
+    real_run = asset_preview.run
+    seeks = []
+
+    def run(cmd, *args, **kw):
+        out = real_run(cmd, *args, **kw)
+        if '-ss' in cmd:
+            at = float(cmd[cmd.index('-ss') + 1])
+            seeks.append(at)
+            if at > limit:      # as if the video ended here
+                out.stdout = b''
+        return out
+    monkeypatch.setattr(asset_preview, 'run', run)
+    limit = 1.0
+    inspect(project, root, 'inspect-video', 'Library/B-roll/clip.mp4')
+    assert max(seeks) > limit and len(seeks) > 9
+    limit = -1.0
+    with pytest.raises(EngineError) as e:
+        inspect(project, root, 'inspect-video', 'Library/B-roll/clip.mp4')
+    assert e.value.code == 'BAD_MEDIA'
 
 
 def test_fails_if_a_noisy_contact_sheet_exceeds_the_model_preview_limit(tmp_path):
