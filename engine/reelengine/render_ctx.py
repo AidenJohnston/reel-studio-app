@@ -73,6 +73,7 @@ class ZoomSpan:
     cy: float
     ramp_in: float = 0.0
     ramp_out: float = 0.0
+    last_word_end: float = 0.0  # unrounded output time, before the tail and frame rounding
 
 
 @dataclass
