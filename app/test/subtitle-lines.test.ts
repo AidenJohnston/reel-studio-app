@@ -20,6 +20,10 @@ const saved = { enabled: true, split: ['w4'] }
 const text = (lines: LineToken[][]) => lines.map((l) => l.map((t) => t.shown).join(' '))
 
 describe('subtitle lines', () => {
+  it('does not add an existing split again when Enter is pressed', () => {
+    expect(setBreak(saved, 'w4', true)).toEqual(saved)
+  })
+
   it('shows an Enter or a join where the next version will put it, and never joins across a long pause', () => {
     const enter = setBreak(saved, 'w1', true)
     expect(text(subtitleLines(rendered, kept, saved, enter, heard))).toEqual(['I', 'use cloud', 'for', 'everything,', 'TypeScript', 'too.'])

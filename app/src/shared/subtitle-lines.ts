@@ -49,7 +49,7 @@ export function shownAs(t: CaptionToken, saved: Correction[] | undefined, now: C
 export function setBreak(c: Captions, id: string, newLine: boolean, above?: string): Captions {
   const split = c.split ?? []
   const join = c.join ?? []
-  if (newLine) return join.some((j) => j.to === id) ? { ...c, join: join.filter((j) => j.to !== id) } : { ...c, split: [...split, id] }
+  if (newLine) return join.some((j) => j.to === id) ? { ...c, join: join.filter((j) => j.to !== id) } : split.includes(id) ? c : { ...c, split: [...split, id] }
   if (split.includes(id)) return { ...c, split: split.filter((x) => x !== id) }
   if (!above) throw new Error(`joining the line at ${id} needs the line above it`)
   return { ...c, join: [...join, { from: above, to: id }] }
