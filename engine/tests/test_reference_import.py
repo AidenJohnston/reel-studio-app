@@ -147,6 +147,33 @@ def test_references_that_expand_without_bound_are_refused(tmp_path, name, body, 
     assert _code(source) == code
 
 
+@pytest.mark.parametrize("suffix", [".fcpxml", ".xml"], ids=["fcpxml", "premiere"])
+def test_reference_chain_over_depth_cap_reports_input_too_large(tmp_path, suffix):
+    depth = reference_import.MAX_EXPANDED_DEPTH + 1
+    if suffix == ".fcpxml":
+        body = _compound_clips(levels=depth, fanout=1)
+    else:
+        # The sequence is at depth 1; the last referenced file is at depth cap + 1.
+        definitions = "".join(
+            f'<file id="f{i}"><file id="f{i + 1}"/></file>'
+            for i in range(1, depth - 1)
+        ) + f'<file id="f{depth - 1}"/>'
+        body = (f'<xmeml version="5"><sequence><file id="f1"/></sequence>'
+                f'{definitions}</xmeml>')
+    source = tmp_path / f"deep{suffix}"
+    source.write_text(body, encoding="utf-8")
+    buf = io.StringIO()
+    proto.set_stream(buf)
+    try:
+        code = cli.main(["import-reference", str(source)])
+    finally:
+        proto.set_stream(None)
+    error = json.loads(buf.getvalue().splitlines()[-1])
+    assert code != 0
+    assert error["event"] == "error"
+    assert error["code"] == "INPUT_TOO_LARGE"
+
+
 def _event_clip_note(uses, note):
     spine = "".join(f'<asset-clip ref="r2" offset="{i}s" duration="1s" name="a"/>' for i in range(uses))
     return ('<fcpxml version="1.10"><resources><format id="r1" frameDuration="1/25s"/>'

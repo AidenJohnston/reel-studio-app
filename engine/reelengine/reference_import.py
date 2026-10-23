@@ -204,29 +204,66 @@ def _fcp7_expanded(root: ET.Element) -> tuple[int, int, int]:
     memo: dict[str, tuple[int, int, int]] = {}
     open_ids: set[str] = set()
 
-    def own(e: ET.Element, depth: int) -> tuple[int, int, int]:
-        if depth > MAX_EXPANDED_DEPTH:
-            raise _fail("INPUT_TOO_LARGE", "id references nest too deeply")
-        clips, elements, size = int(e.tag in ("clipitem", "generatoritem")), 1, _own_bytes(e)
-        for child in e:
-            c, n, b = resolved(child, depth + 1)
-            clips, elements, size = clips + c, elements + n, size + b
-        return clips, elements, size
-
-    def resolved(e: ET.Element, depth: int) -> tuple[int, int, int]:
-        key = e.get("id")
-        if key is None:
-            return own(e, depth)
-        if key not in memo:
-            if key in open_ids:
-                raise _fail("BAD_XML", f"element with id {key!r} contains itself")
-            open_ids.add(key)
-            costs = [own(d, depth) for d in by_id[key]]
-            open_ids.discard(key)
-            memo[key] = tuple(max(cost[i] for cost in costs) for i in range(3))
-        return memo[key]
-
-    return resolved(root, 0)
+    stack = [{"kind": "resolved", "element": root, "depth": 0, "index": 0,
+              "clips": 0, "elements": 0, "size": 0}]
+    result = None
+    while stack:
+        frame = stack[-1]
+        if "child_result" in frame:
+            c, n, b = frame.pop("child_result")
+            if frame["kind"] == "resolved_max":
+                frame["costs"].append((c, n, b))
+            else:
+                frame["clips"] += c
+                frame["elements"] += n
+                frame["size"] += b
+            continue
+        kind, e, depth = frame["kind"], frame["element"], frame["depth"]
+        if kind == "resolved":
+            key = e.get("id")
+            if key is None:
+                frame["kind"] = "own"
+                frame["clips"] = int(e.tag in ("clipitem", "generatoritem"))
+                frame["elements"], frame["size"] = 1, _own_bytes(e)
+                continue
+            if key in memo:
+                result = memo[key]
+                stack.pop()
+            else:
+                if key in open_ids:
+                    raise _fail("BAD_XML", f"element with id {key!r} contains itself")
+                open_ids.add(key)
+                frame["kind"] = "resolved_max"
+                frame["costs"] = []
+                frame["definitions"] = by_id[key]
+                frame["index"] = 0
+                continue
+        elif kind == "resolved_max":
+            if frame["index"] < len(frame["definitions"]):
+                definition = frame["definitions"][frame["index"]]
+                frame["index"] += 1
+                stack.append({"kind": "own", "element": definition, "depth": depth, "index": 0,
+                              "clips": 0, "elements": 0, "size": 0})
+                continue
+            result = tuple(max(cost[i] for cost in frame["costs"]) for i in range(3))
+            memo[e.get("id")] = result
+            open_ids.remove(e.get("id"))
+            stack.pop()
+        elif kind == "own":
+            if depth > MAX_EXPANDED_DEPTH:
+                raise _fail("INPUT_TOO_LARGE", "id references nest too deeply")
+            if frame["index"] < len(e):
+                child = e[frame["index"]]
+                frame["index"] += 1
+                stack.append({"kind": "resolved", "element": child, "depth": depth + 1, "index": 0,
+                              "clips": 0, "elements": 0, "size": 0})
+                continue
+            result = frame["clips"], frame["elements"], frame["size"]
+            stack.pop()
+        if stack and result is not None:
+            stack[-1]["child_result"] = result
+            result = None
+    return result
 
 
 def _secs(value: str | None) -> Fraction:
@@ -342,31 +379,68 @@ class _Fcpx:
         memo: dict[str, tuple[int, int, int]] = {}
         open_ids: set[str] = set()
 
-        def sequence(seq: ET.Element, depth: int) -> tuple[int, int, int]:
-            clips, (elements, nbytes) = 0, size[seq]
-            for c in seq.iter():
-                if c.tag not in _FCPX_COMPOSABLE:
+        def walk(sequence: ET.Element, depth: int) -> tuple[int, int, int]:
+            stack = [{"kind": "sequence", "value": sequence, "depth": depth, "index": 0,
+                      "clips": 0, "elements": size[sequence][0], "bytes": size[sequence][1]}]
+            result = None
+            while stack:
+                frame = stack[-1]
+                if "child_result" in frame:
+                    c, n, b = frame.pop("child_result")
+                    frame["clips"] += c
+                    frame["elements"] += n
+                    frame["bytes"] += b
                     continue
-                m, k = marked[self.timing_clip(c)], copied.get(c.get("ref"), (0, 0))
-                clips, elements, nbytes = clips + 1, elements + m[0] + k[0], nbytes + m[1] + k[1]
-                if c.tag == "ref-clip":
-                    mc, me, mb = compound(c.get("ref"), depth + 1)
-                    clips, elements, nbytes = clips + mc, elements + me, nbytes + mb
-            return clips, elements, nbytes
+                if frame["kind"] == "compound":
+                    key = frame["value"]
+                    if key in memo:
+                        result = memo[key]
+                        stack.pop()
+                    else:
+                        if key in open_ids:
+                            raise _fail("BAD_XML", f"compound clip {key!r} contains itself")
+                        if frame["depth"] > MAX_EXPANDED_DEPTH:
+                            raise _fail("INPUT_TOO_LARGE", "compound clips nest too deeply")
+                        seq = self.media[key].find("sequence") if key in self.media else None
+                        if seq is None:
+                            result = (0, 0, 0)
+                            memo[key] = result
+                            stack.pop()
+                        else:
+                            open_ids.add(key)
+                            frame["kind"] = "compound_result"
+                            stack.append({"kind": "sequence", "value": seq, "depth": frame["depth"],
+                                          "index": 0, "clips": 0, "elements": size[seq][0],
+                                          "bytes": size[seq][1]})
+                            continue
+                elif frame["kind"] == "compound_result":
+                    result = frame["clips"], frame["elements"], frame["bytes"]
+                    memo[frame["value"]] = result
+                    open_ids.remove(frame["value"])
+                    stack.pop()
+                else:
+                    composable = [c for c in frame["value"].iter() if c.tag in _FCPX_COMPOSABLE]
+                    if frame["index"] >= len(composable):
+                        result = frame["clips"], frame["elements"], frame["bytes"]
+                        stack.pop()
+                    else:
+                        c = composable[frame["index"]]
+                        frame["index"] += 1
+                        m, k = marked[self.timing_clip(c)], copied.get(c.get("ref"), (0, 0))
+                        frame["clips"] += 1
+                        frame["elements"] += m[0] + k[0]
+                        frame["bytes"] += m[1] + k[1]
+                        if c.tag == "ref-clip":
+                            stack.append({"kind": "compound", "value": c.get("ref"),
+                                          "depth": frame["depth"] + 1, "index": 0,
+                                          "clips": 0, "elements": 0, "bytes": 0})
+                            continue
+                if stack and result is not None:
+                    stack[-1]["child_result"] = result
+                    result = None
+            return result
 
-        def compound(key: str, depth: int) -> tuple[int, int, int]:
-            if key not in memo:
-                if key in open_ids:
-                    raise _fail("BAD_XML", f"compound clip {key!r} contains itself")
-                if depth > MAX_EXPANDED_DEPTH:
-                    raise _fail("INPUT_TOO_LARGE", "compound clips nest too deeply")
-                seq = self.media[key].find("sequence") if key in self.media else None
-                open_ids.add(key)
-                memo[key] = (0, 0, 0) if seq is None else sequence(seq, depth)
-                open_ids.discard(key)
-            return memo[key]
-
-        totals = [sequence(p.find("sequence"), 0) for p in projects if p.find("sequence") is not None]
+        totals = [walk(p.find("sequence"), 0) for p in projects if p.find("sequence") is not None]
         return tuple(sum(t[i] for t in totals) for i in range(3))
 
     def lanes(self, project: ET.Element) -> dict[str, list[dict]]:
