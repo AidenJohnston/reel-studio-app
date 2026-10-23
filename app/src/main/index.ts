@@ -50,7 +50,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, PlatformExportResult, ProjectJson, VersionInfo } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { parsePlatformExportRequest } from '../shared/platforms'
-import { checkPlatformExport, exportPlatforms, sweepExportStaging } from './platform-export'
+import { exportPlatforms, sweepExportStaging } from './platform-export'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
@@ -539,16 +539,15 @@ function registerIpc(): void {
     const request = parsePlatformExportRequest(value)
     if (!(await listVersions(projectDir(slug))).some((v) => v.n === n)) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before exporting for platforms.' }
     const version = await finishedExportVersion(slug, n)
-    const video = await checkPlatformExport(version.videoPath, request, runEngine)
     const project = await readProject(slug)
     const chosenCover = join(dirname(version.videoPath), 'cover.png')
     let result: PlatformExportResult | null = null
     let failure: unknown
     jobs.start(slug, 'export', async (emit, signal) => {
-      emit({ type: 'status', message: 'Saving platform files', pct: 1 })
+      emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
         result = await exportPlatforms({
-          source: version.videoPath, video, chosenCover: existsSync(chosenCover) ? chosenCover : null, folder: binDir('exports'),
+          source: version.videoPath, chosenCover: existsSync(chosenCover) ? chosenCover : null, folder: binDir('exports'),
           name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal,
           onProgress: (message, pct) => emit({ type: 'status', message, pct })
         })

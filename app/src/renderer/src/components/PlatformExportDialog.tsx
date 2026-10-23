@@ -22,7 +22,6 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
   const [seconds, setSeconds] = useState<number | null>(null)
   // null: the project's own cover. A number: the frame the person scrubbed to.
   const [coverSeconds, setCoverSeconds] = useState<number | null>(null)
-  const [safeChecked, setSafeChecked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [state, setState] = useState<ExportState>({ kind: 'choosing' })
   const [phoneFile, setPhoneFile] = useState<PlatformExportResult['files'][number] | null>(null)
@@ -38,14 +37,13 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
   }, [screen])
 
   const toggle = (platform: Platform) => setSelected((current) => current.includes(platform) ? current.filter((p) => p !== platform) : [...current, platform])
-  const checks = selected.flatMap((platform) => checkPlatform(platform, caption, seconds ?? 0).map((issue) => ({ ...issue, text: `${platformRule(platform).label}: ${issue.message}` })))
-  const blocking = seconds === null ? [] : checks.filter((c) => c.blocking)
-  const warnings = seconds === null ? [] : checks.filter((c) => !c.blocking)
+  // Limits change and vary by account, so they warn next to each platform and never stop the export.
+  const warningsFor = (platform: Platform) => seconds === null || !selected.includes(platform) ? [] : checkPlatform(platform, caption, seconds)
   // The Export button turns into progress, so focus moves to Stop once the job can be stopped.
   useEffect(() => {
     if (saving && jobId) stopButton.current?.focus()
   }, [saving, jobId])
-  const ready = selected.length > 0 && seconds !== null && blocking.length === 0 && safeChecked
+  const ready = selected.length > 0 && seconds !== null
 
   const save = async () => {
     if (!ready) return
@@ -92,14 +90,24 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
         <p className="muted">Choose where Version {version.n} is going. Each platform gets a named video, cover and caption file. Nothing is posted.</p>
         <fieldset className="platform-options" disabled={saving}>
           <legend>Platforms</legend>
-          {PLATFORM_RULES.map((rule, i) => <label className="platform-option" key={rule.id}>
-            <input type="checkbox" checked={selected.includes(rule.id)} onChange={() => toggle(rule.id)} data-autofocus={i === 0 || undefined} />
-            <span><strong>{rule.label}</strong><small>Up to {rule.maxSeconds >= 60 ? `${rule.maxSeconds / 60} min` : `${rule.maxSeconds} s`}{rule.captionLimit !== null ? ` · caption ${rule.captionLimit}` : ''}</small></span>
-          </label>)}
+          {PLATFORM_RULES.map((rule, i) => {
+            const warnings = warningsFor(rule.id)
+            return <label className="platform-option" key={rule.id}>
+              <input type="checkbox" checked={selected.includes(rule.id)} onChange={() => toggle(rule.id)} data-autofocus={i === 0 || undefined}
+                aria-describedby={warnings.length ? `platform-warnings-${rule.id}` : undefined} />
+              <span>
+                <strong>{rule.label}</strong>
+                <small>Up to {rule.maxSeconds >= 60 ? `${rule.maxSeconds / 60} min` : `${rule.maxSeconds} s`}{rule.captionLimit !== null ? ` · caption ${rule.captionLimit}` : ''}</small>
+                {warnings.length > 0 && <span className="platform-warnings" id={`platform-warnings-${rule.id}`} data-testid={`platform-warnings-${rule.id}`}>
+                  {warnings.map((w) => <span key={w.message}>{w.message}</span>)}
+                </span>}
+              </span>
+            </label>
+          })}
         </fieldset>
-        {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.width} × {rule.height}. {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
+        {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
         <label className="field-label" htmlFor="platform-caption">Post caption and hashtags</label>
-        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts platform-issues" />
+        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts" />
         <p className="muted-sm platform-counts" id="platform-caption-counts">
           {PLATFORM_RULES.map((rule) => {
             if (!selected.includes(rule.id) || rule.captionLimit === null) return null
@@ -122,22 +130,17 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
             {coverSeconds !== null && version.cover && <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={useProjectCover} disabled={saving}>Use my cover</button>}
           </div>
         </div>
-        <label className="platform-option">
-          <input type="checkbox" checked={safeChecked} onChange={(e) => setSafeChecked(e.target.checked)} disabled={saving} />
-          <span>I checked subtitles and important details near the edges.<small>Platform buttons and captions can cover them. Exports fit inside a vertical frame without cropping or moving baked-in text.</small></span>
-        </label>
-        <div id="platform-issues">
-          {blocking.length > 0 && <ul className="platform-errors">{blocking.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
-          {warnings.length > 0 && <ul className="muted-sm platform-warnings">{warnings.map((c) => <li key={c.text}>{c.text}</li>)}</ul>}
-        </div>
         {error && <p className="platform-errors" role="alert">{error}</p>}
-        <div className="row platform-actions">
-          {saving
-            ? <button ref={stopButton} className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
-            : <button className="btn ghost" onClick={onClose}>Cancel</button>}
-          <button className="btn primary" onClick={() => void save()} disabled={saving || !ready} data-testid="export-selected">
-            {saving ? <><Spinner /> <span role="status">{status ?? 'Saving files'}</span></> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
-          </button>
+        <div className="platform-actions">
+          <p className="muted-sm" data-testid="platform-edges">Each app puts its buttons and the caption over the edges of the video. Check that your subtitles and other details stay clear.</p>
+          <div className="row">
+            {saving
+              ? <button ref={stopButton} className="btn ghost" disabled={!jobId} onClick={() => jobId && void reel.jobs.cancel(jobId)}>Stop export</button>
+              : <button className="btn ghost" onClick={onClose}>Cancel</button>}
+            <button className="btn primary" onClick={() => void save()} disabled={saving || !ready} data-testid="export-selected">
+              {saving ? <><Spinner /> <span role="status">{status ?? 'Saving files'}</span></> : selected.length ? `Export for ${selected.length} ${selected.length === 1 ? 'platform' : 'platforms'}` : 'Choose a platform'}
+            </button>
+          </div>
         </div>
         {version.draft && <p className="muted-sm">This is a preview. I will make the full-quality version before saving the platform files.</p>}
       </>}

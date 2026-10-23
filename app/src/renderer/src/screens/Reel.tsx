@@ -366,14 +366,21 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <Spinner /> Wait for this version to finish
             </p>
           )}
-          <button className="btn primary big export-btn" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export" title={job ? 'Wait for this version to finish' : undefined}>
-            <Icon name="upload" /> {exportLabel}
-          </button>
+          <div className="split-btn export-btn">
+            <button className="btn primary big" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export" title={job ? 'Wait for this version to finish' : undefined}>
+              <Icon name="upload" /> {exportLabel}
+            </button>
+            <MoreMenu
+              label="More ways to export"
+              icon="chevron-down"
+              triggerClassName="btn primary big"
+              testid="export-more"
+              disabled={!version || !!job}
+              items={[{ label: 'Other platforms…', run: () => setPlatformPicker(true), testid: 'export-platforms' }]}
+            />
+          </div>
           <button className="btn export-btn" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
             <Icon name="send" /> Send to my phone
-          </button>
-          <button className="btn ghost export-btn" onClick={() => setPlatformPicker(true)} disabled={!version || !!job} data-testid="export-platforms" title={job ? 'Wait for this version to finish' : undefined}>
-            Export for other platforms
           </button>
         </div>
 

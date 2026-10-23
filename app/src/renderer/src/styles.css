@@ -229,7 +229,7 @@ a { color: inherit; }
 /* Fixed phone column: adding version buttons never shifts the layout. */
 .reel { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 36px; align-items: start; }
 .reel-left { position: sticky; top: 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 340px; }
-.phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 340px); background: #111; border-radius: 40px; padding: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.18); position: relative; }
+.phone { width: clamp(220px, calc((100vh - var(--titlebar) - 250px) * 9 / 16 + 24px), 340px); background: #111; border-radius: 40px; padding: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.18); position: relative; }
 .phone-screen { width: 100%; aspect-ratio: 9 / 16; border-radius: 30px; overflow: hidden; background: #000; display: grid; place-items: center; position: relative; container-type: inline-size; }
 .phone-screen > video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; cursor: pointer; }
 .phone-screen > video.raw-video { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .12s; }
@@ -259,6 +259,11 @@ a { color: inherit; }
 .chip:hover { border-color: var(--ink-4); color: var(--ink); }
 .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
 .export-btn { width: 100%; max-width: 340px; }
+/* Export for Instagram plus a menu of other ways to export, as one control. */
+.split-btn { display: flex; }
+.split-btn > .btn { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-btn > .more { display: flex; }
+.split-btn > .more > .btn { padding: 0 14px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-color: rgba(255,255,255,.24); }
 .reel-right { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - var(--titlebar) - 40px); }
 .reel-right .panel + .panel { margin-top: 0; }
 .reel-head { display: flex; align-items: flex-end; gap: 8px; }
@@ -421,9 +426,11 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .platform-cover video { width: 90px; height: 160px; object-fit: contain; background: #000; border-radius: var(--radius-sm); flex: none; }
 .platform-errors { color: var(--red-ink); font-size: 14px; }
 .platform-export { display: contents; }
-.platform-actions { justify-content: flex-end; position: sticky; bottom: -28px; margin: 0 -28px -28px; padding: 14px 28px 28px; background: var(--bg); border-top: 1px solid var(--line); }
+.platform-actions { position: sticky; bottom: -28px; margin: 0 -28px -28px; padding: 14px 28px 28px; background: var(--bg); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.platform-actions > .row { justify-content: flex-end; }
+.platform-warnings { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; color: var(--amber-ink); font-size: 13px; }
 .platform-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
-.platform-counts .over { color: var(--red-ink); font-weight: 600; }
+.platform-counts .over { color: var(--amber-ink); font-weight: 600; }
 .platform-results { display: flex; flex-direction: column; gap: 20px; }
 .platform-result { display: flex; flex-direction: column; gap: 8px; }
 .platform-result .selectable { overflow-wrap: anywhere; }
@@ -462,7 +469,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 @media (max-width: 1180px) {
   .reel { grid-template-columns: 300px minmax(0, 1fr); gap: 26px; }
   .reel-left { width: 300px; }
-  .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 300px); }
+  .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 250px) * 9 / 16 + 24px), 300px); }
   .checklist.two { grid-template-columns: 1fr; }
   .page { padding-left: 28px; padding-right: 28px; }
 }
