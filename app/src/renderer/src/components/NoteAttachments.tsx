@@ -145,7 +145,7 @@ export function useNoteAttachments(slug: string, notify: Notify) {
 }
 
 /** Small thumbnail of one attached file: the still, plus "GIF" or the clip's length. */
-export function AttachmentThumb({ a, size = 'chip' }: { a: NoteAttachment; size?: 'chip' | 'bubble' }) {
+export function AttachmentThumb({ a, size = 'chip' }: { a: NoteAttachment; size?: 'chip' | 'bubble' | 'row' }) {
   const badge = chipBadge(a)
   return (
     <span className={`att-thumb ${size}`} title={a.name}>

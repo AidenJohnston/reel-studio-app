@@ -131,15 +131,16 @@ def take(args: list[str], flag: str) -> str | None:
     return None
 
 
-def load(proj: Path) -> dict:
-    return json.loads((proj / "project.json").read_text("utf-8"))
+def load(proj: Path, file: str | None = None) -> dict:
+    return json.loads((proj / (file or "project.json")).read_text("utf-8"))
 
 
-def save(proj: Path, data: dict) -> None:
+def save(proj: Path, data: dict, file: str | None = None) -> None:
     data["updatedAt"] = now()
-    tmp = proj / "project.json.tmp"
+    target = proj / (file or "project.json")
+    tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
-    os.replace(tmp, proj / "project.json")
+    os.replace(tmp, target)
 
 
 def cmd_init(args: list[str]) -> dict:
@@ -255,12 +256,16 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
 def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
-    data = load(proj)
+    file, out = take(args, "--project-file"), take(args, "--out")
+    data = load(proj, file)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
-    # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
+    # docs/versions.md: a draft goes to --out (default versions/preview/); only a final makes
+    # versions/vN/, starting afresh when an earlier attempt that was never saved left one there
     n = int(data.get("version", 0)) + 1
-    vdir = proj / "versions" / ("preview" if draft else f"v{n}")
+    vdir = (proj / out if out else proj / "versions" / "preview") if draft else proj / "versions" / f"v{n}"
+    if not draft:
+        shutil.rmtree(vdir, ignore_errors=True)
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / ".rendering").write_text("", "utf-8")
     src = data["sources"][0]
@@ -284,7 +289,7 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / ".rendering").unlink()
     if not draft:
         data["version"] = n
-        save(proj, data)
+        save(proj, data, file)
     progress("render", 100, "Done")
     return {"version": n, "path": str(vdir / name), "file": str(vdir / name), "draft": draft, "preview": draft,
             "versionDir": str(vdir)}
@@ -351,6 +356,7 @@ def main() -> int:
               "userMessage": "Reel Studio asked for something I do not know how to do."})
         return 1
     cmd, args = sys.argv[1], sys.argv[2:]
+    take(args, "--owner")       # the real engine checks it (reelengine/owner.py); the stand-in has no lock
     if os.environ.get("FAKE_ENGINE_FAIL") == cmd:
         emit({"event": "error", "code": "TEST_FAILURE", "message": "forced", "userMessage": "Test failure. Try again."})
         return 1

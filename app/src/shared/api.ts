@@ -16,6 +16,8 @@ export interface ProjectSummary {
   version: number
   thumbnail: string | null
   status: ScreenStatus
+  /** Notes waiting their turn (not counting one that is running). */
+  waiting: number
 }
 
 export interface VersionInfo {
@@ -76,6 +78,18 @@ export interface NoteAttachment {
   thumbUrl?: string
 }
 
+/** A note the creator sent. It runs, in order, on whatever version is newest when its turn comes;
+ * `seenVersion` is the version that was on screen when it was written. `id` is what project.json.notes
+ * saves it under. */
+export interface QueuedNote {
+  id: string
+  text: string
+  attachments: NoteAttachment[]
+  seenVersion: number
+  /** Set while its note job runs: `base` = the version it started from. */
+  attempt?: { base: number }
+}
+
 /** What came of attaching: the files that made it, and a plain message for each one that did not. */
 export interface AttachResult {
   attached: NoteAttachment[]
@@ -92,7 +106,12 @@ export interface ProjectDetail extends ProjectSummary {
   checklist: ChecklistItem[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
-  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null
+  /** Notes waiting their turn, in the order they will run. */
+  queue: QueuedNote[]
+  /** True: the queue waits for Resume (after Stop, a failed note, or a restart). */
+  queueHeld: boolean
+  /** `waitingForRender`: its render waits for another reel's (one render at a time); the bar holds. */
+  job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean; waitingForRender: boolean } | null
   /** A small picture for each b-roll item with an image file (broll id -> reel-media URL). Animations and
    * text-only items have none (the Pictures list names them in words instead of a file name). */
   brollThumbs: Record<string, string>
@@ -138,7 +157,8 @@ export interface ProjectJson {
   zooms?: unknown[]
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
-  notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** `id`: the queued note's id (docs/schema-changes.md) */
+  notes?: { id?: string; version: number; text: string; applied: string[]; at: string }[]
   [k: string]: unknown
 }
 
@@ -173,7 +193,7 @@ export type JobEvent = Ids &
      * history (main/progress.ts), null = too early to say. Status repeats about once a second while a job
      * runs (thinking kept), so a bar fed by `overall` never freezes. */
     /** overdue = past every estimate on the last step: show "Still working, almost there", no number. */
-    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean }
+    | { type: 'status'; message: string; pct: number; phase?: Phase; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean; waitingForRender: boolean }
     | { type: 'tool'; name: string; summary: string }
     /** video = a playable reel-media URL of a stable copy (never the file the engine overwrites next). */
     | { type: 'render'; version: number; draft: boolean; firstLook: boolean; video: string | null }
@@ -340,8 +360,9 @@ export interface ReelApi {
     create(files: string[]): Promise<{ slug: string; jobId: string; skipped: DropResult[] }>
     resume(slug: string): Promise<{ jobId: string }>
     /** jobId null = no AI connected: the note and a plain reply were added to the chat, nothing runs.
-     * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one). */
-    note(slug: string, text: string, attachments?: string[]): Promise<{ jobId: string | null }>
+     * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one).
+     * `onVersion`: the version on screen while it was written. queued = it waits its turn. */
+    note(slug: string, text: string, attachments?: string[], onVersion?: number): Promise<{ jobId: string | null; queued?: boolean }>
     update(slug: string, patch: Partial<ProjectJson>): Promise<ProjectDetail>
     /** `change`: what changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
      * `label`: what to call the work while it runs ("Updating your subtitles"). Render only, never the AI. */
@@ -362,8 +383,21 @@ export interface ReelApi {
     remove(slug: string, asset: string): Promise<void>
   }
   jobs: {
-    cancel(jobId: string): Promise<void>
+    /** `slug`: the video it runs on. If that job has already ended, its video's waiting notes are held. */
+    cancel(jobId: string, slug?: string): Promise<void>
     onEvent(cb: (e: JobEvent) => void): () => void
+  }
+  /** Notes waiting their turn on one reel (main/note-queue.ts). Only a note still waiting can change. */
+  queue: {
+    edit(slug: string, id: string, text: string): Promise<void>
+    cancel(slug: string, id: string): Promise<void>
+    /** -1 = one place earlier, 1 = one place later */
+    move(slug: string, id: string, by: -1 | 1): Promise<void>
+    /** Runs the waiting notes again, from the first, after Stop, a failed note or a restart. */
+    resume(slug: string): Promise<void>
+    clear(slug: string): Promise<void>
+    /** Something about a reel's queue changed. */
+    onChange(cb: (slug: string) => void): () => void
   }
   phone: {
     /** Start (or restart, e.g. on another network) the link for one exported video. */

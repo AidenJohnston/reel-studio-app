@@ -5,6 +5,10 @@
 // converts it if needed and writes it into <project>/work/assets/attach-* with a sidecar. Nothing the page
 // says about an attachment is trusted later: a note's refs are re-read from this project's own sidecars.
 //
+// New attachments go to the reel's staging folder (paths.ts noteStagingDir), even while idle, so a
+// job starting during attachment preparation cannot race a project write. Each file is copied
+// into the project by its own note's job (unstage).
+//
 // No `electron` import here (dialog and clipboard are passed in), so the logic is unit-tested in Node.
 import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs, realpathSync } from 'node:fs'
@@ -73,19 +77,59 @@ export function forChat(a: NoteAttachment): NoteAttachment {
   return rest
 }
 
-/** A note's refs, checked against this project's sidecars: at most four, no repeats, each real. */
-export async function checkNoteAttachments(dir: string, refs: unknown): Promise<NoteAttachment[]> {
+/** A note's refs, checked against this project's sidecars, else its staging folder's: at most four, no
+ * repeats, each real. */
+export async function checkNoteAttachments(dir: string, refs: unknown, staging?: string): Promise<NoteAttachment[]> {
   if (refs === undefined || refs === null) return []
   if (!Array.isArray(refs)) throw MISSING
   const uniq = [...new Set(refs.map((r) => (typeof r === 'string' ? r.replace(/\\/g, '/') : r)))]
   if (uniq.length > MAX_ATTACHMENTS_PER_NOTE) throw { code: 'TOO_MANY', userMessage: MSG.tooMany }
   const out: NoteAttachment[] = []
   for (const r of uniq) {
-    const a = await readSidecar(dir, r)
+    const a = (await readSidecar(dir, r)) ?? (staging ? await readSidecar(staging, r) : null)
     if (!a) throw MISSING
     out.push(a)
   }
   return out
+}
+
+const filesOf = (a: NoteAttachment): string[] => [a.asset, ...(a.thumb ? [a.thumb] : []), `${a.asset}.attach.json`]
+
+/** In the note's job, with the project owned: copies each attachment still only in staging into the
+ * project, sidecar last (readSidecar needs it), then deletes the staged copies. */
+export async function unstage(dir: string, staging: string, list: NoteAttachment[]): Promise<void> {
+  const moved: NoteAttachment[] = []
+  for (const a of list) {
+    if (await readSidecar(dir, a.asset)) {
+      moved.push(a)
+      continue
+    }
+    if (!(await readSidecar(staging, a.asset))) throw MISSING
+    for (const rel of filesOf(a)) {
+      const to = join(dir, ...rel.split('/'))
+      await fs.mkdir(dirname(to), { recursive: true })
+      await fs.copyFile(join(staging, ...rel.split('/')), to)
+    }
+    moved.push(a)
+  }
+  await dropStaged(staging, moved)
+}
+
+/** Deletes staged copies (a waiting note cancelled, or already copied into the project), except those
+ * `keep` still refers to. */
+export async function dropStaged(staging: string, list: NoteAttachment[], keep: NoteAttachment[] = []): Promise<void> {
+  const kept = new Set(keep.flatMap(filesOf))
+  for (const rel of list.flatMap(filesOf)) if (!kept.has(rel)) await fs.rm(join(staging, ...rel.split('/')), { force: true })
+}
+
+/** At startup: deletes staged files no waiting note or chat message refers to (attached, never sent). */
+export async function pruneStaging(staging: string, keep: NoteAttachment[]): Promise<void> {
+  const wanted = new Set(keep.flatMap(filesOf))
+  if (!wanted.size) return fs.rm(staging, { recursive: true, force: true })
+  for (const sub of ['work/assets', 'work/thumbs']) {
+    const names = await fs.readdir(join(staging, ...sub.split('/'))).catch(() => [] as string[])
+    for (const n of names) if (!wanted.has(`${sub}/${n}`)) await fs.rm(join(staging, ...sub.split('/'), n), { force: true })
+  }
 }
 
 /** Assets the video uses (an attachment there must not be deleted). */
@@ -139,6 +183,7 @@ export async function attachPaths(deps: AttachDeps, dir: string, files: { path: 
       out.attached.push(withThumbUrl(dir, a))
     } catch (e) {
       deps.log(`[attach] ${name}: ${(e as { code?: string })?.code ?? ''} ${(e as { message?: string })?.message ?? ''}`)
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') throw e
       out.errors.push(friendly(e))
     }
   }
@@ -185,50 +230,78 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** a job is running on this video (removing a file then could pull it from under the AI) */
-  busy: (slug: string) => boolean
+  /** Serialize attachment admission and removal with note admission and unstage. */
+  queue: <T>(slug: string, fn: () => Promise<T>, removing?: unknown) => Promise<T>
+  /** Project-file removal uses the same reservation as jobs and manual edits. */
+  reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
+  /** Throws while the video is kept closed, in the job lane's words (jobs.ts refuseIfKeptClosed): part
+   * of its engine may still be writing, so not even its staging folder takes a file. */
+  refuse: (slug: string) => void
+  stagingDir: (slug: string) => string
   /** the picture on the system clipboard (null = none) */
   clipboardImage: () => Promise<{ mime: string; bytes: Uint8Array } | null>
   /** Electron's file dialog (null = cancelled) */
   choose: (filters: { name: string; extensions: string[] }[]) => Promise<string[] | null>
 }
 
-const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-
-/** The project folder; refused while a job runs on it (a failed note puts work/assets back as it was,
- * which would take a file attached meanwhile with it). */
-async function projectOf(deps: AttachIpcDeps, slug: unknown): Promise<string> {
+/** The video and its folder; refused while it is kept closed. */
+function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: string } {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video.' }
   const dir = deps.projectDir(slug)
   if (!existsSync(join(dir, 'project.json'))) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video. It may have been moved or deleted.' }
-  if (deps.busy(slug)) throw BUSY
-  return dir
+  deps.refuse(slug)
+  return { slug, dir }
+}
+
+/** New attachments always enter staging, so a job cannot start between admission and the attachment write. */
+async function attachDir(deps: AttachIpcDeps, name: unknown): Promise<string> {
+  const { slug, dir } = projectOf(deps, name)
+  const staging = deps.stagingDir(slug)
+  await fs.mkdir(join(staging, 'work', 'assets'), { recursive: true })
+  // The engine requires project.json; startup uses the source path to identify orphaned staging.
+  await fs.writeFile(join(staging, 'project.json'), JSON.stringify({ sourceProject: dir }) + '\n')
+  return staging
 }
 
 export function registerAttachmentIpc(deps: AttachIpcDeps): void {
   deps.handle('notes:attachFiles', async (_e, slug: unknown, paths: unknown) => {
-    const dir = await projectOf(deps, slug)
-    const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
-    return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
+      return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:attachData', async (_e, slug: unknown, file: unknown) => {
-    const dir = await projectOf(deps, slug)
-    return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    })
   })
   deps.handle('notes:attachClipboard', async (_e, slug: unknown) => {
-    const dir = await projectOf(deps, slug)
-    const img = await deps.clipboardImage().catch(() => null)
-    if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
-    return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const img = await deps.clipboardImage().catch(() => null)
+      if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
+      return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    })
   })
   deps.handle('notes:chooseAttachment', async (_e, slug: unknown) => {
-    const dir = await projectOf(deps, slug)
-    const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
-    if (!picked?.length) return { attached: [], errors: [] }
-    return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
+      if (!picked?.length) return { attached: [], errors: [] }
+      return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    })
   })
-  deps.handle('notes:removeAttachment', async (_e, slug: unknown, asset: unknown) => {
-    const dir = await projectOf(deps, slug)
-    await removeAttachment(dir, asset, await deps.readProject(slug as string).catch(() => null))
+  deps.handle('notes:removeAttachment', async (_e, name: unknown, asset: unknown) => {
+    const slug = typeof name === 'string' ? name : String(name)
+    return deps.queue(slug, async () => {
+      const { dir } = projectOf(deps, name)
+      const staging = deps.stagingDir(slug)
+      if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
+      await deps.reserve(slug, async () => {
+        await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+      })
+    }, asset)
   })
 }

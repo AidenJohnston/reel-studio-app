@@ -2,9 +2,9 @@
 // project.json belongs to the engine and the AI. The app keeps its own small state
 // (chat history, running job, last error) in app.json next to it.
 import { existsSync, promises as fs } from 'node:fs'
-import { join, basename, extname, relative, isAbsolute } from 'node:path'
+import { join, basename, dirname, extname, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { BIN_FOLDERS, binDir, projectsDir, libraryDir, reelStudioRoot } from './paths'
+import { BIN_FOLDERS, binDir, noteStagingDir, projectsDir, libraryDir, reelStudioRoot } from './paths'
 import type {
   ChatMessage,
   ChecklistItem,
@@ -15,21 +15,28 @@ import type {
   ScreenStatus,
   VersionInfo,
   Word,
-  JobKind
+  JobKind,
+  QueuedNote
 } from '../shared/api'
 import { mediaUrl } from './media-url'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import { keptIds } from '../shared/cut'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
 
 export interface AppState {
   chat: ChatMessage[]
-  job: { id: string; kind: JobKind; startedAt: string; note?: string } | null
+  /** `noteId`: what a note job saves its note under in project.json.notes (its queue entry's id). */
+  job: { id: string; kind: JobKind; startedAt: string; note?: string; noteId?: string } | null
   status: ScreenStatus
   lastError: { code: string; userMessage: string } | null
   /** Title chosen at creation, shown until project.json exists. */
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** Notes sent and not yet saved in project.json, oldest first; the first may be running (main/note-queue.ts). */
+  queue?: QueuedNote[]
+  /** The queue waits for Resume: after Stop, a failed note, or a restart. */
+  queueHeld?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -118,10 +125,32 @@ export async function readJson<T>(path: string, fallback: T): Promise<T> {
  * On Windows a rename over a file that someone is reading fails with EPERM/EBUSY/EACCES for a few
  * milliseconds, so retry before giving up, and never leave the temp file behind.
  */
-export async function writeJson(path: string, data: unknown): Promise<void> {
+export async function writeJson(path: string, data: unknown, opts: { durable?: boolean } = {}): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  const text = JSON.stringify(data, null, 2) + '\n'
+  if (!opts.durable) await fs.writeFile(tmp, text, 'utf8')
+  else {
+    const fh = await fs.open(tmp, 'w')
+    try {
+      await fh.writeFile(text, 'utf8')
+      await fh.sync()
+    } finally {
+      await fh.close()
+    }
+  }
   await renameWithRetry(tmp, path)
+  if (opts.durable) await syncRename(path)
+}
+
+/** Flushes a rename to disk: the folder on macOS/Linux; Windows can't open a folder for this, so the
+ * renamed file itself is flushed, which writes its directory entry too. */
+async function syncRename(path: string): Promise<void> {
+  const fh = await fs.open(process.platform === 'win32' ? path : dirname(path), process.platform === 'win32' ? 'r+' : 'r')
+  try {
+    await fh.sync()
+  } finally {
+    await fh.close()
+  }
 }
 
 export async function renameWithRetry(from: string, to: string, tries = 40): Promise<void> {
@@ -164,8 +193,14 @@ export async function writeProject(slug: string, project: ProjectJson): Promise<
   await serialized(file, () => writeJson(file, project))
 }
 
+const STATE_UNREADABLE = { code: 'STATE_UNREADABLE', userMessage: 'I could not read this video\'s notes right now. Try again in a moment.' }
+
+/** Only a missing app.json is an empty one. One that can't be read or parsed throws: reading it as empty
+ * would make the next write erase the chat and the waiting notes. */
 async function readAppStateNow(file: string): Promise<AppState> {
-  const s = await readJson<Partial<AppState>>(file, {})
+  if (!existsSync(file)) return { ...EMPTY_STATE, chat: [] }
+  const s = await readJson<Partial<AppState> | null>(file, null)
+  if (!s || typeof s !== 'object' || Array.isArray(s)) throw STATE_UNREADABLE
   return { ...EMPTY_STATE, ...s, chat: s.chat ?? [] }
 }
 
@@ -175,12 +210,14 @@ export function readAppState(slug: string): Promise<AppState> {
   return serialized(file, () => readAppStateNow(file))
 }
 
-export function updateAppState(slug: string, fn: (s: AppState) => void): Promise<AppState> {
+/** `durable`: on disk before this resolves (fsync), for writes a creator was told happened (the note queue).
+ * A state holding queued notes is always flushed: every write replaces the copy that holds them. */
+export function updateAppState(slug: string, fn: (s: AppState) => void, opts: { durable?: boolean } = {}): Promise<AppState> {
   const file = join(projectDir(slug), 'app.json')
   return serialized(file, async () => {
     const s = await readAppStateNow(file)
     fn(s)
-    await writeJson(file, s)
+    await writeJson(file, s, { durable: opts.durable || !!s.queue?.length })
     return s
   })
 }
@@ -195,12 +232,14 @@ export async function addChat(
   attachments?: ChatMessage['attachments']
 ): Promise<void> {
   await updateAppState(slug, (s) => {
-    s.chat.push({
-      id: randomUUID(), from, text, at: new Date().toISOString(), version,
+    s.chat.push(stamp({
+      from, text, version,
       ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
-    })
+    }))
   })
 }
+
+export const stamp = (line: ChatLine): ChatMessage => ({ id: randomUUID(), at: new Date().toISOString(), ...line })
 
 // ---- versions ---------------------------------------------------------------------------------
 
@@ -209,12 +248,15 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
   let names: string[] = []
+  let saved: number
   try {
     names = await fs.readdir(vdir)
+    saved = Number(JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')).version) || 0
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
+  // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
+  // (a higher one is a note that was never saved). Drafts live in `versions/preview/`
   // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
@@ -232,7 +274,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > saved) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue
@@ -249,8 +291,9 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
 export const PREVIEW_DIR = 'preview'
 
 /**
- * Removes versions that never finished (crash or quit mid-render) and stray temp files.
- * A finished version has a video file and no `.rendering` marker.
+ * Removes versions that never finished (crash or quit mid-render, or a note that never saved its
+ * final) and stray temp files. A finished version has a video file, no `.rendering` marker, and a
+ * number project.json has saved. Runs only in the job lane or at startup, before any job.
  */
 export async function cleanPartialVersions(dir: string): Promise<string[]> {
   const removed: string[] = []
@@ -261,6 +304,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   } catch {
     return removed
   }
+  // a folder above project.json's version is a final no note or render ever saved (docs/versions.md)
+  const saved = await readJson<{ version?: number } | null>(join(dir, 'project.json'), null)
   for (const name of names) {
     // The engine's scratch previews (docs/versions.md) are the engine's to overwrite (review 31).
     if (name === PREVIEW_DIR) continue
@@ -276,6 +321,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
     }
     const finished =
       /^v\d+$/.test(name) &&
+      !(saved && Number(name.slice(1)) > (Number(saved.version) || 0)) &&
       VIDEO_NAMES.some((v) => existsSync(join(d, v))) &&
       !existsSync(join(d, '.rendering'))
     if (!finished) {
@@ -298,7 +344,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
  * to pick up where it left off.
  */
-export async function recoverInterrupted(): Promise<string[]> {
+export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
   let slugs: string[] = []
   try {
@@ -307,31 +353,59 @@ export async function recoverInterrupted(): Promise<string[]> {
     return recovered
   }
   for (const slug of slugs) {
-    let dir: string
     try {
-      dir = projectDir(slug)
+      projectDir(slug) // refuses a folder name that is not a project
     } catch {
       continue
     }
-    if (!existsSync(join(dir, 'app.json'))) continue
-    const s = await readAppState(slug)
-    if (!s.job) continue
-    await cleanPartialVersions(dir)
-    await updateAppState(slug, (st) => {
-      st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
-      if (st.status === 'ready' && st.job?.kind !== 'export') {
-        st.chat.push({
-          id: randomUUID(),
-          from: 'editor',
-          text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.',
-          at: new Date().toISOString()
-        })
-      }
-      st.job = null
-    })
-    recovered.push(slug)
+    if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
+    if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
   }
   return recovered
+}
+
+/**
+ * Ends a job app.json still records but nothing is running: the app quit or crashed during it, or the
+ * write that ends it failed. Runs at startup, before any job, and as the next job on that project
+ * begins, so a new job
+ * never replaces a marker whose note may already be saved. A note found saved in project.json (by its
+ * job id) gets its reply and questions; one that is not gets "send it again". While project.json
+ * cannot be read the marker stays for the next try: the note may be saved, and telling the creator
+ * to send it again would apply it twice.
+ */
+export async function settleInterrupted(slug: string): Promise<'settled' | 'unreadable' | 'nothing'> {
+  const dir = projectDir(slug)
+  if (!existsSync(join(dir, 'app.json'))) return 'nothing'
+  const s = await readAppState(slug).catch(() => null)
+  if (!s) return 'unreadable'
+  if (!s.job) return 'nothing'
+  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.noteId ?? s.job.id) : null
+  if (saved === UNREADABLE) return 'unreadable'
+  await cleanPartialVersions(dir)
+  // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
+  await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
+  await updateAppState(slug, (st) => {
+    st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
+    if (saved) {
+      const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
+      st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
+    } else if (st.queue?.some((q) => q.id === st.job?.noteId)) {
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. It is waiting below. Press Resume when you want it.' }))
+    } else if (st.status === 'ready' && st.job?.kind !== 'export') {
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.' }))
+    }
+    st.job = null
+  })
+  return 'settled'
+}
+
+interface SavedNote { id?: string; version: number; reply?: string; styleRulesAdded?: string[]; styleSuggestions?: string[] }
+const UNREADABLE = Symbol('unreadable')
+
+/** The note a job saved in project.json (ai/src/editor.ts applyNote), null when it is not there. */
+async function savedNote(dir: string, jobId: string): Promise<SavedNote | null | typeof UNREADABLE> {
+  const p = await readJson<{ notes?: SavedNote[] } | typeof UNREADABLE>(join(dir, 'project.json'), UNREADABLE)
+  return p === UNREADABLE ? p : (p.notes?.find((n) => n.id === jobId) ?? null)
 }
 
 // ---- transcript and cut ------------------------------------------------------------------------
@@ -438,11 +512,13 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
       updatedAt: now,
       version: 0,
       thumbnail: null,
-      status: st.job ? 'working' : st.status === 'ready' ? 'failed' : st.status
+      status: st.job ? 'working' : st.status === 'ready' ? 'failed' : st.status,
+      waiting: (st.queue ?? []).filter((q) => !q.attempt).length
     }
   }
   const versions = await listVersions(dir)
-  const st = await readAppState(slug)
+  // Home still lists a video whose app.json can't be read right now; opening it says so
+  const st = await readAppState(slug).catch((): AppState => ({ ...EMPTY_STATE, chat: [] }))
   const last = versions[versions.length - 1]
   const status: ScreenStatus = st.job
     ? 'working'
@@ -459,7 +535,8 @@ export async function summary(slug: string): Promise<ProjectSummary | null> {
     updatedAt: p.updatedAt,
     version: last?.n ?? 0,
     thumbnail: last?.cover ?? null,
-    status
+    status,
+    waiting: (st.queue ?? []).filter((q) => !q.attempt).length
   }
 }
 
@@ -492,6 +569,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
+  const thumb = (a: NoteAttachment): NoteAttachment => attachmentThumb(slug, a)
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
@@ -519,11 +597,19 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
-    chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
+    chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map(thumb) } : m)),
     lastError: st.lastError,
-    job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false } : null,
+    queue: (st.queue ?? []).map((q) => ({ ...q, attachments: q.attachments.map(thumb) })),
+    queueHeld: !!st.queueHeld,
+    job: st.job ? { id: st.job.id, kind: st.job.kind, message: 'Working on it', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, waitingForRender: false } : null,
     aiEdited: !!st.aiEdited
   }
+}
+
+/** A file attached while a job ran stays in staging until its note runs (attachments.ts). */
+function attachmentThumb(slug: string, a: NoteAttachment): NoteAttachment {
+  const t = chatThumb(projectDir(slug), a)
+  return t.thumbUrl ? t : chatThumb(noteStagingDir(projectDir(slug)), a)
 }
 
 function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {
