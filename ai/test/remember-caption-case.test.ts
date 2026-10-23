@@ -172,6 +172,9 @@ describe('My style cannot widen what the caption tool allows', () => {
     await ai().updateStyleRule(rule.id, { text: 'use lowercase captions for tutorials' });
     expect((await ai().styleRules())[0]).toMatchObject({ text: 'Use lowercase captions for tutorials.' });
     expect((await ai().styleRules())[0].payload).toBeUndefined();
+    // the old question's buttons survived a crash: Yes on it must not say the app makes new videos lowercase
+    expect(await ai().approveStyleProposal(r.styleProposal!)).toMatchObject({ status: 'exists', rule: { text: 'Use lowercase captions for tutorials.' } });
+    expect(await ai().styleRules()).toHaveLength(1);
     const next = await newVideo(dir);
     await ai().firstEdit(next, () => undefined);
     expect(await caseOf(next)).not.toBe('lower');

@@ -152,7 +152,9 @@ export class StyleStore {
       const data = await this.read();
       if (data.forgotten?.includes(p.id)) return { status: 'forgotten' };
       const same = data.rules.find((r) => r.consent?.proposal === p.id);
-      if (same) return { status: 'saved', rule: same };
+      // Edited to new words since the Yes, the rule is a sentence the AI reads, so "Saved" would promise lowercase
+      // videos the app no longer makes.
+      if (same) return { status: isCaptionCase(same.payload) ? 'saved' : 'exists', rule: same };
       const typed = data.rules.find((r) => isCaptionCase(r.payload));
       if (typed) return { status: 'exists', rule: typed };
       const at = new Date().toISOString();

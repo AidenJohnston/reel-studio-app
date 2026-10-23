@@ -43,7 +43,7 @@ export function MyStyle() {
       <div className="page-head">
         <div>
           <h1>My style</h1>
-          <p className="muted">Things you told me to always do. I use them on every video.</p>
+          <p className="muted">Things you told me to always do. I follow these when I edit your videos.</p>
         </div>
       </div>
       {damaged && (

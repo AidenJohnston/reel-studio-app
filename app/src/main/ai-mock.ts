@@ -270,7 +270,8 @@ export const createMockAI: CreateAI = ({ host }) => {
     async approveStyleProposal(proposal) {
       return withStyle(async (s) => {
         if (s.forgotten?.includes(proposal.id)) return { status: 'forgotten' as const }
-        if (s.rules.some((r) => r.consent?.proposal === proposal.id)) return { status: 'saved' as const }
+        const same = s.rules.find((r) => r.consent?.proposal === proposal.id)
+        if (same) return { status: same.payload ? ('saved' as const) : ('exists' as const) }
         if (s.rules.some((r) => r.payload)) return { status: 'exists' as const }
         const at = new Date().toISOString()
         const rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: proposal.payload, source: proposal.source, consent: { proposal: proposal.id, at } }

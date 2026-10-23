@@ -63,6 +63,15 @@ describe('My style in the stand-in AI', () => {
     ])
   })
 
+  it('Yes again after the typed rule got new words says it is already there, not that new videos go lowercase', async () => {
+    const { ai } = standIn()
+    await ai.approveStyleProposal!(proposal)
+    const [rule] = await ai.styleRules()
+    await ai.updateStyleRule!(rule.id, { text: 'use lowercase captions for tutorials' })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'exists' })
+    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ payload: expect.anything() })])
+  })
+
   it('a lowercase note from a person whose AI package failed to load is kept as a note and changes nothing', async () => {
     // no REELSTUDIO_MOCK_CLAUDE and nothing chosen in Settings: how a real person meets the stand-in
     const { ai, root } = standIn()
