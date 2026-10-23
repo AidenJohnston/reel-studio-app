@@ -365,6 +365,21 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
   }
 }
 
+/** The reply to a note whose edit ended where it started (applyNote). */
+const UNDONE_REPLY = "That left your video the same as before, so I didn't make a new version.";
+
+/** A finished `vN/export.mp4` exists: the rule app/src/main/store.ts listVersions uses to hide the preview. */
+async function hasFinishedVersion(projectDir: string): Promise<boolean> {
+  const vdir = path.join(projectDir, 'versions');
+  for (const name of await fsp.readdir(vdir).catch(() => [] as string[])) {
+    if (!/^v\d+$/.test(name)) continue;
+    const done = await fsp.access(path.join(vdir, name, 'export.mp4')).then(() => true, () => false);
+    const rendering = await fsp.access(path.join(vdir, name, '.rendering')).then(() => true, () => false);
+    if (done && !rendering) return true;
+  }
+  return false;
+}
+
 /** What a note says in notes.md: its words, or what was attached when it has none. */
 function noteLabel(note: string, attached: AttachmentInfo[]): string {
   if (note.trim()) return note.trim();
@@ -424,12 +439,22 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     const undone = ctx.state.changed.size > 0 && sameEdit(p0, await loadProject(projectDir));
-    if ((!ctx.state.changed.size || undone) && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about. An edit that ends
-      // where it started (undone, or set to what it already was) is no change: never repeat its claim.
-      const reply = undone && !r.finished?.trim().endsWith('?') ? 'That leaves your video the same as before, so I did not make a new version.' : r.finished;
+    if (undone && !ctx.state.styleRulesAdded.length) {
+      // An edit that ends where it started (undone, or set to what it already was) is no change: never
+      // repeat its claim, make no version, and keep the attempt in the notes with no version.
+      // While no vN exists the app plays versions/preview/draft.mp4, which this run's render_draft
+      // overwrote with the discarded edit: put the restored edit back there.
+      if (ctx.state.renders.some((x) => x.draft) && !(await hasFinishedVersion(projectDir))) await doRender(ctx, true);
+      const p = await loadProject(projectDir);
+      p.notes = [...(p.notes ?? []), { text: note.trim(), applied: [], at: new Date().toISOString(), ...(refs.length ? { attachments: refs } : {}) }];
+      await saveProject(projectDir, p);
+      const summary = r.finished?.trim().endsWith('?') ? r.finished : UNDONE_REPLY;
+      return { summary, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [] };
+    }
+    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
+      // nothing to render: a proposed rule still goes back to the app to ask about
       return {
-        summary: reply || 'I looked, but I was not sure what to change. Could you say it another way?',
+        summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
         version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
       };
     }

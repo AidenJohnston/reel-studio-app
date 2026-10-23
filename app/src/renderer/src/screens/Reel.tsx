@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
-import { describeFacts, versionMessage } from '../../../shared/describe'
+import { versionTooltip } from '../../../shared/describe'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
@@ -349,7 +349,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   aria-checked={v.n === version?.n}
                   className={`chip${v.n === version?.n ? ' active' : ''}`}
                   onClick={() => setSelected(v.n)}
-                  title={v.facts && versionMessage(v.n, describeFacts(v.facts, d.words))}
+                  title={versionTooltip(v, d.chat, d.words)}
                 >
                   {v.n === 0 ? 'Preview' : `Version ${v.n}`}
                 </button>
