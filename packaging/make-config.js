@@ -23,6 +23,12 @@ if (missing.length) {
   console.error('make-config: these environment variables must be set: ' + [...new Set(missing)].join(', '))
   process.exit(1)
 }
+const repo = fs.readFileSync(path.join(here, '..', 'app', 'src', 'shared', 'config.ts'), 'utf8').match(/RELEASES_REPO = '([^/']+)\/([^']+)'/)
+if (!repo) {
+  console.error('make-config: RELEASES_REPO not found in app/src/shared/config.ts')
+  process.exit(1)
+}
+out += `\npublish:\n  provider: github\n  owner: ${repo[1]}\n  repo: ${repo[2]}\n  releaseType: release\n`
 const afterPack = path.join(here, 'after-pack.js').replace(/[\\]/g, '/')
 out += `\nafterPack: ${afterPack}\n`
 const dir = path.join(here, '.build')

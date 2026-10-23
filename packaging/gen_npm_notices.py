@@ -21,9 +21,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).resolve().parent / "licenses" / "npm-licenses.txt"
 BUNDLED_FRONTEND = ["react", "react-dom", "scheduler"]
-ALLOWED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD", "CC0-1.0"}
+# BlueOak-1.0.0 (sax) and Python-2.0 (argparse) come with electron-updater; both are permissive, OSI-approved
+# licences that only ask for their notice to be kept, which npm-licenses.txt does.
+ALLOWED = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD", "CC0-1.0", "BlueOak-1.0.0", "Python-2.0"}
 # Packages whose npm tarball carries no licence file: (SPDX shown, file to use instead).
-NO_FILE = {"standardwebhooks": "licenses/npm-extra/standardwebhooks-LICENSE.txt"}
+NO_FILE = {"standardwebhooks": "licenses/npm-extra/standardwebhooks-LICENSE.txt", "lazy-val": "licenses/npm-extra/lazy-val-LICENSE.txt"}
 
 
 def walk(node: dict, seen: set) -> None:
