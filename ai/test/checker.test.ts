@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { problemTextIssue } from '../src/checker';
 import {
   AIError, approxOutputTimes, CompletionRequest, CompletionResponse, createAI, EditFact, EngineProgress, loadProject, ModelProvider, Project, saveProject,
 } from '../src';
@@ -305,4 +306,39 @@ it("fails if a checker sentence the creator will read runs past two sentences or
   // a refused second reply ends the check; a kept one would have run a repair
   expect(r.check?.verdict).toBe('error');
   expect(r.summary).toBe('I cut the flour part.');
+});
+
+it("fails if a check after a repair whose own preview failed looks at the preview from before the repair", async () => {
+  const { dir, host } = await noteProject();
+  const arm = failNextDraft(host);
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    () => { arm(); return [call('set_caption_style', { size: 90 }), call('render_draft')]; },
+    [call('finish', { summary_for_user: 'I cut the flour part and made the captions bigger.' })],
+  ], [fix('The captions are hard to read.', 'Make the captions bigger.'), pass()]);
+  await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(model.checkerRequests).toHaveLength(2);
+  expect(text(model.checkerRequests[1])).toContain('captions.style');
+});
+
+it('fails if a repair that ends with the edit unchanged keeps the picture it downloaded', async () => {
+  const { dir, host } = await noteProject();
+  host.engineAssets = true;
+  const model = new Roles([
+    [CUT, call('render_draft')],
+    [call('finish', { summary_for_user: 'I cut the flour part.' })],
+    [call('fetch_image', { url: 'https://example.com/flour.png', name: 'flour' })],
+    [call('finish', { summary_for_user: 'I could not place the picture.' })],
+  ], [fix('There is no picture of the flour.', 'Add a picture of flour.')]);
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  expect(r.check).toMatchObject({ verdict: 'unresolved', repairs: 1 });
+  expect(fs.existsSync(path.join(dir, 'work', 'assets', 'flour.png'))).toBe(false);
+});
+
+it("fails if the creator-facing check refuses ordinary words, or lets the editor's words through", () => {
+  expect(problemTextIssue('Use an iPhone photo at 0:05, like the bread one. TikTok crops the edges.')).toBeNull();
+  expect(problemTextIssue('The flour line at w27 is still there.')).not.toBeNull();
+  expect(problemTextIssue('set_cut left the flour line in.')).not.toBeNull();
+  expect(problemTextIssue('The captions.style size changed.')).not.toBeNull();
 });

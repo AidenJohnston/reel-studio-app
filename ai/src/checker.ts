@@ -33,8 +33,8 @@ export function problemTextIssue(problem: string): string | null {
   const t = problem.trim();
   if (t.length > MAX_PROBLEM_CHARS) return `at most ${MAX_PROBLEM_CHARS} characters`;
   if ((t.match(/[.!?]+(\s|$)/g) ?? []).length > MAX_PROBLEM_SENTENCES) return `at most ${MAX_PROBLEM_SENTENCES} sentences`;
-  // word ids (w12) and tool or field names (set_cut, captions.style, gapCap) are the editor's words, not the creator's
-  if (/\bw\d+\b|\b[a-z]+_[a-z_]+\b|\b[a-z]+\.[a-z]+\b|\b[a-z]+[A-Z][a-zA-Z]*\b/.test(t)) return 'plain words only: no word ids, tool names or field names';
+  // word ids (w12), tool names (set_cut) and project.json paths (captions.style, cut.gapCap) are the editor's words
+  if (/\bw\d+\b|\b[a-z]+_[a-z_]+\b|\b(cut|captions|music|broll|zooms|cover|post|sources|notes)\.[a-zA-Z]/.test(t)) return 'plain words only: no word ids, tool names or field names';
   return null;
 }
 

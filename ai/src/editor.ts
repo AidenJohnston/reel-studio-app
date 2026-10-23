@@ -366,17 +366,25 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     const changed = new Set(ctx.state.changed);
     const [rules, saved, proposed] = [ctx.state.styleRuleIds.length, ctx.state.styleRulesAdded.length, ctx.state.styleSuggestions.length];
     const said = summary;
+    const renders = ctx.state.renders.length;
     undoRepair = async () => {
       await rollbackNote(deps, ctx.projectDir, before, assets, { ...ctx.state, styleRuleIds: ctx.state.styleRuleIds.slice(rules) });
       ctx.state.styleRuleIds.splice(rules); ctx.state.styleRulesAdded.splice(saved); ctx.state.styleSuggestions.splice(proposed);
       ctx.state.changed = changed;
+      // a failed final render falls back to the last preview: never one of the undone repair
+      ctx.state.renders.splice(renders);
+      ctx.project = await loadProject(ctx.projectDir);
       summary = said;
     };
     ctx.state.finished = null;
     try {
       const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes), ctx, onEvent, signal,
         maxSteps: REPAIR_STEPS, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-      if (sameEdit(p0, await loadProject(ctx.projectDir))) return done('unresolved');
+      if (sameEdit(p0, await loadProject(ctx.projectDir))) {
+        // the edit is as it was, but a download or a saved rule may not be
+        await undoRepair();
+        return done('unresolved');
+      }
       if (r.finished) summary = r.finished;
     } catch (e: any) {
       if (signal?.aborted) throw e;
