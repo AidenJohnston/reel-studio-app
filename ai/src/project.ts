@@ -167,15 +167,17 @@ export async function writeFileAtomic(file: string, data: string | Buffer, mode?
   } finally {
     await fh.close();
   }
+  // About 7 s in all, the same as the app's renameWithRetry (app/src/main/store.ts). The old 0.9 s was too short for a
+  // Windows tester's program holding My style.json open; how long antivirus or sync tools really hold a file is unmeasured.
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt <= 40; attempt++) {
     try {
       await fsp.rename(tmp, file);
       return;
     } catch (err: any) {
       lastErr = err;
-      if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) break;
-      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+      if (attempt === 40 || !['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) break;
+      await new Promise((r) => setTimeout(r, Math.min(250, 10 + attempt * 10)));
     }
   }
   await fsp.rm(tmp, { force: true });
