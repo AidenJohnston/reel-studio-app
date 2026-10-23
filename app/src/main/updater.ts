@@ -58,6 +58,9 @@ export function createUpdater(d: UpdaterDeps) {
   let snoozeEnd: ReturnType<typeof setTimeout> | null = null
   // A persisted notice has no electron-updater download target until its release is checked again.
   let fresh = false
+  // electron-updater hands back its cached file while its SHA-512 still matches the feed, so downloading a release
+  // whose file failed verify() again would fail the same way. Until the app restarts, that release opens its page.
+  let rejected: string | null = null
 
   const set = (next: UpdateState): void => {
     state = { ...next, snoozed: isSnoozed(dismissed, next, d.now()) }
@@ -81,8 +84,9 @@ export function createUpdater(d: UpdaterDeps) {
       const url = allowedReleaseUrl(found.releaseUrl) ?? pageFor(`v${found.version}`)
       const { notes, older } = notesSince(all, d.version)
       const downloaded = state.downloadedVersion === found.version
+      const page = pageOnly || found.version === rejected
       set({
-        ...state, status: downloaded ? 'downloaded' : 'available', mode: downloaded ? state.mode : pageOnly ? 'page' : d.mode, availableVersion: found.version,
+        ...state, status: downloaded ? 'downloaded' : 'available', mode: downloaded ? state.mode : page ? 'page' : d.mode, availableVersion: found.version,
         downloadedVersion: downloaded ? found.version : null, releaseNotes: notes, olderNotes: older, releases,
         releaseUrl: url, downloadPercent: downloaded ? 100 : null, message: null, errorContext: null
       })
@@ -95,7 +99,7 @@ export function createUpdater(d: UpdaterDeps) {
       remember(state.status === 'up-to-date' ? { updateLatest: null, updateHistory: releases } : { updateHistory: releases })
       d.log('[update] up to date')
     }
-    fresh = found !== null && !pageOnly
+    fresh = found !== null && !pageOnly && found.version !== rejected
   }
   const enabled = (): boolean => d.disabledReason === null && d.backend !== null
 
@@ -253,10 +257,15 @@ export function createUpdater(d: UpdaterDeps) {
       try {
         await d.backend!.verify()
       } catch (e) {
-        // The file itself is wrong (or gone): offer a fresh download instead of retrying the same install.
+        // The file itself is wrong (or gone), and a new download would return the same cached file.
+        const version = state.downloadedVersion!
         active = null
         fresh = false
-        set({ ...state, status: 'error', downloadedVersion: null, downloadPercent: null, message: 'The downloaded update did not pass its check. Download it again.', errorContext: 'download' })
+        rejected = version
+        set({
+          ...state, status: 'error', mode: 'page', availableVersion: version, downloadedVersion: null, downloadPercent: null, errorContext: 'download',
+          message: `The downloaded update did not pass its check, so it was not installed. Get Reel Studio ${version} from its download page instead.`
+        })
         d.log(`[update] downloaded update rejected: ${why(e)}`)
         start()
         return { accepted: true, state }
@@ -330,8 +339,8 @@ export async function menuCheckForUpdates(
       type: 'info',
       title: 'Update available',
       message: `Reel Studio ${v} is available`,
-      detail: page ? 'Download opens its page in your browser.' : 'It downloads in the background. When it is done, restart from the update button in the sidebar.',
-      buttons: ['Download', 'Not now'],
+      detail: page ? 'Its download page opens in your browser.' : 'It downloads in the background. When it is done, restart from the update button in the sidebar.',
+      buttons: [page ? 'Open download page' : 'Download', 'Not now'],
       defaultId: 0,
       cancelId: 1
     })
