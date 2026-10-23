@@ -97,13 +97,27 @@ function isRecord(v: any): v is FrozenAsset {
 }
 /** Lines that do not parse are skipped wherever they are: a crash mid-append leaves a torn line,
  * and the next append (which starts on a fresh line) turns it into a middle line. */
-export async function readAssets(store: AssetStore): Promise<FrozenAsset[]> {
-  let text: string;
-  try { text = await fs.readFile(file(store, LEDGER), 'utf8'); }
-  catch (e) { if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return []; throw e; }
+function parseRecords(text: string): FrozenAsset[] {
   return text.split('\n').flatMap((line) => {
     try { const r = JSON.parse(line); return isRecord(r) ? [r] : []; } catch { return []; }
   });
+}
+async function ledgerBuffer(store: AssetStore): Promise<Buffer | null> {
+  try { return await fs.readFile(file(store, LEDGER)); }
+  catch (e) { if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return null; throw e; }
+}
+export async function readAssets(store: AssetStore): Promise<FrozenAsset[]> {
+  const buf = await ledgerBuffer(store);
+  return buf ? parseRecords(buf.toString('utf8')) : [];
+}
+/** Frozen files that only records past the first `offset` ledger bytes use: what a failed note froze.
+ * A file an earlier record also uses (same hash, so same path) stays. */
+export async function frozenSince(store: AssetStore, offset: number | null): Promise<string[]> {
+  const buf = await ledgerBuffer(store);
+  if (!buf) return [];
+  const at = Math.min(offset ?? 0, buf.length);
+  const kept = new Set(parseRecords(buf.subarray(0, at).toString('utf8')).map((r) => r.sha256));
+  return [...new Set(parseRecords(buf.subarray(at).toString('utf8')).filter((r) => !kept.has(r.sha256)).map((r) => r.committedPath))];
 }
 async function appendRecord(store: AssetStore, asset: FrozenAsset): Promise<void> {
   const handle = await fs.open(file(store, LEDGER, true), 'a+');

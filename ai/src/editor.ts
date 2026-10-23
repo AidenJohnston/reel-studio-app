@@ -7,7 +7,7 @@ import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
-import { LEDGER } from './assets';
+import { LEDGER, frozenSince, removeFiles } from './assets';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
@@ -144,9 +144,13 @@ const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGE
 async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
   await removeStyleRules(deps, state);
+  // read before the ledger goes: the loop below keeps a frozen/ folder that existed before the note
+  const store = { projectDir, root: projectDir };
+  const frozenByNote = await frozenSince(store, ledgerBefore).catch(() => []);
   for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
+  await removeFiles(store, frozenByNote);
   if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
 }
 

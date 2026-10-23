@@ -51,7 +51,7 @@ async function commit(ctx: ToolContext, candidateId: string) {
 }
 const place = (asset: string) => ({ anchor: { from: 'w29', to: 'w30' }, treatment: 'side-card', asset, animation: null, params: {} });
 const FROZEN = /^work\/assets\/frozen\/(image|logo)\/[0-9a-f]{64}\.png$/;
-async function ledger(dir: string) {
+async function ledgerRecords(dir: string) {
   return (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
 }
 /** a picture fetch_image saved earlier, with no resolve_asset commit */
@@ -208,13 +208,13 @@ describe('frozen image assets', () => {
     const pop = await executeTool(ctx, 'add_broll', { ...place(''), anchor: { from: 'w48', to: 'w52' }, asset: null,
       animation: { template: 'logo-pop', params: { image: loaf, text: 'Loaf' } } });
     expect(pop.isError, pop.content).toBe(false);
-    expect(String(host.animations[0].params.image).endsWith(path.normalize((await ledger(dir))[2].committedPath))).toBe(true);
+    expect(String(host.animations[0].params.image).endsWith(path.normalize((await ledgerRecords(dir))[2].committedPath))).toBe(true);
 
-    expect((await ledger(dir)).map((a) => [a.provenance.intent, a.source, a.rightsConfidence, a.kind])).toEqual([
+    expect((await ledgerRecords(dir)).map((a) => [a.provenance.intent, a.source, a.rightsConfidence, a.kind])).toEqual([
       [local, 'library', 'user-owned', 'image'], [loaf, 'library', 'user-owned', 'image'], [loaf, 'library', 'user-owned', 'logo'],
     ]);
     expect(host.calls.filter((c) => c.command === 'inspect-image')).toEqual([]);
-    expect((await loadProject(dir)).broll[0].asset).toBe((await ledger(dir))[1].committedPath);
+    expect((await loadProject(dir)).broll[0].asset).toBe((await ledgerRecords(dir))[1].committedPath);
   });
 
   it('fails if a provider whose dispose throws leaves the run\'s candidate stills behind', async () => {
@@ -237,7 +237,7 @@ describe('frozen image assets', () => {
     const replay = new ReplayProvider(fixture);
     await runAgent({ provider: replay, system: 's', task: 't', ctx: again.ctx, onEvent: () => undefined });
     expect(replay.remaining).toBe(0);
-    expect((await loadProject(again.dir)).broll.map((b) => b.asset)).toEqual([(await ledger(again.dir))[0].committedPath]);
+    expect((await loadProject(again.dir)).broll.map((b) => b.asset)).toEqual([(await ledgerRecords(again.dir))[0].committedPath]);
   });
 
   it('fails if a request leaves uncommitted downloads or stills behind, or deletes a picture it did not download', async () => {
@@ -314,6 +314,25 @@ describe('frozen image assets', () => {
     const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
     await expect(ai.applyNote(dir, 'show the bread', () => undefined)).rejects.toThrow();
     expect(await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).toBe(ledger);
+    // the note froze the same bytes as the earlier record, so that file is still the earlier record's
+    for (const r of withRecord ? await ledgerRecords(dir) : []) expect(await fs.readFile(path.join(dir, r.committedPath))).toEqual(tinyPng());
+  });
+
+  it('fails if a failed note leaves a picture it froze inside a frozen folder that already existed', async () => {
+    const { ctx, dir, root, host, local } = await setup();
+    const earlier = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const loaf = 'Library/Images/loaf.png';
+    await fs.writeFile(path.join(root, loaf), tinyPng([200, 160, 90]));
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { ...place(loaf), anchor: { from: 'w48', to: 'w52' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added the loaf.' })] },
+    ]);
+    host.failRender = true;
+    const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+    await expect(ai.applyNote(dir, 'show the loaf', () => undefined)).rejects.toThrow();
+    const frozen = path.join(dir, 'work/assets/frozen/image');
+    expect(await fs.readdir(frozen)).toEqual([path.basename(earlier.committedPath)]);
+    expect((await ledgerRecords(dir)).map((r) => r.assetId)).toEqual([earlier.assetId]);
   });
 
   // Windows ignores POSIX modes, so chmod cannot make work/assets unreadable there; Linux and macOS cover it.

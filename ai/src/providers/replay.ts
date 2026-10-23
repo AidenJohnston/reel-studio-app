@@ -24,8 +24,10 @@ const isRef = (v: unknown): v is ResultRef => !!v && typeof v === 'object' && !A
 function toolResults(messages: CompletionRequest['messages']) {
   return messages.flatMap((m) => (m.role === 'tool' ? m.results : []));
 }
+/** A tool result's JSON. Its first line only: the agent appends "(earlier images removed)" to old results
+ * (pruneImages), and JSON.stringify never writes a raw newline. */
 function parsed(content: string): unknown {
-  try { return JSON.parse(content); } catch { return undefined; }
+  try { return JSON.parse(content.split('\n')[0]); } catch { return undefined; }
 }
 function findPath(v: unknown, want: string, at: string[] = []): string[] | null {
   if (v === want) return at;
@@ -36,10 +38,11 @@ function findPath(v: unknown, want: string, at: string[] = []): string[] | null 
   }
   return null;
 }
-/** Recording: a minted string found in an earlier result becomes a ResultRef (newest result first). */
+/** Recording: a minted string becomes a ResultRef to the first result that holds it, the call that minted
+ * it. A later copy (list_assets, a commit echoing its candidate) can be in a different order on replay. */
 export function refsForMinted(args: unknown, messages: CompletionRequest['messages']): unknown {
   if (typeof args === 'string' && MINTED.test(args)) {
-    for (const r of toolResults(messages).reverse()) {
+    for (const r of toolResults(messages)) {
       const at = findPath(parsed(r.content), args);
       if (at) return { $result: r.callId, path: at.join('.') } satisfies ResultRef;
     }
