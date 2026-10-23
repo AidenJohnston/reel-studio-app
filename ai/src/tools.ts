@@ -4,9 +4,9 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
+  captionsUnderInstagram, nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -717,6 +717,11 @@ const PARAMS = S.obj({
   style: S.opt(S.enum(['pop', 'label'], 'text-pop look: label = dark words on a white box, as written (the hook title, a step label "2: Editing"); pop = big outlined capitals (one key word or number). Default pop')),
 });
 
+// What sets a caption look in Edit it myself apart (app/src/shared/caption-presets.ts). Size, Position, Colour
+// and the colour of the spoken word fine-tune a look; turning the highlight on or off changes it.
+const captionLook = (st: CaptionStyle): string =>
+  JSON.stringify([!!st.box, !!st.pop, !!st.highlight, st.case ?? null, st.maxWords ?? null, st.outline ?? null, st.outlineColor ?? null]);
+
 const tools: ToolDef[] = [
   {
     name: 'get_project',
@@ -766,21 +771,39 @@ const tools: ToolDef[] = [
     description: 'Change caption look. Pass null for anything you are not changing.',
     parameters: S.obj({
       enabled: S.opt(S.bool()),
-      preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
+      preset: S.opt(S.str('leave null: the name of the look the person picked in Edit it myself; it does not change how captions are drawn')),
       size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80')),
       maxWords: S.opt(S.int('words per caption chunk, 1-4')),
       case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
       color: S.opt(S.str('hex color like #FFFFFF')),
-      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
+      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
+      highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
+      pop: S.opt(S.bool()),
     }),
     async run(ctx, args) {
+      let warning: string | null = null;
       await mutate(ctx, 'captions', (p) => {
+        const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
+        const underBefore = shownUnder();
+        if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
-        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position']) {
-          if (args[k] !== null && args[k] !== undefined) (p.captions.style as any)[k] = args[k];
+        const style = p.captions.style;
+        const before = captionLook(style);
+        // sizePicked means the person picked this size in Edit it myself; a note that changes it makes it the AI's
+        if (args.size != null && args.size !== style.size) delete style.sizePicked;
+        for (const k of ['preset', 'size', 'maxWords', 'case', 'color', 'position', 'highlight', 'pop']) {
+          if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
+        if (args.highlight === 'none') delete style.highlight;
+        // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
+        // and without it the picker matches the look by its fields.
+        if (captionLook(style) !== before) delete style.preset;
+        // The person may post elsewhere, so a position in Instagram's bottom band is allowed. When a change of size or
+        // position leaves shown captions there, or turns them on there, the model is told so it can pass it on.
+        const under = shownUnder();
+        if (under && under !== underBefore) warning = `${under} Tell the person this in one plain sentence.`;
       });
-      return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };
+      return { content: { ok: true, captions: ctx.project!.captions, ...(warning ? { warning } : {}) }, summary: 'Adjusted the captions' };
     },
   },
   {
