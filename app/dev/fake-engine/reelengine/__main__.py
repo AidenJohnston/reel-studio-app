@@ -7,6 +7,7 @@ transcribe: the transcript is placeholder words spread over the take.
 Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
+  FAKE_ENGINE_SLOW_RENDER=<seconds>   a full-quality render waits this long first, in small steps (Stop tests)
 """
 from __future__ import annotations
 
@@ -68,7 +69,9 @@ def probe(path: str) -> dict:
     v = next((s for s in streams if s.get("codec_type") == "video" and s.get("disposition", {}).get("attached_pic") != 1), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
     dur = float(info.get("format", {}).get("duration") or 0)
-    res = {"path": str(p), "duration": dur, "hasAudio": a is not None}
+    res = {"path": str(p), "duration": dur, "hasAudio": a is not None, "sizeBytes": p.stat().st_size,
+           "vcodec": v.get("codec_name") if v else None, "acodec": a.get("codec_name") if a else None,
+           "pixFmt": v.get("pix_fmt") if v else None}
     if v:
         num, _, den = (v.get("avg_frame_rate") or "30/1").partition("/")
         fps = float(num) / float(den or 1) if float(den or 1) else 30.0
@@ -258,6 +261,10 @@ def cmd_render(args: list[str]) -> dict:
     data = load(proj)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
+    slow = 0.0 if draft else float(os.environ.get("FAKE_ENGINE_SLOW_RENDER", "0") or 0)
+    for i in range(int(slow * 10)):
+        progress("render", i / slow, "Putting it all together")
+        time.sleep(0.1)
     # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
     n = int(data.get("version", 0)) + 1
     vdir = proj / "versions" / ("preview" if draft else f"v{n}")
@@ -293,6 +300,31 @@ def cmd_render(args: list[str]) -> dict:
 def cmd_probe(args: list[str]) -> dict:
     files = [a for a in args if not a.startswith("--")]
     return probe(files[0])
+
+
+def cmd_export_probe(args: list[str]) -> dict:
+    info = cmd_probe(args)
+    out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=bit_rate", "-of", "csv=p=0", args[0]],
+                         capture_output=True, text=True).stdout.strip()
+    # The real engine reads the edit list from the file; assume one, so Instagram and Threads remux.
+    return {**info, "hasVideo": info.get("width") is not None, "vduration": info["duration"], "audioBitrate": int(out) if out.isdigit() else None, "editList": True}
+
+
+def cmd_export_media(args: list[str]) -> dict:
+    dest = take(args, "--dest")
+    bitrate = take(args, "--bitrate")
+    video = ["-c:v", "libx264", "-preset", "ultrafast", "-b:v", bitrate, "-pix_fmt", "yuv420p"] if bitrate else ["-c:v", "copy"]
+    run_ffmpeg([FFMPEG, "-y", "-v", "error", "-i", args[0], *video, "-c:a", "aac", "-b:a", "128k", "-use_editlist", "0", dest],
+               float(probe(args[0])["duration"]), "export", "Saving platform files", 0, 100)
+    return {"video": dest, "sizeBytes": Path(dest).stat().st_size}
+
+
+def cmd_export_cover(args: list[str]) -> dict:
+    dest = take(args, "--dest")
+    at = take(args, "--at")
+    subprocess.run([FFMPEG, "-y", "-v", "error", *(["-ss", at] if at else []), "-i", args[0], "-frames:v", "1", "-q:v", "2", dest],
+                   check=True, capture_output=True)
+    return {"cover": dest}
 
 
 def cmd_download_model(args: list[str]) -> dict:
@@ -341,7 +373,8 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
+    "export-media": cmd_export_media,
 }
 
 
