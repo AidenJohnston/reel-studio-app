@@ -35,7 +35,7 @@ import {
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
 import { createLiveVideos } from './live-video'
-import { rememberQuestion, styleConsent } from './style-consent'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -256,21 +256,19 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
-    return replyAskingAboutStyle(slug, r, r.summary)
+    return replyAskingAboutStyle(r, r.summary)
   })
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
-async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
+async function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version: number; chat: ChatLine[] }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
     for (const rule of rules) if (c.undo.includes(rule.text)) await ai.removeStyleRule(rule.id).catch(() => undefined)
   }
-  await addChat(slug, 'editor', c.summary, r.version)
-  for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
-  return { summary: c.summary, version: r.version, quiet: true }
+  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version) }
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -299,7 +297,7 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
       )
       const version = Number(r?.version ?? 0)
       emit({ type: 'render', version, draft: false })
-      return { summary: '', version, quiet: true }
+      return { summary: '', version, chat: [] }
     })
     await jobs.forSlug(slug)?.done
     versions = await listVersions(dir)
@@ -476,11 +474,12 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal, { owner }) => {
-        const opts = { ...(files.length ? { attachments: files.map((f) => f.asset) } : {}), ...(owner ? { owner } : {}) }
+      async (emit, signal, { id, owner }) => {
+        // the note is saved under the job's id; the app asks before anything goes into My style
+        const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(slug, r, r.summary + extra)
+        return replyAskingAboutStyle(r, r.summary + extra)
       },
       { note: note || files.map((f) => f.name).join(', ') }
     )

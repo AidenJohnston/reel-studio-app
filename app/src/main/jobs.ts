@@ -2,8 +2,9 @@
 // goes to the renderer; app.json records the running job so a crash can be recovered at startup.
 import { randomUUID } from 'node:crypto'
 import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
-import { addChat, cleanPartialVersions, projectDir, updateAppState } from './store'
+import { addChat, cleanPartialVersions, projectDir, settleInterrupted, stamp, updateAppState } from './store'
 import { claimProject, type ProjectOwner } from './owner'
+import type { ChatLine } from './style-consent'
 import { toUserError } from './engine'
 import { learn, ProgressTracker, type SpeedHistory } from './progress'
 
@@ -21,9 +22,10 @@ export interface ProgressDeps {
 
 /** Turns a finished render into a playable URL of a copy that is safe to play (index.ts). */
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
-/** `job.owner`: the token that owns the project while the job runs; every engine command and edit it
- * starts joins with it (`--owner`, ai owner.ts). */
-export type JobFn = (emit: Emit, signal: AbortSignal, job: { owner: string | null }) => Promise<{ summary: string; version?: number; quiet?: boolean }>
+/** `job.id`: a note is saved in project.json under it (store.ts settleInterrupted). `job.owner`: the
+ * token that owns the project while the job runs; every engine command and edit it starts joins with
+ * it (`--owner`, ai owner.ts). `chat`: the lines to post when the job ends (default: the summary). */
+export type JobFn = (emit: Emit, signal: AbortSignal, job: { id: string; owner: string | null }) => Promise<{ summary: string; version?: number; chat?: ChatLine[] }>
 
 interface Running {
   id: string
@@ -70,6 +72,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     let mediaSec = 0
     let mediaAsked = false
     const pending: Promise<void>[] = []
+    // after a failure or Stop, a render still being copied is never shown
+    let open = true
     const tracker = new ProgressTracker(kind, 0, history)
     let owner: ProjectOwner | null = null
     let phase: Phase | undefined
@@ -91,7 +95,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       try {
         // Inside the try: if even this fails, the user gets an error instead of a job that never ends.
         if (slug) {
-          owner = await claimProject(projectDir(slug))
+          owner = await enter(slug)
           await updateAppState(slug, (s) => {
             s.job = { id, kind, startedAt: new Date().toISOString(), note: opts.note }
             s.lastError = null
@@ -128,31 +132,36 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           } else if (e.type === 'render') {
             const r = e
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
-        }, abort.signal, { owner: owner?.token ?? null })
+        }, abort.signal, { id, owner: owner?.token ?? null })
         await Promise.all(pending) // a render's event before `done`, never after
         if (progress && mediaSec > 0) {
           // what each phase really took on this computer: the next estimate starts from it
           await progress.saveHistory(learn(history, kind, mediaSec, tracker.finish())).catch(() => undefined)
         }
+        // The work is saved: bookkeeping that fails now is logged, never reported as a failed job. The
+        // job stays recorded in app.json then, and settleInterrupted finishes it before the next job.
         if (slug) {
           await updateAppState(slug, (s) => {
             s.job = null
             s.status = 'ready'
-          })
-          if (!res.quiet) await addChat(slug, 'editor', res.summary, res.version)
+            s.chat.push(...(res.chat ?? [{ from: 'editor', text: res.summary, version: res.version }]).map(stamp))
+          }).catch((e) => log(`[job ${kind}] saved, but app.json was not updated: ${String(e)}`))
         }
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
+        open = false
+        await Promise.allSettled(pending)
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
         if (slug && err.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage })
-        // Without the project this job wrote nothing. With a stuck engine nothing is cleaned up or let
-        // go: it may still be writing.
+        // Without the project (an earlier job could not be settled) this job wrote nothing, and app.json's
+        // record of that earlier job must stay for settleInterrupted. With a stuck engine nothing is
+        // cleaned up or let go: it may still be writing.
         if (slug && owner && !stuck.has(slug)) {
           await cleanPartialVersions(projectDir(slug)).catch(() => [])
           await updateAppState(slug, (s) => {
@@ -172,13 +181,27 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     return id
   }
 
+  /** Marks the project open, then finishes a job app.json still records, before anything else writes. */
+  async function enter(slug: string): Promise<ProjectOwner> {
+    const owner = await claimProject(projectDir(slug))
+    try {
+      if ((await settleInterrupted(slug)) === 'unreadable') {
+        throw { code: 'PROJECT_UNREADABLE', userMessage: 'I could not read this video right now. Try again in a moment.' }
+      }
+      return owner
+    } catch (e) {
+      await owner.release()
+      throw e
+    }
+  }
+
   /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
    * on it, and no job can start on it until `fn` is done. */
   async function hold<T>(slug: string, fn: () => Promise<T>): Promise<T> {
     refuseIfBusy(slug)
     held.add(slug)
     try {
-      const owner = await claimProject(projectDir(slug))
+      const owner = await enter(slug)
       try {
         return await fn()
       } finally {

@@ -134,8 +134,8 @@ def project_file(project_dir: Path) -> Path:
     return Path(project_dir) / "project.json"
 
 
-def load(project_dir: Path, check: bool = True) -> dict:
-    pf = project_file(project_dir)
+def load(project_dir: Path, check: bool = True, file: Optional[Path] = None) -> dict:
+    pf = Path(file) if file is not None else project_file(project_dir)
     if not pf.exists():
         raise EngineError("NO_PROJECT", f"no project.json in {project_dir}",
                           "I couldn't find this video's project. It may have been moved.")
@@ -152,14 +152,14 @@ def load(project_dir: Path, check: bool = True) -> dict:
     return proj
 
 
-def save(project_dir: Path, proj: dict, touch: bool = True) -> None:
+def save(project_dir: Path, proj: dict, touch: bool = True, file: Optional[Path] = None) -> None:
     if touch:
         proj["updatedAt"] = now_iso()
     problems = validate(proj)
     if problems:
         raise EngineError("BAD_PROJECT", "refusing to save an invalid project: " + "; ".join(problems[:8]),
                           "Something went wrong saving your edit. Please try again.")
-    write_json(project_file(project_dir), proj)
+    write_json(Path(file) if file is not None else project_file(project_dir), proj)
 
 
 def edit_signature(proj: dict) -> str:

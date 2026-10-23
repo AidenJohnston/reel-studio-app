@@ -5,23 +5,27 @@ import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore } from './style';
-import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
+import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent } from './tools';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
-  Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
-  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
+  Analysis, NoteEntry, PROJECT_FILE, Project, withDefaults, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
+  snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords, projectBytes, versionDir,
 } from './project';
 import { extractJson } from './providers/cli';
 import * as fsp from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { refuseIfOpen } from './owner';
 
 export interface EditorDeps {
   host: EngineHost;
+  /** the token of the app job that has the project (owner.ts); without one this is a dev run */
+  owner?: string;
   prompts: Prompts;
   style: StyleStore;
   fetchImpl?: typeof fetch;
   maxSteps?: number;
-  /** render a full-quality export after the agent finishes (default true) */
+  /** render a full-quality export after a first edit (default true); a note is always saved with its final video */
   finalRender?: boolean;
   /** cumulative token brake per run (default agent.DEFAULT_TOKEN_BUDGET) */
   tokenBudget?: number;
@@ -115,14 +119,13 @@ function withStyleEcho(summary: string, state: ToolState): string {
   return `${summary} I also saved ${state.styleRulesAdded.length === 1 ? 'this' : 'these'} to My style for your future videos: ${rules} You can remove ${state.styleRulesAdded.length === 1 ? 'it' : 'them'} in Settings.`;
 }
 
-/** When the agent stopped without calling finish (step cap, or it stopped using tools), never claim
- * the task is done: say it ran out of time and list what really changed. */
-function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state: ToolState, task: 'note' | 'first'): string | null {
+/** When a first edit stopped without calling finish (step cap, or it stopped using tools), never claim
+ * it is done: say it ran out of time and list what really changed. */
+function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state: ToolState): string | null {
   if (r.finished) return r.finished;
   const did = [...new Set(state.summaries)].slice(0, 8);
-  const what = task === 'note' ? 'this note' : 'your first edit';
   if (!did.length) return null;
-  return `I ran out of time before I finished ${what}, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
+  return `I ran out of time before I finished your first edit, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
 async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
@@ -130,30 +133,15 @@ async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<voi
   state.styleRuleIds = []; state.styleRulesAdded = [];
 }
 
-async function listAssets(projectDir: string): Promise<Set<string>> {
-  const dir = path.join(projectDir, 'work', 'assets');
-  return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
-}
-
-/** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, state: ToolState): Promise<void> {
-  await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
-  await removeStyleRules(deps, state);
-  for (const f of await listAssets(projectDir)) {
-    if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
-  }
-}
-
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
  * loses its credit, one added gains it). */
 async function refreshCredits(ctx: ToolContext): Promise<void> {
-  const p = await loadProject(ctx.projectDir);
+  const p = await loadProject(ctx.projectDir, ctx.note?.file);
   if (!p.post?.caption) return;
   const caption = await captionWithCredits(ctx.projectDir, p, p.post.caption);
   if (caption === p.post.caption) return;
   p.post = { ...p.post, caption };
-  await saveProject(ctx.projectDir, p);
+  await saveProject(ctx.projectDir, p, ctx.note?.file);
   ctx.project = p;
 }
 
@@ -278,7 +266,7 @@ ${summary}
   await wrapUpPost(deps, provider, ctx, onEvent, signal);
   onEvent({ type: 'status', message: 'Finishing your video', pct: 94, phase: 'final' });
   const version = await finalize(deps, ctx, onEvent);
-  const summary = withStyleEcho(honestSummary(run, ctx.state, 'first')
+  const summary = withStyleEcho(honestSummary(run, ctx.state)
     ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
   await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
@@ -290,6 +278,11 @@ ${summary}
 export interface ApplyNoteOptions {
   /** files attached to this note: `work/assets/attach-*` refs (re-checked against the project's sidecars) */
   attachments?: string[];
+  /** names the note in project.json (the app passes its job id); default a new id */
+  id?: string;
+  /** false: a rule the note asked to remember is only returned (styleRulesAdded), the host asks
+   * first; default true saves it to My style with the note */
+  saveStyleRules?: boolean;
 }
 
 /** What a note says in notes.md: its words, or what was attached when it has none. */
@@ -298,87 +291,128 @@ function noteLabel(note: string, attached: AttachmentInfo[]): string {
   return attached.length === 1 ? `(attached ${attached[0].name})` : `(attached ${attached.length} files)`;
 }
 
+/** A note that never called finish is not applied: say what it had started, and that nothing changed. */
+function unfinished(state: ToolState): AIError {
+  const did = [...new Set(state.summaries)].slice(0, 8).map((d) => d[0].toLowerCase() + d.slice(1));
+  return new AIError('note_unfinished', `I ran out of time before I finished this note, so I did not change your video.${did.length ? ` I had started to: ${did.join('; ')}.` : ''} Try asking for one thing at a time.`);
+}
+
+/**
+ * A note is all-or-nothing. It edits a private copy of project.json (work/notes/<id>/edit.json) and
+ * renders its previews beside it; its final video goes to versions/v(N+1), which counts as a version
+ * only once project.json's `version` says so (docs/versions.md). The note is saved by one write:
+ * project.json replaced whole, after checking that nothing else changed it and Stop was not pressed.
+ * A failure or Stop before that leaves the project exactly as it was.
+ */
 export async function applyNote(deps: EditorDeps, provider: ModelProvider | null, projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: ApplyNoteOptions = {}): Promise<EditResult> {
   if (!provider) throw new AIError('no_ai', 'Connect ChatGPT or a Claude key in Settings so I can make changes from your notes.');
   const attached = await validateAttachments(projectDir, opts.attachments);
   if (!note.trim() && !attached.length) throw new AIError('empty_note', 'Type what you would like me to change.');
   const refs = attached.map((a) => a.asset);
-  let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
-  const { p: p0 } = await load(ctx);
-  // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
-  // project.json, My style and work/assets back as they were.
-  const before = await fsp.readFile(path.join(projectDir, 'project.json'));
-  const assetsBefore = await listAssets(projectDir);
-  const mediaSec = mediaSeconds(p0);
-  // "smaller captions", "quieter music": one direct change and the final render, no AI turns
-  const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
-  if (fast) {
-    onEvent({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
-    let ok = true;
-    for (const c of fast.calls) {
-      const r = await executeTool(ctx, c.name, c.args);
-      if (r.isError) { ok = false; break; }
-    }
-    if (ok) {
-      // the change is made: say so now, the render that shows it follows
-      onEvent({ type: 'reply', text: fast.summary });
-      try {
-        const version = await finalize(deps, ctx, onEvent);
-        const p = await loadProject(projectDir);
-        p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString() }];
-        await saveProject(projectDir, p);
-        // a version the engine reused (the same video) is saved already, and is never rewritten
-        if (version > p0.version) await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${fast.summary}\n`);
-        onEvent({ type: 'status', message: 'Done', pct: 100 });
-        return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
-      } catch (e) {
-        if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
-        throw e;
-      }
-    }
-    // the direct change did not fit this project: undo it and let the AI read the note
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
-    ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
-    await load(ctx);
-  }
-  onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
-  // the attached files (and earlier ones still not in the video): listed in the task, one still each
-  const earlier = await earlierUnplaced(projectDir, ctx.project ?? p0, attached);
-  const { images, stills } = await attachmentStills(projectDir, [...attached, ...earlier]);
-  const files = attachmentsSection(attached, earlier, provider.supportsImages ? stills : new Map());
-  const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
-  const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
+  const id = opts.id ?? randomUUID();
+  if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', 'Something went wrong starting your note. Try again.', { detail: `note id ${JSON.stringify(id)}` });
+  const dir = path.join(projectDir, 'work', 'notes', id);
+  const base = await fsp.readFile(path.join(projectDir, PROJECT_FILE));
+  const baseVersion = withDefaults(JSON.parse(base.toString('utf8'))).version;
+  const begin = async (): Promise<ToolContext> => {
+    const file = path.join(dir, 'edit.json');
+    await writeFileAtomic(file, base);
+    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note, note: { id, file, dir } };
+  };
   const label = noteLabel(note, attached);
   try {
+    let ctx = await begin();
+    const { p: p0 } = await load(ctx);
+    // "smaller captions", "quieter music": one direct change and the final render, no AI turns
+    const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
+    if (fast) {
+      onEvent({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
+      let ok = true;
+      for (const c of fast.calls) {
+        const r = await executeTool(ctx, c.name, c.args);
+        if (r.isError) { ok = false; break; }
+      }
+      if (ok) {
+        // the change is made: say so now, the render that shows it follows
+        onEvent({ type: 'reply', text: fast.summary });
+        const r = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary: fast.summary, attachments: [] }, opts.saveStyleRules !== false);
+        return { ...r, fast: fast.kind };
+      }
+      // the direct change did not fit this project: start again from the saved project and let the AI read the note
+      ctx = await begin();
+      await load(ctx);
+    }
+    onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
+    // the attached files (and earlier ones still not in the video): listed in the task, one still each
+    const earlier = await earlierUnplaced(projectDir, ctx.project ?? p0, attached);
+    const { images, stills } = await attachmentStills(projectDir, [...attached, ...earlier]);
+    const files = attachmentsSection(attached, earlier, provider.supportsImages ? stills : new Map());
+    const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
+    const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
+    if (r.stoppedBy !== 'finish') throw unfinished(ctx.state);
+    if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length) {
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
-        version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
+        version: baseVersion, styleRulesAdded: [], styleSuggestions: [], changed: [],
       };
     }
-    onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
-    const version = await finalize(deps, ctx, onEvent);
-    const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
-    const p = await loadProject(projectDir);
+    const summary = withStyleEcho(r.finished || 'I saved your preference.', ctx.state);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
-    const placedNow = placedAssets(p);
+    const placedNow = placedAssets(await loadProject(projectDir, ctx.note!.file));
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
-    p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
-    await saveProject(projectDir, p);
-    if (version > p0.version) await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
-    onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
-  } catch (e) {
-    if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
-    throw e;
+    return await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false);
+  } finally {
+    // only what this note made under its own id; a final it started stays above project.json's
+    // version, never shown, and the app's job lane clears it (app store.ts cleanPartialVersions)
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-/** Part of the engine would not stop and may still be writing to the project (index.ts editHost): a
- * rollback would race it, so the project is left as it is and the app keeps it closed. */
-const engineStuck = (e: unknown): boolean => (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK';
+/** The final video (none when the note only saved or proposed a My style rule), then the one write that saves the note
+ * (see applyNote). Nothing after that write can fail the note. */
+async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVersion: number, n: { text: string; label: string; summary: string; attachments: string[] }, saveStyle: boolean): Promise<EditResult> {
+  let final: RenderInfo | null = null;
+  if (ctx.state.changed.size) {
+    ctx.emit({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
+    await refreshCredits(ctx);
+    final = await doRender(ctx, false, false);
+  }
+  const version = final?.version ?? baseVersion;
+  const p = await loadProject(ctx.projectDir, ctx.note!.file);
+  const { styleRulesAdded, styleSuggestions } = ctx.state;
+  const entry: NoteEntry = {
+    version, text: n.text, applied: [...ctx.state.changed], at: new Date().toISOString(),
+    ...(n.attachments.length ? { attachments: n.attachments } : {}),
+    id: ctx.note!.id, reply: n.summary,
+    ...(styleRulesAdded.length ? { styleRulesAdded } : {}), ...(styleSuggestions.length ? { styleSuggestions } : {}),
+  };
+  p.notes = [...(p.notes ?? []), entry];
+  const bytes = projectBytes(p);
+  const live = path.join(ctx.projectDir, PROJECT_FILE);
+  // a new version folder is complete, snapshot and notes included, before project.json points at it;
+  // an unchanged video keeps its version, whose folder is never rewritten
+  if (version > baseVersion) {
+    const vdir = versionDir(ctx.projectDir, version);
+    await writeFileAtomic(path.join(vdir, PROJECT_FILE), bytes);
+    await fsp.writeFile(path.join(vdir, 'notes.md'), `# v${version}\n\nNote: ${n.label}\n\n${n.summary}\n`);
+  }
+  await writeFileAtomic(live, bytes, undefined, async () => {
+    if (!deps.owner) refuseIfOpen(ctx.projectDir);
+    if (!(await fsp.readFile(live)).equals(base)) {
+      throw new AIError('project_changed', 'Your video was changed somewhere else while I worked on your note, so I left it as it was. Send your note again.');
+    }
+    if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
+  });
+  try {
+    if (saveStyle) for (const rule of styleRulesAdded) await deps.style.add(rule);
+    if (final) ctx.emit(renderEvent(final));
+    ctx.emit({ type: 'status', message: 'Done', pct: 100 });
+  } catch {
+    // the note is saved: a My style write or a listener that fails now must not report it as failed
+  }
+  return { summary: n.summary, version, styleRulesAdded, styleSuggestions, changed: [...ctx.state.changed] };
+}
 
 // ---------------------------------------------------------------- idea -> script
 

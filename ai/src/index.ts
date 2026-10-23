@@ -114,10 +114,10 @@ export function createAI(opts: CreateAIOptions) {
     locks.set(key, tail);
     return run;
   }
-  const deps = (host: EngineHost): editor.EditorDeps => ({ host, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (host: EngineHost, owner?: string): editor.EditorDeps => ({ host, owner, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
   function edit<T>(owner: string | undefined, run: (d: editor.EditorDeps) => Promise<T>): Promise<T> {
     const engine = editHost(opts.host, owner);
-    return engine.settle(run(deps(engine.host)));
+    return engine.settle(run(deps(engine.host, owner)));
   }
 
   async function settings(): Promise<AISettings> {
