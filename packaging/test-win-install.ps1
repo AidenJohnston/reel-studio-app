@@ -57,10 +57,14 @@ if (-not $KeepInstalled) {
   # The NSIS uninstaller re-launches itself from %TEMP%, so -Wait can return before it has finished.
   for ($i = 0; $i -lt 120 -and (Test-Path $exe); $i++) { Start-Sleep -Milliseconds 500 }
   Start-Sleep 2
-  # The installer drops a copy of itself in %LOCALAPPDATA%\<name>-updater\installer.exe. Check the file itself, so a
-  # folder left by an older build can't make this pass.
+  # The installer drops a byte copy of itself in %LOCALAPPDATA%\<name>-updater\installer.exe (electron-builder's
+  # copyFile "$EXEPATH"). Other electron-builder apps keep their own installer.exe in their own *-updater folder, and an
+  # older build may have left one, so only a copy of THIS installer counts.
+  $self = Get-Item $Installer
+  $selfHash = (Get-FileHash $Installer -Algorithm SHA256).Hash
   $leftover = @(Get-ChildItem $env:LOCALAPPDATA -Directory -Filter "*-updater" -ErrorAction SilentlyContinue |
-    ForEach-Object { Join-Path $_.FullName "installer.exe" } | Where-Object { Test-Path $_ })
+    ForEach-Object { Join-Path $_.FullName "installer.exe" } |
+    Where-Object { (Test-Path $_) -and (Get-Item $_).Length -eq $self.Length -and (Get-FileHash $_ -Algorithm SHA256).Hash -eq $selfHash })
   foreach ($f in $leftover) { "UNINSTALL LEFT {0} ({1:N0} MB)" -f $f, ((Get-Item $f).Length / 1MB) }
   if ($leftover.Count) { "UNINSTALL CHECK FAILED"; exit 1 }
   "uninstall left no updater installer copy"
