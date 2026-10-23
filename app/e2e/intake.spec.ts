@@ -48,7 +48,8 @@ for (const source of ['paste', 'open-file before ready', 'second-instance argv']
       } else await passFirstRun(page)
       if (source === 'paste') {
         await app.evaluate(async ({ clipboard, ClipboardItem }, url) => {
-          const previous = await clipboard.read()
+          // Electron rejects an empty ClipboardItem, so entries with no types are not saved.
+          const previous = (await clipboard.read()).filter((item) => item.types.length > 0)
           globalThis.__intakeClipboard = await Promise.all(previous.map(async (item) => new ClipboardItem(Object.fromEntries(
             await Promise.all(item.types.map(async (type) => [type, await item.getType(type)]))
           ))))
@@ -64,7 +65,9 @@ for (const source of ['paste', 'open-file before ready', 'second-instance argv']
       expect(projects[0].title).toBe('My first take')
     } finally {
       if (source === 'paste') await app.evaluate(async ({ clipboard }) => {
-        if (globalThis.__intakeClipboard) await clipboard.write(globalThis.__intakeClipboard)
+        if (!globalThis.__intakeClipboard) return
+        if (globalThis.__intakeClipboard.length) await clipboard.write(globalThis.__intakeClipboard)
+        else clipboard.clear()
       })
       await app.close()
     }
