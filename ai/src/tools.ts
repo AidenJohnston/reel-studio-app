@@ -783,7 +783,8 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       let warning: string | null = null;
       await mutate(ctx, 'captions', (p) => {
-        const underBefore = captionsUnderInstagram(p.format, p.captions.style);
+        const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
+        const underBefore = shownUnder();
         if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
         const style = p.captions.style;
@@ -798,8 +799,8 @@ const tools: ToolDef[] = [
         // and without it the picker matches the look by its fields.
         if (captionLook(style) !== before) delete style.preset;
         // The person may post elsewhere, so a position in Instagram's bottom band is allowed. When a change of size or
-        // position leaves the captions there, the model is told so it can pass it on.
-        const under = captionsUnderInstagram(p.format, style);
+        // position leaves shown captions there, or turns them on there, the model is told so it can pass it on.
+        const under = shownUnder();
         if (under && under !== underBefore) warning = `${under} Tell the person this in one plain sentence.`;
       });
       return { content: { ok: true, captions: ctx.project!.captions, ...(warning ? { warning } : {}) }, summary: 'Adjusted the captions' };

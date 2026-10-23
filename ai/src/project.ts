@@ -132,8 +132,9 @@ export function lowestCaptionPosition(format: Format, style: CaptionStyle): numb
 /** The plain-words warning when captions reach Instagram's caption and username, or null when they stay clear. */
 export function captionsUnderInstagram(format: Format, style: CaptionStyle): string | null {
   const lowest = lowestCaptionPosition(format, style);
-  if ((style.position ?? 0.75) <= lowest) return null;
-  return `At position ${style.position} and size ${style.size ?? 105}, a caption that wraps to two lines reaches under Instagram's caption and username, so it is partly hidden on Instagram. At this size, ${lowest} or higher stays clear.`;
+  const position = style.position ?? 0.75;
+  if (position <= lowest) return null;
+  return `At position ${position} and size ${style.size ?? 105}, a caption that wraps to two lines reaches under Instagram's caption and username, so it is partly hidden on Instagram. At this size, ${lowest} or higher stays clear.`;
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);

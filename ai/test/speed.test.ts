@@ -66,6 +66,15 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('bigger captions', p)!.summary).toBe('I made the captions a bit bigger.');
   });
 
+  it('says when captions turned back on sit under Instagram\'s caption', async () => {
+    const { dir } = await setup();
+    const p = await loadProject(dir);
+    p.captions.enabled = false;
+    expect(planFastNote('turn on captions', p)!.summary).toBe('I put the captions back on.');
+    p.captions.style = { ...p.captions.style, position: 0.88 };
+    expect(planFastNote('turn on captions', p)!.summary).toMatch(/^I put the captions back on\. .*under Instagram's own caption and username/);
+  });
+
   it('applies a simple note with one direct change and one final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);

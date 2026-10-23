@@ -218,6 +218,9 @@ describe('tool implementations', () => {
     expect(JSON.parse(low.content).warning).toMatch(/partly hidden on Instagram\. At this size, 0\.75 or higher stays clear\. Tell the person/);
     expect((await loadProject(ctx.projectDir)).captions.style).toMatchObject({ size: 105, position: 0.88 });
     expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { position: 0.75 })).content)).not.toHaveProperty('warning');
+    // hidden captions sit nowhere; turning them back on at 0.88 is what puts them under Instagram's caption
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { enabled: false, position: 0.88 })).content)).not.toHaveProperty('warning');
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { enabled: true })).content).warning).toMatch(/^At position 0\.88 and size 105, .*partly hidden on Instagram/);
     await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
     expect(ctx.project!.captions.style.highlight).toBe('#34C759');
     expect((await executeTool(ctx, 'set_caption_style', { highlight: '#34C75980' })).isError).toBe(true); // the engine draws no see-through highlight

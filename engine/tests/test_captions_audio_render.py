@@ -54,6 +54,9 @@ def test_fit_shrinks_long_lines_and_never_grows():
     # a real cue the old size-by-ratio estimate left 1 px too wide
     size, lines = captions.fit("AND IMPERSONATED BEING 7", 105, 939.6, 8, m)
     assert m.width(lines[0], size, 8) <= 939.6
+    # the widest real cue at render_ass's safe width at 1080 (verify.ig_right_limit, a pixel inside)
+    size, lines = captions.fit("SOMEONE'S PERSONAL BRAND", 105, 797.2, 8, m)
+    assert lines == ["SOMEONE'S PERSONAL BRAND"] and m.width(lines[0], size, 8) <= 797.2 and size == 73
     # stepping down past 62% of the size wraps the line instead (at 877.2 the first guess is just above 62%)
     size, lines = captions.fit("INTERNATIONALIZATION EVERYWHERE", 105, 877.2, 8, m)
     assert lines == ["INTERNATIONALIZATION", "EVERYWHERE"] and size >= 105 * captions.MIN_SHRINK

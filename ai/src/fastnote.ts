@@ -5,6 +5,8 @@
 // the user's trust, so this list stays short and strict.
 import { captionsUnderInstagram, lowestCaptionPosition, type Project } from './project';
 
+const UNDER_INSTAGRAM = 'Where they sit, a two-line caption reaches under Instagram\'s own caption and username, so part of it can be hidden on Instagram. Say "captions higher" to move them up.';
+
 export interface FastCall { name: string; args: Record<string, unknown> }
 export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
 
@@ -39,9 +41,7 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
       if (next <= size) return null;
       // a bigger line is taller and can reach Instagram's caption: say so, but never move them unasked
       const under = !captionsUnderInstagram(p.format, style) && captionsUnderInstagram(p.format, { ...style, size: next });
-      const summary = under
-        ? 'I made the captions a bit bigger. Where they sit, a two-line caption now reaches under Instagram\'s own caption and username, so part of it can be hidden on Instagram. Say "captions higher" to move them up.'
-        : 'I made the captions a bit bigger.';
+      const summary = under ? `I made the captions a bit bigger. ${UNDER_INSTAGRAM}` : 'I made the captions a bit bigger.';
       return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     const pos = Number(style.position) || 0.75;
@@ -56,7 +56,8 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
       return { kind: 'captions-down', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions down a little.' };
     }
     if (/\b(add|turn on|put back|bring back|show)\b/.test(n) && !p.captions.enabled) {
-      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary: 'I put the captions back on.' };
+      const summary = captionsUnderInstagram(p.format, style) ? `I put the captions back on. ${UNDER_INSTAGRAM}` : 'I put the captions back on.';
+      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary };
     }
     return null;
   }
