@@ -226,7 +226,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     // a rewording describes the receipts up to the one it names; a later receipt in this folder makes it stale
     const titled = await readJson<{ renderId: string; title: string; summary: string } | null>(join(d, 'title.json'), null)
     // an engine that records receipts gives every render an id (render_identity.py)
-    const manifest = await readJson<{ renderId?: unknown } | null>(join(d, 'render.json'), null)
+    const manifest = receipts || n === 0 ? null : await readJson<{ renderId?: unknown } | null>(join(d, 'render.json'), null)
     out.push({
       ...(receipts ? { facts: receipts.flatMap((r) => r.facts) } : {}),
       ...(n > 0 && !receipts && typeof manifest?.renderId !== 'string' ? { beforeReceipts: true as const } : {}),

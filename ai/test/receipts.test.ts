@@ -156,3 +156,18 @@ it('fails if a took-back note that saved a My style rule makes or names a versio
   expect(r.summary).toMatch(/^That left your video the same as before, so I didn't make a new version\. I also saved this to My style/);
   expect((await loadProject(dir)).notes.map((n) => n.version)).toEqual([undefined]);
 });
+
+it("fails if a note that changed nothing gives its reply a version, or a took-back note's reply keeps a claim ahead of its question", async () => {
+  const { root, dir } = await makeProject();
+  const gap = (await loadProject(dir)).cut.gapCap;
+  const ask = new ScriptedModel([{ toolCalls: [call('finish', { summary_for_user: 'Do you mean the pauses or the cuts?' })] }]);
+  const asked = await createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: ask }).applyNote(dir, 'make it snappier', () => {});
+  expect([asked.summary, 'version' in asked]).toEqual(['Do you mean the pauses or the cuts?', false]);
+  const claim = new ScriptedModel([
+    { toolCalls: [call('set_gap_cap', { seconds: 0.1 })] },
+    { toolCalls: [call('set_gap_cap', { seconds: gap })] },
+    { toolCalls: [call('finish', { summary_for_user: 'I tightened your pauses. Want them tighter?' })] },
+  ]);
+  const undone = await createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: claim }).applyNote(dir, 'try tighter pauses', () => {});
+  expect(undone.summary).toBe("That left your video the same as before, so I didn't make a new version.");
+});

@@ -13,7 +13,7 @@ export interface UserFacingError {
 
 export interface AgentResult {
   summary: string
-  /** Absent when a note's edit ended where it started: its reply belongs to no version. */
+  /** Absent when a note made no new version (it changed nothing, or its edit ended where it started): its reply belongs to no version. */
   version?: number
   styleRulesAdded: string[]
   changed: string[]

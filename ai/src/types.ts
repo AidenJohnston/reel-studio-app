@@ -14,7 +14,7 @@ export type AgentEvent =
 
 export interface AgentResult {
   summary: string;
-  /** the version the project is on; absent when a note's edit ended where it started (no version is its reply's) */
+  /** the version this task made; absent when a note made no new version (it changed nothing, or its edit ended where it started) */
   version?: number;
   /** rules saved to My style because the user's note asked for it ("always...", "from now on...") */
   styleRulesAdded: string[];
