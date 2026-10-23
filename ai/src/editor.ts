@@ -372,14 +372,25 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   }
 }
 
+const changedElsewhere = (): AIError =>
+  new AIError('project_changed', 'Your video was changed somewhere else while I worked on your note, so I left it as it was. Send your note again.');
+
 /** The final video (none when the note only saved or proposed a My style rule), then the one write that saves the note
  * (see applyNote). Nothing after that write can fail the note. */
 async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVersion: number, n: { text: string; label: string; summary: string; attachments: string[] }, saveStyle: boolean): Promise<EditResult> {
+  const live = path.join(ctx.projectDir, PROJECT_FILE);
+  // Checked again before anything goes into versions/: a version saved since the note began (another
+  // edit) has the number this note's final would take, and must never be rendered or written over.
+  const unchanged = async (): Promise<void> => {
+    if (!(await fsp.readFile(live)).equals(base)) throw changedElsewhere();
+  };
   let final: RenderInfo | null = null;
   if (ctx.state.changed.size) {
     ctx.emit({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
+    await unchanged();
     await refreshCredits(ctx);
-    final = await doRender(ctx, false, false);
+    // the engine refuses that number too (render.py PROJECT_CHANGED), for a save that lands meanwhile
+    final = await doRender(ctx, false, false).catch((e) => { throw e?.code === 'PROJECT_CHANGED' ? changedElsewhere() : e; });
   }
   const version = final?.version ?? baseVersion;
   const p = await loadProject(ctx.projectDir, ctx.note!.file);
@@ -392,19 +403,17 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
   };
   p.notes = [...(p.notes ?? []), entry];
   const bytes = projectBytes(p);
-  const live = path.join(ctx.projectDir, PROJECT_FILE);
   // a new version folder is complete, snapshot and notes included, before project.json points at it;
   // an unchanged video keeps its version, whose folder is never rewritten
   if (version > baseVersion) {
+    await unchanged();
     const vdir = versionDir(ctx.projectDir, version);
     await writeFileAtomic(path.join(vdir, PROJECT_FILE), bytes);
     await fsp.writeFile(path.join(vdir, 'notes.md'), `# v${version}\n\nNote: ${n.label}\n\n${n.summary}\n`);
   }
   await writeFileAtomic(live, bytes, undefined, async () => {
     if (!deps.owner) refuseIfOpen(ctx.projectDir);
-    if (!(await fsp.readFile(live)).equals(base)) {
-      throw new AIError('project_changed', 'Your video was changed somewhere else while I worked on your note, so I left it as it was. Send your note again.');
-    }
+    await unchanged();
     if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
   });
   try {

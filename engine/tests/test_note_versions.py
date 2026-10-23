@@ -98,3 +98,20 @@ def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(proj
     assert (project / "project.json").read_bytes() == root_before
     assert (project / "versions" / "preview" / "draft.mp4").read_bytes() == b"the creator's preview"
 
+
+def test_a_note_never_replaces_a_version_saved_while_it_ran(project):
+    engine(project, "render")
+    note = project / "work" / "notes" / "n1"     # the note's copy, made at Version 1
+    note.mkdir(parents=True)
+    p = json.loads((project / "project.json").read_text())
+    (note / "edit.json").write_text(json.dumps({**p, "cut": {**p["cut"], "gapCap": 0.4}}))
+    live = json.loads((project / "project.json").read_text())   # meanwhile another edit saves Version 2
+    live["cut"]["gapCap"] = 0.3
+    (project / "project.json").write_text(json.dumps(live))
+    assert engine(project, "render")["version"] == 2
+    v2 = project / "versions" / "v2"
+    saved = {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()}
+
+    refused = last_event(project, "render", "--project-file", "work/notes/n1/edit.json")
+    assert refused["event"] == "error" and refused["code"] == "PROJECT_CHANGED"
+    assert {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()} == saved

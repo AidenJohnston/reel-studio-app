@@ -35,7 +35,8 @@ Rules:
 6. `frames` reads the file given with `--file`, else the video the project shows: `v{version}`, or the
    preview while there is no version. Its stills go to `work/frames/`.
 7. `--project-file work/...` makes `render`, `anim-context` and `cover-candidates` read (and `render`
-   patch `version` into) that document instead of `project.json`.
+   patch `version` into) that document instead of `project.json`. A final rendered from such a copy
+   never takes a number `project.json` has already saved: the engine refuses it (`PROJECT_CHANGED`).
 
 ## Render result (engine `done.result`)
 

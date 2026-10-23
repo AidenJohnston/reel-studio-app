@@ -88,6 +88,27 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(await listVersions(dir)).toEqual([1]);
   });
 
+  it('a version another edit saved while the note ran is left byte for byte, and the note is not saved', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    const v2 = path.join(dir, 'versions', 'v2');
+    let saved: Record<string, string> = {};
+    const m = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.4 })] },
+      async () => {
+        // a manual change and its render save Version 2 meanwhile
+        const p = JSON.parse(await read());
+        await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify({ ...p, title: 'Renamed by hand' }, null, 2));
+        await host.runEngine('render', ['--project', dir]);
+        saved = await folder(v2);
+        return finish('I gave the pauses more room.');
+      },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'project_changed' });
+    expect(Object.keys(saved)).toContain('export.mp4');
+    expect(await folder(v2)).toEqual(saved);
+    expect(JSON.parse(await read())).toMatchObject({ version: 2, title: 'Renamed by hand' });
+  });
+
   it('a model that answers in words and never calls a tool gets the "not sure" reply, and nothing changes', async () => {
     const { dir, host, settingsDir, read, before } = await setup();
     const m = new ScriptedModel(Array.from({ length: 6 }, () => ({ text: 'The music suits your bread nicely.' })));

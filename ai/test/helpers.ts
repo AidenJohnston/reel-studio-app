@@ -149,6 +149,10 @@ export class FakeHost implements EngineHost {
           return { version: p.version, preview: false, draft: false, file: path.join(saved, 'export.mp4'), reused: true };
         }
         const v = (p.version ?? 0) + 1;
+        // like render.py: a note's copy never renders over a version project.json saved since it was made
+        if (!draft && args.includes('--project-file') && v <= JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).version) {
+          throw { code: 'PROJECT_CHANGED', userMessage: 'Your video was changed somewhere else while I worked on your note.' };
+        }
         const vd = draft ? (args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', 'preview')) : path.join(dir, 'versions', `v${v}`);
         if (!draft) await fsp.rm(vd, { recursive: true, force: true });
         await fsp.mkdir(vd, { recursive: true });
