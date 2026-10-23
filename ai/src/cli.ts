@@ -84,9 +84,10 @@ async function main() {
     });
     const settingsDir = typeof flags.settings === 'string' ? flags.settings : defaultSettingsDir();
     const ai = createAI({ host, settingsDir, dev: true, providerOverride: provider, finalRender: !flags['draft-only'] });
-    // the engine runs in its own process group (engineHost.ts), out of reach of Ctrl-C: stop it like Stop does
+    // the engine runs in its own process group (engineHost.ts), out of reach of Ctrl-C: stop it like Stop
+    // does. write-script runs no engine and takes no signal, so Ctrl-C keeps its default there.
     const stop = new AbortController();
-    process.once('SIGINT', () => stop.abort());
+    if (cmd !== 'write-script') process.once('SIGINT', () => stop.abort());
     let result: unknown;
     if (cmd === 'first-edit') result = await ai.firstEdit(String(flags.project), log, stop.signal);
     else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log, stop.signal);

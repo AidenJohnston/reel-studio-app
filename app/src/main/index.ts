@@ -53,7 +53,8 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -373,7 +374,8 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    busy: (slug) => jobs.isClosed(slug),
+    refuse: (slug) => jobs.refuseIfBusy(slug),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -458,12 +460,8 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
     const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    const { note, files } = await takeNote(jobs, slug, text, attachments)
     await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -537,6 +535,8 @@ function registerIpc(): void {
       jobs.cancel(running.id)
       await running.done
     }
+    // a video kept closed stays: part of its engine may still be writing into the folder
+    jobs.refuseIfBusy(slug)
     await fs.rm(projectDir(slug), { recursive: true, force: true })
   })
 
