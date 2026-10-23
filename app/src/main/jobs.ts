@@ -36,7 +36,7 @@ interface Running {
   done: Promise<void>
 }
 
-export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
+export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo, assertCanStart: () => void = () => {}) {
   const jobs = new Map<string, Running>()
 
   function forSlug(slug: string): Running | undefined {
@@ -44,6 +44,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   }
 
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
+    assertCanStart()
     if (slug && forSlug(slug)) {
       throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     }

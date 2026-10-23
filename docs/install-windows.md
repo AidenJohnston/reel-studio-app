@@ -42,13 +42,12 @@ Reel Studio downloads its speech helper once (this is how it "listens" to your v
 
 ## Updating to a newer version
 
-Reel Studio does not update itself yet, but it tells you when a new version is out: a small note at the bottom left says
-**Reel Studio 0.1.1 is out.** (with the new number) and **Download** opens the download page in your browser. You can also open
-**Settings** and click **Check for a newer version** any time. When a new version is out, download the new **Reel-Studio-Setup-...exe** from the
-same page you got the first one from (the version number is in the file name, so you can see whether it is newer than the
-one you have), and run it the same way. It installs over the old copy and your videos, music and settings are untouched.
-Only download it from that page: the app is not signed with a paid certificate yet, so Windows cannot vouch for a file
-that came from anywhere else.
+When a new version is out, click **Download update** at the bottom left. When it finishes, click
+**Restart to update** and confirm. Reel Studio closes, a small window shows the new version installing, and Reel Studio
+opens again. Your videos and settings stay. You can also check from **Settings**.
+
+Older versions open the release page instead. Download the new **Reel-Studio-Setup-...exe** there and run it.
+It installs over the old copy.
 
 ## Removing it
 

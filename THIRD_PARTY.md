@@ -147,6 +147,17 @@ Production dependency tree of the app plus the front-end libraries vite bundles 
 | standardwebhooks 1.1.1 | MIT (package.json; its repository root file is Apache-2.0, both texts shipped) | Standard Webhooks |
 | @stablelib/base64 1.0.1 | MIT | Dmitry Chestnykh |
 | fast-sha256 1.3.0 | Unlicense | Dmitry Chestnykh |
+| electron-updater 6.8.9, builder-util-runtime 9.7.0, lazy-val 1.0.5 (the app's updater) | MIT | Vladimir Krivosheev |
+| fs-extra 10.1.0, jsonfile 6.2.1 | MIT | JP Richardson |
+| universalify 2.0.1 | MIT | Ryan Zimmerman |
+| graceful-fs 4.2.11 | ISC | Isaac Z. Schlueter, Ben Noordhuis, and Contributors |
+| js-yaml 4.3.2 | MIT | Vitaly Puzrin |
+| argparse 2.0.1 | Python-2.0 (PSF licence; a JavaScript port of Python's argparse) | Python Software Foundation, Vitaly Puzrin |
+| sax 1.6.1 | BlueOak-1.0.0 | Isaac Z. Schlueter |
+| semver 7.7.4 | ISC | GitHub Inc. |
+| debug 4.4.3, ms 2.1.3 | MIT | Josh Junon, TJ Holowaychuk, Vercel |
+| lodash.escaperegexp 4.1.2, lodash.isequal 4.5.0 | MIT | JS Foundation and other contributors |
+| tiny-typed-emitter 2.1.0 | MIT | Zurab Benashvili |
 
 ### QR Code generator library (vendored source, MIT)
 
