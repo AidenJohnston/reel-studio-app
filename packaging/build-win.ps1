@@ -104,6 +104,11 @@ if (-not (Test-Path $Installer)) { throw "latest.yml names $($fields.path), whic
 $stream = [IO.File]::OpenRead($Installer)
 try { $digest = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($stream)) } finally { $stream.Close() }
 if ($digest -ne $fields.sha512) { throw "the SHA-512 in latest.yml does not match $($fields.path)" }
+# electron-updater checks the download against files[0], not the top-level copy
+$first = [regex]::Match($yml, "(?m)^files:\s*\r?\n\s+- url: *([^\r\n]+?)\s*\r?\n\s+sha512: *([^\r\n]+?)\s*$")
+if (-not $first.Success) { throw "latest.yml has no files[0] with url and sha512" }
+if ($first.Groups[1].Value -ne $fields.path) { throw "latest.yml files[0] is $($first.Groups[1].Value), not $($fields.path)" }
+if ($first.Groups[2].Value -ne $digest) { throw "the files[0] SHA-512 in latest.yml does not match $($fields.path)" }
 $AppFeed = Join-Path $Release "win-unpacked\resources\app-update.yml"
 if (-not (Test-Path $AppFeed)) { throw "app-update.yml is missing from the app; the publish block did not reach the build" }
 "app-update.yml (where the installed app looks for updates):"
