@@ -9,6 +9,7 @@ import {
   listChatGPTModels, AnthropicProvider,
 } from '../src';
 import { DATA_BOUNDARY } from '../src/editor';
+import { withEditLock } from '../src/index';
 import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
 import { childEnv, devSettingsDir, isBlockedAddress, safeResolve } from '../src/safety';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng, firstVersion } from './helpers';
@@ -334,7 +335,17 @@ describe('finding 35: a note is rolled back on ANY failure, including the final 
   });
 });
 
-describe('finding 36: serialised style writes', () => {
+describe('finding 36: cross-process edit lock, serialised style writes', () => {
+  it('a lock held by another live process refuses; a dead holder is taken over', async () => {
+    const { dir } = await makeProject();
+    const lock = path.join(dir, 'work', '.ai-edit.lock');
+    await fsp.writeFile(lock, JSON.stringify({ pid: process.ppid, at: Date.now() }));
+    await expect(withEditLock(dir, async () => 1)).rejects.toMatchObject({ code: 'busy' });
+    await fsp.writeFile(lock, JSON.stringify({ pid: 2 ** 22 + 12345, at: Date.now() }));
+    expect(await withEditLock(dir, async () => 2)).toBe(2);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
   it('concurrent style adds keep every rule', async () => {
     const root = tmpDir('style ');
     const s = new StyleStore(() => root);

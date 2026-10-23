@@ -140,6 +140,22 @@ describe('agent loop with a scripted model', () => {
     expect(host.calls.filter((c) => c.command === 'render')).toHaveLength(1);
   });
 
+  it('part of a note\'s preview render would not stop: the note ends with that error at once, and nothing else runs or is saved', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
+    host.afterRenderFiles = ({ draft }) => {
+      if (draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    const m = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.4 }), call('render_draft')] },
+      { toolCalls: [call('finish', { summary_for_user: 'I gave the pauses more room.' })] },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(m.requests).toHaveLength(1);
+    expect(host.calls.map((c) => c.command)).toEqual(['render']);
+    expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
+  });
+
   it('cancel stops the loop', async () => {
     const { dir, host, settingsDir } = await setup();
     const ac = new AbortController();

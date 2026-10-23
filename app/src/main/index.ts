@@ -508,6 +508,7 @@ function registerIpc(): void {
     jobs.hold(slug, async () => {
       const p = await readProject(slug)
       for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        // the "Flip picture" toggle: only each take's mirror flag, never its path or size
         if (k === 'sources') {
           p.sources = mergeSourcesPatch(p.sources, patch.sources)
           continue

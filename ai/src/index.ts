@@ -95,15 +95,17 @@ export function createAI(opts: CreateAIOptions) {
   const style = new StyleStore(() => opts.host.reelStudioRoot());
   const siwc = new SiwcAuth({ settingsDir: opts.settingsDir, secretStore: opts.secretStore, fetch: opts.fetch, issuer: opts.siwcIssuer, allowPlaintextSecrets: opts.allowPlaintextSecrets });
   // One edit at a time per project (the app may double-click; the CLI may race). `owner`: the token of
-  // the app job that has the project (owner.ts); without one (the dev CLI) the edit refuses while
+  // the app job that has the project (owner.ts); without one (the dev CLI) the edit also refuses while
   // the app has the project open.
   const locks = new Map<string, Promise<unknown>>();
   function exclusive<T>(dir: string, owner: string | undefined, fn: () => Promise<T>): Promise<T> {
     const key = path.resolve(dir).toLowerCase();
     const prev = locks.get(key) ?? Promise.resolve();
+    // in-process queue, plus a lock FILE every edit holds for its whole run, so two edits in different
+    // processes (the app and the dev CLI, or two dev CLIs) never run on one project at once
     const run = prev.catch(() => undefined).then(() => {
       if (!owner) refuseIfOpen(dir);
-      return fn();
+      return withEditLock(dir, fn);
     });
     // The lock's copy of the run must never reject on its own: the caller gets `run` and handles
     // its error; an unobserved rejected `finally` copy is an unhandled rejection in Node.
@@ -307,10 +309,10 @@ export function createAI(opts: CreateAIOptions) {
 export type ReelStudioAI = ReturnType<typeof createAI>;
 
 /** The engine as one edit sees it. An app job's `owner` token goes on every command
- * (engine/reelengine/owner.py). Once part of an engine would not stop (ENGINE_STUCK) no further command
- * runs, and `settle` fails the edit with that error however it ended: a first look or a tool result
- * would otherwise swallow it, and the app job would let go of the project (app jobs.ts) while that
- * part may still be writing to it. */
+ * (engine/reelengine/owner.py). Once part of an engine would not stop (ENGINE_STUCK) no further
+ * command runs, and `settle` fails the edit with that error however it ended: a first look or a tool
+ * result would otherwise swallow it, and the app job would let go of the project while that part may
+ * still be writing to it. */
 function editHost(host: EngineHost, owner: string | undefined) {
   let stuck: unknown = null;
   return {
@@ -337,4 +339,35 @@ function editHost(host: EngineHost, owner: string | undefined) {
   };
 }
 
+const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === 'EPERM'; }
+}
+
+/** <project>/work/.ai-edit.lock holds {pid, at}. Another LIVE process holding it = AIError busy; a
+ * dead or 3-hour-old holder is taken over. */
+export async function withEditLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const lock = path.join(dir, 'work', '.ai-edit.lock');
+  await fsp.mkdir(path.dirname(lock), { recursive: true });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const fh = await fsp.open(lock, 'wx');
+      await fh.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
+      await fh.close();
+      break;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST' || attempt > 0) {
+        if (e?.code === 'EEXIST') throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
+        throw e;
+      }
+      let held: { pid?: number; at?: number } = {};
+      try { held = JSON.parse(await fsp.readFile(lock, 'utf8')); } catch { /* unreadable = stale */ }
+      const live = held.pid && held.pid !== process.pid && alive(held.pid) && Date.now() - (held.at ?? 0) < LOCK_STALE_MS;
+      if (live) throw new AIError('busy', 'This video is being edited somewhere else right now. Try again when that finishes.');
+      await fsp.rm(lock, { force: true });
+    }
+  }
+  try { return await fn(); } finally { await fsp.rm(lock, { force: true }).catch(() => undefined); }
+}
 export { PythonEngineHost, defaultRoot } from './engineHost';

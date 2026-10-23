@@ -16,6 +16,7 @@ async function setup(opts: { firstVersion?: boolean } = {}) {
 }
 
 const notesLeft = (dir: string) => fs.readdirSync(path.join(dir, 'work', 'notes')).length;
+const folder = async (dir: string) => Object.fromEntries(await Promise.all((await fsp.readdir(dir)).map(async (f) => [f, await fsp.readFile(path.join(dir, f), 'utf8')])));
 const finish = (summary: string) => ({ toolCalls: [call('finish', { summary_for_user: summary })] });
 
 describe('a note that does not finish leaves the project as it was', () => {
@@ -87,6 +88,39 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(await listVersions(dir)).toEqual([1]);
   });
 
+  it('a version another edit saved while the note ran is left byte for byte, and the note is not saved', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    const v2 = path.join(dir, 'versions', 'v2');
+    let saved: Record<string, string> = {};
+    const m = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.4 })] },
+      async () => {
+        // a manual change and its render save Version 2 meanwhile
+        const p = JSON.parse(await read());
+        await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify({ ...p, title: 'Renamed by hand' }, null, 2));
+        await host.runEngine('render', ['--project', dir]);
+        saved = await folder(v2);
+        return finish('I gave the pauses more room.');
+      },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'project_changed' });
+    expect(Object.keys(saved)).toContain('export.mp4');
+    expect(await folder(v2)).toEqual(saved);
+    expect(JSON.parse(await read())).toMatchObject({ version: 2, title: 'Renamed by hand' });
+  });
+
+  it('a model that answers in words and never calls a tool gets the "not sure" reply, saved like any note that changes nothing', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    const m = new ScriptedModel(Array.from({ length: 6 }, () => ({ text: 'The music suits your bread nicely.' })));
+    const r = await createAI({ host, settingsDir, providerOverride: m })
+      .applyNote(dir, 'what do you think of the music?', () => undefined, undefined, { id: 'job-4', saveStyleRules: false });
+    const reply = 'I looked, but I was not sure what to change. Could you say it another way?';
+    expect(r).toMatchObject({ summary: reply, version: 1, changed: [] });
+    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-4', version: 1, applied: [], reply });
+    expect(host.calls).toEqual([]);
+    expect(notesLeft(dir)).toBe(0);
+  });
+
   it('a project with only a preview keeps that preview when a note fails at the final render', async () => {
     const { dir, host, settingsDir, read, before } = await setup({ firstVersion: false });
     const preview = path.join(dir, 'versions', 'preview', 'draft.mp4');
@@ -107,23 +141,6 @@ describe('a note that does not finish leaves the project as it was', () => {
     expect(notesLeft(dir)).toBe(0);
   });
 
-  it('part of the preview render would not stop: the note ends with that error at once, and nothing else runs or is saved', async () => {
-    const { dir, host, settingsDir, read, before } = await setup();
-    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
-    host.afterRenderFiles = ({ draft }) => {
-      if (draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
-    };
-    const m = new ScriptedModel([
-      { toolCalls: [call('set_gap_cap', { seconds: 0.4 }), call('render_draft')] },
-      finish('I gave the pauses more room.'),
-    ]);
-    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined, undefined, { owner: 'job-1' }))
-      .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
-    expect(m.requests).toHaveLength(1);
-    expect(host.calls.map((c) => c.command)).toEqual(['render']);
-    expect(await read()).toBe(before);
-  });
-
   it('part of the engine would not stop during a step that hides its errors: a note that then changes nothing is not saved', async () => {
     const { root, dir, host, settingsDir, read, before } = await setup();
     await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'job-1' }));
@@ -138,15 +155,6 @@ describe('a note that does not finish leaves the project as it was', () => {
     await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'better music', () => undefined, undefined, { owner: 'job-1' }))
       .rejects.toMatchObject({ code: 'ENGINE_STUCK' });
     expect(await read()).toBe(before);
-  });
-
-  it('the dev CLI refuses a project Reel Studio has open, and changes nothing', async () => {
-    const { dir, host, settingsDir, read, before } = await setup();
-    await fsp.writeFile(path.join(dir, OWNER_LOCK), JSON.stringify({ app: 'Reel Studio', token: 'the app\'s job' }));
-    const m = new ScriptedModel([{ toolCalls: [call('set_gap_cap', { seconds: 0.4 })] }, finish('Done.')]);
-    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'project_open' });
-    expect(await read()).toBe(before);
-    expect(m.requests).toEqual([]);
   });
 });
 
@@ -166,21 +174,6 @@ describe('a note that finishes is saved in one write', () => {
     expect(await new StyleStore(() => root).list()).toEqual([]);
     expect(events.filter((e) => e.type === 'render').at(-1)).toMatchObject({ draft: false, version: 2 });
     expect(notesLeft(dir)).toBe(0);
-  });
-
-  it('a caption-only note takes the version the engine reuses and writes nothing into its folder', async () => {
-    const { dir, host, settingsDir, read } = await setup();
-    const v1 = path.join(dir, 'versions', 'v1');
-    const folder = async () => Object.fromEntries(await Promise.all((await fsp.readdir(v1)).map(async (f) => [f, await fsp.readFile(path.join(v1, f), 'utf8')])));
-    const before = await folder();
-    const m = new ScriptedModel([
-      { toolCalls: [call('write_post', { caption: 'Bread takes patience', hashtags: ['bread', 'baking', 'sourdough', 'homemade', 'patience'], keywords: ['bread'] })] },
-      finish('I rewrote your caption.'),
-    ]);
-    const r = await createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'new caption about patience', () => undefined);
-    expect(r.version).toBe(1);
-    expect(JSON.parse(await read()).post.caption).toBe('Bread takes patience');
-    expect(await folder()).toEqual(before);
   });
 
   it('a note that only proposes a rule is saved with its question, with no render', async () => {

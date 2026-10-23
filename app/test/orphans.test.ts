@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir, uptime } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
@@ -149,31 +149,39 @@ describe('orphaned engine reaper', () => {
     expect(torn).toBe(0)
   }, 60000)
 
-  it('a start that cannot read the engine list keeps every project the last run had open closed, until the computer restarts', async () => {
-    setupPaths()
+  it('a start that cannot read the engine list keeps closed only the videos an engine or ffmpeg is still working in', async () => {
+    setupPaths() // its folders have spaces and non-ASCII names, like real users'
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
-    const open = join(projectsDir(), 'bread')
-    const shut = join(projectsDir(), 'cake')
-    for (const p of [open, shut]) mkdirSync(join(p, 'work'), { recursive: true })
-    writeFileSync(join(open, OWNER_LOCK), '{"app":"Reel Studio"}')
+    const [bread, cake, rolls] = ['bread', 'cake', 'bread-rolls'].map((slug) => join(projectsDir(), slug))
+    for (const p of [bread, cake, rolls]) mkdirSync(join(p, 'work'), { recursive: true })
     // what an older version's crash in the middle of rewriting it left
-    writeFileSync(join(settings, 'engines.json'), `[{"pid":4242,"project":${JSON.stringify(open).slice(0, 12)}`)
-
-    for (let start = 0; start < 2; start++) {
-      const { stillRunning, unknown } = await createPidRegistry(settings).reap()
-      await clearStaleLocks(stillRunning)
-      expect(stillRunning).toEqual([open])
-      expect(existsSync(join(open, OWNER_LOCK))).toBe(true)
-      expect(unknown).toBe(true)
+    writeFileSync(join(settings, 'engines.json'), `[{"pid":4242,"project":${JSON.stringify(bread).slice(0, 12)}`)
+    // the crashed run's engine still rendering bread, and an ffmpeg a dead engine left writing into cake
+    // (under the real path the engine resolved: on macOS the temp folder is behind a symlink)
+    const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    const ffmpeg = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-re', '-f', 'lavfi', '-i', 'anullsrc=r=8000', '-t', '60', '-y', join(realpathSync.native(cake), 'work', 'mix.wav')], { stdio: 'ignore', windowsHide: true })
+    // an app opened from the Finder has no locale
+    const locale = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LC_CTYPE: process.env.LC_CTYPE }
+    for (const k of Object.keys(locale)) delete process.env[k]
+    try {
+      await Promise.all([once(engine, 'spawn'), once(ffmpeg, 'spawn')])
+      for (let start = 0; start < 2; start++) {
+        const { stillRunning, unknown } = await createPidRegistry(settings).reap()
+        expect(unknown).toBe(true)
+        expect(stillRunning.sort()).toEqual([bread, cake].sort())
+      }
+      await killTree(engine.pid!)
+      ffmpeg.kill()
+      await once(ffmpeg, 'exit')
+      // nothing works in them any more: they open, and the next start no longer looks
+      expect((await createPidRegistry(settings).reap()).stillRunning).toEqual([])
+      expect((await createPidRegistry(settings).reap()).unknown).toBe(false)
+    } finally {
+      for (const [k, v] of Object.entries(locale)) if (v !== undefined) process.env[k] = v
+      if (engine.exitCode === null) await killTree(engine.pid!)
+      ffmpeg.kill()
     }
-
-    const beforeBoot = new Date(Date.now() - (uptime() + 60) * 1000)
-    utimesSync(join(settings, 'engines.unreadable.json'), beforeBoot, beforeBoot)
-    const { stillRunning, unknown } = await createPidRegistry(settings).reap()
-    await clearStaleLocks(stillRunning)
-    expect(unknown).toBe(false)
-    expect(existsSync(join(open, OWNER_LOCK))).toBe(false)
-  })
+  }, 60000)
 
   it.skipIf(process.platform === 'win32')('stopping an engine never signals a lone process that took over its pid', async () => {
     // not detached: it leads no process group, like an unrelated process that was handed a dead engine's pid
@@ -185,13 +193,13 @@ describe('orphaned engine reaper', () => {
     other.kill()
   })
 
-  it.skipIf(process.platform === 'win32')('an engine from a 0.1.x list (no video named) that would not stop keeps every video left open closed', async () => {
+  it.skipIf(process.platform === 'win32')('an engine from a 0.1.x list (no video named) that would not stop keeps the video it works in closed', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
     const open = join(projectsDir(), 'bread')
     mkdirSync(join(open, 'work'), { recursive: true })
-    writeFileSync(join(open, OWNER_LOCK), '{"app":"Reel Studio"}')
-    const left = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', detached: true })
+    mkdirSync(join(projectsDir(), 'cake', 'work'), { recursive: true })
+    const left = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', open], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', detached: true })
     await once(left, 'spawn')
     writeFileSync(join(settings, 'engines.json'), JSON.stringify([left.pid]))
     const { stillRunning, unknown } = await createPidRegistry(settings, async () => false).reap()

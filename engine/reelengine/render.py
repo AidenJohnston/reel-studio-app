@@ -56,8 +56,10 @@ def _opt_module(name: str):
 
 def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
     """{path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
-    song or picture was REPLACED under the same name."""
+    song or picture was REPLACED under the same name, or that the words changed: the transcript sets
+    the cut's timings and the burned-in subtitles."""
     refs = [s.get("path") for s in proj.get("sources") or []]
+    refs.append(projmod.TRANSCRIPT_REL)
     refs.append(((proj.get("music") or {}).get("track")))
     for b in proj.get("broll") or []:
         refs.append(b.get("asset"))
@@ -745,8 +747,16 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         made = projmod.read_json(vdir / "render.json")
         made.pop("segmentsDetail", None)
         return dict(made, file=str(vdir / "export.mp4"), versionDir=str(vdir), reused=True)
-    if not preview and version > committed and vdir.exists():
-        shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
+    if not preview and version > committed:
+        # A note renders its private copy, whose version is the one it started from. A version that
+        # project.json saved since (another note, a change made by hand) is never replaced.
+        saved = committed if project_file is None else int(projmod.load(project_dir, check=False).get("version") or 0)
+        if version <= saved:
+            raise EngineError("PROJECT_CHANGED", f"v{version} was saved after {project_file} was copied (project.json is at v{saved})",
+                              "Your video was changed somewhere else while I worked on your note, so I left it as it was. "
+                              "Send your note again.")
+        if vdir.exists():
+            shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
     vdir.mkdir(parents=True, exist_ok=True)
     if win:     # one scratch window at a time: older window slices go
         for old in vdir.glob("window_*"):

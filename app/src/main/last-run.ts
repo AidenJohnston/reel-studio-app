@@ -1,5 +1,6 @@
 // At startup, before any job: settles what the last run left behind. The storage root comes first,
-// because an engine list that can't be read closes every video still locked under the root this run uses.
+// because an engine list that can't be read sends the app looking for engines in the videos under
+// the root this run uses.
 import { basename } from 'node:path'
 import type { createPidRegistry } from './orphans'
 import { clearStaleLocks } from './owner'
@@ -18,11 +19,11 @@ export async function settleLastRun(
   await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
   const { stopped, stillRunning, unknown } = await registry.reap()
   if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
-  if (unknown) log('[start] the engine list from the last run could not be read, or names an engine with no video; every video left open stays closed')
-  // something there would not stop and may still be writing: the project stays closed, its lock kept
+  if (unknown) log('[start] the engine list from the last run could not be read, or names an engine with no video; looked for engines and ffmpeg still working in a video')
+  // something there would not stop, or is still running, and may still be writing: the project stays closed
   const closed = stillRunning.map((dir) => basename(dir))
   for (const slug of closed) {
-    log(`[start] ${slug}: an engine process from the last run would not stop; the video stays closed`)
+    log(`[start] ${slug}: an engine process from the last run is still running; the video stays closed`)
     keepClosed(slug)
   }
   await clearStaleLocks(stillRunning).catch((e) => log(`[locks] ${String(e)}`))

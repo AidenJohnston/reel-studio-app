@@ -27,14 +27,16 @@ Rules:
    stopped, or was cut off by a quit or crash): nobody shows it, and the next final render of that
    number deletes it first.
 4. **A saved version is never rewritten.** A final render of an edit unchanged since `vN` was rendered
-   returns `vN` as it is (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`. A note that
-   only changes the caption therefore keeps its version number, and `vN/project.json` keeps the caption
-   it was made with; `project.json` has the new one, which is what Export writes.
+   (the same edit, and the same files it reads, the transcript included) returns `vN` as it is
+   (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`. A note that only changes the
+   caption therefore keeps its version number, and `vN/project.json` keeps the caption it was made
+   with; `project.json` has the new one, which is what Export writes.
 5. `cover` (cover only) writes into `preview/`.
 6. `frames` reads the file given with `--file`, else the video the project shows: `v{version}`, or the
    preview while there is no version. Its stills go to `work/frames/`.
 7. `--project-file work/...` makes `render`, `anim-context` and `cover-candidates` read (and `render`
-   patch `version` into) that document instead of `project.json`.
+   patch `version` into) that document instead of `project.json`. A final rendered from such a copy
+   never takes a number `project.json` has already saved: the engine refuses it (`PROJECT_CHANGED`).
 
 ## Render result (engine `done.result`)
 
@@ -68,8 +70,8 @@ Rules:
   copy of `project.json`, renders its drafts into that folder and its final into `v(N+1)`, then writes
   the snapshot and `notes.md` into `v(N+1)` and replaces `project.json` in one rename, after checking
   that `project.json` is still what the note started from and Stop was not pressed. A note that fails,
-  is stopped, hits its step limit, or whose final render fails changes nothing the user can see; its
-  downloads stay in `work/assets` but are not offered again.
+  is stopped, hits its step limit with something changed, or whose final render fails changes nothing
+  the user can see; its downloads stay in `work/assets` but are not offered again.
 
 ## One writer per project
 
@@ -81,11 +83,24 @@ the project open: the engine CLI and the AI dev CLI refuse while it exists ("Ree
 this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
 app removes leftover lock files when it starts (`app/src/main/owner.ts`).
 
+Every AI edit, the app's and the dev CLI's alike, also holds `<project>/work/.ai-edit.lock` for its
+whole run, so two edits in different processes never run on one project at once (`ai/src/index.ts`
+`withEditLock`). A lock whose process has died, or that is 3 hours old, is taken over.
+
+## Engine processes
+
 An engine call settles only after the engine and everything it started have exited. On macOS and
 Linux the engine runs as its own process group and the host stops what is left of the group after
 any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
 project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
 children when it exits (`engine/reelengine/contain.py`).
+
+The app records each engine's pid and project in `engines.json` (in its settings folder) until the
+engine's whole group is gone, and at startup stops engines a crashed run left behind. A project whose
+engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
+running processes: a project stays closed only while an engine or ffmpeg names its folder in its
+arguments, and every other project opens. It keeps looking at each start until it finds none
+(`app/src/main/orphans.ts`).
 
 ## Notes waiting their turn
 

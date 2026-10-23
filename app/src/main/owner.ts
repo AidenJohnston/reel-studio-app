@@ -25,16 +25,9 @@ export async function claimProject(dir: string): Promise<ProjectOwner> {
   return { token, release: () => fs.rm(lock, { force: true }) }
 }
 
-/** Projects whose lock file an app left: they were open when it last ran. */
-export async function lockedProjects(): Promise<string[]> {
-  const slugs = await fs.readdir(projectsDir()).catch(() => [] as string[])
-  const locked = await Promise.all(slugs.map((slug) => fs.access(join(projectsDir(), slug, OWNER_LOCK)).then(() => true, () => false)))
-  return slugs.filter((_, i) => locked[i]).map((slug) => join(projectsDir(), slug))
-}
-
 /** At startup, after leftover engines are stopped (orphans.ts) and before any job: every lock file was
  * left by an app that has quit or crashed, since this one holds the single-instance lock. `stillRunning`:
- * projects where something of that app's could not be stopped; their locks stay. */
+ * projects where something of that app's is still running; their locks stay. */
 export async function clearStaleLocks(stillRunning: string[]): Promise<void> {
   const keep = new Set(stillRunning.map((dir) => resolve(dir)))
   const slugs = await fs.readdir(projectsDir()).catch(() => [] as string[])

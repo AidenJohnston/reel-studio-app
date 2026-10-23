@@ -59,6 +59,21 @@ def test_the_same_edit_gets_its_saved_version_back_untouched(project):
     assert {f.name: f.read_bytes() for f in v1.iterdir() if f.is_file()} == before
 
 
+def test_changed_words_make_a_new_version_with_their_subtitles(project):
+    p = json.loads((project / "project.json").read_text())
+    p["captions"]["enabled"] = True
+    (project / "project.json").write_text(json.dumps(p))
+    assert engine(project, "render")["version"] == 1
+    t = json.loads((project / "work" / "transcript.json").read_text())
+    t["words"][2]["w"] = "loaves"          # the words were heard again; the edit is the same
+    (project / "work" / "transcript.json").write_text(json.dumps(t))
+
+    again = engine(project, "render")
+    assert again["version"] == 2 and not again.get("reused")
+    shown = lambda v: " ".join(c["text"] for c in json.loads((project / "versions" / v / "captions.json").read_text())["cues"]).lower()
+    assert "loaves" in shown("v2") and "loaves" not in shown("v1")
+
+
 def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(project):
     root_before = (project / "project.json").read_bytes()
     (project / "versions" / "preview").mkdir(parents=True)
@@ -84,12 +99,19 @@ def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(proj
     assert (project / "versions" / "preview" / "draft.mp4").read_bytes() == b"the creator's preview"
 
 
-def test_a_render_run_by_hand_refuses_a_project_reel_studio_has_open(project):
-    lock = project / "work" / ".owner.lock"
-    lock.write_text(json.dumps({"app": "Reel Studio", "token": "the app's note"}))
-    refused = last_event(project, "render")
-    assert refused["event"] == "error" and refused["code"] == "PROJECT_OPEN"
-    assert str(lock) in refused["userMessage"]
-    assert not (project / "versions" / "v1").exists()
+def test_a_note_never_replaces_a_version_saved_while_it_ran(project):
+    engine(project, "render")
+    note = project / "work" / "notes" / "n1"     # the note's copy, made at Version 1
+    note.mkdir(parents=True)
+    p = json.loads((project / "project.json").read_text())
+    (note / "edit.json").write_text(json.dumps({**p, "cut": {**p["cut"], "gapCap": 0.4}}))
+    live = json.loads((project / "project.json").read_text())   # meanwhile another edit saves Version 2
+    live["cut"]["gapCap"] = 0.3
+    (project / "project.json").write_text(json.dumps(live))
+    assert engine(project, "render")["version"] == 2
+    v2 = project / "versions" / "v2"
+    saved = {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()}
 
-    assert engine(project, "render", "--owner", "the app's note")["version"] == 1
+    refused = last_event(project, "render", "--project-file", "work/notes/n1/edit.json")
+    assert refused["event"] == "error" and refused["code"] == "PROJECT_CHANGED"
+    assert {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()} == saved

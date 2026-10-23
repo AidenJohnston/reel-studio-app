@@ -198,25 +198,20 @@ export const createMockAI: CreateAI = ({ host }) => {
       if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
-      const added: string[] = []
-      if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
-        added.push(note.trim())
-      }
+      // a rule to remember is only proposed: the app asks before anything goes into My style
+      const proposed = /\b(always|never|every video|from now on|in general)\b/i.test(note) ? [note.trim()] : []
+      const summary = proposed.length
+        ? 'Connect ChatGPT in Settings and I can change this video from your notes too.'
+        : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".'
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
-      p.notes = [...(p.notes ?? []), { ...(opts?.id ? { id: opts.id } : {}), version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
+      // saved under the job's id with its reply, so a crash right after is finished at the next start (store.ts settleInterrupted)
+      p.notes = [...(p.notes ?? []), {
+        version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments,
+        ...(opts?.id ? { id: opts.id } : {}), reply: summary, ...(proposed.length ? { styleSuggestions: proposed } : {})
+      }]
       await writeProject(projectDir, p)
       onEvent({ type: 'status', message: 'Done', pct: 100 })
-      return {
-        summary: added.length
-          ? 'I saved that to My style. Connect ChatGPT in Settings and I can change this video from your notes too.'
-          : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".',
-        version: p.version ?? 0,
-        styleRulesAdded: added,
-        changed: []
-      }
+      return { summary, version: p.version ?? 0, styleRulesAdded: [], styleSuggestions: proposed, changed: [] }
     },
 
     async writeScript(): Promise<ScriptResult> {

@@ -2,12 +2,11 @@
 // rendering into a project the next app instance is about to resume. We record each engine's pid and
 // project in a small file, from its start until it and everything it started have exited, and at
 // startup stop whatever of ours is still running. A project with something we could not stop stays
-// closed, its lock file kept (owner.ts), until nothing of ours runs in it.
+// closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs'
-import { uptime } from 'node:os'
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
-import { lockedProjects } from './owner'
+import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
 
 /** `stop` ends a pid's process tree and reports whether all of it is gone (proctree killTree). */
@@ -16,8 +15,8 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
   const engines = new Map<number, string | null>()
   /** Engines of a previous run that reap could not stop. */
   const leftover = new Set<number>()
-  // A list that cannot be read may hide engines that are still running: it is kept aside, and every
-  // project left locked stays closed, until the computer has restarted since it was written.
+  // A list that cannot be read may hide engines that are still running. It is kept aside, and every
+  // start looks for them among the running processes (stillWorking) until a look finds none.
   const unreadable = join(dir, 'engines.unreadable.json')
   // Written whole or not at all: a crash mid-write must not leave a list the next start cannot read.
   const save = (): void => {
@@ -45,11 +44,11 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       save()
     },
     /** Stops engines a previous run left behind. `stillRunning`: the projects of those that would not
-     * stop, which stay registered for the next start, and while the list was unreadable (`unknown`)
-     * every project still locked. */
+     * stop, which stay registered for the next start. While the list cannot be read, or names an
+     * engine with no video (`unknown`), it also has every project a running engine or ffmpeg names. */
     async reap(): Promise<{ stopped: number; stillRunning: string[]; unknown: boolean }> {
       let old: { pid: number; project: string | null }[] = []
-      let unknown = false
+      let unknown = existsSync(unreadable)
       try {
         // a plain pid list was written by 0.1.x
         old = JSON.parse(readFileSync(file, 'utf8')).map((e: number | { pid: number; project: string | null }) => (typeof e === 'number' ? { pid: e, project: null } : e))
@@ -57,17 +56,11 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
         if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
           unknown = true
           try {
-            renameSync(file, unreadable) // keeps its time: when the last run last wrote it
+            renameSync(file, unreadable)
           } catch {
-            /* closed for this start only */
+            /* looked for at this start only */
           }
         }
-      }
-      try {
-        if (statSync(unreadable).mtimeMs > Date.now() - uptime() * 1000) unknown = true
-        else rmSync(unreadable)
-      } catch {
-        /* nothing kept aside */
       }
       let stopped = 0
       const stillRunning: string[] = []
@@ -84,7 +77,12 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
         else unknown = true
       }
       save()
-      return { stopped, stillRunning: unknown ? [...new Set([...stillRunning, ...(await lockedProjects())])] : stillRunning, unknown }
+      if (!unknown) return { stopped, stillRunning, unknown }
+      const folders = projectFolders()
+      const working = await stillWorking(folders)
+      if (working && !working.length) rmSync(unreadable, { force: true })
+      // with no process list nothing says which videos are safe: none opens at this start
+      return { stopped, stillRunning: [...new Set([...stillRunning, ...(working ?? folders)])], unknown }
     },
     /** Resolves once every engine reap could not stop has exited (checked every `everyMs`). */
     async drained(everyMs = 2000): Promise<void> {
@@ -99,6 +97,71 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       }
     }
   }
+}
+
+function projectFolders(): string[] {
+  try {
+    return readdirSync(projectsDir(), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(projectsDir(), e.name))
+  } catch {
+    return []
+  }
+}
+
+/** The folders a running engine or ffmpeg names in its arguments (an engine gets `--project`, its
+ * ffmpeg the files it reads and writes there), or null when the processes cannot be listed. This only
+ * reads: such a process may be an engine someone ran by hand, which is not the app's to stop. */
+async function stillWorking(folders: string[]): Promise<string[] | null> {
+  const procs = await processList()
+  if (!procs) return null
+  const working = procs.filter((p) => p.pid !== process.pid && (isOurEngine(p.cmdline) || FFMPEG.test(p.cmdline)))
+  // the engine names the folder as the app gave it; its ffmpeg names the real path the engine resolved,
+  // which differs when the storage folder is reached through a symlink or a junction
+  return folders.filter((dir) => [dir, realPath(dir)].some((name) => working.some((p) => namesFolder(p.cmdline, name))))
+}
+
+function realPath(dir: string): string {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return dir
+  }
+}
+
+const FFMPEG = /(^|[\\/"\s])ff(mpeg|probe)(\.exe)?("|\s|$)/i
+
+/** `dir` appears in the command line as a whole path: `.../bread` never matches `.../bread-rolls`, and
+ * `/var/x` never matches `/private/var/x`. An argument starts it, or `=`, `:` or `,` inside one. */
+function namesFolder(cmdline: string, dir: string): boolean {
+  const norm = (s: string): string => (process.platform === 'win32' ? s.replace(/\//g, '\\').toLowerCase() : s)
+  const line = norm(cmdline)
+  const folder = norm(dir).replace(/[\\/]+$/, '')
+  for (let i = line.indexOf(folder); i >= 0; i = line.indexOf(folder, i + 1)) {
+    const before = i === 0 ? undefined : line[i - 1]
+    const next = line[i + folder.length]
+    if ((before === undefined || /["'\s=:,]/.test(before)) && (next === undefined || /[\\/"'\s]/.test(next))) return true
+  }
+  return false
+}
+
+/** Every running process with its full command line, or null when the list cannot be read. */
+function processList(): Promise<{ pid: number; cmdline: string }[] | null> {
+  return new Promise((resolve) => {
+    const parse = (err: Error | null, out: string): void =>
+      resolve(err ? null : out.split(/\r?\n/).flatMap((line) => {
+        const m = /^\s*(\d+)\s+(.*\S)/.exec(line)
+        return m ? [{ pid: Number(m[1]), cmdline: m[2] }] : []
+      }))
+    const big = 64 * 1024 * 1024
+    if (process.platform === 'win32') {
+      const list = '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }'
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', list], { windowsHide: true, timeout: 30000, maxBuffer: big }, parse)
+    } else {
+      // Without a UTF-8 locale (an app opened from the Finder has none) macOS ps escapes every
+      // non-ASCII byte, and "Zoë" would never match the folder it names.
+      const env = { ...process.env, LC_ALL: process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8' }
+      execFile('ps', ['-A', '-ww', '-o', 'pid=,args='], { env, timeout: 30000, maxBuffer: big }, parse)
+    }
+  })
 }
 
 /** Something of ours still runs from this pid: the engine itself (after a crash the pid may belong to
