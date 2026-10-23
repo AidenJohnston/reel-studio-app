@@ -60,6 +60,7 @@ def test_each_candidate_carries_the_reasons_of_the_frame_that_won(monkeypatch, t
     monkeypatch.setattr(cover, "score_frames", lambda ctx, sid, times: [dict(r) for r in rows])
     monkeypatch.setattr(cover, "grab_frame", lambda path, t, ctx: np.zeros((1920, 1080, 3), np.uint8))
 
-    [c] = cover.candidates(object(), "s1", [2.0], tmp_path, width=90)
+    ctx = SimpleNamespace(project={"sources": [{"id": "s1"}]})
+    [c] = cover.candidates(ctx, "s1", [2.0], tmp_path, width=90)
 
     assert (c["atSourceTime"], c["score"], c["reasons"]) == (2.1, 0.8, ["eyesOpen", "still"])

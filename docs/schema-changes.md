@@ -30,7 +30,8 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 
 - `cover.manual` (bool): the person picked `cover.atSourceTime` from the cover suggestions in the app, so the
   engine renders that exact frame and does no search around it. The app clears it when the slider moves,
-  and the AI's `set_cover` clears it. `cover.exact` (the AI looked at this frame; search 0.2 s around it)
+  and the AI's `set_cover` clears it only when the source changes or the time moves by at least 0.01 s.
+  A text-only cover edit keeps the manual pick. `cover.exact` (the AI looked at this frame; search 0.2 s around it)
   is unchanged.
 
 ## 2026-10-20 (mirror)
