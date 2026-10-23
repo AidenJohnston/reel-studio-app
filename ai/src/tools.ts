@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AssetCandidate, AssetKind, MediaEngine, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryFile, readAssets, removeFiles } from './assets';
+import { AssetCandidate, AssetKind, FrozenAsset, MediaEngine, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryFile, readAssets, removeFiles } from './assets';
 import { readAttachment } from './attachments';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
@@ -598,6 +598,15 @@ async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly A
   if (!kinds.includes(committed.kind)) throw new ToolInputError(`This placement needs ${kinds.join(' or ')}. Choose that kind with resolve_asset.`);
   return committed.committedPath;
 }
+/** The Library file a song committed through resolve_asset was frozen from, by its ledger record (the one
+ * placed by `asked`, an assetId, else any record of that frozen file), or null for a song from elsewhere.
+ * The Library file may be gone since: only the path's shape is checked. */
+async function songLibrarySource(ctx: ToolContext, asked: string, committedPath: string): Promise<string | null> {
+  const fromLibrary = (a: FrozenAsset) => a.source === 'library' && a.provenance.intent.startsWith('Library/') && !pathProblem(a.provenance.intent);
+  const records = (await readAssets(assetStore(ctx))).filter((a) => a.kind === 'music' && a.committedPath === committedPath);
+  const record = records.find((a) => a.assetId === asked) ?? records.find(fromLibrary);
+  return record && fromLibrary(record) ? record.provenance.intent : null;
+}
 interface ImageCredit {
   title?: string; provider?: string; source?: string; url?: string; creator?: string; license?: string; licenseUrl?: string;
   attributionRequired?: boolean; attribution?: string; copyrighted?: boolean; trademark?: boolean;
@@ -1087,10 +1096,11 @@ const tools: ToolDef[] = [
         abs = r.abs;
         // A Library song stays Library/Music/<name> in track: the app's checklist names the song and its Music
         // tab checks it by that path. The engine plays music.frozen.
-        const library = same && kept ? kept.track : asked?.ref.startsWith('Library/') ? asked.ref : null;
+        const library = same && kept ? kept.track : asked?.ref.startsWith('Library/') ? asked.ref
+          : await songLibrarySource(ctx, String(args.track), r.ref);
         ref = library ?? r.ref;
         frozen = library ? { track: library, path: r.ref } : undefined;
-        sameSong = same;
+        sameSong = same || (library !== null && library === cur.track);
       }
       const prev = (await loadProject(ctx.projectDir)).music;
       const newSong = ref !== prev.track && !sameSong;

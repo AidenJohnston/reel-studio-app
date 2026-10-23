@@ -347,8 +347,9 @@ export async function readWords(dir: string, project: ProjectJson): Promise<Word
 /**
  * "What I did". Honest about who did what: without an AI editor nothing picked the best takes or
  * wrote the post caption, so those lines say what really happened (grandma test, findings 7 + 12).
+ * `songTitle` names a frozen song that has no Library path (see songTitle).
  */
-export function checklist(p: ProjectJson, words: Word[], kept: string[], versions: VersionInfo[], aiEdited = false): ChecklistItem[] {
+export function checklist(p: ProjectJson, words: Word[], kept: string[], versions: VersionInfo[], aiEdited = false, songTitle?: string): ChecklistItem[] {
   const cutWords = words.length - kept.length
   const caption = (p.post?.caption ?? '').trim()
   const items: ChecklistItem[] = [
@@ -374,7 +375,7 @@ export function checklist(p: ProjectJson, words: Word[], kept: string[], version
       key: 'music',
       label: p.music?.track ? 'Added music' : 'No music yet',
       done: !!(p.music?.enabled && p.music?.track),
-      detail: p.music?.track ? niceName(p.music.track) : 'Add a song to your Library and I will use it'
+      detail: p.music?.track ? niceName(songTitle ?? p.music.track) : 'Add a song to your Library and I will use it'
     },
     {
       key: 'broll',
@@ -494,7 +495,9 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const st = await readAppState(slug)
   const brollThumbs: Record<string, string> = {}
   const assets = (project.broll ?? []).map((b) => (typeof b.asset === 'string' ? b.asset : ''))
-  const clipSources = assets.some((a) => FROZEN_CLIP.test(a)) ? await frozenClipSources(dir) : new Map<string, string>()
+  const track = project.music?.track ?? ''
+  const ledger = assets.some((a) => FROZEN_CLIP.test(a)) || FROZEN_SONG.test(track) ? await readLedger(dir) : []
+  const clipSources = new Map(ledger.filter((r) => FROZEN_CLIP.test(r.committedPath) && ATTACHED_CLIP.test(r.intent)).map((r): [string, string] => [r.committedPath, r.intent]))
   for (const [i, b] of (project.broll ?? []).entries()) {
     // a clip the AI placed is its frozen copy; the attachment it was frozen from has the still
     const a = clipSources.get(assets[i]) ?? assets[i]
@@ -520,7 +523,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     words,
     keptIds: kept,
     brollThumbs,
-    checklist: checklist(project, words, kept, versions, !!st.aiEdited),
+    checklist: checklist(project, words, kept, versions, !!st.aiEdited, songTitle(ledger, track)),
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,
@@ -531,24 +534,42 @@ export async function detail(slug: string): Promise<ProjectDetail> {
 
 const ATTACHED_CLIP = /^work\/assets\/(attach-[a-f0-9]{8}-[a-z0-9-]+)\.(mp4|mov|m4v|webm)$/
 const FROZEN_CLIP = /^work\/assets\/frozen\/video\/[0-9a-f]{64}\.[a-z0-9]+$/
+const FROZEN_SONG = /^work\/assets\/frozen\/music\/[0-9a-f]{64}\.[a-z0-9]+$/
 
-/** Frozen clip path -> the attached clip it was frozen from, read from the AI's asset ledger (a record's
- * provenance.intent is the path the clip came from). Other intents are ignored. */
-async function frozenClipSources(dir: string): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+interface LedgerRecord {
+  committedPath: string
+  /** provenance.intent: the path (or request) the file was frozen from */
+  intent: string
+  title: string
+}
+
+/** The AI's asset ledger (work/assets/manifest.jsonl), one record per frozen file. Lines that do not
+ * parse are skipped: a crash mid-append leaves a torn line. */
+async function readLedger(dir: string): Promise<LedgerRecord[]> {
   const text = await fs.readFile(join(dir, 'work', 'assets', 'manifest.jsonl'), 'utf8').catch(() => '')
+  const out: LedgerRecord[] = []
   for (const line of text.split('\n')) {
-    let r: { committedPath?: unknown; provenance?: { intent?: unknown } }
+    let r: { committedPath?: unknown; title?: unknown; provenance?: { intent?: unknown } }
     try {
       r = JSON.parse(line)
     } catch {
       continue
     }
-    if (typeof r?.committedPath === 'string' && FROZEN_CLIP.test(r.committedPath) && typeof r.provenance?.intent === 'string' && ATTACHED_CLIP.test(r.provenance.intent)) {
-      out.set(r.committedPath, r.provenance.intent)
-    }
+    if (typeof r?.committedPath !== 'string') continue
+    out.push({
+      committedPath: r.committedPath,
+      intent: typeof r.provenance?.intent === 'string' ? r.provenance.intent : '',
+      title: typeof r.title === 'string' ? r.title : ''
+    })
   }
   return out
+}
+
+/** A song the AI committed from somewhere other than the Library keeps its frozen path in music.track
+ * (a Library song keeps its Library path); the checklist names it by its ledger title, not the hash. */
+function songTitle(ledger: LedgerRecord[], track: string): string | undefined {
+  if (!FROZEN_SONG.test(track)) return undefined
+  return ledger.filter((r) => r.committedPath === track && r.title.trim()).at(-1)?.title
 }
 
 function chatThumb(dir: string, a: NoteAttachment): NoteAttachment {

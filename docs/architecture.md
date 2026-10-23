@@ -317,8 +317,10 @@ the edit through `resolve_asset`. It offers candidates read where they are, each
 a picture, a 3x3 contact sheet for a clip, a waveform with duration and loudness (LUFS) for a song. Only a
 committed candidate can be placed. The user's own Library pictures, clips and songs skip the candidate
 turn: `add_broll`, `update_broll`, `choose_music` and `logo-pop` take a `Library/...` path and freeze it
-with its record in the same call, unseen by the model. A Library song keeps its `Library/Music/...` path in
-`music.track`, and its frozen copy goes in `music.frozen`, which the engine plays.
+with its record in the same call, unseen by the model. A Library song keeps its `Library/...` path in
+`music.track`, whether it was placed by its path or committed through `resolve_asset`, and its frozen copy
+goes in `music.frozen`, which the engine plays. A song from anywhere else keeps its frozen path in
+`music.track`, and the app names it by its ledger title.
 
 Freezing happens in the engine, because the AI package never reads media. `freeze-asset` copies the file to
 `work/assets/frozen/<kind>/<sha256>.<ext>`, or reuses a frozen file with the same bytes. It clones where

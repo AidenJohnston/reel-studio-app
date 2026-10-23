@@ -55,7 +55,8 @@ describe('agent loop with a scripted model', () => {
     expect(r.changed.sort()).toEqual(['broll', 'cover', 'cut', 'music', 'post', 'zooms']);
     const p = await loadProject(dir);
     expect(p.cut.keep[0]).toEqual({ from: 'w16', to: 'w26' });
-    expect(p.music.track).toBe(track);
+    // committed from the Library: track keeps the Library path, the engine plays the frozen copy
+    expect(p.music).toMatchObject({ track: 'Library/Music/gentle.mp3', frozen: { track: 'Library/Music/gentle.mp3', path: track } });
     expect(p.broll).toHaveLength(1);
     expect(p.post.hashtags).toHaveLength(5);
     // the no-AI first look (a preview, never saved), then the AI's preview, then the one final render

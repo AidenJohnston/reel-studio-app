@@ -89,10 +89,33 @@ describe('media assets', () => {
     expect((await executeTool(ctx, 'add_broll', place(asset.assetId))).isError).toBe(true);
     const placed = await executeTool(ctx, 'choose_music', { track: asset.assetId });
     expect(placed.isError, placed.content).toBe(false);
-    expect((await loadProject(dir)).music.track).toBe(asset.committedPath);
+    expect((await loadProject(dir)).music).toMatchObject({ track: ref, frozen: { track: ref, path: asset.committedPath } });
     await fs.writeFile(path.join(dir, asset.committedPath), 'changed frozen song');
     expect((await executeTool(ctx, 'choose_music', { level: 'quiet' })).isError).toBe(true);
     expect((await executeTool(ctx, 'choose_music', { track: video })).isError).toBe(true);
+  });
+
+  it('fails if a Library song committed through resolve_asset puts its frozen path in music.track', async () => {
+    const { ctx, dir, music } = await setup();
+    const commit = async (ref: string) => {
+      // a project file has no licence of its own: only the commentary policy offers it
+      const staged = await executeTool(ctx, 'resolve_asset', { kind: 'music', intent: ref, licensePolicy: 'commentary' });
+      const candidate = JSON.parse(staged.content).candidates[0];
+      const result = await executeTool(ctx, 'resolve_asset', { kind: 'music', intent: ref, phase: 'commit', candidateId: candidate.id });
+      expect(result.isError, result.content).toBe(false);
+      return JSON.parse(result.content).asset;
+    };
+    const asset = await commit(music);
+    for (const track of [asset.assetId, asset.committedPath]) {
+      const placed = await executeTool(ctx, 'choose_music', { track, startAt: 3 });
+      expect(placed.isError, placed.content).toBe(false);
+      expect((await loadProject(dir)).music).toMatchObject({ track: music, frozen: { track: music, path: asset.committedPath } });
+    }
+    // a song from outside the Library has no Library path: its frozen path stays in track (the app names it by its ledger title)
+    const other = await commit('work/attachments/song.wav');
+    expect((await executeTool(ctx, 'choose_music', { track: other.assetId })).isError).toBe(false);
+    const after = (await loadProject(dir)).music;
+    expect([after.track, after.frozen]).toEqual([other.committedPath, undefined]);
   });
 
   it('fails if every placement of a frozen file reads it again, or a changed file keeps its old hash', async () => {

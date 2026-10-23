@@ -39,8 +39,8 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 ## 2026-10-23 (frozen songs)
 
 - `music.frozen` (object, optional): `{ "track": "Library/Music/<name>", "path": "work/assets/frozen/music/<sha256>.<ext>" }`.
-  When the AI places a Library song it freezes a copy of the song into the project, and `music.track` keeps the
-  Library path the user chose, so the app's checklist and Music tab still name and check the song. The engine
+  When the AI places a Library song, by its path or committed through `resolve_asset`, it freezes a copy of the
+  song into the project, and `music.track` keeps the Library path, so the app's checklist and Music tab still name and check the song. The engine
   plays `frozen.path` only while `frozen.track` equals `music.track`. The app switches songs by rewriting
   `track` and keeps every other field, so a frozen copy left over from another song is ignored and the engine
   plays `track`. Projects without the field play `track`, as before.

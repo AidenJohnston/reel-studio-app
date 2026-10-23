@@ -80,7 +80,7 @@ describe('tool implementations', () => {
     const r = await executeTool(ctx, 'choose_music', { track, startAt: 4, level: 'quiet' });
     expect(r.summary).toBe('Added the song "calm piano"');
     const p = await loadProject(dir);
-    expect(p.music).toMatchObject({ track, startAt: 4, level: 'quiet', enabled: true });
+    expect(p.music).toMatchObject({ track: 'Library/Music/calm piano.mp3', frozen: { track: 'Library/Music/calm piano.mp3', path: track }, startAt: 4, level: 'quiet', enabled: true });
     expect((await executeTool(ctx, 'set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'wX', gainDb: -6 }] })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: -6 }] })).isError).toBe(false);
     // CLI-style call with missing nullable fields is accepted
