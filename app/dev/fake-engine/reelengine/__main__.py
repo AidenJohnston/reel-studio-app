@@ -252,6 +252,41 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.", err[-2000:])
 
 
+def write_captions(proj: Path, data: dict) -> None:
+    """work/captions.json as the real engine writes it, with simpler lines: the kept words three to a line
+    (one speech run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the
+    subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
+    cap = data.get("captions") or {}
+    if cap.get("enabled") is False:
+        return
+    words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
+    index = {w["id"]: i for i, w in enumerate(words)}
+    fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
+    tokens = [{"w": fixes.get(w["id"], w["w"]), "ids": [w["id"]]}
+              for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
+    split = set(cap.get("split") or [])
+    joins = {(j["from"], j["to"]) for j in cap.get("join") or []}
+
+    def shown(line):
+        return [t["ids"][0] for t in line if t["w"]]
+
+    joined: list = []
+    for line in (tokens[i:i + 3] for i in range(0, len(tokens), 3)):
+        if joined and shown(joined[-1]) and shown(line) and (shown(joined[-1])[-1], shown(line)[0]) in joins:
+            joined[-1] += line
+        else:
+            joined.append(line)
+    lines: list = []
+    for line in joined:
+        lines.append([line[0]])
+        for t in line[1:]:
+            if t["ids"][0] in split:
+                lines.append([])
+            lines[-1].append(t)
+    cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
+    (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
+
+
 def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
@@ -283,6 +318,7 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
     if not draft:
+        write_captions(proj, data)
         data["version"] = n
         save(proj, data)
     progress("render", 100, "Done")

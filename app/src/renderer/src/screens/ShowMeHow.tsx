@@ -8,6 +8,8 @@ import { useNotify } from '../App'
 import { IS_MAC } from '../components/ui'
 import { Icon } from '../components/icons'
 import { SubtitleSample, lookFromStyle, type SubtitleLook } from '../components/Player'
+import { SubtitleLines } from '../components/SubtitleLines'
+import { previewText, subtitleLines } from '../../../shared/subtitle-lines'
 
 export type Tab = 'cut' | 'captions' | 'music' | 'broll' | 'cover' | 'post'
 const TABS: { key: Tab; label: string }[] = [
@@ -294,14 +296,20 @@ export function ShowMeHow({
     notify(`${what} copied.`)
   }
 
+  // A line clicked or typed in the Subtitles list shows on the phone instead of the sample.
+  const [shown, setShown] = useState<{ text: string; at: number } | null>(null)
   const sample = useMemo(() => sampleLine(d.words, kept), [d.words, kept])
+  const line = shown ?? sample
   const subsOn = p.captions?.enabled !== false
   const lookJson = JSON.stringify(capStyle)
   useEffect(() => {
     if (!onPreview) return
-    onPreview(tab === 'captions' && subsOn ? { look: lookFromStyle(capStyle), text: sample.text, at: sample.at } : null)
+    onPreview(tab === 'captions' && subsOn ? { look: lookFromStyle(capStyle), text: line.text, at: line.at } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subsOn, lookJson, sample.text, sample.at])
+  }, [tab, subsOn, lookJson, line.text, line.at])
+  const lines = useMemo(() => subtitleLines(d.captionLines, kept, d.project.captions, p.captions, wordText), [d.captionLines, kept, d.project.captions, p.captions, wordText])
+  const firstSource = d.project.sources?.[0]?.id
+  const wordById = useMemo(() => new Map(d.words.map((w) => [w.id, w])), [d.words])
 
   const coverTime = Number(p.cover?.atSourceTime ?? 0) || 0
   const sourceDuration = d.project.sources?.[0]?.duration ?? 60
@@ -437,12 +445,40 @@ export function ShowMeHow({
                   <p className="muted-sm">The phone on the left shows the new look. Press "Make a new version" to use it.</p>
                 </div>
               )}
+              {p.captions?.enabled !== false && (
+                <div className="stack" data-testid="subtitle-lines">
+                  <h3 style={{ marginTop: 10 }}>Your subtitles</h3>
+                  {lines.length ? (
+                    <>
+                      <p className="muted-sm">
+                        Click a word to see it on the phone, or type to fix it. Enter starts a new line; Backspace at the start of a line joins it to the
+                        one above.
+                      </p>
+                      <SubtitleLines
+                        lines={lines}
+                        saved={d.project.captions?.corrections ?? []}
+                        corrections={p.captions?.corrections ?? []}
+                        heard={wordText}
+                        onEdit={(edit) => setPatch((x) => ({ ...x, captions: edit({ enabled: true, ...d.project.captions, ...x.captions }) }))}
+                        onShow={(text, token) => {
+                          const w = wordById.get(token.ids[0])
+                          const at = w && (!w.source || w.source === firstSource) ? w.s + 0.05 : line.at
+                          setShown({ text: previewText(text), at })
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <p className="muted-sm">Your subtitle lines show here once your next version is made.</p>
+                  )}
+                </div>
+              )}
               <h3 style={{ marginTop: 10 }}>Fix a word</h3>
-              <p className="muted-sm">If I spelled something wrong, tell me the right spelling.</p>
+              <p className="muted-sm">If I spelled something wrong everywhere you say it, tell me the right spelling.</p>
               <div className="list">
                 {(p.captions?.corrections ?? []).map((c, i) => (
                   <div key={i} className="list-item">
-                    <span>"{c.from}" becomes "{c.to}"</span>
+                    {/* a fix from the Subtitles list is for one place; Remove brings the word back as heard */}
+                    <span>{!c.at ? `"${c.from}" becomes "${c.to}"` : c.to ? `"${c.from}" becomes "${c.to}" in one place` : `"${c.from}" is off the subtitles in one place`}</span>
                     <span className="spacer" />
                     <button
                       className="btn small ghost"

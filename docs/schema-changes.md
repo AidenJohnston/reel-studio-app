@@ -35,3 +35,18 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
   `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
   the field, so the project matches one that never had it.
+
+## 2026-10-22 (subtitle editing)
+
+- `captions.corrections[].at` (word id, optional): the fix applies to that one word only, before any other
+  correction, and only while the transcript still hears it as `from` (after a re-transcription the same id can
+  be another word, and the fix then does nothing). With `through` (word id), the words from `at` through
+  `through` become one word, as when the subtitle editor fixes a word a phrase correction made of several. An
+  empty `to` takes the word off the captions; it is still heard, and it keeps its place, so the lines around it
+  are grouped as before. Written when a word is fixed in the Subtitles list of "Edit it myself".
+- `captions.split` (word ids): each starts a new caption line. `captions.join` (`{from, to}` word ranges): the
+  line that starts at `to` goes onto the line before while that line still ends at `from`. Lines with a long
+  silence or a hidden line between them never join. Both change only the lines they touch; every other line is
+  grouped as before. Anchored on word ids, so a recut keeps them.
+- `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
+  it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
