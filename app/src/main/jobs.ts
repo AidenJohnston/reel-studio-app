@@ -67,8 +67,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       // Until the video's length is known every estimate is for "0 minutes of video" and would jump UP
       // later: wait for duration before showing a number.
       const secondsLeft = slug && progress && !mediaSec ? null : snap.etaSec
-      // Project-detail hydration must retain the same estimate as an already-open screen.
-      if (secondsLeft !== null) job.secondsLeft = secondsLeft
+      // Null clears an expired estimate in broadcasts and project-detail hydration alike.
+      job.secondsLeft = secondsLeft
       job.overdue = snap.overdue
       send({ jobId: id, slug, type: 'status', message: job.message, pct: job.pct, ...(phase ? { phase } : {}), overall: snap.overall, secondsLeft: job.secondsLeft, overdue: job.overdue, thinking: job.thinking })
     }

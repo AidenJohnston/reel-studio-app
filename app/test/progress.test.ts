@@ -58,7 +58,7 @@ describe('honest progress', () => {
     now = 2 * budget
     const earlier = t.snapshot().overall
     now = 10 * budget
-    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: false })
+    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
     expect(t.snapshot().overall).toBeGreaterThan(earlier)
     expect(t.snapshot().overall).toBeLessThan(99)
   })
@@ -87,17 +87,36 @@ describe('honest progress', () => {
     expect(fast.snapshot().etaSec!).toBeLessThan(full.snapshot().etaSec!)
   })
 
-  it('fails if fresh timings retain a legacy base instead of replacing it', () => {
+  it('retains the fixed base while learning the per-minute cost', () => {
     const legacy: SpeedHistory = { v: 1, phases: { 'note:final': { base: 6, perMin: 22, n: 3 } } }
     expect(new ProgressTracker('note', 120, legacy).estimate('final')).toBe(50)
     const h = learn(legacy, 'note', 120, { edit: 0, final: 6 + 2 * 60 })
     const d = DEFAULTS['note:final']
-    expect(new ProgressTracker('note', 120, h).estimate('final')).toBe(126)
+    expect(h.phases['note:final']!.base).toBe(6)
+    expect(new ProgressTracker('note', 120, h).estimate('final')).toBeCloseTo(72.8)
     expect(h.phases['note:final']!.perMin).toBeGreaterThan(d.perMin)   // measured 60 s/min vs 22 default
     expect(h.phases['note:edit']).toBeUndefined()                       // a skipped phase teaches nothing
     const t = new ProgressTracker('note', 120, h)
     const t0 = new ProgressTracker('note', 120, empty())
     expect(t.estimate('final')).toBeGreaterThan(t0.estimate('final'))
+  })
+
+  it('does not scale fixed AI latency from a short clip to a long clip', () => {
+    const history = learn(empty(), 'first-edit', 5, { edit: 128, final: 10 })
+    const long = new ProgressTracker('first-edit', 600, history)
+    expect(history.phases['first-edit:edit']!.base).toBe(128)
+    expect(long.estimate('edit')).toBe(128)
+    expect(long.estimate('final')).toBeCloseTo(248)
+  })
+
+  it('does not say almost there during an AI overrun with a render ahead', () => {
+    let now = 0
+    const tracker = new ProgressTracker('first-edit', 600, empty(), () => now)
+    tracker.update('listen', 0)
+    now = tracker.estimate('listen') * 1000
+    tracker.update('edit', 0)
+    now += 200_000
+    expect(tracker.snapshot()).toMatchObject({ etaSec: null, overdue: false })
   })
 
   it('formats time left in plain words', () => {

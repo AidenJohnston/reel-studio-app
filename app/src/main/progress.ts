@@ -158,10 +158,10 @@ export class ProgressTracker {
       return { ...out, etaSec: aggregateLeft > 0 ? Math.max(1, aggregateLeft) : null, overdue: false }
     }
     if (unknownEdit && observed) {
-      if (aiElapsed > aiBudget) return { ...out, etaSec: null, overdue: true }
+      if (aiElapsed > aiBudget) return { ...out, etaSec: null, overdue: false }
       return { ...out, etaSec: displayRemaining, overdue: false }
     }
-    if (elapsed > current) return { ...out, etaSec: null, overdue: !approximate && remaining < 30 }
+    if (elapsed > current) return { ...out, etaSec: null, overdue: this.cur === this.phases.length - 1 }
     if (approximate && !observed && this.kind !== 'note' && this.kind !== 'rerender') return { ...out, etaSec: null, overdue: false }
     return { ...out, etaSec: Math.max(1, remaining), overdue: false }
   }
@@ -186,11 +186,14 @@ export function learn(history: SpeedHistory, kind: ProgressKind, mediaSec: numbe
     if (!sec || sec <= 0 || !Number.isFinite(sec)) continue
     const key = `${kind}:${phase}`
     const previous = out.phases[key]
-    const prev = previous && previous.n > 0 && previous.base === 0 ? previous : undefined
-    const measured = sec / min
+    // Fixed startup and AI latency must not become a per-minute cost after a short clip.
+    // A measured phase can be faster than the fallback startup cost, as in the basic-edit fixture.
+    const base = Math.min(sec, (DEFAULTS[key] ?? DEFAULTS[key.replace('first-edit-basic:', 'first-edit:')])?.base ?? 10)
+    const prev = previous && previous.n > 0 && previous.base === base ? previous : undefined
+    const measured = Math.max(0, sec - base) / min
     if (!Number.isFinite(measured)) continue
     const a = prev ? 0.3 : 1
-    out.phases[key] = { base: 0, perMin: (prev?.perMin ?? measured) * (1 - a) + measured * a, n: (prev?.n ?? 0) + 1 }
+    out.phases[key] = { base, perMin: (prev?.perMin ?? measured) * (1 - a) + measured * a, n: (prev?.n ?? 0) + 1 }
   }
   return out
 }

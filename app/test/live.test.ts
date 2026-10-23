@@ -30,6 +30,12 @@ describe('reduceLive (the renderer side of the contract)', () => {
     expect(fold([{ ...J, type: 'tool', name: 'set_captions', summary: 'Added subtitles' }], s)).toMatchObject({ thinking: false, tools: ['Added subtitles'] })
   })
 
+  it('clears a shown ETA when the next status has no usable estimate', () => {
+    const s = fold([status({ secondsLeft: 120 }), status({ secondsLeft: null })])
+    expect(s.secondsLeft).toBeNull()
+    expect(timeLeftWords(s)).toBeNull()
+  })
+
   it('first look plays, then the AI draft replaces it, never the other way round', () => {
     const look: JobEvent = { ...J, type: 'render', version: 0, draft: true, firstLook: true, video: 'reel-media://f/look' }
     const ai: JobEvent = { ...J, type: 'render', version: 0, draft: true, firstLook: false, video: 'reel-media://f/ai' }
@@ -140,14 +146,15 @@ describe('job manager (main): the contract on the wire', () => {
     expect(existsSync(projectDir(slug))).toBe(true)
   })
 
-  it('fails if reopening an overrunning job discards the displayed estimate', async () => {
+  it('clears an expired estimate in broadcasts and reopened jobs', async () => {
     setupPaths()
     const slug = 'eta-reopen'
     mkdirSync(projectDir(slug), { recursive: true })
     let now = 0
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
     const wall = vi.spyOn(Date, 'now').mockImplementation(() => now)
-    const jobs = createJobManager(() => undefined, () => undefined, {
+    const events: JobEvent[] = []
+    const jobs = createJobManager((e) => events.push(e), () => undefined, {
       loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined,
       mediaSeconds: async () => 60
     })
@@ -168,7 +175,8 @@ describe('job manager (main): the contract on the wire', () => {
     try {
       await jobs.forSlug(slug)!.done
       expect(shown).not.toBeNull()
-      expect(reopened).toBe(shown)
+      expect(reopened).toBe('Still working, almost there')
+      expect(events.filter((e) => e.type === 'status').at(-1)).toMatchObject({ secondsLeft: null, overdue: true })
     } finally {
       clock.mockRestore()
       wall.mockRestore()
