@@ -406,6 +406,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .more { position: relative; }
 .more > .icon-btn { width: 44px; height: 44px; border: 1px solid var(--line-2); background: var(--panel); }
 .more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.12); padding: 6px; display: flex; flex-direction: column; }
+.more-menu.up { top: auto; bottom: calc(100% + 6px); }
 .more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: var(--ink); min-height: 36px; }
 .more-menu button:hover { background: var(--soft); }
 .more-menu button.danger { color: var(--red-ink); }
