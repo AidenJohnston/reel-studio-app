@@ -250,10 +250,9 @@ function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: str
   return { slug, dir }
 }
 
-/** Where a new attachment goes: the project, or its staging folder while a job runs on it. */
+/** New attachments always enter staging, so a job cannot start between admission and the attachment write. */
 async function attachDir(deps: AttachIpcDeps, name: unknown): Promise<string> {
-  const { slug, dir } = projectOf(deps, name)
-  if (!deps.busy(slug)) return dir
+  const { slug } = projectOf(deps, name)
   const staging = deps.stagingDir(slug)
   await fs.mkdir(join(staging, 'work', 'assets'), { recursive: true })
   // engine attach refuses a folder without one; nothing reads it
