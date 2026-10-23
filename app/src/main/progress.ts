@@ -25,11 +25,11 @@ export function parseHistory(value: unknown): SpeedHistory {
 export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
   'first-edit:listen': { base: 6, perMin: 8 },
   'first-edit:analyze': { base: 2, perMin: 4 },
-  // First-run fallback from one observation: Claude Sonnet via CLIProxyAPI took
-  // 128 s on IMG_7303, 39 s, on 2026-10-21. Local history always replaces this seed.
+  // First-run fallback from one observation: Claude Sonnet took 128 s on a 39 s
+  // clip on 2026-10-21. Local history always replaces this seed.
   'first-edit:edit': { base: 128, perMin: 0 },
   'first-edit:final': { base: 8, perMin: 25 },
-  // Basic edits skip AI drafts. Checked against Aiden 5.41 s and IMG_7303 23.13 s finals
+  // Basic edits skip AI drafts. Checked against 5.41 s and 23.13 s finals
   // at 10.77 s and 39.23 s of video in the M4 Pro stage suite.
   'first-edit-basic:final': { base: 2, perMin: 40 },
   'note:edit': { base: 20, perMin: 4 },

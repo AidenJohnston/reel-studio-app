@@ -162,7 +162,7 @@ describe('honest progress', () => {
   })
 
   it('fails if the recorded basic edit includes AI time or loses completed phase timings', async () => {
-    const fixture = (await import('./fixtures/aiden-progress.json')).default
+    const fixture = (await import('./fixtures/basic-progress.json')).default
     const replay = (history: SpeedHistory) => {
       let now = 0
       const tracker = new ProgressTracker('first-edit-basic', fixture.mediaSeconds, history, () => now)
