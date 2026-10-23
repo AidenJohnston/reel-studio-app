@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
 import { fallbackCoverSeconds, outputGroups, platformRule, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
@@ -39,6 +40,21 @@ async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?:
   return [first, { ...tries[1], video: second }]
 }
 
+/** A new hidden folder in `folder` where files are written before they are placed. */
+export async function makeStagingFolder(folder: string): Promise<string> {
+  const stage = await fs.mkdtemp(join(folder, STAGE_PREFIX))
+  // Windows does not hide dot-folders, so Explorer would show this one in Finished videos while the export runs.
+  // Hiding it is cosmetic: if attrib fails, the export still works, so the failure is ignored.
+  if (process.platform === 'win32') {
+    await new Promise<void>((done) => {
+      const attrib = spawn('attrib', ['+h', stage], { stdio: 'ignore', windowsHide: true })
+      attrib.on('error', () => done())
+      attrib.on('exit', () => done())
+    })
+  }
+  return stage
+}
+
 /** What the export needs to know about a finished render. Refuses only a render it cannot read. */
 async function readFinishedVideo(source: string, runEngine: RunEngine, label: string, signal?: AbortSignal): Promise<FinishedVideo> {
   const video = await runEngine('export-probe', [source], undefined, signal) as Partial<FinishedVideo & { hasVideo: boolean }> | null
@@ -72,7 +88,7 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
   // Read under the export's signal: on a slow drive this takes a while, and Stop must end it too.
   const tries = await readTries(requested, runEngine, signal)
   await fs.mkdir(folder, { recursive: true })
-  const stage = await fs.mkdtemp(join(folder, STAGE_PREFIX))
+  const stage = await makeStagingFolder(folder)
   const placed: string[] = []
   const two = tries.length > 1
   try {

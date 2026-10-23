@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, promises as fs, readdirSync, readFileSync, writ
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
-import { exportPlatforms, sweepExportStaging, type ExportTry } from '../src/main/platform-export'
+import { exportPlatforms, makeStagingFolder, sweepExportStaging, type ExportTry } from '../src/main/platform-export'
 import { coverFrame, outputGroups, type Platform } from '../src/shared/platforms'
 import { PYTHON } from './helpers'
 
@@ -296,6 +296,15 @@ describe('platform files through the real engine', () => {
     }
     expect(await fs.readdir(folder)).toEqual([])
   })
+  it.skipIf(process.platform !== 'win32')('fails if the staging folder is not hidden on Windows, where a leading dot hides nothing', async () => {
+    const folder = join(scratch, 'hidden-stage')
+    mkdirSync(folder)
+    const stage = await makeStagingFolder(folder)
+    const attributes = execFileSync('powershell.exe', ['-NoProfile', '-Command',
+      `(Get-Item -LiteralPath '${stage.replaceAll("'", "''")}' -Force).Attributes`]).toString()
+    expect(attributes).toMatch(/\bHidden\b/)
+  })
+
   // Real locks, not mocks: PowerShell opens the file with FileShare.None for 600 ms, as a stopped ffmpeg or a virus scanner can.
   it.runIf(process.platform === 'win32')('removes a staging folder whose file is still locked for a moment', async () => {
     const folder = join(scratch, 'sweep-locked')
