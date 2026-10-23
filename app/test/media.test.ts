@@ -65,7 +65,8 @@ it('fails if a project or unapproved Library file link serves an outside file, w
 it('fails if replacing checked media with an outside symlink serves outside bytes after native realpath expands an alias', async (t) => {
   const realRoot = join(base, 'Runner Long Folder')
   mkdirSync(realRoot)
-  const root = join(base, 'RUNNER~1')
+  // A fresh parent keeps NTFS 8.3 names from occupying the junction path.
+  const root = join(mkdtempSync(join(base, 'alias-')), 'root')
   link(t, realRoot, root, true)
   const requested = join(root, 'still.jpg')
   writeFileSync(requested, 'public')
