@@ -155,7 +155,7 @@ export class ProgressTracker {
     const out = { overall: this.best }
     if (!(this.mediaSec > 0)) return { ...out, etaSec: null, overdue: false }
     if (aggregateLeft !== undefined) {
-      return { ...out, etaSec: aggregateLeft > 0 ? Math.max(1, aggregateLeft) : null, overdue: false }
+      return { ...out, etaSec: aggregateLeft > 0 ? Math.max(1, aggregateLeft) : null, overdue: aggregateLeft <= 0 && this.cur === this.phases.length - 1 }
     }
     if (unknownEdit && observed) {
       if (aiElapsed > aiBudget) return { ...out, etaSec: null, overdue: false }

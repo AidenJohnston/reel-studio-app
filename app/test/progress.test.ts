@@ -63,6 +63,16 @@ describe('honest progress', () => {
     expect(t.snapshot().overall).toBeLessThan(99)
   })
 
+  it('keeps the final render overdue when aggregate progress outlives its estimate', () => {
+    let now = 0
+    const t = new ProgressTracker('rerender', 60, empty(), () => now)
+    t.update('final', 0)
+    now = 1000
+    t.update('final', 50, true)
+    now = 4000
+    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+  })
+
   it('recalibrates remaining engine defaults from a slow first step', () => {
     let now = 0
     const onTime = new ProgressTracker('first-edit-basic', 60, empty(), () => now)
