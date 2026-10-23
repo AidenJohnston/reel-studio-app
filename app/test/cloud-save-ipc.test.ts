@@ -23,7 +23,7 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'win32')('fails 
   await fs.writeFile(video, 'complete video')
   const iCloud = process.platform === 'darwin' ? join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs') : join(home, 'iCloudDrive')
   await fs.mkdir(iCloud, { recursive: true })
-  await fs.mkdir(join(home, 'Library', 'CloudStorage', 'GoogleDrive-zoe@gmail.com', 'My Drive'), { recursive: true })
+  await fs.mkdir(join(home, 'Library', 'CloudStorage', 'GoogleDrive-zoe@example.com', 'My Drive'), { recursive: true })
 
   // Every other place a drive may live never answers, like a disconnected network drive letter.
   const never = new Promise<never>(() => {})

@@ -45,8 +45,8 @@ test('fails if the drive way loses its web links, saves the wrong export or to t
     await expect(cloud.getByRole('button', { name: /^Save to / })).toHaveCount(0)
 
     mkdirSync(iCloud, { recursive: true })
-    const personal = join(home, 'Library', 'CloudStorage', 'GoogleDrive-zoe.m@gmail.com', 'My Drive')
-    const work = join(home, 'Library', 'CloudStorage', 'GoogleDrive-studio@reels.co', 'My Drive')
+    const personal = join(home, 'Library', 'CloudStorage', 'GoogleDrive-zoe.m@example.com', 'My Drive')
+    const work = join(home, 'Library', 'CloudStorage', 'GoogleDrive-studio@example.org', 'My Drive')
     mkdirSync(personal, { recursive: true })
     mkdirSync(work, { recursive: true })
     // The export dialog keeps one obvious next action: the drive buttons live only in the phone fallbacks.

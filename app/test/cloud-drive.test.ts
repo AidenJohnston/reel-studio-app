@@ -153,9 +153,9 @@ it('fails if, on a drive without hard links, a save renames over a file that rep
 it('fails if a button names a drive by its raw path or full email, or two buttons read the same', () => {
   const names = (...folders: string[]) => driveNames(folders.map((folder) => ({ folder, label: folder.includes('CloudDocs') || folder.endsWith('iCloudDrive') ? 'iCloud Drive' : 'Google Drive' })))
   const mac = '/Users/zoe/Library/CloudStorage'
-  expect(names('/Users/zoe/Library/Mobile Documents/com~apple~CloudDocs', `${mac}/GoogleDrive-zoe.m@gmail.com/My Drive`)).toEqual(['iCloud Drive', 'Google Drive'])
-  expect(names(`${mac}/GoogleDrive-zoe.m@gmail.com/My Drive`, `${mac}/GoogleDrive-studio@reels.co/My Drive`)).toEqual(['Google Drive (zoe.m)', 'Google Drive (studio)'])
-  expect(names(`${mac}/GoogleDrive-zoe@gmail.com/My Drive`, `${mac}/GoogleDrive-zoe@reels.co/My Drive`)).toEqual(['Google Drive (zoe@gmail.com)', 'Google Drive (zoe@reels.co)'])
+  expect(names('/Users/zoe/Library/Mobile Documents/com~apple~CloudDocs', `${mac}/GoogleDrive-zoe.m@example.com/My Drive`)).toEqual(['iCloud Drive', 'Google Drive'])
+  expect(names(`${mac}/GoogleDrive-zoe.m@example.com/My Drive`, `${mac}/GoogleDrive-studio@example.org/My Drive`)).toEqual(['Google Drive (zoe.m)', 'Google Drive (studio)'])
+  expect(names(`${mac}/GoogleDrive-zoe@example.com/My Drive`, `${mac}/GoogleDrive-zoe@example.org/My Drive`)).toEqual(['Google Drive (zoe@example.com)', 'Google Drive (zoe@example.org)'])
   expect(names('C:\\Users\\Zoe\\iCloudDrive', 'G:\\My Drive', 'h:\\My Drive')).toEqual(['iCloud Drive', 'Google Drive (G:)', 'Google Drive (H:)'])
   expect(names('C:\\Users\\Zoe\\Google Drive', 'G:\\My Drive')).toEqual(['Google Drive (Google Drive folder)', 'Google Drive (G:)'])
 })
