@@ -107,11 +107,17 @@ describe('version messages', () => {
       ['Longer cut', [restoreTwo]],
       ['Cut a word', [cutTwo]],
       ['Fixed a word', [{ kind: 'captions.corrections', before: [], after: [{ from: 'a', to: 'b' }, { from: 'c', to: 'd' }, { from: 'e', to: 'f' }] }]],
-      ['Removed a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }, { kind: 'broll', id: 'b2', before: { id: 'b2' }, after: null }]]
+      ['Removed a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }, { kind: 'broll', id: 'b2', before: { id: 'b2' }, after: null }]],
+      ['Cut 2 takes', [cutTwo]],
+      ['New cover words', [{ kind: 'cover.atSourceTime', before: 1, after: 2 }]],
+      ['Subtitles off and back on', [{ kind: 'captions.enabled', before: true, after: false }, { kind: 'music.enabled', before: false, after: true }]]
     ]
     expect(versionTitle([restoreTwo], words)).toBe('More words back')
     const kept = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: reply.toLowerCase() }, facts as never, words))
     expect(kept.map(([reply]) => reply)).toEqual([])
+    // the title alone is checked too: the app's own summary beside it changes nothing
+    const keptTitles = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: describeFacts(facts as never, words) }, facts as never, words))
+    expect(keptTitles.map(([reply]) => reply)).toEqual([])
   })
   it('fails if a fair rewording with "and more" or a song name is thrown away, or a made-up song name is kept', () => {
     const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
@@ -124,6 +130,11 @@ describe('version messages', () => {
     const fair = { title: 'Bigger captions, shorter cut and more', summary: 'new song “Picture Perfect”, cut two words and bigger subtitles' }
     expect(acceptRewrite(fair, facts, words)).toEqual(fair)
     expect(acceptRewrite({ ...fair, summary: 'new song "Smaller Captions", cut 2 words' }, facts, words)).toBeNull()
+    // the app's own longest name passes its own check
+    const restored = [{ kind: 'cut.keep', before: [{ from: 'w2', to: 'w5' }], after: [{ from: 'w0', to: 'w5' }] }, ...facts.slice(1)]
+    const own = { title: versionTitle(restored, words), summary: describeFacts(restored, words) }
+    expect(own.title).toBe('More words back, bigger subtitles and more')
+    expect(acceptRewrite(own, restored, words)).toEqual(own)
   })
   it("fails if a version button shows the AI's chat reply when a receipt exists, or for a version made after receipts", () => {
     const chat: ChatMessage[] = [

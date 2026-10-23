@@ -164,7 +164,8 @@ export function versionTitle(facts: EditFact[], words: Word[]): string {
 interface Lexicon { markers: string[]; nouns: string[]; dirs: Record<string, string> }
 const LEXICON: [Group, Lexicon][] = [
   ['post', { markers: ['post', 'hashtag'], nouns: ['post', 'subtitle', 'hashtag'], dirs: { new: 'new', changed: 'new' } }],
-  ['cover', { markers: ['cover', 'thumbnail'], nouns: ['cover', 'thumbnail', 'word', 'on'], dirs: { new: 'new', no: 'none' } }],
+  // "words" is a claim of its own here (the cover's text), so "new cover words" needs a text fact
+  ['cover', { markers: ['cover', 'thumbnail'], nouns: ['cover', 'thumbnail', 'on'], dirs: { new: 'new', no: 'none', word: 'words' } }],
   ['flip', {
     markers: ['flip', 'flipped', 'mirror', 'mirrored', 'filmed'],
     nouns: ['picture', 'video', 'way', 'you', 'it'],
@@ -200,8 +201,12 @@ const LEXICON: [Group, Lexicon][] = [
   }],
   ['cut', {
     markers: ['cut', 'trim', 'trimmed', 'take', 'retake'],
-    nouns: ['word', 'take', 'retake'],
-    dirs: { cut: 'fewer', trimmed: 'fewer', trim: 'fewer', shorter: 'fewer', more: 'more', back: 'more', brought: 'more', different: 'swapped', picked: 'swapped' }
+    // words and takes are claims too: "Cut 2 takes" is not "cut 2 words"
+    nouns: [],
+    dirs: {
+      cut: 'fewer', trimmed: 'fewer', trim: 'fewer', shorter: 'fewer', more: 'more', back: 'more', brought: 'more', different: 'swapped', picked: 'swapped',
+      word: 'words', take: 'takes', retake: 'takes'
+    }
   }]
 ]
 
@@ -268,7 +273,7 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
   const straight = (s: string): string => s.replace(/[“”]/g, '"')
   const title = text.title.trim()
   const summary = text.summary.trim().replace(/\.$/, '')
-  if (title.split(/\s+/).length > 6 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
+  if (title.split(/\s+/).length > 7 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
   const meant = new Map(own.map((c) => [c.group, ownClaims(c)]))
   const holds = (c: Claim, inSummary: boolean): boolean => {
     const mine = meant.get(c.group)
@@ -289,7 +294,10 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
       }
       const w = tokens(part)
       const marked = LEXICON.find(([, lex]) => w.some((x) => lex.markers.includes(x)))?.[0]
-      const candidates: Group[] = marked ? [marked] : [...new Set([...(group ? [group] : []), ...own.map((c) => c.group)])]
+      // A part that reads as the kind before it is about that kind, true or not: "subtitles off and back
+      // on" may not borrow "back on" from the music.
+      const before = !marked && group ? claimAbout(group, w) : null
+      const candidates: Group[] = marked ? [marked] : before ? [before.group] : own.map((c) => c.group)
       const claim: Claim | undefined = candidates.map((g) => claimAbout(g, w)).find((c): c is Claim => !!c && holds(c, inSummary))
       if (!claim) return null
       group = claim.group
