@@ -1067,6 +1067,8 @@ const tools: ToolDef[] = [
         // a level change without naming the song keeps the current song (null + level never means "remove")
         args = { ...args, track: cur.track }
       }
+      // the song already playing: freezing a legacy Library path changes ref, not the song
+      let sameSong = false;
       if (args.track) {
         const current = (await loadProject(ctx.projectDir)).music.track;
         const legacy = current && resolveAsset(ctx, current);
@@ -1079,26 +1081,28 @@ const tools: ToolDef[] = [
         if (!r) throw new ToolInputError(`no such song "${args.track}"; call list_library with kind music`);
         ref = r.ref;
         abs = r.abs;
+        sameSong = !!same;
       }
       const prev = (await loadProject(ctx.projectDir)).music;
+      const newSong = ref !== prev.track && !sameSong;
       // a new song with no start point: start where the engine hears a calm bar before the build
-      const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
+      const song = abs && newSong ? await analyzeMusic(ctx, abs) : null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
-        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
+        : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (newSong ? 0 : undefined));
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
         if (args.level) p.music.level = args.level as MusicLevel;
         // hand edits end the song WITH the last word (a ~0.3 s tail), not a long fade under it
-        if (ref !== null && ref !== prev.track) p.music.fadeOut = MUSIC_TAIL_S;
+        if (ref !== null && newSong) p.music.fadeOut = MUSIC_TAIL_S;
       });
       const record = ref ? (await readAssets(assetStore(ctx))).find((a) => a.committedPath === ref) : null;
       const title = record?.title ?? ref;
       const name = title ? path.basename(title, path.extname(title)) : null;
       const levelWord: Record<string, string> = { quiet: 'Turned the music down', 'under-voice': 'Set the music under your voice', 'loud-intro': 'Made the music louder at the start' };
       const summary = !name ? 'Took the music out'
-        : ref === prev.track && prev.enabled ? (args.level && args.level !== prev.level ? levelWord[args.level] ?? 'Adjusted the music' : 'Adjusted the music')
+        : !newSong && prev.enabled ? (args.level && args.level !== prev.level ? levelWord[args.level] ?? 'Adjusted the music' : 'Adjusted the music')
         : `Added the song "${name}"`;
       return { content: { ok: true, music: ctx.project!.music, ...(song ? { song } : {}) }, summary };
     },

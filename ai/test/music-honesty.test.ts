@@ -30,12 +30,17 @@ describe('choose_music honesty', () => {
     p.music.track = 'Library/Music/calm.mp3';
     p.music.enabled = true;
     p.music.level = 'under-voice';
+    p.music.startAt = 12.5;
+    p.music.fadeOut = 2;
     await saveProject(dir, p);
-    await executeTool(ctx, 'choose_music', { track: null, startAt: null, level: 'quiet' });
+    const r = await executeTool(ctx, 'choose_music', { track: null, startAt: null, level: 'quiet' });
+    expect(r.summary).toBe('Turned the music down');
     const after = (await loadProject(dir)).music;
     // a project from before frozen songs: the level change freezes its Library song and records it
     expect(after.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
     expect(JSON.parse(await fsp.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8'))).toMatchObject({ provenance: { intent: 'Library/Music/calm.mp3' } });
     expect(after.level).toBe('quiet');
+    // the same song in a new place: its start point and fade stay
+    expect([after.startAt, after.fadeOut]).toEqual([12.5, 2]);
   });
 });

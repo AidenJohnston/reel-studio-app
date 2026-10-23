@@ -70,13 +70,15 @@ def kind_of(path: Path, kind: str) -> tuple[str, str]:
 def _has_stream(path: Path, codec_type: str) -> bool:
     """ffprobe finds a real stream of this type (a cover picture in a song is not a video)."""
     import json
-    import subprocess
-    from .compose_util import ffprobe_bin
+    from .compose_util import ffprobe_bin, run
     try:
-        out = subprocess.run([ffprobe_bin(), '-v', 'error', *INPUT_OPTIONS, '-show_streams', '-of', 'json', str(path)],
-                             capture_output=True, text=True, timeout=60, check=True, stdin=subprocess.DEVNULL).stdout
+        out = run([ffprobe_bin(), '-v', 'error', *INPUT_OPTIONS, '-show_streams', '-of', 'json', str(path)], timeout=60, what='probe media').stdout
         streams = json.loads(out).get('streams', [])
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except EngineError as e:
+        if e.code != 'FFMPEG_FAILED':  # a missing ffprobe or a timeout is not a bad file
+            raise
+        return False
+    except ValueError:
         return False
     return any(s.get('codec_type') == codec_type and not s.get('disposition', {}).get('attached_pic') for s in streams)
 
@@ -120,7 +122,7 @@ def freeze(project: Path, root: Path | None, asset: str, kind: str, expect: str 
         raise EngineError('NOT_FOUND', f'{asset} is not a file', 'That file is missing. Choose it again.')
     ext, mime = kind_of(src, kind)
     # committedPath must be work/assets/frozen/<kind>/...: a symlinked folder would resolve somewhere else
-    for folder in (project / 'work' / 'assets' / 'frozen', project / 'work' / 'assets' / 'frozen' / kind):
+    for folder in (project / 'work', project / 'work' / 'assets', project / 'work' / 'assets' / 'frozen', project / 'work' / 'assets' / 'frozen' / kind):
         if folder.is_symlink():
             raise EngineError('UNSAFE_PATH', f'{folder} is a symlink', 'The project folder looks changed. Open it again.')
     frozen = safe_resolve(project, 'work/assets/frozen', write=True, what='frozen asset')

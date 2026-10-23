@@ -186,3 +186,21 @@ def test_fails_if_freeze_takes_a_file_of_another_kind_a_long_song_is_refused_or_
         freeze(project, root, 'Library/B-roll/one.mp4', 'video')
     assert error.value.code == 'UNSAFE_PATH'
     assert list(elsewhere.iterdir()) == []
+
+
+def test_fails_if_freeze_follows_a_symlinked_work_assets_or_calls_a_missing_ffprobe_a_bad_file(tmp_path, monkeypatch):
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    folder = root / 'Library' / 'B-roll'
+    folder.mkdir(parents=True)
+    ffmpeg('-f', 'lavfi', '-i', 'color=red:s=96x54:r=30', '-frames:v', '1', folder / 'one.mp4')
+    (project / 'work' / 'elsewhere').mkdir(parents=True)
+    (project / 'work' / 'assets').symlink_to(project / 'work' / 'elsewhere', target_is_directory=True)
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/B-roll/one.mp4', 'video')
+    assert error.value.code == 'UNSAFE_PATH'
+    assert list((project / 'work' / 'elsewhere').iterdir()) == []
+    (project / 'work' / 'assets').unlink()
+    monkeypatch.setenv('REELENGINE_FFPROBE', str(tmp_path / 'no-ffprobe'))
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/B-roll/one.mp4', 'video')
+    assert error.value.code == 'NO_FFMPEG'
