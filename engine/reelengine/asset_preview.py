@@ -10,10 +10,9 @@ from pathlib import Path
 
 from .compose_util import ffmpeg_bin, ffprobe_bin, run
 from .proto import EngineError
+from .asset_freeze import kind_of, sha256_of
 from .safepath import safe_resolve
 
-# Keep the image resolver's 40 MB ceiling for every candidate kind.
-MAX_BYTES = 40 * 1024 * 1024
 # Refuse playlist demuxers, including a playlist disguised with a media extension.
 INPUT_OPTIONS = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi,wav,mp3,flac,ogg,aac']
 
@@ -21,8 +20,9 @@ INPUT_OPTIONS = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,m
 def inspect(project: Path, root: Path | None, asset: str, video: bool, preview_ref: str | None = None) -> dict:
     from PIL import Image, ImageDraw
     source = safe_resolve(project, asset, root=root, what='media')
-    if not source.is_file() or source.stat().st_size > MAX_BYTES:
-        raise EngineError('BAD_MEDIA', 'preview requires a file under 40 MB', 'Choose a media file no larger than 40 MB.')
+    if not source.is_file():
+        raise EngineError('BAD_MEDIA', 'preview requires a file', 'That file is missing. Choose it again.')
+    _ext, mime = kind_of(source, 'video' if video else 'music')
     probe = run([ffprobe_bin(), '-v', 'error', *INPUT_OPTIONS, '-show_format', '-show_streams', '-of', 'json', str(source)],
                 timeout=60, what='inspect media')
     data = json.loads(probe.stdout)
@@ -39,7 +39,8 @@ def inspect(project: Path, root: Path | None, asset: str, video: bool, preview_r
         raise EngineError('UNSAFE_PATH', 'invalid candidate preview path', 'The preview path is invalid. Resolve the asset again.')
     preview = safe_resolve(project, preview_ref or f'work/thumbs/candidate-{uuid.uuid4().hex}.{extension}', write=True, what='preview')
     preview.parent.mkdir(parents=True, exist_ok=True)
-    result = {'previewPath': str(preview.relative_to(project.resolve())), 'durationSec': duration}
+    result = {'previewPath': str(preview.relative_to(project.resolve())), 'durationSec': duration,
+              'sha256': sha256_of(source), 'mime': mime}
     base = [ffmpeg_bin(), '-nostdin', '-v', 'error', '-threads', '1', *INPUT_OPTIONS]
     try:
         if video:

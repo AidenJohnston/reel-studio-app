@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AssetCandidate, AssetKind, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryPicture, hashAsset, readAssets, removeFiles } from './assets';
+import { AssetCandidate, AssetKind, MediaEngine, PendingAsset, ASSET_KINDS, STILL_KINDS, commitAsset, committedAsset, exportCredits, freezeLibraryFile, readAssets, removeFiles } from './assets';
 import { readAttachment } from './attachments';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
@@ -568,18 +568,33 @@ async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: str
 function assetStore(ctx: ToolContext) {
   return { projectDir: ctx.projectDir, root: ctx.host.reelStudioRoot() };
 }
+function mediaEngine(ctx: ToolContext): MediaEngine {
+  const root = ['--root', ctx.host.reelStudioRoot()];
+  return {
+    freeze: (ref, kind, expect) => engine(ctx, 'freeze-asset', ['--asset', ref, '--kind', kind, ...root, ...(expect ? ['--expect-sha256', expect] : [])], 'Saving the asset'),
+    hash: (ref) => engine(ctx, 'hash-asset', ['--asset', ref, ...root]),
+  };
+}
+/** The kind a Library file is frozen as when it is placed by its path, from its extension. */
+function libraryFileKind(ref: string, pictureKind: AssetKind): AssetKind | null {
+  if (/\.(png|jpe?g|gif|webp)$/i.test(ref)) return pictureKind;
+  if (/\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(ref)) return 'video';
+  if (/\.(wav|mp3|m4a|aac|flac|ogg|opus)$/i.test(ref)) return 'music';
+  return null;
+}
 /** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
- * the user's own Library picture frozen and recorded in the same call, and anything else only once
- * resolve_asset committed it as one of `kinds`. */
-async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], libraryKind: AssetKind = 'image'): Promise<string> {
+ * the user's own Library picture, clip or song frozen and recorded in the same call, and anything else
+ * only once resolve_asset committed it as one of `kinds`. */
+async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], pictureKind: AssetKind = 'image'): Promise<string> {
   const ref = /^asset_[0-9a-f-]{36}$/.test(asset) ? asset : resolveAsset(ctx, asset)?.ref;
   if (!ref) throw new ToolInputError(`asset not found: ${asset}`);
   if (kinds.includes('video') && ctx.state.animationsMade?.has(ref)) return ref;
-  if (ref.startsWith('Library/') && kinds.includes(libraryKind) && /\.(png|jpe?g|gif|webp)$/i.test(ref)) {
-    try { return (await freezeLibraryPicture(assetStore(ctx), ref, libraryKind)).committedPath; }
-    catch (e) { throw new ToolInputError(`${ref}: ${e instanceof Error ? e.message : String(e)}`); }
+  const libraryKind = ref.startsWith('Library/') ? libraryFileKind(ref, pictureKind) : null;
+  if (libraryKind && kinds.includes(libraryKind)) {
+    try { return (await freezeLibraryFile(assetStore(ctx), mediaEngine(ctx), ref, libraryKind)).committedPath; }
+    catch (e: any) { throw new ToolInputError(`${ref}: ${e?.userMessage ?? e?.message ?? String(e)}`); }
   }
-  const committed = await committedAsset(assetStore(ctx), ref);
+  const committed = await committedAsset(assetStore(ctx), mediaEngine(ctx), ref);
   if (!kinds.includes(committed.kind)) throw new ToolInputError(`This placement needs ${kinds.join(' or ')}. Choose that kind with resolve_asset.`);
   return committed.committedPath;
 }
@@ -644,15 +659,14 @@ function assetData<T>(value: T): unknown {
   return value;
 }
 type Offered = { candidate: AssetCandidate; images?: ImagePart[] } | null;
-/** Hashes and inspects a picture where it is (nothing is copied until commit) and remembers it as a
- * candidate of this request. A refused or failed download is removed at once. */
+/** Has the engine hash and inspect an asset where it is (nothing is copied until commit) and remembers it
+ * as a candidate of this request. A refused or failed download is removed at once. */
 async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string, requestId: string, policy: string, ref: string, o: Origin): Promise<Offered> {
   const store = assetStore(ctx);
   const made = [...o.made];
   try {
     if (!policyAllows(policy, o)) { await removeFiles(store, made); return null; }
-    const { sha256, mime } = await hashAsset(store, ref, kind);
-    const command = kind === 'video' ? 'inspect-video' : kind === 'music' || kind === 'sfx' ? 'inspect-audio' : 'inspect-image';
+    const command = kind === 'video' ? 'inspect-video' : kind === 'music' ? 'inspect-audio' : 'inspect-image';
     const preview = command !== 'inspect-image' ? `work/thumbs/candidate-${randomUUID()}.${kind === 'video' ? 'jpg' : 'png'}` : null;
     // Own the path before the engine starts, so cancellation can remove a partly written preview.
     if (preview) made.push(preview);
@@ -663,7 +677,7 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
     const c = o.credit;
     const candidate: AssetCandidate = {
       id: randomUUID(), kind, source: o.source, provider: c.provider ?? o.source, title: c.title ?? path.basename(ref),
-      localPath: ref, previewPath, width: inspected.width, height: inspected.height, durationSec: inspected.durationSec, loudnessLufs: inspected.loudnessLufs, mime, sha256, rightsConfidence: o.rights,
+      localPath: ref, previewPath, width: inspected.width, height: inspected.height, durationSec: inspected.durationSec, loudnessLufs: inspected.loudnessLufs, mime: inspected.mime, sha256: inspected.sha256, rightsConfidence: o.rights,
       ...(o.sourceUrl ? { sourceUrl: o.sourceUrl } : {}), ...(c.source ? { landingUrl: c.source } : {}),
       ...(c.creator ? { creator: c.creator } : {}), ...(c.license ? { license: c.license } : {}),
       ...(c.licenseUrl ? { licenseUrl: c.licenseUrl } : {}),
@@ -710,7 +724,7 @@ async function resolveCandidates(ctx: ToolContext, kind: AssetKind, intent: stri
     const got = await captureSite(ctx, intent, 'phone');
     offered = [await offer(got.asset, { source: 'capture', rights: 'commentary', sourceUrl: got.url, made: downloaded(got), credit: {
       title: `Screenshot of ${got.site}`, provider: 'capture', source: got.url, creator: got.site, attribution: `Screenshot of ${got.site}` } })];
-  } else if (isUrl && (kind === 'video' || kind === 'music' || kind === 'sfx')) {
+  } else if (isUrl && (kind === 'video' || kind === 'music')) {
     throw new ToolInputError('Choose a local Library or project file for this media kind.');
   } else if (isUrl) {
     const got = await fetchImageWithThumb(ctx, text);
@@ -719,8 +733,8 @@ async function resolveCandidates(ctx: ToolContext, kind: AssetKind, intent: stri
     const asked = intent.trim().toLowerCase();
     const same = [...new Set((await readAssets(assetStore(ctx))).filter((a) => a.kind === kind && a.provenance.intent.trim().toLowerCase() === asked).map((a) => a.committedPath))];
     offered = await Promise.all(same.slice(0, 3).map((ref) => orMiss(async () => offer(ref, await originOf(ctx, ref)))));
-    if (!offered.some(Boolean) && (kind === 'video' || kind === 'music' || kind === 'sfx')) {
-      const folder = kind === 'video' ? 'B-roll' : kind === 'music' ? 'Music' : 'SFX';
+    if (!offered.some(Boolean) && (kind === 'video' || kind === 'music')) {
+      const folder = kind === 'video' ? 'B-roll' : 'Music';
       const extensions = kind === 'video' ? ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi'] : [...EXT.music, '.opus'];
       const files = await listFiles(path.join(ctx.host.reelStudioRoot(), 'Library', folder), extensions, `Library/${folder}`);
       const matching = files.filter((ref) => path.basename(ref).toLowerCase().includes(asked)).slice(0, 3);
@@ -1032,9 +1046,9 @@ const tools: ToolDef[] = [
   },
   {
     name: 'choose_music',
-    description: 'Pick a committed music assetId from resolve_asset or null for no music. level: under-voice (default) | quiet | loud-intro.',
+    description: 'Pick the song: a Library/Music path from list_library (frozen as it is placed), a committed music assetId from resolve_asset, or null for no music. level: under-voice (default) | quiet | loud-intro.',
     parameters: S.obj({
-      track: S.opt(S.str('music assetId from resolve_asset commit, or null to remove music')),
+      track: S.opt(S.str('e.g. "Library/Music/song.mp3", a music assetId from resolve_asset commit, or null to remove music')),
       startAt: S.opt(S.num('seconds into the song to start; leave null and the engine enters on a calm bar before the first big hit', { minimum: 0 })),
       level: S.opt(S.enum(['under-voice', 'quiet', 'loud-intro'])),
     }),
@@ -1103,11 +1117,11 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture path from list_library (placed at once), or the assetId of a clip, or of a web or project picture, committed with resolve_asset. text-pop needs only params.text.',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text.',
     parameters: S.obj({
       anchor: ANCHOR,
       treatment: S.enum(TREATMENTS),
-      asset: S.opt(S.str('a Library/... picture path, or a picture or video assetId from resolve_asset commit')),
+      asset: S.opt(S.str('a Library/... picture or clip path, or a picture or video assetId from resolve_asset commit')),
       animation: S.opt(S.obj({
         template: S.enum(ANIMATION_IDS),
         params: ANIM_PARAMS,
@@ -1142,7 +1156,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'update_broll',
-    description: 'Change an existing b-roll by id. A replacement picture is a Library/... path or a committed assetId from resolve_asset; a replacement video is a committed assetId. Pass null for anything you are not changing.',
+    description: 'Change an existing b-roll by id. A replacement picture or clip is a Library/... path or a committed assetId from resolve_asset. Pass null for anything you are not changing.',
     parameters: S.obj({
       id: S.str(),
       anchor: S.opt(ANCHOR),
@@ -1215,14 +1229,14 @@ const tools: ToolDef[] = [
   },
   {
     name: 'resolve_asset',
-    description: 'Get an asset ready to place (a Library picture needs none of this: give add_broll its path). Video, music and sfx use local Library or project files; previews are contact sheets or waveforms with duration and LUFS. intent is a Library or project file, a search_images result url, a picture query, or (for website_screenshot) a web address. Returns candidates, each with a still: LOOK at it, then call again with phase commit and the matching candidateId; add_broll takes the committed assetId. Logos must be official marks.',
+    description: 'Get a web or found asset ready to place (a Library picture, clip or song needs none of this: give add_broll or choose_music its path). Video and music use local Library or project files; previews are contact sheets or waveforms with duration and LUFS. intent is a Library or project file, a search_images result url, a picture query, or (for website_screenshot) a web address. Returns candidates, each with a still: LOOK at it, then call again with phase commit and the matching candidateId; add_broll takes the committed assetId. Logos must be official marks.',
     parameters: S.obj({ kind: S.enum(ASSET_KINDS), intent: S.str(), phase: S.opt(S.enum(['candidates', 'commit'])),
       candidateId: S.opt(S.str()), licensePolicy: S.opt(S.enum(['commercial-safe', 'open-only', 'user-owned', 'commentary'], 'commercial-safe (default): the user\'s own files and openly licensed web pictures. commentary also allows screenshots and pictures that are copyrighted or have no licence: only while talking about them, and name them in the finish summary')) }),
     async run(ctx, args) {
       if (args.phase !== 'commit') return resolveCandidates(ctx, args.kind, args.intent, args.licensePolicy ?? (args.kind === 'website_screenshot' ? 'commentary' : 'commercial-safe'));
       const pending = ctx.state.assetCandidates?.get(args.candidateId);
       if (!pending || pending.candidate.kind !== args.kind) throw new ToolInputError('Choose a candidate ID returned by resolve_asset in this editing request.');
-      const asset = await commitAsset(assetStore(ctx), pending);
+      const asset = await commitAsset(assetStore(ctx), mediaEngine(ctx), pending);
       ctx.state.assetCandidates?.delete(args.candidateId);
       return { content: { requestId: pending.requestId, status: 'committed', candidates: [], asset: assetData(asset) } };
     },

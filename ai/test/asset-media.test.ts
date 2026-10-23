@@ -11,14 +11,17 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(ro
 async function setup() {
   const { root, dir } = await makeProject();
   roots.push(root);
-  await fs.mkdir(path.join(root, 'Library/SFX'));
-  const video = 'Library/B-roll/clip.mp4', music = 'Library/Music/song.wav', sfx = 'Library/SFX/pop.wav';
+  const video = 'Library/B-roll/clip.mp4', music = 'Library/Music/song.wav';
   await fs.writeFile(path.join(root, video), Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(20)]));
   const wav = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVEfmt '), Buffer.alloc(32)]);
   await fs.writeFile(path.join(root, music), wav);
-  await fs.writeFile(path.join(root, sfx), wav);
-  const ctx: ToolContext = { projectDir: dir, host: new FakeHost(root), style: new StyleStore(() => root), emit: () => {}, state: newToolState(), supportsImages: true };
-  return { root, dir, ctx, video, music, sfx };
+  // the same clip and song attached to a note: in the project, not the user's Library
+  await fs.mkdir(path.join(dir, 'work/attachments'), { recursive: true });
+  await fs.copyFile(path.join(root, video), path.join(dir, 'work/attachments/clip.mp4'));
+  await fs.copyFile(path.join(root, music), path.join(dir, 'work/attachments/song.wav'));
+  const host = new FakeHost(root);
+  const ctx: ToolContext = { projectDir: dir, host, style: new StyleStore(() => root), emit: () => {}, state: newToolState(), supportsImages: true };
+  return { root, dir, ctx, host, video, music, wav };
 }
 async function resolve(ctx: ToolContext, kind: string, intent: string) {
   const result = await executeTool(ctx, 'resolve_asset', { kind, intent });
@@ -47,42 +50,78 @@ describe('media assets', () => {
     expect((await loadProject(dir)).broll[0].asset).toBe(asset.committedPath);
   });
 
-  it('fails if uncommitted music, sfx or video can be placed', async () => {
-    const { ctx, video, music, sfx } = await setup();
-    for (const track of [music, sfx]) {
-      const result = await executeTool(ctx, 'choose_music', { track });
-      expect(result.isError, result.content).toBe(true);
-      expect(result.content).toContain('resolve_asset');
-    }
-    expect((await executeTool(ctx, 'add_broll', place(video))).isError).toBe(true);
+  it('fails if a clip or song from outside the Library can be placed without a commit', async () => {
+    const { ctx } = await setup();
+    const song = await executeTool(ctx, 'choose_music', { track: 'work/attachments/song.wav' });
+    expect(song.isError, song.content).toBe(true);
+    expect(song.content).toContain('resolve_asset');
+    expect((await executeTool(ctx, 'add_broll', place('work/attachments/clip.mp4'))).isError).toBe(true);
+  });
+
+  it('fails if a Library clip or song placed by its path needs a commit turn, or lands without a frozen copy and its record', async () => {
+    const { ctx, dir, root, host, video, music } = await setup();
+    const clip = await executeTool(ctx, 'add_broll', place(video));
+    expect(clip.isError, clip.content).toBe(false);
+    const song = await executeTool(ctx, 'choose_music', { track: music });
+    expect(song.isError, song.content).toBe(false);
+    const p = await loadProject(dir);
+    expect(p.broll[0].asset).toMatch(/^work\/assets\/frozen\/video\/[0-9a-f]{64}\.mp4$/);
+    expect(p.music.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.wav$/);
+    const records = (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(records.map((r) => [r.kind, r.provenance.intent, r.rightsConfidence])).toEqual([['video', video, 'user-owned'], ['music', music, 'user-owned']]);
+    expect(host.calls.filter((c) => c.command.startsWith('inspect-'))).toEqual([]);
+    // the edit keeps its copy when the Library file changes
+    const before = await fs.readFile(path.join(root, video));
+    await fs.writeFile(path.join(root, video), 'edited later');
+    expect(await fs.readFile(path.join(dir, String(p.broll[0].asset)))).toEqual(before);
   });
 
   it('fails if music placement loses its kind or frozen-byte checks', async () => {
-    const { ctx, dir, music, sfx } = await setup();
-    for (const [kind, ref] of [['music', music], ['sfx', sfx]]) {
-      const candidate = await resolve(ctx, kind, ref);
-      expect(candidate).toMatchObject({ durationSec: 2, loudnessLufs: -21 });
-      const result = await executeTool(ctx, 'resolve_asset', { kind, intent: ref, phase: 'commit', candidateId: candidate.id });
-      expect(result.isError, result.content).toBe(false);
-      const asset = JSON.parse(result.content).asset;
-      const placed = await executeTool(ctx, 'choose_music', { track: asset.assetId });
-      expect(placed.isError, placed.content).toBe(kind === 'sfx');
-      if (kind === 'music') {
-        expect((await loadProject(dir)).music.track).toBe(asset.committedPath);
-        await fs.writeFile(path.join(dir, asset.committedPath), 'changed frozen song');
-        expect((await executeTool(ctx, 'choose_music', { level: 'quiet' })).isError).toBe(true);
-      }
-    }
+    const { ctx, dir, video, music: ref } = await setup();
+    const candidate = await resolve(ctx, 'music', ref);
+    expect(candidate).toMatchObject({ durationSec: 2, loudnessLufs: -21 });
+    const result = await executeTool(ctx, 'resolve_asset', { kind: 'music', intent: ref, phase: 'commit', candidateId: candidate.id });
+    expect(result.isError, result.content).toBe(false);
+    const asset = JSON.parse(result.content).asset;
+    expect((await executeTool(ctx, 'add_broll', place(asset.assetId))).isError).toBe(true);
+    const placed = await executeTool(ctx, 'choose_music', { track: asset.assetId });
+    expect(placed.isError, placed.content).toBe(false);
+    expect((await loadProject(dir)).music.track).toBe(asset.committedPath);
+    await fs.writeFile(path.join(dir, asset.committedPath), 'changed frozen song');
+    expect((await executeTool(ctx, 'choose_music', { level: 'quiet' })).isError).toBe(true);
+    expect((await executeTool(ctx, 'choose_music', { track: video })).isError).toBe(true);
+  });
+
+  it('fails if every placement of a frozen file reads it again, or a changed file keeps its old hash', async () => {
+    const { ctx, dir, host, music, wav } = await setup();
+    expect((await executeTool(ctx, 'choose_music', { track: music })).isError).toBe(false);
+    const [record] = (await fs.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    const hashes = () => host.calls.filter((c) => c.command === 'hash-asset').length;
+    for (const level of ['quiet', 'under-voice', 'quiet']) expect((await executeTool(ctx, 'choose_music', { level })).isError).toBe(false);
+    expect(hashes()).toBe(1);
+    // same size, new bytes and a new modification time
+    const frozen = path.join(dir, record.committedPath);
+    await fs.writeFile(frozen, Buffer.concat([wav.subarray(0, wav.length - 1), Buffer.from([1])]));
+    await fs.utimes(frozen, new Date(), new Date(Date.now() + 5000));
+    expect((await executeTool(ctx, 'choose_music', { level: 'under-voice' })).isError).toBe(true);
+    expect(hashes()).toBe(2);
+  });
+
+  it('fails if sound effects can still be resolved before anything places them', async () => {
+    const { ctx, music } = await setup();
+    const r = await executeTool(ctx, 'resolve_asset', { kind: 'sfx', intent: music });
+    expect(r.isError).toBe(true);
+    expect(r.content).toMatch(/invalid arguments/);
   });
 
   it('fails if cleanup leaves contact sheets or waveforms behind, or removes Library media', async () => {
-    const { ctx, dir, root, video, music, sfx } = await setup();
+    const { ctx, dir, root, video, music } = await setup();
     const candidates = [];
-    for (const [kind, ref] of [['video', video], ['music', music], ['sfx', sfx]]) candidates.push(await resolve(ctx, kind, ref));
+    for (const [kind, ref] of [['video', video], ['music', music]]) candidates.push(await resolve(ctx, kind, ref));
     for (const candidate of candidates) expect((await fs.stat(path.join(dir, candidate.previewPath))).isFile()).toBe(true);
     await discardAssetCandidates(ctx);
     expect(await fs.readdir(path.join(dir, 'work/thumbs'))).toEqual([]);
-    for (const ref of [video, music, sfx]) expect((await fs.stat(path.join(root, ref))).isFile()).toBe(true);
+    for (const ref of [video, music]) expect((await fs.stat(path.join(root, ref))).isFile()).toBe(true);
     ctx.host.runEngine = async (_command, args) => {
       const preview = args.includes('--preview') ? args[args.indexOf('--preview') + 1] : 'work/thumbs/partial.png';
       await fs.writeFile(path.join(dir, preview), Buffer.from('partial waveform'));

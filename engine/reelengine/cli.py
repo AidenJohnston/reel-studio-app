@@ -155,17 +155,29 @@ def cmd_inspect_image(args):
     from .safepath import safe_resolve
     proj = _project(args)
     src = safe_resolve(proj, args.asset, root=Path(args.root) if args.root else None, what="image")
+    from .asset_freeze import kind_of, sha256_of
+    _ext, mime = kind_of(src, "image")
     with Image.open(src) as im:
         width, height = ImageOps.exif_transpose(im).size  # the size the video shows, as the still is drawn
     thumb = _thumb(proj, src, stem=f"candidate-{uuid.uuid4().hex}")
     if not thumb:
         raise EngineError("NOT_AN_IMAGE", f"no still for {src.name}", "I couldn't open that picture. Try another one.")
-    return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height}
+    return {"previewPath": _rel_to(Path(thumb), proj), "width": width, "height": height, "sha256": sha256_of(src), "mime": mime}
 
 
 def cmd_inspect_media(args):
     from .asset_preview import inspect
     return inspect(_project(args), Path(args.root) if args.root else None, args.asset, args.command == 'inspect-video', args.preview)
+
+
+def cmd_freeze_asset(args):
+    from .asset_freeze import freeze
+    return freeze(_project(args), Path(args.root) if args.root else None, args.asset, args.kind, args.expect_sha256)
+
+
+def cmd_hash_asset(args):
+    from .asset_freeze import hash_file
+    return hash_file(_project(args), Path(args.root) if args.root else None, args.asset)
 
 
 def cmd_register_capture(args):
@@ -383,6 +395,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument('--asset', required=True)
         sp.add_argument('--root')
         sp.add_argument('--preview')
+    sp = add("freeze-asset", cmd_freeze_asset, "copy a picture, clip or song into work/assets/frozen (a clone where the disk supports it)")
+    sp.add_argument("--asset", required=True)
+    sp.add_argument("--kind", required=True)
+    sp.add_argument("--root")
+    sp.add_argument("--expect-sha256")
+    sp = add("hash-asset", cmd_hash_asset, "sha256 of a project or Library file, read in chunks")
+    sp.add_argument("--asset", required=True)
+    sp.add_argument("--root")
     sp = add("register-capture", cmd_register_capture, "credit a website screenshot saved in work/assets")
     sp.add_argument("--asset", required=True)
     sp.add_argument("--url", required=True)

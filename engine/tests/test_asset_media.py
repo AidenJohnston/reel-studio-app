@@ -93,3 +93,69 @@ def test_fails_if_a_noisy_contact_sheet_exceeds_the_model_preview_limit(tmp_path
     ffmpeg('-framerate', '9', '-i', folder / '%d.png', '-c:v', 'ffv1', folder / 'noise.mkv')
     result = inspect(project, root, 'inspect-video', 'Library/B-roll/noise.mkv')
     assert (project / result['previewPath']).stat().st_size <= 1024 * 1024
+
+
+def freeze(project, root, ref, kind, *extra):
+    args = cli.build_parser().parse_args(['freeze-asset', '--project', str(project), '--root', str(root), '--asset', str(ref), '--kind', kind, *extra])
+    return args.fn(args)
+
+
+def test_fails_if_a_clip_over_40_mb_cannot_be_inspected_or_frozen(tmp_path):
+    import hashlib
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    folder = root / 'Library' / 'B-roll'
+    folder.mkdir(parents=True)
+    (project / 'work').mkdir(parents=True)
+    # 32 uncompressed 1280x720 frames: about 44 MB, a real clip the app accepts as an attachment (up to 200 MB)
+    ffmpeg('-f', 'lavfi', '-i', 'testsrc=s=1280x720:r=16:d=2', '-c:v', 'rawvideo', '-pix_fmt', 'yuv420p', folder / 'big.avi')
+    clip = folder / 'big.avi'
+    assert clip.stat().st_size > 40 * 1024 * 1024
+    inspected = inspect(project, root, 'inspect-video', 'Library/B-roll/big.avi')
+    sha = hashlib.sha256(clip.read_bytes()).hexdigest()
+    assert inspected['sha256'] == sha
+    frozen = freeze(project, root, 'Library/B-roll/big.avi', 'video', '--expect-sha256', sha)
+    assert frozen['committedPath'] == f'work/assets/frozen/video/{sha}.avi'
+    assert (project / frozen['committedPath']).read_bytes() == clip.read_bytes()
+    assert not list((project / 'work' / 'assets' / 'frozen').rglob('*.tmp'))
+
+
+def test_fails_if_a_clip_over_the_attachment_limit_is_frozen(tmp_path):
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    folder = root / 'Library' / 'B-roll'
+    folder.mkdir(parents=True)
+    (project / 'work').mkdir(parents=True)
+    huge = folder / 'huge.mp4'
+    with open(huge, 'wb') as f:  # sparse: 201 MB on paper, a few bytes on disk
+        f.write(b'\x00\x00\x00\x18ftypisom')
+        f.truncate(201 * 1024 * 1024)
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/B-roll/huge.mp4', 'video')
+    assert error.value.code == 'TOO_LARGE'
+    assert not list((project / 'work').rglob('*.mp4'))
+
+
+def test_fails_if_freeze_stores_the_same_bytes_twice_keeps_changed_bytes_or_reads_outside(tmp_path, monkeypatch):
+    monkeypatch.delenv('REELENGINE_EXTRA_READ_DIRS', raising=False)
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    (root / 'Library' / 'Images').mkdir(parents=True)
+    (project / 'work').mkdir(parents=True)
+    Image.new('RGB', (8, 8), 'red').save(root / 'Library' / 'Images' / 'a.png')
+    first = freeze(project, root, 'Library/Images/a.png', 'image')
+    again = freeze(project, root, 'Library/Images/a.png', 'logo')
+    assert again['committedPath'] == first['committedPath'] and first['mime'] == 'image/png'
+    hashed = cli.build_parser().parse_args(['hash-asset', '--project', str(project), '--asset', first['committedPath']])
+    assert hashed.fn(hashed)['sha256'] == first['sha256']
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/Images/a.png', 'image', '--expect-sha256', '0' * 64)
+    assert error.value.code == 'ASSET_CHANGED'
+    (root / 'Library' / 'Images' / 'fake.png').write_bytes(b'not a picture')
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/Images/fake.png', 'image')
+    assert error.value.code == 'BAD_MEDIA'
+    outside = tmp_path / 'private.png'
+    Image.new('RGB', (8, 8), 'blue').save(outside)
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, outside, 'image')
+    assert error.value.code == 'UNSAFE_PATH'
+    frozen = project / 'work' / 'assets' / 'frozen'
+    assert sorted(p.relative_to(frozen).as_posix() for p in frozen.rglob('*')) == ['image', f"image/{first['sha256']}.png"]

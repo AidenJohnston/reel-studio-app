@@ -6,8 +6,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, loadProject, ReplayProvider, RecordingProvider, ClaudeCliProvider, pickTakes, ModelProvider, CompletionRequest, newToolState, StyleStore } from '../src';
-import { FakeHost, makeProject, tinyPng, tmpDir, tinyMp3, commitLocalAsset } from './helpers';
+import { createAI, loadProject, ReplayProvider, RecordingProvider, ClaudeCliProvider, pickTakes, ModelProvider, CompletionRequest } from '../src';
+import { FakeHost, makeProject, tinyPng, tmpDir, tinyMp3 } from './helpers';
 
 const FIX = path.join(__dirname, '..', 'fixtures');
 const LIVE = process.env.RECORD_LIVE === '1';
@@ -51,27 +51,21 @@ async function breadSetup() {
   const host = new BreadHost(root);
   host.engineAssets = true;
   host.searchResults = [{ url: BRICK, title: 'Dense sourdough loaf', kind: 'photo', license: 'CC BY 4.0' }];
-  const ctx = { projectDir: dir, host, style: new StyleStore(() => root), emit: () => {}, state: newToolState(), supportsImages: true };
-  const track = await commitLocalAsset(ctx, 'Library/Music/gentle piano.mp3', 'music');
-  return { root, dir, transcript, host, track };
+  return { root, dir, transcript, host };
 }
 
-function model(name: string, track?: string): ModelProvider {
+function model(name: string): ModelProvider {
   const file = path.join(FIX, `${name}.json`);
   if (LIVE) return new RecordingProvider(new ClaudeCliProvider({ model: process.env.RECORD_MODEL ?? 'claude-sonnet-5-5' }), file, name);
-  const fixture = JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (track) for (const step of fixture.steps) for (const call of step.response.toolCalls) {
-    if (call.name === 'choose_music' && call.args.track) call.args.track = track;
-  }
-  return new ReplayProvider(fixture);
+  return new ReplayProvider(file);
 }
 
 const have = (name: string) => LIVE || fs.existsSync(path.join(FIX, `${name}.json`));
 
 describe('recorded sessions (replay)', () => {
   it.runIf(have('firstEdit-bread'))('firstEdit picks the later hook take and builds a full edit', async () => {
-    const { dir, host, track } = await breadSetup();
-    const { provider, errors } = failingCalls(model('firstEdit-bread', track));
+    const { dir, host } = await breadSetup();
+    const { provider, errors } = failingCalls(model('firstEdit-bread'));
     const ai = createAI({ host, settingsDir: tmpDir(), providerOverride: provider, fetch: fakeFetch, lookup: async () => ['93.184.215.14'] });
     const r = await ai.firstEdit(dir, () => undefined);
     expect(errors).toEqual([]);
@@ -84,7 +78,7 @@ describe('recorded sessions (replay)', () => {
     expect(kept.has('w0')).toBe(false);      // earlier hook take dropped
     expect(kept.has('w10')).toBe(false);     // "let me try that again" dropped
     expect(kept.has('w56')).toBe(true);      // ending kept
-    expect(p.music.track).toBe(track);
+    expect(p.music.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
     expect(p.post.hashtags).toHaveLength(5);
     // two Library pictures placed by path and one web picture resolved, seen and committed: all frozen, all recorded
     const pictures = p.broll.filter((b) => b.treatment !== 'text-pop');
@@ -92,8 +86,8 @@ describe('recorded sessions (replay)', () => {
     for (const b of pictures) expect(b.asset).toMatch(/^work\/assets\/frozen\/image\/[0-9a-f]{64}\.png$/);
     const ledger = (await fsp.readFile(path.join(dir, 'work', 'assets', 'manifest.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
     expect(ledger.map((a) => [a.provenance.intent, a.rightsConfidence])).toEqual([
-      ['Library/Music/gentle piano.mp3', 'user-owned'],
       [BRICK, 'verified-metadata'],
+      ['Library/Music/gentle piano.mp3', 'user-owned'],
       ['Library/Images/bag of flour.png', 'user-owned'],
       ['Library/Images/sourdough loaf.png', 'user-owned'],
     ]);
