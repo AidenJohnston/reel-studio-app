@@ -5,8 +5,8 @@
 // converts it if needed and writes it into <project>/work/assets/attach-* with a sidecar. Nothing the page
 // says about an attachment is trusted later: a note's refs are re-read from this project's own sidecars.
 //
-// While a job runs on the reel it is the project's only writer (docs/versions.md). A file attached then
-// goes to the reel's staging folder (paths.ts noteStagingDir), laid out like the project, and is copied
+// New attachments go to the reel's staging folder (paths.ts noteStagingDir), even while idle, so a
+// job starting during attachment preparation cannot race a project write. Each file is copied
 // into the project by its own note's job (unstage).
 //
 // No `electron` import here (dialog and clipboard are passed in), so the logic is unit-tested in Node.
@@ -226,9 +226,8 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** Nothing else may write to this video now (jobs.ts isClosed). After `refuse`, that means a job runs
-   * on it: files go to staging, and a file in the project stays. */
-  busy: (slug: string) => boolean
+  /** Project-file removal uses the same reservation as jobs and manual edits. */
+  reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
   /** Throws while the video is kept closed, in the job lane's words (jobs.ts refuseIfKeptClosed): part
    * of its engine may still be writing, so not even its staging folder takes a file. */
   refuse: (slug: string) => void
@@ -238,8 +237,6 @@ export interface AttachIpcDeps extends AttachDeps {
   /** Electron's file dialog (null = cancelled) */
   choose: (filters: { name: string; extensions: string[] }[]) => Promise<string[] | null>
 }
-
-const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
 
 /** The video and its folder; refused while it is kept closed. */
 function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: string } {
@@ -286,7 +283,8 @@ export function registerAttachmentIpc(deps: AttachIpcDeps): void {
     const { slug, dir } = projectOf(deps, name)
     const staging = deps.stagingDir(slug)
     if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
-    if (deps.busy(slug)) throw BUSY
-    await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+    await deps.reserve(slug, async () => {
+      await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+    })
   })
 }

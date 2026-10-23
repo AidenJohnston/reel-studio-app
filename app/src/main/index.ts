@@ -402,7 +402,7 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => jobs.isClosed(slug),
+    reserve: (slug, fn) => jobs.hold(slug, fn),
     refuse: (slug) => jobs.refuseIfKeptClosed(slug),
     stagingDir: (slug) => noteStagingDir(projectDir(slug)),
     clipboardImage: async () => {

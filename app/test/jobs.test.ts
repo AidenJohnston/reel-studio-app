@@ -66,7 +66,7 @@ describe('a job whose engine would not stop', () => {
       readProject: async () => {
         throw new Error('a closed video is never read')
       },
-      busy: (s) => jobs.isClosed(s),
+      reserve: (s, fn) => jobs.hold(s, fn),
       refuse: (s) => jobs.refuseIfKeptClosed(s),
       stagingDir: (s) => noteStagingDir(projectDir(s)),
       clipboardImage: async () => ({ mime: 'image/png', bytes: new Uint8Array([1]) }),
