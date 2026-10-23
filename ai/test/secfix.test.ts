@@ -226,7 +226,8 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('an unreadable credits file does not stop a note', async () => {
+  // chmod 000 cannot stop Windows or the root user from reading the file.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('an unreadable credits file does not stop a note', async () => {
     const { dir, host, settingsDir } = await setup();
     const creditsPath = path.join(dir, 'work', 'assets', 'credits.json');
     await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
