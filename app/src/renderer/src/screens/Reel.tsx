@@ -376,6 +376,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               triggerClassName="btn primary big"
               testid="export-more"
               disabled={!version || !!job}
+              up
               items={[{ label: 'Other platforms…', run: () => setPlatformPicker(true), testid: 'export-platforms' }]}
             />
           </div>

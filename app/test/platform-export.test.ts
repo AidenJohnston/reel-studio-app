@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -98,6 +98,8 @@ describe('platform files through the real engine', () => {
     mkdirSync(folder)
     const source = join(scratch, 'slow drive.mp4')
     execFileSync('mkfifo', [source])
+    // Opening and closing the write end lets a reader that was never stopped see the end and exit, even after a timeout.
+    onTestFinished(async () => (await fs.open(source, 'r+')).close())
     const stop = new AbortController()
     const reading: typeof runEngine = (command, args, onProgress, signal) => {
       if (command === 'export-probe') setTimeout(() => stop.abort(), 500)

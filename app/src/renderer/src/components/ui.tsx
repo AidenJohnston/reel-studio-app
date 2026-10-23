@@ -98,13 +98,15 @@ export function Confirm(props: { title: string; body: string; yes: string; no: s
  * A small menu behind a button: "More" for things that should not sit next to the main action (Delete), or the
  * other half of a split button. Focus moves into the menu when it opens; arrow keys move between items.
  */
-export function MoreMenu({ items, label = 'More', icon = 'more', triggerClassName = 'icon-btn', testid = 'more', disabled }: {
+export function MoreMenu({ items, label = 'More', icon = 'more', triggerClassName = 'icon-btn', testid = 'more', disabled, up }: {
   items: { label: string; run: () => void; danger?: boolean; testid?: string; disabled?: boolean }[]
   label?: string
   icon?: IconName
   triggerClassName?: string
   testid?: string
   disabled?: boolean
+  /** Open above the button, for a button near the bottom of the window. */
+  up?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -141,7 +143,7 @@ export function MoreMenu({ items, label = 'More', icon = 'more', triggerClassNam
         <Icon name={icon} />
       </button>
       {open && (
-        <div className="more-menu" role="menu" aria-label={label}>
+        <div className={`more-menu${up ? ' up' : ''}`} role="menu" aria-label={label}>
           {items.map((it) => (
             <button
               key={it.label}
