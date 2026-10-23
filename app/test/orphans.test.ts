@@ -126,7 +126,8 @@ describe('orphaned engine reaper', () => {
     // the crashed run's engine still rendering bread, and an ffmpeg a dead engine left writing into cake
     // (under the real path the engine resolved: on macOS the temp folder is behind a symlink)
     const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
-    const ffmpeg = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-re', '-f', 'lavfi', '-i', 'anullsrc=r=8000', '-t', '60', '-y', join(realpathSync.native(cake), 'work', 'mix.wav')], { stdio: 'ignore', windowsHide: true })
+    // its own group, stopped as a whole: on Windows `ffmpeg` may be a shim that runs the real one as a child
+    const ffmpeg = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-re', '-f', 'lavfi', '-i', 'anullsrc=r=8000', '-t', '60', '-y', join(realpathSync.native(cake), 'work', 'mix.wav')], { stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
     // an app opened from the Finder has no locale
     const locale = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LC_CTYPE: process.env.LC_CTYPE }
     for (const k of Object.keys(locale)) delete process.env[k]
@@ -138,15 +139,14 @@ describe('orphaned engine reaper', () => {
         expect(stillRunning.sort()).toEqual([bread, cake].sort())
       }
       await killTree(engine.pid!)
-      ffmpeg.kill()
-      await once(ffmpeg, 'exit')
+      await killTree(ffmpeg.pid!)
       // nothing works in them any more: they open, and the next start no longer looks
       expect((await createPidRegistry(settings).reap()).stillRunning).toEqual([])
       expect((await createPidRegistry(settings).reap()).unknown).toBe(false)
     } finally {
       for (const [k, v] of Object.entries(locale)) if (v !== undefined) process.env[k] = v
       if (engine.exitCode === null) await killTree(engine.pid!)
-      ffmpeg.kill()
+      if (ffmpeg.exitCode === null) await killTree(ffmpeg.pid!)
     }
   }, 60000)
 
