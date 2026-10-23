@@ -118,6 +118,17 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
 
+  // Each switch puts up a new <video>, and its poster fetches and decodes the full-size cover again unless the image
+  // is still loaded in the page. Holding every cover shown here keeps it loaded, so switching back does neither.
+  const covers = useRef(new Map<string, HTMLImageElement>())
+  useEffect(() => {
+    const url = version?.cover
+    if (!url || covers.current.has(url)) return
+    const img = new Image()
+    img.src = url
+    covers.current.set(url, img)
+  }, [version?.cover])
+
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
     setPhoneFirst(toPhone)
