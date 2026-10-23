@@ -2,12 +2,35 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { execFile, spawn } from 'node:child_process';
 import {
   loadProject, saveProject, validateProject, withDefaults, loadTranscript, findPhrase, anchorText, keptWords,
   approxOutputTimes, approxDuration, normalizeKeep, snapshotVersion, restoreVersion, listVersions, writeFileAtomic,
   loadAnalysis, normalizeAnalysis, nextBrollId,
 } from '../src';
 import { makeProject, makeTranscript, tmpDir } from './helpers';
+
+/** Holds `file` so nothing can replace it, for `ms`. Resolves once the file is held; `released` settles when it is
+ * let go. (Wrapped in an object: an async function returning the promise itself would wait for the release.) */
+async function holdFor(file: string, ms: number): Promise<{ released: Promise<void> }> {
+  if (process.platform === 'darwin') {
+    await run('chflags', ['uchg', file]);
+    return { released: new Promise((r) => setTimeout(r, ms)).then(() => run('chflags', ['nouchg', file])) };
+  }
+  const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+    `$f = [IO.File]::Open('${file.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'locked'; Start-Sleep -Milliseconds ${ms}; $f.Close()`]);
+  const exited = new Promise<void>((ok) => holder.on('exit', () => ok()));
+  await new Promise<void>((ok, fail) => {
+    holder.stdout.on('data', (d: Buffer) => d.toString().includes('locked') && ok());
+    holder.on('error', fail);
+    holder.on('exit', (code) => fail(new Error(`PowerShell exited with ${code} before it held the file`)));
+  });
+  return { released: exited };
+}
+
+function run(cmd: string, args: string[]): Promise<void> {
+  return new Promise((ok, fail) => execFile(cmd, args, (err) => (err ? fail(err) : ok())));
+}
 
 describe('project API', () => {
   it('loads, validates and saves atomically in a path with spaces and unicode', async () => {
@@ -93,6 +116,21 @@ describe('project API', () => {
     await Promise.all(Array.from({ length: 20 }, (_, i) => writeFileAtomic(f, JSON.stringify({ i }))));
     expect(typeof JSON.parse(await fsp.readFile(f, 'utf8')).i).toBe('number');
   });
+
+  // A real hold, not a mock, for 2 s: longer than the 0.9 s the write used to retry for. On Windows PowerShell opens
+  // the file the way antivirus and sync tools do (others may read it, nobody may replace it). On macOS the immutable
+  // flag refuses the replace with the same EPERM. Linux has no unprivileged way to do either, so it skips.
+  it.runIf(process.platform === 'win32' || process.platform === 'darwin')('a write waits out another program holding the file for 2 s', async () => {
+    const f = path.join(tmpDir('held '), 'My style.json');
+    await fsp.writeFile(f, '{"rules":["old"]}');
+    const { released } = await holdFor(f, 2000);
+    try {
+      await writeFileAtomic(f, '{"rules":["new"]}');
+    } finally {
+      await released;
+    }
+    expect(await fsp.readFile(f, 'utf8')).toBe('{"rules":["new"]}');
+  }, 20_000);
 
   it('broll ids are unique', () => {
     const p = withDefaults({});
