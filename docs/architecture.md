@@ -62,7 +62,10 @@ The root `package.json` is an npm workspace (`app`, `ai`).
 Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Library** lives in
 `<Documents>/Reel Studio/Library/` with subfolders `Raw takes/`, `B-roll/`, `Music/`, `Images/`, `Exports/`
 (plain folder names on purpose, so anyone can open them in Finder or Explorer). User style lives in
-`<Documents>/Reel Studio/My style.json`.
+`<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
+listed in My style but the AI doesn't read it. An older version ignores `paused`. A file there that can't be parsed is kept as `My style.damaged.json`
+(`My style.damaged 2.json` and so on if that name is taken) and a new one starts, with the copy's name in
+`damaged`; My style says so while the copy is there.
 
 ```
 <slug>/

@@ -256,6 +256,8 @@ export interface StyleRule {
   id: string
   text: string
   createdAt: string
+  /** Listed in My style, but left out of what the AI reads. */
+  paused?: boolean
 }
 
 export interface ExportResult {
@@ -384,6 +386,10 @@ export interface ReelApi {
   style: {
     rules(): Promise<StyleRule[]>
     remove(id: string): Promise<void>
+    /** My style started over because its file was damaged, and the damaged copy is still next to it. */
+    damaged(): Promise<boolean>
+    /** Change a rule's words, or pause or resume it. */
+    update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
   }

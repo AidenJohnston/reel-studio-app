@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate } from '../shared/api'
+import type { JobUpdate, StyleRule } from '../shared/api'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -76,10 +76,14 @@ export interface AI {
     opts?: { attachments?: string[] }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
-  styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
+  styleRules(): Promise<StyleRule[]>
   removeStyleRule(id: string): Promise<void>
   /** Saves one My style rule (after the user said Yes). Optional: older packages lack it. */
   addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
+  /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
+  styleWasDamaged?(): Promise<boolean>
+  /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
+  updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
   /** Optional extras from @reelstudio/ai. */
   cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
