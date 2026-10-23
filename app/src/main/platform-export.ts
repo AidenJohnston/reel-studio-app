@@ -1,6 +1,6 @@
 import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
-import { outputGroups, platformRule, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
+import { fallbackCoverSeconds, outputGroups, platformRule, secondTryProblem, type FinishedVideo, type Platform, type PlatformTry } from '../shared/platforms'
 import type { PlatformExportResult } from '../shared/api'
 import type { RunEngine } from './engine'
 
@@ -32,7 +32,8 @@ async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?:
   const first = { ...tries[0], video: await readFinishedVideo(tries[0].source, runEngine, label(1), signal) }
   if (!tries[1]) return [first]
   // The cover frame needs the render's frame rate and end, so this runs after the probe. The end is the one cover() uses.
-  const problem = secondTryProblem(first.platforms, first, tries[1], { fps: first.video.fps, end: first.video.vduration || first.video.duration })
+  const problem = secondTryProblem(first.platforms, first, tries[1], { fps: first.video.fps, end: first.video.vduration || first.video.duration,
+    fallback: first.chosenCover ? null : fallbackCoverSeconds(first.video.duration) })
   if (problem) throw { code: 'BAD_EXPORT', userMessage: problem }
   const second = tries[1].source === first.source ? first.video : await readFinishedVideo(tries[1].source, runEngine, label(2), signal)
   return [first, { ...tries[1], video: second }]
@@ -82,8 +83,7 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
       // The scrub bar's end is the duration itself; the engine picks the last frame it can decode.
       const coverArgs = item.coverSeconds !== null ? [item.source, '--at', String(Math.min(item.coverSeconds, item.video.duration))]
         : item.chosenCover ? [item.chosenCover]
-        // the same frame the renderer falls back to (render.py fallback_cover)
-        : [item.source, '--at', String(Math.min(item.video.duration * 0.25, 3))]
+        : [item.source, '--at', String(fallbackCoverSeconds(item.video.duration))]
       await runEngine('export-cover', [...coverArgs, '--dest', cover], undefined, signal)
 
       const outputFor = new Map<Platform, string>()

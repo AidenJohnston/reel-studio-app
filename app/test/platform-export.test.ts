@@ -179,6 +179,15 @@ describe('platform files through the real engine', () => {
       .rejects.toMatchObject({ code: 'BAD_EXPORT', userMessage: 'Try 2 is the same as Try 1. Pick another version, cover or caption.' })
   })
 
+  it('fails if a Try 2 cover on the frame Try 1 falls back to, with no cover picture, counts as a change', async () => {
+    const source = finalRender(join(scratch, 'no cover.mp4'), 12)
+    const platforms: Platform[] = ['instagram']
+    const one = { version: 1, source, chosenCover: null, name: 'Fallback - Version 1', platforms, caption: 'Same' }
+    // With no cover picture, Try 1 gets the frame at a quarter of the video, at most 3 s.
+    await expect(exportPlatforms({ tries: [{ ...one, coverSeconds: null }, { ...one, coverSeconds: 3 }], folder: join(scratch, 'fallback'), runEngine }))
+      .rejects.toMatchObject({ code: 'BAD_EXPORT', userMessage: 'Try 2 is the same as Try 1. Pick another version, cover or caption.' })
+  })
+
   it('fails if coverFrame names a different frame from the one export-cover saves', async () => {
     // Each frame's brightness is its number, so the saved JPEG says which frame the engine took. B-frames and an
     // edit list, like a final render.
@@ -192,7 +201,7 @@ describe('platform files through the real engine', () => {
       const [luma] = execFileSync('ffmpeg', ['-v', 'error', '-i', dest, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'])
       return Math.round(luma * 219 / 255 / 2) // cover() saves full range: 2N limited-range steps become 2N × 255/219
     }
-    const clock = { fps: 30, end: 3 }
+    const clock = { fps: 30, end: 3, fallback: null }
     for (const at of [0, 0.01, 1, 1.0001, 1.01, 1.03, 1.034, 2.9, 2.95, 2.97, 3]) expect([at, coverFrame(at, clock)]).toEqual([at, await saved(at)])
   }, 60_000)
 

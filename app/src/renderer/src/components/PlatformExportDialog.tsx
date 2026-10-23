@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { PlatformExportResult, ProjectJson, VersionInfo } from '../../../shared/api'
-import { PLATFORM_RULES, captionLength, checkPlatform, platformRule, secondTryPlatforms, secondTryProblem, tryChanges, type Platform, type PlatformTry } from '../../../shared/platforms'
+import { PLATFORM_RULES, captionLength, checkPlatform, platformRule, fallbackCoverSeconds, secondTryPlatforms, secondTryProblem, tryChanges, type Platform, type PlatformTry } from '../../../shared/platforms'
 import { clock } from '../../../shared/progress'
 import { errorCode, reel, userMessage } from '../api'
 import { FOLDER_APP, Modal, Spinner } from './ui'
@@ -53,7 +53,7 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
   const secondPlatforms = second ? secondTryPlatforms(selected, second.version === version.n) : []
   const secondDuration = second?.version === version.n ? seconds : secondSeconds
   // Covers are compared only on one video, Try 1's; Export waits for its duration anyway.
-  const coverClock = { fps, end: seconds ?? Infinity }
+  const coverClock = { fps, end: seconds ?? Infinity, fallback: version.cover || seconds === null ? null : fallbackCoverSeconds(seconds) }
   const secondProblem = second && selected.length ? secondTryProblem(selected, first, second, coverClock) : null
   // Limits change and vary by account, so they warn next to each platform and never stop the export.
   const warningsFor = (platform: Platform): string[] => {

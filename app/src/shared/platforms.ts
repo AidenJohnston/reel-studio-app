@@ -80,8 +80,16 @@ export function parsePlatformExportRequest(value: unknown): PlatformExportReques
 
 export type TryChange = 'video' | 'cover' | 'caption'
 
-/** What decides which frame a cover time saves: the render's frame rate and where its picture ends, in seconds. */
-export interface CoverClock { fps: number; end: number }
+/**
+ * What decides which frame a cover saves: the render's frame rate, where its picture ends, and the time used for a
+ * try that keeps its version's cover when the version has no cover picture (null when it has one). Seconds.
+ */
+export interface CoverClock { fps: number; end: number; fallback: number | null }
+
+/** The frame the renderer falls back to for a cover (render.py fallback_cover), and so the export too. */
+export function fallbackCoverSeconds(duration: number): number {
+  return Math.min(duration * 0.25, 3)
+}
 
 /**
  * The frame `export-cover` saves for a cover `seconds` into a render. engine/reelengine/export_media.py cover() moves a
@@ -95,9 +103,12 @@ export function coverFrame(seconds: number, { fps, end }: CoverClock): number {
   return Math.max(0, Math.ceil(at * fps - 1e-3))
 }
 
-/** Two cover times count as the same cover when the engine saves the same frame for both. */
+/** Two covers count as the same when the engine saves the same frame for both. */
 export function tryChanges(first: PlatformTry, second: PlatformTry, clock: CoverClock): TryChange[] {
-  const frame = (seconds: number | null) => seconds === null ? null : coverFrame(seconds, clock)
+  const frame = (seconds: number | null) => {
+    const at = seconds ?? clock.fallback
+    return at === null ? null : coverFrame(at, clock)
+  }
   const changes: TryChange[] = []
   if (second.version !== first.version) changes.push('video')
   if (frame(second.coverSeconds) !== frame(first.coverSeconds)) changes.push('cover')
