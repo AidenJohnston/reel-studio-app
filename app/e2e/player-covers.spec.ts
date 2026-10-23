@@ -2,7 +2,7 @@
 // replaces the <video>, and a 1080x1920 cover decoded again on every switch kept about 1.9 MiB of renderer
 // memory per switch. The decodes are counted in a Chromium trace while switching back and forth.
 //
-// Run: npx playwright test e2e/player.spec.ts (after npm run build).
+// Run: npx playwright test e2e/player-covers.spec.ts (after npm run build).
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
