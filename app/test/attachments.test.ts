@@ -277,23 +277,25 @@ describe('main: the IPC handlers', () => {
       clipboardImage: async () => null,
       choose: async () => null
     })
-    return (ch: string, ...a: unknown[]) => h.get(ch)!({} as any, ...a)
+    const call = (ch: string, ...a: unknown[]) => h.get(ch)!({} as any, ...a)
+    return { call, calls }
   }
   it('attach, an empty clipboard, a cancelled picker, remove', async () => {
     const dir = project()
-    const call = wire(dir)
+    const { call, calls } = wire(dir)
     const r = await call('notes:attachFiles', 'slug', ['C:\a.png', 42])
     expect(r.attached).toHaveLength(1)
+    expect(calls[0].slice(-2)).toEqual(['--owner', 'test-owner'])
     expect(await call('notes:attachClipboard', 'slug')).toEqual({ attached: [], errors: [MSG.noPicture] })
     expect(await call('notes:chooseAttachment', 'slug')).toEqual({ attached: [], errors: [] })
     await call('notes:removeAttachment', 'slug', r.attached[0].asset)
     expect(existsSync(join(dir, ...r.attached[0].asset.split('/')))).toBe(false)
   })
   it('refuses while a job runs on the video, and for a folder with no project', async () => {
-    const call = wire(project(), true)
+    const { call } = wire(project(), true)
     await expect(call('notes:attachFiles', 'slug', ['C:\a.png'])).rejects.toMatchObject({ code: 'BUSY' })
     await expect(call('notes:removeAttachment', 'slug', 'work/assets/attach-00000000-x.png')).rejects.toMatchObject({ code: 'BUSY' })
-    const gone = wire(join(tmpdir(), 'no such project here'))
+    const { call: gone } = wire(join(tmpdir(), 'no such project here'))
     await expect(gone('notes:attachData', 'slug', {})).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })
