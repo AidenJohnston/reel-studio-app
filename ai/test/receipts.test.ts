@@ -140,3 +140,19 @@ it('fails if look_at_frames on a project rendered before render ids gives up ins
   expect(draft.draft).toBe(true);
   expect(host.calls.find((c) => c.command === 'frames')!.args).toEqual(expect.arrayContaining(['--render-id', draft.result.renderId]));
 });
+
+it('fails if a took-back note that saved a My style rule makes or names a version', async () => {
+  const { root, dir } = await makeProject();
+  const gap = (await loadProject(dir)).cut.gapCap;
+  const model = new ScriptedModel([
+    { toolCalls: [call('set_gap_cap', { seconds: 0.1 }), call('add_style_rule', { rule: 'Keep my pauses as they are.' })] },
+    { toolCalls: [call('set_gap_cap', { seconds: gap })] },
+    { toolCalls: [call('finish', { summary_for_user: 'I tightened your pauses.' })] },
+  ]);
+  const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: model });
+  const r = await ai.applyNote(dir, 'from now on keep my pauses as they are', () => {});
+  expect(r).not.toHaveProperty('version');
+  expect(r.styleRulesAdded).toEqual(['Keep my pauses as they are.']);
+  expect(r.summary).toMatch(/^That left your video the same as before, so I didn't make a new version\. I also saved this to My style/);
+  expect((await loadProject(dir)).notes.map((n) => n.version)).toEqual([undefined]);
+});

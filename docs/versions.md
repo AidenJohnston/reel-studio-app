@@ -67,7 +67,9 @@ among the project's renders.
   event with `draft: true`).
 - **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
   no `export.mp4` (the final render failed and the run fell back to its preview), show
-  `versions/preview/draft.mp4` and offer to try the final render again.
+  `versions/preview/draft.mp4` and offer to try the final render again. It is absent after a note
+  whose edit ended where it started: that note made no version. If the run had overwritten the
+  preview while no `vN` exists, it renders the preview again from the restored edit first.
 - `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
 
 ## ai package
