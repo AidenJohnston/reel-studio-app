@@ -1,12 +1,12 @@
 // Stand-in for @reelstudio/ai when the real package is not available. Same interface (ai-types.ts).
 // It runs the deterministic "no AI connected" path from docs/architecture.md section 8: transcribe, analyze,
 // autocut, music from the Library, render. It never pretends to be a real AI provider.
-import { existsSync, promises as fs } from 'node:fs'
-import { join, extname } from 'node:path'
+import { constants, existsSync, promises as fs } from 'node:fs'
+import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { writeJson } from './store'
+import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, ProviderStatus, ScriptResult } from './ai-types'
-import type { Phase } from '../shared/api'
+import type { Phase, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -27,20 +27,52 @@ const MOCK_CLAUDE_BIN = process.platform === 'win32' ? 'C:\\Program Files\\Mock 
 /** Maps an engine stage pct (0-100) into an overall window [lo, hi]. */
 const span = (lo: number, hi: number, pct: number): number => Math.round(lo + ((hi - lo) * pct) / 100)
 
+/** Copies `file` to "<name>.damaged.json", or "<name>.damaged 2.json" and so on when that is taken. Never overwrites. */
+async function keepDamagedCopy(file: string): Promise<string> {
+  const stem = file.replace(/\.json$/i, '')
+  for (let n = 1; ; n++) {
+    const copy = `${stem}.damaged${n > 1 ? ` ${n}` : ''}.json`
+    try {
+      await fs.copyFile(file, copy, constants.COPYFILE_EXCL)
+      return copy
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+    }
+  }
+}
+
+/** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
+type StyleData = { rules: StyleRule[]; damaged?: string; [field: string]: unknown }
+
 export const createMockAI: CreateAI = ({ host }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
 
-  async function readRules(): Promise<{ id: string; text: string; createdAt: string }[]> {
+  /** Read as the real package reads it (ai/src/style.ts): no file is an empty My style, a damaged one is kept as a copy
+   * next to it and My style starts over, and any other read error throws, so no save replaces rules it could not read. */
+  async function readStyle(): Promise<StyleData> {
+    let text: string
     try {
-      const j = JSON.parse(await fs.readFile(styleFile(), 'utf8'))
-      return Array.isArray(j.rules) ? j.rules : []
-    } catch {
-      return []
+      text = await fs.readFile(styleFile(), 'utf8')
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { rules: [] }
+      throw e
     }
+    let j: any = null
+    try {
+      j = JSON.parse(text.replace(/^\uFEFF/, ''))
+    } catch {
+      /* damaged: kept below */
+    }
+    if (Array.isArray(j?.rules)) return j
+    const fresh: StyleData = { version: 1, rules: [], damaged: basename(await keepDamagedCopy(styleFile())) }
+    await writeJson(styleFile(), fresh)
+    return fresh
   }
-  async function writeRules(rules: { id: string; text: string; createdAt: string }[]): Promise<void> {
+  /** Each read or change of the whole file runs one at a time, or two changes at once lose one of them. */
+  const withStyle = <T>(fn: (s: StyleData) => Promise<T>): Promise<T> => serialized(styleFile(), async () => fn(await readStyle()))
+  async function saveRules(s: StyleData, rules: StyleRule[]): Promise<void> {
     await fs.mkdir(host.reelStudioRoot(), { recursive: true })
-    await fs.writeFile(styleFile(), JSON.stringify({ rules }, null, 2) + '\n', 'utf8')
+    await writeJson(styleFile(), { ...s, rules })
   }
 
   async function readProject(dir: string): Promise<any> {
@@ -169,9 +201,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
+        const rule = { id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() }
+        await withStyle((s) => saveRules(s, [...s.rules, rule]))
         added.push(note.trim())
       }
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
@@ -193,15 +224,18 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
 
     async styleRules() {
-      return readRules()
+      return withStyle(async (s) => s.rules).catch(() => [])
+    },
+    async styleWasDamaged() {
+      return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
     async addStyleRule(text) {
       const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
-      await writeRules([...(await readRules()), rule])
+      await withStyle((s) => saveRules(s, [...s.rules, rule]))
       return rule
     },
     async removeStyleRule(id) {
-      await writeRules((await readRules()).filter((r) => r.id !== id))
+      await withStyle((s) => saveRules(s, s.rules.filter((r) => r.id !== id)))
     }
   }
   return ai
