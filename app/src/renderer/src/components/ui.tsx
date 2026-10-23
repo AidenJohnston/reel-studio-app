@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths } from '../api'
 import { Icon } from './icons'
 
@@ -64,7 +64,7 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
     return () => clearTimeout(t)
   }, [text, kind, onClose])
   return (
-    <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast">
+    <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast" data-over-dialogs>
       <span>{text}</span>
       {kind === 'error' && (
         <button className="icon-btn on-dark" onClick={onClose} aria-label="Close" title="Close">
@@ -75,26 +75,53 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
+/** Open dialogs in the order they opened. The newest one decides what is inert. */
+const openDialogs: HTMLElement[] = []
+/** Elements a dialog made inert. Inert set by anything else is never undone here. */
+const madeInert = new Set<HTMLElement>()
+/** A node added next to the page while a dialog is open (a toast, the drop overlay) gets the same rule. */
+const added = new MutationObserver(holdBackground)
+
+/**
+ * Makes everything outside the newest open dialog inert: each sibling of its backdrop and of each
+ * ancestor, except a toast (data-over-dialogs), which stays readable and closable. Undoes what no
+ * longer applies, so the page comes back only when the last dialog closes, in whatever order.
+ */
+function holdBackground(): void {
+  added.disconnect()
+  const behind = new Set<HTMLElement>()
+  for (let branch = openDialogs.at(-1)?.parentElement; branch?.parentElement; branch = branch.parentElement) {
+    added.observe(branch.parentElement, { childList: true })
+    for (const sibling of branch.parentElement.children) {
+      if (sibling instanceof HTMLElement && sibling !== branch && !sibling.hasAttribute('data-over-dialogs') && (madeInert.has(sibling) || !sibling.inert)) behind.add(sibling)
+    }
+  }
+  for (const el of madeInert) {
+    if (behind.has(el)) continue
+    el.inert = false
+    madeInert.delete(el)
+  }
+  for (const el of behind) {
+    el.inert = true
+    madeInert.add(el)
+  }
+}
+
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
 export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
+  // A layout effect: its cleanup runs before React removes the dialog, so holdBackground never sees a
+  // detached dialog on top of the stack (and the page is inert before the first paint).
+  useLayoutEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
     const prev = document.activeElement as HTMLElement | null
-    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
-    const background: HTMLElement[] = []
-    let branch = ref.current?.parentElement
-    while (branch?.parentElement) {
-      for (const sibling of branch.parentElement.children) {
-        if (sibling instanceof HTMLElement && sibling !== branch && !sibling.inert) {
-          sibling.inert = true
-          background.push(sibling)
-        }
-      }
-      branch = branch.parentElement
-    }
-    first?.focus()
+    openDialogs.push(dialog)
+    holdBackground()
+    ;(dialog.querySelector<HTMLElement>('[data-autofocus]') ?? dialog.querySelector<HTMLElement>('button'))?.focus()
     return () => {
-      background.forEach((el) => { el.inert = false })
+      openDialogs.splice(openDialogs.indexOf(dialog), 1)
+      holdBackground() // before focusing: an inert element cannot take focus
       prev?.focus()
     }
   }, [])
