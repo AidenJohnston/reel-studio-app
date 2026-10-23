@@ -357,6 +357,45 @@ describe('frozen image assets', () => {
     expect((await fs.readFile(path.join(assets, 'manifest.jsonl'), 'utf8')).trim()).not.toBe('');
   });
 
+  // Windows ignores POSIX modes; Linux and macOS cover both cases.
+  it.skipIf(process.platform === 'win32')('fails if a note starts when it cannot read the ledger, and its rollback then deletes earlier frozen pictures', async () => {
+    const { ctx, dir, host, local } = await setup();
+    const asset = await commit(ctx, (await candidates(ctx, local))[0].id);
+    const assets = path.join(dir, 'work/assets');
+    const model = new ScriptedModel([
+      async () => {
+        await fs.chmod(assets, 0o755);
+        return { toolCalls: [call('add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'text-pop', asset: null, animation: null, params: { tilt: null, scale: null, text: '$20' } })] };
+      },
+      { toolCalls: [call('finish', { summary_for_user: 'ok' })] },
+    ]);
+    host.failRender = true;
+    await fs.chmod(assets, 0o600);                 // listable, but the ledger inside cannot be stat'ed
+    try {
+      const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+      await expect(ai.applyNote(dir, 'put the price on screen', () => undefined)).rejects.toThrow();
+    } finally { await fs.chmod(assets, 0o755); }
+    expect(await fs.readFile(path.join(dir, asset.committedPath))).toEqual(tinyPng());
+  });
+
+  it.skipIf(process.platform === 'win32')('fails if a rollback that could not restore project.json deletes the picture that project still uses', async () => {
+    const { dir, root, host } = await setup();
+    const loaf = 'Library/Images/loaf.png';
+    await fs.writeFile(path.join(root, loaf), tinyPng([200, 160, 90]));
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { ...place(loaf), anchor: { from: 'w48', to: 'w52' } })] },
+      async () => { await fs.chmod(dir, 0o555); return { toolCalls: [call('finish', { summary_for_user: 'Added the loaf.' })] }; },
+    ]);
+    host.failRender = true;
+    try {
+      const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false });
+      await expect(ai.applyNote(dir, 'show the loaf', () => undefined)).rejects.toThrow();
+    } finally { await fs.chmod(dir, 0o755); }
+    const [b] = (await loadProject(dir)).broll;
+    expect(b.asset).toMatch(FROZEN);
+    expect(await fs.readFile(path.join(dir, String(b.asset)))).toEqual(tinyPng([200, 160, 90]));
+  });
+
   it('fails if a frozen picture deleted from disk can never be committed again', async () => {
     const { ctx, dir, local } = await setup();
     const first = await commit(ctx, (await candidates(ctx, local))[0].id);

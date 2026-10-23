@@ -7,7 +7,7 @@ import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
-import { LEDGER, frozenSince, removeFiles } from './assets';
+import { LEDGER } from './assets';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
@@ -131,26 +131,35 @@ async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<voi
   state.styleRuleIds = []; state.styleRulesAdded = [];
 }
 
-/** The rollback deletes whatever is not in this list, so only a missing folder counts as empty. */
+const missingIsEmpty = (e: any): string[] => { if (e?.code === 'ENOENT') return []; throw e; };
+
+/** The rollback deletes whatever is not in this list, so only a missing folder counts as empty. Frozen
+ * pictures are listed one by one (`frozen/<kind>/<file>`): the folder outlives a note, the files it froze don't. */
 async function listAssets(projectDir: string): Promise<Set<string>> {
   const dir = path.join(projectDir, 'work', 'assets');
-  return new Set(await fsp.readdir(dir).catch((e) => { if (e?.code === 'ENOENT') return [] as string[]; throw e; }));
+  const top = await fsp.readdir(dir).catch(missingIsEmpty);
+  const frozen = top.includes('frozen') ? await fsp.readdir(path.join(dir, 'frozen')).catch(missingIsEmpty) : [];
+  const files = await Promise.all(frozen.map(async (kind) =>
+    (await fsp.readdir(path.join(dir, 'frozen', kind)).catch(missingIsEmpty)).map((f) => `frozen/${kind}/${f}`)));
+  return new Set([...top, ...files.flat()]);
 }
 
-const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, () => null);
+/** The ledger's size before a note, or null when it does not exist yet. Any other error stops the note:
+ * the rollback truncates the ledger back to this size. */
+const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, (e) => {
+  if (e?.code === 'ENOENT') return null; throw e;
+});
 
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, the pictures it downloaded, and the asset records it appended. */
+ * it added, the pictures it downloaded or froze, and the asset records it appended. */
 async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<void> {
-  await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
+  const restored = await writeFileAtomic(path.join(projectDir, 'project.json'), before).then(() => true, () => false);
   await removeStyleRules(deps, state);
-  // read before the ledger goes: the loop below keeps a frozen/ folder that existed before the note
-  const store = { projectDir, root: projectDir };
-  const frozenByNote = await frozenSince(store, ledgerBefore).catch(() => []);
+  // a project.json that could not be put back may still use this note's pictures and their records
+  if (!restored) return;
   for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
-  await removeFiles(store, frozenByNote);
   if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
 }
 
