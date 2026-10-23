@@ -350,7 +350,7 @@ export function captionCorrectionProblem(kept: readonly Word[], corrections: Cap
   }
   return applied.size
     ? `correction "${proposed.from}" has no matches after existing corrections: ${[...applied].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
-    : `phrase not found in the transcript: "${proposed.from}"`;
+    : `phrase not found in the part of the video that is kept: "${proposed.from}"; check whether it was cut and restore that section first`;
 }
 
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */

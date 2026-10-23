@@ -801,7 +801,7 @@ const tools: ToolDef[] = [
   {
     name: 'add_caption_correction',
     description: 'Fix a misheard word or phrase in the captions (e.g. from "cloud" to "Claude"). from = exactly as transcribed. A single word is replaced EVERYWHERE it appears, so when the same word is right elsewhere ("script"), give the whole misheard phrase instead ("type script" -> "TypeScript"). One correction per mistake.',
-    parameters: S.obj({ from: S.str('the wrong text as transcribed', { minLength: 1 }), to: S.str('the correct text') }),
+    parameters: S.obj({ from: S.str('the wrong text as transcribed'), to: S.str('the correct text') }),
     async run(ctx, args) {
       await mutate(ctx, 'captions', (p, t) => {
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
