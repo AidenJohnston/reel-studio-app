@@ -7,7 +7,8 @@
 //
 // Checked throughout, as the formal model of the same rules names them (queue-formal on Sam's fork):
 //   NoDoubleCommit      a note id is saved once, and a note whose id is saved never starts again;
-//   NoAdmittedLost      a sent note is waiting, saved, or one the creator cancelled or stopped;
+//   NoAdmittedLost      a sent note is waiting, saved, or one the creator cancelled. Deliberate
+//                       difference from the model: a stopped note that was not saved waits again first;
 //   AdmissionBeforeAck  a send resolves only once its note is in app.json;
 //   OneRender           at most one render runs at a time across reels;
 //   OneProjectJob       at most one note runs per reel;
@@ -258,16 +259,12 @@ async function run(cmds: Cmd[]): Promise<void> {
         }
         const job = app.jobs.forSlug(slug)
         if (!job) break
-        const id = model.running[r]
         app.queue.stop(job.id)
         model.held[r] = true
         // already saved: the job finishes its bookkeeping and its note leaves the queue then
         if (app.bookkeeping.has(slug)) break
+        // not saved: the note waits again at the top of its queue
         model.running[r] = null
-        if (id && model.order[r].includes(id)) {
-          left(r, id)
-          gone.add(id)
-        }
         break
       }
       case 'think': {

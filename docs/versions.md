@@ -111,7 +111,8 @@ first, each on whatever version is newest when it starts. A queued note's id is 
 the save never runs it twice. A note that changes nothing is saved too, with `applied: []`.
 
 The queue goes on by itself only after a saved note. Stop, a failed note and a restart hold it until the
-user presses Resume (a note sent to an empty queue starts at once). A file attached while a job runs goes
+user presses Resume (a note sent to an empty queue starts at once). A note that was stopped or failed before
+it was saved waits again at the top, so it can be edited or tried again without retyping it. A file attached while a job runs goes
 to `<userData>/note-staging/<slug>/` and is copied into `work/assets` by its own note's job.
 
 Notes on different videos run side by side, but only one engine `render` runs at a time across all of

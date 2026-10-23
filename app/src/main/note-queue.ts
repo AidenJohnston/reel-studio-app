@@ -4,7 +4,7 @@
 // that publishes the note is also the proof it ran: an entry leaves the queue only once its id is there
 // (a note that changed nothing is saved too). The queue runs on by itself only after a saved note. Stop,
 // a failure and a restart hold it until Resume, so nothing the creator stopped to rethink applies behind
-// their back.
+// their back. A stopped note that was not saved waits again at the top, to edit or try again.
 // A note shows in one place: a waiting row, or from the moment it starts, a "you" message in the chat.
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -27,7 +27,7 @@ export interface NoteToRun {
 export type StartNote = (slug: string, note: NoteToRun, record: (s: AppState) => void) => Promise<string>
 
 const STARTED = { code: 'NOT_QUEUED', userMessage: 'That note already started, so it can no longer change.' }
-export const STOPPED = 'Stopped. Nothing changed.'
+export const STOPPED = 'Stopped. Nothing changed. Your note is waiting below: edit it, or press Resume to try it again.'
 export const BACK_IN_QUEUE = 'That note is waiting below. Press Resume to try it again.'
 
 /** The saved notes' ids, or null when project.json can't be read or its notes are not a list. */
@@ -173,8 +173,9 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
       ).then(() => undefined)
     },
 
-    /** Stop on the Reel screen: the note running now is dropped and the ones behind it are held. When
-     * that job has already ended (the screen was behind), the notes waiting are held all the same. */
+    /** Stop on the Reel screen: the note running now goes back to the top of the queue, unless it was
+     * saved already, and the queue is held. When that job has already ended (the screen was behind), the
+     * notes waiting are held all the same. */
     async stop(jobId: string, slug?: string): Promise<void> {
       if (jobs.get(jobId)) {
         stopped.add(jobId)
@@ -224,7 +225,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
     },
 
     /** Every job event (index.ts). Once a job on a reel has fully ended, its entry leaves the queue if
-     * the note was saved or stopped; a failed one stays first, for Resume to try again. The next note runs
+     * the note was saved; a stopped or failed one stays first, for Resume to try again. The next note runs
      * only after a job nobody stopped finished and saved its note; any other end holds the queue. When
      * project.json cannot be read, the note stays (unless stopped) and the next promotion reconciles it.
      * Decided in the reel's queue lane, so a note sent meanwhile waits for the decision. Resolves once
@@ -245,7 +246,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
         if (!ran && runOn) return true
         await change(slug, (s) => {
           if (ran) {
-            if (savedAs !== null || byStop) s.queue = (s.queue ?? []).filter((q) => q.id !== ran.id)
+            if (savedAs !== null) s.queue = (s.queue ?? []).filter((q) => q.id !== ran.id)
             const line = endLine(byStop, savedAs, head !== null, e.type)
             if (line) s.chat.push(stamp(line))
           }

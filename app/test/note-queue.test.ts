@@ -153,7 +153,7 @@ describe('note queue', () => {
     expect(await waitingTexts(slug)).toEqual([])
   }, 60000)
 
-  it('Stop says so, holds the waiting notes, and nothing starts until Resume', async () => {
+  it('Stop puts the note back at the top, holds it with the notes behind it, and nothing starts until Resume', async () => {
     setupPaths()
     const slug = await reel('stop')
     const a = app()
@@ -164,13 +164,18 @@ describe('note queue', () => {
     await a.settled()
     expect(a.jobs.forSlug(slug)).toBeUndefined()
     expect((await readAppState(slug)).queueHeld).toBe(true)
-    expect(await waitingTexts(slug)).toEqual(['second', 'third'])
+    expect(await waitingTexts(slug)).toEqual(['first', 'second', 'third'])
+    // a waiting note shows only as a row, never also in the chat
+    expect(await yours(slug)).toEqual([])
     expect(await replies(slug)).toEqual([STOPPED])
     expect((await readProject(slug)).version).toBe(1)
 
+    // retried without retyping, as the creator edited it
+    await a.queue.edit(slug, (await readAppState(slug)).queue![0].id, 'first, but softer')
     await a.queue.resume(slug)
     await a.runAll(slug)
-    expect((await readProject(slug)).version).toBe(3)
+    expect((await readProject(slug)).version).toBe(4)
+    expect(await replies(slug)).toContain('Done: "first, but softer". It is Version 2.')
   }, 60000)
 
   it('Stop pressed after the note was saved keeps it, and still holds the notes behind it', async () => {
