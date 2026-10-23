@@ -209,6 +209,11 @@ export function createUpdater(d: UpdaterDeps) {
       if (active || updateAction(state) !== 'download' || state.mode !== 'install') return { accepted: false, state }
       active = 'download'
       const version = state.availableVersion!
+      if (dismissed) {
+        dismissed = null
+        remember({ updateDismissed: null })
+        armSnoozeEnd()
+      }
       set({ ...state, status: 'downloading', downloadPercent: 0, message: null, errorContext: null })
       d.log(`[update] downloading ${version}`)
       try {
@@ -245,6 +250,16 @@ export function createUpdater(d: UpdaterDeps) {
       stop()
       try {
         await d.backend!.verify()
+      } catch (e) {
+        // The file itself is wrong (or gone): offer a fresh download instead of retrying the same install.
+        active = null
+        fresh = false
+        set({ ...state, status: 'error', downloadedVersion: null, downloadPercent: null, message: 'The downloaded update did not pass its check. Download it again.', errorContext: 'download' })
+        d.log(`[update] downloaded update rejected: ${why(e)}`)
+        start()
+        return { accepted: true, state }
+      }
+      try {
         await d.prepareToQuit()
         d.backend!.install()
       } catch (e) {

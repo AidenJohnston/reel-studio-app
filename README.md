@@ -109,8 +109,11 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-Update checks run at most once a day, and when you click "Check for updates". Turn the daily check off in
-Settings with "Check for updates". A check makes these requests, with no cookies, account or ID:
+Update checks run once a day (an hour later if the request failed), when you click "Check for updates", and when
+you click **Download update** for an update found before the app last started or after a failed download, to
+confirm it is still the newest.
+Turn the daily check off in Settings with "Check for updates". A check makes these requests, with no cookies,
+account or ID:
 
 1. GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only
    `User-Agent: ReelStudio/<version>` and `Accept: application/vnd.github+json`.

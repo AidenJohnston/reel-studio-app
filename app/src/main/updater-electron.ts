@@ -30,8 +30,8 @@ export type UpdaterLike = Pick<
   removeListener(event: 'download-progress', listener: (p: ProgressInfo) => void): unknown
 }
 
-/** Throws if the downloaded file must not be installed as `selected`. */
-export type VerifyDownload = (file: string, selected: string) => Promise<void>
+/** Throws if the downloaded file must not be installed as `version`. */
+export type VerifyDownload = (file: string, version: string) => Promise<void>
 
 export function electronUpdaterBackend(opts: {
   updater: UpdaterLike
@@ -46,7 +46,7 @@ export function electronUpdaterBackend(opts: {
 }): UpdateBackend {
   const u = opts.updater
   let selected: string | null = null
-  let downloaded: string | undefined
+  let downloaded: { file: string; version: string } | null = null
   u.logger = {
     info: (m: unknown) => opts.log(`[updater] ${String(m)}`),
     warn: (m: unknown) => opts.log(`[updater] warn: ${String(m)}`),
@@ -74,6 +74,11 @@ export function electronUpdaterBackend(opts: {
       const found = result.update
       selected = null
       if (!found) return result
+      // Already downloaded: re-reading its feed would only risk the download the person is about to install.
+      if (downloaded?.version === found.version) {
+        selected = found.version
+        return result
+      }
       let problem: string
       try {
         u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
@@ -98,15 +103,22 @@ export function electronUpdaterBackend(opts: {
       const progress = (p: ProgressInfo): void => onProgress(p.percent)
       u.on('download-progress', progress)
       try {
+        if (!selected) throw new Error('No update is selected.')
+        const version = selected
         const files = await u.downloadUpdate()
-        downloaded = files[0]
+        downloaded = { file: files[0], version }
       } finally {
         u.removeListener('download-progress', progress)
       }
     },
     async verify() {
-      if (!downloaded || !selected) throw new Error('No downloaded update is selected.')
-      await opts.verifyDownload(downloaded, selected)
+      if (!downloaded) throw new Error('No update is downloaded.')
+      try {
+        await opts.verifyDownload(downloaded.file, downloaded.version)
+      } catch (e) {
+        downloaded = null
+        throw e
+      }
     },
     install() {
       u.quitAndInstall(true, true)

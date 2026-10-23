@@ -415,10 +415,11 @@ describe('release notes from the GitHub list', () => {
 
 })
 
-it('fails if a download that does not pass its check stops a video that is being made', async () => {
+it('fails if a download that does not pass its check stops a video or cannot be downloaded again', async () => {
   let jobs!: ReturnType<typeof createJobManager>
+  let bad = true
   const { u, installs } = setup(async () => v013, {
-    verify: async () => { throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
+    verify: async () => { if (bad) throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
     prepareToQuit: () => jobs.cancelAll()
   })
   jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
@@ -427,16 +428,22 @@ it('fails if a download that does not pass its check stops a video that is being
   jobs.start(null, 'rerender', (_emit, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('stopped')))))
   await u.install()
   expect(jobs.runningCount()).toBe(1)
-  expect(u.state()).toMatchObject({ status: 'error', errorContext: 'install', downloadedVersion: '0.1.3' })
+  expect(u.state()).toMatchObject({ status: 'error', errorContext: 'download', downloadedVersion: null })
   expect(installs).toHaveLength(0)
+  expect(updateAction(u.state())).toBe('download')
+  bad = false
+  await u.download()
+  expect(u.state()).toMatchObject({ status: 'downloaded', downloadedVersion: '0.1.3' })
 })
 
-it('fails if a download started with automatic checks off leaves no strip to restart from', async () => {
-  const { u } = setup(async () => v013, { memory: { checkUpdates: false } })
+it('fails if a download started with automatic checks off, or after Not now, leaves no strip to restart from', async () => {
+  const { u, memory } = setup(async () => v013, { memory: { checkUpdates: false } })
   await u.init()
   await u.check('button')
+  await u.dismiss('0.1.3')
   expect(showsUpdateButton(u.state())).toBe(false)
   await u.download()
   expect(u.state().status).toBe('downloaded')
   expect(showsUpdateButton(u.state())).toBe(true)
+  expect(memory().updateDismissed).toBeNull()
 })

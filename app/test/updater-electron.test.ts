@@ -106,3 +106,29 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('fails if a later check that cannot read the feed breaks Restart for an update already downloaded', async () => {
+  const updater = new FakeUpdater({ version: '0.1.3', files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-10-21' }, 'update.zip')
+  const verified: string[] = []
+  let installed = 0
+  updater.quitAndInstall = () => void installed++
+  const backend = electronUpdaterBackend({
+    updater, version: '0.1.2', fetch: github, releasesApi: 'https://example.test/releases', releaseFolder: () => 'https://example.test/v0.1.3',
+    log: () => {}, onError: () => {}, verifyDownload: async (file, version) => void verified.push(`${file}@${version}`)
+  })
+  const u = createUpdater({
+    version: '0.1.2', mode: 'install', disabledReason: null, backend,
+    load: async () => ({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }),
+    save: async () => undefined, busy: () => ({ exporting: false, working: 0 }), prepareToQuit: async () => undefined,
+    openExternal: async () => undefined, send: () => {}, log: () => {}, now: () => 1000
+  })
+  await u.init()
+  await u.check('button')
+  await u.download()
+  updater.checkForUpdates = async () => { throw new Error('HttpError: 404') }
+  await u.check('auto')
+  expect(updateAction(u.state())).toBe('install')
+  await u.install()
+  expect(verified).toEqual(['update.zip@0.1.3'])
+  expect(installed).toBe(1)
+})
