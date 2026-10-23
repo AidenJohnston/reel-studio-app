@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r1" name="FFVideoFormat1080p2997" frameDuration="1001/30000s" width="1920" height="1080"/>
+    <asset id="r2" name="talking-head" src="file:///media/talking-head.mov" start="0s" duration="600600/30000s" hasVideo="1" hasAudio="1" format="r1"/>
+    <asset id="r3" name="broll" src="file:///media/broll.mov" start="0s" duration="300300/30000s" hasVideo="1" format="r1"/>
+  </resources>
+  <project name="Hook cut">
+    <sequence format="r1" duration="105105/30000s" tcStart="108108000/30000s" tcFormat="DF">
+      <spine>
+        <asset-clip name="intro" ref="r2" offset="0s" start="120120/30000s" duration="30030/30000s" format="r1">
+          <asset-clip name="broll wide" ref="r3" lane="2" offset="135135/30000s" start="0s" duration="20020/30000s" format="r1"/>
+          <asset-clip name="broll close" ref="r3" lane="10" offset="120120/30000s" start="30030/30000s" duration="10010/30000s" format="r1"/>
+          <marker start="130130/30000s" duration="1001/30000s" value="hook"/>
+        </asset-clip>
+        <asset-clip name="point" ref="r2" offset="30030/30000s" start="200200/30000s" duration="45045/30000s" format="r1">
+          <spine lane="1" offset="210210/30000s">
+            <asset-clip name="broll storyline" ref="r3" offset="0s" start="0s" duration="15015/30000s" format="r1"/>
+          </spine>
+        </asset-clip>
+        <asset-clip name="outro" ref="r2" offset="75075/30000s" start="300300/30000s" duration="30030/30000s" format="r1"/>
+      </spine>
+    </sequence>
+  </project>
+</fcpxml>

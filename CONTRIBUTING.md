@@ -20,6 +20,8 @@ npm install && npm run build -w ai
 cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
 ```
 
+If you work on `reelengine import-reference` or run its tests, install `.[dev,reference]` instead.
+
 ## Checks to run
 
 ```

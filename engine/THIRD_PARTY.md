@@ -47,6 +47,11 @@ The packaging stream should generate the exact list with licenses from the insta
 `pillow-heif` into the bundle: its binary wheels also contain x265 (GPL 2.0). HEIC decoding involves HEVC,
 a patent-encumbered codec; whether to ship it is a legal decision, not a technical one.
 
+**Edit import (`reference` extra, not bundled):** `opentimelineio` 0.18.1, `otio-fcpx-xml-adapter` 1.0.0
+and `otio-fcp-adapter` 1.0.0 are Apache-2.0; `psutil` is BSD-3-Clause. OpenTimelineIO's compiled module also contains Imath
+(BSD-3-Clause) and RapidJSON (MIT), but the wheel ships only OpenTimelineIO's own LICENSE and NOTICE.
+A bundle that includes it must add those two license texts.
+
 ## FFmpeg / ffprobe (bundled by packaging, NOT part of this package)
 
 - **Required version: FFmpeg >= 6.1** (7.x recommended). `render` passes `-display_rotation 0` to
