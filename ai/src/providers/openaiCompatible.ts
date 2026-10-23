@@ -27,7 +27,7 @@ function toChatMessages(system: string, messages: ChatMessage[]): any[] {
     } else if (m.role === 'assistant') {
       out.push({
         role: 'assistant',
-        content: m.text || null,
+        content: m.toolCalls.length ? m.text || null : m.text ?? '',
         ...(m.toolCalls.length ? { tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } })) } : {}),
       });
     } else {

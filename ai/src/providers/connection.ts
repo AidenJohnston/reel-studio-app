@@ -85,6 +85,10 @@ export function mapConnectionError(status: number | undefined, body: unknown, ct
 }
 
 export function mapFetchFailure(e: any): AIError {
+  // Node fetch reports redirect: 'error' as a TypeError with this cause.
+  if (e?.cause?.message === 'unexpected redirect') {
+    return new AIError('connection_redirect', 'That server sent Reel Studio to a different address, which it refused to follow. Use the final server address, such as the https:// one.');
+  }
   const code = e?.cause?.code ?? e?.code;
   return unreachable(`${e?.message ?? e}${code ? ` (${code})` : ''}`);
 }

@@ -85,6 +85,27 @@ describe('OpenAI-compatible provider (Chat Completions)', () => {
     const r = await new OpenAICompatibleProvider({ baseURL: `${mock.origin}/v1`, apiKey: KEY, model: 'mock-small' }).complete(sayOk);
     expect(r.malformed).toBe(true);
   });
+
+  it('sends string content in the follow-up request after an empty malformed turn', async () => {
+    mock.chatHandlers.push((_b, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '' }, finish_reason: 'tool_calls' }] })));
+    const p = new OpenAICompatibleProvider({ baseURL: `${mock.origin}/v1`, apiKey: KEY, model: 'mock-small', supportsImages: true });
+    const first = await p.complete(sayOk);
+    expect(first.malformed).toBe(true);
+    mock.chatHandlers.push((body, res) => {
+      const assistant = body.messages.find((m: any) => m.role === 'assistant');
+      const valid = typeof assistant.content === 'string' && !assistant.tool_calls;
+      res.writeHead(valid ? 200 : 400, { 'content-type': 'application/json' }).end(JSON.stringify(valid
+        ? { choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }
+        : { error: { message: 'assistant content must be a string without tool_calls' } }));
+    });
+    const next = await p.complete({ ...sayOk, messages: [
+      ...sayOk.messages,
+      { role: 'assistant', text: first.text, toolCalls: first.toolCalls },
+      { role: 'user', content: [{ type: 'text', text: 'Please try again with valid tool calls.' }] },
+    ] });
+    expect(next.text).toBe('OK');
+    expect(mock.requests.at(-1)!.body.messages[2]).toEqual({ role: 'assistant', content: '' });
+  });
 });
 
 describe('plain-words errors from the person\'s own server', () => {
@@ -122,7 +143,11 @@ describe('plain-words errors from the person\'s own server', () => {
     try {
       expect((await caught(openai(`${base}/v1`).complete(sayOk))).code).toBe('connection_wrong_address');
       // never follow a redirect with the key
-      expect((await caught(openai(`${base}/redirect`).complete(sayOk))).code).toBe('connection_unreachable');
+      const redirect = await caught(openai(`${base}/redirect`).complete(sayOk));
+      expect(redirect.code).toBe('connection_redirect');
+      expect(redirect.userMessage).toContain('refused to follow');
+      expect(redirect.userMessage).toContain('https://');
+      expect(redirect.userMessage).not.toContain('could not reach');
     } finally { page.closeAllConnections(); page.close(); }
 
     expect(mapConnectionError(503, { error: { message: 'model temporarily unavailable' } }, { kind: 'openai', model: 'm' }).code).toBe('connection_unavailable');
