@@ -174,6 +174,7 @@ export function engineEnv(): NodeJS.ProcessEnv {
   }
   // The engine's cache default ignores Electron's isolated userData directory.
   if (out.REELENGINE_CACHE === undefined && env().REELSTUDIO_USER_DATA) out.REELENGINE_CACHE = settingsDir()
+  if (out.REELENGINE_CACHE_DIR === undefined && env().REELSTUDIO_USER_DATA) out.REELENGINE_CACHE_DIR = join(settingsDir(), 'cache')
   // Only absolute paths: a bare name means "not found", and the engine does its own PATH search.
   if (isAbsolute(ffmpegPath())) out.REELENGINE_FFMPEG = ffmpegPath()
   if (isAbsolute(ffprobePath())) out.REELENGINE_FFPROBE = ffprobePath()

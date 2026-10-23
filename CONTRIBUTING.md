@@ -13,17 +13,11 @@ Thanks for helping. Bug reports, fixes and small improvements are welcome.
 
 ## Set up
 
-See "Build from source" in the [README](README.md).
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first.
-The engine setup commands work in PowerShell and on macOS without activating the environment.
+See "Build from source" in the [README](README.md). The short version:
 
 ```
-npm ci
-npm run build -w ai
-cd engine
-uv venv --python 3.11 --managed-python
-uv pip install --python .venv -c requirements.txt -e ".[dev]"
-cd ..
+npm install && npm run build -w ai
+cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
 ```
 
 ## Checks to run
@@ -31,7 +25,7 @@ cd ..
 ```
 npm test                        # app + ai
 npm run typecheck
-uv run --no-project --python engine/.venv python -m pytest engine/tests
+cd engine && python -m pytest tests
 python scripts/leak-check/check.py   # also runs on every pull request
 ```
 
@@ -51,7 +45,7 @@ put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TES
 PRs are squash-merged. The PR title becomes the single commit on main, so use Conventional Commits: `type(scope): subject`.
 
 * Keep a change focused, add a test for a bug you fix, and use the PR template to explain the change and verification.
-* Put a `Changelog:` line in the PR description. At release, move those entries into `CHANGELOG.md`.
+* Put a `Changelog:` line in the PR description. At the next release, create `CHANGELOG.md` from the PRs' `Changelog:` lines.
   Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.

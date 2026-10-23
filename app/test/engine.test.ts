@@ -10,14 +10,17 @@ it('applies engine cache precedence', () => {
   const userDataDir = join(APP_DIR, 'isolated user data')
   const base = { isPackaged: false, resourcesPath: '', documentsDir: APP_DIR, userDataDir, appDir: APP_DIR }
 
-  initPaths({ ...base, env: { REELENGINE_CACHE: '/explicit/cache' } })
+  initPaths({ ...base, env: { REELSTUDIO_USER_DATA: userDataDir, REELENGINE_CACHE: '/explicit/cache', REELENGINE_CACHE_DIR: '/explicit/assets' } })
   expect(engineEnv().REELENGINE_CACHE).toBe('/explicit/cache')
+  expect(engineEnv().REELENGINE_CACHE_DIR).toBe('/explicit/assets')
 
   initPaths({ ...base, env: { REELSTUDIO_USER_DATA: userDataDir } })
   expect(engineEnv().REELENGINE_CACHE).toBe(userDataDir)
+  expect(engineEnv().REELENGINE_CACHE_DIR).toBe(join(userDataDir, 'cache'))
 
   initPaths({ ...base, env: {} })
   expect(engineEnv().REELENGINE_CACHE).toBeUndefined()
+  expect(engineEnv().REELENGINE_CACHE_DIR).toBeUndefined()
 })
 
 describe('LineSplitter', () => {

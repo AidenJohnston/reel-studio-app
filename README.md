@@ -116,9 +116,8 @@ nothing is downloaded or installed. Turn it off in Settings with "Check for upda
 
 ## Build from source
 
-You need Node.js 22 or newer and [uv](https://docs.astral.sh/uv/getting-started/installation/) for Python 3.11.
-For development on a machine without the bundled runtime, put `ffmpeg` and `ffprobe`
-(7.1 recommended) on your PATH.
+You need Node.js 22 or newer and Python 3.11. For development on a machine without the bundled runtime, put
+`ffmpeg` and `ffprobe` (7.1 recommended) on your PATH.
 
 ```
 git clone https://github.com/AidenJohnston/reel-studio-app.git
@@ -131,15 +130,10 @@ Set up the engine (the app uses `engine/.venv` automatically when it exists):
 
 ```
 cd engine
-uv venv --python 3.11 --managed-python
-uv pip install --python .venv -c requirements.txt -e ".[dev]"
+python -m venv .venv
+# Windows:  .venv\Scripts\pip install -e ".[dev]"      macOS:  .venv/bin/pip install -e ".[dev]"
 cd ..
 ```
-
-These commands work in PowerShell and on macOS without activating the environment.
-`engine/requirements.txt` remains the runtime lock and constrains development installs. To resolve
-dependency changes, use the `uv pip compile` command in its header and preserve that header.
-The packaged runtime still uses pip and its existing hash-checked pins.
 
 Run the app and the tests:
 
@@ -147,7 +141,7 @@ Run the app and the tests:
 npm run dev                  # the app, with hot reload
 npm test                     # app + ai unit tests
 npm run typecheck
-cd engine && uv run --no-project --python .venv python -m pytest tests          # engine tests (the compositing suite takes a few minutes)
+cd engine && python -m pytest tests          # engine tests (the compositing suite takes a few minutes)
 npm run e2e                  # Electron end-to-end tests (slower; needs the engine venv)
 ```
 
