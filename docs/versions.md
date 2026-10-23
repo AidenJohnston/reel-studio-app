@@ -7,7 +7,8 @@ never a pile of preview-only folders an AI run left behind.
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md),
+                 and the reports that describe this video: captions.json, layers.json, mix.json
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -21,11 +22,14 @@ Rules:
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
 3. `project.json` `version` = the last FINAL version number.
-4. A final render re-uses `vN` when the edit is unchanged since `vN` was rendered (re-rendering the
-   same edit overwrites it); otherwise it makes `v(N+1)`.
-5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
-   `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+4. **A saved version is never rewritten.** A final render of an edit unchanged since `vN` was rendered
+   (the same edit, and the same files it reads, the transcript included) returns `vN` as it is
+   (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`. A `vN` folder above `project.json`'s
+   `version` is an attempt that was never saved, and the next final render of that number deletes it
+   first.
+5. `cover` (cover only) writes into `preview/`.
+6. `frames` reads the file given with `--file`, else the video the project shows: `v{version}`, or the
+   preview while there is no version. Its stills go to `work/frames/`.
 
 ## Render result (engine `done.result`)
 

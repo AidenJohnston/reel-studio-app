@@ -2,16 +2,19 @@
 
     python check_export.py --project <project dir> --export <Library/Exports/x.mp4> --out <dir>
 
-1. `python -m reelengine verify` on the exported file.
+1. `python -m reelengine verify` on the saved version the export is a copy of (its caption, layer
+   and mix reports live beside it).
 2. Frames at a spread of times (plus the middle of the first b-roll layers) -> PNGs + one contact
    sheet, so a person (or an agent) can look at captions, b-roll placement and the face.
-3. Music presence: the export's level where the cut voice (work/render/voice.wav) is silent, i.e.
-   the music-only moments between words, vs. the level while talking. Also the first 3 s.
+3. Music: the export's level overall and in the first 3 s, and what the engine measured when it
+   mixed this version (its mix.json): whether a song is in it, and how far the voice sits above it
+   while talking. The voice track itself is not kept per version, so it is not re-measured here.
 Prints one JSON object.
 """
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import os
 import subprocess
@@ -51,6 +54,14 @@ def db_windows(x: np.ndarray) -> np.ndarray:
     return 20 * np.log10(np.maximum(rms, 1e-6))
 
 
+def saved_version(project: Path, export: Path) -> Path:
+    """The version folder whose export.mp4 the exported file is a byte copy of."""
+    for d in sorted((project / "versions").glob("v*")):
+        if (d / "export.mp4").exists() and filecmp.cmp(d / "export.mp4", export, shallow=False):
+            return d
+    raise SystemExit(f"{export} is not a copy of any saved version in {project}")
+
+
 def verify(project: Path, export: Path) -> dict:
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     r = run([sys.executable, "-m", "reelengine", "verify", "--project", str(project), str(export)], env=env)
@@ -65,8 +76,8 @@ def verify(project: Path, export: Path) -> dict:
     return {"exit": r.returncode, "event": result}
 
 
-def layer_times(project: Path) -> list[float]:
-    f = project / "work" / "layers" / "layers.json"
+def layer_times(version: Path) -> list[float]:
+    f = version / "layers.json"
     try:
         items = json.loads(f.read_text("utf-8"))
     except (OSError, ValueError):
@@ -114,12 +125,13 @@ def main() -> None:
     a.out.mkdir(parents=True, exist_ok=True)
 
     res: dict = {"export": str(a.export)}
-    res["verify"] = verify(a.project, a.export)
+    version = saved_version(a.project, a.export)
+    res["verify"] = verify(a.project, version / "export.mp4")
     dur = duration(a.export)
     res["duration"] = dur
 
     spread = [1.0] + [round(dur * f, 2) for f in (0.25, 0.5, 0.75)] + [round(dur - 1.0, 2)]
-    lt = layer_times(a.project)[:3]
+    lt = layer_times(version)[:3]
     res["layerTimes"] = lt
     times = sorted(set(t for t in spread + lt if 0 <= t < dur))
     fp = frames(a.export, times, a.out)
@@ -130,29 +142,17 @@ def main() -> None:
         res["cover"] = str(cover)
     res["sheet"] = sheet(fp, a.out) if fp else None
 
-    voice_wav = a.project / "work" / "render" / "voice.wav"
     mix = pcm(a.export)
     m = db_windows(mix)
     music: dict = {"mixMedianDb": round(float(np.median(m)), 1), "first3sDb": round(float(np.median(m[: int(3 / WIN)])), 1)}
-    if voice_wav.exists():
-        v = db_windows(pcm(voice_wav))
-        n = min(len(v), len(m))
-        v, mm = v[:n], m[:n]
-        quiet = v < -50
-        talk = v > (np.median(v) - 6)
-        music["voiceSilentWindows"] = int(quiet.sum())
-        if quiet.sum():
-            music["musicOnlyMedianDb"] = round(float(np.median(mm[quiet])), 1)
-        if talk.sum():
-            music["talkingMedianDb"] = round(float(np.median(mm[talk])), 1)
-        if quiet.sum() and talk.sum():
-            music["voiceOverMusicDb"] = round(music["talkingMedianDb"] - music["musicOnlyMedianDb"], 1)
-        music["present"] = bool(quiet.sum() and music["musicOnlyMedianDb"] > -55)
-    mixjson = a.project / "work" / "audio" / "mix.json"
+    mixjson = version / "mix.json"
     if mixjson.exists():
         try:
             mj = json.loads(mixjson.read_text("utf-8"))
             music["mixReport"] = {k: mj[k] for k in list(mj)[:12] if not isinstance(mj[k], (list, dict))}
+            music["present"] = mj.get("music") is not None
+            if mj.get("music"):
+                music["voiceOverMusicDb"] = mj["music"].get("measuredGapDb")
         except ValueError:
             pass
     res["music"] = music
