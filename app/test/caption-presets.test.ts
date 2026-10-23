@@ -7,16 +7,19 @@ describe('caption presets', () => {
     const base = { font: 'Montserrat SemiBold', outlineColor: '#000000', shadow: 0, position: 0.75 }
     expect(CAPTION_PRESETS.map((p) => applyPreset(p.key))).toEqual([
       { ...base, preset: 'clean', size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8 },
-      { ...base, preset: 'bold-pop', size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true },
+      { ...base, preset: 'bold-pop', size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true, position: 0.73 },
       { ...base, preset: 'karaoke', size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, highlight: '#FFD60A' },
       { ...base, preset: 'boxed', size: 96, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, box: true },
       { ...base, preset: 'minimal', size: 84, maxWords: 4, case: 'lower', color: '#FFFFFF', outline: 5 }
     ])
   })
 
-  it('picking a look keeps Position, and a Size the person picked through every switch', () => {
+  it('picking a look keeps a Position moved off the look\'s own, and a Size the person picked through every switch', () => {
     const clean = applyPreset('clean')
     expect(applyPreset('bold-pop', { ...clean, position: 0.66 })).toMatchObject({ preset: 'bold-pop', size: 126, position: 0.66 })
+    // a position nobody moved follows the look, both ways
+    expect(applyPreset('clean', applyPreset('bold-pop', clean)).position).toBe(0.75)
+    expect(applyPreset('bold-pop', { ...clean, preset: undefined }).position).toBe(0.73)
     // Big in the Size row (ShowMeHow writes size and sizePicked), then Bold pop, whose own size is Big, then Minimal
     const minimal = applyPreset('minimal', applyPreset('bold-pop', { ...clean, size: 126, sizePicked: true }))
     expect(minimal).toMatchObject({ preset: 'minimal', size: 126, sizePicked: true })

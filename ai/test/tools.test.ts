@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { lowestCaptionPosition, saveProject } from '../src/project';
+import { planFastNote } from '../src/fastnote';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
 import { CAPTION_PRESETS, applyPreset, presetOf } from '../../app/src/shared/caption-presets';
@@ -284,6 +285,22 @@ describe('tool implementations', () => {
     const fmt = { width: 1080, height: 1920, fps: 30 };
     expect(Object.fromEntries(CAPTION_PRESETS.map((x) => [x.key, lowestCaptionPosition(fmt, x.style)])))
       .toEqual({ clean: 0.75, 'bold-pop': 0.73, karaoke: 0.75, boxed: 0.75, minimal: 0.76 });
+  });
+
+  it('every look, picked on a new reel, starts clear of Instagram\'s caption, so turning captions on never warns', async () => {
+    const { ctx, dir } = await ctxFor();
+    const reel = await loadProject(dir);
+    for (const { key } of CAPTION_PRESETS) {
+      const p = await loadProject(dir);
+      p.captions = { ...p.captions, enabled: false, style: applyPreset(key, reel.captions.style) };
+      await saveProject(dir, p);
+      // position counts down from the top: at or above the lowest clear line is a fraction no larger than it
+      expect([key, p.captions.style.position]).toEqual([key, expect.any(Number)]);
+      expect([key, p.captions.style.position! <= lowestCaptionPosition(p.format, p.captions.style)]).toEqual([key, true]);
+      expect([key, planFastNote('turn on captions', p)!.summary]).toEqual([key, 'I put the captions back on.']);
+      const r = await executeTool(ctx, 'set_caption_style', { enabled: true });
+      expect([key, (r.content as any).warning]).toEqual([key, undefined]);
+    }
   });
 
   it('engine errors come back as readable tool errors', async () => {
