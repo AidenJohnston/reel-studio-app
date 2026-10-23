@@ -41,8 +41,8 @@ async function readTries(tries: Tries<ExportTry>, runEngine: RunEngine, signal?:
 
 /** What the export needs to know about a finished render. Refuses only a render it cannot read. */
 async function readFinishedVideo(source: string, runEngine: RunEngine, label: string, signal?: AbortSignal): Promise<FinishedVideo> {
-  const video = await runEngine('export-probe', [source], undefined, signal) as Partial<FinishedVideo> | null
-  if (typeof video?.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 || typeof video.fps !== 'number' ||
+  const video = await runEngine('export-probe', [source], undefined, signal) as Partial<FinishedVideo & { hasVideo: boolean }> | null
+  if (video?.hasVideo !== true || typeof video.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 || typeof video.fps !== 'number' ||
       typeof video.vduration !== 'number' || typeof video.sizeBytes !== 'number' || (video.audioBitrate !== null && typeof video.audioBitrate !== 'number') || typeof video.editList !== 'boolean') {
     throw { code: 'EXPORT_FAILED', userMessage: `${label}I could not read the finished video. Render this version again before exporting.` }
   }

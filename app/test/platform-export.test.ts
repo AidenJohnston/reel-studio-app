@@ -81,9 +81,19 @@ describe('platform files through the real engine', () => {
     const video = { duration: 600, vduration: 600, fps: 30, sizeBytes: 400_000_000, audioBitrate: 128_000, editList: false }
     // 300 MB × 0.94 × 8 bits / 600 s, less 128 kb/s for the audio
     expect(outputGroups(['instagram', 'facebook', 'x'], video)).toEqual([{ platforms: ['instagram'], bitrate: 3_632_000 }])
+    // Too long for any bitrate the engine takes: the floor, then the size check after encoding.
+    expect(outputGroups(['instagram'], { ...video, duration: 9_000 })).toEqual([{ platforms: ['instagram'], bitrate: 128_000 }])
     // Edit lists and 192k audio matter only to Instagram and Threads.
     expect(outputGroups(['facebook', 'x', 'tiktok', 'linkedin'], { ...video, sizeBytes: 900_000_000, editList: true, audioBitrate: 192_000 }))
       .toEqual([{ platforms: ['linkedin'], bitrate: 6_138_666 }])
+  })
+
+  it('fails if a file with no picture is exported as a finished video', async () => {
+    const source = join(scratch, 'sound only.mp4')
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=3', '-c:a', 'aac', source])
+    const folder = join(scratch, 'sound only')
+    await expect(exportPlatforms({ tries: oneTry(source, null, 'Sound', { platforms: ['tiktok'], caption: '', coverSeconds: null }), folder, runEngine }))
+      .rejects.toMatchObject({ code: 'EXPORT_FAILED' })
   })
 
   it('fails if a re-encode changes the picture size, keeps the edit list, or misses its bitrate', async () => {
@@ -326,6 +336,10 @@ describe('platform files through the real engine', () => {
 /** Resolves once PowerShell holds `file` open with no sharing; it lets go 600 ms later. */
 async function holdFor600ms(file: string): Promise<void> {
   const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
-    `$f = [IO.File]::Open('${file}', 'Open', 'ReadWrite', 'None'); 'locked'; Start-Sleep -Milliseconds 600; $f.Close()`])
-  await new Promise<void>((ok) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('locked') && ok()))
+    `$f = [IO.File]::Open('${file.replaceAll("'", "''")}', 'Open', 'ReadWrite', 'None'); 'locked'; Start-Sleep -Milliseconds 600; $f.Close()`])
+  await new Promise<void>((ok, fail) => {
+    holder.stdout.on('data', (d: Buffer) => d.toString().includes('locked') && ok())
+    holder.on('error', fail)
+    holder.on('exit', (code) => fail(new Error(`PowerShell exited with ${code} before it held ${file}`)))
+  })
 }

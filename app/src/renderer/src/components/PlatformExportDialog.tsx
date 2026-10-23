@@ -64,6 +64,8 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
     const secondWarnings = checkPlatform(platform, second.caption, secondDuration).filter((issue) => issue.kind !== 'duration' || second.version !== version.n)
     return [...firstWarnings, ...secondWarnings.map((issue) => `Try 2: ${issue.message}`)]
   }
+  // The ids of the warning lines shown under these platforms, so a caption box is described by them.
+  const warned = (platforms: Platform[]) => platforms.filter((p) => warningsFor(p).length).map((p) => `platform-warnings-${p}`)
   // The Export button turns into progress, so focus moves to Stop once the job can be stopped.
   useEffect(() => {
     if (saving && jobId) stopButton.current?.focus()
@@ -142,7 +144,7 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
         </fieldset>
         {selected.length > 0 && <details className="muted-sm"><summary>Platform details</summary>{PLATFORM_RULES.filter((rule) => selected.includes(rule.id)).map((rule) => <p key={rule.id}>{rule.label}: {rule.note ?? 'The caption includes hashtags.'}</p>)}</details>}
         <label className="field-label" htmlFor="platform-caption">{second ? 'Try 1 post caption and hashtags' : 'Post caption and hashtags'}</label>
-        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby="platform-caption-counts" />
+        <textarea id="platform-caption" className="textarea" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={saving} aria-describedby={['platform-caption-counts', ...warned(selected)].join(' ')} />
         <p className="muted-sm platform-counts" id="platform-caption-counts">
           {PLATFORM_RULES.map((rule) => {
             if (!selected.includes(rule.id) || rule.captionLimit === null) return null
@@ -193,7 +195,7 @@ export function PlatformExportDialog({ slug, version, versions, fps, post, jobId
             </div>
           </div>
           <label className="field-label" htmlFor="platform-caption-2">Post caption and hashtags</label>
-          <textarea id="platform-caption-2" className="textarea" value={second.caption} onChange={(e) => editSecond({ caption: e.target.value })} aria-describedby="platform-caption-2-counts try-two-status" />
+          <textarea id="platform-caption-2" className="textarea" value={second.caption} onChange={(e) => editSecond({ caption: e.target.value })} aria-describedby={['platform-caption-2-counts', 'try-two-status', ...warned(secondPlatforms)].join(' ')} />
           <p className="muted-sm platform-counts" id="platform-caption-2-counts">
             {secondPlatforms.map((platform) => {
               const rule = platformRule(platform)
