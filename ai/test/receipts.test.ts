@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, executeTool, loadProject, newToolState, saveProject, StyleStore, ToolContext } from '../src';
+import { createAI, executeTool, loadProject, newToolState, Project, saveProject, StyleStore, ToolContext } from '../src';
 import { call, FakeHost, makeProject, ScriptedModel, tmpDir } from './helpers';
 
 it('fails if look_at_frames looks at the newer final render instead of its own preview, or at later layers', async () => {
@@ -53,10 +53,51 @@ it('fails if a change the AI made and then took back is reported or rendered as 
   ]);
   const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
   const r = await ai.applyNote(dir, 'try tighter pauses', () => {});
-  expect(r.summary).not.toMatch(/tightened/i);
+  expect(r.summary).toBe("That left your video the same as before, so I didn't make a new version.");
   expect(r.changed).toEqual([]);
+  expect(r).not.toHaveProperty('version');
   expect(host.calls.filter((c) => c.command === 'render' && !c.args.includes('--draft'))).toEqual([]);
-  expect((await loadProject(dir)).notes).toEqual([]);
+});
+
+it('fails if a note the AI took back is missing from the notes, or is filed under a version', async () => {
+  const { root, dir } = await makeProject();
+  const gap = (await loadProject(dir)).cut.gapCap;
+  const model = new ScriptedModel([
+    { toolCalls: [call('set_gap_cap', { seconds: 0.1 })] },
+    { toolCalls: [call('set_gap_cap', { seconds: gap })] },
+    { toolCalls: [call('finish', { summary_for_user: 'I tightened your pauses.' })] },
+  ]);
+  const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: model });
+  await ai.applyNote(dir, ' try tighter pauses ', () => {});
+  const notes = (await loadProject(dir)).notes;
+  expect(notes).toEqual([{ text: 'try tighter pauses', applied: [], at: expect.any(String) }]);
+});
+
+it('fails if a note the AI took back leaves its discarded edit in the only preview the app plays', async () => {
+  const { root, dir } = await makeProject();
+  const p = await loadProject(dir);
+  p.cut.keep = [{ from: 'w0', to: 'w56' }];
+  await saveProject(dir, p);
+  const host = new FakeHost(root);
+  const madeFrom = new Map<string, Project>();   // render id -> the project it was made from
+  const run = host.runEngine.bind(host);
+  host.runEngine = async (command, args, onProgress, signal) => {
+    const before = await loadProject(dir);
+    const r = await run(command, args, onProgress, signal);
+    if (command === 'render') madeFrom.set(r.renderId, before);
+    return r;
+  };
+  // the first edit's final render failed: the project has a preview and no vN
+  await host.runEngine('render', ['--project', dir, '--draft']);
+  const model = new ScriptedModel([
+    { toolCalls: [call('set_cut', { keep: [{ from: 'w16', to: 'w56' }] }), call('render_draft')] },
+    { toolCalls: [call('set_cut', { keep: [{ from: 'w0', to: 'w56' }] })] },
+    { toolCalls: [call('finish', { summary_for_user: 'I cut the intro.' })] },
+  ]);
+  const ai = createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model });
+  await ai.applyNote(dir, 'try cutting the intro', () => {});
+  const shown = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'preview', 'render_draft.json'), 'utf8')).renderId;
+  expect(madeFrom.get(shown)?.cut.keep).toEqual([{ from: 'w0', to: 'w56' }]);
 });
 
 it('fails if a note whose final render failed records the fallback preview as its version receipt', async () => {

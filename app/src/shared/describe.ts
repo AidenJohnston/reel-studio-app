@@ -1,6 +1,6 @@
 // "Version 3: bigger yellow subtitles, moved up." Says in plain words what an "Edit it myself"
 // change did, so the chat and the version buttons mean something. Keep free of Node and DOM imports.
-import type { DropResult, EditFact, ProjectJson, Word } from './api'
+import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
 import { isMirrored } from './mirror'
 
@@ -239,6 +239,16 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
     if (!named.size) return null
   }
   return { title, summary }
+}
+
+/** A version button's tooltip: what its receipt says it changed. A version rendered before receipts existed
+ * keeps the editor's chat reply that carried its number, as it did then; a newer one never falls back to it. */
+export function versionTooltip(v: Pick<VersionInfo, 'n' | 'facts' | 'beforeReceipts' | 'wording'>, chat: ChatMessage[], words: Word[]): string | undefined {
+  if (v.facts) return versionMessage(v.n, v.wording?.summary ?? describeFacts(v.facts, words))
+  if (!v.beforeReceipts) return undefined
+  let reply: string | undefined
+  for (const m of chat) if (m.from === 'editor' && m.version === v.n) reply = m.text
+  return reply
 }
 
 /** "Version 3: bigger yellow subtitles, moved up." */

@@ -133,6 +133,7 @@ export class FakeHost implements EngineHost {
           .then((s) => [...approxOutputTimes(JSON.parse(s), cut.keep, cut.gapCap)].map(([id, w]) => ({ id, ...w })), () => []);
         const layers = await fsp.readFile(path.join(dir, 'work', 'layers', 'layers.json'), 'utf8').then((s) => JSON.parse(s).items, () => []);
         this.rendered.set(renderId, { words, layers });
+        await fsp.writeFile(path.join(vd, draft ? 'render_draft.json' : 'render.json'), JSON.stringify({ renderId, file: draft ? 'draft.mp4' : 'export.mp4' }));
         const jobId = args.includes('--job-id') ? args[args.indexOf('--job-id') + 1] : null;
         return { renderId, version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, receipt: { jobId, renderId, version: v, facts: [] }, ...this.renderExtra };
       }

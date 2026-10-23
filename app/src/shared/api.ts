@@ -29,6 +29,8 @@ export interface VersionInfo {
   facts?: EditFact[]
   /** the AI connection's rewording of the title and summary, already checked against `facts` (`versions/vN/title.json`) */
   wording?: { title: string; summary: string }
+  /** a `vN` rendered before receipts existed (its render.json has no renderId): its tooltip is the chat reply */
+  beforeReceipts?: true
 }
 
 /** One thing an edit changed (engine project.net_changes): `kind` is the project.json path. */
@@ -151,7 +153,8 @@ export interface ProjectJson {
   zooms?: unknown[]
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
-  notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** `version` is absent for a note whose edit ended where it started (docs/schema-changes.md) */
+  notes?: { version?: number; text: string; applied: string[]; at: string }[]
   [k: string]: unknown
 }
 

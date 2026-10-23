@@ -257,7 +257,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
-async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
+async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version?: number; quiet: true }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
