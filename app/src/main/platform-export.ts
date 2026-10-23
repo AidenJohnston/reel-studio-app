@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { constants, promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
 import { outputGroups, platformRule, type FinishedVideo, type Platform, type PlatformExportRequest } from '../shared/platforms'
@@ -8,6 +9,21 @@ import { uniqueStem } from './library'
 const STAGE_PREFIX = '.platform-export-'
 // A clone on APFS and other copy-on-write disks; a plain copy elsewhere. Never replaces a file.
 const COMMIT = constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE
+
+/** A new hidden folder in `folder` where files are written before they are placed. */
+export async function makeStagingFolder(folder: string): Promise<string> {
+  const stage = await fs.mkdtemp(join(folder, STAGE_PREFIX))
+  // Windows does not hide dot-folders, so Explorer would show this one in Finished videos while the export runs.
+  // Hiding it is cosmetic: if attrib fails, the export still works, so the failure is ignored.
+  if (process.platform === 'win32') {
+    await new Promise<void>((done) => {
+      const attrib = spawn('attrib', ['+h', stage], { stdio: 'ignore', windowsHide: true })
+      attrib.on('error', () => done())
+      attrib.on('exit', () => done())
+    })
+  }
+  return stage
+}
 
 /** What the export needs to know about the finished render. Refuses only a render it cannot read. */
 export async function readFinishedVideo(source: string, runEngine: RunEngine, signal?: AbortSignal): Promise<FinishedVideo> {
@@ -38,7 +54,7 @@ export async function exportPlatforms({ source, chosenCover, folder, name, reque
   // Read under the export's signal: on a slow drive this takes a while, and Stop must end it too.
   const video = await readFinishedVideo(source, runEngine, signal)
   await fs.mkdir(folder, { recursive: true })
-  const stage = await fs.mkdtemp(join(folder, STAGE_PREFIX))
+  const stage = await makeStagingFolder(folder)
   const placed: string[] = []
   try {
     const cover = join(stage, 'cover.jpg')

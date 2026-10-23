@@ -3,7 +3,7 @@ import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderIn
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
-import { reel, userMessage } from '../api'
+import { errorCode, reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
@@ -128,7 +128,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       setExporting(await reel.projects.exportVersion(slug, version.n))
     } catch (e) {
       setExporting(null)
-      notify(userMessage(e), 'error')
+      // The creator pressed Stop while the full-quality video was being made: nothing went wrong.
+      if (errorCode(e) !== 'CANCELLED') notify(userMessage(e), 'error')
     }
   }, [version, job, exporting, slug, notify])
 

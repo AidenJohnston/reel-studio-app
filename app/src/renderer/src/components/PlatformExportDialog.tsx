@@ -125,7 +125,7 @@ export function PlatformExportDialog({ slug, version, post, jobId, status, onClo
             <span className="field-label">Cover</span>
             <p className="muted-sm" data-testid="platform-cover-choice">
               {coverSeconds !== null ? `The frame at ${clock(coverSeconds)}.` : version.cover ? "Your reel's cover." : 'A frame from the first few seconds.'}
-              {' '}Scrub the video to use a different frame.
+              {' '}Move the video's slider to pick a different frame.
             </p>
             {coverSeconds !== null && version.cover && <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={useProjectCover} disabled={saving}>Use my cover</button>}
           </div>
