@@ -95,7 +95,8 @@ export class StyleStore {
     return typeof data?.damaged === 'string' && fs.existsSync(path.join(path.dirname(this.file), path.basename(data.damaged)));
   }
 
-  /** Adds a rule unless an equivalent one already exists. */
+  /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
+   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A). */
   async add(text: string): Promise<{ added: boolean; rule: StyleRule }> {
     return this.serial(() => this.addNow(text));
   }
@@ -110,7 +111,13 @@ export class StyleStore {
     const clean = cleanRuleText(text);
     const data = await this.read();
     const dup = data.rules.find((r) => normalize(r.text) === normalize(clean));
-    if (dup) return { added: false, rule: dup };
+    if (dup) {
+      if (dup.paused) {
+        delete dup.paused;
+        await this.write(data);
+      }
+      return { added: false, rule: dup };
+    }
     const rule: StyleRule = { id: randomUUID(), text: clean, createdAt: new Date().toISOString() };
     await this.write({ ...data, rules: [...data.rules, rule] });
     return { added: true, rule };
@@ -121,7 +128,7 @@ export class StyleStore {
     return this.serial(async () => {
       const data = await this.read();
       const rule = data.rules.find((r) => r.id === id);
-      if (!rule) throw new Error('that rule is not in My style any more');
+      if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' };
       if (patch.text !== undefined) rule.text = cleanRuleText(patch.text);
       if (patch.paused === true) rule.paused = true;
       if (patch.paused === false) delete rule.paused;

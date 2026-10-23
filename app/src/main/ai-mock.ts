@@ -50,6 +50,14 @@ function cleanRule(text: string): string {
   return clean[0].toUpperCase() + clean.slice(1)
 }
 
+/** Rules with these equal are the same rule (normalize in ai/src/style.ts). */
+const sameRule = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} ]+/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
 type StyleData = { rules: StyleRule[]; damaged?: string; [field: string]: unknown }
 
@@ -83,6 +91,21 @@ export const createMockAI: CreateAI = ({ host }) => {
     await fs.mkdir(host.reelStudioRoot(), { recursive: true })
     await writeJson(styleFile(), { ...s, rules })
   }
+  /** As the real package's StyleStore.add: the same words again turn a paused rule back on instead of adding a copy. */
+  const addRule = (text: string): Promise<{ added: boolean; rule: StyleRule }> =>
+    withStyle(async (s) => {
+      const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+      if (dup) {
+        if (dup.paused) {
+          delete dup.paused
+          await saveRules(s, s.rules)
+        }
+        return { added: false, rule: dup }
+      }
+      const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
+      await saveRules(s, [...s.rules, rule])
+      return { added: true, rule }
+    })
 
   async function readProject(dir: string): Promise<any> {
     return JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8'))
@@ -210,9 +233,9 @@ export const createMockAI: CreateAI = ({ host }) => {
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rule = { id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() }
-        await withStyle((s) => saveRules(s, [...s.rules, rule]))
-        added.push(note.trim())
+        // Only a new rule: the app takes every rule listed here out of My style again and asks about it.
+        const r = await addRule(note.trim())
+        if (r.added) added.push(r.rule.text)
       }
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
       p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
@@ -239,9 +262,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
     async addStyleRule(text) {
-      const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
-      await withStyle((s) => saveRules(s, [...s.rules, rule]))
-      return rule
+      return (await addRule(text)).rule
     },
     async updateStyleRule(id, patch) {
       return withStyle(async (s) => {
