@@ -54,6 +54,27 @@ check() {
   printf '%s\n' "$out" | sed 's/^/    /'
 }
 
+stop_started_process_tree() {
+  local root="$1" p pgid
+  local pids="$(
+    descendants() {
+      local parent="$1" child
+      for child in $(pgrep -P "$parent" || true); do descendants "$child"; done
+      echo "$parent"
+    }
+    descendants "$root"
+  )"
+  local groups=""
+  for p in $pids; do
+    pgid="$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ' || true)"
+    if [ "$pgid" = "$p" ]; then groups="$groups $p"; fi
+  done
+  kill -TERM "$root" 2>/dev/null || true; sleep 5
+  for p in $groups; do kill -KILL -- "-$p" 2>/dev/null || true; done
+  for p in $pids; do kill -KILL "$p" 2>/dev/null || true; done
+  wait "$root" 2>/dev/null || true
+}
+
 hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
 APPNAME="$(cd "$MNT" && ls -d *.app | head -1)"
 rm -rf "$DEST"; mkdir -p "$DEST"
@@ -83,10 +104,7 @@ while [ $(( $(date +%s) - S )) -lt "$TIMEOUT" ]; do
 done
 if [ -z "$CODE" ]; then
   echo "self-test            FAIL: still running after ${TIMEOUT}s, stopping it"
-  kill -TERM "$PID" 2>/dev/null || true; sleep 5; kill -KILL "$PID" 2>/dev/null || true
-  # The engine leads its own process group and its ffmpeg and ffprobe children join it, but their command lines do
-  # not name python, so kill each engine's whole group.
-  for p in $(pgrep -f "$APP/Contents/Resources/python" || true); do kill -KILL -- "-$p" 2>/dev/null || true; done
+  stop_started_process_tree "$PID"
   tail -n 20 "$WORK/app.log" | sed 's/^/    /'
   FAILED+=("self-test timeout")
 else
