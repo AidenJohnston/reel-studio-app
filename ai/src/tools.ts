@@ -1075,12 +1075,12 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
-    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Save style "snap" (a quick eased push-in with motion blur) for the one or two biggest punchlines; the rest stay hard cuts. Empty list = no zooms.',
+    parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }), style: S.opt(S.enum(['snap'], 'null = hard cut in and out')) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       args.zooms.forEach((z: any, i: number) => checkAnchor(t, z.anchor, `zooms[${i}]`));
-      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale })); });
+      await mutate(ctx, 'zooms', (p) => { p.zooms = args.zooms.filter((z: any) => z.scale > 1.001).map((z: any) => ({ anchor: z.anchor, scale: z.scale, ...(z.style ? { style: z.style } : {}) })); });
       return { content: { ok: true, count: ctx.project!.zooms.length }, summary: args.zooms.length ? 'Added a few zoom-ins on the big moments' : 'Took out the zooms' };
     },
   },

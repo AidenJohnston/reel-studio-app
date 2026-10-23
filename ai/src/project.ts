@@ -45,7 +45,7 @@ export interface Broll {
   id: string; anchor: WordAnchor; leadIn?: number; treatment: Treatment | string;
   asset: string | null; assets?: string[]; params: BrollParams; [k: string]: unknown;
 }
-export interface Zoom { anchor: WordAnchor; scale: number; [k: string]: unknown }
+export interface Zoom { anchor: WordAnchor; scale: number; style?: 'snap'; [k: string]: unknown }
 export interface Cover { atSourceTime: number; source: string; text: string | null; [k: string]: unknown }
 export interface Post { caption: string; hashtags: string[]; keywords: string[]; [k: string]: unknown }
 export interface NoteEntry {
