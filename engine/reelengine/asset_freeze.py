@@ -15,8 +15,12 @@ from .safepath import safe_resolve
 MB = 1024 * 1024
 STILL_KINDS = ('image', 'logo', 'icon', 'website_screenshot')
 # Video matches the app's attachment limit (app/src/shared/attachments.ts CLIP_MAX_BYTES), so a clip
-# the app accepts can always be frozen. Pictures and songs keep the resolver's 40 MB.
-LIMITS = {**{k: 40 * MB for k in STILL_KINDS}, 'video': 200 * MB, 'music': 40 * MB}
+# the app accepts can always be frozen. Songs get the same limit: a Library song is frozen when it is
+# chosen, main had no size limit for it, and a five-minute WAV is about 50 MB. The engine streams and
+# clones, so the size costs no memory. Pictures keep the resolver's 40 MB.
+LIMITS = {**{k: 40 * MB for k in STILL_KINDS}, 'video': 200 * MB, 'music': 200 * MB}
+# Refuse playlist demuxers, including a playlist disguised with a media extension.
+INPUT_OPTIONS = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi,wav,mp3,flac,ogg,aac']
 IMAGE_FORMATS = {'PNG': ('png', 'image/png'), 'JPEG': ('jpg', 'image/jpeg'), 'GIF': ('gif', 'image/gif'), 'WEBP': ('webp', 'image/webp')}
 VIDEO_MIME = {'mp4': 'video/mp4', 'mov': 'video/quicktime', 'm4v': 'video/mp4', 'webm': 'video/webm',
               'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo'}
@@ -58,9 +62,23 @@ def kind_of(path: Path, kind: str) -> tuple[str, str]:
     table = VIDEO_MIME if kind == 'video' else AUDIO_MIME
     with open(path, 'rb') as f:
         head = f.read(16)
-    if ext not in table or not _container(head):
+    if ext not in table or not _container(head) or not _has_stream(path, 'video' if kind == 'video' else 'audio'):
         raise EngineError('BAD_MEDIA', f'{path.name} is not {kind}', 'That file is not the requested media kind.')
     return ext, table[ext]
+
+
+def _has_stream(path: Path, codec_type: str) -> bool:
+    """ffprobe finds a real stream of this type (a cover picture in a song is not a video)."""
+    import json
+    import subprocess
+    from .compose_util import ffprobe_bin
+    try:
+        out = subprocess.run([ffprobe_bin(), '-v', 'error', *INPUT_OPTIONS, '-show_streams', '-of', 'json', str(path)],
+                             capture_output=True, text=True, timeout=60, check=True, stdin=subprocess.DEVNULL).stdout
+        streams = json.loads(out).get('streams', [])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return any(s.get('codec_type') == codec_type and not s.get('disposition', {}).get('attached_pic') for s in streams)
 
 
 def _clone_or_copy(src: Path, dst: Path) -> None:
@@ -101,6 +119,10 @@ def freeze(project: Path, root: Path | None, asset: str, kind: str, expect: str 
     if not src.is_file():
         raise EngineError('NOT_FOUND', f'{asset} is not a file', 'That file is missing. Choose it again.')
     ext, mime = kind_of(src, kind)
+    # committedPath must be work/assets/frozen/<kind>/...: a symlinked folder would resolve somewhere else
+    for folder in (project / 'work' / 'assets' / 'frozen', project / 'work' / 'assets' / 'frozen' / kind):
+        if folder.is_symlink():
+            raise EngineError('UNSAFE_PATH', f'{folder} is a symlink', 'The project folder looks changed. Open it again.')
     frozen = safe_resolve(project, 'work/assets/frozen', write=True, what='frozen asset')
     frozen.mkdir(parents=True, exist_ok=True)
     tmp = frozen / f'.{uuid.uuid4().hex}.tmp'

@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { executeTool, newToolState, loadProject, saveProject, StyleStore, ToolContext } from '../src';
-import { FakeHost, makeProject } from './helpers';
+import { FakeHost, makeProject, tinyMp3 } from './helpers';
 
 async function ctxFor() {
   const { root, dir } = await makeProject();
@@ -22,10 +22,10 @@ describe('choose_music honesty', () => {
     expect((await loadProject(dir)).music.track).toBeNull();
   });
 
-  it('a level change without a track keeps the current song', async () => {
+  it('a level change without a track keeps the current song, frozen once it is placed again', async () => {
     const { ctx, dir, root } = await ctxFor();
     await fsp.mkdir(path.join(root, 'Library', 'Music'), { recursive: true });
-    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm.mp3'), Buffer.from([0]));
+    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm.mp3'), tinyMp3());
     const p = await loadProject(dir);
     p.music.track = 'Library/Music/calm.mp3';
     p.music.enabled = true;
@@ -33,7 +33,9 @@ describe('choose_music honesty', () => {
     await saveProject(dir, p);
     await executeTool(ctx, 'choose_music', { track: null, startAt: null, level: 'quiet' });
     const after = (await loadProject(dir)).music;
-    expect(after.track).toBe('Library/Music/calm.mp3');
+    // a project from before frozen songs: the level change freezes its Library song and records it
+    expect(after.track).toMatch(/^work\/assets\/frozen\/music\/[0-9a-f]{64}\.mp3$/);
+    expect(JSON.parse(await fsp.readFile(path.join(dir, 'work/assets/manifest.jsonl'), 'utf8'))).toMatchObject({ provenance: { intent: 'Library/Music/calm.mp3' } });
     expect(after.level).toBe('quiet');
   });
 });

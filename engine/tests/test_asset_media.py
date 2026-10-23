@@ -159,3 +159,30 @@ def test_fails_if_freeze_stores_the_same_bytes_twice_keeps_changed_bytes_or_read
     assert error.value.code == 'UNSAFE_PATH'
     frozen = project / 'work' / 'assets' / 'frozen'
     assert sorted(p.relative_to(frozen).as_posix() for p in frozen.rglob('*')) == ['image', f"image/{first['sha256']}.png"]
+
+
+def test_fails_if_freeze_takes_a_file_of_another_kind_a_long_song_is_refused_or_a_symlinked_folder_is_followed(tmp_path):
+    project, root = tmp_path / 'project', tmp_path / 'root'
+    folder = root / 'Library' / 'B-roll'
+    folder.mkdir(parents=True)
+    (root / 'Library' / 'Music').mkdir(parents=True)
+    (project / 'work' / 'assets').mkdir(parents=True)
+    Image.new('RGB', (8, 8), 'red').save(folder / 'still.webp')
+    (folder / 'still.webp').rename(folder / 'still.mp4')       # a RIFF picture named like a clip
+    ffmpeg('-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', folder / 'tone.wav')
+    for ref, kind in [('Library/B-roll/still.mp4', 'video'), ('Library/B-roll/tone.wav', 'video'), ('Library/B-roll/still.mp4', 'music')]:
+        with pytest.raises(EngineError) as error:
+            freeze(project, root, ref, kind)
+        assert error.value.code == 'BAD_MEDIA', ref
+    # about 42 MB: a four-minute stereo WAV, which a Library song often is
+    ffmpeg('-f', 'lavfi', '-i', 'sine=frequency=440:duration=240', '-ac', '2', root / 'Library' / 'Music' / 'long.wav')
+    song = freeze(project, root, 'Library/Music/long.wav', 'music')
+    assert song['committedPath'].startswith('work/assets/frozen/music/')
+    elsewhere = project / 'work' / 'elsewhere'
+    elsewhere.mkdir()
+    (project / 'work' / 'assets' / 'frozen' / 'video').symlink_to(elsewhere, target_is_directory=True)
+    ffmpeg('-f', 'lavfi', '-i', 'color=red:s=96x54:r=30', '-frames:v', '1', folder / 'one.mp4')
+    with pytest.raises(EngineError) as error:
+        freeze(project, root, 'Library/B-roll/one.mp4', 'video')
+    assert error.value.code == 'UNSAFE_PATH'
+    assert list(elsewhere.iterdir()) == []

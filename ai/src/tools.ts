@@ -1071,7 +1071,9 @@ const tools: ToolDef[] = [
         const current = (await loadProject(ctx.projectDir)).music.track;
         const legacy = current && resolveAsset(ctx, current);
         const same = args.track === current || (legacy && !String(args.track).startsWith('asset_') && resolveAsset(ctx, args.track)?.ref === legacy.ref);
-        const chosen = same && legacy && !legacy.ref.startsWith('work/assets/frozen/')
+        // a song an older project placed outside the Library and the frozen folder stays as it is; a
+        // Library song is frozen like any other placement
+        const chosen = same && legacy && !legacy.ref.startsWith('work/assets/frozen/') && !legacy.ref.startsWith('Library/')
           ? legacy.ref : await placementAsset(ctx, args.track, ['music']);
         const r = resolveAsset(ctx, chosen);
         if (!r) throw new ToolInputError(`no such song "${args.track}"; call list_library with kind music`);

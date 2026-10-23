@@ -10,11 +10,9 @@ from pathlib import Path
 
 from .compose_util import ffmpeg_bin, ffprobe_bin, run
 from .proto import EngineError
-from .asset_freeze import kind_of, sha256_of
+from .asset_freeze import INPUT_OPTIONS, kind_of, sha256_of
 from .safepath import safe_resolve
 
-# Refuse playlist demuxers, including a playlist disguised with a media extension.
-INPUT_OPTIONS = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi,wav,mp3,flac,ogg,aac']
 
 
 def inspect(project: Path, root: Path | None, asset: str, video: bool, preview_ref: str | None = None) -> dict:
