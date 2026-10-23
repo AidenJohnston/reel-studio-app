@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
+  nextBrollId, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -107,9 +107,13 @@ const quote = (t: Transcript, a: WordAnchor, max = 6) => {
   return words.length > max ? `${words.slice(0, max).join(' ')}...` : words.join(' ');
 };
 
+// Hand-mirrored from engine/reelengine/schema/project.schema.json; schema-parity.test checks drift.
+const WORD_ID = { pattern: '^w[0-9]+$' };
+const BROLL_ID = { pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' };
+
 const ANCHOR = S.obj({
-  from: S.str('first word id, e.g. "w44"'),
-  to: S.str('last word id (inclusive)'),
+  from: S.str('first word id, e.g. "w44"', WORD_ID),
+  to: S.str('last word id (inclusive)', WORD_ID),
 });
 
 function libraryDir(ctx: ToolContext, kind: LibraryKind): string {
@@ -162,6 +166,17 @@ export function resolveAsset(ctx: ToolContext, ref: string): { ref: string; abs:
     if (fs.existsSync(r.abs)) return r;
   }
   return null;
+}
+
+function requireAsset(ctx: ToolContext, ref: string): { ref: string; abs: string } {
+  const resolved = resolveAsset(ctx, ref);
+  if (!resolved) throw new ToolInputError(`asset not found: ${ref}`);
+  return resolved;
+}
+
+function checkBrollAssets(ctx: ToolContext, b: Broll): void {
+  if (b.asset) requireAsset(ctx, b.asset);
+  for (const asset of b.assets ?? []) requireAsset(ctx, asset);
 }
 
 /** Transcript words and web text are DATA. They are fenced, and anything that looks like a fence
@@ -767,10 +782,10 @@ const tools: ToolDef[] = [
     parameters: S.obj({
       enabled: S.opt(S.bool()),
       preset: S.opt(S.str('style preset name, e.g. "bold-lower"')),
-      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80')),
-      maxWords: S.opt(S.int('words per caption chunk, 1-4')),
-      case: S.opt(S.enum(['upper', 'sentence', 'lower', 'as-is'])),
-      color: S.opt(S.str('hex color like #FFFFFF')),
+      size: S.opt(S.num('font size in px at 1080 wide. Default 105 (proven readable on a phone); 84 = small, 126 = big. Never below 80', { minimum: 10, maximum: 300 })),
+      maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
+      case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
+      color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
     }),
     async run(ctx, args) {
@@ -788,9 +803,12 @@ const tools: ToolDef[] = [
     description: 'Fix a misheard word or phrase in the captions (e.g. from "cloud" to "Claude"). from = exactly as transcribed. A single word is replaced EVERYWHERE it appears, so when the same word is right elsewhere ("script"), give the whole misheard phrase instead ("type script" -> "TypeScript"). One correction per mistake.',
     parameters: S.obj({ from: S.str('the wrong text as transcribed'), to: S.str('the correct text') }),
     async run(ctx, args) {
-      await mutate(ctx, 'captions', (p) => {
+      await mutate(ctx, 'captions', (p, t) => {
         const c = p.captions.corrections.filter((x) => x.from.toLowerCase() !== String(args.from).toLowerCase());
-        c.push({ from: args.from, to: args.to });
+        const proposed = { from: args.from, to: args.to };
+        c.push(proposed);
+        const problem = captionCorrectionProblem(keptWords(t, p.cut.keep), c, proposed);
+        if (problem) return problem;
         p.captions.corrections = c;
       });
       return { content: { ok: true }, summary: `Fixed the caption "${args.to}"` };
@@ -857,6 +875,9 @@ const tools: ToolDef[] = [
       const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
+      if (startAt !== undefined && validate(S.num(undefined, { minimum: 0 }), startAt).length) {
+        throw new ToolInputError('music startAt must be a finite number >= 0');
+      }
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
@@ -877,7 +898,7 @@ const tools: ToolDef[] = [
     name: 'set_music_automation',
     description: 'Replace music volume changes, each over a word range: gainDb relative to the level (e.g. -6 quieter, +3 swell). Empty list = none.',
     parameters: S.obj({
-      automation: S.arr(S.obj({ fromWord: S.str(), toWord: S.str(), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
+      automation: S.arr(S.obj({ fromWord: S.str(undefined, WORD_ID), toWord: S.str(undefined, WORD_ID), gainDb: S.num('-24 to +6', { minimum: -40, maximum: 12 }) })),
     }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -918,7 +939,11 @@ const tools: ToolDef[] = [
         const results = await searchImages(ctx, args.search).catch((e) => { throw new ToolInputError(`image search is not available (${e?.userMessage ?? e?.message}); use text-pop or make_animation`); });
         let lastErr = '';
         for (const r of results.slice(0, 3)) {
-          try { asset = r.path ? r.path : await fetchImage(ctx, r.url, args.search); break; } catch (e: any) { lastErr = e.message; }
+          try {
+            const candidate = r.path ? r.path : await fetchImage(ctx, r.url, args.search);
+            asset = requireAsset(ctx, candidate).ref;
+            break;
+          } catch (e: any) { lastErr = e.message; }
         }
         if (!asset) throw new ToolInputError(`no usable image found for "${args.search}"${lastErr ? ` (${lastErr})` : ''}; try another search, text-pop, or make_animation`);
       } else if (args.treatment !== 'text-pop') {
@@ -929,6 +954,7 @@ const tools: ToolDef[] = [
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);
         const b: Broll = { id, anchor: { from: args.anchor.from, to: args.anchor.to }, leadIn: 0.13, treatment: args.treatment, asset, params: stripNulls(args.params ?? {}) };
+        checkBrollAssets(ctx, b);
         p.broll.push(b);
       });
       const says = quote(t, args.anchor);
@@ -940,7 +966,7 @@ const tools: ToolDef[] = [
     name: 'update_broll',
     description: 'Change an existing b-roll by id. Pass null for anything you are not changing.',
     parameters: S.obj({
-      id: S.str(),
+      id: S.str(undefined, BROLL_ID),
       anchor: S.opt(ANCHOR),
       treatment: S.opt(S.enum(TREATMENTS)),
       asset: S.opt(S.str()),
@@ -968,13 +994,15 @@ const tools: ToolDef[] = [
         const wantFull = args.treatment === 'full-frame' ? true : args.treatment === 'animation' ? false : anim.layout === 'full';
         const anchor = args.anchor ? { from: args.anchor.from, to: args.anchor.to } : existing!.anchor;
         if (wantFull === (anim.layout === 'full') && !args.anchor) {
+          checkBrollAssets(ctx, existing!);
           return { content: { ok: true, unchanged: true, layout: anim.layout, placement: ANIMATION_PLACEMENT } };
         }
         const made = await makeAnimation(ctx, anim.template, anim.params, anchor, wantFull ? { fullScreen: true } : { topOnly: true });
         let says = '';
         await mutate(ctx, 'broll', (pp) => {
           const b = pp.broll.find((x) => x.id === args.id)!;
-          b.anchor = anchor; b.asset = made.asset; b.treatment = 'animation';
+          b.anchor = anchor; b.asset = requireAsset(ctx, made.asset).ref; b.treatment = 'animation';
+          checkBrollAssets(ctx, b);
           says = quote(t, b.anchor);
         });
         const summary = wantFull !== (anim.layout === 'full')
@@ -990,6 +1018,7 @@ const tools: ToolDef[] = [
         if (args.treatment) b.treatment = args.treatment;
         if (asset) b.asset = asset;
         if (args.params) b.params = { ...b.params, ...stripNulls(args.params) };
+        checkBrollAssets(ctx, b);
         says = quote(t, b.anchor);
       });
       return { content: { ok: true }, summary: `Adjusted the visual on "${says}"` };
@@ -998,7 +1027,7 @@ const tools: ToolDef[] = [
   {
     name: 'remove_broll',
     description: 'Remove a b-roll by id.',
-    parameters: S.obj({ id: S.str() }),
+    parameters: S.obj({ id: S.str(undefined, BROLL_ID) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
       let says = '';
@@ -1357,8 +1386,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   ctx.state.toolCalls++;
   const tool = toolByName(name);
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
-  const args = fillNulls(tool.parameters as JSONSchema, rawArgs ?? {});
-  const problems = validate(tool.parameters as JSONSchema, args);
+  const args = fillNulls(tool.parameters, rawArgs ?? {});
+  const problems = validate(tool.parameters, args);
   if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
   try {
     const out = await tool.run(ctx, args);
