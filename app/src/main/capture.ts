@@ -6,11 +6,12 @@
 // preload, an in-memory session of its own (never the user's cookies), no permissions, no
 // downloads, no pop-ups, no navigation off http(s), and every request (page, frames, images,
 // scripts, redirects) must go to a PUBLIC address: no localhost, no home network.
-import { BrowserWindow, session, type Session } from 'electron'
+import { app, BrowserWindow, session, type Session } from 'electron'
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { createCaptureProxy } from './capture-proxy'
 import {
-  assertCapturable, CAPTURE_UA, captureError, CONSENT_SELECTORS, HIDE_CONSENT_OVERLAYS_JS, hostIsPublic, isBlank, LAYOUTS, type Layout, refusalPage, siteOf
+  assertCapturable, CAPTURE_UA, captureError, CONSENT_SELECTORS, HIDE_CONSENT_OVERLAYS_JS, isBlank, LAYOUTS, type Layout, refusalPage, siteOf
 } from './capture-guard'
 
 export interface CaptureResult {
@@ -27,9 +28,8 @@ const LOAD_TIMEOUT_MS = 25_000
 const SETTLE_MS = 2_500
 
 let ses: Session | null = null
-const hostOk = new Map<string, Promise<boolean>>()
 
-function captureSession(): Session {
+async function captureSession(): Promise<Session> {
   if (ses) return ses
   const s = session.fromPartition(PARTITION, { cache: false })
   s.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
@@ -45,14 +45,12 @@ function captureSession(): Session {
     }
     if (u.protocol === 'data:' || u.protocol === 'blob:') return cb({})
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return cb({ cancel: true })
-    let ok = hostOk.get(u.hostname)
-    if (!ok) {
-      ok = hostIsPublic(u.hostname)
-      hostOk.set(u.hostname, ok)
-      if (hostOk.size > 2000) hostOk.clear()
-    }
-    ok.then((pub) => cb({ cancel: !pub }), () => cb({ cancel: true }))
+    cb({})
   })
+  const proxy = await createCaptureProxy()
+  // Chromium otherwise bypasses the proxy for loopback redirects.
+  await s.setProxy({ proxyRules: `127.0.0.1:${proxy.port}`, proxyBypassRules: '<-loopback>' })
+  app.once('will-quit', () => void proxy.close())
   ses = s
   return s
 }
@@ -64,7 +62,7 @@ function sleep(ms: number): Promise<void> {
 async function captureOnce(raw: string, outPath: string, layout: Layout): Promise<CaptureResult> {
   const target = await assertCapturable(raw)
   const { width, height, zoom } = LAYOUTS[layout]
-  const s = captureSession()
+  const s = await captureSession()
   const win = new BrowserWindow({
     show: false, width, height, useContentSize: true, frame: false, resizable: false,
     enableLargerThanScreen: true, paintWhenInitiallyHidden: true, backgroundColor: '#ffffff',
