@@ -59,7 +59,7 @@ describe('agent loop with a scripted model', () => {
     const renders = host.calls.filter((c) => c.command === 'render');
     expect(renders.map((c) => c.args.includes('--draft'))).toEqual([true, true, false]);
     expect(renders[0].args).toEqual(expect.arrayContaining(['--first-look', '--no-cover', '--music', 'Library/Music/gentle.mp3']));
-    expect(events.filter((e) => e.type === 'render')).toEqual([
+    expect(events.filter((e) => e.type === 'render').map(({ file: _, ...e }: any) => e)).toEqual([
       { type: 'render', version: 1, draft: true, firstLook: true }, { type: 'render', version: 1, draft: true }, { type: 'render', version: 1, draft: false }]);
     // the project and transcript were handed to the model up front, not fetched in a turn
     expect((model.requests[0].messages[0] as any).content[0].text).toMatch(/Already loaded for you[\s\S]*result of get_project[\s\S]*result of get_transcript/);
