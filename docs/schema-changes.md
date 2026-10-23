@@ -35,3 +35,15 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
   `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
   the field, so the project matches one that never had it.
+
+## 2026-10-22 (sound effects)
+
+- `sfx` (array, absent = none): built-in sound effects, `{at, sound, gainDb?}`. `sound` is an id from
+  `engine/reelengine/sfx/pack.json`. `at` names one moment: `{word}` (that word starts, if the cut keeps it),
+  `{broll}` (that b-roll appears, its lead-in included) or `{cut}` (the cut into a kept range after the first whose
+  `from` is that word). The engine lines the sound's measured hit (`onsetMs`) up with that moment on the frame grid
+  and plays one at a time, at most one every 2 seconds; an effect that breaks that, or whose build-up would start
+  before the video, is left out with a render warning. Its level comes from the measured voice: 10 dB under the
+  voice's speech loudness, 6 dB more while the voice is talking, `gainDb` (-24 to +12) on top but never above 4 dB
+  under the voice, and its sample peak stays 3 dB under the voice's loudest peak. Word and cut anchors are
+  remapped after a re-transcription like the others. Written by the AI's `set_sfx`; an empty list removes the field.

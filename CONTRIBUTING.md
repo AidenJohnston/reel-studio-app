@@ -30,6 +30,7 @@ python scripts/leak-check/check.py   # also runs on every pull request
 ```
 
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
+The only media exemption is `engine/reelengine/sfx/*.opus`, the bundled CC0 sounds listed in `engine/THIRD_PARTY.md`.
 Its list of private terms is stored only as fingerprints, so a finding names the line, not the word. If it
 flags something that is not private, say so in the pull request.
 

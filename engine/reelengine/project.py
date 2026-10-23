@@ -236,6 +236,11 @@ def _anchor_slots(proj: dict):
     for h in ((proj.get("captions") or {}).get("hidden") or []):
         yield h, "from", "from"
         yield h, "to", "to"
+    for s in proj.get("sfx") or []:
+        at = s.get("at") or {}
+        for key in ("word", "cut"):
+            if at.get(key):
+                yield at, key, "from"
 
 
 def remap_anchors(proj: dict, old_words: list, new_words: list) -> int:

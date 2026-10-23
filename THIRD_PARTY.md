@@ -204,6 +204,12 @@ font's own `name` table.
 
 OFL fonts may be bundled with software; they may not be sold on their own and keep their names.
 
+### Sound effects (bundled, CC0 1.0)
+
+37 short sounds ship in `resources/engine/reelengine/sfx/` (`engine/reelengine/sfx/`). Each is dedicated to the
+public domain under CC0 1.0, from Freesound and Kenney, so none needs a credit. `engine/THIRD_PARTY.md` lists every
+file with its source, author and page.
+
 ## Not bundled, not used
 
 No PyTorch, no CUDA runtime, no telemetry or analytics libraries.

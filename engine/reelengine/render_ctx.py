@@ -79,6 +79,7 @@ class RenderCtx:
     root: Path                                   # Reel Studio root (resolves "Library/...")
     out_timeline: list[Segment]                  # cut segments in output order
     word_out_time: Callable[[str], float]        # word id -> output seconds (word start)
+    is_kept: Callable[[str], bool]               # whether the timeline keeps a word
     duration: float                              # output duration, seconds
     fmt: dict                                    # {"width", "height", "fps"} of the output
     draft: bool
@@ -92,6 +93,7 @@ class RenderCtx:
     face_box: Optional[dict] = None                         # output-space face box {x,y,w,h} or None
     window: Optional[tuple] = None                          # (a, b) output seconds when --window used
     out_dir: Optional[Path] = None                          # versions/vN
+    sfx_mixed: Optional[list] = None                        # sound effects music.build_audio put in the mix
 
     def resolve_path(self, p: str) -> Path:
         """Resolve a project.json asset path: 'Library/...' against root, else project-relative.
