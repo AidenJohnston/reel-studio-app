@@ -26,15 +26,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+alive() {
+  local stat
+  stat="$(ps -o stat= -p "$1" 2>/dev/null)" && [[ $stat != Z* ]]
+}
+
 FAKE_APP_DIR="$TMP/[abc]"
-# This dummy process is unrelated, but its command line matches the old pgrep -f pattern.
-bash -c 'while :; do sleep 1; done' bash "$TMP/a/Contents/Resources/python" &
+# This dummy process is unrelated, but it leads its own process group like the engine, and its command line matches the
+# old pgrep -f pattern.
+perl -e 'setpgrp(0, 0); exec @ARGV' bash -c 'while :; do sleep 1; done' bash "$TMP/a/Contents/Resources/python" &
 UNRELATED=$!
 disown "$UNRELATED" 2>/dev/null || true
 pattern="$FAKE_APP_DIR/Contents/Resources/python"
 for _ in 1 2 3 4 5; do
   pgrep -f "$pattern" | grep -Fx "$UNRELATED" >/dev/null && break
-  sleep 0.1
+  command sleep 0.1
 done
 pgrep -f "$pattern" | grep -Fx "$UNRELATED" >/dev/null
 
@@ -42,11 +48,11 @@ pgrep -f "$pattern" | grep -Fx "$UNRELATED" >/dev/null
 command sleep 30 &
 started=$!
 stop_started_process_tree "$started"
-if kill -0 "$started" 2>/dev/null; then
+if alive "$started"; then
   echo "started process survived cleanup" >&2
   exit 1
 fi
-if ! kill -0 "$UNRELATED" 2>/dev/null; then
+if ! alive "$UNRELATED"; then
   echo "unrelated matching process was killed" >&2
   exit 1
 fi
