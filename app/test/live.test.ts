@@ -138,22 +138,4 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
   })
-
-  it('fails if a render still reporting after Stop puts "Making Version 5" back over the stopped note', async () => {
-    const events: JobEvent[] = []
-    const jobs = createJobManager((e) => events.push(e), () => undefined)
-    const id = jobs.start(null, 'note', (emit, signal) => new Promise((_, reject) => {
-      emit({ type: 'status', message: 'Making Version 5', pct: 40, phase: 'final' })
-      signal.addEventListener('abort', () => {
-        // the engine runner settles on Stop at once; lines the killed render already wrote still arrive
-        reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
-        setTimeout(() => emit({ type: 'status', message: 'Making Version 5', pct: 60, phase: 'final' }), 0)
-      })
-    }))
-    const done = jobs.get(id)!.done
-    jobs.cancel(id)
-    await done
-    await new Promise((r) => setTimeout(r, 20))
-    expect(events.at(-1)?.type).toBe('cancelled')
-  })
 })

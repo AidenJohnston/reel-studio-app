@@ -142,9 +142,7 @@ look on PATH / repo-relative.
 {"event":"error","code":"NO_AUDIO","message":"<developer detail>","userMessage":"This video has no sound. Try a different file."}
 ```
 
-Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain. A
-render's first progress event also carries `version`, the version it makes (for a preview, the number
-the edit will get), so the app can say "Making Version 5".
+Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain.
 
 | command | does |
 |---|---|

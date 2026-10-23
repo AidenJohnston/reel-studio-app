@@ -474,7 +474,7 @@ function registerIpc(): void {
       async (emit, signal, id) => {
         const opts = { jobId: id, ...(files.length ? { attachments: files.map((f) => f.asset) } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
-        if (r.changed.length && ai.rewordVersion) {
+        if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
           void titleVersion(slug, r.version, ai.rewordVersion.bind(ai), AbortSignal.timeout(60_000)).catch((e) =>
             log(`[ai] version title: ${String(e?.message ?? e)}`)
           )

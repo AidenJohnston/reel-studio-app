@@ -102,8 +102,14 @@ describe('version messages', () => {
       ['Subtitles not bigger', [bigger]],
       ['Cut 3 words, 2 pictures', [cutTwo, added('b1'), added('b2'), added('b3')]],
       ['Twelve words cut', [cutTwo]],
-      ['Shorter cut, idiot', [cutTwo]]
+      ['Shorter cut, idiot', [cutTwo]],
+      ['Cut 2 words', [restoreTwo]],
+      ['Longer cut', [restoreTwo]],
+      ['Cut a word', [cutTwo]],
+      ['Fixed a word', [{ kind: 'captions.corrections', before: [], after: [{ from: 'a', to: 'b' }, { from: 'c', to: 'd' }, { from: 'e', to: 'f' }] }]],
+      ['Removed a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }, { kind: 'broll', id: 'b2', before: { id: 'b2' }, after: null }]]
     ]
+    expect(versionTitle([restoreTwo], words)).toBe('More words back')
     const kept = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: reply.toLowerCase() }, facts as never, words))
     expect(kept.map(([reply]) => reply)).toEqual([])
   })
@@ -118,6 +124,7 @@ describe('version messages', () => {
     const fair = { title: 'Bigger captions, shorter cut and more', summary: 'new song “Picture Perfect”, cut two words and bigger subtitles' }
     expect(acceptRewrite(fair, facts, words)).toEqual(fair)
     expect(acceptRewrite({ ...fair, summary: 'new song "Smaller Captions", cut 2 words' }, facts, words)).toBeNull()
+  })
   it("fails if a version button shows the AI's chat reply when a receipt exists, or for a version made after receipts", () => {
     const chat: ChatMessage[] = [
       { id: '1', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 1 },
@@ -130,6 +137,8 @@ describe('version messages', () => {
     expect(versionTooltip({ n: 1, facts: size }, chat, [])).toBe('Version 1: bigger subtitles.')
     expect(versionTooltip({ n: 2 }, chat, [])).toBeUndefined()
     expect(versionTooltip({ n: 3, beforeReceipts: true }, chat, [])).toBe('I tightened your pauses.')
+    // a checked rewording of the summary replaces the app's words, never the chat's
+    expect(versionTooltip({ n: 1, facts: size, wording: { title: 'Bigger captions', summary: 'made the subtitles bigger' } }, chat, [])).toBe('Version 1: made the subtitles bigger.')
   })
   it('describes subtitle changes the way a person would', () => {
     const p = base()

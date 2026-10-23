@@ -24,7 +24,7 @@ export interface AgentResult {
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 
-export interface EngineProgress { stage: string; pct: number; message: string; /** the version a render makes (render only) */ version?: number }
+export interface EngineProgress { stage: string; pct: number; message: string }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>;

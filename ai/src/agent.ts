@@ -1,6 +1,6 @@
 // The provider-neutral agent loop: model -> tool calls -> results -> model ... until `finish`.
 import { AgentEvent, AIError, ChatMessage, ImagePart, ModelProvider, TokenUsage, ToolCall, ToolResultMsg } from './types';
-import { executeTool, operationStatus, toolSchemas, ToolContext } from './tools';
+import { executeTool, toolSchemas, ToolContext } from './tools';
 
 const STAGE: Record<string, { message: string; pct: number }> = {
   get_project: { message: 'Reading your video', pct: 8 },
@@ -133,7 +133,7 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
   const one = async (call: ToolCall): Promise<ToolResultMsg> => {
     if (o.ctx.state.finished !== null) return { callId: call.id, name: call.name, content: JSON.stringify({ skipped: 'finish was already called' }), isError: true };
     const stage = STAGE[call.name];
-    if (stage) o.onEvent({ type: 'status', message: operationStatus(o.ctx, call.name, call.args) ?? stage.message, pct: stage.pct, phase: 'edit' });
+    if (stage) o.onEvent({ type: 'status', message: stage.message, pct: stage.pct, phase: 'edit' });
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     const r = await executeTool(o.ctx, call.name, call.args);
     return { callId: call.id, name: call.name, content: r.content, images: r.images, isError: r.isError };

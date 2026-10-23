@@ -33,7 +33,7 @@ export interface EngineHost {
   runEngine(
     command: string,
     args: string[],
-    onProgress?: (p: { stage: string; pct: number; message: string; version?: number }) => void,
+    onProgress?: (p: { stage: string; pct: number; message: string }) => void,
     signal?: AbortSignal
   ): Promise<any>
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>

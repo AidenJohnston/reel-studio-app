@@ -14,7 +14,6 @@ import json
 import sys
 import threading
 import time
-from typing import Optional
 
 _OUT = None            # the real stdout, set by capture_stdout()
 _LOCK = threading.Lock()
@@ -60,17 +59,15 @@ def emit(obj: dict) -> None:
         out.flush()
 
 
-def progress(stage: str, pct: float, message: str, force: bool = False, version: Optional[int] = None) -> None:
-    """Throttled to ~10 lines a second per stage so a fast loop cannot flood the app. `version`: the
-    version a render makes (the app's status line names it)."""
+def progress(stage: str, pct: float, message: str, force: bool = False) -> None:
+    """Throttled to ~10 lines a second per stage so a fast loop cannot flood the app."""
     pct = max(0.0, min(100.0, float(pct)))
     now = time.monotonic()
     if not force and stage == _LAST["stage"] and now - _LAST["t"] < 0.1 and pct < 100.0 \
             and abs(pct - _LAST["pct"]) < 5.0:
         return
     _LAST.update(t=now, pct=pct, stage=stage)
-    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message,
-          **({"version": version} if version is not None else {})})
+    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message})
 
 
 def done(result) -> None:

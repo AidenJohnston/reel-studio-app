@@ -1,11 +1,9 @@
-import io
-import json
 import shutil
 
 import pytest
 
 import fixtures as fx
-from reelengine import frames, project, proto, render, render_identity, verify
+from reelengine import frames, project, render, render_identity, verify
 from reelengine.proto import EngineError
 
 
@@ -85,20 +83,3 @@ def test_a_new_version_records_what_changed_since_the_last(pdir):
     again = render.run(pdir, cover=False, job_id="job-8")
     assert again["version"] == 2 and again["receipt"]["facts"] == []
     assert project.read_json(pdir / "versions" / "v2" / "receipts.json") == receipts
-
-
-def test_a_render_names_the_version_it_makes_before_it_starts(pdir):
-    """Fails if the app's status line can't say which version a preview or a final render makes."""
-    def first_progress(**kw):
-        buf = io.StringIO()
-        proto.set_stream(buf)
-        try:
-            render.run(pdir, cover=False, **kw)
-        finally:
-            proto.set_stream(None)
-        return next(json.loads(l) for l in buf.getvalue().splitlines() if '"progress"' in l)
-
-    assert first_progress()["version"] == 1
-    edit(pdir, lambda p: p["cut"].update(gapCap=0.1))
-    assert first_progress(draft=True)["version"] == 2
-    assert first_progress()["version"] == 2

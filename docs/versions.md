@@ -50,8 +50,9 @@ The app names each version from its receipts ("Shorter cut, bigger subtitles", a
 After a note, the creator's own connection may reword that name with its small model (Haiku through
 Claude Code or a Claude key; none for other connections). The app keeps the rewording in
 `versions/vN/title.json` (`{renderId, title, summary}`) only when every change, direction and number it
-names is in the receipts, using only the words the app's own name and summary use for that change
-(plus a few joining words and synonyms), and shows it only while `renderId` is the folder's last receipt.
+names is in the receipts, and shows it only while `renderId` is the folder's last receipt. The check reads each
+part of the rewording as a claim (kind of change, direction, number) and compares it with what the app's own
+words for that change claim, so "Cut 2 words" for words brought back, or "Cut a word" for 2, is dropped.
 
 ## Render result (engine `done.result`)
 

@@ -81,7 +81,7 @@ function changes(facts: EditFact[], words: Word[]): Change[] {
   const keep = at('cut.keep')
   if (keep) {
     const delta = keptIds(words, keep.after as Range[]).length - keptIds(words, keep.before as Range[]).length
-    if (delta > 0) out.push({ group: 'cut', title: 'longer cut', said: delta === 1 ? 'brought back a word' : `brought back ${delta} words` })
+    if (delta > 0) out.push({ group: 'cut', title: 'more words back', said: delta === 1 ? 'brought back a word' : `brought back ${delta} words` })
     else if (delta < 0) out.push({ group: 'cut', title: 'shorter cut', said: delta === -1 ? 'cut a word' : `cut ${-delta} words` })
     else out.push({ group: 'cut', title: 'different takes', said: 'picked different takes' })
   }
@@ -157,36 +157,58 @@ export function versionTitle(facts: EditFact[], words: Word[]): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-// Words that claim a kind of change. A phrase is removed once matched, so "post caption" is not also a
-// subtitle and "flipped the picture" not also a picture. null = a kind the receipts never record.
-const CLAIMS: [Group | null, RegExp][] = [
-  ['post', /\b(post caption|hashtags?)\b/g],
-  ['cover', /\b(cover|thumbnail)s?\b/g],
-  ['flip', /\b(flip\w*|mirror\w*)( the)?( picture| video)?|\b(picture|video) (back )?(the way you filmed it|as filmed)/g],
-  ['cut', /\b(cuts?|trim\w*|takes?|retakes?|brought back)\b/g],
-  ['pauses', /\b(pauses?|gaps?|silences?|pace|pacing)\b/g],
-  ['subtitles', /\b(subtitles?|captions?)\b/g],
-  ['music', /\b(music|songs?|soundtrack|volume|audio)\b/g],
-  ['pictures', /\b(pictures?|images?|photos?|b-? ?roll|visuals?|clips?|gifs?|animations?|graphics?)\b/g],
-  ['zooms', /\bzoom/g],
-  [null, /\b(transitions?|filters?|speed|slow[- ]?mo\w*|effects?|stickers?|emojis?|crop\w*|brightness)\b/g]
+// What each kind of change can say, as words after tokens(): `markers` name the kind on their own,
+// `nouns` may appear without meaning anything more, and `dirs` map a word to the direction it claims.
+// "cut" always means fewer words, so a restore is titled "more words back", never "longer cut".
+// The order decides a part that has markers of two kinds ("post caption" is the post, not subtitles).
+interface Lexicon { markers: string[]; nouns: string[]; dirs: Record<string, string> }
+const LEXICON: [Group, Lexicon][] = [
+  ['post', { markers: ['post', 'hashtag'], nouns: ['post', 'subtitle', 'hashtag'], dirs: { new: 'new', changed: 'new' } }],
+  ['cover', { markers: ['cover', 'thumbnail'], nouns: ['cover', 'thumbnail', 'word', 'on'], dirs: { new: 'new', no: 'none' } }],
+  ['flip', {
+    markers: ['flip', 'flipped', 'mirror', 'mirrored', 'filmed'],
+    nouns: ['picture', 'video', 'way', 'you', 'it'],
+    dirs: { flip: 'flipped', flipped: 'flipped', mirror: 'flipped', mirrored: 'flipped', filmed: 'as-filmed', back: 'as-filmed', as: 'as-filmed' }
+  }],
+  ['pauses', {
+    markers: ['pause', 'gap', 'silence'],
+    nouns: ['pause', 'gap', 'silence'],
+    dirs: { tighter: 'shorter', shorter: 'shorter', longer: 'longer', more: 'longer', room: 'longer' }
+  }],
+  ['subtitles', {
+    markers: ['subtitle'],
+    nouns: ['subtitle', 'word', 'look', 'moved'],
+    dirs: {
+      bigger: 'bigger', smaller: 'smaller', yellow: 'yellow', white: 'white', boxed: 'boxed', up: 'up', down: 'down',
+      no: 'off', off: 'off', back: 'on', on: 'on', fixed: 'fixed', corrected: 'fixed', new: 'changed', changed: 'changed'
+    }
+  }],
+  ['music', {
+    markers: ['music', 'song', 'soundtrack', 'volume'],
+    nouns: ['music', 'song', 'soundtrack', 'volume'],
+    dirs: { no: 'none', off: 'none', new: 'new', different: 'new', back: 'on', on: 'on', louder: 'louder', quieter: 'quieter', adjusted: 'adjusted', changed: 'adjusted' }
+  }],
+  ['pictures', {
+    markers: ['picture', 'b-roll', 'clip', 'gif', 'animation'],
+    nouns: ['picture', 'b-roll', 'clip', 'gif', 'animation'],
+    dirs: { new: 'more', added: 'more', more: 'more', fewer: 'fewer', removed: 'fewer', changed: 'changed' }
+  }],
+  ['zooms', {
+    markers: ['zoom', 'zoom-in'],
+    nouns: ['zoom', 'zoom-in'],
+    dirs: { more: 'more', added: 'more', fewer: 'fewer', no: 'none', new: 'changed', changed: 'changed' }
+  }],
+  ['cut', {
+    markers: ['cut', 'trim', 'trimmed', 'take', 'retake'],
+    nouns: ['word', 'take', 'retake'],
+    dirs: { cut: 'fewer', trimmed: 'fewer', trim: 'fewer', shorter: 'fewer', more: 'more', back: 'more', brought: 'more', different: 'swapped', picked: 'swapped' }
+  }]
 ]
-
-function claims(text: string): Set<Group | null> {
-  let rest = text.toLowerCase()
-  const found = new Set<Group | null>()
-  for (const [group, re] of CLAIMS) {
-    if (rest.search(re) < 0) continue
-    found.add(group)
-    rest = rest.replace(re, ' ')
-  }
-  return found
-}
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
 const SYNONYMS: Record<string, string> = { caption: 'subtitle', image: 'picture', photo: 'picture', larger: 'bigger', softer: 'quieter' }
-// Glue a rewording may add anywhere; every other word has to come from the change it describes.
-const GLUE = new Set(['a', 'an', 'the', 'and', 'your', 'of', 'in', 'to', 'now', 'made'])
+// Words that say nothing about the change. "a" and "an" are not here: they mean one.
+const GLUE = new Set(['the', 'your', 'of', 'in', 'to', 'now', 'made'])
 // A song's name, which the app writes in quotes: it is a name, not a claim, and is left out of every check.
 const QUOTED = /"[^"]*"/g
 
@@ -199,12 +221,45 @@ function tokens(text: string): string[] {
   })
 }
 
+/** What one part of a sentence claims: a kind of change, its directions and the number it gives. */
+interface Claim { group: Group; dirs: string[]; count?: number }
+
+/** `words` read as a claim about `group`, or null when a word means nothing to that kind of change. */
+function claimAbout(group: Group, words: string[]): Claim | null {
+  const lex = LEXICON.find(([g]) => g === group)![1]
+  const dirs = new Set<string>()
+  let count: number | undefined
+  for (const w of words) {
+    if (GLUE.has(w)) continue
+    const n = /^\d+$/.test(w) ? Number(w) : w === 'a' || w === 'an' ? 1 : undefined
+    if (n !== undefined) {
+      if (count !== undefined) return null
+      count = n
+    } else if (lex.dirs[w]) dirs.add(lex.dirs[w])
+    else if (!lex.nouns.includes(w)) return null
+  }
+  return dirs.size ? { group, dirs: [...dirs], count } : null
+}
+
+const splitParts = (t: string): string[] => t.replace(QUOTED, ' ').split(/,|\band\b/i).map((p) => p.trim()).filter(Boolean)
+
+/** What the app's own title and summary for a change claim: each direction, with the number the app gives it. */
+function ownClaims(c: Change): Map<string, number | undefined> {
+  const out = new Map<string, number | undefined>()
+  for (const part of [...splitParts(c.title), ...splitParts(c.said)]) {
+    const claim = claimAbout(c.group, tokens(part))
+    for (const d of claim?.dirs ?? []) out.set(d, out.get(d) ?? claim!.count)
+  }
+  return out
+}
+
 /**
  * A small model's rewording of a version's title and summary. Kept only when it reads like a title and
- * says nothing the receipts don't: each comma- or "and"-separated part names one change in the receipt
- * and uses only that change's own words (so its numbers and directions), the glue words and a few
- * synonyms. A part that names nothing continues the change before it (the first such part: the change
- * whose words it uses); a last "more" stands for changes not named.
+ * every part (between commas or "and") means something the receipt says: each part is read as a claim
+ * (kind of change, direction, number) in that kind's own words, and the receipt's change of that kind
+ * must make the same claim. A number must be the app's own; "a" counts as one. In the summary, a
+ * direction the app gives a number to must keep that number. A part that names no kind continues the
+ * kind before it, or is any kind it is true of; a last "more" stands for changes not named.
  * A quoted name must be the song's own. null = keep the app's own words.
  */
 export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
@@ -214,9 +269,17 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
   const title = text.title.trim()
   const summary = text.summary.trim().replace(/\.$/, '')
   if (title.split(/\s+/).length > 6 || title.length > 48 || summary.length > 160 || /[\n—–:]/.test(title + summary) || title.endsWith('.')) return null
-  for (const t of [straight(title), straight(summary)]) {
+  const meant = new Map(own.map((c) => [c.group, ownClaims(c)]))
+  const holds = (c: Claim, inSummary: boolean): boolean => {
+    const mine = meant.get(c.group)
+    if (!mine || !c.dirs.every((d) => mine.has(d))) return false
+    const counts = c.dirs.map((d) => mine.get(d)).filter((n): n is number => n !== undefined)
+    if (c.count !== undefined) return counts.length > 0 && counts.every((n) => n === c.count)
+    return !inSummary || !counts.length
+  }
+  for (const [t, inSummary] of [[straight(title), false], [straight(summary), true]] as const) {
     if ((t.match(QUOTED) ?? []).some((q) => !songs.has(q))) return null
-    const parts = t.replace(QUOTED, ' ').split(/,|\band\b/i).map((p) => p.trim()).filter(Boolean)
+    const parts = splitParts(t)
     const named = new Set<Group>()
     let group: Group | null = null
     for (const [i, part] of parts.entries()) {
@@ -224,17 +287,13 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
         if (own.every((c) => named.has(c.group))) return null
         continue
       }
-      const said = [...claims(part)]
-      if (said.length > 1 || (said.length === 1 && !said[0])) return null
-      const candidates: (Group | null)[] = said.length ? said : group ? [group] : own.map((c) => c.group)
-      const fits = (g: Group | null): boolean => {
-        const mine = own.filter((c) => c.group === g)
-        const allowed = new Set([...GLUE, ...mine.flatMap((c) => tokens(`${c.title} ${c.said}`))])
-        return mine.length > 0 && tokens(part).every((w) => allowed.has(w))
-      }
-      group = candidates.find(fits) ?? null
-      if (!group) return null
-      named.add(group)
+      const w = tokens(part)
+      const marked = LEXICON.find(([, lex]) => w.some((x) => lex.markers.includes(x)))?.[0]
+      const candidates: Group[] = marked ? [marked] : [...new Set([...(group ? [group] : []), ...own.map((c) => c.group)])]
+      const claim: Claim | undefined = candidates.map((g) => claimAbout(g, w)).find((c): c is Claim => !!c && holds(c, inSummary))
+      if (!claim) return null
+      group = claim.group
+      named.add(claim.group)
     }
     if (!named.size) return null
   }
