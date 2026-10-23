@@ -226,6 +226,24 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(false);
   });
 
+  it.skipIf(process.platform === 'win32')('an unreadable credits file does not stop a note', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const creditsPath = path.join(dir, 'work', 'assets', 'credits.json');
+    await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
+    await fsp.writeFile(creditsPath, '{}\n');
+    await fsp.chmod(creditsPath, 0o000);
+    try {
+      const m = new ScriptedModel([
+        { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
+        { toolCalls: [call('finish', { summary_for_user: 'I slowed it down.' })] },
+      ]);
+      const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false }).applyNote(dir, 'slower', () => undefined);
+      expect(r.summary).toContain('I slowed it down.');
+    } finally {
+      await fsp.chmod(creditsPath, 0o644);
+    }
+  });
+
   it('a rule that was saved is echoed to the user in the summary', async () => {
     const { dir, host, settingsDir } = await setup();
     const m = new ScriptedModel([

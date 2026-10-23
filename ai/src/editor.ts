@@ -137,12 +137,12 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
 
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
  * it added, the credits book, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null, assetsBefore: Set<string>, state: ToolState): Promise<void> {
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
   await removeStyleRules(deps, state);
   const creditsPath = path.join(projectDir, 'work', 'assets', 'credits.json');
   if (creditsBefore === null) await fsp.rm(creditsPath, { force: true }).catch(() => undefined);
-  else await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
+  else if (creditsBefore) await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
   for (const f of await listAssets(projectDir)) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
   }
@@ -311,10 +311,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
   // project.json, My style and work/assets back as they were.
   const before = await fsp.readFile(path.join(projectDir, 'project.json'));
-  const creditsBefore = await fsp.readFile(path.join(projectDir, 'work', 'assets', 'credits.json')).catch((e) => {
-    if (e.code === 'ENOENT') return null;
-    throw e;
-  });
+  // null: no credits file yet. undefined: it could not be read, so the note goes ahead and a rollback leaves it alone.
+  const creditsBefore = await fsp.readFile(path.join(projectDir, 'work', 'assets', 'credits.json'))
+    .catch((e) => (e.code === 'ENOENT' ? null : undefined));
   const assetsBefore = await listAssets(projectDir);
   const mediaSec = mediaSeconds(p0);
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
