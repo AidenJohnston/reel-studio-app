@@ -787,9 +787,18 @@ function createWindow(): void {
 }
 
 const pendingOpenFiles: string[] = []
+let setupDone = false
 function queueOpenFiles(files: string[]): void {
   pendingOpenFiles.push(...files)
-  if (win && !win.isDestroyed()) win.webContents.send('app:filesAvailable')
+  // Early open-file events must wait until IPC and the app's services are ready.
+  if (!setupDone) return
+  if (!win || win.isDestroyed()) {
+    createWindow() // The new renderer drains pendingOpenFiles on mount.
+  } else {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    win.webContents.send('app:filesAvailable')
+  }
 }
 app.on('open-file', (event, path) => {
   event.preventDefault()
@@ -850,6 +859,7 @@ app.whenReady().then(async () => {
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()
+  setupDone = true
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower
   // reelstudio:// links open this app (Windows writes it per user; macOS also reads Info.plist). Not in dev or tests,
