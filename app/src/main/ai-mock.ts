@@ -1,12 +1,12 @@
 // Stand-in for @reelstudio/ai when the real package is not available. Same interface (ai-types.ts).
 // It runs the deterministic "no AI connected" path from docs/architecture.md section 8: transcribe, analyze,
 // autocut, music from the Library, render. It never pretends to be a real AI provider.
-import { existsSync, promises as fs } from 'node:fs'
-import { join, extname } from 'node:path'
+import { constants, existsSync, promises as fs } from 'node:fs'
+import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { writeJson } from './store'
+import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, ProviderStatus, ScriptResult } from './ai-types'
-import type { Phase } from '../shared/api'
+import type { Phase, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -27,20 +27,63 @@ const MOCK_CLAUDE_BIN = process.platform === 'win32' ? 'C:\\Program Files\\Mock 
 /** Maps an engine stage pct (0-100) into an overall window [lo, hi]. */
 const span = (lo: number, hi: number, pct: number): number => Math.round(lo + ((hi - lo) * pct) / 100)
 
+/** Copies `file` to "<name>.damaged.json", or "<name>.damaged 2.json" and so on when that is taken. Never overwrites. */
+async function keepDamagedCopy(file: string): Promise<string> {
+  const stem = file.replace(/\.json$/i, '')
+  for (let n = 1; ; n++) {
+    const copy = `${stem}.damaged${n > 1 ? ` ${n}` : ''}.json`
+    try {
+      await fs.copyFile(file, copy, constants.COPYFILE_EXCL)
+      return copy
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+    }
+  }
+}
+
+/** A rule's words as the real store keeps them (cleanRuleText in ai/src/style.ts): one sentence, capitalised,
+ * ending in a full stop. */
+function cleanRule(text: string): string {
+  let clean = text.replace(/\s*—\s*/g, ', ').replace(/\s+/g, ' ').trim()
+  if (!clean) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Remove.' }
+  if (!/[.!?]$/.test(clean)) clean += '.'
+  return clean[0].toUpperCase() + clean.slice(1)
+}
+
+/** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
+type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; [field: string]: unknown }
+
+const LOWERCASE_CAPTIONS = 'Use lowercase captions.'
+
 export const createMockAI: CreateAI = ({ host }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
 
-  async function readRules(): Promise<{ id: string; text: string; createdAt: string }[]> {
+  /** Read as the real package reads it (ai/src/style.ts): no file is an empty My style, a damaged one is kept as a copy
+   * next to it and My style starts over, and any other read error throws, so no save replaces rules it could not read. */
+  async function readStyle(): Promise<StyleData> {
+    let text: string
     try {
-      const j = JSON.parse(await fs.readFile(styleFile(), 'utf8'))
-      return Array.isArray(j.rules) ? j.rules : []
-    } catch {
-      return []
+      text = await fs.readFile(styleFile(), 'utf8')
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { rules: [] }
+      throw e
     }
+    let j: any = null
+    try {
+      j = JSON.parse(text.replace(/^\uFEFF/, ''))
+    } catch {
+      /* damaged: kept below */
+    }
+    if (Array.isArray(j?.rules)) return j
+    const fresh: StyleData = { version: 1, rules: [], damaged: basename(await keepDamagedCopy(styleFile())) }
+    await writeJson(styleFile(), fresh)
+    return fresh
   }
-  async function writeRules(rules: { id: string; text: string; createdAt: string }[]): Promise<void> {
+  /** Each read or change of the whole file runs one at a time, or two changes at once lose one of them. */
+  const withStyle = <T>(fn: (s: StyleData) => Promise<T>): Promise<T> => serialized(styleFile(), async () => fn(await readStyle()))
+  async function saveRules(s: StyleData, rules: StyleRule[]): Promise<void> {
     await fs.mkdir(host.reelStudioRoot(), { recursive: true })
-    await fs.writeFile(styleFile(), JSON.stringify({ rules }, null, 2) + '\n', 'utf8')
+    await writeJson(styleFile(), { ...s, rules })
   }
 
   async function readProject(dir: string): Promise<any> {
@@ -145,6 +188,9 @@ export const createMockAI: CreateAI = ({ host }) => {
         onEvent({ type: 'tool', name: 'choose_music', summary: `Picked a song: ${track.split('/').pop()}` })
       }
       // No post caption here: nothing smart ran, so the user writes it ("Post caption: add your own").
+      const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
+      const lower = rules.some((r) => r.payload?.case === 'lower' && !r.paused)
+      if (lower) p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
       await writeProject(projectDir, p)
 
       status('Making your cover', 60)
@@ -155,24 +201,40 @@ export const createMockAI: CreateAI = ({ host }) => {
       status('Done', 100)
 
       return {
-        summary: track
-          ? 'Your video is ready. I cut out the pauses, added subtitles, music and a cover. Connect ChatGPT and I can also pick your best takes and add pictures.'
-          : 'Your video is ready. I cut out the pauses and added subtitles and a cover. Add a song for music, and connect ChatGPT so I can pick your best takes and add pictures.',
+        summary:
+          (track
+            ? 'Your video is ready. I cut out the pauses, added subtitles, music and a cover. Connect ChatGPT and I can also pick your best takes and add pictures.'
+            : 'Your video is ready. I cut out the pauses and added subtitles and a cover. Add a song for music, and connect ChatGPT so I can pick your best takes and add pictures.') +
+          (lower ? ' I used lowercase captions from your My style.' : ''),
         version,
         styleRulesAdded: [],
         changed
       }
     },
 
-    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
+    async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
+        const rule = { id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() }
+        await withStyle((s) => saveRules(s, [...s.rules, rule]))
         added.push(note.trim())
+      }
+      // Tests only: REELSTUDIO_MOCK_CLAUDE=ready, and the mock Claude Code app chosen in Settings. Then act like the real
+      // package on a lowercase note (change the captions, make a new version, ask to remember it). Never for a
+      // person whose AI package failed to load: this stand-in does not read notes.
+      if (claudeChosen && claudeState === 'ready' && /\blower ?case\b/i.test(note) && p.captions?.style?.case !== 'lower') {
+        p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
+        await writeProject(projectDir, p)
+        const r = await host.runEngine('render', ['--project', projectDir], undefined, signal)
+        const version = Number(r?.version ?? 0)
+        onEvent({ type: 'render', version, draft: false })
+        const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
+        const styleProposal: StyleProposal | undefined = rules.some((x) => x.payload)
+          ? undefined
+          : { id: randomUUID(), text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' }, source: { project: p.id, title: p.title, version } }
+        return { summary: 'I made the captions lowercase.', version, styleRulesAdded: added, changed: ['captions'], ...(styleProposal ? { styleProposal } : {}) }
       }
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
       p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
@@ -193,15 +255,57 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
 
     async styleRules() {
-      return readRules()
+      return withStyle(async (s) => s.rules).catch(() => [])
+    },
+    async styleWasDamaged() {
+      return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
     async addStyleRule(text) {
       const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
-      await writeRules([...(await readRules()), rule])
+      await withStyle((s) => saveRules(s, [...s.rules, rule]))
       return rule
     },
+    // The same answers as the real store (ai/src/style.ts): a removed rule's question cannot bring it back, and the
+    // same question answered again returns the rule it saved.
+    async approveStyleProposal(proposal) {
+      return withStyle(async (s) => {
+        if (s.forgotten?.includes(proposal.id)) return { status: 'forgotten' as const }
+        const same = s.rules.find((r) => r.consent?.proposal === proposal.id)
+        if (same) return { status: same.payload ? ('saved' as const) : ('exists' as const) }
+        if (s.rules.some((r) => r.payload)) return { status: 'exists' as const }
+        const at = new Date().toISOString()
+        const rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: proposal.payload, source: proposal.source, consent: { proposal: proposal.id, at } }
+        await saveRules(s, [...s.rules, rule])
+        return { status: 'saved' as const }
+      })
+    },
+    async declineStyleProposal(proposal) {
+      return withStyle(async (s) => {
+        if (!s.rules.some((r) => r.consent?.proposal === proposal.id)) return
+        s.forgotten = [...(s.forgotten ?? []), proposal.id]
+        await saveRules(s, s.rules.filter((r) => r.consent?.proposal !== proposal.id))
+      })
+    },
+    async updateStyleRule(id, patch) {
+      return withStyle(async (s) => {
+        const rule = s.rules.find((r) => r.id === id)
+        if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' }
+        if (patch.text !== undefined) {
+          rule.text = cleanRule(patch.text)
+          if (rule.text !== LOWERCASE_CAPTIONS) delete rule.payload
+        }
+        if (patch.paused === true) rule.paused = true
+        if (patch.paused === false) delete rule.paused
+        await saveRules(s, s.rules)
+        return rule
+      })
+    },
     async removeStyleRule(id) {
-      await writeRules((await readRules()).filter((r) => r.id !== id))
+      await withStyle((s) => {
+        const asked = s.rules.find((r) => r.id === id)?.consent?.proposal
+        if (asked) s.forgotten = [...(s.forgotten ?? []), asked]
+        return saveRules(s, s.rules.filter((r) => r.id !== id))
+      })
     }
   }
   return ai

@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate } from '../shared/api'
+import type { JobUpdate, StyleProposal, StyleRule } from '../shared/api'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -18,6 +18,8 @@ export interface AgentResult {
   changed: string[]
   /** Rules the AI PROPOSES for My style, not saved (stream quality2). The app asks before saving. */
   styleSuggestions?: string[]
+  /** A typed rule to ask about; Yes = approveStyleProposal(it). */
+  styleProposal?: StyleProposal
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
 }
@@ -76,10 +78,17 @@ export interface AI {
     opts?: { attachments?: string[] }
   ): Promise<AgentResult>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
-  styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
+  styleRules(): Promise<StyleRule[]>
   removeStyleRule(id: string): Promise<void>
   /** Saves one My style rule (after the user said Yes). Optional: older packages lack it. */
   addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
+  /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
+  styleWasDamaged?(): Promise<boolean>
+  /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */
+  approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
+  declineStyleProposal?(p: StyleProposal): Promise<void>
+  /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
+  updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
   /** Optional extras from @reelstudio/ai. */
   cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
