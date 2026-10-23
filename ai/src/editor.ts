@@ -331,7 +331,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+        if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
         throw e;
       }
     }
@@ -370,10 +370,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    if (!engineStuck(e)) await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
     throw e;
   }
 }
+
+/** Part of the engine would not stop and may still be writing to the project (index.ts editHost): a
+ * rollback would race it, so the project is left as it is and the app keeps it closed. */
+const engineStuck = (e: unknown): boolean => (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK';
 
 // ---------------------------------------------------------------- idea -> script
 
