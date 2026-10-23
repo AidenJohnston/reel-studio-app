@@ -84,9 +84,12 @@ async function main() {
     });
     const settingsDir = typeof flags.settings === 'string' ? flags.settings : defaultSettingsDir();
     const ai = createAI({ host, settingsDir, dev: true, providerOverride: provider, finalRender: !flags['draft-only'] });
+    // the engine runs in its own process group (engineHost.ts), out of reach of Ctrl-C: stop it like Stop does
+    const stop = new AbortController();
+    process.once('SIGINT', () => stop.abort());
     let result: unknown;
-    if (cmd === 'first-edit') result = await ai.firstEdit(String(flags.project), log);
-    else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log);
+    if (cmd === 'first-edit') result = await ai.firstEdit(String(flags.project), log, stop.signal);
+    else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log, stop.signal);
     else result = await ai.writeScript(String(flags.idea ?? ''), log);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return;

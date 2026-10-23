@@ -55,3 +55,18 @@ Rules:
   edit, 2 per note).
 - After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
   version.
+
+## Engine processes
+
+An engine call settles only after the engine and everything it started have exited. On macOS and
+Linux the engine runs as its own process group and the host stops what is left of the group after
+any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
+project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
+children when it exits (`engine/reelengine/contain.py`).
+
+The app records each engine's pid and project in `engines.json` (in its settings folder) until the
+engine's whole group is gone, and at startup stops engines a crashed run left behind. A project whose
+engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
+running processes: a project stays closed only while an engine or ffmpeg names its folder in its
+arguments, and every other project opens. It keeps looking at each start until it finds none
+(`app/src/main/orphans.ts`).

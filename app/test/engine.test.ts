@@ -43,11 +43,12 @@ describe('parseEngineLine', () => {
   })
 })
 
-function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void) {
+function runner(engineDir = FAKE_ENGINE, extra: NodeJS.ProcessEnv = {}, onSpawn?: (pid: number) => void, onExit?: (pid: number) => void) {
   return createEngineRunner({
     python: () => PYTHON,
     env: () => ({ ...engineEnv(), PYTHONPATH: engineDir, ...extra }),
-    onSpawn
+    onSpawn,
+    onExit
   })
 }
 
@@ -152,24 +153,32 @@ describe('engine runner (against the stand-in engine)', () => {
     })
   })
 
-  it('cancel kills the engine and everything it started', async () => {
+  it('cancel settles only after the engine and everything it started have exited', async () => {
     setupPaths()
     let pid = 0
     let grandchild = 0
-    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p))
+    let exited = false
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'), {}, (p) => (pid = p), () => (exited = true))
     const ac = new AbortController()
-    const t0 = Date.now()
     const p = run('sleep', [], (pr) => {
       grandchild = Number(pr.message)
       ac.abort()
     }, ac.signal)
     await expect(p).rejects.toMatchObject({ code: 'CANCELLED' })
-    expect(Date.now() - t0).toBeLessThan(15000)
+    expect(exited).toBe(true)
     expect(pid).toBeGreaterThan(0)
     expect(grandchild).toBeGreaterThan(0)
-    // taskkill /T /F (or the process group kill) takes a moment.
-    for (let i = 0; i < 40 && (isAlive(pid) || isAlive(grandchild)); i++) await new Promise((r) => setTimeout(r, 100))
     expect(isAlive(pid)).toBe(false)
+    expect(isAlive(grandchild)).toBe(false)
+  }, 30000)
+
+  // Windows has no process groups: a child orphaned by a crashed engine cannot be found there
+  it.skipIf(process.platform === 'win32')('an engine that dies early settles only after what it started has been stopped', async () => {
+    setupPaths()
+    let grandchild = 0
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'sleeper'))
+    await expect(run('crash', [], (pr) => (grandchild = Number(pr.message)))).rejects.toMatchObject({ code: 'ENGINE_CRASHED' })
+    expect(grandchild).toBeGreaterThan(0)
     expect(isAlive(grandchild)).toBe(false)
   }, 30000)
 

@@ -26,7 +26,6 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -45,6 +44,7 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
@@ -110,7 +110,7 @@ const runEngine: RunEngine = createEngineRunner({
   env: engineEnv,
   cwd: engineDir,
   log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
+  onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
 
@@ -481,7 +481,7 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    jobs.refuseIfBusy(slug)
     const p = await readProject(slug)
     for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
       // the "Flip picture" toggle: only each take's mirror flag, never its path or size
@@ -650,16 +650,7 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
   const loaded = await loadAI(
     {
       host,
