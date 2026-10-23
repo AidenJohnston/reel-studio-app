@@ -12,7 +12,7 @@ export function UpdateSettingsRow() {
   const action = updateAction(s)
   const disabled = ['disabled', 'checking', 'downloading', 'installing'].includes(s.status)
   const text = s.status === 'idle' ? `You have Reel Studio ${s.currentVersion}.` : updateSummary(s).replace(/ Click to .*$/, '')
-  const button = action !== 'none' ? (s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download')
+  const button = action !== 'none' ? (action === 'open-page' ? 'Open download page' : s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download')
     : s.status === 'checking' ? 'Checking…' : s.status === 'downloading' ? 'Downloading…' : s.status === 'installing' ? 'Restarting…'
     : s.status === 'up-to-date' ? 'Check again' : s.status === 'error' ? 'Try again' : 'Check for updates'
   return (
