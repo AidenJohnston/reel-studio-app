@@ -3,7 +3,8 @@ import { posix, win32 } from 'node:path'
 /**
  * Whether `file` is `root` itself or somewhere inside it. On Windows the comparison ignores letter case, as NTFS
  * does: `C:\Users\Zoë\Documents` and `c:\users\zoë\documents` are the same folder, and different Windows APIs (a
- * typed folder, a file dialog, app.getPath) can return the same path in different case.
+ * typed folder, a file dialog, app.getPath) can return the same path in different case. Lower-casing is close to
+ * NTFS's own upper-case table but not identical for a few rare characters; the roots are fixed app folders.
  */
 export function isInsideFolder(file: string, root: string, platform: NodeJS.Platform = process.platform): boolean {
   const windows = platform === 'win32'
@@ -12,4 +13,9 @@ export function isInsideFolder(file: string, root: string, platform: NodeJS.Plat
   const f = fold(p.resolve(file))
   const r = fold(p.resolve(root))
   return f === r || f.startsWith(r.endsWith(p.sep) ? r : r + p.sep)
+}
+
+/** Whether `file` is somewhere inside `root`, never `root` itself, with the same Windows case rule. */
+export function isStrictlyInsideFolder(file: string, root: string, platform: NodeJS.Platform = process.platform): boolean {
+  return isInsideFolder(file, root, platform) && !isInsideFolder(root, file, platform)
 }

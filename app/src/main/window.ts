@@ -4,7 +4,7 @@
 import { app, BrowserWindow, Menu, nativeImage, Notification, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { isInsideFolder } from './inside-folder'
+import { isStrictlyInsideFolder } from './inside-folder'
 import type { AppCommand, JobEvent } from '../shared/api'
 import { RELEASES_REPO } from '../shared/config'
 
@@ -241,7 +241,7 @@ export function createJobFeedback(opts: {
  */
 export function startDragOut(sender: WebContents, file: string, roots: string[]): void {
   const f = resolve(String(file))
-  const inside = roots.some((r) => isInsideFolder(f, r) && f !== resolve(r))
+  const inside = roots.some((r) => isStrictlyInsideFolder(f, r))
   if (!inside || !existsSync(f)) return
   const cover = join(dirname(f), 'cover.png')
   let icon = existsSync(cover) ? nativeImage.createFromPath(cover) : nativeImage.createEmpty()
