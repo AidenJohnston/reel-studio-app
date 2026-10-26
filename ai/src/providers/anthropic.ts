@@ -16,6 +16,30 @@ function recordedContent(raw: unknown): Anthropic.Beta.BetaContentBlock[] | unde
   return Array.isArray(c) && c.length ? c : undefined;
 }
 
+/** Adaptive thinking (and the block_binding control that needs it) exists on Opus and Sonnet 4.6 and
+ * later, Haiku 5.5 and later, and every Fable and Mythos model (Anthropic's thinking table; live,
+ * claude-opus-4-6 and claude-sonnet-4-6 accepted it). Anything else, including ids this cannot read,
+ * gets the request without a thinking field, as before thinking was replayed. */
+function supportsAdaptiveThinking(model: string): boolean {
+  const m = /^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?:$|[-@])/.exec(model);
+  if (!m) return false;
+  const [, family, major, minor = '0'] = m;
+  const version = Number(major) + Number(minor) / 10;
+  if (family === 'fable' || family === 'mythos') return true;
+  return version >= (family === 'haiku' ? 5.5 : 4.6);
+}
+
+/** pruneImages edits older tool results every step, and an edit before a thinking block invalidates
+ * it: live, the default "error" answered 400 ("Invalid `signature` in `thinking` block"), while
+ * "drop_block" answered 200 and dropped only the affected blocks. */
+function thinkingParams(model: string) {
+  if (!supportsAdaptiveThinking(model)) return {};
+  return {
+    betas: ['thinking-binding-controls-2026-08-01'],
+    thinking: { type: 'adaptive' as const, block_binding: { prefix_mismatch_behavior: 'drop_block' as const } },
+  };
+}
+
 export interface AnthropicOptions {
   apiKey: string;
   model?: string;
@@ -135,11 +159,7 @@ export class AnthropicProvider implements ModelProvider {
       const stream = this.client.beta.messages.stream({
         model: this.model,
         max_tokens: this.maxTokens,
-        // pruneImages edits older tool results every step, and an edit before a thinking block
-        // invalidates it: live, the default "error" answered 400 ("Invalid `signature` in `thinking`
-        // block"), while "drop_block" answered 200 and dropped only the affected blocks.
-        betas: ['thinking-binding-controls-2026-08-01'],
-        thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+        ...thinkingParams(this.model),
         // Cache the long, stable prefix (system prompt + tool definitions) across agent steps.
         system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
         messages: withCacheBreakpoint(toAnthropicMessages(req.messages)),
@@ -169,10 +189,11 @@ export class AnthropicProvider implements ModelProvider {
     }
   }
 
-  /** Tiny request used to validate a pasted key. */
+  /** Tiny request used to validate a pasted key. It sends the same thinking settings as an edit, so a
+   * model that rejects them fails here, at setup, instead of on every edit. */
   async ping(): Promise<void> {
     try {
-      await this.client.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] });
+      await this.client.beta.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }], ...thinkingParams(this.model) });
     } catch (err: any) {
       throw mapAnthropicError(err);
     }
