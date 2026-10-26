@@ -1,13 +1,14 @@
-// Dev/test providers that shell out to a logged-in CLI (`claude -p`, `codex exec`) and drive the
+// Providers that shell out to the person's own signed-in CLI (`claude -p`, `codex exec`) and drive the
 // SAME tool loop through a JSON protocol: the model replies with {"tool_calls":[...]} as text,
-// we execute them and feed results back. Hidden unless `dev: true`. Never shown to users.
+// we execute them and feed results back. Offered to people as "Claude (your Claude Code app)" and
+// "ChatGPT (your Codex app)" (index.ts).
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ImagePart, ModelProvider, ToolCall, ToolSchema } from '../types';
-import { childEnv } from '../safety';
+import { childEnv, cliEnv } from '../safety';
 
 export function protocolPrompt(tools: ToolSchema[], jsonOnly: boolean): string {
   if (jsonOnly) return 'OUTPUT RULE: reply with ONE JSON object exactly as the task specifies. No prose, no markdown fences.';
@@ -207,7 +208,7 @@ function workDir(): string {
   return d;
 }
 
-export interface CliOptions { model?: string; bin?: string; /** args placed before the CLI's own (e.g. a script path) */ binArgs?: string[]; timeoutMs?: number; cwd?: string; extraArgs?: string[] }
+export interface CliOptions { model?: string; bin?: string; /** base environment for the CLI (ANTHROPIC_* and OPENAI_* are always removed) */ env?: NodeJS.ProcessEnv; /** args placed before the CLI's own (e.g. a script path) */ binArgs?: string[]; timeoutMs?: number; cwd?: string; extraArgs?: string[] }
 
 function userLine(text: string, images: { label: string; img: ImagePart }[]): string {
   const content: any[] = [{ type: 'text', text }];
@@ -274,7 +275,7 @@ export class ClaudeCliProvider implements ModelProvider {
   }
 
   private startSession(key: string): LiveSession {
-    const child = spawn(this.o.bin ?? 'claude', this.args(), { cwd: this.o.cwd ?? workDir(), env: childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.o.bin ?? 'claude', this.args(), { cwd: this.o.cwd ?? workDir(), env: cliEnv(this.o.env), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const s: LiveSession = { child, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
     let errTail = '';
     child.stderr.setEncoding('utf8').on('data', (d: string) => { errTail = (errTail + d).slice(-800); });
@@ -338,7 +339,7 @@ export class ClaudeCliProvider implements ModelProvider {
     const args = this.args();
     let r: RunResult;
     try {
-      r = await runProcess(this.o.bin ?? 'claude', args, line, { cwd: this.o.cwd ?? workDir(), signal: req.signal, timeoutMs: this.o.timeoutMs ?? 600_000 });
+      r = await runProcess(this.o.bin ?? 'claude', args, line, { cwd: this.o.cwd ?? workDir(), signal: req.signal, timeoutMs: this.o.timeoutMs ?? 600_000, env: cliEnv(this.o.env) });
     } catch (e: any) {
       if (e instanceof AIError) throw e;
       throw new AIError('cli_missing', 'The claude command line tool is not installed or not on PATH.', { detail: e?.message });
@@ -359,21 +360,23 @@ export class ClaudeCliProvider implements ModelProvider {
   }
 }
 
-/** `codex exec` (read-only sandbox, ephemeral). Not yet tested against a live account. */
+/** `codex exec` (read-only sandbox, ephemeral, the person's own Codex config ignored). Measured live 2026-10-25:
+ * a whole first edit on the Day 86 take, 17 tool calls in 4 min. */
 export class CodexCliProvider implements ModelProvider {
   readonly id = 'codex-cli' as const;
   readonly supportsImages = true;
   readonly model?: string;
   constructor(private readonly o: CliOptions = {}) { this.model = o.model; }
 
-  private resolveBin(): { cmd: string; pre: string[] } {
-    if (this.o.bin) return { cmd: this.o.bin, pre: [] };
-    if (process.platform === 'win32') {
-      // Spawning codex.cmd needs a shell; run its node entry point directly instead.
-      const npmDir = path.join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-      if (fs.existsSync(npmDir)) return { cmd: process.execPath, pre: [npmDir] };
-    }
-    return { cmd: 'codex', pre: [] };
+  /** The binary the app found (index.ts), else `codex` on PATH. Never `process.execPath` + codex.js: inside the
+   * Electron app process.execPath is Reel Studio itself, not Node. */
+  private resolveBin(): string { return this.o.bin ?? 'codex'; }
+
+  /** `--ignore-user-config`: the person's MCP servers, plugins and notify hooks from ~/.codex/config.toml never run
+   * for an edit (their sign-in still works: it is not in that file). */
+  args(imageArgs: string[], out: string): string[] {
+    return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '--ignore-user-config',
+      ...(this.model ? ['-m', this.model] : []), ...imageArgs, '-o', out, ...(this.o.extraArgs ?? []), '-'];
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
@@ -387,15 +390,12 @@ export class CodexCliProvider implements ModelProvider {
         imageArgs.push('-i', f);
       }
       const out = path.join(dir, 'last.txt');
-      const { cmd, pre } = this.resolveBin();
-      const args = [...pre, 'exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never',
-        ...(this.model ? ['-m', this.model] : []), ...imageArgs, '-o', out, ...(this.o.extraArgs ?? []), '-'];
       let r: RunResult;
       try {
-        r = await runProcess(cmd, args, text, { cwd: dir, signal: req.signal, timeoutMs: this.o.timeoutMs ?? 600_000 });
+        r = await runProcess(this.resolveBin(), this.args(imageArgs, out), text, { cwd: dir, signal: req.signal, timeoutMs: this.o.timeoutMs ?? 600_000, env: cliEnv(this.o.env) });
       } catch (e: any) {
         if (e instanceof AIError) throw e;
-        throw new AIError('cli_missing', 'The codex command line tool is not installed or not on PATH.', { detail: e?.message });
+        throw new AIError('cli_missing', 'We could not start your Codex app. Connect ChatGPT again in Settings.', { detail: e?.message });
       }
       const reply = fs.existsSync(out) ? await fsp.readFile(out, 'utf8') : '';
       if (!reply.trim()) {
