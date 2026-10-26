@@ -41,8 +41,10 @@ NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"\.(pem|key|p12|p8|cer|mobileprovision|keychain)$",
     r"(^|/)\.claude/",
     r"\.log$",
-    r"\.(mp4|mov|m4v|mkv|avi|webm|mp3|m4a|aac|flac|ogg)$",
+    r"\.(mp4|mov|m4v|mkv|avi|webm|mp3|m4a|aac|flac|ogg|opus)$",
 )]
+# The one media folder that ships: the CC0 sound effects, each listed with its source in engine/THIRD_PARTY.md.
+SHIPPED_MEDIA = re.compile(r"^engine/reelengine/sfx/[a-z0-9-]+\.opus$")
 NEVER_COMMIT_EXACT = {"SPEC.md", "docs/PUBLISH.md"}
 NEVER_COMMIT_PREFIX = ("docs/RELEASE-NOTES",)
 
@@ -143,6 +145,8 @@ def is_text(path: str, data: bytes) -> bool:
 
 
 def never_commit(path: str) -> bool:
+    if SHIPPED_MEDIA.match(path):
+        return False
     return path in NEVER_COMMIT_EXACT or path.startswith(NEVER_COMMIT_PREFIX) or any(r.search(path) for r in NEVER_COMMIT)
 
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
 import { isStrict, validate } from '../src/schema';
@@ -8,7 +9,7 @@ import { FakeHost, makeProject, tinyPng } from './helpers';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
-  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
+  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_sfx', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
 
 async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string; root: string; events: AgentEvent[] }> {
   const { root, dir } = await makeProject();
@@ -116,6 +117,34 @@ describe('tool implementations', () => {
     p = await loadProject(dir);
     expect(p.broll.map((x) => x.id)).toEqual(['b2', 'b3', 'b4']);
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
+  });
+
+  it('sound effects: on a word, a b-roll or a cut that exist; an empty list leaves no trace', async () => {
+    const { ctx, dir } = await ctxFor();
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w40' }, { from: 'w44', to: 'w56' }] });
+    const nullP = { tilt: null, scale: null, text: null };
+    await executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { ...nullP, text: '$20' } });
+    const id = (await loadProject(dir)).broll[0].id;
+    const none = { word: null, broll: null, cut: null };
+    const ok = await executeTool(ctx, 'set_sfx', { sfx: [
+      { sound: 'whoosh-soft', at: { ...none, cut: 'w44' }, gainDb: null },
+      { sound: 'pop-plop', at: { ...none, broll: id }, gainDb: -3 },
+      { sound: 'click-soft', at: { ...none, word: 'w53' }, gainDb: null },
+    ] });
+    expect(ok.isError).toBe(false);
+    expect((await loadProject(dir)).sfx).toEqual([
+      { at: { cut: 'w44' }, sound: 'whoosh-soft' }, { at: { broll: id }, sound: 'pop-plop', gainDb: -3 }, { at: { word: 'w53' }, sound: 'click-soft' },
+    ]);
+    for (const at of [{ ...none, cut: 'w45' }, { ...none, cut: 'w16' }, { ...none, broll: 'nope' }, { ...none, word: 'w53', cut: 'w44' }, none]) {
+      expect((await executeTool(ctx, 'set_sfx', { sfx: [{ sound: 'pop-plop', at, gainDb: null }] })).isError).toBe(true);
+    }
+    expect((await loadProject(dir)).sfx).toHaveLength(3);
+    await executeTool(ctx, 'set_sfx', { sfx: [] });
+    expect('sfx' in JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8'))).toBe(false);
+  });
+
+  it('offers exactly the sounds the engine ships', () => {
+    execFileSync(process.execPath, [path.resolve(__dirname, '..', 'scripts', 'gen-sfx.mjs'), '--check']);
   });
 
   it('fetch_image downloads images only', async () => {

@@ -15,7 +15,8 @@ some points" at a +13 dB gap; +19 dB passed. So the mixer:
      returns, so a word is never fighting a swell
   5. applies the project's word-anchored automation (gainDb between two words)
   6. fades in gently (never a loud first frame) and fades out at the end
-  7. two-pass loudness: measure the mix, apply a static gain to -14 LUFS, true-peak limit
+  7. adds the project's sound effects (sfx.py), placed and levelled against the same voice
+  8. two-pass loudness: measure the mix, apply a static gain to -14 LUFS, true-peak limit
      (4x oversampled), measure again and correct the residual
 
 The music also gets a gentle low cut (highpass 90 Hz, -6 dB shelf at 160 Hz): the original
@@ -321,7 +322,7 @@ def normalize(ctx, x: np.ndarray, work: Path, tag: str = "mix") -> tuple[np.ndar
 
 
 def build_audio(ctx, voice_wav) -> Path:
-    """Cut voice wav (output timeline) + project.music -> work/audio/mix-<hash>.wav at -14 LUFS.
+    """Cut voice wav (output timeline) + project.music + project.sfx -> work/audio/mix-<hash>.wav at -14 LUFS.
     Writes work/audio/mix.json with the measured numbers."""
     voice_wav = Path(voice_wav)
     work = Path(ctx.work) / "audio"
@@ -340,10 +341,24 @@ def build_audio(ctx, voice_wav) -> Path:
         if not track.exists():
             raise EngineError("MUSIC_MISSING", f"music not found: {track}",
                               "The song for this video is missing. Pick another song.")
-    sig = hashlib.sha1(json.dumps([3, str(voice_wav), voice_wav.stat().st_size, voice_wav.stat().st_mtime_ns,
-                                   mcfg, str(track) if track else None,
-                                   track.stat().st_mtime_ns if track else None, offset], sort_keys=True,
-                                  default=str).encode()).hexdigest()[:12]
+    effects = None
+    if (ctx.project or {}).get("sfx"):
+        # built before the cache lookup so a failure keeps them out of the key, not just out of the mix
+        try:
+            from . import sfx as sfxmod
+            placed = sfxmod.plan(ctx)[0]
+            if placed:
+                effects, rows = sfxmod.track(ctx, placed, voice)
+                fx_key = sfxmod.signature(placed)
+        except Exception as exc:    # noqa: BLE001 -- a broken sound effect must never cost the music
+            effects = None
+            log(f"# sound effects skipped: {exc!r}")
+    key = [3, str(voice_wav), voice_wav.stat().st_size, voice_wav.stat().st_mtime_ns,
+           mcfg, str(track) if track else None, track.stat().st_mtime_ns if track else None, offset]
+    if effects is not None:
+        key.append(fx_key)
+        ctx.sfx_mixed = rows
+    sig = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:12]
     out = work / f"mix-{sig}.wav"
     rep_path = work / "mix.json"
     if out.exists() and rep_path.exists():
@@ -390,6 +405,9 @@ def build_audio(ctx, voice_wav) -> Path:
                      "measuredGapDb": None if gap is None else round(gap, 2),
                      "gapP10Db": None if gap_p10 is None else round(gap_p10, 2)})
         rep["music"] = mrep
+    if effects is not None:
+        mix = mix + effects
+        rep["sfx"] = rows
     report(ctx, "music", 70, "Balancing the sound")
     mix, lrep = normalize(ctx, mix, work)
     rep.update(lrep)

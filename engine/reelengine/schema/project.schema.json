@@ -152,6 +152,28 @@
         }
       }
     },
+    "sfx": {
+      "type": "array",
+      "description": "sound effects from the built-in pack (reelengine/sfx/pack.json), each hitting on one moment",
+      "items": {
+        "type": "object",
+        "required": ["at", "sound"],
+        "properties": {
+          "at": {
+            "type": "object",
+            "description": "exactly one of: word (that word starts), broll (that b-roll appears), cut (the cut into the kept range that starts with that word)",
+            "properties": {
+              "word": { "$ref": "#/$defs/wordId" },
+              "broll": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+              "cut": { "$ref": "#/$defs/wordId" }
+            },
+            "oneOf": [{ "required": ["word"] }, { "required": ["broll"] }, { "required": ["cut"] }]
+          },
+          "sound": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "gainDb": { "type": "number", "minimum": -24, "maximum": 12 }
+        }
+      }
+    },
     "cover": {
       "type": ["object", "null"],
       "properties": {
