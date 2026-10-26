@@ -39,7 +39,9 @@ NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"(^|/)release/",
     r"(^|/)\.env($|\.)",
     r"\.(pem|key|p12|p8|cer|mobileprovision|keychain)$",
-    r"(^|/)\.claude/",
+    # Local agent settings and transcripts stay out. The root .claude/skills/ is shared contributor
+    # guidance, and Claude Code loads project skills only from there.
+    r"^\.claude/(?!skills/)|/\.claude/",
     r"\.log$",
     r"\.(mp4|mov|m4v|mkv|avi|webm|mp3|m4a|aac|flac|ogg)$",
 )]
