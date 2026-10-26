@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as http from 'node:http';
-import { AnthropicProvider, AIError, runAgent, newToolState, StyleStore } from '../src';
+import { AnthropicProvider, AIError, runAgent, newToolState, StyleStore, pickTakes, ChatMessage } from '../src';
 import { toAnthropicMessages } from '../src/providers/anthropic';
-import { FakeHost, makeProject } from './helpers';
+import { pruneImages } from '../src/agent';
+import { FakeHost, makeProject, makeTranscript, SAMPLE_LINES } from './helpers';
 
 let server: http.Server | null = null;
 afterEach(() => { server?.closeAllConnections?.(); server?.close(); server = null; });
@@ -133,22 +134,64 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
       expect.objectContaining({ type: 'text', text: 'Reading it.' }),
       expect.objectContaining({ type: 'tool_use', id: 'toolu_1', name: 'get_project', input: {} }),
     ]);
+    const resultTurn = m.bodies[1].body.messages[2];
+    expect(resultTurn.role).toBe('user');
+    expect(resultTurn.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_1' });
   });
 
-  it('asks for edited history to drop stale thinking blocks instead of failing, on every request', async () => {
-    const m = await mockAnthropic((_b, _q, res) => streamToolUse(res));
+  it('after pruneImages edits an earlier tool result, still replays later thinking and asks to drop stale blocks', async () => {
+    const thinkingB = { type: 'thinking', thinking: 'Frame 2 is sharper.', signature: 'SIG-B==' };
+    const replies = [
+      [{ type: 'thinking', thinking: 'Look first.', signature: 'SIG-A==' }, { type: 'tool_use', id: 'toolu_1', name: 'look_at_frames', input: { times: [1] } }],
+      [thinkingB, { type: 'tool_use', id: 'toolu_2', name: 'look_at_frames', input: { times: [2] } }],
+      [{ type: 'text', text: 'ok' }],
+    ];
+    const m = await mockAnthropic((_b, _q, res) => streamBlocks(res, replies[m.bodies.length - 1], { stop_reason: 'tool_use' }));
     const p = new AnthropicProvider({ apiKey: 'k', baseURL: m.url });
-    const first = await p.complete({ system: 's', tools, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] });
-    await p.complete({ system: 's', tools, messages: [
-      { role: 'user', content: [{ type: 'text', text: 'go' }] },
-      { role: 'assistant', text: first.text, toolCalls: first.toolCalls, raw: first.raw },
-      { role: 'tool', results: [{ callId: 'toolu_1', name: 'set_cut', content: 'ok' }] },
-    ] });
-    expect(m.bodies).toHaveLength(2);
+    const image = { type: 'image' as const, mime: 'image/png', base64: 'AAAA' };
+    const messages: ChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }];
+    for (let step = 0; step < 3; step++) {
+      const r = await p.complete({ system: 's', tools, messages: pruneImages(messages) });
+      messages.push({ role: 'assistant', text: r.text, toolCalls: r.toolCalls, raw: r.raw });
+      for (const c of r.toolCalls) messages.push({ role: 'tool', results: [{ callId: c.id, name: c.name, content: 'frame', images: [image] }] });
+    }
     for (const { body, headers } of m.bodies) {
       expect(headers['anthropic-beta']).toContain('thinking-binding-controls-2026-08-01');
       expect(body.thinking).toMatchObject({ type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
     }
+    const third = m.bodies[2].body.messages;
+    expect(third[2].content[0].content).toEqual([{ type: 'text', text: 'frame\n(earlier images removed)' }]);
+    expect(third[3].content[0]).toEqual(thinkingB);
+  });
+
+  it('sends adaptive thinking only to models that support it, and checks the key with the same shape', async () => {
+    const m = await mockAnthropic((_b, _q, res) => streamToolUse(res));
+    for (const model of ['claude-sonnet-4-5', 'claude-sonnet-4-6']) {
+      const p = new AnthropicProvider({ apiKey: 'k', baseURL: m.url, model });
+      await p.complete({ system: 's', tools, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] });
+      await p.ping().catch(() => undefined);
+    }
+    const [oldEdit, oldPing, newEdit, newPing] = m.bodies;
+    for (const r of [oldEdit, oldPing]) {
+      expect(r.body.thinking).toBeUndefined();
+      expect(r.headers['anthropic-beta']).toBeUndefined();
+    }
+    for (const r of [newEdit, newPing]) {
+      expect(r.body.thinking).toEqual({ type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
+      expect(r.headers['anthropic-beta']).toContain('thinking-binding-controls-2026-08-01');
+    }
+  });
+
+  it('a JSON-correction retry sends the first reply back with its thinking unchanged', async () => {
+    const thinking = { type: 'thinking', thinking: 'Keep the second take.', signature: 'SIG-J==' };
+    const m = await mockAnthropic((_b, _q, res) => streamBlocks(res, m.bodies.length === 1
+      ? [thinking, { type: 'text', text: 'not json' }]
+      : [{ type: 'text', text: '{"keep":[{"from":"w16","to":"w26"}],"notes":"ok"}' }], { stop_reason: 'end_turn' }));
+    const r = await pickTakes(makeTranscript(SAMPLE_LINES), new AnthropicProvider({ apiKey: 'k', baseURL: m.url }));
+    expect(r.attempts).toBe(2);
+    const retried = m.bodies[1].body.messages[1];
+    expect(retried.role).toBe('assistant');
+    expect(retried.content[0]).toEqual(thinking);
   });
 
   it('a refusal stops with a plain message instead of an empty reply', async () => {
