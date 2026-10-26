@@ -240,3 +240,17 @@ export function testVendorEnv(base: NodeJS.ProcessEnv, platform: NodeJS.Platform
     ...(base.REELSTUDIO_TEST_BROWSER ? { BROWSER: base.REELSTUDIO_TEST_BROWSER } : {})
   })
 }
+
+/** Test switch, sign-in step only: the CLI's sign-in keeps the person's REAL home (so the browser it opens is their
+ * own, signed-in profile: with the throwaway USERPROFILE/LOCALAPPDATA, Chrome started an empty profile) and only its
+ * config folder is the throwaway one, so the sign-in still lands there and not in their own Claude Code / Codex. */
+export function testVendorLoginEnv(base: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv | null {
+  const home = base.REELSTUDIO_TEST_VENDOR_HOME
+  if (!home) return null
+  const P = platform === 'win32' ? win32 : posix
+  return vendorEnv(base, {
+    CLAUDE_CONFIG_DIR: P.join(home, '.claude'),
+    CODEX_HOME: P.join(home, '.codex'),
+    ...(base.REELSTUDIO_TEST_BROWSER ? { BROWSER: base.REELSTUDIO_TEST_BROWSER } : {})
+  })
+}

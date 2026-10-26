@@ -47,7 +47,7 @@ import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
-import { runInstall, runLogin, testVendorEnv, type Vendor } from './vendor-setup'
+import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
@@ -133,6 +133,7 @@ let vendors: VendorConnect
 // without touching the apps already on this computer (vendor-setup.ts testVendorEnv).
 const TEST_VENDOR_ENV = testVendorEnv(process.env, process.platform)
 const cliBaseEnv = (): NodeJS.ProcessEnv => TEST_VENDOR_ENV ?? process.env
+const TEST_LOGIN_ENV = testVendorLoginEnv(process.env, process.platform)
 let win: BrowserWindow | null = null
 
 function broadcast(channel: string, payload: unknown): void {
@@ -625,7 +626,7 @@ function createVendors(): VendorConnect {
       return TEST_VENDOR_ENV && process.platform === 'win32' && v === 'chatgpt' ? withUserPathKept(run, log) : run()
     },
     login: (v, bin, signal) =>
-      mock ? mock.login(v, signal) : runLogin({ vendor: v, bin, env: cliBaseEnv(), platform: process.platform, signal, systemRoot: process.env.SystemRoot }),
+      mock ? mock.login(v, signal) : runLogin({ vendor: v, bin, env: TEST_LOGIN_ENV ?? process.env, platform: process.platform, signal, systemRoot: process.env.SystemRoot }),
     select: (v) => ai.setActive(v === 'claude' ? 'claude-cli' : 'codex-cli'),
     emit: (i) => broadcast('ai:vendor', i),
     log

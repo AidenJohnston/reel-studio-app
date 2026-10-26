@@ -14,6 +14,7 @@ import {
   runInstall,
   runLogin,
   testVendorEnv,
+  testVendorLoginEnv,
   vendorEnv,
   type SpawnFn
 } from '../src/main/vendor-setup'
@@ -204,6 +205,15 @@ describe('environments', () => {
     expect(Object.keys(w).filter((k) => k.toLowerCase() === 'path')).toEqual(['PATH'])
     expect(w.OPENAI_API_KEY).toBeUndefined()
     expect(testVendorEnv({ REELSTUDIO_TEST_VENDOR_HOME: '/tmp/t', PATH: '/opt/homebrew/bin' }, 'darwin')).toMatchObject({ HOME: '/tmp/t', PATH: '/usr/bin:/bin:/usr/sbin:/sbin', CODEX_HOME: '/tmp/t/.codex' })
+  })
+
+  it('the test switch, sign-in step: the REAL home stays (the browser opens their own profile), only the config folders are throwaway', () => {
+    expect(testVendorLoginEnv({ PATH: 'x' }, 'win32')).toBeNull()
+    const base = { REELSTUDIO_TEST_VENDOR_HOME: 'C:\\t', USERPROFILE: 'C:\\Users\\me', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local', Path: 'C:\\real', OPENAI_API_KEY: 'k' }
+    const w = testVendorLoginEnv(base, 'win32')!
+    expect(w).toMatchObject({ USERPROFILE: 'C:\\Users\\me', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local', Path: 'C:\\real', CLAUDE_CONFIG_DIR: 'C:\\t\\.claude', CODEX_HOME: 'C:\\t\\.codex' })
+    expect(w.OPENAI_API_KEY).toBeUndefined()
+    expect(testVendorLoginEnv({ REELSTUDIO_TEST_VENDOR_HOME: '/tmp/t', HOME: '/Users/me' }, 'darwin')).toMatchObject({ HOME: '/Users/me', CLAUDE_CONFIG_DIR: '/tmp/t/.claude', CODEX_HOME: '/tmp/t/.codex' })
   })
 
   it('reads the user PATH and its type from reg query', () => {
