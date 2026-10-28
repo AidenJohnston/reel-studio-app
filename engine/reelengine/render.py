@@ -197,16 +197,31 @@ def _turn(rot: int) -> list:
     return {90: ["transpose=clock"], 270: ["transpose=cclock"], 180: ["hflip,vflip"]}.get(rot, [])
 
 
+def is_mirrored(src: Optional[dict]) -> bool:
+    """`sources[].mirror`: the take came out mirrored (a front-camera selfie: wall text, shirts and
+    signs read backwards), so the picture is flipped left to right. Absent or false = as shot."""
+    return bool(src) and src.get("mirror") is True
+
+
+def _mirror(src: Optional[dict]) -> list:
+    """The flip, LAST in the face-picture chain: after crop, scale and the upright turn, the output
+    is the mirror image of the same window (the crop is decided on the unflipped source, around the
+    face, exactly as without the flip). Everything drawn later (b-roll, zooms, captions) is not
+    flipped; readers of the face box in OUTPUT pixels mirror x (compose_util.map_box_rect)."""
+    return ["hflip"] if is_mirrored(src) else []
+
+
 def reframe_filter(src: dict, out_w: int, out_h: int, face: Optional[tuple], draft: bool) -> str:
     """Software path: crop (fewest pixels first), scale, then turn upright. Inputs are opened with
     -noautorotate: ffmpeg would otherwise insert a full-resolution transpose on EVERY use of the
-    input (one per segment), so rotation is done here, last, on the already-small frame."""
+    input (one per segment), so rotation is done here, last, on the already-small frame. A mirrored
+    take is flipped after that (`_mirror`)."""
     pl = reframe_plan(src, out_w, out_h, face)
     chain = []
     if (pl["rcw"], pl["rch"]) != (pl["rw"], pl["rh"]):
         chain.append(f"crop={pl['rcw']}:{pl['rch']}:{pl['rx']}:{pl['ry']}")
     chain.append(f"scale={pl['sw']}:{pl['sh']}:flags={'fast_bilinear' if draft else 'lanczos'}")
-    return ",".join(chain + _turn(pl["rot"]))
+    return ",".join(chain + _turn(pl["rot"]) + _mirror(src))
 
 
 def gpu_reframe(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> tuple:
@@ -222,7 +237,7 @@ def gpu_reframe(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> tup
     seg = []
     if (fw, fh) != (pl["sw"], pl["sh"]):
         seg.append(f"crop={pl['sw']}:{pl['sh']}:{cx}:{cy}")
-    return pre, ",".join(seg + _turn(pl["rot"]) + ["format=yuv420p"])
+    return pre, ",".join(seg + _turn(pl["rot"]) + _mirror(src) + ["format=yuv420p"])
 
 
 HDR_CHAIN = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"

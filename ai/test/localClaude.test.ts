@@ -28,7 +28,8 @@ function cli(o: { version?: { code: number; stdout: string } | Error; auth?: { c
 }
 const signedIn = cli({});
 const signedOut = cli({ auth: { code: 1, stdout: authJson(false) } });
-const noProvider = () => ({ host: new FakeHost(tmpDir()), settingsDir: tmpDir() });
+// never runs the real `codex` on this machine
+const noProvider = () => ({ host: new FakeHost(tmpDir()), settingsDir: tmpDir(), localCodex: { bin: null } });
 
 describe('where the Claude Code app is looked for', () => {
   it('macOS: PATH, the native installer, Homebrew, npm-global, nvm (newest first), volta, bun', () => {
@@ -165,11 +166,11 @@ describe('what detection reports', () => {
 });
 
 describe('the Claude Code choice in the provider list', () => {
-  it('offered to everyone, labelled for people, in its real state, between the API key and No AI', async () => {
+  it('offered to everyone, labelled for people, in its real state, after the API key, with the Codex app and No AI', async () => {
     for (const [run, connected] of [[signedIn, true], [signedOut, false]] as const) {
       const ai = createAI({ ...noProvider(), localClaude: { bin: '/x/claude', run } });
       const list = await ai.providers();
-      expect(list.map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'none']);
+      expect(list.map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'none']);
       const st = list.find((p) => p.id === 'claude-cli')!;
       expect(st).toMatchObject({ connected, label: 'Claude (your Claude Code app)' });
       expect(st.label).not.toBe('Claude Code');
@@ -179,11 +180,12 @@ describe('the Claude Code choice in the provider list', () => {
     expect(st).toMatchObject({ connected: false, error: { code: 'claude_code_missing' } });
   });
 
-  it('dev mode adds codex-cli and replay with their dev labels', async () => {
+  it('dev mode adds the retired ChatGPT sign-in and replay with their dev labels', async () => {
     const ai = createAI({ ...noProvider(), dev: true, localClaude: { bin: '/x/claude', run: signedIn } });
     const list = await ai.providers();
-    expect(list.map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
-    expect(list.find((p) => p.id === 'codex-cli')!.label).toBe('Codex CLI (dev)');
+    expect(list.map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'chatgpt', 'replay', 'none']);
+    expect(list.find((p) => p.id === 'codex-cli')!.label).toBe('ChatGPT (your Codex app)');
+    expect(list.find((p) => p.id === 'chatgpt')!.label).toBe('ChatGPT (dev)');
     expect(list.find((p) => p.id === 'replay')!.label).toBe('Replay (dev)');
     expect(list.find((p) => p.id === 'claude-cli')!.label).toBe('Claude (your Claude Code app)');
   });

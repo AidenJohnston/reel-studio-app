@@ -202,7 +202,7 @@ test(`${TAG}: first run + macOS chrome`, async () => {
     if (tl) expect((info.brand as { top: number }).top).toBeGreaterThanOrEqual(tl.y + 14 + 6)
 
     // ---- what the one build offers ----
-    expect(info.providers).toEqual(['chatgpt', 'claude', 'claude-cli', 'none'])
+    expect(info.providers).toEqual(['claude', 'claude-cli', 'codex-cli', 'none'])
     expect(String(info.connectText)).not.toMatch(CLAUDE_CODE_MISNAMED)
     if (USE_CLAUDE) expect(String(info.connectAi)).toBe('Claude (your Claude Code app)')
     else expect(info.connectAi).toBe('none')

@@ -19,6 +19,7 @@ const STAGE: Record<string, { message: string; pct: number }> = {
   update_broll: { message: 'Adjusting pictures', pct: 62 },
   remove_broll: { message: 'Adjusting pictures', pct: 62 },
   set_zoom: { message: 'Adding zooms', pct: 66 },
+  set_mirror: { message: 'Flipping your video', pct: 67 },
   cover_candidates: { message: 'Choosing a cover', pct: 69 },
   set_cover: { message: 'Choosing a cover', pct: 70 },
   write_post: { message: 'Writing your caption', pct: 75 },
