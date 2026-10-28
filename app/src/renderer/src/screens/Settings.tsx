@@ -1,7 +1,7 @@
 import type { AppInfo } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
-import { ConnectAI, DevProviders, ModelDownload, USING_CLAUDE_CODE } from '../components/connect'
+import { ConnectAI, DevProviders, ModelDownload, usingLine } from '../components/connect'
 import { FOLDER_APP } from '../components/ui'
 import { Icon } from '../components/icons'
 import { useUpdateState } from '../components/update'
@@ -41,7 +41,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <p className="muted" style={{ margin: '6px 0 14px' }}>
           It picks your best takes, adds pictures that match what you say, and changes your video from your notes.
         </p>
-        <ConnectAI onConnected={(p) => notify(p.id === 'claude-cli' ? USING_CLAUDE_CODE : `Connected to ${p.label}.`)} />
+        <ConnectAI onConnected={(p) => notify(usingLine(p))} />
       </section>
 
       <section className="panel">
