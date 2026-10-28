@@ -199,10 +199,13 @@ describe('no AI connected', () => {
   it('provider list hides dev providers unless dev: true', async () => {
     const host = new FakeHost(tmpDir());
     const localClaude = { bin: null }; // no Claude Code app here (never runs the real one)
-    expect((await createAI({ host, settingsDir: tmpDir(), localClaude }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'none']);
-    expect((await createAI({ host, settingsDir: tmpDir(), dev: true, localClaude }).providers()).map((p) => p.id)).toEqual(['chatgpt', 'claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
-    await expect(createAI({ host, settingsDir: tmpDir(), localClaude }).setActive('claude-cli')).rejects.toMatchObject({ code: 'not_available' });
-    await expect(createAI({ host, settingsDir: tmpDir(), localClaude }).setActive('codex-cli')).rejects.toMatchObject({ code: 'not_available' });
+    const localCodex = { bin: null }; // nor the real Codex app
+    expect((await createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).providers()).map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'none']);
+    expect((await createAI({ host, settingsDir: tmpDir(), dev: true, localClaude, localCodex }).providers()).map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'chatgpt', 'replay', 'none']);
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('claude-cli')).rejects.toMatchObject({ code: 'not_available' });
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('codex-cli')).rejects.toMatchObject({ code: 'not_available' });
+    // the retired in-app ChatGPT sign-in can no longer be chosen outside dev mode
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('chatgpt')).rejects.toMatchObject({ code: 'not_available' });
   });
 });
 

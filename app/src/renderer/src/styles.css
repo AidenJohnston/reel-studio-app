@@ -473,3 +473,16 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
   .progress > div::after, .phone-scan { display: none; }
 }
+
+/* Connect Claude / Connect ChatGPT (components/vendor-connect.tsx) */
+.vendor { display: flex; flex-direction: column; gap: 6px; }
+.vendor .sub { margin: -2px 0 2px; }
+.vendor.flow { gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.vendor.flow h3 { margin: 0; font-size: 16px; }
+.vendor .banner:not(.error) { background: var(--amber-soft); color: var(--amber-ink); }
+.vendor-line { display: flex; gap: 10px; align-items: flex-start; }
+.vendor-line .mark { width: 18px; min-height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--green); flex: none; }
+.vendor-line .what { display: flex; flex-direction: column; gap: 2px; }
+.vendor-line.later .what { color: var(--ink-3); }
+.vendor-line .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-4); }
+.vendor .hint { margin: 0 0 0 28px; }

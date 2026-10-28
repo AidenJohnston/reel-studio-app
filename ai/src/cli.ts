@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { AgentEvent, ModelProvider } from './types';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
+import { findCodex } from './providers/localCodex';
 import { AnthropicProvider } from './providers/anthropic';
 import { ReplayProvider, RecordingProvider } from './providers/replay';
 import { pickTakes } from './editor';
@@ -35,7 +36,7 @@ function makeProvider(flags: Record<string, string | true>, task: string): Model
   let p: ModelProvider;
   switch (id) {
     case 'claude-cli': p = new ClaudeCliProvider({ model }); break;
-    case 'codex-cli': p = new CodexCliProvider({ model }); break;
+    case 'codex-cli': p = new CodexCliProvider({ model, bin: findCodex() ?? undefined }); break;
     case 'claude': {
       const key = process.env.ANTHROPIC_API_KEY;
       if (!key) throw new Error('set ANTHROPIC_API_KEY for --provider claude');
