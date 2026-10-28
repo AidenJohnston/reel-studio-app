@@ -39,9 +39,9 @@ from pathlib import Path
 from typing import Optional
 
 from . import placement
-from .compose_util import (EngineError, _get, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
-                           open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_path,
-                           source_spans, word_end, word_ids_between, word_start)
+from .compose_util import (EngineError, _get, any_mirrored, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
+                           open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_mirrored,
+                           source_path, source_spans, word_end, word_ids_between, word_start)
 
 try:
     from .render_ctx import Layer
@@ -286,7 +286,8 @@ def output_faces(ctx, t0: float, t1: float) -> tuple[tuple, tuple]:
     for sid, a, b, _o in source_spans(ctx, t0, t1) or []:
         rect = reframe_rect(ctx, sid)          # decided before any face file is written
         tr = placement.track_for_source(ctx, sid)
-        o = placement.output_face(tr, a, b, {**frame, "reframe": rect})
+        # a mirrored take is flipped after the crop: the face sits at W - x - w in the output
+        o = placement.output_face(tr, a, b, {**frame, "reframe": rect, "mirror": source_mirrored(ctx, sid)})
         faces.append(o["face"])
         cores.append(o["core"])
     if not faces:
@@ -643,7 +644,10 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     W, H, fps = fmt_of(ctx)
     d = layers_dir(ctx)
     # the window is part of the name: the speaker half is cut from t0..t1, so a re-anchored split must not reuse it
-    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3))}.mp4"
+    # the speaker half is cut from the source with reframe_vf: a flipped take must not reuse an
+    # unflipped file (an unmirrored project keeps the key it always had)
+    flip = ("mirror",) if any_mirrored(ctx) else ()
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip)}.mp4"
     if out.exists():
         return out
     dur = t1 - t0

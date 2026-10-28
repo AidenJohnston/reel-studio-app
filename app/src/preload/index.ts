@@ -1,6 +1,6 @@
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateNotice } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateNotice, VendorInfo } from '../shared/api'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as
@@ -38,9 +38,6 @@ const api: ReelApi = {
     providers: () => call('ai:providers'),
     active: () => call('ai:active'),
     setActive: (id, connectionId) => call('ai:setActive', id, connectionId),
-    signInChatGPT: () => call('ai:signInChatGPT'),
-    cancelSignIn: () => call('ai:cancelSignIn'),
-    signOutChatGPT: () => call('ai:signOutChatGPT'),
     setClaudeKey: (k) => call('ai:setClaudeKey', k),
     claudeCodeStatus: () => call('ai:claudeCodeStatus'),
     openClaudeSignIn: () => call('ai:openClaudeSignIn'),
@@ -49,7 +46,12 @@ const api: ReelApi = {
     removeConnection: (id) => call('ai:removeConnection', id),
     setConnectionImages: (id, on) => call('ai:setConnectionImages', id, on),
     connectionModels: (q) => call('ai:connectionModels', q),
-    onChange: (cb) => on<ProviderInfo>('ai:change', cb)
+    onChange: (cb) => on<ProviderInfo>('ai:change', cb),
+    vendorStatus: (v) => call('ai:vendorStatus', v),
+    vendorConnect: (v) => call('ai:vendorConnect', v),
+    vendorCancel: (v) => call('ai:vendorCancel', v),
+    vendorSignInAgain: (v) => call('ai:vendorSignInAgain', v),
+    onVendor: (cb) => on<VendorInfo>('ai:vendor', cb)
   },
   projects: {
     list: () => call('projects:list'),

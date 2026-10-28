@@ -152,10 +152,10 @@ describe('parallel tool calls', () => {
       ] },
       (req) => { results = (req.messages.at(-1) as any).results; return { toolCalls: [call('finish', { summary_for_user: 'ok' })] }; },
     ]);
-    const t0 = Date.now();
     await runAgent({ provider: model, system: 's', task: 't', ctx: ctxOf(dir, host), onEvent: () => undefined });
+    // 4 slow calls were in flight at once (it would be 1 if they ran one by one). Counted, not timed: a wall-clock
+    // limit failed on a busy machine.
     expect(host.peak).toBe(4);
-    expect(Date.now() - t0).toBeLessThan(6 * 60 + 2 * 60);          // 8 slow calls, not run one by one
     expect(results.map((r) => r.name)).toEqual([...Array(6).fill('search_images'), 'set_gap_cap', 'fetch_image', 'fetch_image']);
     expect(results.every((r) => !r.isError)).toBe(true);
     // the edit between the two runs of searches/downloads did not overlap either of them

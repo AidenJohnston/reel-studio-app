@@ -17,6 +17,7 @@ import { ReplayProvider } from './providers/replay';
 import { CONNECTION_KINDS, ConnectionKind, listConnectionModels, noRedirectFetch, normalizeBaseURL, suggestedModel } from './providers/connection';
 import { OpenAICompatibleProvider } from './providers/openaiCompatible';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
+import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
 
 export * from './types';
@@ -35,6 +36,9 @@ export { OpenAICompatibleProvider } from './providers/openaiCompatible';
 export type { ConnectionKind } from './providers/connection';
 export { detectLocalClaude, findClaude, claudeCandidates, claudeFromLoginShell, CLAUDE_CODE_MESSAGES } from './providers/localClaude';
 export type { LocalClaude, ClaudeCodeState } from './providers/localClaude';
+export { detectCodex, findCodex, codexCandidates, codexFromLoginShell, CODEX_MESSAGES } from './providers/localCodex';
+export type { LocalCodex, CodexState } from './providers/localCodex';
+export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
 export type { ApplyNoteOptions } from './editor';
 export { ATTACHMENT_REF, MAX_ATTACHMENTS_PER_NOTE, readAttachment, listAttachments, validateAttachments, placedAssets } from './attachments';
@@ -45,10 +49,14 @@ export interface AISettings {
   claudeModel?: string;
   chatgptModel?: string;
   cliModel?: string;
+  /** the model for "ChatGPT (your Codex app)"; unset = the Codex app's own default for the person's plan */
+  codexModel?: string;
   replayFixture?: string;
   /** each connection's key is its own encrypted file, never in here */
   connections?: CustomConnection[];
   activeConnection?: string;
+  /** set when the old in-app "Sign in with ChatGPT" was signed out on upgrade; cleared once the Codex app is chosen */
+  chatgptMoved?: boolean;
 }
 
 export interface CustomConnection {
@@ -89,6 +97,11 @@ export interface CreateAIOptions {
   dev?: boolean;
   /** test hook: how the person's own Claude Code app (`claude`) is found and run for detection */
   localClaude?: DetectOptions;
+  /** test hook: how the person's own Codex app (`codex`) is found and run for detection */
+  localCodex?: CodexDetectOptions;
+  /** The environment the person's own CLIs get (detection and edits). The app's test switch points it at a throwaway
+   * config folder. ANTHROPIC_* and OPENAI_* are always removed. Default: process.env. */
+  cliEnv?: () => NodeJS.ProcessEnv;
   /** Electron `safeStorage` (or compatible). Without it (or when it cannot encrypt) secrets are NOT
    * saved, unless allowPlaintextSecrets is set. */
   secretStore?: SecretStore;
@@ -113,10 +126,14 @@ export interface CreateAIOptions {
 // claude-cli = the person's own Claude Code app, offered to everyone. It is never called "Claude Code" on its own:
 // Reel Studio is not Claude Code, it uses the Claude Code app the person signed in to themselves.
 export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)';
+// codex-cli = the person's own Codex app (OpenAI's `codex` CLI), signed in with their ChatGPT plan.
+export const CODEX_LABEL = 'ChatGPT (your Codex app)';
 const LABELS: Record<ProviderId, string> = {
-  chatgpt: 'ChatGPT', claude: 'Claude', 'codex-cli': 'Codex CLI (dev)', 'claude-cli': CLAUDE_CODE_LABEL, custom: 'Your own server', replay: 'Replay (dev)', none: 'No AI',
+  chatgpt: 'ChatGPT (dev)', claude: 'Claude', 'codex-cli': CODEX_LABEL, 'claude-cli': CLAUDE_CODE_LABEL, custom: 'Your own server', replay: 'Replay (dev)', none: 'No AI',
 };
-const PEOPLE_PROVIDERS: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', 'custom', 'none'];
+// "Sign in with ChatGPT" (chatgpt, SIWC) is retired for people: ChatGPT goes through the person's own Codex app.
+// It stays reachable in dev mode only until siwc.ts is deleted (the release after the one-time sign-out).
+const PEOPLE_PROVIDERS: ProviderId[] = ['claude', 'claude-cli', 'codex-cli', 'custom', 'none'];
 
 const LOCAL_CLAUDE_TTL_MS = 60_000;
 
@@ -124,8 +141,16 @@ export function createAI(opts: CreateAIOptions) {
   let localCache: { at: number; v: LocalClaude } | null = null;
   async function localClaude(fresh = false): Promise<LocalClaude> {
     if (!fresh && localCache && Date.now() - localCache.at < LOCAL_CLAUDE_TTL_MS) return localCache.v;
-    const v = await detectLocalClaude(opts.localClaude ?? {});
+    const v = await detectLocalClaude({ env: env(), ...(opts.localClaude ?? {}) });
     localCache = { at: Date.now(), v };
+    return v;
+  }
+  const env = (): NodeJS.ProcessEnv => opts.cliEnv?.() ?? process.env;
+  let codexCache: { at: number; v: LocalCodex } | null = null;
+  async function localCodex(fresh = false): Promise<LocalCodex> {
+    if (!fresh && codexCache && Date.now() - codexCache.at < LOCAL_CLAUDE_TTL_MS) return codexCache.v;
+    const v = await detectCodex({ env: env(), ...(opts.localCodex ?? {}) });
+    codexCache = { at: Date.now(), v };
     return v;
   }
   const settingsFile = path.join(opts.settingsDir, 'ai-settings.json');
@@ -260,7 +285,14 @@ export function createAI(opts: CreateAIOptions) {
         // an Anthropic-compatible server always needs a key (connectionProvider); an OpenAI-compatible one may not
         return { ...base, connected: c.kind === 'openai' || !!key };
       }
-      case 'codex-cli': return { id, connected: true, label: LABELS['codex-cli'], detail: s.cliModel };
+      case 'codex-cli': {
+        // detail is the CLI version at most: never the account
+        const lc = await localCodex();
+        return {
+          id, connected: lc.state === 'ready', label: LABELS['codex-cli'], ...(lc.version ? { detail: lc.version } : {}),
+          ...(lc.state === 'ready' ? {} : { error: { code: `codex_${lc.state}`, userMessage: lc.reason ?? 'Your Codex app is not ready.' } }),
+        };
+      }
       case 'replay': {
         const f = s.replayFixture ?? process.env.REELSTUDIO_REPLAY;
         return { id, connected: !!(f && fs.existsSync(f)), label: LABELS.replay, detail: f };
@@ -271,9 +303,10 @@ export function createAI(opts: CreateAIOptions) {
 
   async function providers(): Promise<ProviderStatus[]> {
     // claude-cli is always listed, in its real state (the Connect screen shows how to get it ready)
+    // the person's own CLIs are always listed, in their real state (the Connect screen shows how to get them ready)
     const custom: ProviderId[] = (await settings()).connections?.length ? ['custom'] : [];
-    const ids: ProviderId[] = ['chatgpt', 'claude', 'claude-cli', ...custom, ...(opts.dev ? (['codex-cli', 'replay'] as ProviderId[]) : []), 'none'];
-    await localClaude(true);
+    const ids: ProviderId[] = ['claude', 'claude-cli', 'codex-cli', ...custom, ...(opts.dev ? (['chatgpt', 'replay'] as ProviderId[]) : []), 'none'];
+    await Promise.all([localClaude(true), localCodex(true)]);
     return Promise.all(ids.map(statusOf));
   }
 
@@ -284,9 +317,9 @@ export function createAI(opts: CreateAIOptions) {
       if (st.connected) return st;
     }
     if (s.active === 'none') return statusOf('none');
-    // Several connected and none chosen: Claude first (the provider that measured best in testing).
-    // Never falls back to claude-cli: it spends the person's own Claude plan, so only their click turns it on.
-    for (const id of ['claude', 'chatgpt'] as ProviderId[]) {
+    // Nothing chosen: an Anthropic API key, if one is saved. Never falls back to claude-cli or codex-cli: they spend
+    // the person's own plan, so only their click turns them on.
+    for (const id of (opts.dev ? ['claude', 'chatgpt'] : ['claude']) as ProviderId[]) {
       const st = await statusOf(id);
       if (st.connected) return st;
     }
@@ -311,7 +344,11 @@ export function createAI(opts: CreateAIOptions) {
       case 'claude-cli': {
         const bin = (await localClaude()).bin;
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
-        return new ClaudeCliProvider({ model: s.cliModel, session: true, ...(bin ? { bin } : {}) });
+        return new ClaudeCliProvider({ model: s.cliModel, session: true, env: env(), ...(bin ? { bin } : {}) });
+      }
+      case 'codex-cli': {
+        const bin = (await localCodex()).bin;
+        return new CodexCliProvider({ model: s.codexModel, env: env(), ...(bin ? { bin } : {}) });
       }
       case 'custom':
         // read the address and its key together, never halfway through a save that changes both
@@ -320,7 +357,6 @@ export function createAI(opts: CreateAIOptions) {
           if (!c) throw new AIError('no_ai', 'That connection is no longer saved. Pick your AI editor again in Settings.');
           return connectionProvider(c, await readSecret(connectionSecret(c.id)));
         });
-      case 'codex-cli': return new CodexCliProvider({ model: s.cliModel });
       case 'replay': return new ReplayProvider((s.replayFixture ?? process.env.REELSTUDIO_REPLAY)!);
       default: return null;
     }
@@ -400,10 +436,15 @@ export function createAI(opts: CreateAIOptions) {
       if (id === 'claude-cli') {
         const lc = await localClaude(true);
         if (lc.state !== 'ready') throw new AIError('not_available', lc.reason ?? 'Your Claude Code app is not ready.');
+      } else if (id === 'codex-cli') {
+        const lc = await localCodex(true);
+        if (lc.state !== 'ready') throw new AIError('not_available', lc.reason ?? 'Your Codex app is not ready.');
+        await saveSettings({ active: id, chatgptMoved: undefined });
+        return;
       } else if (!opts.dev && !PEOPLE_PROVIDERS.includes(id)) {
         throw new AIError('not_available', 'That option is not available.');
       }
-      await saveSettings({ active: id });
+      await saveSettings({ active: id, ...(id === 'claude-cli' ? { chatgptMoved: undefined } : {}) });
     },
     async signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus> {
       try {
@@ -419,6 +460,22 @@ export function createAI(opts: CreateAIOptions) {
     /** A fresh look at the person's own Claude Code app: state, version, plan kind and the binary path (for the
      * app's sign-in window). Never an e-mail, organization or token. */
     async claudeCodeStatus(): Promise<LocalClaude> { return localClaude(true); },
+    /** A fresh look at the person's own Codex app: state, version, kind of sign-in and the binary path (for the app's
+     * sign-in). Never an e-mail, a key or a token. `chatgptMoved`: the old in-app sign-in was retired on upgrade. */
+    async codexStatus(): Promise<LocalCodex & { chatgptMoved?: boolean }> {
+      const v = await localCodex(true);
+      return { ...v, ...((await settings()).chatgptMoved ? { chatgptMoved: true } : {}) };
+    },
+    /** Once, at start-up: "Sign in with ChatGPT" is retired. A saved session is signed out (the renewable token revoked,
+     * the files deleted) and a choice of it cleared. Returns true when there was something to retire. */
+    async retireSignInWithChatGPT(): Promise<boolean> {
+      const s = await settings();
+      const files = ['chatgpt-credentials.bin', 'chatgpt-credentials.json'].some((f) => fs.existsSync(path.join(opts.settingsDir, f)));
+      if (!files && s.active !== 'chatgpt') return false;
+      if (files) await siwc.signOut().catch(() => undefined);
+      await saveSettings({ ...(s.active === 'chatgpt' ? { active: undefined } : {}), chatgptMoved: true });
+      return true;
+    },
     async signOutChatGPT(): Promise<void> {
       await siwc.signOut();
       const s = await settings();

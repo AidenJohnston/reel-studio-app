@@ -26,7 +26,12 @@ cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Wind
 npm test                        # app + ai
 npm run typecheck
 cd engine && python -m pytest tests
+python scripts/leak-check/check.py   # also runs on every pull request
 ```
+
+The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
+Its list of private terms is stored only as fingerprints, so a finding names the line, not the word. If it
+flags something that is not private, say so in the pull request.
 
 Tests that read your own videos or music are marked `real` and skip themselves when the files are absent;
 put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TEST_TAKES` and
