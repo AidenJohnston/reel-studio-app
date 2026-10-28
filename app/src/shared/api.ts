@@ -144,7 +144,8 @@ export interface ProjectJson {
   updatedAt: string
   version: number
   format?: { width: number; height: number; fps: number }
-  sources?: { id: string; path: string; duration?: number }[]
+  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed) */
+  sources?: { id: string; path: string; duration?: number; rotation?: number; mirror?: boolean }[]
   transcript?: { file: string; language?: string }
   cut?: { keep: { from: string; to: string }[]; gapCap?: number; minSaving?: number }
   captions?: {
@@ -265,6 +266,33 @@ export interface AppInfo {
 /** The person's own Claude Code app: not found / found but will not start / not signed in / ready. */
 export type ClaudeCodeState = 'missing' | 'broken' | 'signed_out' | 'ready'
 
+/** "Connect Claude" / "Connect ChatGPT": the person's own Claude Code app or Codex app (main/vendor-connect.ts). */
+export type VendorId = 'claude' | 'chatgpt'
+/** idle = nothing running; installing = the vendor's installer runs; signing_in = the vendor's page is open in the
+ * browser; checking = asking the app if it worked; done = it is the AI editor now; failed = see `problem`. */
+export type VendorStep = 'idle' | 'installing' | 'signing_in' | 'checking' | 'done' | 'failed'
+export type VendorProblem =
+  | 'install_failed'
+  | 'not_found_after_install'
+  | 'sign_in_failed'
+  | 'sign_in_timeout'
+  | 'port_busy'
+  | 'free_plan'
+  | 'cancelled'
+
+/** What the page learns about a vendor's app. Never the account, a path, a sign-in link or a code. */
+export interface VendorInfo {
+  vendor: VendorId
+  state: ClaudeCodeState
+  step: VendorStep
+  version?: string
+  /** the plan kind when the app says it (Claude: "pro", "max") */
+  plan?: string
+  /** plain words for the person */
+  message?: string
+  problem?: VendorProblem
+}
+
 /** What the page learns about it. Never the account (no e-mail, no organization), never a path. */
 export interface ClaudeCodeInfo {
   state: ClaudeCodeState
@@ -358,14 +386,21 @@ export interface ReelApi {
     providers(): Promise<ProviderInfo[]>
     active(): Promise<ProviderInfo>
     setActive(id: ProviderInfo['id']): Promise<void>
-    signInChatGPT(): Promise<ProviderInfo>
-    cancelSignIn(): Promise<void>
-    signOutChatGPT(): Promise<void>
     setClaudeKey(key: string | null): Promise<ProviderInfo>
     /** A fresh look at the person's own Claude Code app. */
     claudeCodeStatus(): Promise<ClaudeCodeInfo>
-    /** Opens a terminal window where the person signs in to their Claude Code app themselves. */
+    /** Opens a terminal window where the person signs in to their Claude Code app themselves (the fallback when the
+     * browser sign-in shows a code instead of coming back). */
     openClaudeSignIn(): Promise<void>
+    /** A fresh look at a vendor's app, plus the step of a connect in progress. */
+    vendorStatus(v: VendorId): Promise<VendorInfo>
+    /** Installs the vendor's app if missing, starts its own sign-in in the browser, then makes it the AI editor.
+     * Resolves when that ends (done, failed or cancelled); every step also arrives on onVendor. */
+    vendorConnect(v: VendorId): Promise<VendorInfo>
+    vendorCancel(v: VendorId): Promise<void>
+    /** Restarts a waiting sign-in so the vendor's app opens a fresh page. */
+    vendorSignInAgain(v: VendorId): Promise<void>
+    onVendor(cb: (i: VendorInfo) => void): () => void
   }
   projects: {
     list(): Promise<ProjectSummary[]>

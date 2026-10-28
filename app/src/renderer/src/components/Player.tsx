@@ -200,6 +200,7 @@ export function PhonePlayer({
   warmOriginal,
   holdingOriginal,
   still,
+  stillMirrored,
   onDuration,
   dragFile,
   marks,
@@ -232,6 +233,8 @@ export function PhonePlayer({
   holdingOriginal?: boolean
   /** A still frame (the raw take, no subtitles burned in) under the subtitle preview. */
   still?: string | null
+  /** The take is mirrored and the video flips it: show the still flipped too, so it matches. */
+  stillMirrored?: boolean
   onDuration?: (seconds: number) => void
   /** The file on disk: drag the phone out of the window to put the reel on the desktop or in an upload box. */
   dragFile?: string | null
@@ -524,7 +527,7 @@ export function PhonePlayer({
               />
             )}
             {still && subtitle && !holdingOriginal && (
-              <Video className="raw-video on" key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
+              <Video className={`raw-video on${stillMirrored ? ' mirrored' : ''}`} key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
             {/* always on the page, so a screen reader announces each change of its words */}
             <div className={holdTag ? 'phone-tag' : undefined} role="status" data-testid="original-tag">
