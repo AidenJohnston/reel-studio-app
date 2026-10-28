@@ -28,6 +28,8 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
   const jobRef = useRef<string | null>(null)
   const [source, setSource] = useState<string | null>(null)
   const [frameShown, setFrameShown] = useState(false)
+  // the take is flipped at render (it was mirrored): its first frame here is shown flipped too
+  const [mirrored, setMirrored] = useState(false)
   const [heard, setHeard] = useState<string[]>([])
   // Everything the job flow says while it runs (shared/live.ts): bar, time left, thinking, first look.
   const [live, setLive] = useState<LiveState>(EMPTY_LIVE)
@@ -41,6 +43,7 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
       .get(slug)
       .then((d) => {
         if (d.sourceVideo) setSource(d.sourceVideo)
+        setMirrored(d.project.sources?.[0]?.mirror === true)
         if (d.words.length) setHeard(d.words.map((w) => w.w))
       })
       .catch(() => {})
@@ -54,6 +57,7 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
         if (!live) return
         setTitle(d.title)
         if (d.sourceVideo) setSource(d.sourceVideo)
+        setMirrored(d.project.sources?.[0]?.mirror === true)
         if (d.words.length) setHeard(d.words.map((w) => w.w))
         if (d.job) {
           jobRef.current = d.job.id
@@ -136,7 +140,7 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
               <div className={`phone-screen${frameShown ? '' : ' waiting'}`} data-testid="working-screen">
                 {source && (
                   <video
-                    className={`still${frameShown ? ' shown' : ''}`}
+                    className={`still${mirrored ? ' mirrored' : ''}${frameShown ? ' shown' : ''}`}
                     src={`${source}#t=0.5`}
                     preload="auto"
                     muted
