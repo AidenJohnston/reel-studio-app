@@ -36,7 +36,7 @@ async function dropOnWindow(page: Page, paths: string[], release = true): Promis
 /** Pretend an AI editor is signed in, for the screenshots of the connected states (no AI runs). */
 async function stubConnected(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ ipcMain }) => {
-    const p = { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: 'zoe@example.com' }
+    const p = { id: 'codex-cli', connected: true, label: 'ChatGPT (your Codex app)', detail: '0.164.0' }
     ipcMain.removeHandler('ai:active')
     ipcMain.handle('ai:active', async () => ({ ok: true, value: p }))
   })
@@ -162,14 +162,15 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   st.aiEdited = true
   writeFileSync(appJson, JSON.stringify(st, null, 2))
   await page.getByTestId('nav-settings').click()
-  await expect(page.getByTestId('ai-connected-banner')).toContainText('Connected to ChatGPT')
-  await expect(page.getByTestId('signin-chatgpt')).toHaveCount(0) // folded away
+  await expect(page.getByTestId('ai-connected-banner')).toContainText('Using ChatGPT through your Codex app.')
+  await expect(page.getByTestId('connect-claude')).toHaveCount(0) // folded away
   await expect(page.getByTestId('use-different-ai')).toBeVisible()
   await expect(page.getByTestId('root-display')).toContainText('Reel Studio')
   await expect(page.getByTestId('root-display')).not.toContainText('~')
   await shot(page, 'd-10-settings-connected')
   await page.getByTestId('use-different-ai').click()
-  await expect(page.getByTestId('signin-chatgpt')).toBeVisible()
+  await expect(page.getByTestId('connect-claude')).toBeVisible()
+  await expect(page.getByTestId('vendor-chatgpt')).toHaveCount(0) // the one in use is not offered again
   await shot(page, 'd-11-settings-different-ai')
   await page.getByTestId('nav-home').click()
   await expect(page.getByTestId('ai-status')).toContainText('AI editor: ChatGPT')

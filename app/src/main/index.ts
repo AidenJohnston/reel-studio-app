@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
@@ -14,6 +14,7 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
+import { logDuration } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -47,11 +48,15 @@ import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
+import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
+import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
+import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, PlacedWord, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { aiNoteText, checkMoment, momentRoute, parseMoment, placeWords, typedMoment, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
+import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -85,6 +90,25 @@ function log(line: string): void {
   }
 }
 
+app.on('render-process-gone', (_event, contents, details) => {
+  log(`[render-process-gone] type=Renderer webContentsId=${contents.id} reason=${details.reason} exitCode=${details.exitCode}`)
+})
+app.on('child-process-gone', (_event, details) => {
+  log(`[child-process-gone] type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
+})
+app.on('browser-window-created', (_event, window) => {
+  window.on('unresponsive', () => log(`[unresponsive] type=Renderer windowId=${window.id}`))
+  window.on('responsive', () => log(`[responsive] type=Renderer windowId=${window.id}`))
+})
+
+function showOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> {
+  return logDuration(`[dialog] ${options.title ?? 'Open folder'}`, log, async () => {
+    const result = await dialog.showOpenDialog(win!, options)
+    log(`[dialog] returned canceled=${result.canceled} selectedCount=${result.filePaths.length}`)
+    return result
+  })
+}
+
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
 let pidRegistry: ReturnType<typeof createPidRegistry> | null = null
 const runEngine: RunEngine = createEngineRunner({
@@ -105,6 +129,14 @@ const host: EngineHost = {
 
 let ai: AI
 let aiSource: 'package' | 'mock' = 'mock'
+let vendors: VendorConnect
+
+// The environment the person's own Claude Code / Codex apps get. Normally the app's own; the test switch
+// REELSTUDIO_TEST_VENDOR_HOME swaps in a throwaway home (a fresh machine) so a real install + sign-in can be tried
+// without touching the apps already on this computer (vendor-setup.ts testVendorEnv).
+const TEST_VENDOR_ENV = testVendorEnv(process.env, process.platform)
+const cliBaseEnv = (): NodeJS.ProcessEnv => TEST_VENDOR_ENV ?? process.env
+const TEST_LOGIN_ENV = testVendorLoginEnv(process.env, process.platform)
 let win: BrowserWindow | null = null
 
 function broadcast(channel: string, payload: unknown): void {
@@ -340,7 +372,7 @@ function registerIpc(): void {
     }
   })
   handle('app:chooseFolder', async () => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
+    const r = await showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
@@ -373,7 +405,7 @@ function registerIpc(): void {
       return null
     },
     choose: async (filters) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Attach a picture or a clip', properties: ['openFile', 'multiSelections'], filters })
+      const r = await showOpenDialog({ title: 'Attach a picture or a clip', properties: ['openFile', 'multiSelections'], filters })
       return r.canceled ? null : r.filePaths
     }
   })
@@ -385,9 +417,6 @@ function registerIpc(): void {
   handle('ai:providers', () => ai.providers())
   handle('ai:active', () => ai.active())
   handle('ai:setActive', (_e, id) => ai.setActive(id))
-  handle('ai:signInChatGPT', () => ai.signInChatGPT((url) => shell.openExternal(url)))
-  handle('ai:cancelSignIn', () => ai.cancelSignInChatGPT?.())
-  handle('ai:signOutChatGPT', () => ai.signOutChatGPT())
   handle('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
   // The person's own Claude Code app: the page gets the state only; the sign-in happens in Anthropic's CLI.
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
@@ -398,6 +427,15 @@ function registerIpc(): void {
     const open = aiSource === 'mock' ? async () => (ai.mockClaudeSignInOpened?.(), '') : (f: string) => shell.openPath(f)
     await openSignInWindow(st.bin, { dir: join(settingsDir(), 'claude-sign-in'), platform: process.platform, open })
   })
+  // "Connect Claude" / "Connect ChatGPT" (vendor-connect.ts): the page gets VendorInfo only.
+  const vendorOf = (v: unknown): Vendor => {
+    if (v !== 'claude' && v !== 'chatgpt') throw { code: 'BAD_INPUT', userMessage: 'Unknown AI.' }
+    return v
+  }
+  handle('ai:vendorStatus', (_e, v) => vendors.status(vendorOf(v)))
+  handle('ai:vendorConnect', (_e, v) => vendors.connect(vendorOf(v)))
+  handle('ai:vendorCancel', (_e, v) => vendors.cancel(vendorOf(v)))
+  handle('ai:vendorSignInAgain', (_e, v) => void vendors.signInAgain(vendorOf(v)))
 
   handle('projects:list', () => listProjects())
   handle('projects:get', async (_e, slug: string) => {
@@ -514,6 +552,11 @@ function registerIpc(): void {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
     const p = await readProject(slug)
     for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+      // the "Flip picture" toggle: only each take's mirror flag, never its path or size
+      if (k === 'sources') {
+        p.sources = mergeSourcesPatch(p.sources, patch.sources)
+        continue
+      }
       if (!EDITABLE.includes(k)) continue
       ;(p as any)[k] = (patch as any)[k]
     }
@@ -574,7 +617,7 @@ function registerIpc(): void {
       kind === 'music'
         ? [{ name: 'Songs', extensions: ['mp3', 'm4a', 'wav', 'aac', 'flac', 'ogg'] }]
         : [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'heic'] }]
-    const r = await dialog.showOpenDialog(win!, {
+    const r = await showOpenDialog({
       title: kind === 'music' ? 'Pick a song' : 'Pick pictures',
       properties: ['openFile', 'multiSelections'],
       filters
@@ -616,6 +659,28 @@ function registerIpc(): void {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
     if (template) return host.renderAnimation(template, params ?? {}, outPath)
     return host.renderAnimation(TEST_TEMPLATE, { text: 'Hi', duration: fullSize ? 2 : 1 }, outPath)
+  })
+}
+
+/** "Connect Claude" / "Connect ChatGPT": real installers and sign-ins, or the mock's (REELSTUDIO_MOCK_CLAUDE / _CODEX). */
+function createVendors(): VendorConnect {
+  const status = async (v: Vendor): Promise<CliStatus> =>
+    (v === 'claude' ? await ai.claudeCodeStatus?.() : await ai.codexStatus?.()) ?? { state: 'missing' }
+  const mock = aiSource === 'mock' ? ai.mockVendor : undefined
+  return createVendorConnect({
+    status,
+    install: (v, signal) => {
+      if (mock) return mock.install(v, signal)
+      const run = (): Promise<void> =>
+        runInstall({ vendor: v, platform: process.platform, dir: join(settingsDir(), 'vendor-setup'), env: cliBaseEnv(), fetch: (u, i) => net.fetch(u, i), signal, systemRoot: process.env.SystemRoot, log })
+      // Test switch only: OpenAI's Windows installer rewrites the user PATH; put it back exactly as it was.
+      return TEST_VENDOR_ENV && process.platform === 'win32' && v === 'chatgpt' ? withUserPathKept(run, log) : run()
+    },
+    login: (v, bin, signal) =>
+      mock ? mock.login(v, signal) : runLogin({ vendor: v, bin, env: TEST_LOGIN_ENV ?? process.env, platform: process.platform, signal, systemRoot: process.env.SystemRoot }),
+    select: (v) => ai.setActive(v === 'claude' ? 'claude-cli' : 'codex-cli'),
+    emit: (i) => broadcast('ai:vendor', i),
+    log
   })
 }
 
@@ -668,6 +733,12 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin' && process.execPath.startsWith('/Volumes/')) {
+    log('[start] executable is under /Volumes/ on macOS; running from a mounted volume that may be a read-only disk image')
+  }
+  if (process.platform === 'darwin' && process.execPath.includes('/AppTranslocation/')) {
+    log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
+  }
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
   if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
@@ -684,12 +755,19 @@ app.whenReady().then(async () => {
       host,
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
-      secretStore: safeStorage
+      secretStore: safeStorage,
+      cliEnv: cliBaseEnv
     },
     log
   )
   ai = loaded.ai
   aiSource = loaded.source
+  vendors = createVendors()
+  if (TEST_VENDOR_ENV) log(`[ai] test switch: the Claude Code and Codex apps see a throwaway home (REELSTUDIO_TEST_VENDOR_HOME)`)
+  if (!DEV_PROVIDERS) {
+    const retired = await ai.retireSignInWithChatGPT?.().catch((e) => (log(`[ai] retire Sign in with ChatGPT: ${String(e)}`), false))
+    if (retired) log('[ai] signed out the old in-app ChatGPT sign-in; ChatGPT now connects through the Codex app')
+  }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])

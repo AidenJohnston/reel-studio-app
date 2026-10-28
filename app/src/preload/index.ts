@@ -1,6 +1,6 @@
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ReelApi, UpdateNotice } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ReelApi, UpdateNotice, VendorInfo } from '../shared/api'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as
@@ -38,12 +38,14 @@ const api: ReelApi = {
     providers: () => call('ai:providers'),
     active: () => call('ai:active'),
     setActive: (id) => call('ai:setActive', id),
-    signInChatGPT: () => call('ai:signInChatGPT'),
-    cancelSignIn: () => call('ai:cancelSignIn'),
-    signOutChatGPT: () => call('ai:signOutChatGPT'),
     setClaudeKey: (k) => call('ai:setClaudeKey', k),
     claudeCodeStatus: () => call('ai:claudeCodeStatus'),
-    openClaudeSignIn: () => call('ai:openClaudeSignIn')
+    openClaudeSignIn: () => call('ai:openClaudeSignIn'),
+    vendorStatus: (v) => call('ai:vendorStatus', v),
+    vendorConnect: (v) => call('ai:vendorConnect', v),
+    vendorCancel: (v) => call('ai:vendorCancel', v),
+    vendorSignInAgain: (v) => call('ai:vendorSignInAgain', v),
+    onVendor: (cb) => on<VendorInfo>('ai:vendor', cb)
   },
   projects: {
     list: () => call('projects:list'),
