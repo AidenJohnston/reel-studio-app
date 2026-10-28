@@ -222,20 +222,29 @@ Prompts are plain markdown in `ai/prompts/`.
 
 ### Providers
 
-- **OpenAI via "Sign in with ChatGPT"**: users bill their own ChatGPT plan. OAuth in the system browser with a
-  loopback redirect; tokens are stored with Electron `safeStorage`.
 - **Anthropic via a pasted API key** (Messages API with tool use).
 - **"Use Claude (your Claude Code app)"** (`claude-cli`, offered to everyone): runs the person's own Claude Code
   app, Anthropic's `claude` CLI, so the edit uses their own Claude plan and its usage limits. Reel Studio never
   sees, stores, reads or proxies a Claude credential. It finds the binary (PATH, Anthropic's native installer in
   `~/.local/bin`, Homebrew, npm, nvm, Volta, Bun, WinGet, and on macOS the login shell, since a Finder-launched app
   has a minimal PATH) and asks the CLI itself: `claude --version` (installed) and `claude auth status` (signed in).
-  Only the yes/no, the version and the plan kind are kept, never the e-mail or organization. Signing in happens
-  in a terminal window the app opens, running `claude auth login`: the person signs in to Anthropic there. The
-  Connect screen recommends what the person already has (a signed-in Claude Code app first, otherwise ChatGPT)
-  and never switches to it on its own. There is one installer per system; there is no build flag.
-- **Developer providers** (behind a dev flag, never shown to users): `codex-cli` and a recorded-response replay
-  provider used by tests.
+  Only the yes/no, the version and the plan kind are kept, never the e-mail or organization.
+- **"ChatGPT (your Codex app)"** (`codex-cli`): the same idea with OpenAI's `codex` CLI, signed in with the
+  person's ChatGPT plan. Found the same way (PATH, OpenAI's installer folders, Homebrew, npm's native exe, the
+  macOS login shell); `codex --version` and `codex login status` only, never `~/.codex`. Edits run `codex exec`
+  read-only, ephemeral and with `--ignore-user-config`, so the person's MCP servers, plugins and hooks never run.
+- **Connect Claude / Connect ChatGPT** (`app/src/main/vendor-connect.ts`, `vendor-setup.ts`): one click installs
+  the vendor's app when it is missing, by downloading the vendor's own install script to a FILE and running it
+  hidden (never a `| iex` / `| bash` command line: Defender blocks that one-liner as a trojan), then runs the
+  CLI's own sign-in hidden (`claude auth login --claudeai`, `codex login`). The CLI opens the vendor's page and
+  catches the answer on 127.0.0.1; Reel Studio only waits for the process and asks the CLI again. Its output is
+  never shown or logged and stdin is closed, so no sign-in code passes through the app. The page only learns
+  {vendor, state, step, version, plan kind, message}. A Claude sign-in whose page shows a code falls back to a
+  terminal window running `claude auth login` (`claude-signin.ts`). Neither CLI is ever chosen on its own.
+- **Retired: "Sign in with ChatGPT"** (`chatgpt`, `siwc.ts`): on the first start of this version a saved session is
+  signed out (token revoked, files deleted). It stays in dev mode until `siwc.ts` is deleted.
+- **Developer providers** (behind a dev flag, never shown to users): the retired `chatgpt` sign-in and a
+  recorded-response replay provider used by tests.
 
 ## 7. B-roll treatments and animations
 
