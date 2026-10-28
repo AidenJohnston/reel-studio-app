@@ -13,7 +13,7 @@ const ai = createAI({
   host,                                                    // your EngineHost (docs/architecture.md section 8)
   settingsDir: path.join(app.getPath('userData'), 'ai'),   // provider settings + encrypted tokens
   secretStore: safeStorage,                                // tokens + Claude key encrypted at rest
-  dev: process.env.REELSTUDIO_DEV === '1',                 // also shows codex-cli / replay
+  dev: process.env.REELSTUDIO_DEV === '1',                 // also shows the retired chatgpt sign-in / replay
 });
 
 await ai.signInChatGPT((url) => shell.openExternal(url));  // system browser, loopback redirect
