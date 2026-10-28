@@ -1,7 +1,34 @@
 import { expect, it } from 'vitest';
+import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { createAI } from '../src';
 import { FakeHost, tmpDir } from './helpers';
+
+/**
+ * The environment the app's CLIs get, with a stand-in `codex` signed in with ChatGPT as the only thing on PATH, so
+ * detection finds and runs it the way it would a real one and never sees a Codex installed on this machine. The
+ * stand-in is Node under Codex's name (Windows lists only a real codex.exe and spawns no scripts), preloading a file
+ * that answers `login status` as Codex does before Node looks for a script; `--version` is Node's own and exits 0.
+ */
+function codexStandIn(): NodeJS.ProcessEnv {
+  const dir = tmpDir('codex ');
+  const bin = path.join(dir, process.platform === 'win32' ? 'codex.exe' : 'codex');
+  if (process.platform === 'win32') {
+    try { fs.linkSync(process.execPath, bin); } catch { fs.copyFileSync(process.execPath, bin); }
+  } else fs.symlinkSync(process.execPath, bin);
+  const answer = path.join(dir, 'login-status.cjs');
+  // argv[1] is Node's resolved "script" path (…/login); write synchronously, since exit can drop a pending pipe write
+  fs.writeFileSync(answer, `const a = process.argv.slice(1);
+if (a.length === 2 && require('path').basename(a[0]) === 'login' && a[1] === 'status') {
+  require('fs').writeSync(2, 'Logged in using ChatGPT\\n');
+  process.exit(0);
+}
+`);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() !== 'PATH'));
+  // NODE_OPTIONS reads a backslash inside quotes as an escape, so the path goes in with forward slashes
+  return { ...env, PATH: dir, NODE_OPTIONS: `--require "${answer.replace(/\\/g, '/')}"` };
+}
 
 it('fails if the version title call leaves the creator’s own key, uses the editing model, or runs on a connection with no small model', async () => {
   const bodies: any[] = [];
@@ -29,7 +56,8 @@ it('fails if the version title call leaves the creator’s own key, uses the edi
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
     const url = `http://127.0.0.1:${(server.address() as any).port}`;
-    const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir('settings '), anthropicBaseURL: url, allowPlaintextSecrets: true, dev: true });
+    const cli = codexStandIn();
+    const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir('settings '), anthropicBaseURL: url, allowPlaintextSecrets: true, dev: true, cliEnv: () => cli });
     expect((await ai.setClaudeKey('sk-ant-mine')).connected).toBe(true);
     await ai.setModel('claude', 'claude-opus-5-5');
     expect(await ai.rewordVersion({ title: 'Shorter cut', summary: 'cut 2 words' })).toEqual({ title: 'Two words gone', summary: 'cut 2 words' });
