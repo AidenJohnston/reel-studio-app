@@ -65,18 +65,22 @@ starts, adds captions, mixes in the song you choose, and makes a cover.
 With an AI connected, it also picks your best takes, finds pictures and builds simple animation cards, writes
 your post caption, and handles your notes. You choose one of:
 
-* **Use Claude (your Claude Code app).** If you have Anthropic's Claude Code app and a paid Claude plan (Pro or
-  Max), Reel Studio can use it. You sign in inside Anthropic's own app, in a window Reel Studio opens for you.
-  Reel Studio never sees that sign-in, your password or any token. The edits run on your own Claude plan and
-  count toward its usage limits. If the app is already signed in on your computer, this is the first choice
-  offered; nothing switches to it until you click it.
-* **Sign in with ChatGPT.** Uses your own ChatGPT plan through OpenAI's "Sign in with ChatGPT" flow. The
-  sign-in happens in your browser; Reel Studio never sees your password, and the token is stored encrypted
-  with your operating system's secure storage.
-* **A Claude API key.** Paste a key from the Anthropic Console. It is stored encrypted the same way.
+* **Connect Claude.** Needs a paid Claude plan (Pro or Max). One click installs Anthropic's Claude Code app if
+  you don't have it, then opens Anthropic's own sign-in page in your browser. Reel Studio never sees that
+  sign-in, your password or any token: Anthropic's app keeps it. The edits run on your own Claude plan and
+  count toward its usage limits.
+* **Connect ChatGPT.** Works with your ChatGPT plan, free ones too (with their limits). One click installs
+  OpenAI's Codex app if you don't have it, then opens OpenAI's own sign-in page. Same rules: Reel Studio never
+  sees the sign-in, and the edits run on your own ChatGPT plan.
+* **A Claude API key** (advanced). Paste a key from the Anthropic Console. It is stored encrypted with your
+  operating system's secure storage.
+
+If one of those apps is already signed in on your computer, it is the first choice offered; nothing switches
+to it until you click it. The installers are the vendors' own (the scripts on their install pages), downloaded
+and run for you.
 
 <p align="center">
-  <img src="docs/images/connect-ai.png" alt="Connect your AI editor: use Claude through your own Claude Code app, sign in with ChatGPT, or use an Anthropic API key, or skip it" width="560">
+  <img src="docs/images/connect-ai.png" alt="Connect your AI editor: Connect Claude or Connect ChatGPT, use an Anthropic API key, or skip it" width="560">
 </p>
 
 The AI does not write code or ffmpeg commands. It reads the transcript and the project, then changes a

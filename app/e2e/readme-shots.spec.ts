@@ -39,10 +39,10 @@ async function snap(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(OUT, `${name}.png`) })
 }
 
-/** The sidebar with an AI editor connected (ChatGPT, stubbed). */
+/** The sidebar with an AI editor connected (ChatGPT through the Codex app, stubbed). */
 async function stubConnected(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ ipcMain }) => {
-    const p = { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' }
+    const p = { id: 'codex-cli', connected: true, label: 'ChatGPT (your Codex app)', detail: '' }
     ipcMain.removeHandler('ai:active')
     ipcMain.handle('ai:active', async () => ({ ok: true, value: p }))
   })
