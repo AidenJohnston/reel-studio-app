@@ -202,6 +202,14 @@ export function childEnv(base: NodeJS.ProcessEnv = process.env, extra: NodeJS.Pr
   return { ...out, ...extra };
 }
 
+/** The environment for the person's own Claude Code / Codex app: no ANTHROPIC_* and no OPENAI_* variable, so a stray
+ * API key in the environment can never change which account the person's own app uses or bills. */
+export function cliEnv(base: NodeJS.ProcessEnv = process.env, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) if (!/^(ANTHROPIC_|OPENAI_)/i.test(k)) out[k] = v;
+  return { ...out, ...extra };
+}
+
 /** The dev CLI's settings folder: OUTSIDE Documents, which is often synced to OneDrive or iCloud
  *. */
 export function devSettingsDir(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {

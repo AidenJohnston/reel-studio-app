@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runProcess } from './cli';
+import { cliEnv } from '../safety';
 
 /** What the Connect screen needs to know. */
 export type ClaudeCodeState = 'missing' | 'broken' | 'signed_out' | 'ready';
@@ -42,10 +43,11 @@ export interface DetectOptions {
 const RUN_TIMEOUT_MS = 15_000;
 const LOGIN_SHELL_TIMEOUT_MS = 5_000;
 
-// runProcess uses childEnv(): no ANTHROPIC_* variable reaches `claude`, so a stray API key in the environment
-// can never change what the person's own CLI reports or bills.
-const defaultRunner: Runner = async (cmd, args, o) => {
-  const r = await runProcess(cmd, args, '', { timeoutMs: o?.timeoutMs ?? RUN_TIMEOUT_MS });
+// No ANTHROPIC_* (or OPENAI_*) variable reaches `claude`, so a stray API key in the environment can never change
+// what the person's own CLI reports or bills.
+// `env` (the app's test switch can point it at a throwaway config folder) goes to the CLI through cliEnv().
+const runnerFor = (env: NodeJS.ProcessEnv): Runner => async (cmd, args, o) => {
+  const r = await runProcess(cmd, args, '', { timeoutMs: o?.timeoutMs ?? RUN_TIMEOUT_MS, env: cliEnv(env) });
   return { code: r.code, stdout: r.stdout, stderr: r.stderr };
 };
 const defaultExists = (p: string): boolean => { try { return fs.statSync(p).isFile(); } catch { return false; } };
@@ -157,8 +159,8 @@ export const CLAUDE_CODE_MESSAGES = {
 
 /** Installed = `claude --version` exits 0. Signed in = `claude auth status` says `loggedIn: true`. */
 export async function detectLocalClaude(o: DetectOptions = {}): Promise<LocalClaude> {
-  const run = o.run ?? defaultRunner;
   const env = o.env ?? process.env;
+  const run = o.run ?? runnerFor(env);
   const platform = o.platform ?? process.platform;
   const exists = o.exists ?? defaultExists;
   let bin: string | null = o.bin === undefined ? findClaude(env, platform, exists, o.listDir ?? defaultListDir) : o.bin;
