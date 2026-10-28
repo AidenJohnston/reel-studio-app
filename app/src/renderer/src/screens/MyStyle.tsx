@@ -15,6 +15,7 @@ export function MyStyle() {
   const [damaged, setDamaged] = useState(false)
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const editButtons = useRef(new Map<string, HTMLButtonElement>())
+  const editInput = useRef<HTMLInputElement>(null)
   const load = () => Promise.all([reel.style.rules().then(setRules), reel.style.damaged().then(setDamaged)])
   useEffect(() => {
     void load()
@@ -26,6 +27,8 @@ export function MyStyle() {
       return true
     } catch (e) {
       notify(userMessage(e), 'error')
+      // The rule may be gone (removed in another window): show the list as it is now.
+      void load()
       return false
     }
   }
@@ -81,6 +84,7 @@ export function MyStyle() {
                 onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
                 aria-label="Rule"
                 aria-describedby={r.payload ? `edit-hint-${r.id}` : undefined}
+                ref={editInput}
                 autoFocus
                 data-testid="style-edit-input"
               />
@@ -116,7 +120,12 @@ export function MyStyle() {
                   if (el) editButtons.current.set(r.id, el)
                   else editButtons.current.delete(r.id)
                 }}
-                onClick={() => setEditing({ id: r.id, text: r.text })}
+                onClick={() => {
+                  // Another row has typed words that are not saved: keep it open rather than throw them away.
+                  const open = editing && rules.find((x) => x.id === editing.id)
+                  if (open && open.text !== editing.text) editInput.current?.focus()
+                  else setEditing({ id: r.id, text: r.text })
+                }}
                 aria-label={`Edit "${r.text}"`}
               >
                 Edit

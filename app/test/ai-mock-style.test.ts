@@ -85,4 +85,12 @@ describe('My style in the stand-in AI', () => {
     expect(r.styleProposal).toBeUndefined()
     expect(r.summary).not.toMatch(/lowercase/)
   })
+
+  it('saving the words of a paused rule again turns it back on, as the real package does', async () => {
+    const { ai } = standIn()
+    const rule = await ai.addStyleRule!('Put a yellow box behind the captions.')
+    await ai.updateStyleRule!(rule.id, { paused: true })
+    expect(await ai.addStyleRule!('put a yellow box behind the captions')).toMatchObject({ id: rule.id })
+    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ paused: true })])
+  })
 })

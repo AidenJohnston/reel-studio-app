@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -48,6 +48,9 @@ import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
 import { openSignInWindow, publicInfo } from './claude-signin'
+import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
+import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
+import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
@@ -125,6 +128,14 @@ const host: EngineHost = {
 
 let ai: AI
 let aiSource: 'package' | 'mock' = 'mock'
+let vendors: VendorConnect
+
+// The environment the person's own Claude Code / Codex apps get. Normally the app's own; the test switch
+// REELSTUDIO_TEST_VENDOR_HOME swaps in a throwaway home (a fresh machine) so a real install + sign-in can be tried
+// without touching the apps already on this computer (vendor-setup.ts testVendorEnv).
+const TEST_VENDOR_ENV = testVendorEnv(process.env, process.platform)
+const cliBaseEnv = (): NodeJS.ProcessEnv => TEST_VENDOR_ENV ?? process.env
+const TEST_LOGIN_ENV = testVendorLoginEnv(process.env, process.platform)
 let win: BrowserWindow | null = null
 
 function broadcast(channel: string, payload: unknown): void {
@@ -397,9 +408,6 @@ function registerIpc(): void {
   handle('ai:providers', () => ai.providers())
   handle('ai:active', () => ai.active())
   handle('ai:setActive', (_e, id) => ai.setActive(id))
-  handle('ai:signInChatGPT', () => ai.signInChatGPT((url) => shell.openExternal(url)))
-  handle('ai:cancelSignIn', () => ai.cancelSignInChatGPT?.())
-  handle('ai:signOutChatGPT', () => ai.signOutChatGPT())
   handle('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
   // The person's own Claude Code app: the page gets the state only; the sign-in happens in Anthropic's CLI.
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
@@ -410,6 +418,15 @@ function registerIpc(): void {
     const open = aiSource === 'mock' ? async () => (ai.mockClaudeSignInOpened?.(), '') : (f: string) => shell.openPath(f)
     await openSignInWindow(st.bin, { dir: join(settingsDir(), 'claude-sign-in'), platform: process.platform, open })
   })
+  // "Connect Claude" / "Connect ChatGPT" (vendor-connect.ts): the page gets VendorInfo only.
+  const vendorOf = (v: unknown): Vendor => {
+    if (v !== 'claude' && v !== 'chatgpt') throw { code: 'BAD_INPUT', userMessage: 'Unknown AI.' }
+    return v
+  }
+  handle('ai:vendorStatus', (_e, v) => vendors.status(vendorOf(v)))
+  handle('ai:vendorConnect', (_e, v) => vendors.connect(vendorOf(v)))
+  handle('ai:vendorCancel', (_e, v) => vendors.cancel(vendorOf(v)))
+  handle('ai:vendorSignInAgain', (_e, v) => void vendors.signInAgain(vendorOf(v)))
 
   handle('projects:list', () => listProjects())
   handle('projects:get', async (_e, slug: string) => {
@@ -614,6 +631,28 @@ function registerIpc(): void {
   })
 }
 
+/** "Connect Claude" / "Connect ChatGPT": real installers and sign-ins, or the mock's (REELSTUDIO_MOCK_CLAUDE / _CODEX). */
+function createVendors(): VendorConnect {
+  const status = async (v: Vendor): Promise<CliStatus> =>
+    (v === 'claude' ? await ai.claudeCodeStatus?.() : await ai.codexStatus?.()) ?? { state: 'missing' }
+  const mock = aiSource === 'mock' ? ai.mockVendor : undefined
+  return createVendorConnect({
+    status,
+    install: (v, signal) => {
+      if (mock) return mock.install(v, signal)
+      const run = (): Promise<void> =>
+        runInstall({ vendor: v, platform: process.platform, dir: join(settingsDir(), 'vendor-setup'), env: cliBaseEnv(), fetch: (u, i) => net.fetch(u, i), signal, systemRoot: process.env.SystemRoot, log })
+      // Test switch only: OpenAI's Windows installer rewrites the user PATH; put it back exactly as it was.
+      return TEST_VENDOR_ENV && process.platform === 'win32' && v === 'chatgpt' ? withUserPathKept(run, log) : run()
+    },
+    login: (v, bin, signal) =>
+      mock ? mock.login(v, signal) : runLogin({ vendor: v, bin, env: TEST_LOGIN_ENV ?? process.env, platform: process.platform, signal, systemRoot: process.env.SystemRoot }),
+    select: (v) => ai.setActive(v === 'claude' ? 'claude-cli' : 'codex-cli'),
+    emit: (i) => broadcast('ai:vendor', i),
+    log
+  })
+}
+
 /** Old local-Claude-Code installs used Claude Code without a saved choice; keep it for them, once (ai-carryover.ts). */
 async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedOver: boolean }): Promise<void> {
   const decision = carryOverDecision({
@@ -685,12 +724,19 @@ app.whenReady().then(async () => {
       host,
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
-      secretStore: safeStorage
+      secretStore: safeStorage,
+      cliEnv: cliBaseEnv
     },
     log
   )
   ai = loaded.ai
   aiSource = loaded.source
+  vendors = createVendors()
+  if (TEST_VENDOR_ENV) log(`[ai] test switch: the Claude Code and Codex apps see a throwaway home (REELSTUDIO_TEST_VENDOR_HOME)`)
+  if (!DEV_PROVIDERS) {
+    const retired = await ai.retireSignInWithChatGPT?.().catch((e) => (log(`[ai] retire Sign in with ChatGPT: ${String(e)}`), false))
+    if (retired) log('[ai] signed out the old in-app ChatGPT sign-in; ChatGPT now connects through the Codex app')
+  }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])

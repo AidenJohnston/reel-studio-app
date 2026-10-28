@@ -65,8 +65,6 @@ export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
   setActive(id: ProviderStatus['id']): Promise<void>
-  signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>
-  signOutChatGPT(): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
   /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
@@ -89,12 +87,22 @@ export interface AI {
   declineStyleProposal?(p: StyleProposal): Promise<void>
   /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
   updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
-  /** Optional extras from @reelstudio/ai. */
-  cancelSignInChatGPT?(): void | Promise<void>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** A fresh look at the person's own Codex app (`bin` stays in main). */
+  codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
+  /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */
+  retireSignInWithChatGPT?(): Promise<boolean>
   /** Mock only: the sign-in window "opened" (tests flip the mock's state instead of opening a terminal). */
   mockClaudeSignInOpened?(): void
+  /** Mock only: how REELSTUDIO_MOCK_CLAUDE / REELSTUDIO_MOCK_CODEX play an install and a browser sign-in. */
+  mockVendor?: MockVendor
+}
+
+/** Mock only (ai-mock.ts): plays install and sign-in for the Connect cards without a real CLI. */
+export interface MockVendor {
+  install(v: 'claude' | 'chatgpt', signal: AbortSignal): Promise<void>
+  login(v: 'claude' | 'chatgpt', signal: AbortSignal): Promise<{ code: number | null; portBusy?: boolean; aborted?: boolean }>
 }
 
 export interface ClaudeCodeStatus {
@@ -110,6 +118,8 @@ export interface CreateAIOptions {
   settingsDir: string
   dev?: boolean
   secretStore?: SecretStore
+  /** the environment the person's own CLIs get (main's test switch can swap in a throwaway home) */
+  cliEnv?: () => NodeJS.ProcessEnv
 }
 
 export type CreateAI = (opts: CreateAIOptions) => AI

@@ -6,23 +6,50 @@ import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, ProviderStatus, ScriptResult } from './ai-types'
+import { VendorError } from './vendor-setup'
 import type { Phase, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
 const NOT_CONNECTED: ProviderStatus = { id: 'none', connected: true, label: 'No AI' }
 
-// The person's own Claude Code app, as tests want it (REELSTUDIO_MOCK_CLAUDE). Default: not on this computer.
-// `signs_in` starts signed out and becomes ready a moment after the sign-in window "opens" (no terminal opens in
-// mock mode), so the Connect screen's waiting and re-checking can be driven.
+// The person's own Claude Code app and Codex app, as tests want them (REELSTUDIO_MOCK_CLAUDE / REELSTUDIO_MOCK_CODEX).
+// Default: not on this computer. Modes:
+//   missing        Connect installs it (0.8 s), then the browser sign-in "finishes" (1.2 s): the happy path
+//   installing     the install never ends (until Cancel)       install_failed  the install fails
+//   broken         found, but it does not start                signed_out      found, signed out (the sign-in finishes)
+//   browser        signed out; the browser sign-in never comes back (until Cancel / Open again)
+//   signs_in       signed out; the terminal window's sign-in finishes 1.5 s after it "opens" (no terminal opens)
+//   free           the sign-in finishes on a plan the app reports as "free"
+//   ready          installed and signed in
+type MockMode = 'missing' | 'installing' | 'install_failed' | 'broken' | 'signed_out' | 'browser' | 'signs_in' | 'free' | 'ready'
+const MODES: MockMode[] = ['missing', 'installing', 'install_failed', 'broken', 'signed_out', 'browser', 'signs_in', 'free', 'ready']
 const CLAUDE_LABEL = 'Claude (your Claude Code app)'
-const CLAUDE_REASONS: Record<ClaudeCodeStatus['state'], string | undefined> = {
-  missing: 'We could not find the Claude Code app on this computer.',
-  broken: 'We found the Claude Code app, but it did not start. Try installing it again.',
-  signed_out: 'Your Claude Code app is not signed in yet.',
-  ready: undefined
+const CODEX_LABEL = 'ChatGPT (your Codex app)'
+const REASONS: Record<'claude' | 'chatgpt', Record<ClaudeCodeStatus['state'], string | undefined>> = {
+  claude: {
+    missing: 'We could not find the Claude Code app on this computer.',
+    broken: 'We found the Claude Code app, but it did not start. Try installing it again.',
+    signed_out: 'Your Claude Code app is not signed in yet.',
+    ready: undefined
+  },
+  chatgpt: {
+    missing: 'We could not find the Codex app on this computer.',
+    broken: 'We found the Codex app, but it did not start. Try installing it again.',
+    signed_out: 'Your Codex app is not signed in yet.',
+    ready: undefined
+  }
 }
-const MOCK_CLAUDE_BIN = process.platform === 'win32' ? 'C:\\Program Files\\Mock Claude\\claude.exe' : '/opt/mock claude/bin/claude'
+const MOCK_BIN = { claude: process.platform === 'win32' ? 'C:\\Program Files\\Mock Claude\\claude.exe' : '/opt/mock claude/bin/claude', chatgpt: process.platform === 'win32' ? 'C:\\Program Files\\Mock Codex\\codex.exe' : '/opt/mock codex/bin/codex' }
+const until = (signal: AbortSignal, ms: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (signal.aborted) return resolve(false)
+    const t = ms === Infinity ? null : setTimeout(() => resolve(true), ms)
+    signal.addEventListener('abort', () => {
+      if (t) clearTimeout(t)
+      resolve(false)
+    }, { once: true })
+  })
 
 /** Maps an engine stage pct (0-100) into an overall window [lo, hi]. */
 const span = (lo: number, hi: number, pct: number): number => Math.round(lo + ((hi - lo) * pct) / 100)
@@ -49,6 +76,14 @@ function cleanRule(text: string): string {
   if (!/[.!?]$/.test(clean)) clean += '.'
   return clean[0].toUpperCase() + clean.slice(1)
 }
+
+/** Rules with these equal are the same rule (normalize in ai/src/style.ts). */
+const sameRule = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} ]+/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
 type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; [field: string]: unknown }
@@ -85,6 +120,21 @@ export const createMockAI: CreateAI = ({ host }) => {
     await fs.mkdir(host.reelStudioRoot(), { recursive: true })
     await writeJson(styleFile(), { ...s, rules })
   }
+  /** As the real package's StyleStore.add: the same words again turn a paused rule back on instead of adding a copy. */
+  const addRule = (text: string): Promise<{ added: boolean; rule: StyleRule }> =>
+    withStyle(async (s) => {
+      const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+      if (dup) {
+        if (dup.paused) {
+          delete dup.paused
+          await saveRules(s, s.rules)
+        }
+        return { added: false, rule: dup }
+      }
+      const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
+      await saveRules(s, [...s.rules, rule])
+      return { added: true, rule }
+    })
 
   async function readProject(dir: string): Promise<any> {
     return JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8'))
@@ -101,54 +151,87 @@ export const createMockAI: CreateAI = ({ host }) => {
     return files.length ? `Library/Music/${files[0]}` : null
   }
 
-  const mode = process.env.REELSTUDIO_MOCK_CLAUDE ?? 'missing'
-  let claudeState: ClaudeCodeStatus['state'] =
-    mode === 'signs_in' ? 'signed_out' : (['missing', 'broken', 'signed_out', 'ready'] as const).find((s) => s === mode) ?? 'missing'
-  let claudeChosen = false
-  const claudeStatus = (): ClaudeCodeStatus => ({
-    state: claudeState,
-    ...(claudeState === 'missing' ? {} : { bin: MOCK_CLAUDE_BIN }),
-    ...(claudeState === 'signed_out' || claudeState === 'ready' ? { version: '2.1.0' } : {}),
-    ...(CLAUDE_REASONS[claudeState] ? { reason: CLAUDE_REASONS[claudeState] } : {})
+  const modeOf = (v: string | undefined): MockMode => MODES.find((m) => m === v) ?? 'missing'
+  const mode = { claude: modeOf(process.env.REELSTUDIO_MOCK_CLAUDE), chatgpt: modeOf(process.env.REELSTUDIO_MOCK_CODEX) }
+  const startState = (m: MockMode): ClaudeCodeStatus['state'] =>
+    m === 'ready' ? 'ready' : m === 'broken' ? 'broken' : ['signed_out', 'browser', 'signs_in', 'free'].includes(m) ? 'signed_out' : 'missing'
+  const state = { claude: startState(mode.claude), chatgpt: startState(mode.chatgpt) }
+  const plan: { claude?: string; chatgpt?: string } = {}
+  let chosen: 'claude-cli' | 'codex-cli' | null = null
+  const cliStatus = (v: 'claude' | 'chatgpt'): ClaudeCodeStatus => ({
+    state: state[v],
+    ...(state[v] === 'missing' ? {} : { bin: MOCK_BIN[v] }),
+    ...(state[v] === 'signed_out' || state[v] === 'ready' ? { version: v === 'claude' ? '2.1.0' : '0.164.0' } : {}),
+    ...(plan[v] ? { plan: plan[v] } : {}),
+    ...(REASONS[v][state[v]] ? { reason: REASONS[v][state[v]] } : {})
   })
-  const claudeProvider = (): ProviderStatus => {
-    const ready = claudeState === 'ready'
+  const claudeStatus = (): ClaudeCodeStatus => cliStatus('claude')
+  const cliProvider = (v: 'claude' | 'chatgpt'): ProviderStatus => {
+    const ready = state[v] === 'ready'
     return {
-      id: 'claude-cli',
+      id: v === 'claude' ? 'claude-cli' : 'codex-cli',
       connected: ready,
-      label: CLAUDE_LABEL,
-      ...(ready ? {} : { error: { code: `claude_code_${claudeState}`, userMessage: CLAUDE_REASONS[claudeState]! } })
+      label: v === 'claude' ? CLAUDE_LABEL : CODEX_LABEL,
+      ...(ready ? {} : { error: { code: `${v === 'claude' ? 'claude_code' : 'codex'}_${state[v]}`, userMessage: REASONS[v][state[v]]! } })
     }
   }
+  const claudeProvider = (): ProviderStatus => cliProvider('claude')
 
   const ai: AI = {
     async providers() {
-      return [
-        { id: 'chatgpt', connected: false, label: 'ChatGPT' },
-        { id: 'claude', connected: false, label: 'Claude' },
-        claudeProvider(),
-        NOT_CONNECTED
-      ]
+      return [{ id: 'claude', connected: false, label: 'Claude' }, claudeProvider(), cliProvider('chatgpt'), NOT_CONNECTED]
     },
     async active() {
-      return claudeChosen && claudeState === 'ready' ? claudeProvider() : NOT_CONNECTED
+      if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
+      if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
+      return NOT_CONNECTED
     },
     async setActive(id) {
-      if (id === 'claude-cli') {
-        if (claudeState !== 'ready') throw { code: 'not_available', userMessage: CLAUDE_REASONS[claudeState] }
-        claudeChosen = true
-      } else claudeChosen = false
+      if (id === 'claude-cli' || id === 'codex-cli') {
+        const v = id === 'claude-cli' ? 'claude' : 'chatgpt'
+        if (state[v] !== 'ready') throw { code: 'not_available', userMessage: REASONS[v][state[v]] }
+        chosen = id
+      } else chosen = null
     },
     async claudeCodeStatus() {
       return claudeStatus()
     },
+    async codexStatus() {
+      return cliStatus('chatgpt')
+    },
+    async retireSignInWithChatGPT() {
+      return false
+    },
     mockClaudeSignInOpened() {
-      if (mode === 'signs_in' && claudeState === 'signed_out') setTimeout(() => (claudeState = 'ready'), 1500)
+      if (mode.claude === 'signs_in' && state.claude === 'signed_out') setTimeout(() => (state.claude = 'ready'), 1500)
     },
-    async signInChatGPT() {
-      throw { code: 'NOT_READY', userMessage: 'Signing in with ChatGPT is not ready in this build yet. Your videos still work without it.' }
+    mockVendor: {
+      async install(v, signal) {
+        if (mode[v] === 'installing') await until(signal, Infinity)
+        if (signal.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
+        if (mode[v] === 'install_failed') {
+          await until(signal, 300)
+          throw new VendorError(
+            'install_failed',
+            v === 'claude'
+              ? "Anthropic's Claude Code app didn't install: this computer couldn't reach Anthropic. Check your internet, then try again."
+              : "OpenAI's Codex app didn't install: this computer couldn't reach OpenAI. Check your internet, then try again.",
+            'mock'
+          )
+        }
+        if (await until(signal, 800)) state[v] = 'signed_out'
+      },
+      async login(v, signal) {
+        if (mode[v] === 'browser') {
+          await until(signal, Infinity)
+          return { code: null, aborted: true }
+        }
+        if (!(await until(signal, 1200))) return { code: null, aborted: true }
+        state[v] = 'ready'
+        if (mode[v] === 'free') plan[v] = 'free'
+        return { code: 0 }
+      }
     },
-    async signOutChatGPT() {},
     async setClaudeKey(key) {
       if (!key) return { id: 'none', connected: true, label: 'No AI' }
       throw { code: 'NOT_READY', userMessage: 'Claude keys are not ready in this build yet. Your videos still work without it.' }
@@ -217,14 +300,14 @@ export const createMockAI: CreateAI = ({ host }) => {
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rule = { id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() }
-        await withStyle((s) => saveRules(s, [...s.rules, rule]))
-        added.push(note.trim())
+        // Only a new rule: the app takes every rule listed here out of My style again and asks about it.
+        const r = await addRule(note.trim())
+        if (r.added) added.push(r.rule.text)
       }
       // Tests only: REELSTUDIO_MOCK_CLAUDE=ready, and the mock Claude Code app chosen in Settings. Then act like the real
       // package on a lowercase note (change the captions, make a new version, ask to remember it). Never for a
       // person whose AI package failed to load: this stand-in does not read notes.
-      if (claudeChosen && claudeState === 'ready' && /\blower ?case\b/i.test(note) && p.captions?.style?.case !== 'lower') {
+      if (chosen === 'claude-cli' && state.claude === 'ready' && /\blower ?case\b/i.test(note) && p.captions?.style?.case !== 'lower') {
         p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
         await writeProject(projectDir, p)
         const r = await host.runEngine('render', ['--project', projectDir], undefined, signal)
@@ -261,9 +344,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
     async addStyleRule(text) {
-      const rule = { id: randomUUID(), text, createdAt: new Date().toISOString() }
-      await withStyle((s) => saveRules(s, [...s.rules, rule]))
-      return rule
+      return (await addRule(text)).rule
     },
     // The same answers as the real store (ai/src/style.ts): a removed rule's question cannot bring it back, and the
     // same question answered again returns the rule it saved.
