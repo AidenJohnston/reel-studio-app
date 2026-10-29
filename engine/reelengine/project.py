@@ -55,8 +55,31 @@ def write_json(path: Path, data, indent: int = 2) -> None:
         fh.write("\n")
         fh.flush()
         os.fsync(fh.fileno())        # power loss right after the rename must not leave an empty file
-    os.replace(tmp, path)
+    _replace_with_retry(tmp, path)
     _fsync_dir(path.parent)
+
+
+# Windows refuses to rename over a file another process has open without delete sharing (WinError 5 or 32),
+# as a virus scanner, a sync tool or an editor can hold project.json for a moment. Retry for about 7 s, the
+# same window as the app's renameWithRetry (app/src/main/store.ts) and the AI's writeFileAtomic, then give up
+# without leaving the temp file behind.
+_REPLACE_TRIES = 40
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    import time
+    try:
+        for attempt in range(_REPLACE_TRIES + 1):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_TRIES:
+                    raise
+                time.sleep(min(0.25, 0.01 + attempt * 0.01))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _fsync_dir(d: Path) -> None:
