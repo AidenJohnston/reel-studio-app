@@ -6,7 +6,7 @@ import { IS_MAC, Toast } from './components/ui'
 import { draggingOut } from './components/Player'
 import { Icon, type IconName } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { UpdateNotice } from './components/UpdateNotice'
+import { UpdateButton } from './components/UpdateButton'
 import { Home } from './screens/Home'
 import { NewVideo } from './screens/NewVideo'
 import { Working } from './screens/Working'
@@ -215,7 +215,7 @@ export function App() {
               </button>
             ))}
           </nav>
-          <UpdateNotice />
+          <UpdateButton />
           <div className="sidebar-foot" data-testid="ai-status">
             {provider &&
               (aiOn ? (
