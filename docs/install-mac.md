@@ -47,11 +47,12 @@ Reel Studio downloads its speech helper once (this is how it "listens" to your v
 
 ## Updating to a newer version
 
-Reel Studio does not update itself yet, but it tells you when a new version is out: a small note at the bottom left says
-**Reel Studio 0.1.1 is out.** (with the new number) and **Download** opens the download page in your browser. You can also open
-**Settings** and click **Check for a newer version** any time. When a new version is out, download the new **Reel-Studio-...-arm64.dmg** from the
-same page you got the first one from (the version number is in the file name), drag the new **Reel Studio** onto
-**Applications** and choose **Replace**. Your videos, music and settings are untouched. Only download it from that page.
+When a new version is out, click **Download update** at the bottom left. When it finishes, click
+**Restart to update** and confirm. Reel Studio closes and opens on the new version. Your videos and settings stay.
+You can also check from **Settings**, or use the **Reel Studio > Check for Updates** menu.
+
+Older versions, and copies outside Applications, open the release page instead. Download the new
+**Reel-Studio-...-arm64.dmg**, drag **Reel Studio** onto **Applications** and choose **Replace**.
 
 ## Removing it
 
