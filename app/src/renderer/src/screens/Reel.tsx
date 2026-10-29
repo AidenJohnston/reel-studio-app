@@ -50,6 +50,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
+  const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
@@ -63,6 +64,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const att = useNoteAttachments(slug, notify)
   const [noteDrop, setNoteDrop] = useState(false)
   const noteDropDepth = useRef(0)
+  // Files dropped on the note box before the AI check answers: attached once it does, as any drop is.
+  const heldDrops = useRef<{ files: File[]; types: string[] }[]>([])
+  const [held, setHeld] = useState(0)
 
   const load = useCallback(
     async (selectLatest = false) => {
@@ -82,7 +86,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   useEffect(() => {
     void load(true)
-    reel.ai.active().then(setProvider).catch(() => {})
+    reel.ai
+      .active()
+      .then(setProvider)
+      .catch(() => {})
+      .finally(() => setProviderChecked(true))
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
       if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
@@ -118,6 +126,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
 
+  useEffect(() => {
+    if (!providerChecked || !heldDrops.current.length) return
+    for (const drop of heldDrops.current) att.onDropFiles(drop)
+    heldDrops.current = []
+    setHeld(0)
+  }, [providerChecked, att.onDropFiles])
+
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
     setPhoneFirst(toPhone)
@@ -139,7 +154,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   if (!d) return <div className="page"><Spinner /></div>
 
-  const aiOff = !provider || !provider.connected || provider.id === 'none'
+  // Only the AI-dependent parts (the banner, the note box) wait for the AI check, which can take seconds when a
+  // Claude Code app is probed. Drawn before it, a connected editor flashed the "No AI editor yet" banner.
+  const aiOff = providerChecked && (!provider || !provider.connected || provider.id === 'none')
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
@@ -148,7 +165,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const send = async () => {
     const text = note.trim()
     const files = att.chips
-    if ((!text && !files.length) || att.busy) return
+    if ((!text && !files.length) || att.busy || !providerChecked) return
     setNote('')
     att.clear()
     try {
@@ -162,7 +179,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       notify(userMessage(e), 'error')
     }
   }
-  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy
+  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy && providerChecked
   // Files dropped on the note box are attached to the note. The window-wide drop (App.tsx: a video makes
   // a new reel) must not see them, so the drop stops here; App clears its overlay on NOTE_DROP_DONE.
   const noteDropProps = {
@@ -189,6 +206,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       setNoteDrop(false)
       window.dispatchEvent(new Event(NOTE_DROP_DONE))
       if (job) return
+      if (!providerChecked) {
+        heldDrops.current.push({ files: Array.from(e.dataTransfer.files), types: Array.from(e.dataTransfer.types) })
+        setHeld(heldDrops.current.length)
+        return
+      }
       att.onDropFiles(e.dataTransfer)
     }
   }
@@ -448,8 +470,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     <div style={{ minWidth: 0 }}>
                       <span className="did-label">{line.label}</span>
                       {line.detail && <span className="muted-sm"> · {line.detail}</span>}
-                      {line.act && !job && (
-                        <button className="item-action" onClick={line.act.run} data-testid={line.act.testid}>
+                      {/* greyed, not removed, while a version is made: the panel keeps its size */}
+                      {line.act && (
+                        <button className="item-action" onClick={line.act.run} disabled={!!job} data-testid={line.act.testid}>
                           {line.act.label}
                         </button>
                       )}
@@ -458,11 +481,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && (
+            {extras.length > 0 && (
               <div className="extras" data-testid="extras">
                 <span className="muted-sm">Optional extras:</span>
                 {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                  <button key={x.key} className="extra" onClick={x.run} disabled={!!job} data-testid={x.testid}>
                     <Icon name="plus" size={14} stroke={2} /> {x.label}
                   </button>
                 ))}
@@ -558,12 +581,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             )}
             <div className={`note-drop${noteDrop ? ' over' : ''}`} {...noteDropProps} data-testid="note-drop">
             {noteDrop && <div className="note-drop-hint">Drop to attach it to your note</div>}
-            <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
+            <AttachmentChips chips={att.chips} busy={att.busy + held} onRemove={(a) => void att.remove(a)} />
             <div className={`composer${aiOff ? ' no-ai' : ''}`} ref={composerRef}>
               <button
                 className="btn attach-btn"
                 onClick={att.choose}
-                disabled={!!job}
+                disabled={!!job || !providerChecked}
                 aria-label="Attach a picture or a clip"
                 title="Attach a picture or a clip"
                 data-testid="note-attach"
@@ -574,18 +597,20 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <textarea
                 className="input composer-input"
                 rows={1}
-                placeholder={aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'}
+                placeholder={
+                  !providerChecked ? 'Checking for your AI editor…' : aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'
+                }
                 aria-label="Note for your editor"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                onPaste={att.onPaste}
+                onPaste={providerChecked ? att.onPaste : undefined}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     void send()
                   }
                 }}
-                disabled={!!job}
+                disabled={!!job || !providerChecked}
                 data-testid="note-input"
               />
               {aiOff && !note.trim() && (

@@ -6,7 +6,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, passFirstRun, shot } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'design-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
@@ -72,6 +72,11 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.getByTestId('stop').click()
   await expect(page.getByTestId('confirm')).toContainText('Stop making this reel?')
   await shot(page, 'd-02-stop-confirm')
+  // Tab stays in the dialog (aria-modal): it used to walk into the page behind it.
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab')
+    await expect(page.getByTestId('confirm').locator(':focus')).toHaveCount(1)
+  }
   await page.keyboard.press('Escape') // Esc = the safe choice: keep going
   await expect(page.getByTestId('confirm')).toHaveCount(0)
   await expect(page.getByText('Making your reel')).toBeVisible()
@@ -178,12 +183,56 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await shot(page, 'd-11-settings-different-ai')
   await page.getByTestId('nav-home').click()
   await expect(page.getByTestId('ai-status')).toContainText('AI editor: ChatGPT')
+  // With an AI editor on, the no-AI controls must never be drawn, not even for the first frame.
+  await page.evaluate(() => {
+    ;(window as any).__sawNoAi = false
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid=composer-connect],[data-testid=ai-banner]')) (window as any).__sawNoAi = true
+    }).observe(document.body, { subtree: true, childList: true })
+  })
   await page.getByTestId('project-card').first().click()
   await expect(page.getByTestId('player')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__sawNoAi)).toBe(false)
   await expect(page.getByTestId('did-cut')).toContainText('Kept your best takes')
   await expect(page.getByTestId('ai-banner')).toHaveCount(0)
   await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')
   await shot(page, 'd-12-reel-with-ai')
+
+  // ---- AI detection that has not answered: the reel still opens at once, only the note box waits ----
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:active')
+    const g = globalThis as any
+    g.__aiWaiting = []
+    ipcMain.handle('ai:active', () => new Promise((answer) => g.__aiWaiting.push(answer)))
+  })
+  await page.getByTestId('nav-home').click()
+  const opened = Date.now()
+  await page.getByTestId('project-card').first().click()
+  await expect(page.getByTestId('player')).toBeVisible({ timeout: 1000 })
+  await expect(page.getByTestId('export')).toBeEnabled({ timeout: 1000 })
+  await expect(page.getByTestId('edit-myself')).toBeEnabled({ timeout: 1000 })
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const wasPaused = await paused()
+  await page.keyboard.press('Space') // plays or pauses, like on a reel opened normally
+  await expect.poll(paused, { timeout: 1000 }).toBe(!wasPaused)
+  expect(Date.now() - opened).toBeLessThan(1000)
+  await expect(page.getByTestId('note-input')).toBeDisabled()
+  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
+  await expect(page.getByTestId('composer-connect')).toHaveCount(0)
+  // A picture dropped on the note box meanwhile is held: nothing can be sent until the check answers...
+  await dropFiles(page, 'note-drop', [media.picture])
+  await expect(page.getByTestId('note-attachment-busy')).toBeVisible()
+  await page.waitForTimeout(2000) // a picture copies in about 0.2 s, so an early attach would have landed by now
+  await expect(page.getByTestId('note-attachment')).toHaveCount(0)
+  await expect(page.getByTestId('send')).toBeDisabled()
+  // ...then it is attached like any drop.
+  await app.evaluate(() => {
+    for (const answer of (globalThis as any).__aiWaiting) answer({ ok: true, value: { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' } })
+  })
+  await expect(page.getByTestId('note-attachment')).toHaveCount(1)
+  await expect(page.getByTestId('send')).toBeEnabled()
+  await page.getByTestId('note-attachment-remove').click()
+  await stubConnected(app)
 
   // ---- Library: a drop anywhere on the window lands in the Library ----
   await page.getByTestId('nav-library').click()

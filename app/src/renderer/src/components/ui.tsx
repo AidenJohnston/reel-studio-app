@@ -5,7 +5,7 @@ import { Icon } from './icons'
 export function Progress({ pct, done, label }: { pct: number; done?: boolean; label?: string }) {
   return (
     <div className={`progress${done ? ' done' : ''}`} role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-      <div style={{ width: `${Math.max(3, Math.min(100, pct))}%` }} />
+      <div style={{ transform: `translateX(${Math.max(3, Math.min(100, pct)) - 100}%)` }} />
     </div>
   )
 }
@@ -47,14 +47,35 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
-/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
+const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex="-1"])'
+
+/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it and Tab stays in it. */
 export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
-    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
+    // A dialog with nothing to press ("Getting it ready…") takes focus itself.
+    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button') ?? ref.current
     first?.focus()
-    return () => prev?.focus?.()
+    // aria-modal says the page behind is out of reach; without this, Tab walked into it.
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !ref.current) return
+      const items = Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null)
+      if (!items.length) {
+        e.preventDefault()
+        ref.current.focus()
+        return
+      }
+      const at = items.indexOf(document.activeElement as HTMLElement)
+      const next = e.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : at === -1 || at === items.length - 1 ? 0 : at + 1
+      e.preventDefault()
+      items[next].focus()
+    }
+    window.addEventListener('keydown', trap)
+    return () => {
+      window.removeEventListener('keydown', trap)
+      prev?.focus?.()
+    }
   }, [])
   useEffect(() => {
     if (!onClose) return
@@ -69,7 +90,7 @@ export function Modal({ children, onClose, wide, testid }: { children: ReactNode
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
+      <div ref={ref} tabIndex={-1} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal data-testid={testid}>
         {children}
       </div>
     </div>
@@ -98,16 +119,26 @@ export function Confirm(props: { title: string; body: string; yes: string; no: s
 export function MoreMenu({ items, label = 'More' }: { items: { label: string; run: () => void; danger?: boolean; testid?: string; disabled?: boolean }[]; label?: string }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
+    const items = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role=menuitem]:not(:disabled)') ?? [])
+    items()[0]?.focus()
     const away = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false)
     }
+    // The keys a menu answers to: arrows move, Esc closes and gives focus back to the ⋯ button, Tab leaves.
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
         setOpen(false)
-      }
+        trigger.current?.focus()
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const all = items()
+        const at = all.indexOf(document.activeElement as HTMLElement)
+        all[(at + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus()
+      } else if (e.key === 'Tab') setOpen(false)
     }
     window.addEventListener('mousedown', away)
     window.addEventListener('keydown', key, true)
@@ -118,7 +149,7 @@ export function MoreMenu({ items, label = 'More' }: { items: { label: string; ru
   }, [open])
   return (
     <div className="more" ref={ref}>
-      <button className="icon-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="more">
+      <button ref={trigger} className="icon-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="more">
         <Icon name="more" />
       </button>
       {open && (

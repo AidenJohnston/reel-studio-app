@@ -23,8 +23,6 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [stage, setStage] = useState(0)
   const stageRef = useRef(0)
-  const [elapsed, setElapsed] = useState(0)
-  const started = useRef(Date.now())
   const jobRef = useRef<string | null>(null)
   const [source, setSource] = useState<string | null>(null)
   // the take is flipped at render (it was mirrored): its first frame here is shown flipped too
@@ -87,11 +85,9 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
       else if (e.type === 'error') setState({ kind: 'failed', message: e.userMessage, code: e.code })
       else if (e.type === 'cancelled') setState({ kind: 'stopped' })
     })
-    const tick = setInterval(() => setElapsed((Date.now() - started.current) / 1000), 1000)
     return () => {
       live = false
       off()
-      clearInterval(tick)
     }
   }, [slug, go])
 
@@ -99,8 +95,6 @@ export function Working({ slug, go }: { slug: string; go: Go }) {
     try {
       setStage(0)
       stageRef.current = 0
-      started.current = Date.now()
-      setElapsed(0)
       setLive(EMPTY_LIVE)
       setState({ kind: 'running', jobId: '', message: 'Getting started', pct: 0 })
       const r = await reel.projects.resume(slug)
