@@ -7,6 +7,7 @@ import { Prompts } from './prompts';
 import { StyleStore } from './style';
 import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
 import { planFastNote } from './fastnote';
+import { LEDGER } from './assets';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
   Analysis, Project, Transcript, WordAnchor, hasTranscript, loadProject, normalizeAnalysis, normalizeKeep, saveProject,
@@ -130,19 +131,39 @@ async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<voi
   state.styleRuleIds = []; state.styleRulesAdded = [];
 }
 
+const entries = (dir: string) => fsp.readdir(dir, { withFileTypes: true }).catch((e) => { if (e?.code === 'ENOENT') return []; throw e; });
+
+/** The rollback deletes whatever is not in this list, so only a missing folder counts as empty. Frozen
+ * pictures are listed one by one (`frozen/<kind>/<file>`): the folder outlives a note, the files it froze
+ * don't. Only real folders are entered, never a symlink, so the rollback never deletes outside the project. */
 async function listAssets(projectDir: string): Promise<Set<string>> {
   const dir = path.join(projectDir, 'work', 'assets');
-  return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
+  const top = await entries(dir);
+  const frozen = top.find((e) => e.name === 'frozen')?.isDirectory() ? await entries(path.join(dir, 'frozen')) : [];
+  const files = await Promise.all(frozen.filter((k) => k.isDirectory()).map(async (kind) =>
+    (await entries(path.join(dir, 'frozen', kind.name))).map((f) => `frozen/${kind.name}/${f.name}`)));
+  return new Set([...top.map((e) => e.name), ...files.flat()]);
 }
 
+/** The ledger's size before a note, or null when it does not exist yet. Any other error stops the note:
+ * the rollback truncates the ledger back to this size. */
+const ledgerBytes = (projectDir: string) => fsp.stat(path.join(projectDir, LEDGER)).then((s) => s.size, (e) => {
+  if (e?.code === 'ENOENT') return null; throw e;
+});
+
 /** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, state: ToolState): Promise<void> {
-  await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
+ * it added, the pictures it downloaded or froze, and the asset records it appended. Returns false when
+ * project.json could not be put back. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, assetsBefore: Set<string>, ledgerBefore: number | null, state: ToolState): Promise<boolean> {
+  const restored = await writeFileAtomic(path.join(projectDir, 'project.json'), before).then(() => true, () => false);
   await removeStyleRules(deps, state);
-  for (const f of await listAssets(projectDir)) {
-    if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
+  // a project.json that could not be put back may still use this note's pictures and their records
+  if (!restored) return false;
+  for (const f of await listAssets(projectDir).catch(() => new Set<string>())) {
+    if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true, recursive: true }).catch(() => undefined);
   }
+  if (ledgerBefore !== null) await fsp.truncate(path.join(projectDir, LEDGER), ledgerBefore).catch(() => undefined);
+  return true;
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -309,6 +330,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // project.json, My style and work/assets back as they were.
   const before = await fsp.readFile(path.join(projectDir, 'project.json'));
   const assetsBefore = await listAssets(projectDir);
+  const ledgerBefore = await ledgerBytes(projectDir);
   const mediaSec = mediaSeconds(p0);
   // "smaller captions", "quieter music": one direct change and the final render, no AI turns
   const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
@@ -331,12 +353,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+        await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
         throw e;
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    if (!await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state)) {
+      throw new AIError('rollback_failed', 'I could not undo a change to this project, so I stopped. Try the note again.', { detail: 'project.json could not be restored after the fast note' });
+    }
     ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
     await load(ctx);
   }
@@ -362,7 +386,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
     const p = await loadProject(projectDir);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
-    const placedNow = placedAssets(p);
+    const placedNow = await placedAssets(projectDir, p);
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
     p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
     await saveProject(projectDir, p);
@@ -370,7 +394,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, assetsBefore, ctx.state);
+    await rollbackNote(deps, projectDir, before, assetsBefore, ledgerBefore, ctx.state);
     throw e;
   }
 }

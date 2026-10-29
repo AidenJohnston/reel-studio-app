@@ -47,7 +47,7 @@ export function animationParamsSchema(): JSONSchema {
     const req = uses.filter((u) => templateSpec(u.id)!.required.includes(k)).map((u) => u.id);
     let d = all ? descs[0] : `${uses.map((u) => u.id).join(', ')}: ${descs.length === 1 ? descs[0] : uses.map((u) => `(${u.id}) ${u.desc}`).join(' ')}`;
     if (req.length) d += ` Required for ${req.join(', ')}.`;
-    if (spec.format === 'file') d += ' A file path from list_library / fetch_image (Library/... or work/assets/...).';
+    if (spec.format === 'file') d += ' A Library/... picture path, or a web picture\'s assetId from resolve_asset commit.';
     props[k] = S.opt(toSchema(spec, d));
   }
   return S.obj(props, 'Template params. Fill only what the chosen template uses; leave the rest null. Word timings and the free space above the face are added for you.');
