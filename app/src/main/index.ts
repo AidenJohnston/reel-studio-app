@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
-import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
   binDir,
@@ -7,6 +7,7 @@ import {
   engineEnv,
   engineMode,
   initPaths,
+  legalFile,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -55,9 +56,14 @@ import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
+import { RELEASES_REPO } from '../shared/config'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
-import { createUpdateService } from './update-check'
+import { RELEASES_API, releasePageBackend, type FetchLike } from './update-check'
+import { createUpdater, menuCheckForUpdates } from './updater'
+import { autoUpdater } from 'electron-updater'
+import { electronUpdaterBackend, macBundleCheck } from './updater-electron'
+import { disabledReason, updateMode } from './update-machine'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -164,21 +170,76 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  () => updates.assertCanStartWork()
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
-// "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
-const updates = createUpdateService({
-  active: !TEST,
+// ---- updates (main/updater.ts) -------------------------------------------------------------------
+// Test runs never touch the network, except the update e2e, which points a dev build at a local server
+// (REELSTUDIO_UPDATE_FEED, honoured only in an unpackaged test run: app/e2e/update.spec.ts).
+const TEST_FEED = TEST && !app.isPackaged ? process.env.REELSTUDIO_UPDATE_FEED : undefined
+const SELF_TEST = process.argv.includes('--self-test')
+let exportsWriting = 0
+const updateBusy = () => ({ exporting: exportsWriting > 0, working: jobs.runningCount() })
+
+function readUpdateFeed(): string | null {
+  if (TEST_FEED) {
+    // electron-updater's dev config: same format as the packaged app-update.yml, generic provider
+    const file = join(app.getPath('userData'), 'dev-app-update.yml')
+    const text = `provider: generic\nurl: ${TEST_FEED}\nupdaterCacheDirName: reel-studio-e2e-updater-${basename(dirname(app.getPath('userData')))}\n`
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, text)
+    return file
+  }
+  const file = join(process.resourcesPath, 'app-update.yml')
+  return existsSync(file) ? file : null
+}
+
+const updateFeed = app.isPackaged || TEST_FEED ? readUpdateFeed() : null
+const updateEnv = {
+  platform: process.platform,
+  isPackaged: app.isPackaged || !!TEST_FEED,
+  test: (TEST && !TEST_FEED) || SELF_TEST,
+  hasFeed: updateFeed !== null,
+  inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
+}
+// Node's fetch: no Electron session, so no cookies ride along
+const githubFetch: FetchLike = (url, init) => fetch(url, init)
+const updateOff = disabledReason(updateEnv)
+const updateHow = updateMode(updateEnv)
+const updates = createUpdater({
   version: app.getVersion(),
+  mode: updateHow,
+  disabledReason: updateOff,
+  backend: updateOff
+    ? null
+    : updateHow === 'install'
+      ? electronUpdaterBackend({
+          updater: autoUpdater,
+          version: app.getVersion(),
+          fetch: githubFetch,
+          releasesApi: TEST_FEED ? `${TEST_FEED}/releases` : RELEASES_API,
+          releaseFolder: (tag) => (TEST_FEED ? `${TEST_FEED}/download/${tag}` : `https://github.com/${RELEASES_REPO}/releases/download/${tag}`),
+          log,
+          devFeedFile: TEST_FEED ? updateFeed ?? undefined : undefined,
+          onError: (e) => updates.installFailed(e),
+          verifyDownload: macBundleCheck(app.getVersion())
+        })
+      : releasePageBackend(githubFetch, app.getVersion()),
   load: loadSettings,
   save: saveSettings,
-  fetch: (url, init) => fetch(url, init), // Node's fetch: no Electron session, so no cookies
-  now: () => Date.now(),
-  log,
+  busy: updateBusy,
+  prepareToQuit: async () => {
+    await stopPhoneShare()
+    await jobs.cancelAll()
+    await killAllEngines()
+  },
   openExternal: (url) => shell.openExternal(url),
-  send: (n) => broadcast('update:change', n)
+  send: (st) => broadcast('update:state', st),
+  log,
+  now: () => Date.now()
 })
+log(`[update] ${updateOff ?? `on (${updateHow})`}`)
 
 // ---- helpers ------------------------------------------------------------------------------------
 type Handler = (e: IpcMainInvokeEvent, ...args: any[]) => unknown
@@ -349,6 +410,11 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
+  handle('app:showLegal', (_e, doc: unknown) => {
+    const file = legalFile(doc)
+    if (!TEST) shell.showItemInFolder(file)
+  })
   ipcMain.on('app:startDrag', (e, file: string) => {
     try {
       startDragOut(e.sender, file, [reelStudioRoot(), projectsDir()])
@@ -541,7 +607,15 @@ function registerIpc(): void {
     })
     return { jobId }
   })
-  handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:export', async (_e, slug: string, n: number) => {
+    updates.assertCanStartWork()
+    exportsWriting++ // the updater will not restart the app while an export writes its file
+    try {
+      return await exportVersion(slug, n)
+    } finally {
+      exportsWriting--
+    }
+  })
   handle('projects:remove', async (_e, slug: string) => {
     const running = jobs.forSlug(slug)
     if (running) {
@@ -599,10 +673,14 @@ function registerIpc(): void {
     return ai.writeScript(String(idea), () => {})
   })
 
-  handle('update:status', () => updates.status())
-  handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
-  handle('update:open', (_e, url: unknown) => updates.open(url))
+  handle('update:state', () => updates.state())
+  handle('update:check', () => updates.check('button'))
+  handle('update:download', () => updates.download())
+  handle('update:install', () => updates.install())
+  handle('update:openRelease', (_e, version?: unknown) => updates.openRelease(version))
+  handle('update:busy', updateBusy)
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
+  handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
 
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
@@ -655,7 +733,16 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
+  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, () =>
+    // On Mac the menu outlives a closed window, so the window may be gone when this runs.
+    void menuCheckForUpdates(updates, {
+      focus: () => {
+        if (!win || win.isDestroyed()) createWindow()
+        win?.show()
+      },
+      show: (o) => (win && !win.isDestroyed() ? dialog.showMessageBox(win, o) : dialog.showMessageBox(o))
+    }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
+  )
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.
   win.on('focus', () => win?.flashFrame(false))
@@ -722,7 +809,8 @@ app.whenReady().then(async () => {
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
   registerIpc()
   createWindow()
-  updates.start() // a few seconds after the window, so launch is never slower
+  await updates.init()
+  updates.start() // 15 s after the window, so launch is never slower
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
