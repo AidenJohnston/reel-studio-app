@@ -3,6 +3,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvider, ToolSchema } from '../types';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
+/** The same key's small model, for short text (version titles). */
+export const SMALL_CLAUDE_MODEL = 'claude-haiku-5-5';
 
 export interface AnthropicOptions {
   apiKey: string;

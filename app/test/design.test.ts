@@ -2,9 +2,9 @@
 // folder names, and the Library summary line.
 import { describe, expect, it } from 'vitest'
 import { STAGES, clock, estimateSecondsLeft, overallProgress, stageIndex, timeLeftText } from '../src/shared/progress'
-import { describeChange, describeSorted, versionMessage } from '../src/shared/describe'
+import { acceptRewrite, describeChange, describeFacts, describeSorted, versionMessage, versionTitle, versionTooltip } from '../src/shared/describe'
 import { displayPath } from '../src/shared/display-path'
-import type { DropResult, ProjectJson } from '../src/shared/api'
+import type { ChatMessage, DropResult, ProjectJson } from '../src/shared/api'
 
 const base = (extra: Partial<ProjectJson> = {}): ProjectJson =>
   ({
@@ -50,6 +50,120 @@ describe('progress', () => {
 })
 
 describe('version messages', () => {
+  it('fails if a version button stops reading its receipt the way a manual edit is worded', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 },
+      { kind: 'captions.style', field: 'color', before: '#FFFFFF', after: '#FFD60A' },
+      { kind: 'music.level', before: 'under-voice', after: 'quiet' },
+      { kind: 'broll', id: 'b3', before: null, after: { id: 'b3' } }
+    ]
+    expect(versionMessage(4, describeFacts(facts, words))).toBe('Version 4: cut 2 words, bigger yellow subtitles, quieter music, added a picture.')
+  })
+  it('fails if the title of a cut-plus-subtitles version is wrong', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 }
+    ]
+    expect(versionTitle(facts, words)).toBe('Shorter cut, bigger subtitles')
+  })
+  it('fails if a version title names a change that is not in its receipt', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const receipts = [
+      [{ kind: 'source', id: 's1', before: { id: 's1', mirror: false }, after: { id: 's1', mirror: true } }],
+      [{ kind: 'source', id: 's1', before: { id: 's1', mirror: true }, after: { id: 's1', mirror: false } }],
+      [{ kind: 'cut.keep', before: [{ from: 'w0', to: 'w3' }], after: [{ from: 'w0', to: 'w5' }] }],
+      [{ kind: 'cut.gapCap', before: 0.25, after: 0.12 }],
+      [{ kind: 'captions.corrections', before: [], after: [{ from: 'bred', to: 'bread' }] }],
+      [{ kind: 'music.track', before: 'Library/Music/calm.mp3', after: 'Library/Music/Picture Perfect.mp3' }],
+      [{ kind: 'broll', id: 'b1', before: { id: 'b1', treatment: 'side-card' }, after: { id: 'b1', treatment: 'full-frame' } }],
+      [{ kind: 'zooms', before: [{ scale: 1.1 }], after: [] }],
+      [{ kind: 'cover.text', before: null, after: 'Bread' }],
+      [{ kind: 'post.caption', before: '', after: 'My bread' }]
+    ]
+    // the app's own name and summary pass for any three changes together ("A, B and more")
+    for (const [i, a] of receipts.entries()) {
+      for (const [j, b] of receipts.entries()) {
+        for (const c of receipts.slice(Math.max(i, j) + 1)) {
+          if (j <= i) continue
+          const facts = [...a, ...b, ...c]
+          const own = { title: versionTitle(facts, words), summary: describeFacts(facts, words) }
+          expect(acceptRewrite(own, facts, words), own.title).toEqual(own)
+        }
+      }
+    }
+    for (const facts of receipts) {
+      const title = versionTitle(facts, words)
+      expect(acceptRewrite({ title, summary: describeFacts(facts, words) }, facts, words), title).not.toBeNull()
+      for (const other of receipts.filter((r) => r !== facts)) expect(acceptRewrite({ title, summary: title }, other, words), `${title} for ${other[0].kind}`).toBeNull()
+    }
+  })
+  it('fails if a rewording that contradicts its receipt is kept', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const cutTwo = { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] }
+    const restoreTwo = { kind: 'cut.keep', before: [{ from: 'w2', to: 'w5' }], after: [{ from: 'w0', to: 'w5' }] }
+    const bigger = { kind: 'captions.style', field: 'size', before: 105, after: 126 }
+    const added = (id: string) => ({ kind: 'broll', id, before: null, after: { id } })
+    const contradictions: [string, unknown[]][] = [
+      ['New song', [{ kind: 'music.track', before: 'Library/Music/calm.mp3', after: null }]],
+      ['Added a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }]],
+      ['Trimmed 2 words', [restoreTwo]],
+      ['Subtitles removed', [bigger]],
+      ['Subtitles not bigger', [bigger]],
+      ['Cut 3 words, 2 pictures', [cutTwo, added('b1'), added('b2'), added('b3')]],
+      ['Twelve words cut', [cutTwo]],
+      ['Shorter cut, idiot', [cutTwo]],
+      ['Cut 2 words', [restoreTwo]],
+      ['Longer cut', [restoreTwo]],
+      ['Cut a word', [cutTwo]],
+      ['Fixed a word', [{ kind: 'captions.corrections', before: [], after: [{ from: 'a', to: 'b' }, { from: 'c', to: 'd' }, { from: 'e', to: 'f' }] }]],
+      ['Removed a picture', [{ kind: 'broll', id: 'b1', before: { id: 'b1' }, after: null }, { kind: 'broll', id: 'b2', before: { id: 'b2' }, after: null }]],
+      ['Cut 2 takes', [cutTwo]],
+      ['New cover words', [{ kind: 'cover.atSourceTime', before: 1, after: 2 }]],
+      ['Subtitles off and back on', [{ kind: 'captions.enabled', before: true, after: false }, { kind: 'music.enabled', before: false, after: true }]],
+      ['Added 2 animations', [added('b1'), added('b2')]]
+    ]
+    expect(versionTitle([restoreTwo], words)).toBe('More words back')
+    const kept = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: reply.toLowerCase() }, facts as never, words))
+    expect(kept.map(([reply]) => reply)).toEqual([])
+    // the title alone is checked too: the app's own summary beside it changes nothing
+    const keptTitles = contradictions.filter(([reply, facts]) => acceptRewrite({ title: reply, summary: describeFacts(facts as never, words) }, facts as never, words))
+    expect(keptTitles.map(([reply]) => reply)).toEqual([])
+  })
+  it('fails if a fair rewording with "and more" or a song name is thrown away, or a made-up song name is kept', () => {
+    const words = Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, w: `word${i}`, s: i, e: i + 0.5 }))
+    const facts = [
+      { kind: 'cut.keep', before: [{ from: 'w0', to: 'w5' }], after: [{ from: 'w2', to: 'w5' }] },
+      { kind: 'captions.style', field: 'size', before: 105, after: 126 },
+      { kind: 'music.track', before: null, after: 'Library/Music/Picture Perfect.mp3' }
+    ]
+    expect(versionTitle(facts, words)).toBe('Shorter cut, bigger subtitles and more')
+    const fair = { title: 'Bigger captions, shorter cut and more', summary: 'new song “Picture Perfect”, cut two words and bigger subtitles' }
+    expect(acceptRewrite(fair, facts, words)).toEqual(fair)
+    expect(acceptRewrite({ ...fair, summary: 'new song "Smaller Captions", cut 2 words' }, facts, words)).toBeNull()
+    // the app's own longest name passes its own check
+    const restored = [{ kind: 'cut.keep', before: [{ from: 'w2', to: 'w5' }], after: [{ from: 'w0', to: 'w5' }] }, ...facts.slice(1)]
+    const own = { title: versionTitle(restored, words), summary: describeFacts(restored, words) }
+    expect(own.title).toBe('More words back, bigger subtitles and more')
+    expect(acceptRewrite(own, restored, words)).toEqual(own)
+  })
+  it("fails if a version button shows the AI's chat reply when a receipt exists, or for a version made after receipts", () => {
+    const chat: ChatMessage[] = [
+      { id: '1', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 1 },
+      { id: '2', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 2 },
+      { id: '3', from: 'editor', text: 'I tightened your pauses.', at: '', version: 3 },
+      { id: '4', from: 'you', text: 'try tighter pauses', at: '' },
+      { id: '5', from: 'editor', text: "That left your video the same as before, so I didn't make a new version.", at: '' }
+    ]
+    const size = [{ kind: 'captions.style', field: 'size', before: 105, after: 126 }]
+    expect(versionTooltip({ n: 1, facts: size }, chat, [])).toBe('Version 1: bigger subtitles.')
+    expect(versionTooltip({ n: 2 }, chat, [])).toBeUndefined()
+    expect(versionTooltip({ n: 3, beforeReceipts: true }, chat, [])).toBe('I tightened your pauses.')
+    // a checked rewording of the summary replaces the app's words, never the chat's
+    expect(versionTooltip({ n: 1, facts: size, wording: { title: 'Bigger captions', summary: 'made the subtitles bigger' } }, chat, [])).toBe('Version 1: made the subtitles bigger.')
+  })
   it('describes subtitle changes the way a person would', () => {
     const p = base()
     const patch = { captions: { enabled: true, style: { size: 126, position: 0.66, color: '#FFD60A', box: false } } }

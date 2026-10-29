@@ -258,6 +258,8 @@ a { color: inherit; }
 .chip { min-height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); font: inherit; font-weight: 600; font-size: 13.5px; cursor: pointer; color: var(--ink-2); }
 .chip:hover { border-color: var(--ink-4); color: var(--ink); }
 .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* The selected version's name, under the chips: a caption, not a control. */
+.version-title { margin: -4px 0 0; min-height: 1.45em; max-width: 100%; font-size: 13.5px; color: var(--ink-3); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .export-btn { width: 100%; max-width: 340px; }
 .reel-right { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - var(--titlebar) - 40px); }
 .reel-right .panel + .panel { margin-top: 0; }

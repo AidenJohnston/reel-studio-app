@@ -8,10 +8,10 @@ import {
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
 import { writeFileAtomic } from './project';
-import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
+import { AnthropicProvider, DEFAULT_CLAUDE_MODEL, SMALL_CLAUDE_MODEL } from './providers/anthropic';
 import { SiwcAuth } from './providers/siwc';
 import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
-import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
+import { ClaudeCliProvider, CodexCliProvider, extractJson } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
@@ -246,6 +246,20 @@ export function createAI(opts: CreateAIOptions) {
     }
   }
 
+  /** The active connection's own small model, or null when it has none. Never another provider or
+   * account: a ChatGPT sign-in has no small model here, so it gets none. */
+  async function smallModel(): Promise<ModelProvider | null> {
+    const st = await active();
+    switch (st.id) {
+      case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: SMALL_CLAUDE_MODEL, maxTokens: 2000, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
+      case 'claude-cli': {
+        const bin = (await localClaude()).bin;
+        return new ClaudeCliProvider({ model: 'haiku', ...(bin ? { bin } : {}) });
+      }
+      default: return null;
+    }
+  }
+
   return {
     providers,
     active,
@@ -343,6 +357,16 @@ export function createAI(opts: CreateAIOptions) {
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);
+    },
+    /** Rewords a committed version's title and summary with one small-model call. null: the connection
+     * has no small model, or the reply was not the JSON asked for. The app checks the words against the
+     * version's receipts before it shows them. */
+    async rewordVersion(text: { title: string; summary: string }, signal?: AbortSignal): Promise<{ title: string; summary: string } | null> {
+      const p = await smallModel();
+      if (!p) return null;
+      const r = await p.complete({ system: prompts.render('versionTitle'), messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify(text) }] }], tools: [], jsonOnly: true, signal });
+      const j = extractJson(r.text);
+      return typeof j?.title === 'string' && typeof j?.summary === 'string' ? { title: j.title, summary: j.summary } : null;
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },
