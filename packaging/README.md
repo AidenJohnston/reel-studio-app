@@ -32,6 +32,15 @@ packaging/build-mac.sh            # or --spike
 packaging/sign-mac.sh             # run in a GUI session: sign + notarize + staple
 ```
 
+### Release files
+
+Installed copies update from the GitHub release tagged `v<version>`. Attach, next to the GPL sources:
+
+* Windows: `Reel-Studio-Setup-<version>-x64.exe` **and** `latest.yml` from `app\release\`. `build-win.ps1` checks that
+  `latest.yml` names that installer, its version and its SHA-512. Without `latest.yml`, Windows copies cannot update.
+  The `.blockmap` is not needed.
+* Mac: the three files from `app/release/signed/` (`docs/signing-mac.md`, "Release").
+
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.
 
