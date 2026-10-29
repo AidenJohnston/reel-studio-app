@@ -11,6 +11,22 @@ export const PAPER = '#f7f5f1'
 export const INK = '#1d1b18'
 /** Height of the Windows title bar overlay (window buttons). The renderer leaves this much room at the top. */
 export const WIN_TITLEBAR_HEIGHT = 40
+/** The modal scrim, as in styles.css `.modal-backdrop`: INK at 30 %. */
+export const SCRIM_ALPHA = 0.3
+
+/** `top` laid over `base` at `alpha`, both #rrggbb. */
+export function blendHex(base: string, top: string, alpha: number): string {
+  const ch = (hex: string, i: number): number => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)
+  return '#' + [0, 1, 2].map((i) => Math.round(ch(base, i) * (1 - alpha) + ch(top, i) * alpha).toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Windows and Linux: the strip behind the system's window buttons is drawn by the OS in this colour, outside the
+ * page, so a modal's scrim cannot cover it. While a modal is open it takes the scrim's colour instead.
+ */
+export function titleBarOverlay(dimmed: boolean): { color: string; symbolColor: string; height: number } {
+  return { color: dimmed ? blendHex(PAPER, INK, SCRIM_ALPHA) : PAPER, symbolColor: INK, height: WIN_TITLEBAR_HEIGHT }
+}
 
 export type { AppCommand }
 
@@ -64,7 +80,7 @@ export function createMainWindow(opts: { preload: string; stateFile: string; tes
     titleBarStyle: 'hidden',
     ...(mac
       ? { trafficLightPosition: { x: 18, y: 18 } }
-      : { titleBarOverlay: { color: PAPER, symbolColor: INK, height: WIN_TITLEBAR_HEIGHT } }),
+      : { titleBarOverlay: titleBarOverlay(false) }),
     webPreferences: {
       preload: opts.preload,
       contextIsolation: true,

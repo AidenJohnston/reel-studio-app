@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { droppedPaths } from '../api'
+import { droppedPaths, reel } from '../api'
 import { Icon } from './icons'
 
 export function Progress({ pct, done, label }: { pct: number; done?: boolean; label?: string }) {
@@ -47,9 +47,18 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
+// Modals can stack (a Confirm over a dialog); the title bar stays dimmed until the last one closes.
+let openModals = 0
+
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
 export function Modal({ children, onClose, wide, testid }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (openModals++ === 0) void reel.app.dimTitleBar(true)
+    return () => {
+      if (--openModals === 0) void reel.app.dimTitleBar(false)
+    }
+  }, [])
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
