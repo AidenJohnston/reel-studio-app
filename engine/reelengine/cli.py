@@ -35,6 +35,23 @@ def cmd_probe(args):
     return probe.probe(Path(args.file))
 
 
+def cmd_export_probe(args):
+    from . import export_media
+    return export_media.inspect(Path(args.file))
+
+
+def cmd_export_media(args):
+    from . import export_media
+    if args.bitrate is None:
+        return export_media.remux(Path(args.file), Path(args.dest))
+    return export_media.encode(Path(args.file), Path(args.dest), args.bitrate)
+
+
+def cmd_export_cover(args):
+    from . import export_media
+    return export_media.cover(Path(args.file), Path(args.dest), args.at)
+
+
 def cmd_classify(args):
     from . import classify
     return classify.run(Path(args.root) if args.root else None, [Path(f) for f in args.files],
@@ -305,6 +322,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("probe", cmd_probe, "describe a media file")
     sp.add_argument("file")
+    sp = add("export-probe", cmd_export_probe, "read what a platform export decides on: size, audio bitrate, edit lists")
+    sp.add_argument("file")
+    sp = add("export-media", cmd_export_media, "re-encode a finished edit to fit a platform's size limit, or only redo its audio")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--bitrate", type=int, help="video bits per second for a re-encode at the same size; without it, copy the video")
+    sp = add("export-cover", cmd_export_cover, "save a JPEG cover from a video frame or a picture")
+    sp.add_argument("file")
+    sp.add_argument("--dest", required=True)
+    sp.add_argument("--at", type=float, help="seconds into a video (default: the whole picture)")
     sp = add("classify", cmd_classify, "sort dropped files into the Library")
     sp.add_argument("--root", help="Reel Studio root (default REELENGINE_ROOT or ~/Documents/Reel Studio)")
     sp.add_argument("--move", action="store_true", help="move instead of copy")
