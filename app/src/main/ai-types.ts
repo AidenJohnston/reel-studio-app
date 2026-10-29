@@ -45,11 +45,39 @@ export interface EngineHost {
 }
 
 export interface ProviderStatus {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'replay' | 'none'
+  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string
   error?: UserFacingError
+  connectionId?: string
+}
+
+export interface ConnectionInfo {
+  id: string
+  label: string
+  kind: 'anthropic' | 'openai'
+  baseURL: string
+  model: string
+  supportsImages: boolean
+  hasKey: boolean
+  active: boolean
+}
+
+export interface ConnectionInput {
+  id?: string
+  label: string
+  kind: 'anthropic' | 'openai'
+  baseURL: string
+  model: string
+  /** empty keeps the stored key when editing */
+  key?: string
+}
+
+export interface SaveConnectionResult {
+  status: ProviderStatus
+  connection?: ConnectionInfo
+  error?: UserFacingError & { field?: 'label' | 'address' | 'key' | 'model' }
 }
 
 /** Mirrors Electron's safeStorage. */
@@ -57,12 +85,13 @@ export interface SecretStore {
   isEncryptionAvailable(): boolean
   encryptString(s: string): Buffer
   decryptString(b: Buffer): string
+  getSelectedStorageBackend?(): string
 }
 
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
-  setActive(id: ProviderStatus['id']): Promise<void>
+  setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
   /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
@@ -80,6 +109,12 @@ export interface AI {
   addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
   /** A fresh look at the person's own Claude Code app (`bin` stays in main). Optional: older packages lack it. */
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
+  /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */
+  connections?(): Promise<ConnectionInfo[]>
+  saveConnection?(input: ConnectionInput): Promise<SaveConnectionResult>
+  removeConnection?(id: string): Promise<void>
+  setConnectionImages?(id: string, supportsImages: boolean): Promise<void>
+  connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */

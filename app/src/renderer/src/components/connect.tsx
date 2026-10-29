@@ -3,6 +3,7 @@ import type { ModelStatus, ProviderInfo } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { Progress, Spinner } from './ui'
 import { Icon } from './icons'
+import { Connections } from './Connections'
 import { USING_CLAUDE_CODE, USING_CODEX, VendorCards } from './vendor-connect'
 
 export { USE_CLAUDE_CODE, USE_CODEX, USING_CLAUDE_CODE, USING_CODEX } from './vendor-connect'
@@ -19,8 +20,8 @@ export const usingLine = (p: ProviderInfo): string =>
 /**
  * Connect your AI editor, for normal people: "Connect Claude" and "Connect ChatGPT" (vendor-connect.tsx), each of which
  * installs the person's own AI app if needed and opens that vendor's own sign-in page. Whatever the person already has
- * comes first. "Use an Anthropic API key" stays the quiet advanced choice. Used by the Connect screen, Settings and
- * First run.
+ * comes first. "Use an Anthropic API key" and "Use your own AI server" (Connections.tsx) stay the quiet advanced
+ * choices. Used by the Connect screen, Settings and First run.
  */
 export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => void }) {
   const [active, setActive] = useState<ProviderInfo | null>(null)
@@ -120,6 +121,7 @@ export function ConnectAI({ onConnected }: { onConnected?: (p: ProviderInfo) => 
           </p>
         </>
       )}
+      {choices && <Connections onConnected={done} />}
       {active?.error && !error && <div className="banner error">{active.error.userMessage}</div>}
       {error && (
         <div className="banner error">
@@ -168,8 +170,8 @@ export function DevProviders() {
   )
 }
 
-/** One-time speech model download with progress. */
-export function ModelDownload({ onReady }: { onReady?: () => void }) {
+/** One-time speech model download with progress. `secondary` on Settings, where the AI editor is the main action. */
+export function ModelDownload({ onReady, secondary }: { onReady?: () => void; secondary?: boolean }) {
   const [s, setS] = useState<ModelStatus | null>(null)
   useEffect(() => {
     reel.model.status().then(setS)
@@ -204,7 +206,7 @@ export function ModelDownload({ onReady }: { onReady?: () => void }) {
           </div>
         </>
       ) : (
-        <button className="btn primary big" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
+        <button className={`btn big${secondary ? '' : ' primary'}`} onClick={() => reel.model.download().then(setS)} data-testid="download-model">
           {s.pct > 0 && s.pct < 100 ? 'Keep downloading' : 'Download'}
         </button>
       )}

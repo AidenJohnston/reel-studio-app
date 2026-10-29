@@ -63,6 +63,8 @@ import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDra
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
+// Tests that save a key (safeStorage) must not write to the login keychain of the Mac they run on.
+if (TEST && process.platform === 'darwin') app.commandLine.appendSwitch('use-mock-keychain')
 
 registerMediaScheme()
 
@@ -404,8 +406,39 @@ function registerIpc(): void {
 
   handle('ai:providers', () => ai.providers())
   handle('ai:active', () => ai.active())
-  handle('ai:setActive', (_e, id) => ai.setActive(id))
-  handle('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
+  // Done or failed, every call that can change the AI editor announces it so the sidebar line follows at once.
+  const changesAI = (channel: string, fn: Handler): void =>
+    handle(channel, async (e, ...args) => {
+      try {
+        return await fn(e, ...args)
+      } finally {
+        ai.active().then((p) => broadcast('ai:change', p), () => {})
+      }
+    })
+  changesAI('ai:setActive', (_e, id, connectionId?: string) => ai.setActive(id, typeof connectionId === 'string' ? connectionId : undefined))
+  changesAI('ai:setClaudeKey', (_e, key: string | null) => ai.setClaudeKey(key))
+  // The key goes from the page to the AI package once and never comes back.
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const connectionsNotReady = { code: 'NOT_READY', userMessage: 'Connecting your own AI server is not ready in this build yet. Your videos still work without it.' }
+  handle('ai:connections', async () => (await ai.connections?.()) ?? [])
+  changesAI('ai:saveConnection', async (_e, input: Record<string, unknown>) => {
+    if (!ai.saveConnection) throw connectionsNotReady
+    const kind = input?.kind === 'anthropic' ? 'anthropic' : 'openai'
+    return ai.saveConnection({ ...(input?.id ? { id: text(input.id) } : {}), label: text(input?.label), kind, baseURL: text(input?.baseURL), model: text(input?.model), key: text(input?.key) })
+  })
+  changesAI('ai:removeConnection', async (_e, id: unknown) => {
+    if (!ai.removeConnection) throw connectionsNotReady
+    await ai.removeConnection(text(id))
+  })
+  handle('ai:setConnectionImages', async (_e, id: unknown, on: unknown) => {
+    if (!ai.setConnectionImages) throw connectionsNotReady
+    await ai.setConnectionImages(text(id), on === true)
+  })
+  handle('ai:connectionModels', async (_e, q: Record<string, unknown>) => {
+    if (!ai.connectionModels) return { models: [], suggested: null, needsKey: false }
+    const kind = q?.kind === 'anthropic' ? 'anthropic' : 'openai'
+    return ai.connectionModels({ kind, baseURL: text(q?.baseURL), key: text(q?.key), ...(q?.id ? { id: text(q.id) } : {}) })
+  })
   // The person's own Claude Code app: the page gets the state only; the sign-in happens in Anthropic's CLI.
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
@@ -421,7 +454,8 @@ function registerIpc(): void {
     return v
   }
   handle('ai:vendorStatus', (_e, v) => vendors.status(vendorOf(v)))
-  handle('ai:vendorConnect', (_e, v) => vendors.connect(vendorOf(v)))
+  // connecting ends by making the vendor's app the AI editor
+  changesAI('ai:vendorConnect', (_e, v) => vendors.connect(vendorOf(v)))
   handle('ai:vendorCancel', (_e, v) => vendors.cancel(vendorOf(v)))
   handle('ai:vendorSignInAgain', (_e, v) => void vendors.signInAgain(vendorOf(v)))
 

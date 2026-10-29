@@ -59,7 +59,9 @@ export function App() {
   useEffect(() => {
     reel.app.info().then(setInfo)
   }, [])
-  // The sidebar says which AI editor is on, and is a way in when none is.
+  // The sidebar says which AI editor is on, and is a way in when none is. The read on screen change catches what
+  // main cannot announce, such as a Claude Code app signed out in a terminal.
+  useEffect(() => reel.ai.onChange(setProvider), [])
   useEffect(() => {
     reel.ai.active().then(setProvider).catch(() => {})
   }, [screen, info?.firstRunDone])
@@ -182,12 +184,8 @@ export function App() {
     )
   }
 
-  const section =
-    screen.name === 'new' || screen.name === 'working' || screen.name === 'reel' || screen.name === 'script'
-      ? 'home'
-      : screen.name === 'connect'
-        ? 'settings'
-        : screen.name
+  const shown = screen.name === 'connect' ? (screen.back ?? { name: 'home' }) : screen
+  const section = shown.name === 'new' || shown.name === 'working' || shown.name === 'reel' || shown.name === 'script' ? 'home' : shown.name
   const aiOn = !!provider && provider.connected && provider.id !== 'none'
 
   return (
@@ -225,7 +223,7 @@ export function App() {
               ) : (
                 <>
                   <div className="muted-sm">No AI editor connected.</div>
-                  <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect' })} data-testid="sidebar-connect">
+                  <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect', back: shown.name === 'reel' ? { name: 'reel', slug: shown.slug } /* not fresh: going back must not replay the finish moment */ : shown })} data-testid="sidebar-connect">
                     Connect one
                   </button>
                 </>

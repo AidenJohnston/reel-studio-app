@@ -1,6 +1,6 @@
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ReelApi, UpdateNotice, VendorInfo } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateNotice, VendorInfo } from '../shared/api'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as
@@ -38,10 +38,16 @@ const api: ReelApi = {
   ai: {
     providers: () => call('ai:providers'),
     active: () => call('ai:active'),
-    setActive: (id) => call('ai:setActive', id),
+    setActive: (id, connectionId) => call('ai:setActive', id, connectionId),
     setClaudeKey: (k) => call('ai:setClaudeKey', k),
     claudeCodeStatus: () => call('ai:claudeCodeStatus'),
     openClaudeSignIn: () => call('ai:openClaudeSignIn'),
+    connections: () => call('ai:connections'),
+    saveConnection: (input) => call('ai:saveConnection', input),
+    removeConnection: (id) => call('ai:removeConnection', id),
+    setConnectionImages: (id, on) => call('ai:setConnectionImages', id, on),
+    connectionModels: (q) => call('ai:connectionModels', q),
+    onChange: (cb) => on<ProviderInfo>('ai:change', cb),
     vendorStatus: (v) => call('ai:vendorStatus', v),
     vendorConnect: (v) => call('ai:vendorConnect', v),
     vendorCancel: (v) => call('ai:vendorCancel', v),
