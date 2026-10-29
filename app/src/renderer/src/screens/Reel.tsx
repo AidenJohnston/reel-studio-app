@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
+import type { ChatAction, ChecklistItem, ExportResult, PlacedWord, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
@@ -9,9 +9,13 @@ import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinkin
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
+import { createPlayhead } from '../components/playhead'
+import { versionOnScreen } from '../components/videoLayers'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
+import { ChangeAt } from '../components/ChangeAt'
+import { noteMarks, sourceAt, typedMoment, type RenderSegment } from '../../../shared/moments'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -50,11 +54,14 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
+  const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [bannerHidden, setBannerHidden] = useState(() => localStorage.getItem(bannerKey(slug)) === '1')
   const [igOverlay, setIgOverlay] = useState(() => localStorage.getItem(IG_KEY) === '1')
   const [holding, setHolding] = useState(false)
+  // the pointer or focus reached Hold for original: load the raw footage from then on
+  const [warmOriginal, setWarmOriginal] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
@@ -63,6 +70,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const att = useNoteAttachments(slug, notify)
   const [noteDrop, setNoteDrop] = useState(false)
   const noteDropDepth = useRef(0)
+  // Read by the player and the change button only, so playback does not re-render this screen.
+  const [playhead] = useState(createPlayhead)
+  // the video the player has on screen; during a switch it is still the old one
+  const [shownSrc, setShownSrc] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
 
   const load = useCallback(
     async (selectLatest = false) => {
@@ -82,7 +94,11 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   useEffect(() => {
     void load(true)
-    reel.ai.active().then(setProvider).catch(() => {})
+    reel.ai
+      .active()
+      .then(setProvider)
+      .catch(() => {})
+      .finally(() => setProviderChecked(true))
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
       if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
@@ -117,6 +133,30 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   // while a change is being made: its quick preview (a draft render), until the new version is done
   const changePreview = job?.preview?.video ?? null
+  // Where the shown version plays each word, for the marks. Keyed on its video URL, which changes
+  // with every render of it (the file's mtime is in the URL).
+  // segments null: no timeline to read for that version (none written, or reading it failed)
+  const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] | null } | null>(null)
+  // The marks, the change pop-up and Hold for original act on what is on screen, not on what was just picked.
+  const onScreen = d ? versionOnScreen(d.versions, shownSrc) : null
+  const shownN = onScreen?.n
+  const shownVideo = onScreen?.video
+  useEffect(() => {
+    if (shownN === undefined || !shownVideo) return
+    let live = true
+    reel.projects
+      .timeline(slug, shownN)
+      .then((t) => {
+        if (live) setTimeline({ video: shownVideo, words: t?.words ?? [], segments: t?.segments ?? null })
+      })
+      .catch((e) => {
+        if (live) setTimeline({ video: shownVideo, words: [], segments: null })
+        notify(userMessage(e), 'error')
+      })
+    return () => {
+      live = false
+    }
+  }, [slug, shownN, shownVideo, notify])
 
   const doExport = useCallback(async (toPhone = false) => {
     if (!version || job || exporting) return
@@ -139,7 +179,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   if (!d) return <div className="page"><Spinner /></div>
 
-  const aiOff = !provider || !provider.connected || provider.id === 'none'
+  // Only the AI-dependent parts (the banner, the note box) wait for the AI check, which can take seconds when a
+  // Claude Code app is probed. Drawn before it, a connected editor flashed the "No AI editor yet" banner.
+  const aiOff = providerChecked && (!provider || !provider.connected || provider.id === 'none')
   const connect = () => go({ name: 'connect', back: { name: 'reel', slug } })
   // What each version changed, from the chat ("Version 3: bigger yellow subtitles."), for the button tooltips.
   const versionNote = new Map<number, string>()
@@ -162,7 +204,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       notify(userMessage(e), 'error')
     }
   }
-  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy
+  // the AI check must answer first: until then a note could go out as if no editor were connected
+  const canSend = (!!note.trim() || att.chips.length > 0) && !job && !att.busy && providerChecked
   // Files dropped on the note box are attached to the note. The window-wide drop (App.tsx: a video makes
   // a new reel) must not see them, so the drop stops here; App clears its overlay on NOTE_DROP_DONE.
   const noteDropProps = {
@@ -245,6 +288,25 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
+  // only on the saved version on screen: a change's quick preview (a separate draft file) is cut differently
+  const marks = timeline && timeline.video === shownVideo ? noteMarks(d.chat, job?.jobId ?? null, timeline.words) : []
+  // Hold for original shows the raw take at the moment on screen, by the shown version's own segments (same
+  // rule as the marks), and waits while they load. Over a change's quick preview (a draft, no saved version on
+  // screen), or for a version with no timeline, it plays the first take from 0:00 and says so.
+  const originalReady = !shownVideo || timeline?.video === shownVideo
+  const originalAt = (t: number) => {
+    if (!shownVideo) return 'start' as const
+    if (timeline?.video !== shownVideo) return null
+    if (!timeline.segments) return 'start' as const
+    const at = sourceAt(timeline.segments, t)
+    const src = at && d.sourceVideos[at.source]
+    return src ? { src, at: at.at } : null
+  }
+  const sent = async (jobId: string | null) => {
+    if (jobId) setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Reading your note' }))
+    await load()
+  }
+
   const runAction = (a: ChatAction, messageId: string) => {
     if (a === 'remember-yes' || a === 'remember-no') {
       reel.style
@@ -296,20 +358,44 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
       <div className="reel">
         <div className="reel-left">
-          <PhonePlayer
-            key={changePreview ?? version?.video ?? 'none'}
-            src={changePreview ?? version?.video ?? null}
-            poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
-            subtitle={drawer === 'captions' && preview ? preview : null}
-            still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
-            stillMirrored={d.project.sources?.[0]?.mirror === true}
-            instagram={igOverlay}
-            caption={d.project.post?.caption}
-            original={d.sourceVideo}
-            holdingOriginal={holding}
-            onDuration={setDuration}
-            dragFile={version && !version.draft ? version.videoPath : null}
+          {/* the phone gets the height the rows under it leave (styles.css .phone-slot) */}
+          <div className="phone-slot">
+            <PhonePlayer
+              src={changePreview ?? version?.video ?? null}
+              poster={version?.cover}
+              autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
+              subtitle={drawer === 'captions' && preview ? preview : null}
+              still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
+              stillMirrored={d.project.sources?.[0]?.mirror === true}
+              instagram={igOverlay}
+              caption={d.project.post?.caption}
+              original={d.sourceVideo}
+              originalAt={originalAt}
+              originalReady={originalReady}
+              warmOriginal={warmOriginal}
+              holdingOriginal={holding}
+              onDuration={setDuration}
+              dragFile={version && !version.draft ? version.videoPath : null}
+              marks={marks}
+              asking={asking}
+              playhead={playhead}
+              onShown={setShownSrc}
+              onFailed={() => {
+                // main's words for a missing video; the version on screen stays picked, so its chip can be tried again
+                notify('I could not find that video. It may have been moved or deleted.', 'error')
+                if (onScreen) setSelected(onScreen.n)
+              }}
+            />
+          </div>
+          <ChangeAt
+            slug={slug}
+            playhead={playhead}
+            shown={onScreen ? { n: onScreen.n, latest: onScreen.n === d.versions[d.versions.length - 1].n } : null}
+            aiOn={!aiOff}
+            checking={!providerChecked}
+            busy={!!job}
+            onOpenChange={setAsking}
+            onSent={(id) => void sent(id)}
           />
           {changePreview && (
             <p className="muted-sm center" data-testid="change-preview">Here's your change. I'm making the full-quality version.</p>
@@ -330,6 +416,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             {d.sourceVideo && (
               <button
                 className={`tool${holding ? ' on' : ''}`}
+                onPointerEnter={() => setWarmOriginal(true)}
+                onFocus={() => setWarmOriginal(true)}
                 onPointerDown={() => setHolding(true)}
                 onPointerUp={() => setHolding(false)}
                 onPointerLeave={() => setHolding(false)}
@@ -417,11 +505,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           </div>
 
           {aiOff && !bannerHidden && (
+            // Why the reel is simpler, and that nothing is locked. The way to connect is the button under the player.
             <div className="banner" data-testid="ai-banner">
-              <span>No AI editor yet, so I made a simple cut. Connect one and I can pick your best takes, add pictures and change the video from your notes.</span>
-              <button className="btn small" onClick={connect} data-testid="banner-connect">
-                Connect
-              </button>
+              <span>No AI editor yet, so I made a simple cut. You can still change anything under Edit it myself.</span>
               <button
                 className="icon-btn"
                 aria-label="Hide this"
@@ -458,16 +544,6 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 )
               })}
             </ul>
-            {extras.length > 0 && !job && (
-              <div className="extras" data-testid="extras">
-                <span className="muted-sm">Optional extras:</span>
-                {extras.map((x) => (
-                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
-                    <Icon name="plus" size={14} stroke={2} /> {x.label}
-                  </button>
-                ))}
-              </div>
-            )}
             {postDraft !== null && (
               <div className="stack" style={{ marginTop: 14 }} data-testid="post-editor">
                 <label className="muted-sm" htmlFor="post-draft">
@@ -502,11 +578,9 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           </section>
 
           <section className="panel notes-panel">
-            <h2>Notes for your editor</h2>
+            <h2>Your notes</h2>
             <div className="chat" data-testid="chat">
-              {d.chat.length === 0 && !job && (
-                <p className="muted-sm">Watch your reel, then tell me what to change. For example: "music too loud at the start".</p>
-              )}
+              {d.chat.length === 0 && !job && <p className="muted-sm">Changes you ask for show up here.</p>}
               {d.chat.map((m) => (
                 <div key={m.id} className={`bubble ${m.from}`} data-testid={`bubble-${m.from}`}>
                   {m.attachments?.length ? (
@@ -516,15 +590,18 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                       ))}
                     </div>
                   ) : null}
+                  {m.moment && !typedMoment(m.text) && <><span className="bubble-moment">{clock(m.moment.at)}</span> </>}
                   {m.text}
-                  {m.from === 'editor' && m.actions?.length ? (
+                  {m.moment && <span className="bubble-quote" title={m.moment.quote}>"{m.moment.quote}"</span>}
+                  {/* "Connect" is the change button under the player, once; not in every old reply */}
+                  {m.from === 'editor' && m.actions?.some((a) => a !== 'connect') ? (
                     <div className="bubble-actions">
-                      {m.actions.map((a) => (
+                      {m.actions.filter((a) => a !== 'connect').map((a) => (
                         <button
                           key={a}
-                          className={`btn small${a === 'connect' ? '' : ' primary'}`}
+                          className="bubble-link"
                           onClick={() => runAction(a, m.id)}
-                          disabled={!!job && a !== 'connect'}
+                          disabled={!!job}
                           data-testid={`action-${a}`}
                         >
                           {ACTION_LABELS[a]}
@@ -546,7 +623,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               // Outside the scrolling chat, so the progress can never be scrolled or cut out of sight.
               <div className="job-progress" ref={progressRef} data-testid="note-progress">
                 <div className="row" style={{ marginBottom: 8 }}>
-                  {job.thinking ? <Thinking /> : <Spinner />} <span>{job.message}</span>
+                  {job.thinking ? <Thinking /> : <Spinner />} <span className="job-message">{job.message}</span>
                   <span className="spacer" />
                   <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? ''}</span>
                   <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId)} style={{ padding: 0, marginLeft: 12 }}>
@@ -556,10 +633,25 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <Progress pct={job.overall} label={job.message} />
               </div>
             )}
+            {extras.length > 0 && !job && (
+              <div className="extras" data-testid="extras">
+                {extras.map((x) => (
+                  <button key={x.key} className="extra" onClick={x.run} data-testid={x.testid}>
+                    <Icon name="plus" size={14} stroke={2} /> {x.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {aiOff ? (
+              // the one connect prompt on this screen: notes go to an AI editor (Sam), none is connected
+              <button className="link left" onClick={connect} data-testid="composer-connect">
+                Connect an AI editor to ask for changes
+              </button>
+            ) : (
             <div className={`note-drop${noteDrop ? ' over' : ''}`} {...noteDropProps} data-testid="note-drop">
             {noteDrop && <div className="note-drop-hint">Drop to attach it to your note</div>}
             <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
-            <div className={`composer${aiOff ? ' no-ai' : ''}`} ref={composerRef}>
+            <div className="composer" ref={composerRef}>
               <button
                 className="btn attach-btn"
                 onClick={att.choose}
@@ -574,7 +666,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <textarea
                 className="input composer-input"
                 rows={1}
-                placeholder={aiOff ? 'Connect an AI editor to change things by typing' : 'Tell your editor what to change…'}
+                placeholder={providerChecked ? 'Tell your editor what to change…' : 'Checking for your AI editor…'}
                 aria-label="Note for your editor"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -585,20 +677,16 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     void send()
                   }
                 }}
-                disabled={!!job}
+                disabled={!!job || !providerChecked}
                 data-testid="note-input"
               />
-              {aiOff && !note.trim() && (
-                <button className="btn small in-box" onClick={connect} data-testid="composer-connect">
-                  Connect
-                </button>
-              )}
               </div>
               <button className={`btn${canSend ? ' primary' : ''}`} onClick={() => void send()} disabled={!canSend} data-testid="send" aria-label="Send">
                 <Icon name="send" size={16} /> Send
               </button>
             </div>
             </div>
+            )}
           </section>
         </div>
       </div>

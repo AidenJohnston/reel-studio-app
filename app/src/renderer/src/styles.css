@@ -234,6 +234,9 @@ a { color: inherit; }
 .phone-screen > video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; cursor: pointer; }
 .phone-screen > video.raw-video { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .12s; }
 .phone-screen > video.raw-video.on { opacity: 1; }
+/* A new video loads invisible over the one on screen, then fades in (Player.tsx FADE_MS). */
+.phone-screen > video.layer { position: absolute; inset: 0; transition: opacity .14s var(--ease); }
+.phone-screen > video.layer.loading { opacity: 0; pointer-events: none; }
 /* a mirrored take: the video flips it, so a raw still shown in its place is flipped the same way */
 .phone-screen video.mirrored { transform: scaleX(-1); }
 .phone-empty { color: #bbb; font-size: 14px; padding: 20px; text-align: center; }
@@ -283,12 +286,9 @@ a { color: inherit; }
 .composer { display: flex; gap: 10px; align-items: flex-end; position: relative; }
 .composer-input { resize: none; min-height: 46px; max-height: 120px; field-sizing: content; line-height: 1.4; }
 .composer-box { flex: 1; min-width: 0; position: relative; display: flex; }
-.composer.no-ai .composer-input { padding-right: 100px; }
-.composer-box .in-box { position: absolute; right: 6px; bottom: 6px; min-height: 34px; padding: 0 12px; }
 .composer .btn:disabled { opacity: 1; color: var(--ink-3); background: var(--panel); border-color: var(--line-2); }
 .composer > .btn { min-height: 46px; }
-.bubble-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.bubble-actions .btn.small { min-height: 36px; }
+.bubble-actions { display: flex; gap: 4px 16px; flex-wrap: wrap; margin-top: 6px; }
 /* pictures, GIFs and clips on a note (components/NoteAttachments.tsx) */
 .note-drop { position: relative; border-radius: var(--radius); }
 .note-drop.over { outline: 3px dashed var(--ink); outline-offset: 6px; }
@@ -332,6 +332,89 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .banner > span { flex: 1; min-width: 0; }
 .banner > .icon-btn { color: inherit; }
 .folder-line { display: flex; align-items: center; gap: 10px; margin: 12px 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 600; }
+
+/* ---- the Reel column: the phone takes what the rows under it leave ----
+   The column is as tall as the window (top 10px sticky offset, 24px page bottom, 6px to spare), and the
+   phone's slot gets the height that is left. A row that any change adds under the phone shrinks the phone
+   instead of pushing "Send to my phone" below the window, and there is no fixed height reserve to keep
+   in step. Working keeps the window-based .phone size above (it has no slot). When a frame wraps the
+   phone (device previews), the slot goes around that frame only, so its picker stays a row below. */
+.reel-left:has(> .phone-slot) { height: calc(100vh - var(--titlebar) - 40px); }
+.phone-slot { flex: 1 1 0; min-height: 0; align-self: stretch; container-type: size; display: flex; justify-content: center; }
+/* Sized from the slot, over any rule that sizes it from the window. A frame that draws a real phone
+   around it (device previews) brings its screen height and ratio (--screen-h, --dev-ratio, from its
+   --frame-h); the slot gives that frame its height. */
+.reel .reel-left .phone-slot > * { --frame-h: min(100cqh, 563px); }
+.reel .reel-left .phone-slot .phone { width: min(100cqw, calc(var(--screen-h, calc(100cqh - 24px)) * var(--dev-ratio, 9 / 16) + 24px)); }
+
+/* ---- a change at a moment (components/ChangeAt.tsx) ---- */
+.change-at { position: relative; width: 100%; max-width: 340px; }
+/* the pop-up opens over the right-hand column, so the player column paints above it */
+.reel-left:has(.change-pop) { z-index: 3; }
+.change-btn { width: 100%; max-width: 340px; }
+.change-btn.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.change-time { font-variant-numeric: tabular-nums; }
+/* Beside the button, so the frame being talked about and the scrub bar stay in sight. Scales from the
+   corner next to the button; transitions (not keyframes) so a quick close mid-open turns around. */
+.change-pop {
+  position: absolute; left: calc(100% + 14px); bottom: 0; width: 380px; z-index: 30;
+  display: flex; flex-direction: column; gap: 12px; padding: 16px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,.12);
+  transform-origin: left bottom; transition: opacity .18s var(--ease), transform .18s var(--ease);
+}
+@starting-style { .change-pop { opacity: 0; transform: scale(.96); } }
+.change-pop.closing { opacity: 0; transform: scale(.97); transition-duration: .12s; pointer-events: none; }
+/* opened with N: a shortcut gets no motion */
+.change-pop.instant { transition: none; }
+.change-pop.over { outline: 3px dashed var(--ink); outline-offset: 4px; }
+.change-title { font-size: 16px; }
+.change-context { display: flex; flex-direction: column; gap: 4px; margin-top: -6px; font-size: 13.5px; color: var(--ink-3); }
+.change-heard { color: var(--ink-2); overflow-wrap: anywhere; }
+.change-alert { font-size: 13.5px; color: var(--red-ink); background: var(--red-soft); padding: 8px 10px; border-radius: var(--radius-sm); }
+.change-input { resize: none; min-height: 64px; max-height: 140px; field-sizing: content; line-height: 1.4; }
+.change-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.change-foot { display: flex; align-items: center; gap: 12px; }
+.change-foot > .btn { flex: none; }
+.scope { display: flex; gap: 14px; }
+.scope-opt { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.scope-opt:has(input:checked) { color: var(--ink); }
+.scope-opt input { width: 16px; height: 16px; margin: 0; }
+/* One pill size across the screen: the same metrics as .extra, solid because these do not add things. */
+.pill { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color .12s, border-color .12s, transform .12s var(--ease); }
+.pill:active { transform: scale(.97); }
+.pill[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
+/* the notes asked at a moment, on the scrub bar */
+.scrub-track { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+.scrub.pinned { opacity: 1; }
+/* Marks sit just above the track, so the thumb never covers one (the 24 px target ends 2 px above
+   the track's middle). Each dot has a dark edge so it reads on a light frame too. */
+.scrub-mark { position: absolute; top: 50%; width: 24px; height: 24px; margin: -26px 0 0 -12px; padding: 0; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; cursor: pointer; }
+.scrub-mark::before { content: ''; grid-area: 1 / 1; width: 8px; height: 8px; border-radius: 50%; }
+/* being made: a solid dot in a breathing ring (opacity and scale only) */
+.scrub-mark.making::before { background: #fff; box-shadow: 0 0 0 1.5px rgba(0,0,0,.5); }
+.scrub-mark.making::after { content: ''; grid-area: 1 / 1; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; animation: breathe 1.8s ease-in-out infinite; }
+.scrub-mark.done::before { background: var(--green); box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.35); }
+.scrub-mark.failed::before { width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg); background: var(--red-soft); box-shadow: 0 0 0 2px var(--red-ink); }
+/* stopped on purpose: not an error, so grey and square */
+.scrub-mark.stopped::before { width: 7px; height: 7px; border-radius: 1px; background: rgba(255,255,255,.7); box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
+.scrub-mark-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 200px; padding: 6px 9px; border-radius: 8px; background: rgba(0,0,0,.82); color: #fff; font-size: 12.5px; line-height: 1.35; text-align: left; overflow-wrap: anywhere; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.scrub-mark-tip > span { display: block; }
+.scrub-mark-tip > span + span { margin-top: 4px; }
+.scrub-mark-tip b { display: block; font-weight: 700; }
+.scrub-mark.tip-start .scrub-mark-tip { left: -4px; transform: none; }
+.scrub-mark.tip-end .scrub-mark-tip { left: auto; right: -4px; transform: none; }
+.scrub-mark:focus-visible .scrub-mark-tip { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .scrub-mark:hover .scrub-mark-tip { opacity: 1; }
+  .pill:hover { background: var(--soft); border-color: var(--ink-4); }
+}
+/* Notes history: long words wrap inside the bubble, and its buttons are plain links, never pills in a bubble. */
+.notes-panel .bubble { overflow-wrap: anywhere; }
+.bubble-moment { font-variant-numeric: tabular-nums; opacity: .7; }
+.bubble-quote { display: block; margin-top: 4px; font-size: 13px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble-link { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 14px; font-weight: 600; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-align: left; cursor: pointer; }
+.bubble-link:disabled { opacity: .5; cursor: default; }
+.job-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- drawer ---- */
 /* No dimming: the phone on the left stays bright, it shows the live subtitle preview. */
@@ -454,6 +537,8 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
   .progress > div::after, .phone-scan { display: none; }
+  /* the pop-up still fades, it just does not grow */
+  .change-pop:not(.instant) { transform: none !important; transition-property: opacity !important; transition-duration: .12s !important; }
 }
 
 /* Connect Claude / Connect ChatGPT (components/vendor-connect.tsx) */
