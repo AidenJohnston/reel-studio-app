@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { createEngineRunner, LineSplitter, parseEngineLine, type EngineError } from '../src/main/engine'
+import { createEngineRunner, killAllEngines, LineSplitter, parseEngineLine, type EngineError } from '../src/main/engine'
 import { isAlive } from '../src/main/proctree'
 import { APP_DIR, FAKE_ENGINE, makeClip, PYTHON, setupPaths } from './helpers'
 import { engineEnv } from '../src/main/paths'
@@ -172,6 +172,28 @@ describe('engine runner (against the stand-in engine)', () => {
     expect(isAlive(pid)).toBe(false)
     expect(isAlive(grandchild)).toBe(false)
   }, 30000)
+
+  it.skipIf(process.platform === 'win32')('shutdown stops waiting for a cancelled engine whose pipes never close', async () => {
+    setupPaths()
+    let escaped = 0
+    const run = runner(join(APP_DIR, 'test', 'fixtures', 'pipe-holder'))
+    const ac = new AbortController()
+    const p = run('hold', [], (pr) => {
+      escaped = Number(pr.message)
+      ac.abort()
+    }, ac.signal)
+    try {
+      await expect(p).rejects.toMatchObject({ code: 'CANCELLED' })
+      const t0 = Date.now()
+      await killAllEngines()
+      // killTree's 1.5 s grace before SIGKILL, then the 5 s limit on `close`.
+      expect(Date.now() - t0).toBeLessThan(9000)
+      // The grandchild still holds the engine's stdout, so `close` really could not have fired.
+      expect(isAlive(escaped)).toBe(true)
+    } finally {
+      if (escaped) process.kill(escaped, 'SIGKILL')
+    }
+  }, 20000)
 
   it('an already-aborted signal never starts the engine', async () => {
     setupPaths()

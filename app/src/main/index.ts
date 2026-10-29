@@ -1,11 +1,14 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
-import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   binDir,
   engineDir,
   engineEnv,
   engineMode,
+  ffmpegPath,
+  ffprobePath,
   initPaths,
   projectsDir,
   pythonExe,
@@ -13,6 +16,8 @@ import {
   setRootOverride,
   settingsDir
 } from './paths'
+import { offerMoveToApplications, writeErrorCode } from './move-to-applications'
+import { runSelfTest, selfTestArgs, type SelfTestResult } from './self-test'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
 import { logDuration } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
@@ -62,7 +67,10 @@ import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDra
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
+const SELF_TEST = selfTestArgs(process.argv)
 if (process.env.REELSTUDIO_USER_DATA) app.setPath('userData', process.env.REELSTUDIO_USER_DATA)
+// The self-test must never read or write the person's own data: a throw-away folder stands in for both.
+else if (SELF_TEST.selfTest) app.setPath('userData', mkdtempSync(join(tmpdir(), 'reel-studio-self-test-')))
 
 registerMediaScheme()
 
@@ -71,7 +79,8 @@ initPaths({
   resourcesPath: process.resourcesPath,
   documentsDir: app.getPath('documents'),
   userDataDir: app.getPath('userData'),
-  appDir: app.getAppPath()
+  appDir: app.getAppPath(),
+  rootOverride: SELF_TEST.selfTest ? join(app.getPath('userData'), 'Reel Studio') : null
 })
 
 // ---- logging ------------------------------------------------------------------------------------
@@ -672,7 +681,50 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
-const gotLock = TEST || app.requestSingleInstanceLock()
+/** `--self-test [--out <file>]`: check the bundled python, ffmpeg and engine, write JSON, exit 0 (passed) or 1. */
+async function selfTestAndQuit(): Promise<void> {
+  app.dock?.hide()
+  const t0 = Date.now()
+  const userData = app.getPath('userData')
+  const out = SELF_TEST.out ?? join(userData, 'selftest-result.json')
+  const locations = { python: pythonExe(), ffmpeg: ffmpegPath(), ffprobe: ffprobePath(), engine: engineDir() }
+  // The engine's encoder probe and caches would otherwise land in the person's Application Support / Caches.
+  const isolated = join(userData, 'engine cache')
+  const run = createEngineRunner({
+    python: pythonExe,
+    env: () => ({ ...engineEnv(), REELENGINE_CACHE: isolated, REELENGINE_CACHE_DIR: isolated, HF_HOME: join(userData, 'hf-cache') }),
+    cwd: engineDir,
+    log
+  })
+  let outcome: { ok: boolean; result?: SelfTestResult; error?: string }
+  try {
+    const result = await runSelfTest({
+      locations,
+      runEngine: run
+    })
+    outcome = { ok: result.ok, result }
+  } catch (e) {
+    outcome = { ok: false, error: e instanceof Error ? e.stack ?? e.message : String(e) }
+  } finally {
+    await killAllEngines()
+  }
+  const payload = {
+    ...outcome,
+    seconds: Math.round((Date.now() - t0) / 100) / 10,
+    electron: process.versions.electron,
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    userData,
+    locations
+  }
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, JSON.stringify(payload, null, 2))
+  app.exit(payload.ok ? 0 : 1)
+}
+
+const gotLock = TEST || SELF_TEST.selfTest || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 app.on('second-instance', () => {
   if (win) {
@@ -687,6 +739,27 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin' && process.execPath.includes('/AppTranslocation/')) {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
+  }
+  if (SELF_TEST.selfTest) return selfTestAndQuit()
+  if (gotLock) {
+    const move = await offerMoveToApplications(
+      {
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        test: TEST,
+        inApplications: process.platform === 'darwin' && app.isInApplicationsFolder(),
+        exePath: process.execPath,
+        writeError: writeErrorCode
+      },
+      {
+        destinationExists: (path) => existsSync(path),
+        ask: async (q) => (await dialog.showMessageBox(q)).response,
+        askNow: (q) => dialog.showMessageBoxSync(q),
+        move: (options) => app.moveToApplicationsFolder(options),
+        log
+      }
+    )
+    if (move === 'moving') return // this copy quits; the one in Applications opens
   }
   pidRegistry = createPidRegistry(settingsDir())
   const reaped = await pidRegistry.reap().catch(() => 0)
