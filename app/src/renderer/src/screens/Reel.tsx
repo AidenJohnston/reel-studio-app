@@ -3,10 +3,11 @@ import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderIn
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
-import { reel, userMessage } from '../api'
+import { errorCode, reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
+import { PlatformExportDialog } from '../components/PlatformExportDialog'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
@@ -47,6 +48,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [job, setJob] = useState<LiveState | null>(null)
   const [drawer, setDrawer] = useState<Tab | null>(null)
   const [exporting, setExporting] = useState<'busy' | ExportResult | null>(null)
+  const [platformPicker, setPlatformPicker] = useState(false)
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
@@ -93,7 +95,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       }
       else if (e.type === 'done' || e.type === 'error' || e.type === 'cancelled') {
         setJob(null)
-        void load(e.type === 'done')
+        void load(e.type === 'done' && e.version !== undefined)
       }
     })
   }, [slug, load])
@@ -126,16 +128,17 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
       setExporting(await reel.projects.exportVersion(slug, version.n))
     } catch (e) {
       setExporting(null)
-      notify(userMessage(e), 'error')
+      // The creator pressed Stop while the full-quality video was being made: nothing went wrong.
+      if (errorCode(e) !== 'CANCELLED') notify(userMessage(e), 'error')
     }
   }, [version, job, exporting, slug, notify])
 
   // Cmd/Ctrl+E and File > Export.
   useEffect(() => {
-    const fn = () => void doExport()
+    const fn = () => { if (!platformPicker) void doExport() }
     window.addEventListener(EXPORT_EVENT, fn)
     return () => window.removeEventListener(EXPORT_EVENT, fn)
-  }, [doExport])
+  }, [doExport, platformPicker])
 
   if (!d) return <div className="page"><Spinner /></div>
 
@@ -364,9 +367,20 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               <Spinner /> Wait for this version to finish
             </p>
           )}
-          <button className="btn primary big export-btn" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export" title={job ? 'Wait for this version to finish' : undefined}>
-            <Icon name="upload" /> {exportLabel}
-          </button>
+          <div className="split-btn export-btn">
+            <button className="btn primary big" onClick={() => void doExport()} disabled={!version || !!job} data-testid="export" title={job ? 'Wait for this version to finish' : undefined}>
+              <Icon name="upload" /> {exportLabel}
+            </button>
+            <MoreMenu
+              label="More ways to export"
+              icon="chevron-down"
+              triggerClassName="btn primary big"
+              testid="export-more"
+              disabled={!version || !!job}
+              up
+              items={[{ label: 'Other platforms…', run: () => setPlatformPicker(true), testid: 'export-platforms' }]}
+            />
+          </div>
           <button className="btn export-btn" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
             <Icon name="send" /> Send to my phone
           </button>
@@ -634,6 +648,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
+      {platformPicker && version && <PlatformExportDialog slug={slug} version={version} post={d.project.post} jobId={job?.jobId || undefined} status={job?.message} onClose={() => setPlatformPicker(false)} />}
       {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
     </div>
   )

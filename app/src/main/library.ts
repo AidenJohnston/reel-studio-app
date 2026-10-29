@@ -65,6 +65,13 @@ export function uniqueDest(dir: string, name: string): string {
   return dest
 }
 
+/** Next stem free for every file of a set: "clip" for clip.mp4 + "clip cover.jpg", then "clip (2)", ... */
+export function uniqueStem(dir: string, stem: string, suffixes: string[]): string {
+  let candidate = stem
+  for (let i = 2; suffixes.some((s) => existsSync(join(dir, candidate + s))); i++) candidate = `${stem} (${i})`
+  return candidate
+}
+
 /** Extension-only sorting, used if the engine's classify is unavailable. */
 export async function classifyByExtension(files: string[]): Promise<DropResult[]> {
   const out: DropResult[] = []
