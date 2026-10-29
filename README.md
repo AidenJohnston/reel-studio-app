@@ -48,6 +48,10 @@ this project. Credits: [docs/images/CREDITS.md](docs/images/CREDITS.md).
 
 Get the latest installer from the [Releases page](https://github.com/AidenJohnston/reel-studio-app/releases/latest).
 
+The installers are free and the code is MIT. If Reel Studio saves you time, [buy it](https://aidenjohnston.github.io/reel-studio-site/):
+$99 once (perpetual license plus all 1.x updates) or $20 a month, cancel anytime. Buying funds development
+and gets you the signed builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
+
 | System | File | Guide |
 |---|---|---|
 | Windows 10/11, 64-bit | `Reel-Studio-Setup-<version>-x64.exe` | [Install on Windows](docs/install-windows.md) |
