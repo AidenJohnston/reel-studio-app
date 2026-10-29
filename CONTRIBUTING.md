@@ -29,6 +29,9 @@ cd engine && python -m pytest tests
 python scripts/leak-check/check.py   # also runs on every pull request
 ```
 
+CI runs Node checks on Ubuntu, macOS, and Windows, plus engine and animation tests on Ubuntu.
+Electron e2e tests run locally with `npm run e2e`; CI does not run them.
+
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
 Its list of private terms is stored only as fingerprints, so a finding names the line, not the word. If it
 flags something that is not private, say so in the pull request.
@@ -39,7 +42,11 @@ put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TES
 
 ## Pull requests
 
-* Keep a change focused, and add a test for a bug you fix.
+PRs are squash-merged. The PR title becomes the single commit on main, so use Conventional Commits: `type(scope): subject`.
+
+* Keep a change focused, add a test for a bug you fix, and use the PR template to explain the change and verification.
+* Put a `Changelog:` line in the PR description. At the next release, create `CHANGELOG.md` from the PRs' `Changelog:` lines.
+  Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.
 * New dependencies need a license that fits the MIT app and, if they ship in the installer, an entry in
