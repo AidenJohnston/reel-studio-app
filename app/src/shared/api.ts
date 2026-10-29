@@ -341,6 +341,8 @@ export interface ReelApi {
     onCommand(cb: (c: AppCommand) => void): () => void
     /** Drag a finished file out of the app (desktop, folder, browser upload box). Call from dragstart. */
     startDrag(file: string): void
+    /** The reel viewer opening (true) or closing (false): the window goes full screen and back. A window already full screen stays full screen. */
+    fullScreen(on: boolean): Promise<void>
   }
   model: {
     status(): Promise<ModelStatus>
