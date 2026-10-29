@@ -78,6 +78,35 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeJson(join(dir, 'project.json'), p) // retries on Windows locks (review 32)
   }
 
+  // Tests and walkthroughs only (REELSTUDIO_MOCK_NOTE=<ms>): a connected editor whose every note thinks
+  // for that long, then renders a new version, so notes can pile up behind each other and Stop lands mid-note.
+  // Like the real applyNote, it edits a private copy and publishes it in one project.json write that
+  // carries the note's id.
+  const noteMs = Number(process.env.REELSTUDIO_MOCK_NOTE || 0)
+  const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
+    const id = opts?.id ?? randomUUID()
+    const copy = join(dir, 'work', 'notes', id, 'edit.json')
+    const p = await readProject(dir)
+    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: ['note'], at: new Date().toISOString() }]
+    await fs.mkdir(join(copy, '..'), { recursive: true })
+    await writeJson(copy, p)
+    onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, noteMs)
+      signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+    })
+    onEvent({ type: 'status', message: 'Making the final video', pct: 0, phase: 'final' })
+    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final video', pct: pr.pct, phase: 'final' }), signal)
+    const version = Number(r?.version)
+    if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    const done = JSON.parse(await fs.readFile(copy, 'utf8'))
+    done.notes[done.notes.length - 1].version = version
+    await writeProject(dir, done)
+    onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
+    return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
+  }
+
   async function firstMusicTrack(): Promise<string | null> {
     const dir = join(host.reelStudioRoot(), 'Library', 'Music')
     if (!existsSync(dir)) return null
@@ -116,6 +145,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       return [{ id: 'claude', connected: false, label: 'Claude' }, claudeProvider(), cliProvider('chatgpt'), NOT_CONNECTED]
     },
     async active() {
+      if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
       return NOT_CONNECTED
@@ -171,8 +201,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       throw { code: 'NOT_READY', userMessage: 'Claude keys are not ready in this build yet. Your videos still work without it.' }
     },
 
-    async firstEdit(projectDir, onEvent, signal): Promise<AgentResult> {
-      const args = ['--project', projectDir]
+    async firstEdit(projectDir, onEvent, signal, opts): Promise<AgentResult> {
+      const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}) })
       const changed: string[] = []
@@ -224,28 +254,24 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
-    async applyNote(projectDir, note, onEvent, _signal, opts): Promise<AgentResult> {
+    async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
+      if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
-      const added: string[] = []
-      if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
-        const rules = await readRules()
-        rules.push({ id: randomUUID(), text: note.trim(), createdAt: new Date().toISOString() })
-        await writeRules(rules)
-        added.push(note.trim())
-      }
+      // a rule to remember is only proposed: the app asks before anything goes into My style
+      const proposed = /\b(always|never|every video|from now on|in general)\b/i.test(note) ? [note.trim()] : []
+      const summary = proposed.length
+        ? 'Connect ChatGPT in Settings and I can change this video from your notes too.'
+        : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".'
       const attachments = opts?.attachments?.length ? { attachments: opts.attachments } : {}
-      p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments }]
+      // saved under the job's id with its reply, so a crash right after is finished at the next start (store.ts settleInterrupted)
+      p.notes = [...(p.notes ?? []), {
+        version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...attachments,
+        ...(opts?.id ? { id: opts.id } : {}), reply: summary, ...(proposed.length ? { styleSuggestions: proposed } : {})
+      }]
       await writeProject(projectDir, p)
       onEvent({ type: 'status', message: 'Done', pct: 100 })
-      return {
-        summary: added.length
-          ? 'I saved that to My style. Connect ChatGPT in Settings and I can change this video from your notes too.'
-          : 'I saved your note. Connect ChatGPT in Settings and I can change the video from notes like this one. You can also tweak it yourself under "Show me how".',
-        version: p.version ?? 0,
-        styleRulesAdded: added,
-        changed: []
-      }
+      return { summary, version: p.version ?? 0, styleRulesAdded: [], styleSuggestions: proposed, changed: [] }
     },
 
     async writeScript(): Promise<ScriptResult> {

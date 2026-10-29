@@ -31,10 +31,12 @@ export function Home({ go }: { go: Go }) {
     const off = reel.jobs.onEvent((e) => {
       if (e.type !== 'status') void load()
     })
+    const offQueue = reel.queue.onChange(() => void load())
     return () => {
       live = false
       opening.current = null
       off()
+      offQueue()
     }
   }, [])
 
@@ -85,6 +87,11 @@ export function Home({ go }: { go: Go }) {
                   <span className={`badge ${p.status}`} data-testid="card-status">
                     {p.status === 'ready' && p.version ? `Ready · Version ${p.version}` : STATUS[p.status]}
                   </span>
+                  {p.waiting > 0 && (
+                    <span className="badge" data-testid="card-waiting">
+                      {p.waiting} {p.waiting === 1 ? 'note' : 'notes'} waiting
+                    </span>
+                  )}
                 </div>
                 <div className="muted-sm" style={{ marginTop: 6 }}>{niceDate(p.updatedAt)}</div>
               </div>

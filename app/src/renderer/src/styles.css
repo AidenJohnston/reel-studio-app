@@ -303,12 +303,30 @@ a { color: inherit; }
 .att-thumb { position: relative; flex: none; display: inline-grid; place-items: center; overflow: hidden; background: var(--soft); color: var(--ink-3); }
 .att-thumb.chip { width: 40px; height: 40px; border-radius: 7px; }
 .att-thumb.bubble { width: 64px; height: 64px; border-radius: 8px; }
+.att-thumb.row { width: 28px; height: 28px; border-radius: 6px; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .att-badge { position: absolute; left: 3px; bottom: 3px; padding: 0 4px; border-radius: 4px; background: rgba(0,0,0,.72); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 15px; }
 .bubble-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .bubble-attachments:only-child { margin-bottom: 0; }
 .drop-overlay.light { background: rgba(247,245,241,.55); }
 .job-progress { background: var(--soft); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+/* Notes waiting their turn: quiet rows under the running note; held, they sit in the same soft panel. */
+.note-queue { margin: -4px 0 12px; }
+.note-queue.held { background: var(--soft); border-radius: 12px; padding: 10px 14px 6px; margin-top: 0; }
+.note-queue-head { gap: 8px; padding-bottom: 6px; }
+.note-queue-count { font-weight: 650; }
+.note-queue-list { list-style: none; margin: 0; padding: 0; }
+.note-queue-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px 6px 14px; border-top: 1px solid var(--line); }
+.note-queue:not(.held) .note-queue-row:first-child { border-top: 0; }
+.note-queue-label { flex: none; width: 36px; font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+.note-queue-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.note-queue-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.note-queue-text { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-queue-input { min-height: 34px; padding: 4px 10px; font-size: 14px; }
+.note-queue-actions { flex: none; display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.icon-btn.small { width: 30px; height: 30px; border-radius: 8px; }
+.icon-btn:disabled { opacity: .35; cursor: default; background: transparent; }
 .export-wait { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); text-align: center; }
 .seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line-2); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); }
 .seg button { border: 0; background: none; font: inherit; font-weight: 600; padding: 10px 18px; cursor: pointer; color: var(--ink-2); min-height: 44px; min-width: 88px; }

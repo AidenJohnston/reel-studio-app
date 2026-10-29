@@ -30,6 +30,7 @@ import {
   readSidecar,
   registerAttachmentIpc,
   removeAttachment,
+  unstage,
   withThumbUrl
 } from '../src/main/attachments'
 import { createEngineRunner } from '../src/main/engine'
@@ -257,16 +258,26 @@ describe('main: bytes with no file (paste of a screenshot)', () => {
 })
 
 describe('main: the IPC handlers', () => {
-  function wire(dir: string, busy = false) {
+  function wire(dir: string, busy: boolean | (() => boolean) = false, staging = join(dir, '..', '..', 'note-staging', 'my réel'), onEngine: () => void = () => undefined) {
     const h = new Map<string, (...a: any[]) => any>()
-    const runEngine: any = async () => ({ asset: fakeAttach(dir) })
+    const runEngine: any = async (_c: string, args: string[]) => {
+      onEngine()
+      mkdirSync(join(args[1], 'work', 'thumbs'), { recursive: true })
+      return { asset: fakeAttach(args[1]) }
+    }
     registerAttachmentIpc({
       handle: (ch, fn) => h.set(ch, fn as any),
       runEngine,
       log: () => undefined,
       projectDir: () => dir,
       readProject: async () => ({ broll: [] }) as any,
-      busy: () => busy,
+      queue: (_slug, fn) => fn(),
+      reserve: async (_slug, fn) => {
+        if (typeof busy === 'function' ? busy() : busy) throw { code: 'BUSY' }
+        return fn('test-owner')
+      },
+      refuse: () => undefined,
+      stagingDir: () => staging,
       clipboardImage: async () => null,
       choose: async () => null
     })
@@ -282,10 +293,37 @@ describe('main: the IPC handlers', () => {
     await call('notes:removeAttachment', 'slug', r.attached[0].asset)
     expect(existsSync(join(dir, ...r.attached[0].asset.split('/')))).toBe(false)
   })
-  it('refuses while a job runs on the video, and for a folder with no project', async () => {
-    const call = wire(project(), true)
-    await expect(call('notes:attachFiles', 'slug', ['C:\a.png'])).rejects.toMatchObject({ code: 'BUSY' })
-    await expect(call('notes:removeAttachment', 'slug', 'work/assets/attach-00000000-x.png')).rejects.toMatchObject({ code: 'BUSY' })
+  it('keeps an attachment staged when a job starts after admission', async () => {
+    const dir = project()
+    const staging = join(dir, '..', 'staging-race')
+    let busy = false
+    const call = wire(dir, () => busy, staging, () => {
+      busy = true
+    })
+    const r = await call('notes:attachFiles', 'slug', ['C:\\a.png'])
+    const a = r.attached[0]
+    expect(existsSync(join(staging, ...a.asset.split('/')))).toBe(true)
+    expect(existsSync(join(dir, ...a.asset.split('/')))).toBe(false)
+  })
+  it('while a job runs, a file goes to staging and reaches the project only when its note runs', async () => {
+    const dir = project()
+    const staging = join(dir, '..', '..', 'note-staging', 'my réel')
+    const inProject = fakeAttach(dir)
+    const call = wire(dir, true, staging)
+    const r = await call('notes:attachFiles', 'slug', ['C:\a.png'])
+    const a = r.attached[0]
+    expect(existsSync(join(staging, ...a.asset.split('/')))).toBe(true)
+    expect(existsSync(join(dir, ...a.asset.split('/')))).toBe(false)
+    await expect(checkNoteAttachments(dir, [a.asset])).rejects.toMatchObject({ code: 'BAD_ATTACHMENT' })
+    const sent = await checkNoteAttachments(dir, [a.asset, inProject], staging)
+    await expect(call('notes:removeAttachment', 'slug', inProject)).rejects.toMatchObject({ code: 'BUSY' })
+
+    await unstage(dir, staging, sent)
+    expect(await readSidecar(dir, a.asset)).toMatchObject({ asset: a.asset })
+    expect(existsSync(join(dir, ...a.thumb.split('/')))).toBe(true)
+    expect(existsSync(join(staging, ...a.asset.split('/')))).toBe(false)
+  })
+  it('refuses a folder with no project', async () => {
     const gone = wire(join(tmpdir(), 'no such project here'))
     await expect(gone('notes:attachData', 'slug', {})).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })

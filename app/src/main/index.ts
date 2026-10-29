@@ -7,6 +7,8 @@ import {
   engineEnv,
   engineMode,
   initPaths,
+  noteStagingDir,
+  noteStagingRoot,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -26,17 +28,19 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
   writeJson,
-  writeProject
+  writeProject,
+  type AppState
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
+import { createNoteQueue, type NoteToRun } from './note-queue'
+import { withRenderSlot } from './render-slot'
 import { createLiveVideos } from './live-video'
-import { rememberQuestion, styleConsent } from './style-consent'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -45,6 +49,7 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
@@ -56,7 +61,8 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc, unstage } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -108,14 +114,18 @@ function showOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.O
 
 // ---- engine, AI, jobs ----------------------------------------------------------------------------
 let pidRegistry: ReturnType<typeof createPidRegistry> | null = null
-const runEngine: RunEngine = createEngineRunner({
-  python: pythonExe,
-  env: engineEnv,
-  cwd: engineDir,
-  log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
-  onExit: (pid) => pidRegistry?.remove(pid)
-})
+const renderSlot = withRenderSlot(
+  createEngineRunner({
+    python: pythonExe,
+    env: engineEnv,
+    cwd: engineDir,
+    log,
+    onSpawn: (pid, project) => pidRegistry?.add(pid, project),
+    onExit: (pid) => pidRegistry?.remove(pid)
+  }),
+  (owner, waiting) => jobs.waitingForRender(owner, waiting)
+)
+const runEngine: RunEngine = renderSlot.run
 
 const host: EngineHost = {
   runEngine,
@@ -155,6 +165,7 @@ const jobs = createJobManager(
   (e: JobEvent) => {
     broadcast('job:event', e)
     feedback.onJobEvent(e)
+    noteQueue.onJobEvent(e)
   },
   log,
   {
@@ -166,6 +177,35 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
 )
+
+/** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
+async function startNote(slug: string, { id: noteId, text, attachments }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+  const dir = projectDir(slug)
+  let prepared!: () => void
+  const preparing = new Promise<void>((resolve) => { prepared = resolve })
+  const jobId = jobs.start(
+    slug,
+    'note',
+    async (emit, signal, { owner }) => {
+      try {
+        await unstage(dir, noteStagingDir(dir), attachments)
+      } finally {
+        prepared()
+      }
+      // saved under its queue entry's id (note-queue.ts); the app asks before anything goes into My style
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, saveStyleRules: false, ...(owner ? { owner } : {}) }
+      const r: AgentResult = await ai.applyNote(dir, text, (e) => emit(e), signal, opts)
+      const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
+      return replyAskingAboutStyle(r, r.summary + extra)
+    },
+    { note: text || attachments.map((f) => f.name).join(', '), record }
+  )
+  // pump holds the queue lane until preparation ends, including jobs that fail before their callback.
+  await Promise.race([preparing, jobs.get(jobId)!.done])
+  return jobId
+}
+const noteQueue = createNoteQueue({ jobs, startNote, changed: (slug) => broadcast('queue:change', slug), log })
+
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
 const updates = createUpdateService({
@@ -223,14 +263,19 @@ async function appInfo(): Promise<AppInfo> {
   }
 }
 
+/** Engine arguments for a command a job runs: it joins the job's ownership of the project. */
+function owned(args: string[], owner: string | null): string[] {
+  return owner ? [...args, '--owner', owner] : args
+}
+
 function startFirstEdit(slug: string, initArgs: { title: string; files: string[] } | null): string {
   const dir = projectDir(slug)
-  return jobs.start(slug, 'first-edit', async (emit, signal) => {
+  return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
+        owned(['--project', dir, '--title', initArgs.title, '--slug', slug], owner).concat(initArgs.files),
         (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
       )
@@ -252,7 +297,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
             .catch(() => undefined)
         }
       },
-      signal
+      signal,
+      owner ? { owner } : undefined
     )
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
@@ -261,21 +307,19 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
-    return replyAskingAboutStyle(slug, r, r.summary)
+    return replyAskingAboutStyle(r, r.summary)
   })
 }
 
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
-async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
+async function replyAskingAboutStyle(r: AgentResult, summary: string): Promise<{ summary: string; version: number; chat: ChatLine[] }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
     for (const rule of rules) if (c.undo.includes(rule.text)) await ai.removeStyleRule(rule.id).catch(() => undefined)
   }
-  await addChat(slug, 'editor', c.summary, r.version)
-  for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
-  return { summary: c.summary, version: r.version, quiet: true }
+  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version) }
 }
 
 const EDITABLE: (keyof ProjectJson)[] = ['title', 'cut', 'captions', 'music', 'broll', 'zooms', 'cover', 'post']
@@ -294,17 +338,17 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
-    jobs.start(slug, 'rerender', async (emit, signal) => {
+    jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (pr) => emit({ type: 'status', message: pr.message || 'Making the full-quality video', pct: pr.pct, phase: 'final' }),
         signal
       )
       const version = Number(r?.version ?? 0)
       emit({ type: 'render', version, draft: false })
-      return { summary: '', version, quiet: true }
+      return { summary: '', version, chat: [] }
     })
     await jobs.forSlug(slug)?.done
     versions = await listVersions(dir)
@@ -378,7 +422,10 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    queue: (slug, fn, removing) => noteQueue.run(slug, fn, removing),
+    reserve: (slug, fn) => jobs.hold(slug, fn),
+    refuse: (slug) => jobs.refuseIfKeptClosed(slug),
+    stagingDir: (slug) => noteStagingDir(projectDir(slug)),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -427,7 +474,7 @@ function registerIpc(): void {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
-      ? { id: running.id, kind: running.kind, message: running.message, pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, overdue: running.overdue, thinking: running.thinking }
+      ? { id: running.id, kind: running.kind, message: jobs.message(running), pct: running.pct, overall: running.overall, secondsLeft: running.secondsLeft, overdue: running.overdue, thinking: running.thinking, waitingForRender: running.waitingForRender }
       : null
     if (!running && d.status === 'working') d.status = 'interrupted'
     return d
@@ -468,51 +515,41 @@ function registerIpc(): void {
     }
     return { jobId: startFirstEdit(slug, null) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
-    const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
+  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, onVersion?: unknown) => {
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
       // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      const reply = noAiReply(note, files.length)
-      await addChat(slug, 'editor', reply.text, undefined, reply.actions)
-      return { jobId: null }
+      return noteQueue.run(slug, async () => {
+        const { note, files } = await takeNote(jobs, slug, text, attachments)
+        await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
+        const reply = noAiReply(note, files.length)
+        await addChat(slug, 'editor', reply.text, undefined, reply.actions)
+        return { jobId: null }
+      })
     }
-    const jobId = jobs.start(
-      slug,
-      'note',
-      async (emit, signal) => {
-        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
-        const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
-        const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(slug, r, r.summary + extra)
-      },
-      { note: note || files.map((f) => f.name).join(', ') }
-    )
-    return { jobId }
+    const seen = Number.isInteger(onVersion) ? Number(onVersion) : ((await readProject(slug)).version ?? 0)
+    return noteQueue.send(slug, async () => {
+      const { note, files } = await takeNote(jobs, slug, text, attachments)
+      return { text: note, attachments: files.map(forChat) }
+    }, seen)
   })
-  handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const p = await readProject(slug)
-    for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
-      // the "Flip picture" toggle: only each take's mirror flag, never its path or size
-      if (k === 'sources') {
-        p.sources = mergeSourcesPatch(p.sources, patch.sources)
-        continue
+  handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
+    jobs.hold(slug, async () => {
+      const p = await readProject(slug)
+      for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        // the "Flip picture" toggle: only each take's mirror flag, never its path or size
+        if (k === 'sources') {
+          p.sources = mergeSourcesPatch(p.sources, patch.sources)
+          continue
+        }
+        if (!EDITABLE.includes(k)) continue
+        ;(p as any)[k] = (patch as any)[k]
       }
-      if (!EDITABLE.includes(k)) continue
-      ;(p as any)[k] = (patch as any)[k]
-    }
-    await writeProject(slug, p)
-    const d = await detail(slug)
-    return d
-  })
+      await writeProject(slug, p)
+      return detail(slug)
+    })
+  )
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's
   // own step names like "Adding pictures"), and fast to SEE: a half-size preview first (the Reel screen plays
@@ -520,18 +557,18 @@ function registerIpc(): void {
   handle('projects:rerender', async (_e, slug: string, change?: string, label?: string) => {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
-    const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
+    const jobId = jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: words, pct: 1, phase: 'final' })
       const look: any = await runEngine(
         'render',
-        ['--project', dir, '--draft', '--no-cover'],
+        owned(['--project', dir, '--draft', '--no-cover'], owner),
         (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
         signal
       )
@@ -542,16 +579,19 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
-  handle('projects:remove', async (_e, slug: string) => {
-    const running = jobs.forSlug(slug)
-    if (running) {
-      jobs.cancel(running.id)
-      await running.done
-    }
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
-  })
+  handle('projects:remove', (_e, slug: string) =>
+    noteQueue.remove(slug, async () => {
+      await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
+      await fs.rm(projectDir(slug), { recursive: true, force: true })
+    })
+  )
 
-  handle('jobs:cancel', (_e, id: string) => jobs.cancel(id))
+  handle('jobs:cancel', (_e, id: string, slug?: string) => noteQueue.stop(String(id), typeof slug === 'string' ? slug : undefined))
+  handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
+  handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
+  handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
+  handle('queue:resume', (_e, slug: string) => noteQueue.resume(slug))
+  handle('queue:clear', (_e, slug: string) => noteQueue.clear(slug))
 
   handle('library:list', async () => {
     await ensureRoot()
@@ -689,16 +729,9 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  // an engine that would not stop may be encoding: only its own video waits for it, the others render
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log, (slug) => jobs.reopen(slug))
+  await noteQueue.recover().catch((e) => log(`[queue] ${String(e)}`))
   const loaded = await loadAI(
     {
       host,
@@ -719,7 +752,7 @@ app.whenReady().then(async () => {
   }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir()])
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot()])
   registerIpc()
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower
@@ -738,6 +771,7 @@ app.on('before-quit', (e) => {
   // Stop running work cleanly so the next start finds a tidy project.
   e.preventDefault()
   quitting = true
+  noteQueue.quit()
   void jobs
     .cancelAll()
     .then(() => killAllEngines())

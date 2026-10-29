@@ -14,7 +14,7 @@ import { setupPaths } from './helpers'
 
 const J = { jobId: 'j1', slug: 's' }
 const status = (over: Partial<Extract<JobEvent, { type: 'status' }>> = {}): JobEvent => ({
-  ...J, type: 'status', message: 'Listening to your video', pct: 10, overall: 10, secondsLeft: 120, overdue: false, thinking: false, ...over
+  ...J, type: 'status', message: 'Listening to your video', pct: 10, overall: 10, secondsLeft: 120, overdue: false, thinking: false, waitingForRender: false, ...over
 })
 const fold = (events: JobEvent[], s: LiveState = EMPTY_LIVE): LiveState => events.reduce(reduceLive, s)
 
@@ -117,7 +117,7 @@ describe('job manager (main): the contract on the wire', () => {
       await new Promise((r) => setTimeout(r, 80))
       emit({ type: 'tool', name: 'set_cut', summary: 'Kept your best takes' })
       emit({ type: 'reply', text: 'Done soon.' })
-      return { summary: 'ok', version: 1, quiet: true }
+      return { summary: 'ok', version: 1, chat: [] }
     })
     await jobs.forSlug(slug)?.done
     const i = events.findIndex((e) => e.type === 'status' && e.thinking)
@@ -137,5 +137,52 @@ describe('job manager (main): the contract on the wire', () => {
     expect(statuses[0]).toMatchObject({ secondsLeft: null })
     expect(statuses.some((e) => e.type === 'status' && typeof e.secondsLeft === 'number' && e.secondsLeft > 0)).toBe(true)
     expect(existsSync(projectDir(slug))).toBe(true)
+  })
+
+  it('a manual edit and a note never run on one video at once', async () => {
+    setupPaths()
+    const slug = 'one-lane'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const jobs = createJobManager(() => undefined, () => undefined)
+    let release!: () => void
+    let saving!: () => void
+    const inside = new Promise<void>((r) => (saving = r))
+    const editing = jobs.hold(slug, () => { saving(); return new Promise<void>((r) => (release = r)) })
+    await inside
+    expect(readFileSync(join(projectDir(slug), 'work', '.owner.lock'), 'utf8')).toBeTruthy()
+    expect(() => jobs.start(slug, 'note', async () => ({ summary: 'ok' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
+    release()
+    await editing
+    let finish!: (r: { summary: string }) => void
+    const note = new Promise<{ summary: string }>((r) => (finish = r))
+    jobs.start(slug, 'note', () => note)
+    await expect(jobs.hold(slug, async () => 'saved')).rejects.toMatchObject({ code: 'BUSY' })
+    finish({ summary: 'ok' })
+    await jobs.forSlug(slug)?.done
+    await expect(jobs.hold(slug, async () => 'saved')).resolves.toBe('saved')
+  })
+
+  it('when a job\'s last event arrives the job is gone and the video let go, so a screen reloading on it shows no job', async () => {
+    setupPaths()
+    const slug = 'last-event'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const seen: { type: string; running: boolean; locked: boolean }[] = []
+    const jobs = createJobManager((e) => {
+      if (e.type !== 'done' && e.type !== 'error' && e.type !== 'cancelled') return
+      seen.push({ type: e.type, running: !!jobs.forSlug(slug), locked: existsSync(join(projectDir(slug), 'work', '.owner.lock')) })
+    }, () => undefined)
+    jobs.start(slug, 'note', async () => ({ summary: 'ok' }))
+    await jobs.forSlug(slug)?.done
+    jobs.start(slug, 'note', async () => { throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' } })
+    await jobs.forSlug(slug)?.done
+    const id = jobs.start(slug, 'note', (_emit, signal) => new Promise((_r, reject) => {
+      const stop = (): void => reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
+      if (signal.aborted) stop()
+      else signal.addEventListener('abort', stop)
+    }))
+    const stopping = jobs.forSlug(slug)?.done
+    jobs.cancel(id)
+    await stopping
+    expect(seen).toEqual(['done', 'error', 'cancelled'].map((type) => ({ type, running: false, locked: false })))
   })
 })

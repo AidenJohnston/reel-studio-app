@@ -183,7 +183,11 @@
             "maxItems": 4,
             "description": "files the user attached to this note (work/assets/attach-*), placed by the AI with add_broll",
             "items": { "$ref": "#/$defs/relPath" }
-          }
+          },
+          "id": { "type": "string", "description": "the app's job id for this note" },
+          "reply": { "type": "string", "description": "what the editor told the user about this note" },
+          "styleRulesAdded": { "type": "array", "items": { "type": "string" }, "description": "My style rules the note asked to remember" },
+          "styleSuggestions": { "type": "array", "items": { "type": "string" }, "description": "My style rules the AI proposed" }
         }
       }
     }
