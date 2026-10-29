@@ -91,6 +91,62 @@
     },
     {
       "response": {
+        "text": "Find a web picture for the brick loaf; the flour and the finished loaf are in the library.",
+        "toolCalls": [
+          {
+            "id": "cli_23",
+            "name": "search_images",
+            "args": {
+              "query": "dense sourdough loaf photo"
+            }
+          }
+        ]
+      },
+      "lastMessage": "set_cut,set_gap_cap,add_caption_correction,add_caption_correction,list_library,list_library,list_library"
+    },
+    {
+      "response": {
+        "text": "The first result's title matches; resolve it to see the picture.",
+        "toolCalls": [
+          {
+            "id": "cli_24",
+            "name": "resolve_asset",
+            "args": {
+              "kind": "image",
+              "intent": "https://example.com/dense-sourdough-brick.png",
+              "phase": null,
+              "candidateId": null,
+              "licensePolicy": null
+            }
+          }
+        ]
+      },
+      "lastMessage": "search_images"
+    },
+    {
+      "response": {
+        "text": "The still shows a dense, flat loaf, which fits the brick line. Commit it.",
+        "toolCalls": [
+          {
+            "id": "cli_25",
+            "name": "resolve_asset",
+            "args": {
+              "kind": "image",
+              "intent": "https://example.com/dense-sourdough-brick.png",
+              "phase": "commit",
+              "candidateId": {
+                "$result": "cli_24",
+                "path": "candidates.0.id"
+              },
+              "licensePolicy": null
+            }
+          }
+        ]
+      },
+      "lastMessage": "resolve_asset"
+    },
+    {
+      "response": {
         "text": "Add music, b-roll, a zoom, cover and post kit, then render a draft.",
         "toolCalls": [
           {
@@ -125,7 +181,6 @@
               },
               "treatment": "card-above-head",
               "asset": "Library/Images/bag of flour.png",
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,
@@ -144,12 +199,32 @@
               },
               "treatment": "text-pop",
               "asset": null,
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,
                 "scale": null,
                 "text": "18 hours"
+              }
+            }
+          },
+          {
+            "id": "cli_26",
+            "name": "add_broll",
+            "args": {
+              "anchor": {
+                "from": "w38",
+                "to": "w41"
+              },
+              "treatment": "side-card",
+              "asset": {
+                "$result": "cli_25",
+                "path": "asset.assetId"
+              },
+              "animation": null,
+              "params": {
+                "tilt": null,
+                "scale": null,
+                "text": null
               }
             }
           },
@@ -163,7 +238,6 @@
               },
               "treatment": "card-above-head",
               "asset": "Library/Images/sourdough loaf.png",
-              "search": null,
               "animation": null,
               "params": {
                 "tilt": null,
@@ -224,7 +298,7 @@
           }
         ]
       },
-      "lastMessage": "set_cut,set_gap_cap,add_caption_correction,add_caption_correction,list_library,list_library,list_library"
+      "lastMessage": "resolve_asset"
     },
     {
       "response": {
@@ -245,7 +319,7 @@
           }
         ]
       },
-      "lastMessage": "choose_music,set_music_automation,add_broll,add_broll,add_broll,set_zoom,set_cover,write_post,render_draft"
+      "lastMessage": "choose_music,set_music_automation,add_broll,add_broll,add_broll,add_broll,set_zoom,set_cover,write_post,render_draft"
     },
     {
       "response": {

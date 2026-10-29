@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, loadProject, AgentEvent, AIError, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
+import { createAI, loadProject, AgentEvent, AIError, ChatMessage, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
+import { refsForMinted } from '../src/providers/replay';
+import { FakeHost, ScriptedModel, makeProject, call, tmpDir, commitLocalAsset, tinyMp3 } from './helpers';
 
 const nullP = { tilt: null, scale: null, text: null };
 
-function firstEditScript() {
+function firstEditScript(track = 'Library/Music/gentle.mp3') {
   return new ScriptedModel([
     { toolCalls: [call('get_project'), call('get_transcript')] },
     (req) => {
@@ -16,8 +17,8 @@ function firstEditScript() {
       return { toolCalls: [call('set_cut', { keep: [{ from: 'w16', to: 'w26' }, { from: 'w27', to: 'w56' }] }), call('set_gap_cap', { seconds: 0.12 }), call('list_library', { kind: 'music' })] };
     },
     { toolCalls: [
-      call('choose_music', { track: 'Library/Music/gentle.mp3', startAt: 2, level: 'under-voice' }),
-      call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { ...nullP, text: '$20' } }),
+      call('choose_music', { track, startAt: 2, level: 'under-voice' }),
+      call('add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, animation: null, params: { ...nullP, text: '$20' } }),
       call('set_zoom', { zooms: [{ anchor: { from: 'w53', to: 'w56' }, scale: 1.1 }] }),
       call('set_cover', { atSourceTime: 8.5, source: null, text: 'Bread' }),
       call('write_post', { caption: 'The hardest part of baking bread is waiting', hashtags: ['sourdough', 'breadtok', 'baking', 'homebaker', 'slowfood'], keywords: ['baking bread'] }),
@@ -34,7 +35,7 @@ function firstEditScript() {
 
 async function setup() {
   const { root, dir } = await makeProject();
-  await fsp.writeFile(path.join(root, 'Library', 'Music', 'gentle.mp3'), 'x');
+  await fsp.writeFile(path.join(root, 'Library', 'Music', 'gentle.mp3'), tinyMp3());
   const host = new FakeHost(root);
   const settingsDir = tmpDir('settings ');
   return { root, dir, host, settingsDir };
@@ -43,7 +44,9 @@ async function setup() {
 describe('agent loop with a scripted model', () => {
   it('firstEdit: tools mutate project.json, draft then final render, events, summary', async () => {
     const { dir, host, settingsDir } = await setup();
-    const model = firstEditScript();
+    const ctx = { projectDir: dir, host, style: new StyleStore(() => host.reelStudioRoot()), emit: () => {}, state: newToolState(), supportsImages: true };
+    const track = await commitLocalAsset(ctx, 'Library/Music/gentle.mp3', 'music');
+    const model = firstEditScript(track);
     const ai = createAI({ host, settingsDir, providerOverride: model });
     const events: AgentEvent[] = [];
     const r = await ai.firstEdit(dir, (e) => events.push(e));
@@ -52,7 +55,8 @@ describe('agent loop with a scripted model', () => {
     expect(r.changed.sort()).toEqual(['broll', 'cover', 'cut', 'music', 'post', 'zooms']);
     const p = await loadProject(dir);
     expect(p.cut.keep[0]).toEqual({ from: 'w16', to: 'w26' });
-    expect(p.music.track).toBe('Library/Music/gentle.mp3');
+    // committed from the Library: track keeps the Library path, the engine plays the frozen copy
+    expect(p.music).toMatchObject({ track: 'Library/Music/gentle.mp3', frozen: { track: 'Library/Music/gentle.mp3', path: track } });
     expect(p.broll).toHaveLength(1);
     expect(p.post.hashtags).toHaveLength(5);
     // the no-AI first look (a preview, never saved), then the AI's preview, then the one final render
@@ -68,7 +72,7 @@ describe('agent loop with a scripted model', () => {
     // system prompt carries doctrine + style placeholder filled
     expect(model.requests[0].system).toMatch(/red thread/i);
     expect(model.requests[0].system).not.toMatch(/\{\{styleRules\}\}/);
-    expect(model.requests[0].tools.length).toBe(26);   // docs/architecture.md section 6 + set_mirror
+    expect(model.requests[0].tools.length).toBe(30);   // docs/architecture.md section 6 + set_mirror
     await fsp.access(path.join(dir, 'versions', 'v1', 'project.json'));
     await fsp.access(path.join(dir, 'versions', 'preview', 'draft.mp4'));
     expect((await fsp.readdir(path.join(dir, 'versions'))).sort()).toEqual(['preview', 'v1']);
@@ -219,6 +223,30 @@ describe('record + replay', () => {
     expect(r.summary).toMatch(/best take/);
     expect(replay.remaining).toBe(0);
     expect((await loadProject(again.dir)).cut.keep).toEqual((await loadProject(dir)).cut.keep);
+  });
+
+  it('fails if a recorded ID reference this run cannot fill is replayed instead of stopping the run', async () => {
+    const replay = new ReplayProvider({ version: 1, recordedWith: { provider: 'fake' }, task: 't', createdAt: '', steps: [
+      { response: { text: '', toolCalls: [{ id: 'c2', name: 'resolve_asset', args: { candidateId: { $result: 'c1', path: 'candidates.0.id' } } }] } },
+    ] });
+    const results = (content: string) => [{ role: 'tool' as const, results: [{ callId: 'c1', name: 'resolve_asset', content }] }];
+    const ask = (messages: ChatMessage[]) => replay.complete({ system: '', messages, tools: [] });
+    await expect(ask(results('{"status":"no_match","candidates":[]}'))).rejects.toMatchObject({ code: 'replay_ref' });
+  });
+
+  it('fails if a recorded ID points at a later copy, or is kept literal once its result lost its images', () => {
+    const a = '0f8a7c7e-1d2b-4c3d-8e9f-0a1b2c3d4e5f';
+    const asset = 'asset_5e4d3c2b-1a0f-4e9d-8c7b-6a5f4e3d2c1b';
+    const messages: ChatMessage[] = [
+      { role: 'tool', results: [{ callId: 'resolve_a', name: 'resolve_asset', content: `${JSON.stringify({ candidates: [{ id: a }] })}\n(earlier images removed)` }] },
+      { role: 'tool', results: [{ callId: 'commit_a', name: 'resolve_asset', content: JSON.stringify({ asset: { id: a, assetId: asset } }) }] },
+      { role: 'tool', results: [{ callId: 'list', name: 'list_assets', content: JSON.stringify({ assets: [{ assetId: 'asset_other' }, { assetId: asset }] }) }] },
+    ];
+    expect(refsForMinted({ candidateId: a, asset, query: 'bread' }, messages)).toEqual({
+      candidateId: { $result: 'resolve_a', path: 'candidates.0.id' },
+      asset: { $result: 'commit_a', path: 'asset.assetId' },
+      query: 'bread',
+    });
   });
 });
 

@@ -313,6 +313,19 @@ def test_fetch_unknown_url_writes_no_credit(net, tmp_path, monkeypatch):
     assert out.exists() and not (out.parent / "credits.json").exists()
 
 
+def test_fetch_never_inherits_the_credit_of_a_deleted_file_with_the_same_name(net, tmp_path, monkeypatch):
+    net(FakeNet(commons=lambda q: [cm_page(0, "Grand piano.jpg", "CC BY-SA 4.0", license_code="cc-by-sa-4.0")]))
+    hit = assets.search_images("grand piano", 1)[0]
+    buf = tmp_path / "p.png"
+    Image.new("RGB", (40, 30), "red").save(buf)
+    monkeypatch.setattr(assets, "_get", lambda url, **kw: (buf.read_bytes(), "image/png"))
+    first = assets.fetch_image(hit["url"], tmp_path / "assets", name="piano")
+    first.unlink()
+    again = assets.fetch_image("https://example.com/piano.png", tmp_path / "assets", name="piano")
+    assert again == first
+    assert again.name not in json.loads((again.parent / "credits.json").read_text(encoding="utf-8"))
+
+
 def test_complex_svg_still_refused(net, tmp_path):
     net(FakeNet(svg=b'<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><rect width="5" height="5"/></svg>'))
     with pytest.raises(EngineError) as e:

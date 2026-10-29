@@ -9,7 +9,7 @@ import { createAI, loadProject, saveProject, AIError, validateAttachments, readA
 import { toAnthropicMessages } from '../src/providers/anthropic';
 import { toResponsesInput } from '../src/providers/openai';
 import { renderConversation, renderDelta } from '../src/providers/cli';
-import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
+import { FakeHost, assetSteps, ScriptedModel, makeProject, call, tmpDir, tinyPng, tinyMp4 } from './helpers';
 
 const LINES = [
   'Honestly the worst thing on a first date',   // w0-w7
@@ -36,7 +36,7 @@ async function attach(dir: string, o: { stem?: string; kind?: 'image' | 'video';
   const asset = `work/assets/${stem}.${ext}`;
   await fsp.mkdir(path.join(dir, 'work', 'assets'), { recursive: true });
   await fsp.mkdir(path.join(dir, 'work', 'thumbs'), { recursive: true });
-  await fsp.writeFile(path.join(dir, asset), kind === 'image' ? tinyPng() : 'fake mp4');
+  await fsp.writeFile(path.join(dir, asset), kind === 'image' ? tinyPng() : tinyMp4());
   if (o.thumb !== false) await fsp.writeFile(path.join(dir, 'work', 'thumbs', `${stem}.jpg`), tinyPng([10, 200, 10]));
   const side: any = {
     asset, name: o.name ?? `${o.stem ?? 'meme'}.${ext === 'mp4' && o.fromGif ? 'gif' : ext}`, kind, bytes: 2048, width: 480, height: 270,
@@ -130,14 +130,15 @@ describe('attachments: the AI sees them', () => {
     expect(text).not.toMatch(/—/);
   });
 
-  it('a note that is only an attachment is allowed; a scripted add_broll with the attached path places it', async () => {
+  it('a note that is only an attachment is allowed; a scripted resolve and commit places it', async () => {
     const { dir, host, settingsDir } = await setup();
     const gif = await attach(dir, { kind: 'video', stem: 'the-ick', fromGif: true });
     const model = new ScriptedModel([
       (req) => {
         expect(firstText(req)).toMatch(/no words: the user only attached the file/);
-        return { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: gif, search: null, animation: null, params: nullP })] };
+        return { toolCalls: [call('resolve_asset', { kind: 'video', intent: gif })] };
       },
+      ...assetSteps(gif, { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', params: nullP }, 'video').slice(1),
       { toolCalls: [call('render_draft')] },
       { toolCalls: [call('finish', { summary_for_user: "I put your GIF over your face when you say 'the ick'." })] },
     ]);
@@ -145,7 +146,7 @@ describe('attachments: the AI sees them', () => {
     const r = await ai.applyNote(dir, '', () => undefined, undefined, { attachments: [gif] });
     expect(r.changed).toContain('broll');
     const p = await loadProject(dir);
-    expect(p.broll).toEqual([expect.objectContaining({ anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: gif })]);
+    expect(p.broll).toEqual([expect.objectContaining({ anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: expect.stringMatching(/^work\/assets\/frozen\/video\//) })]);
     expect(p.notes).toEqual([expect.objectContaining({ text: '', attachments: [gif], version: r.version })]);
     const md = await fsp.readFile(path.join(dir, 'versions', `v${r.version}`, 'notes.md'), 'utf8');
     expect(md).toMatch(/Note: \(attached the-ick\.gif\)/);
@@ -168,13 +169,16 @@ describe('attachments: the AI sees them', () => {
         expect(section).not.toContain(placed);
         expect(text).not.toMatch(/## Attached to this note/);
         expect(firstImages(req)).toHaveLength(1);
-        return { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', asset: waiting, search: null, animation: null, params: nullP })] };
+        return { toolCalls: [call('resolve_asset', { kind: 'image', intent: waiting })] };
       },
+      ...assetSteps(waiting, { anchor: { from: 'w12', to: 'w13' }, treatment: 'full-frame', params: nullP }).slice(1),
       { toolCalls: [call('finish', { summary_for_user: "I put it over your face when you say 'the ick'." })] },
     ]);
     const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
     await ai.applyNote(dir, "when I say 'the ick'", () => undefined);
-    expect((await loadProject(dir)).broll.map((b) => b.asset)).toEqual([placed, waiting]);
+    const used = (await loadProject(dir)).broll.map((b) => b.asset);
+    expect(used[0]).toBe(placed);
+    expect(used[1]).toMatch(/^work\/assets\/frozen\/image\//);
     // the note that put the earlier file in the video records it (the one placed before is not this note's)
     expect((await loadProject(dir)).notes).toEqual([expect.objectContaining({ text: "when I say 'the ick'", attachments: [waiting] })]);
     // once placed it is no longer "attached before"
@@ -199,7 +203,7 @@ describe('attachments: the AI sees them', () => {
     const a = await attach(dir, { kind: 'video', stem: 'clip' });
     const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const model = new ScriptedModel([
-      { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'side-card', asset: a, search: null, animation: null, params: nullP })] },
+      { toolCalls: [call('add_broll', { anchor: { from: 'w12', to: 'w13' }, treatment: 'side-card', asset: a, animation: null, params: nullP })] },
       new AIError('chatgpt_usage_limit', 'limit'),
     ]);
     await expect(createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'next to me on the ick', () => undefined, undefined, { attachments: [a] }))

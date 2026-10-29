@@ -20,7 +20,7 @@ import pytest
 from PIL import Image
 
 import fixtures as fx
-from reelengine import assets, broll, cover, music, placement, zoom
+from reelengine import assets, broll, cover, music, placement, render, zoom
 from reelengine.compose_util import EngineError, word_start
 
 W, H = 1080, 1920
@@ -321,6 +321,28 @@ def test_missing_song_is_a_user_error(tmp_path, media):
     with pytest.raises(EngineError) as e:
         music.build_audio(ctx, fx.cut_voice(ctx, tmp_path / "voice.wav"))
     assert e.value.user_message
+
+
+LIB_SONG = "Library/Music/lofi beat.mp3"
+
+
+@pytest.mark.parametrize("frozen,track", [
+    ({"track": LIB_SONG, "path": "SONG"}, LIB_SONG),                       # the AI's frozen copy of the Library song
+    (None, "SONG"),                                                          # an older project: no frozen copy
+    ({"track": LIB_SONG, "path": "work/assets/frozen/music/gone.mp3"}, "SONG"),   # the app switched songs since
+])
+def test_build_audio_plays_the_frozen_copy_of_its_track(tmp_path, media, frozen, track):
+    """music.frozen is played only while its track is music.track; otherwise track is (the Library file
+    in the first case does not exist, so reading it would fail)."""
+    song = str(media["song"])
+    mus = {"enabled": True, "track": song if track == "SONG" else track, "level": "under-voice"}
+    if frozen:
+        mus["frozen"] = {**frozen, "path": song if frozen["path"] == "SONG" else frozen["path"]}
+    ctx = _ctx(tmp_path, media["video"], music=mus)
+    music.build_audio(ctx, fx.cut_voice(ctx, tmp_path / "voice.wav"))
+    rep = json.loads((ctx.work / "audio" / "mix.json").read_text())
+    assert Path(rep["music"]["track"]).resolve() == media["song"].resolve()
+    assert song in render.asset_fingerprint(ctx.project_dir, ctx.project)
 
 
 def test_analyze_track_tempo(media):

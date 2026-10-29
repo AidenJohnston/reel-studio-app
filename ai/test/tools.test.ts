@@ -4,11 +4,11 @@ import * as path from 'node:path';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
 import { isStrict, validate } from '../src/schema';
-import { FakeHost, makeProject, tinyPng } from './helpers';
+import { FakeHost, makeProject, tinyPng, tinyMp3, commitImage, commitLocalAsset } from './helpers';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
-  'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
-  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
+  'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'resolve_asset', 'list_assets', 'preview_asset',
+  'export_asset_credits', 'search_images', 'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
 
 async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string; root: string; events: AgentEvent[] }> {
   const { root, dir } = await makeProject();
@@ -70,16 +70,17 @@ describe('tool implementations', () => {
     expect(r.content).toMatch(/RESPELLED FROM THE USER'S OWN WORDS[^\n]*\nw1: "Nave" -> "Neve" \[title\]/);
   });
 
-  it('music: list, choose by path or bare name, automation anchors', async () => {
+  it('music: list, commit, choose and automate', async () => {
     const { ctx, root, dir } = await ctxFor();
-    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm piano.mp3'), 'x');
+    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm piano.mp3'), tinyMp3());
     const lib = JSON.parse((await executeTool(ctx, 'list_library', { kind: 'music' })).content);
     expect(lib.files).toEqual(['Library/Music/calm piano.mp3']);
     expect((await executeTool(ctx, 'choose_music', { track: 'nope.mp3', startAt: null, level: null })).isError).toBe(true);
-    const r = await executeTool(ctx, 'choose_music', { track: 'calm piano.mp3', startAt: 4, level: 'quiet' });
+    const track = await commitLocalAsset(ctx, 'Library/Music/calm piano.mp3', 'music');
+    const r = await executeTool(ctx, 'choose_music', { track, startAt: 4, level: 'quiet' });
     expect(r.summary).toBe('Added the song "calm piano"');
     const p = await loadProject(dir);
-    expect(p.music).toMatchObject({ track: 'Library/Music/calm piano.mp3', startAt: 4, level: 'quiet', enabled: true });
+    expect(p.music).toMatchObject({ track: 'Library/Music/calm piano.mp3', frozen: { track: 'Library/Music/calm piano.mp3', path: track }, startAt: 4, level: 'quiet', enabled: true });
     expect((await executeTool(ctx, 'set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'wX', gainDb: -6 }] })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_music_automation', { automation: [{ fromWord: 'w0', toWord: 'w8', gainDb: -6 }] })).isError).toBe(false);
     // CLI-style call with missing nullable fields is accepted
@@ -87,34 +88,29 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).music.enabled).toBe(false);
   });
 
-  it('b-roll: text-pop, library asset, animation, search, update, remove', async () => {
+  it('b-roll: text-pop, committed image, animation, update, remove', async () => {
     const { ctx, root, dir, host } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());
     const nullP = { tilt: null, scale: null, text: null };
-    const a = await executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, search: null, animation: null, params: { ...nullP, text: '$20' } });
+    const a = await executeTool(ctx, 'add_broll', { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-pop', asset: null, animation: null, params: { ...nullP, text: '$20' } });
     expect(a.isError).toBe(false);
     expect(a.summary).toBe('Added a visual on "twenty bucks"');
-    const b = await executeTool(ctx, 'add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'card-above-head', asset: 'flour.png', search: null, animation: null, params: { ...nullP, tilt: -2.5 } });
-    expect(JSON.parse(b.content).asset).toBe('Library/Images/flour.png');
-    const c = await executeTool(ctx, 'add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'full-frame', asset: null, search: null, animation: { template: 'stat-count-up', params: { text: 'hours', value: '18', items: null } }, params: nullP });
+    const committed = await commitImage(ctx, 'flour.png');
+    const b = await executeTool(ctx, 'add_broll', { anchor: { from: 'w33', to: 'w34' }, treatment: 'card-above-head', asset: committed, animation: null, params: { ...nullP, tilt: -2.5 } });
+    expect(JSON.parse(b.content).asset).toBe(committed);
+    const c = await executeTool(ctx, 'add_broll', { anchor: { from: 'w48', to: 'w52' }, treatment: 'full-frame', asset: null, animation: { template: 'stat-count-up', params: { text: 'hours', value: '18', items: null } }, params: nullP });
     expect(c.isError).toBe(false);
     expect(host.animations[0]).toMatchObject({ template: 'stat-count-up', params: { text: 'hours', value: '18' } });
-    // search: engine returns a local path result
-    const img = path.join(dir, 'work', 'found.png');
-    await fsp.writeFile(img, tinyPng());
-    host.searchResults = [{ url: 'https://example.com/x.png', path: 'work/found.png', title: 'x' }];
-    const d = await executeTool(ctx, 'add_broll', { anchor: { from: 'w39', to: 'w41' }, treatment: 'side-card', asset: null, search: 'bread brick', animation: null, params: nullP });
-    expect(d.isError).toBe(false);
-    const noAsset = await executeTool(ctx, 'add_broll', { anchor: { from: 'w39', to: 'w41' }, treatment: 'side-card', asset: null, search: null, animation: null, params: nullP });
+    const noAsset = await executeTool(ctx, 'add_broll', { anchor: { from: 'w39', to: 'w41' }, treatment: 'side-card', asset: null, animation: null, params: nullP });
     expect(noAsset.isError).toBe(true);
     let p = await loadProject(dir);
-    expect(p.broll.map((x) => x.id)).toEqual(['b1', 'b2', 'b3', 'b4']);
+    expect(p.broll.map((x) => x.id)).toEqual(['b1', 'b2', 'b3']);
     expect(p.broll[0].params).toEqual({ text: '$20' });
     expect((await executeTool(ctx, 'update_broll', { id: 'b2', anchor: null, treatment: 'side-card', asset: null, params: { tilt: 0, scale: null, text: null } })).isError).toBe(false);
     expect((await executeTool(ctx, 'remove_broll', { id: 'b9' })).isError).toBe(true);
     expect((await executeTool(ctx, 'remove_broll', { id: 'b1' })).isError).toBe(false);
     p = await loadProject(dir);
-    expect(p.broll.map((x) => x.id)).toEqual(['b2', 'b3', 'b4']);
+    expect(p.broll.map((x) => x.id)).toEqual(['b2', 'b3']);
     expect(p.broll[0]).toMatchObject({ treatment: 'side-card', params: { tilt: 0 } });
   });
 
@@ -153,14 +149,15 @@ describe('tool implementations', () => {
   it('choose_music asks the engine where a new song should start', async () => {
     const { ctx, root, dir, host } = await ctxFor();
     host.engineAssets = true;
-    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm piano.mp3'), 'x');
-    const r = JSON.parse((await executeTool(ctx, 'choose_music', { track: 'calm piano.mp3', startAt: null, level: null })).content);
+    await fsp.writeFile(path.join(root, 'Library', 'Music', 'calm piano.mp3'), tinyMp3());
+    const track = await commitLocalAsset(ctx, 'Library/Music/calm piano.mp3', 'music');
+    const r = JSON.parse((await executeTool(ctx, 'choose_music', { track, startAt: null, level: null })).content);
     expect(r.song).toMatchObject({ bpm: 92, energy: 'calm', suggestedStartAt: 7.5 });
     expect(r.song.curve).toBeUndefined();
     expect((await loadProject(dir)).music.startAt).toBe(7.5);
     // an explicit start wins, and re-choosing the same song does not re-analyze
     const n = host.calls.filter((c) => c.command === 'analyze-music').length;
-    await executeTool(ctx, 'choose_music', { track: 'calm piano.mp3', startAt: 3, level: 'quiet' });
+    await executeTool(ctx, 'choose_music', { track, startAt: 3, level: 'quiet' });
     expect((await loadProject(dir)).music.startAt).toBe(3);
     expect(host.calls.filter((c) => c.command === 'analyze-music').length).toBe(n);
   });
