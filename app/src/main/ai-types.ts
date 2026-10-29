@@ -73,6 +73,8 @@ export interface AI {
     signal?: AbortSignal,
     opts?: { attachments?: string[] }
   ): Promise<AgentResult>
+  /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
+  wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult>
   styleRules(): Promise<{ id: string; text: string; createdAt: string }[]>
   removeStyleRule(id: string): Promise<void>

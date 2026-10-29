@@ -48,6 +48,14 @@ Rules:
   no `export.mp4` (the final render failed and the run fell back to its preview), show
   `versions/preview/draft.mp4` and offer to try the final render again.
 - `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
+- **A change asked at a moment** (the button under the player) names the words on screen. The app
+  reads them from the version being watched: `duration` and `segmentsDetail` (source, src_start,
+  src_end, out_start per kept span) in `versions/vN/render.json`, or `versions/preview/render_draft.json`
+  for the Preview, mapped onto `work/transcript.json`, read again each time the pop-up opens. Without
+  them a "Just here" change is refused (never widened); the person can choose Whole reel. The main
+  process checks the same render and rebuilds the word ids itself. The engine lists at most 2000
+  segments; past the last one listed, the same applies. The note's mark on the scrub bar maps the same way in reverse:
+  its word ids, placed on the version on screen; with none of them in that cut, it has no mark.
 
 ## ai package
 

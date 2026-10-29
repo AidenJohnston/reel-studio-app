@@ -22,8 +22,10 @@ import {
   ensureRoot,
   listProjects,
   listVersions,
+  PREVIEW_DIR,
   projectDir,
   readAppState,
+  readJson,
   readProject,
   readWords,
   recoverInterrupted,
@@ -50,8 +52,9 @@ import { createVendorConnect, type CliStatus, type VendorConnect } from './vendo
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, DropResult, ExportResult, JobEvent, NoteMoment, PlacedWord, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
+import { aiNoteText, checkMoment, momentRoute, parseMoment, placeWords, typedMoment, type RenderSegment } from '../shared/moments'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
@@ -337,6 +340,18 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
 }
 
 // ---- IPC ----------------------------------------------------------------------------------------
+// Every word version `n` (0 = the Preview) plays, placed by that render's own timeline: the segments
+// the engine cut it from (render.json segmentsDetail, docs/versions.md). null when the version or its
+// timeline is missing.
+async function readTimeline(slug: string, n: number): Promise<{ duration: number; words: PlacedWord[] } | null> {
+  const dir = projectDir(slug)
+  const file = n === 0 ? join(dir, 'versions', PREVIEW_DIR, 'render_draft.json') : join(dir, 'versions', `v${n}`, 'render.json')
+  const r = await readJson<{ duration?: number; segmentsDetail?: RenderSegment[] }>(file, {})
+  if (typeof r.duration !== 'number' || !r.segmentsDetail?.length) return null
+  const words = await readWords(dir, await readProject(slug))
+  return { duration: r.duration, words: placeWords(r.segmentsDetail, words) }
+}
+
 function registerIpc(): void {
   handle('app:info', () => appInfo())
   handle('app:finishFirstRun', async () => {
@@ -468,14 +483,38 @@ function registerIpc(): void {
     }
     return { jobId: startFirstEdit(slug, null) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
+  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown) => {
+    const typedText = String(text ?? '').trim()
+    // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
+    const typed = at !== undefined ? typedMoment(typedText) : null
+    let note = typed ? typed.rest : typedText
     const dir = projectDir(slug)
     // never trust the page: every attached ref is re-read from THIS project's own sidecars
     const files = await checkNoteAttachments(dir, attachments)
     if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+    if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
+    let moment: NoteMoment | undefined
+    if (at !== undefined) {
+      let asked: NoteMoment
+      try {
+        asked = parseMoment(at)
+      } catch (e) {
+        throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'I lost track of that moment. Open "Change something" again and resend.' }
+      }
+      if (typed) asked = { ...asked, at: typed.at }
+      // checked against the render it names, the one the pop-up read its words from; its words and
+      // quote come from that render, never from the page
+      const c = checkMoment(asked, await readTimeline(slug, asked.version))
+      if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
+      moment = c.moment
+      if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
+      // A setting global by nature ("smaller captions") goes without its moment, which would hide it
+      // from applyNote's no-model fast path; the chat shows the words as typed.
+      if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
+    }
+    // the chat keeps the words as typed, "At 0:05:" included; the AI reads them without it (aiNoteText)
+    const noteId = await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
@@ -484,18 +523,30 @@ function registerIpc(): void {
       await addChat(slug, 'editor', reply.text, undefined, reply.actions)
       return { jobId: null }
     }
+    const before = (await readProject(slug)).version ?? 0
     const jobId = jobs.start(
       slug,
       'note',
       async (emit, signal) => {
         const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
-        const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
+        // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part"
+        const r: AgentResult = await ai.applyNote(dir, aiNoteText(note, moment), (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(slug, r, r.summary + extra)
+        const reply = await replyAskingAboutStyle(slug, r, r.summary + extra)
+        return { ...reply, outcome: r.version > before ? 'done' : 'failed' }
       },
       { note: note || files.map((f) => f.name).join(', ') }
     )
+    // queued on app.json before the job can settle (store.updateAppState runs one write at a time)
+    await updateAppState(slug, (s) => {
+      const m = s.chat.find((c) => c.id === noteId)
+      if (m) m.jobId = jobId
+    })
     return { jobId }
+  })
+  handle('projects:timeline', async (_e, slug: string, n: number) => {
+    if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of your video first.' }
+    return readTimeline(slug, n)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }

@@ -112,10 +112,6 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.mouse.up()
   await expect(page.getByTestId('original-video')).not.toHaveClass(/on/)
 
-  // The banner can be put away, for this video.
-  await page.getByTestId('banner-close').click()
-  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
-
   // ---- drawer: Esc closes, Ctrl/Cmd+Z undoes ----
   await page.getByTestId('edit-myself').click()
   await expect(page.getByTestId('tab-cut')).toBeFocused() // not Close
@@ -181,9 +177,31 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await page.getByTestId('project-card').first().click()
   await expect(page.getByTestId('player')).toBeVisible()
   await expect(page.getByTestId('did-cut')).toContainText('Kept your best takes')
-  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
-  await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', 'Tell your editor what to change…')
+  await expect(page.getByTestId('change-at')).toContainText('Change something at')
   await shot(page, 'd-12-reel-with-ai')
+
+  // ---- an AI check that has not answered: the change button waits, and no connect prompt shows ----
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:active')
+    const waiting: ((v: unknown) => void)[] = []
+    ;(globalThis as { __aiWaiting?: typeof waiting }).__aiWaiting = waiting
+    ipcMain.handle('ai:active', () => new Promise((answer) => waiting.push(answer)))
+  })
+  await page.getByTestId('nav-home').click()
+  await page.getByTestId('project-card').first().click()
+  await expect(page.getByTestId('player')).toBeVisible()
+  await expect(page.getByTestId('change-checking')).toBeDisabled()
+  await expect(page.getByTestId('change-checking')).toHaveText('Checking for your AI editor…')
+  await expect(page.getByTestId('note-input')).toBeDisabled()
+  await expect(page.getByTestId('composer-connect')).toHaveCount(0)
+  await expect(page.getByTestId('ai-banner')).toHaveCount(0)
+  await app.evaluate(() => {
+    for (const answer of (globalThis as { __aiWaiting?: ((v: unknown) => void)[] }).__aiWaiting ?? [])
+      answer({ ok: true, value: { id: 'chatgpt', connected: true, label: 'ChatGPT', detail: '' } })
+  })
+  await expect(page.getByTestId('change-at')).toBeEnabled()
+  await expect(page.getByTestId('note-input')).toBeEnabled()
+  await stubConnected(app)
 
   // ---- Library: a drop anywhere on the window lands in the Library ----
   await page.getByTestId('nav-library').click()
