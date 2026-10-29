@@ -25,6 +25,19 @@ export interface VersionInfo {
   draft: boolean
   cover: string | null
   createdAt: string
+  /** what this version changed since the one before, from `versions/vN/receipts.json`; absent for versions made before receipts existed */
+  facts?: EditFact[]
+  /** a `vN` rendered before receipts existed (its render.json has no renderId): its tooltip is the chat reply */
+  beforeReceipts?: true
+}
+
+/** One thing an edit changed (engine project.net_changes): `kind` is the project.json path. */
+export interface EditFact {
+  kind: string
+  field?: string
+  id?: string
+  before: unknown
+  after: unknown
 }
 
 export interface Word {
@@ -138,7 +151,8 @@ export interface ProjectJson {
   zooms?: unknown[]
   cover?: { atSourceTime: number; source: string; text: string | null }
   post?: { caption: string; hashtags: string[]; keywords: string[] }
-  notes?: { version: number; text: string; applied: string[]; at: string }[]
+  /** `version` is absent for a note whose edit ended where it started (docs/schema-changes.md) */
+  notes?: { version?: number; text: string; applied: string[]; at: string }[]
   [k: string]: unknown
 }
 
@@ -358,6 +372,9 @@ export interface ReelApi {
     /** Opens a terminal window where the person signs in to their Claude Code app themselves (the fallback when the
      * browser sign-in shows a code instead of coming back). */
     openClaudeSignIn(): Promise<void>
+    /** Settings > "Double-check each edit" (off by default). */
+    checkEdits(): Promise<boolean>
+    setCheckEdits(on: boolean): Promise<boolean>
     /** A fresh look at a vendor's app, plus the step of a connect in progress. */
     vendorStatus(v: VendorId): Promise<VendorInfo>
     /** Installs the vendor's app if missing, starts its own sign-in in the browser, then makes it the AI editor.

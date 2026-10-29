@@ -15,7 +15,11 @@ import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types'
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
-export interface RenderInfo { version: number; draft: boolean; result: any }
+export interface RenderInfo {
+  version: number; draft: boolean; result: any;
+  /** a preview the checker asked for (editor.ts candidateRender): it does not use up the editor's previews */
+  checker?: boolean;
+}
 
 export interface ToolState {
   changed: Set<string>;
@@ -31,8 +35,10 @@ export interface ToolState {
   toolCalls: number;
   /** fields changed since the last render (render_draft skips when none of them can be seen) */
   dirty?: Set<string>;
-  /** render_draft was skipped (nothing visible changed): look_at_frames may use the newest render on disk */
+  /** render_draft was skipped (nothing visible changed): look_at_frames looks at the current version instead */
   previewSkipped?: boolean;
+  /** an undone repair's preview overwrote versions/preview/: no earlier preview is on disk (editor.ts finalize) */
+  previewReplaced?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
 }
@@ -48,6 +54,8 @@ export interface ToolContext {
   fetchImpl?: typeof fetch;
   /** the user's own note for this task (applyNote); decides whether add_style_rule saves or only proposes */
   userNote?: string;
+  /** the app job this task runs in; every render records it in its receipt */
+  jobId?: string;
   /** DNS lookup used to refuse private/loopback hosts (test hook; default node:dns) */
   lookupImpl?: LookupFn;
   /** whole-download timeout for in-process image fetches (test hook; default 30 s) */
@@ -243,7 +251,8 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     zooms: p.zooms.map((z) => ({ ...z, says: quote(t, z.anchor) })),
     cover: p.cover,
     post: p.post,
-    notes: p.notes,
+    // a receipt is for the app's version buttons; sent with every note it grows each request
+    notes: p.notes.map(({ receipt: _receipt, ...n }) => n),
     lastRender: ctx.state.renders.at(-1)?.version ?? null,
   };
 }
@@ -407,8 +416,12 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 
 export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
+  // a skipped preview stood for the edit as it was then: from here on only this render does
+  ctx.state.previewSkipped = false;
+  const args = [...(draft ? ['--draft'] : []), ...(ctx.jobId ? ['--job-id', ctx.jobId] : [])];
+  const result = await engine(ctx, 'render', args, draft ? 'Making a preview' : 'Making the final video');
+  // only a render that finished shows the changes: after a failed one they are still unseen (checkAndRepair)
   ctx.state.dirty = new Set();
-  const result = await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
   const p = await loadProject(ctx.projectDir);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
@@ -1203,7 +1216,7 @@ const tools: ToolDef[] = [
     description: 'Render a quick preview of the current edit. Needed before look_at_frames.',
     parameters: S.obj({}),
     async run(ctx) {
-      const drafts = ctx.state.renders.filter((r) => r.draft).length;
+      const drafts = ctx.state.renders.filter((r) => r.draft && !r.checker).length;
       if (ctx.maxDraftRenders !== undefined && drafts >= ctx.maxDraftRenders) {
         throw new ToolInputError('No more previews for this task. Call finish now. The final full-quality video includes every change. If you SAW a problem you could not fix, say so plainly in your summary; small fixes the checks asked for (a longer anchor, a removed or moved card, a zoom) need no mention.');
       }
@@ -1263,26 +1276,28 @@ const tools: ToolDef[] = [
   },
   {
     name: 'look_at_frames',
-    description: 'See still frames from the latest render. Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
+    description: 'See still frames from your last preview. Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
     parameters: S.obj({
       times: S.opt(S.arr(S.num(), 'seconds in the rendered video')),
       words: S.opt(S.arr(S.str(), 'word ids')),
     }),
     async run(ctx, args) {
       if (!ctx.state.renders.length && !ctx.state.previewSkipped) throw new ToolInputError('call render_draft first');
-      const { p, t } = await load(ctx);
+      // a version rendered before render ids has none to inspect: make a preview of it instead
+      const renderId: string | undefined = ctx.state.renders.length ? ctx.state.renders.at(-1)!.result?.renderId
+        : await fsp.readFile(path.join(ctx.projectDir, 'versions', `v${(await load(ctx)).p.version}`, 'render.json'), 'utf8')
+          .then((s) => JSON.parse(s).renderId).catch(() => undefined) ?? (await doRender(ctx, true)).result?.renderId;
+      if (!renderId) throw new ToolInputError('there is no preview to look at; the final video after finish includes the change');
+      const shown: RenderReports = await engine(ctx, 'inspect-render', ['--render-id', renderId]);
       const times: number[] = [...(args.times ?? [])];
-      if (args.words?.length) {
-        const map = approxOutputTimes(t, p.cut.keep, p.cut.gapCap);
-        for (const id of args.words) {
-          const v = map.get(id);
-          if (!v) throw new ToolInputError(`word ${id} is not in the cut`);
-          times.push(Math.round(((v.s + v.e) / 2) * 100) / 100);
-        }
+      for (const id of args.words ?? []) {
+        const w = shown.timeline.words.find((x) => x.id === id);
+        if (!w) throw new ToolInputError(`word ${id} is not in the cut`);
+        times.push(Math.round(((w.s + w.e) / 2) * 100) / 100);
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
-      const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      const { pick, moved } = settleOnAnimations(shown.layers, times.slice(0, 6));
+      const r = await engine(ctx, 'frames', ['--render-id', renderId, '--times', pick.join(',')]);
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1315,13 +1330,15 @@ const tools: ToolDef[] = [
   },
 ];
 
+/** `inspect-render`: one render's own word times and layer records (engine render_identity.py). */
+interface RenderReports { timeline: { words: { id: string; s: number; e: number }[] }; layers: LayerRecord[] }
+interface LayerRecord { id: string; treatment?: string; zone?: string; t0?: number; t1?: number; skipped?: string }
+
 /** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
  * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
  * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
-  const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
+function settleOnAnimations(recs: LayerRecord[], times: number[]): { pick: number[]; moved: { asked: number; sampled: number; id: string }[] } {
+  const anims = recs.filter((r): r is LayerRecord & { t0: number; t1: number } => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
   const moved: { asked: number; sampled: number; id: string }[] = [];
   const pick = times.map((tm) => {
     const a = anims.find((r) => tm >= r.t0 && tm < r.t1);

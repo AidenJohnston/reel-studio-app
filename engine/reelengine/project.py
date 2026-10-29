@@ -170,6 +170,33 @@ def edit_signature(proj: dict) -> str:
     return json.dumps(p, sort_keys=True, ensure_ascii=False)
 
 
+def net_changes(before: dict, after: dict) -> list:
+    """What an edit changed, as facts: `kind` is the project.json path, with `field` for one caption
+    style key and `id` for one b-roll item or take. Compares end states, so a change made and then
+    undone in the same edit is no fact (docs/schema-changes.md, notes[].receipt)."""
+    facts = []
+
+    def add(kind, a, b, **key):
+        if a != b:
+            facts.append({"kind": kind, **key, "before": a, "after": b})
+
+    for section in ("cut", "captions", "music", "cover", "post"):
+        a, b = before.get(section) or {}, after.get(section) or {}
+        for k in sorted((a.keys() | b.keys()) - {"style"}):
+            add(f"{section}.{k}", a.get(k), b.get(k))
+    a = (before.get("captions") or {}).get("style") or {}
+    b = (after.get("captions") or {}).get("style") or {}
+    for k in sorted(a.keys() | b.keys()):
+        add("captions.style", a.get(k), b.get(k), field=k)
+    add("zooms", before.get("zooms") or [], after.get("zooms") or [])
+    for kind, key in (("broll", "broll"), ("source", "sources")):
+        a = {x["id"]: x for x in before.get(key) or []}
+        b = {x["id"]: x for x in after.get(key) or []}
+        for i in [*a, *(i for i in b if i not in a)]:
+            add(kind, a.get(i), b.get(i), id=i)
+    return facts
+
+
 # --- transcript ---------------------------------------------------------------------------------
 
 TRANSCRIPT_REL = "work/transcript.json"
