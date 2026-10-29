@@ -26,7 +26,6 @@ import {
   readAppState,
   readProject,
   readWords,
-  recoverInterrupted,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -45,6 +44,7 @@ import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { loadSettings, saveSettings } from './settings'
 import { createPidRegistry } from './orphans'
+import { settleLastRun } from './last-run'
 import { openSignInWindow, publicInfo } from './claude-signin'
 import { createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
@@ -56,7 +56,8 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
-import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
+import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, windowStateFile, type AppCommand } from './window'
 
@@ -113,7 +114,7 @@ const runEngine: RunEngine = createEngineRunner({
   env: engineEnv,
   cwd: engineDir,
   log,
-  onSpawn: (pid) => pidRegistry?.add(pid),
+  onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
 
@@ -223,14 +224,19 @@ async function appInfo(): Promise<AppInfo> {
   }
 }
 
+/** Engine arguments for a command a job runs: it joins the job's ownership of the project. */
+function owned(args: string[], owner: string | null): string[] {
+  return owner ? [...args, '--owner', owner] : args
+}
+
 function startFirstEdit(slug: string, initArgs: { title: string; files: string[] } | null): string {
   const dir = projectDir(slug)
-  return jobs.start(slug, 'first-edit', async (emit, signal) => {
+  return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
       await runEngine(
         'init',
-        ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
+        owned(['--project', dir, '--title', initArgs.title, '--slug', slug], owner).concat(initArgs.files),
         (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
       )
@@ -252,7 +258,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
             .catch(() => undefined)
         }
       },
-      signal
+      signal,
+      owner ? { owner } : undefined
     )
     // Honest "What I did": only an AI that ran to the end picked the takes and wrote the caption.
     // A notice means it stopped and (usually) the simple edit stepped in, so claim nothing.
@@ -294,11 +301,11 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
     // nothing else can run on this video meanwhile) (review 25).
-    jobs.start(slug, 'rerender', async (emit, signal) => {
+    jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (pr) => emit({ type: 'status', message: pr.message || 'Making the full-quality video', pct: pr.pct, phase: 'final' }),
         signal
       )
@@ -378,7 +385,7 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => !!jobs.forSlug(slug),
+    reserve: (slug, fn) => jobs.hold(slug, fn),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {
@@ -469,12 +476,8 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
-    const note = String(text ?? '').trim()
     const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars
-    const files = await checkNoteAttachments(dir, attachments)
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    const { note, files } = await takeNote(jobs, slug, text, attachments)
     await addChat(slug, 'you', note, undefined, undefined, undefined, files.map(forChat))
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
@@ -487,8 +490,8 @@ function registerIpc(): void {
     const jobId = jobs.start(
       slug,
       'note',
-      async (emit, signal) => {
-        const opts = files.length ? { attachments: files.map((f) => f.asset) } : undefined
+      async (emit, signal, { owner }) => {
+        const opts = { ...(files.length ? { attachments: files.map((f) => f.asset) } : {}), ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
         return replyAskingAboutStyle(slug, r, r.summary + extra)
@@ -497,22 +500,22 @@ function registerIpc(): void {
     )
     return { jobId }
   })
-  handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
-    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    const p = await readProject(slug)
-    for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
-      // the "Flip picture" toggle: only each take's mirror flag, never its path or size
-      if (k === 'sources') {
-        p.sources = mergeSourcesPatch(p.sources, patch.sources)
-        continue
+  handle('projects:update', (_e, slug: string, patch: Partial<ProjectJson>) =>
+    jobs.hold(slug, async () => {
+      const p = await readProject(slug)
+      for (const k of Object.keys(patch ?? {}) as (keyof ProjectJson)[]) {
+        // the "Flip picture" toggle: only each take's mirror flag, never its path or size
+        if (k === 'sources') {
+          p.sources = mergeSourcesPatch(p.sources, patch.sources)
+          continue
+        }
+        if (!EDITABLE.includes(k)) continue
+        ;(p as any)[k] = (patch as any)[k]
       }
-      if (!EDITABLE.includes(k)) continue
-      ;(p as any)[k] = (patch as any)[k]
-    }
-    await writeProject(slug, p)
-    const d = await detail(slug)
-    return d
-  })
+      await writeProject(slug, p)
+      return detail(slug)
+    })
+  )
   // `change` = what the user changed, in plain words ("bigger yellow subtitles"), for the chat and the version button.
   // A manual change is render-only (no AI), called what it is ("Updating your subtitles", never the engine's
   // own step names like "Adding pictures"), and fast to SEE: a half-size preview first (the Reel screen plays
@@ -520,18 +523,18 @@ function registerIpc(): void {
   handle('projects:rerender', async (_e, slug: string, change?: string, label?: string) => {
     const dir = projectDir(slug)
     const words = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'Updating your video'
-    const jobId = jobs.start(slug, 'rerender', async (emit, signal) => {
+    const jobId = jobs.start(slug, 'rerender', async (emit, signal, { owner }) => {
       emit({ type: 'status', message: words, pct: 1, phase: 'final' })
       const look: any = await runEngine(
         'render',
-        ['--project', dir, '--draft', '--no-cover'],
+        owned(['--project', dir, '--draft', '--no-cover'], owner),
         (p) => emit({ type: 'status', message: words, pct: Math.round(p.pct * 0.3), phase: 'final' }),
         signal
       )
       emit({ type: 'render', version: Number(look?.version ?? 0), draft: true, ...(look?.file ? { file: String(look.file) } : {}) })
       const r: any = await runEngine(
         'render',
-        ['--project', dir],
+        owned(['--project', dir], owner),
         (p) => emit({ type: 'status', message: words, pct: 30 + Math.round(p.pct * 0.7), phase: 'final' }),
         signal
       )
@@ -548,6 +551,8 @@ function registerIpc(): void {
       jobs.cancel(running.id)
       await running.done
     }
+    // a video kept closed stays: part of its engine may still be writing into the folder
+    jobs.refuseIfBusy(slug)
     await fs.rm(projectDir(slug), { recursive: true, force: true })
   })
 
@@ -689,16 +694,7 @@ app.whenReady().then(async () => {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
   pidRegistry = createPidRegistry(settingsDir())
-  const reaped = await pidRegistry.reap().catch(() => 0)
-  if (reaped) log(`[start] stopped ${reaped} engine process(es) left over from a crash`)
-  const settings = await loadSettings()
-  if (settings.root) setRootOverride(settings.root)
-  await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const recovered = await recoverInterrupted().catch((e) => {
-    log(`[recover] ${String(e)}`)
-    return []
-  })
-  if (recovered.length) log(`[recover] cleaned up ${recovered.join(', ')}`)
+  const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log)
   const loaded = await loadAI(
     {
       host,

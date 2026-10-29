@@ -120,6 +120,7 @@ export async function removeAttachment(dir: string, asset: unknown, project: Pic
 export interface AttachDeps {
   runEngine: RunEngine
   log: (line: string) => void
+  owner?: string
 }
 
 function friendly(e: unknown): string {
@@ -133,12 +134,13 @@ export async function attachPaths(deps: AttachDeps, dir: string, files: { path: 
   for (const f of files.slice(0, MAX_ATTACHMENTS_PER_NOTE)) {
     const name = f.name || basename(f.path)
     try {
-      const r: any = await deps.runEngine('attach', ['--project', dir, f.path, '--name', name])
+      const r: any = await deps.runEngine('attach', ['--project', dir, f.path, '--name', name, ...(deps.owner ? ['--owner', deps.owner] : [])])
       const a = await readSidecar(dir, r?.asset)
       if (!a) throw { code: 'ATTACH_FAILED', userMessage: MSG.failed }
       out.attached.push(withThumbUrl(dir, a))
     } catch (e) {
       deps.log(`[attach] ${name}: ${(e as { code?: string })?.code ?? ''} ${(e as { message?: string })?.message ?? ''}`)
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') throw e
       out.errors.push(friendly(e))
     }
   }
@@ -185,50 +187,58 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** a job is running on this video (removing a file then could pull it from under the AI) */
-  busy: (slug: string) => boolean
+  /** Reserve the project in the job lane and provide its owner token to engine work. */
+  reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
   /** the picture on the system clipboard (null = none) */
   clipboardImage: () => Promise<{ mime: string; bytes: Uint8Array } | null>
   /** Electron's file dialog (null = cancelled) */
   choose: (filters: { name: string; extensions: string[] }[]) => Promise<string[] | null>
 }
 
-const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-
-/** The project folder; refused while a job runs on it (a failed note puts work/assets back as it was,
- * which would take a file attached meanwhile with it). */
+/** The project folder. The caller reserves it before any attachment write. */
 async function projectOf(deps: AttachIpcDeps, slug: unknown): Promise<string> {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video.' }
   const dir = deps.projectDir(slug)
   if (!existsSync(join(dir, 'project.json'))) throw { code: 'NOT_FOUND', userMessage: 'I could not find that video. It may have been moved or deleted.' }
-  if (deps.busy(slug)) throw BUSY
   return dir
+}
+
+function withOwner(deps: AttachIpcDeps, owner: string): AttachDeps {
+  return { runEngine: deps.runEngine, log: deps.log, owner }
 }
 
 export function registerAttachmentIpc(deps: AttachIpcDeps): void {
   deps.handle('notes:attachFiles', async (_e, slug: unknown, paths: unknown) => {
     const dir = await projectOf(deps, slug)
-    const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
-    return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    return deps.reserve(slug as string, (owner) => {
+      const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
+      return attachPaths(withOwner(deps, owner), dir, list.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:attachData', async (_e, slug: unknown, file: unknown) => {
     const dir = await projectOf(deps, slug)
-    return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    return deps.reserve(slug as string, (owner) => attachBytes(withOwner(deps, owner), dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown }))
   })
   deps.handle('notes:attachClipboard', async (_e, slug: unknown) => {
     const dir = await projectOf(deps, slug)
-    const img = await deps.clipboardImage().catch(() => null)
-    if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
-    return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    return deps.reserve(slug as string, async (owner) => {
+      const img = await deps.clipboardImage().catch(() => null)
+      if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
+      return attachBytes(withOwner(deps, owner), dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    })
   })
   deps.handle('notes:chooseAttachment', async (_e, slug: unknown) => {
     const dir = await projectOf(deps, slug)
-    const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
-    if (!picked?.length) return { attached: [], errors: [] }
-    return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    return deps.reserve(slug as string, async (owner) => {
+      const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
+      if (!picked?.length) return { attached: [], errors: [] }
+      return attachPaths(withOwner(deps, owner), dir, picked.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:removeAttachment', async (_e, slug: unknown, asset: unknown) => {
     const dir = await projectOf(deps, slug)
-    await removeAttachment(dir, asset, await deps.readProject(slug as string).catch(() => null))
+    await deps.reserve(slug as string, async () => {
+      await removeAttachment(dir, asset, await deps.readProject(slug as string).catch(() => null))
+    })
   })
 }

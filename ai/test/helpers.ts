@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall, OWNER_LOCK } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -74,6 +74,21 @@ export function tinyPng(rgb: [number, number, number] = [200, 30, 30]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** A project after its first edit, as every note finds it: a cut, and (`render`) Version 1. */
+export async function firstVersion(dir: string, host: FakeHost, render = true): Promise<void> {
+  const pj = path.join(dir, 'project.json');
+  const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
+  await fsp.writeFile(pj, JSON.stringify({ ...p, cut: { ...p.cut, keep: [{ from: 'w16', to: 'w56' }] } }, null, 2));
+  if (render) await host.runEngine('render', ['--project', dir]);
+  host.calls = [];
+}
+
+/** engine/reelengine/project.py edit_signature: what changes the rendered video. */
+function editSignature(p: Record<string, unknown>): string {
+  const { updatedAt: _u, version: _v, notes: _n, post: _p, createdAt: _c, ...edit } = p;
+  return JSON.stringify(edit);
+}
+
 /** Fake engine: enough of docs/architecture.md section 4 for the AI layer. Records every call. */
 export class FakeHost implements EngineHost {
   calls: { command: string; args: string[] }[] = [];
@@ -84,8 +99,14 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** runs after a render wrote its files, before it reports (Stop or a crash mid-render) */
+  afterRenderFiles?: (r: { draft: boolean; dir: string }) => Promise<void> | void;
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
+  private async fingerprint(dir: string): Promise<string> {
+    const t = await fsp.stat(path.join(dir, 'work', 'transcript.json')).catch(() => null);
+    return JSON.stringify(t ? [t.size, t.mtimeMs] : null);
+  }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
     this.animations.push({ template, params, out: outPath });
     await fsp.writeFile(outPath, 'fake animation');
@@ -94,6 +115,10 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
+    // like engine/reelengine/owner.py: run by hand (no --owner) while Reel Studio has the project open
+    if (!args.includes('--owner') && fs.existsSync(path.join(dir, OWNER_LOCK))) {
+      throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
+    }
     const pj = path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
@@ -111,17 +136,32 @@ export class FakeHost implements EngineHost {
       }
       case 'render': {
         if (this.failRender) throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' };
-        // docs/versions.md: drafts overwrite versions/preview/ and never bump project.version
+        // docs/versions.md: drafts overwrite versions/preview/ and never bump the version; a final of an
+        // unchanged edit returns its saved version, else starts v(N+1) afresh, snapshots the edit, then
+        // patches `version` into project.json
         const draft = args.includes('--draft');
+        const saved = path.join(dir, 'versions', `v${p.version}`);
+        const snapshot = !draft && p.version ? await fsp.readFile(path.join(saved, 'project.json'), 'utf8').catch(() => null) : null;
+        // render.py asset_fingerprint: the files the edit reads must be unchanged too (here the transcript);
+        // a version with no assets.json is compared by its edit alone
+        const files = await fsp.readFile(path.join(saved, 'assets.json'), 'utf8').catch(() => null);
+        if (snapshot && editSignature(JSON.parse(snapshot)) === editSignature(p) && (files === null || files === await this.fingerprint(dir))) {
+          return { version: p.version, preview: false, draft: false, file: path.join(saved, 'export.mp4'), reused: true };
+        }
         const v = (p.version ?? 0) + 1;
+        const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
+        if (!draft) await fsp.rm(vd, { recursive: true, force: true });
+        await fsp.mkdir(vd, { recursive: true });
+        const file = path.join(vd, draft ? 'draft.mp4' : 'export.mp4');
+        await fsp.writeFile(file, 'fake');
+        await fsp.writeFile(path.join(vd, 'project.json'), JSON.stringify(p, null, 2));
+        if (!draft) await fsp.writeFile(path.join(vd, 'assets.json'), await this.fingerprint(dir));
+        await this.afterRenderFiles?.({ draft, dir: vd });
         if (!draft) {
           p.version = v;
           await fsp.writeFile(pj, JSON.stringify(p, null, 2));
         }
-        const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
-        await fsp.mkdir(vd, { recursive: true });
-        await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
-        return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
+        return { version: v, preview: draft, draft, file, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
       }
       case 'frames': {
         const times = args[args.indexOf('--times') + 1].split(',').map(Number);

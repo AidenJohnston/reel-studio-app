@@ -231,7 +231,7 @@ def run(path: Path, expect_duration: Optional[float] = None, project_dir: Option
         except (ValueError, KeyError):
             pass
     if project_dir is not None:
-        cj = Path(project_dir) / "work" / "captions.json"
+        cj = path.parent / "captions.json"
         if cj.exists() and fmt:
             caps = json.loads(cj.read_text(encoding="utf-8")).get("cues")
     rep = check(path, expect_duration, exp_w, exp_h, exp_fps, caps, fmt, draft)

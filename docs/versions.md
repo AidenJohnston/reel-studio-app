@@ -7,7 +7,8 @@ never a pile of preview-only folders an AI run left behind.
 
 ```
 <project>/versions/
-  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md)
+  v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json (+ notes.md),
+                 and the reports that describe this video: captions.json, layers.json, mix.json
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
@@ -21,11 +22,14 @@ Rules:
    replacing what was there (a new window deletes the previous `window_*.mp4`). It never creates a
    `vN` folder and never changes `project.json`'s `version`.
 3. `project.json` `version` = the last FINAL version number.
-4. A final render re-uses `vN` when the edit is unchanged since `vN` was rendered (re-rendering the
-   same edit overwrites it); otherwise it makes `v(N+1)`.
-5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
-   `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+4. **A saved version is never rewritten.** A final render of an edit unchanged since `vN` was rendered
+   (the same edit, and the same files it reads, the transcript included) returns `vN` as it is
+   (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`. A `vN` folder above `project.json`'s
+   `version` is an attempt that was never saved, and the next final render of that number deletes it
+   first.
+5. `cover` (cover only) writes into `preview/`.
+6. `frames` reads the file given with `--file`, else the video the project shows: `v{version}`, or the
+   preview while there is no version. Its stills go to `work/frames/`.
 
 ## Render result (engine `done.result`)
 
@@ -55,3 +59,36 @@ Rules:
   edit, 2 per note).
 - After the agent calls `finish`, the loop runs one final `render`: that is the only step that adds a
   version.
+
+## One writer per project
+
+The running app is the only writer of its projects. Electron's single-instance lock is held by the OS
+until the app process dies, and inside the app the job lane runs one job or manual edit per project.
+Everything a job runs, the AI edit and each engine command, gets the job's token (`--owner`) and never
+decides ownership itself. `<project>/work/.owner.lock` only tells tools run by hand that the app has
+the project open: the engine CLI and the AI dev CLI refuse while it exists ("Reel Studio may be using
+this project. Close it, or delete <path> if it isn't running.") and never take a project over. The
+app removes leftover lock files when it starts (`app/src/main/owner.ts`).
+
+Every AI edit, the app's and the dev CLI's alike, also holds `<project>/work/.ai-edit.lock` for its
+whole run, so two edits in different processes never run on one project at once (`ai/src/index.ts`
+`withEditLock`). A lock whose process has died, or that is 3 hours old, is taken over.
+
+## Engine processes
+
+An engine call settles only after the engine and everything it started have exited. On macOS and
+Linux the engine runs as its own process group and the host stops what is left of the group after
+any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
+project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
+children when it exits (`engine/reelengine/contain.py`).
+
+A closed project refuses everything that would write to it: jobs, manual edits, attachments, notes
+and deleting the video. Each refusal asks the creator to restart Reel Studio first
+(`app/src/main/jobs.ts`).
+
+The app records each engine's pid and project in `engines.json` (in its settings folder) until the
+engine's whole group is gone, and at startup stops engines a crashed run left behind. A project whose
+engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
+running processes: a project stays closed only while an engine or ffmpeg names its folder in its
+arguments, and every other project opens. It keeps looking at each start until it finds none
+(`app/src/main/orphans.ts`).

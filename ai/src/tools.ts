@@ -368,11 +368,15 @@ export function popCards(p: Project): { id: string; text: string }[] {
     .map((b) => ({ id: b.id, text: asData(String((b.params as any)?.text ?? '')) }));
 }
 
-/** Layers the last render put on screen for under `min` seconds (engine windows, not anchors): too
+/** Where each layer of a rendered video was on screen: the engine's layers.json beside that video. */
+async function layersOf(video: string): Promise<any[]> {
+  try { return JSON.parse(await fsp.readFile(path.join(path.dirname(video), 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+}
+
+/** Layers a render put on screen for under `min` seconds (engine windows, not anchors): too
  * short to read. Usually a picture whose next visual starts right after it. */
-async function shortFlashes(ctx: ToolContext, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { return []; }
+async function shortFlashes(video: string | undefined, p: Project, t: Transcript | undefined, min = 1.2): Promise<{ id: string; seconds: number; says: string }[]> {
+  const recs = video ? await layersOf(video) : [];
   return recs.filter((r) => typeof r?.t0 === 'number' && typeof r?.t1 === 'number' && !r.skipped && r.t1 - r.t0 < min)
     .map((r) => {
       const b = p.broll.find((x) => x.id === r.id);
@@ -1241,7 +1245,7 @@ const tools: ToolDef[] = [
       if (perMin > 10) notes.push(`${p.zooms.length} zooms is about ${Math.round(perMin)} a minute, which reads as constant: keep 4 to 8 a minute, on punchlines and in the middle of bare stretches (set_zoom replaces the list).`);
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
-      const flashes = await shortFlashes(ctx, p, ctx.transcript);
+      const flashes = await shortFlashes(r.file, p, ctx.transcript);
       if (flashes.length) notes.push(`${flashes.length} visual${flashes.length > 1 ? 's are' : ' is'} on screen for under 1.2 s (see tooShort), too short to read. For each: extend its anchor to the end of its phrase (a picture needs about 2 s), or when the next visual starts right after it, keep the stronger one or move the next one later.`);
       const names = ctx.transcript ? unshownNames(p, ctx.transcript) : [];
       if (names.length) notes.push(`Named things the viewer hears but never sees (see namedNotShown). A brand, app, product, company or show: search_images "<name> logo" and place it on its words; a place or event: "<name> photo". Skip people the viewer would not know and anything that is not really a name.`);
@@ -1281,8 +1285,11 @@ const tools: ToolDef[] = [
         }
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
-      const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      // the newest preview, else the video the project shows now
+      const video: string = ctx.state.renders.at(-1)?.result?.file
+        ?? path.join(ctx.projectDir, 'versions', p.version ? `v${p.version}` : 'preview', p.version ? 'export.mp4' : 'draft.mp4');
+      const { pick, moved } = await settleOnAnimations(video, times.slice(0, 6));
+      const r = await engine(ctx, 'frames', ['--times', pick.join(','), '--file', video]);
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1318,9 +1325,8 @@ const tools: ToolDef[] = [
 /** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
  * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
  * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
+async function settleOnAnimations(video: string, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
+  const recs = await layersOf(video);
   const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
   const moved: { asked: number; sampled: number; id: string }[] = [];
   const pick = times.map((tm) => {
@@ -1369,6 +1375,8 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
     if (ctx.signal?.aborted) throw err;
     if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
     if (err instanceof AIError) throw err;
+    // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
+    if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
     return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };
