@@ -194,6 +194,57 @@ describe('finding 13: transcript and web text are data, style rules are visible 
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
 
+  it('a failed note restores the existing credits file after downloading a picture', async () => {
+    const { dir, host, settingsDir } = await setup();
+    host.engineAssets = true;
+    const creditsPath = path.join(dir, 'work', 'assets', 'credits.json');
+    const before = Buffer.from('{\n  "old.png": { "attribution": "Old credit" }\n}\n');
+    await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
+    await fsp.writeFile(creditsPath, before);
+    const runEngine = host.runEngine.bind(host);
+    host.runEngine = async (command, args, onProgress) => {
+      const result = await runEngine(command, args, onProgress);
+      if (command === 'fetch-image') {
+        await fsp.writeFile(creditsPath, JSON.stringify({
+          'old.png': { attribution: 'Old credit' },
+          'downloaded.png': { attributionRequired: true, attribution: 'New credit' },
+        }));
+      }
+      return result;
+    };
+    const m = new ScriptedModel([
+      { toolCalls: [call('fetch_image', { url: 'https://example.com/downloaded.png', name: 'downloaded' })] },
+      () => {
+        expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(true);
+        expect(JSON.parse(fs.readFileSync(creditsPath, 'utf8'))['downloaded.png'].attribution).toBe('New credit');
+        throw new AIError('chatgpt_usage_limit', 'limit');
+      },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'add a picture', () => undefined))
+      .rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
+    expect(await fsp.readFile(creditsPath)).toEqual(before);
+    expect(fs.existsSync(path.join(dir, 'work', 'assets', 'downloaded.png'))).toBe(false);
+  });
+
+  // chmod 000 cannot stop Windows or the root user from reading the file.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('an unreadable credits file does not stop a note', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const creditsPath = path.join(dir, 'work', 'assets', 'credits.json');
+    await fsp.mkdir(path.dirname(creditsPath), { recursive: true });
+    await fsp.writeFile(creditsPath, '{}\n');
+    await fsp.chmod(creditsPath, 0o000);
+    try {
+      const m = new ScriptedModel([
+        { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
+        { toolCalls: [call('finish', { summary_for_user: 'I slowed it down.' })] },
+      ]);
+      const r = await createAI({ host, settingsDir, providerOverride: m, finalRender: false }).applyNote(dir, 'slower', () => undefined);
+      expect(r.summary).toContain('I slowed it down.');
+    } finally {
+      await fsp.chmod(creditsPath, 0o644);
+    }
+  });
+
   it('a rule that was saved is echoed to the user in the summary', async () => {
     const { dir, host, settingsDir } = await setup();
     const m = new ScriptedModel([
