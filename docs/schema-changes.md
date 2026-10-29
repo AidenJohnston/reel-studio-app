@@ -2,6 +2,22 @@
 
 All additive (optional fields only), per docs/architecture.md section 3. Schema: `engine/reelengine/schema/project.schema.json`.
 
+## 2026-10-22 (render identity and edit receipts)
+
+- `notes[].receipt` (object, optional): what the version this note ended on changed since the version
+  before it, copied from the engine's render result. `jobId` is the app job (null when the engine ran
+  without one), `renderId` the render that made the version, `facts` a list of `{kind, before, after}`
+  where `kind` is the project.json path (`cut.keep`, `cut.gapCap`, `captions.enabled`, `music.level`,
+  `zooms`, ...). `captions.style` facts name the style key in `field`; `broll` and `source` facts name the
+  item in `id`, with `before: null` for an added item and `after: null` for a removed one. Facts compare
+  the two versions, never the steps between them, so a change made and undone is not a fact.
+- `notes[].version` may now be absent. Such a note changed the video and then took the change back, so it
+  made no version; the app answered "That left your video the same as before, so I didn't make a new
+  version." (or passed on the AI's question). The schema never listed `version` as required, so only the
+  TypeScript types change.
+- Outside project.json: `versions/vN/receipts.json` lists the receipts of every final render that wrote
+  into `vN` and changed something. Versions made before this have none.
+
 ## 2026-10-17 (engine-core, A1)
 
 - `sources[].rotation`: defined as the CLOCKWISE degrees (0/90/180/270) the stored picture must be turned
