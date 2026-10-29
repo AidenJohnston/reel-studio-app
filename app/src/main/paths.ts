@@ -148,10 +148,20 @@ export function templatesDir(): string {
   return join(repoRoot(), 'templates')
 }
 
+export function appIconPath(): string {
+  if (need().isPackaged) return resource('icon.png')
+  return join(repoRoot(), 'packaging', 'icons', 'icon.png')
+}
+
 /** Small test template shipped with the app, used to prove the animation renderer. */
 export function testAnimationDir(): string {
   if (need().isPackaged) return resource('test-animation')
   return join(need().appDir, 'resources', 'test-animation')
+}
+
+let asrThreads: number | null = null
+export function setAsrThreads(n: number | null): void {
+  asrThreads = n
 }
 
 /** Environment for every engine process. */
@@ -177,5 +187,6 @@ export function engineEnv(): NodeJS.ProcessEnv {
   if (isAbsolute(ffprobePath())) out.REELENGINE_FFPROBE = ffprobePath()
   const fonts = fontsDir()
   if (fonts) out.REELENGINE_FONTS = fonts
+  if (asrThreads) out.REELENGINE_ASR_THREADS = String(asrThreads)
   return out
 }

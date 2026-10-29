@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ModelStatus, ProviderInfo } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { Progress, Spinner } from './ui'
@@ -168,47 +168,123 @@ export function DevProviders() {
   )
 }
 
-/** One-time speech model download with progress. */
-export function ModelDownload({ onReady }: { onReady?: () => void }) {
+export const MODEL_FOUND = 'Found the listening model on this computer. Using it, no download needed.'
+
+const mb = (bytes: number): number => Math.round(bytes / 1e6)
+
+function downloadLine(s: ModelStatus, verb: 'Downloading' | 'Paused at'): string {
+  return s.total > 0 ? `${verb} ${mb(s.bytes)} of ${mb(s.total)} MB` : `${verb} ${s.pct}%`
+}
+
+/**
+ * The listening model's state, after looking for a matching copy already on this computer. `onDownloaded` fires only
+ * the moment a download finishes, not for a model that was already here or a copy found here.
+ */
+export function useModelStatus(onDownloaded?: () => void) {
   const [s, setS] = useState<ModelStatus | null>(null)
+  const [looked, setLooked] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [tries, setTries] = useState(0)
+  const wasInstalled = useRef<boolean | null>(null)
+  const downloaded = useRef(onDownloaded)
+  downloaded.current = onDownloaded
   useEffect(() => {
-    reel.model.status().then(setS)
-    return reel.model.onProgress((m) => {
+    let alive = true
+    const show = (m: ModelStatus) => {
+      if (!alive) return
       setS(m)
-      if (m.installed) onReady?.()
-    })
-  }, [onReady])
-  if (!s) return <Spinner />
+      if (wasInstalled.current === false && m.installed && !m.reused) downloaded.current?.()
+      wasInstalled.current = m.installed
+    }
+    const off = reel.model.onProgress(show)
+    void (async () => {
+      try {
+        const m = await reel.model.status()
+        show(m)
+        if (!m.installed && !m.downloading) show(await reel.model.find())
+      } catch {
+        if (alive) setFailed(true)
+      } finally {
+        if (alive) setLooked(true)
+      }
+    })()
+    return () => {
+      alive = false
+      off()
+    }
+  }, [tries])
+  const retry = (): void => {
+    setFailed(false)
+    setLooked(false)
+    setTries((n) => n + 1)
+  }
+  return { s, looked, failed, retry }
+}
+
+/** The one-time listening model download, for Settings and the "model missing" screen. */
+export function ModelDownload() {
+  const { s } = useModelStatus()
+  return s ? <ModelPanel s={s} /> : <Spinner />
+}
+
+/** With `onNext`, a model that is here shows Next. */
+export function ModelPanel({ s, onNext }: { s: ModelStatus; onNext?: () => void }) {
   if (s.installed)
     return (
       <div className="stack">
         <div className="banner good">The listening model is ready.</div>
-        {onReady && (
-          <button className="btn primary big" onClick={onReady} data-testid="model-next">
+        {s.checkFailed && (
+          <p className="muted-sm" data-testid="model-check-failed">
+            I couldn't work out the fastest settings for this computer, so the listening model uses its usual ones.
+            Everything still works.
+          </p>
+        )}
+        {onNext && (
+          <button className="btn primary big" onClick={onNext} data-testid="model-next">
             Next
           </button>
         )}
       </div>
     )
+  if (s.checking)
+    return (
+      <div className="stack" data-testid="model-checking">
+        <Progress pct={s.pct} label="Checking the listening model" />
+        <span className="muted">Checking the listening model on this computer</span>
+      </div>
+    )
+  const paused = !s.downloading && s.pct > 0 && s.pct < 100
   return (
     <div className="stack">
-      {s.downloading ? (
+      {s.downloading || paused ? (
         <>
-          <Progress pct={s.pct} />
+          <Progress pct={s.pct} paused={!s.downloading} label="Downloading the listening model" />
           <div className="row">
-            <span className="muted">Downloading… {s.pct}%</span>
+            <span className="muted" data-testid="model-progress">
+              {downloadLine(s, s.downloading ? 'Downloading' : 'Paused at')}
+            </span>
             <span className="spacer" />
-            <button className="btn small ghost" onClick={() => reel.model.cancel()}>
-              Pause
-            </button>
+            {s.downloading ? (
+              <button className="btn small ghost" onClick={() => reel.model.cancel()} data-testid="pause-model">
+                Pause
+              </button>
+            ) : (
+              <button className="btn small" onClick={() => void reel.model.download()} data-testid="download-model">
+                Keep downloading
+              </button>
+            )}
           </div>
         </>
       ) : (
-        <button className="btn primary big" onClick={() => reel.model.download().then(setS)} data-testid="download-model">
-          {s.pct > 0 && s.pct < 100 ? 'Keep downloading' : 'Download'}
+        <button className="btn primary big" onClick={() => void reel.model.download()} data-testid="download-model">
+          Download
         </button>
       )}
-      {s.error && <div className="banner error">{s.error}</div>}
+      {s.error && (
+        <div className="banner error" role="alert" data-testid="model-error">
+          {s.error}
+        </div>
+      )}
     </div>
   )
 }

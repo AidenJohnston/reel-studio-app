@@ -169,6 +169,8 @@ export function createJobFeedback(opts: {
   title: (slug: string) => Promise<string>
   send: (c: AppCommand) => void
   test: boolean
+  /** The Dock bounce stays either way. */
+  notificationsOn: () => boolean
 }) {
   // per running job: its bar (the job flow's `overall`, never backwards)
   const stages = new Map<string, { bar: number }>()
@@ -192,6 +194,7 @@ export function createJobFeedback(opts: {
   const notify = (title: string, body: string, slug: string | null): void => {
     const w = opts.window()
     if (w && !w.isDestroyed() && w.isFocused()) return
+    if (!opts.notificationsOn()) return
     feedbackLog.notifications.push({ title, body })
     if (opts.test || !Notification.isSupported()) return
     const n = new Notification({ title, body, silent: false })
