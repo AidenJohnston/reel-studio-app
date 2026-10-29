@@ -80,6 +80,10 @@ $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { throw "electron-builder failed ($code)" }
 
+# 4. nothing developer-only in the package (for example engine\.venv from the README setup)
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Packaging "check-win-unpacked.ps1") -Unpacked (Join-Path $AppDir "release\win-unpacked")
+if ($LASTEXITCODE -ne 0) { throw "check-win-unpacked.ps1 found developer-only files in the package" }
+
 Get-ChildItem (Join-Path $AppDir "release") -Filter "*.exe" | ForEach-Object {
   "{0}  {1:N1} MB" -f $_.FullName, ($_.Length / 1MB)
 }
