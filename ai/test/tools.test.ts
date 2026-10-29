@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { TOOLS, TOOL_NAMES, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent } from '../src';
-import { saveProject } from '../src/project';
+import { lowestCaptionPosition, saveProject } from '../src/project';
+import { planFastNote } from '../src/fastnote';
 import { isStrict, validate } from '../src/schema';
 import { FakeHost, makeProject, tinyPng } from './helpers';
+import { CAPTION_PRESETS, applyPreset, presetOf } from '../../app/src/shared/caption-presets';
+import { describeChange } from '../../app/src/shared/describe';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
@@ -218,6 +221,21 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
     expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
+    // an eval's first edit put them at 0.88, under Instagram's caption and username: done, with a warning to pass on
+    const low = await executeTool(ctx, 'set_caption_style', { size: 105, position: 0.88 });
+    expect(low.isError).toBe(false);
+    expect(JSON.parse(low.content).warning).toMatch(/partly hidden on Instagram\. At this size, 0\.75 or higher stays clear\. Tell the person/);
+    expect((await loadProject(ctx.projectDir)).captions.style).toMatchObject({ size: 105, position: 0.88 });
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { position: 0.75 })).content)).not.toHaveProperty('warning');
+    // hidden captions sit nowhere; turning them back on at 0.88 is what puts them under Instagram's caption
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { enabled: false, position: 0.88 })).content)).not.toHaveProperty('warning');
+    expect(JSON.parse((await executeTool(ctx, 'set_caption_style', { enabled: true })).content).warning).toMatch(/^At position 0\.88 and size 105, .*partly hidden on Instagram/);
+    await executeTool(ctx, 'set_caption_style', { highlight: '#34C759' });
+    expect(ctx.project!.captions.style.highlight).toBe('#34C759');
+    expect((await executeTool(ctx, 'set_caption_style', { highlight: '#34C75980' })).isError).toBe(true); // the engine draws no see-through highlight
+    expect((await executeTool(ctx, 'set_caption_style', { highlight: '' })).isError).toBe(true);
+    await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
+    expect(ctx.project!.captions.style).not.toHaveProperty('highlight');
     expect((await executeTool(ctx, 'add_caption_correction', { from: 'flower', to: 'flour' })).isError).toBe(false);
     // no note asking to remember: proposed once (deduped), nothing saved
     await executeTool(ctx, 'add_style_rule', { rule: 'keep music quieter under talking' });
@@ -239,6 +257,58 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'nope', {})).content).toMatch(/unknown tool/);
     // namespaced name is accepted
     expect((await executeTool(ctx, 'reel_editor.get_project', {})).isError).toBe(false);
+  });
+
+  it('set_caption_style forgets the look picked in Edit it myself once a note changes that look', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.captions.style = applyPreset('karaoke');
+    await saveProject(dir, p);
+    const before = JSON.parse(JSON.stringify(p));
+    // "make the highlighted word green" only fine-tunes Karaoke, as the Spoken word row does
+    await executeTool(ctx, 'set_caption_style', { highlight: '#30D158' });
+    expect(ctx.project!.captions.style.preset).toBe('karaoke');
+    // "turn off the word highlight": what is left is drawn exactly like Clean, so the picker shows Clean
+    await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
+    const style = ctx.project!.captions.style;
+    expect(style).not.toHaveProperty('preset');
+    expect(presetOf(style)).toBe('clean');
+    expect(describeChange(before, { captions: ctx.project!.captions } as any)).toBe('clean subtitles');
+  });
+
+  it('set_caption_style drops the Size the person picked once a note changes the size', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.captions.style = { ...applyPreset('clean'), size: 126, sizePicked: true }; // Big in the Size row
+    await saveProject(dir, p);
+    await executeTool(ctx, 'set_caption_style', { size: 126, color: '#FFD60A' });
+    expect(ctx.project!.captions.style.sizePicked).toBe(true);
+    await executeTool(ctx, 'set_caption_style', { size: 107 }); // "smaller captions"
+    expect(ctx.project!.captions.style).not.toHaveProperty('sizePicked');
+    expect(applyPreset('minimal', ctx.project!.captions.style).size).toBe(84);
+  });
+
+  it('the lowest caption position leaves room for a cue wrapped to two lines in every look', () => {
+    // engine/tests/test_ux_captions.py renders a wrapped cue at each of these and checks it clears the band
+    const fmt = { width: 1080, height: 1920, fps: 30 };
+    expect(Object.fromEntries(CAPTION_PRESETS.map((x) => [x.key, lowestCaptionPosition(fmt, x.style)])))
+      .toEqual({ clean: 0.75, 'bold-pop': 0.73, karaoke: 0.75, boxed: 0.75, minimal: 0.76 });
+  });
+
+  it('every look, picked on a new reel, starts clear of Instagram\'s caption, so turning captions on never warns', async () => {
+    const { ctx, dir } = await ctxFor();
+    const reel = await loadProject(dir);
+    for (const { key } of CAPTION_PRESETS) {
+      const p = await loadProject(dir);
+      p.captions = { ...p.captions, enabled: false, style: applyPreset(key, reel.captions.style) };
+      await saveProject(dir, p);
+      // position counts down from the top: at or above the lowest clear line is a fraction no larger than it
+      expect([key, p.captions.style.position]).toEqual([key, expect.any(Number)]);
+      expect([key, p.captions.style.position! <= lowestCaptionPosition(p.format, p.captions.style)]).toEqual([key, true]);
+      expect([key, planFastNote('turn on captions', p)!.summary]).toEqual([key, 'I put the captions back on.']);
+      const r = await executeTool(ctx, 'set_caption_style', { enabled: true });
+      expect([key, (r.content as any).warning]).toEqual([key, undefined]);
+    }
   });
 
   it('engine errors come back as readable tool errors', async () => {

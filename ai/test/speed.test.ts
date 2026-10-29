@@ -40,6 +40,41 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('quieter music', p)).toBeNull();
   });
 
+  it('moves captions down only as far as a two-line caption clears Instagram\'s caption and username', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const p = await loadProject(dir);
+    p.captions.style = { ...p.captions.style, position: 0.66 }; // Higher
+    await saveProject(dir, p);
+    const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
+    const r: any = await createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'captions lower', () => {});
+    expect(r.fast).toBe('captions-down');
+    expect((await loadProject(dir)).captions.style.position).toBe(0.72);
+    // the default 0.75 is already as low as a two-line caption at size 105 goes: the AI reads that note
+    p.captions.style = { ...p.captions.style, position: 0.75 };
+    expect(planFastNote('captions lower', p)).toBeNull();
+  });
+
+  it('makes captions bigger without moving them, and says when that reaches Instagram\'s caption', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
+    const r: any = await createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'bigger captions', () => {});
+    expect(r.fast).toBe('captions-bigger');
+    expect((await loadProject(dir)).captions.style).toMatchObject({ size: 121, position: 0.75 });
+    expect(r.summary).toMatch(/^I made the captions a bit bigger\. .*under Instagram's own caption and username/);
+    const p = await loadProject(dir);
+    p.captions.style = { ...p.captions.style, size: 105, position: 0.66 };
+    expect(planFastNote('bigger captions', p)!.summary).toBe('I made the captions a bit bigger.');
+  });
+
+  it('says when captions turned back on sit under Instagram\'s caption', async () => {
+    const { dir } = await setup();
+    const p = await loadProject(dir);
+    p.captions.enabled = false;
+    expect(planFastNote('turn on captions', p)!.summary).toBe('I put the captions back on.');
+    p.captions.style = { ...p.captions.style, position: 0.88 };
+    expect(planFastNote('turn on captions', p)!.summary).toMatch(/^I put the captions back on\. .*under Instagram's own caption and username/);
+  });
+
   it('applies a simple note with one direct change and one final render, no model', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([new Error('the model must not be called for a fast note')]);
