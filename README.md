@@ -48,10 +48,9 @@ this project. Credits: [docs/images/CREDITS.md](docs/images/CREDITS.md).
 
 Get the latest installer from the [Releases page](https://github.com/AidenJohnston/reel-studio-app/releases/latest).
 
-The installers are free and the code is MIT. If Reel Studio saves you time, buy it:
-[$99 once](https://buy.stripe.com/28E3co5Ak1Hf1Ii6Ktc7u00) (perpetual license plus all 1.x updates) or
-[$20 a month](https://buy.stripe.com/4gM00c9QA3PngDc8SBc7u01), cancel anytime. Buying funds development and gets
-you the signed builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
+The installers are free and the code is MIT. If Reel Studio saves you time, [buy it at getreelstudio.com](https://getreelstudio.com/):
+$99 once (perpetual license plus all 1.x updates) or $20 a month, cancel anytime. Buying funds development and
+gets you the signed builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
 
 | System | File | Guide |
 |---|---|---|
