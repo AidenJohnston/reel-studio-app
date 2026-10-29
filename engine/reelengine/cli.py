@@ -396,6 +396,9 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
+        if sys.platform == "win32":
+            from .contain import contain_children
+            contain_children()
         result = args.fn(args)
         proto.done(result)
         return 0

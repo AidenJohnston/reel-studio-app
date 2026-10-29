@@ -39,14 +39,28 @@ interface Running {
 export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: string) => void, progress?: ProgressDeps, toVideo?: ToVideo) {
   const jobs = new Map<string, Running>()
 
+  /** Projects an engine process may still be writing to after its job ended (ENGINE_STUCK): nothing
+   * runs on them and they stay closed until Reel Studio restarts and its leftovers are reaped. */
+  const stuck = new Map<string, { code: string; userMessage: string }>()
+  const BUSY = { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+
+  function refuseIfBusy(slug: string): void {
+    const s = stuck.get(slug)
+    if (s) throw s
+    if (forSlug(slug)) throw BUSY
+  }
+
   function forSlug(slug: string): Running | undefined {
     return [...jobs.values()].find((j) => j.slug === slug)
   }
 
+  /** Nothing else may write to the project: a job runs on it, or it is kept closed. */
+  function isClosed(slug: string): boolean {
+    return stuck.has(slug) || !!forSlug(slug)
+  }
+
   function start(slug: string | null, kind: JobKind, fn: JobFn, opts: { note?: string } = {}): string {
-    if (slug && forSlug(slug)) {
-      throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
-    }
+    if (slug) refuseIfBusy(slug)
     const id = randomUUID()
     const abort = new AbortController()
     const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, done: Promise.resolve() }
@@ -134,15 +148,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
-        if (slug) {
+        if (slug && err.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage })
+        // With a stuck engine nothing is cleaned up: it may still be writing.
+        if (slug && !stuck.has(slug)) {
           await cleanPartialVersions(projectDir(slug)).catch(() => [])
           await updateAppState(slug, (s) => {
             s.job = null
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
             if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
-          if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         }
+        if (slug && !cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
         clearInterval(tick)
@@ -152,8 +168,17 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     return id
   }
 
+  /** A project something of a previous run still writes to (orphans.ts reap): closed until it stops. */
+  function keepClosed(slug: string): void {
+    stuck.set(slug, { code: 'ENGINE_STILL_RUNNING', userMessage: "Part of Reel Studio's video engine from last time is still running on this video. Quit and reopen Reel Studio in a few minutes, or restart your computer, before you change it." })
+  }
+
   return {
     start,
+    /** Throws while a job runs on the project or it is kept closed: a manual edit must wait. */
+    refuseIfBusy,
+    isClosed,
+    keepClosed,
     forSlug,
     get: (id: string) => jobs.get(id),
     cancel(id: string): void {
