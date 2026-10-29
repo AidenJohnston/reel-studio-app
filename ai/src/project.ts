@@ -19,7 +19,7 @@ export interface Transcript { words: Word[]; language?: string; [k: string]: unk
 
 export interface CaptionStyle {
   preset?: string; font?: string; size?: number; maxWords?: number;
-  case?: 'upper' | 'lower' | 'sentence' | 'as-is' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
+  case?: 'upper' | 'lower' | 'as-is' | 'title' | string; color?: string; outline?: number; outlineColor?: string; shadow?: number; box?: boolean; position?: number;
   [k: string]: unknown;
 }
 export interface CaptionCorrection { from: string; to: string }
@@ -306,6 +306,54 @@ export function isKept(t: Transcript, keep: WordAnchor[], wordId: string): boole
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').trim();
+
+/** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
+export function captionCorrectionProblem(kept: readonly Word[], corrections: CaptionCorrection[], proposed: CaptionCorrection): string | null {
+  const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
+  const words: string[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const word = kept[i].w;
+    const next = kept[i + 1]?.w;
+    if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
+      words.push(word.trim() + next.trim());
+      i++;
+    } else words.push(word);
+  }
+  const tokens = (text: string) => text.trim().split(/\s+/).filter(Boolean);
+  const single = new Map<string, CaptionCorrection>();
+  const spans: { correction: CaptionCorrection; from: string[]; to: string[] }[] = [];
+  for (const correction of corrections) {
+    const from = tokens(correction.from).map(bare);
+    const to = tokens(correction.to);
+    if (!from.length) continue;
+    if (from.length === 1 && to.length === 1) single.set(from[0], correction);
+    else spans.push({ correction, from, to });
+  }
+  const remaining = words.map((w) => ({ w, fixed: false }));
+  const applied = new Set<string>();
+  for (let i = 0; i < remaining.length; i++) {
+    for (const span of spans) {
+      if (!span.from.every((word, k) => remaining[i + k] && bare(remaining[i + k].w) === word)) continue;
+      if (span.correction === proposed) return null;
+      applied.add(span.correction.from);
+      remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, fixed: true })));
+      i += Math.max(0, span.to.length - 1);
+      break;
+    }
+  }
+  for (const word of remaining) {
+    if (word.fixed) continue;
+    // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
+    const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word.w)?.[1].toLowerCase();
+    if (!core) continue;
+    const correction = single.get(core) ?? single.get(core.split(/['’]/)[0]);
+    if (correction === proposed) return null;
+    if (correction) applied.add(correction.from);
+  }
+  return applied.size
+    ? `correction "${proposed.from}" has no matches after existing corrections: ${[...applied].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
+    : `phrase not found in the part of the video that is kept: "${proposed.from}"; check whether it was cut and restore that section first`;
+}
 
 /** Finds a phrase in the transcript (kept words first). Returns the inclusive anchor or null. */
 export function findPhrase(t: Transcript, phrase: string, keep?: WordAnchor[]): WordAnchor | null {

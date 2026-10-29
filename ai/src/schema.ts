@@ -51,9 +51,11 @@ export function validate(schema: JSONSchema, value: unknown, at = 'args'): strin
   if (value === null) return out;
   if (schema.enum && !schema.enum.includes(value)) out.push(`${at}: must be one of ${schema.enum.filter((x: any) => x !== null).join(', ')}`);
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) out.push(`${at}: must be finite`);
     if (schema.minimum !== undefined && value < schema.minimum) out.push(`${at}: must be >= ${schema.minimum}`);
     if (schema.maximum !== undefined && value > schema.maximum) out.push(`${at}: must be <= ${schema.maximum}`);
   }
+  if (typeof value === 'string' && schema.pattern && !new RegExp(schema.pattern).test(value)) out.push(`${at}: must match ${schema.pattern}`);
   if (typeof value === 'string' && schema.minLength !== undefined && value.length < schema.minLength) out.push(`${at}: too short`);
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) out.push(`${at}: needs at least ${schema.minItems} items`);
