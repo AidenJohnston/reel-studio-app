@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall, OWNER_LOCK } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -84,6 +84,8 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** runs after a render wrote its files, before it reports (Stop or a crash mid-render) */
+  afterRenderFiles?: (r: { draft: boolean; dir: string }) => Promise<void> | void;
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -94,6 +96,10 @@ export class FakeHost implements EngineHost {
   async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void): Promise<any> {
     this.calls.push({ command, args });
     const dir = args[args.indexOf('--project') + 1];
+    // like engine/reelengine/owner.py: run by hand (no --owner) while Reel Studio has the project open
+    if (!args.includes('--owner') && fs.existsSync(path.join(dir, OWNER_LOCK))) {
+      throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
+    }
     const pj = path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
@@ -121,6 +127,7 @@ export class FakeHost implements EngineHost {
         const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
         await fsp.mkdir(vd, { recursive: true });
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
+        await this.afterRenderFiles?.({ draft, dir: vd });
         return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
       }
       case 'frames': {

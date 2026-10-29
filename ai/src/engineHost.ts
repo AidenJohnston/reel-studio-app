@@ -20,13 +20,33 @@ export function defaultRoot(): string {
 }
 
 /** Kill the engine AND its ffmpeg children. `child.kill()` on Windows ends python only; the
- * grandchildren keep encoding. */
+ * grandchildren keep encoding. Elsewhere the engine leads its own process group. */
 export function killTree(pid: number | undefined, fallback: () => void): void {
   if (process.platform === 'win32' && pid) {
     const r = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     if (r.status === 0) return;
   }
+  if (process.platform !== 'win32' && pid) {
+    try { process.kill(-pid, 'SIGTERM'); return; } catch { /* no group: the fallback */ }
+  }
   fallback();
+}
+
+const groupAlive = (pid: number): boolean => {
+  try { process.kill(-pid, 0); return true; } catch (e: any) { return e?.code === 'EPERM'; }
+};
+
+/** After the engine exits (macOS/Linux): ends whatever is left in its process group, an ffmpeg a
+ * crashed engine left behind, and reports whether all of it is gone. On Windows the engine's Job
+ * Object ends its children with it (engine/reelengine/contain.py). */
+async function drained(pid: number | undefined): Promise<boolean> {
+  if (!pid || process.platform === 'win32') return true;
+  for (const [signal, ms] of [['SIGTERM', 1500], ['SIGKILL', 5000]] as const) {
+    if (!groupAlive(pid)) return true;
+    try { process.kill(-pid, signal); } catch { /* gone meanwhile */ }
+    for (const end = Date.now() + ms; Date.now() < end && groupAlive(pid);) await new Promise((r) => setTimeout(r, 50));
+  }
+  return !groupAlive(pid);
 }
 
 export class PythonEngineHost implements EngineHost {
@@ -44,7 +64,7 @@ export class PythonEngineHost implements EngineHost {
       if (signal?.aborted) return reject({ code: 'cancelled', userMessage: 'Stopped.' });
       const py = this.o.python ?? process.env.REELENGINE_PYTHON ?? 'python';
       const child = spawn(py, ['-m', 'reelengine', command, ...args], {
-        cwd: this.o.cwd, windowsHide: true,
+        cwd: this.o.cwd, windowsHide: true, detached: process.platform !== 'win32',
         // no ANTHROPIC_* in the engine's environment
         env: childEnv(process.env, { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', REELENGINE_ROOT: this.reelStudioRoot(), ...(this.o.env ?? {}) }),
       });
@@ -69,9 +89,12 @@ export class PythonEngineHost implements EngineHost {
       const abort = () => killTree(child.pid, () => child.kill());
       signal?.addEventListener('abort', abort, { once: true });
       child.on('error', (e) => reject({ code: 'ENGINE_MISSING', userMessage: 'The video engine could not start.', message: e.message }));
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         signal?.removeEventListener('abort', abort);
         if (buf) onLine(buf);
+        if (!(await drained(child.pid))) {
+          return reject({ code: 'ENGINE_STUCK', userMessage: 'Part of the video engine would not stop. Check for a leftover ffmpeg before you edit this video again.', message: `process group ${child.pid} is still alive after SIGKILL` });
+        }
         if (signal?.aborted) return reject({ code: 'cancelled', userMessage: 'Stopped.' });
         if (error) return reject(error);
         if (code === 0 && done !== undefined) return resolve(done);
