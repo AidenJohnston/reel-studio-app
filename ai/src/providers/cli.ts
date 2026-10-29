@@ -249,6 +249,8 @@ export class ClaudeCliProvider implements ModelProvider {
   readonly supportsImages = true;
   readonly model: string;
   private live: LiveSession | null = null;
+  /** settles once every session process this provider ended has exited */
+  private ending: Promise<void> = Promise.resolve();
   constructor(private readonly o: CliOptions & { session?: boolean; effort?: string } = {}) { this.model = o.model ?? 'sonnet'; }
 
   private args(): string[] {
@@ -263,15 +265,20 @@ export class ClaudeCliProvider implements ModelProvider {
     ];
   }
 
-  /** Ends the live session (the agent loop calls this when a run ends). */
-  dispose(): void {
+  /** Ends the live session (the agent loop calls this when a run ends) and settles once its process,
+   * and any session ended before it, has exited: Stop waits for every process a note started. */
+  dispose(): Promise<void> {
     const s = this.live; this.live = null;
-    if (!s) return;
-    if (s.idle) clearTimeout(s.idle);
-    s.closed = true;
-    try { s.child.stdin.end(); } catch { /* gone */ }
-    const t = setTimeout(() => { try { s.child.kill(); } catch { /* gone */ } }, 3000);
-    t.unref?.();
+    if (s) {
+      if (s.idle) clearTimeout(s.idle);
+      s.closed = true;
+      try { s.child.stdin.end(); } catch { /* gone */ }
+      const t = setTimeout(() => { try { s.child.kill(); } catch { /* gone */ } }, 3000);
+      const exited = s.child.exitCode !== null || s.child.signalCode !== null ? Promise.resolve()
+        : new Promise<void>((resolve) => s.child.once('close', () => resolve()));
+      this.ending = Promise.all([this.ending, exited.finally(() => clearTimeout(t))]).then(() => undefined);
+    }
+    return this.ending;
   }
 
   private startSession(key: string): LiveSession {
@@ -308,7 +315,7 @@ export class ClaudeCliProvider implements ModelProvider {
     let rendered: { text: string; images: { label: string; img: ImagePart }[] };
     if (continues) { s = cur!; rendered = renderDelta(req, s.next); }
     else {
-      this.dispose();
+      void this.dispose();
       s = this.live = this.startSession(key);
       rendered = renderConversation(req);
     }
@@ -316,8 +323,8 @@ export class ClaudeCliProvider implements ModelProvider {
     const result = await new Promise<any>((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); req.signal?.removeEventListener('abort', abort); fn(); };
-      const timer = setTimeout(() => finish(() => { s.waiter = null; this.dispose(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
-      const abort = () => finish(() => { s.waiter = null; this.dispose(); reject(new AIError('cancelled', 'Stopped.')); });
+      const timer = setTimeout(() => finish(() => { s.waiter = null; void this.dispose(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
+      const abort = () => finish(() => { s.waiter = null; void this.dispose(); reject(new AIError('cancelled', 'Stopped.')); });
       if (req.signal?.aborted) return abort();
       req.signal?.addEventListener('abort', abort, { once: true });
       s.waiter = { resolve: (r) => finish(() => resolve(r)), reject: (e) => finish(() => reject(e)) };
@@ -327,7 +334,7 @@ export class ClaudeCliProvider implements ModelProvider {
     });
     s.next = req.messages.length + 1;
     // an idle session must not outlive its run for long (a crashed caller never calls dispose)
-    s.idle = setTimeout(() => { if (this.live === s) this.dispose(); }, 120_000);
+    s.idle = setTimeout(() => { if (this.live === s) void this.dispose(); }, 120_000);
     s.idle.unref?.();
     return result;
   }

@@ -262,7 +262,7 @@ def _mix(tmp_path, media, level, automation=()):
                                "automation": list(automation), "fadeOut": 1.0})
     voice = fx.cut_voice(ctx, tmp_path / "voice.wav")
     out = music.build_audio(ctx, voice)
-    return ctx, out, json.loads((ctx.work / "audio" / "mix.json").read_text())
+    return ctx, out, json.loads(Path(out).with_suffix(".json").read_text())
 
 
 @pytest.mark.parametrize("level,gap", [("under-voice", 19.0), ("quiet", 24.0), ("loud-intro", 19.0)])
@@ -345,7 +345,7 @@ def test_build_audio_real_take_and_song(tmp_path):
                                "automation": [], "fadeOut": 1.5})
     out = music.build_audio(ctx, fx.cut_voice(ctx, pdir / "voice.wav"))
     m = music.ffmpeg_measure(out)
-    rep = json.loads((ctx.work / "audio" / "mix.json").read_text())
+    rep = json.loads(Path(out).with_suffix(".json").read_text())
     assert m["lufs"] == pytest.approx(-14.0, abs=1.0)
     assert m["truePeak"] <= -1.0
     assert rep["music"]["measuredGapDb"] >= 16.0                                   # voice clearly on top

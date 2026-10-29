@@ -52,6 +52,12 @@ export interface NoteEntry {
   version: number; text: string; applied: string[]; at: string;
   /** files the user attached to this note (`work/assets/attach-*`), 0.1.2 */
   attachments?: string[];
+  /** the app's job id for this note, and what the app still has to tell the user once it is saved:
+   * after a crash right after saving, the app finds the note here and finishes that (app store.ts) */
+  id?: string;
+  reply?: string;
+  styleRulesAdded?: string[];
+  styleSuggestions?: string[];
 }
 
 export interface Project {
@@ -156,8 +162,9 @@ export function validateProject(p: unknown, transcript?: Transcript): string[] {
 
 // ---------------------------------------------------------------- files
 
-/** Atomic write: temp file in the same folder, fsync, rename over the target (retries on Windows locks). */
-export async function writeFileAtomic(file: string, data: string | Buffer, mode?: number): Promise<void> {
+/** Atomic write: temp file in the same folder, fsync, rename over the target (retries on Windows locks).
+ * `beforeRename` runs right before every rename attempt; throwing from it leaves the target as it was. */
+export async function writeFileAtomic(file: string, data: string | Buffer, mode?: number, beforeRename?: () => Promise<void>): Promise<void> {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const fh = await fsp.open(tmp, 'w', mode);
@@ -168,14 +175,17 @@ export async function writeFileAtomic(file: string, data: string | Buffer, mode?
     await fh.close();
   }
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // The same wait as the app's own writes (app store.ts renameWithRetry, about 8 s): on Windows a reader
+  // such as antivirus can hold project.json that long, and a note that gives up here loses its whole edit.
+  for (let attempt = 0; attempt <= 40; attempt++) {
     try {
+      await beforeRename?.();
       await fsp.rename(tmp, file);
       return;
     } catch (err: any) {
       lastErr = err;
       if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) break;
-      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, Math.min(250, 10 + attempt * 10)));
     }
   }
   await fsp.rm(tmp, { force: true });
@@ -187,8 +197,8 @@ export async function readJson<T = any>(file: string): Promise<T> {
   return JSON.parse(text.replace(/^﻿/, '')) as T;
 }
 
-export async function loadProject(projectDir: string): Promise<Project> {
-  const file = path.join(projectDir, PROJECT_FILE);
+/** `file`: another document of this project (a note's private copy); default project.json. */
+export async function loadProject(projectDir: string, file = path.join(projectDir, PROJECT_FILE)): Promise<Project> {
   let raw: any;
   try { raw = await readJson(file); } catch (err: any) {
     throw new ProjectError(`Could not read ${file}: ${err?.message ?? err}`);
@@ -199,11 +209,15 @@ export async function loadProject(projectDir: string): Promise<Project> {
   return p;
 }
 
-export async function saveProject(projectDir: string, p: Project): Promise<void> {
+export async function saveProject(projectDir: string, p: Project, file = path.join(projectDir, PROJECT_FILE)): Promise<void> {
+  await writeFileAtomic(file, projectBytes(p));
+}
+
+export function projectBytes(p: Project): string {
   const problems = validateProject(p);
   if (problems.length) throw new ProjectError(`Refusing to save invalid project: ${problems.join('; ')}`, problems);
   p.updatedAt = new Date().toISOString();
-  await writeFileAtomic(path.join(projectDir, PROJECT_FILE), JSON.stringify(p, null, 2) + '\n');
+  return JSON.stringify(p, null, 2) + '\n';
 }
 
 /** Always <project>/work/transcript.json: `transcript.file` is never joined. */
@@ -381,10 +395,12 @@ export function versionDir(projectDir: string, n: number): string {
   return path.join(projectDir, 'versions', `v${n}`);
 }
 
+/** Saved versions: a `vN` folder counts only up to project.json's `version` (docs/versions.md). */
 export async function listVersions(projectDir: string): Promise<number[]> {
   try {
+    const { version } = await loadProject(projectDir);
     const names = await fsp.readdir(path.join(projectDir, 'versions'));
-    return names.map((n) => /^v(\d+)$/.exec(n)).filter(Boolean).map((m) => Number(m![1])).sort((a, b) => a - b);
+    return names.map((n) => /^v(\d+)$/.exec(n)).filter(Boolean).map((m) => Number(m![1])).filter((n) => n <= version).sort((a, b) => a - b);
   } catch { return []; }
 }
 
@@ -400,9 +416,10 @@ export async function snapshotVersion(projectDir: string, p: Project, n: number,
 
 /** Restores versions/vN/project.json as the current project (keeps the newer version counter). */
 export async function restoreVersion(projectDir: string, n: number): Promise<Project> {
+  const cur = await loadProject(projectDir);
+  if (n > cur.version) throw new ProjectError(`version ${n} was never saved (the project is at ${cur.version})`);
   const snap = withDefaults(await readJson(path.join(versionDir(projectDir, n), PROJECT_FILE)));
-  const cur = await loadProject(projectDir).catch(() => null);
-  if (cur) snap.version = Math.max(cur.version, snap.version);
+  snap.version = Math.max(cur.version, snap.version);
   await saveProject(projectDir, snap);
   return snap;
 }

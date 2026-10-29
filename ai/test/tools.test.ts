@@ -210,7 +210,7 @@ describe('tool implementations', () => {
     await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
     const rd = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
     expect(rd.version).toBe(1);
-    expect(events).toContainEqual({ type: 'render', version: 1, draft: true });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'render', version: 1, draft: true }));
     const f = await executeTool(ctx, 'look_at_frames', { times: [1.0], words: ['w29'] });
     expect(f.images).toHaveLength(2);
     expect(f.images![0].mime).toBe('image/png');

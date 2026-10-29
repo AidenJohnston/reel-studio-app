@@ -16,9 +16,11 @@ import { ReplayProvider } from './providers/replay';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
+import { refuseIfOpen } from './owner';
 
 export * from './types';
 export * from './project';
+export { refuseIfOpen, OWNER_LOCK } from './owner';
 export { TOOLS, TOOL_NAMES, toolSchemas, executeTool, newToolState } from './tools';
 export type { ToolContext, ToolDef } from './tools';
 export { runAgent } from './agent';
@@ -117,13 +119,19 @@ export function createAI(opts: CreateAIOptions) {
   const prompts = new Prompts(opts.promptsDir ?? defaultPromptsDir());
   const style = new StyleStore(() => opts.host.reelStudioRoot());
   const siwc = new SiwcAuth({ settingsDir: opts.settingsDir, secretStore: opts.secretStore, fetch: opts.fetch, issuer: opts.siwcIssuer, allowPlaintextSecrets: opts.allowPlaintextSecrets });
-  // One edit at a time per project (the app may double-click; the CLI may race).
+  // One edit at a time per project (the app may double-click; the CLI may race). `owner`: the token of
+  // the app job that has the project (owner.ts); without one (the dev CLI) the edit also refuses while
+  // the app has the project open.
   const locks = new Map<string, Promise<unknown>>();
-  function exclusive<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  function exclusive<T>(dir: string, owner: string | undefined, fn: () => Promise<T>): Promise<T> {
     const key = path.resolve(dir).toLowerCase();
     const prev = locks.get(key) ?? Promise.resolve();
-    // in-process queue, plus a lock FILE so the dev CLI and the app cannot edit one project at once
-    const run = prev.catch(() => undefined).then(() => withEditLock(dir, fn));
+    // in-process queue, plus a lock FILE every edit holds for its whole run, so two edits in different
+    // processes (the app and the dev CLI, or two dev CLIs) never run on one project at once
+    const run = prev.catch(() => undefined).then(() => {
+      if (!owner) refuseIfOpen(dir);
+      return withEditLock(dir, fn);
+    });
     // The lock's copy of the run must never reject on its own: the caller gets `run` and handles
     // its error; an unobserved rejected `finally` copy is an unhandled rejection in Node.
     const tail: Promise<unknown> = run.finally(() => { if (locks.get(key) === tail) locks.delete(key); })
@@ -131,7 +139,11 @@ export function createAI(opts: CreateAIOptions) {
     locks.set(key, tail);
     return run;
   }
-  const deps = (): editor.EditorDeps => ({ host: opts.host, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (host: EngineHost, owner?: string): editor.EditorDeps => ({ host, owner, prompts, style, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  function edit<T>(owner: string | undefined, run: (d: editor.EditorDeps) => Promise<T>): Promise<T> {
+    const engine = editHost(opts.host, owner);
+    return engine.settle(run(deps(engine.host, owner)));
+  }
 
   async function settings(): Promise<AISettings> {
     try { return JSON.parse(await fsp.readFile(settingsFile, 'utf8')); } catch { return {}; }
@@ -335,14 +347,14 @@ export function createAI(opts: CreateAIOptions) {
       const r = await p.complete({ system: 'Reply with exactly the word OK.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Say OK.' }] }], tools: [], jsonOnly: true, signal });
       return { provider: p.id, model: p.model, reply: r.text.trim() };
     },
-    async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult & { notice?: any }> {
-      return exclusive(projectDir, async () => editor.firstEdit(deps(), await modelProvider(), projectDir, onEvent, signal));
+    async firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<AgentResult & { notice?: any }> {
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => editor.firstEdit(d, await modelProvider(), projectDir, onEvent, signal)));
     },
-    async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: editor.ApplyNoteOptions): Promise<AgentResult> {
-      return exclusive(projectDir, async () => editor.applyNote(deps(), await modelProvider(), projectDir, note, onEvent, signal, opts));
+    async applyNote(projectDir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: editor.ApplyNoteOptions & { owner?: string } = {}): Promise<AgentResult> {
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => editor.applyNote(d, await modelProvider(), projectDir, note, onEvent, signal, opts)));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
-      return editor.writeScript(deps(), await modelProvider(), idea, onEvent, signal);
+      return editor.writeScript(deps(opts.host), await modelProvider(), idea, onEvent, signal);
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },
@@ -352,6 +364,36 @@ export function createAI(opts: CreateAIOptions) {
 }
 
 export type ReelStudioAI = ReturnType<typeof createAI>;
+
+/** The engine as one edit sees it. An app job's `owner` token goes on every command
+ * (engine/reelengine/owner.py). Once part of an engine would not stop (ENGINE_STUCK) no further
+ * command runs, and `settle` fails the edit with that error however it ended: a first look or a tool
+ * result would otherwise swallow it, and the app job would let go of the project while that part may
+ * still be writing to it. */
+function editHost(host: EngineHost, owner: string | undefined) {
+  let stuck: unknown = null;
+  return {
+    host: {
+      async runEngine(command, args, onProgress, signal) {
+        if (stuck) throw stuck;
+        try {
+          return await host.runEngine(command, owner ? [...args, '--owner', owner] : args, onProgress, signal);
+        } catch (e: any) {
+          if (e?.code === 'ENGINE_STUCK') stuck ??= e;
+          throw e;
+        }
+      },
+      renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
+      reelStudioRoot: () => host.reelStudioRoot(),
+      ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+    } satisfies EngineHost,
+    async settle<T>(edit: Promise<T>): Promise<T> {
+      const r = await edit.catch((e) => { throw stuck ?? e; });
+      if (stuck) throw stuck;
+      return r;
+    },
+  };
+}
 
 const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
 
