@@ -138,15 +138,15 @@ def test_mark_failed_stops_the_encoder_being_chosen(fake, monkeypatch):
 @pytest.mark.parametrize("enc,pix", [("h264_nvenc", "yuv420p"), ("h264_amf", "yuv420p"),
                                      ("h264_qsv", "nv12"), ("h264_videotoolbox", "yuv420p")])
 def test_probe_and_render_use_the_same_options(fake, enc, pix):
-    args = render.encoder_args(enc, True)
+    args = render.encoder_args(enc, True, 30)
     assert args[:2] == ["-c:v", enc]
     assert args[args.index("-pix_fmt") + 1] == pix
     assert all(o in args for o in tools.HW_ENCODER_OPTS[enc])
 
 
 def test_software_args_unchanged():
-    assert render.encoder_args("libx264", True)[:6] == ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24"]
+    assert render.encoder_args("libx264", True, 30)[:6] == ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24"]
     # finals: FINAL_PRESET (veryfast since stream wire, status/wire.md) at CRF 18
-    final = render.encoder_args("libx264", False)
+    final = render.encoder_args("libx264", False, 30)
     assert final[:6] == ["-c:v", "libx264", "-preset", render.FINAL_PRESET, "-crf", "18"]
     assert render.FINAL_PRESET == "veryfast"
