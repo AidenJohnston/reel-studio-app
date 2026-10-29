@@ -1,8 +1,9 @@
 // The reel-media: protocol. Streams files with HTTP range support so <video> can seek.
 import { protocol } from 'electron'
 import { createReadStream, promises as fs } from 'node:fs'
-import { extname, resolve, sep } from 'node:path'
+import { extname, resolve } from 'node:path'
 import { Readable } from 'node:stream'
+import { isInsideFolder } from './inside-folder'
 import { MEDIA_SCHEME, pathFromMediaUrl } from './media-url'
 
 const TYPES: Record<string, string> = {
@@ -35,10 +36,7 @@ export function handleMediaProtocol(allowedRoots: () => string[]): void {
     } catch {
       return new Response('bad url', { status: 400 })
     }
-    const ok = allowedRoots().some((r) => {
-      const root = resolve(r)
-      return file === root || file.startsWith(root.endsWith(sep) ? root : root + sep)
-    })
+    const ok = allowedRoots().some((r) => isInsideFolder(file, r))
     if (!ok) return new Response('forbidden', { status: 403 })
     let size: number
     try {
