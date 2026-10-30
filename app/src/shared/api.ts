@@ -460,6 +460,8 @@ export interface ReelApi {
   style: {
     rules(): Promise<StyleRule[]>
     remove(id: string): Promise<void>
+    /** My style started over because its file was damaged, and the damaged copy is still next to it. */
+    damaged(): Promise<boolean>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
   }

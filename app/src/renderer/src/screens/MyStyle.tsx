@@ -6,7 +6,8 @@ import { useNotify } from '../App'
 export function MyStyle() {
   const notify = useNotify()
   const [rules, setRules] = useState<StyleRule[] | null>(null)
-  const load = () => reel.style.rules().then(setRules)
+  const [damaged, setDamaged] = useState(false)
+  const load = () => Promise.all([reel.style.rules().then(setRules), reel.style.damaged().then(setDamaged)])
   useEffect(() => {
     void load()
   }, [])
@@ -18,6 +19,11 @@ export function MyStyle() {
           <p className="muted">Things you told me to always do. I use them on every video.</p>
         </div>
       </div>
+      {damaged && (
+        <div className="banner" role="status" style={{ marginBottom: 16 }} data-testid="style-damaged">
+          Your saved style file was damaged, so I started a new one. The old one is kept next to it.
+        </div>
+      )}
       {rules && rules.length === 0 && (
         <div className="panel">
           <p>Nothing here yet.</p>
