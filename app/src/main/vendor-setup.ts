@@ -135,6 +135,8 @@ export async function runInstall(d: InstallDeps): Promise<void> {
   await mkdir(d.dir, { recursive: true })
   await writeFile(plan.fileName, bytes) // the exact bytes (no re-encoding: PowerShell reads them as published)
   if (d.platform !== 'win32') await chmod(plan.fileName, 0o755)
+  // Cancel pressed while the script was being saved: the abort listener below isn't attached yet, so stop here.
+  if (d.signal?.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError' })
   d.log?.(`[vendor] installing ${d.vendor}: ${plan.cmd} ${plan.args.join(' ')}`)
 
   const spawn = d.spawn ?? nodeSpawn
