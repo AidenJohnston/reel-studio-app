@@ -1,7 +1,7 @@
 {
   "name": "@reelstudio/app",
   "productName": "Reel Studio",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "license": "UNLICENSED",
   "description": "Turn a raw talking-head video into a finished Reel.",
