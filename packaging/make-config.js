@@ -7,6 +7,13 @@
 // on Windows too) and writes packaging/.build/electron-builder.resolved.yml. The build scripts run it, then pass
 // the printed path to `electron-builder --config`.
 //
+// Windows code signing is optional. With RS_WIN_SIGN=1 the script also puts `azureSignOptions` (Azure Artifact
+// Signing, formerly Trusted Signing) into the `win:` mapping, from RS_AZURE_ENDPOINT, RS_AZURE_ACCOUNT (code signing
+// account name), RS_AZURE_PROFILE (certificate profile name) and RS_AZURE_PUBLISHER (the certificate's subject), and
+// refuses if one of them is missing. Without RS_WIN_SIGN the build is unsigned, exactly as before. The credentials
+// (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET) never reach this file: the TrustedSigning module reads them
+// from the environment itself. See packaging/README.md, "Signing the Windows build".
+//
 //   node packaging/make-config.js            -> prints the path of the resolved file
 const fs = require('fs')
 const path = require('path')
@@ -22,6 +29,30 @@ let out = src.replace(/\$\{env\.(RS_[A-Z_]+)\}/g, (_m, name) => {
 if (missing.length) {
   console.error('make-config: these environment variables must be set: ' + [...new Set(missing)].join(', '))
   process.exit(1)
+}
+if (process.env.RS_WIN_SIGN === '1') {
+  // Option names: app-builder-lib 26.15.3, out/options/winOptions.d.ts (WindowsAzureSigningConfiguration).
+  const fields = {
+    RS_AZURE_ENDPOINT: 'endpoint',
+    RS_AZURE_ACCOUNT: 'codeSigningAccountName',
+    RS_AZURE_PROFILE: 'certificateProfileName',
+    RS_AZURE_PUBLISHER: 'publisherName'
+  }
+  const absent = Object.keys(fields).filter((name) => !process.env[name])
+  if (absent.length) {
+    console.error('make-config: RS_WIN_SIGN=1 needs these environment variables: ' + absent.join(', '))
+    process.exit(1)
+  }
+  // The template already has a top-level `win:` mapping and YAML forbids a second one, so the block goes inside it.
+  const marker = /^win:[ \t]*\r?\n/m
+  if (!marker.test(out)) {
+    console.error('make-config: electron-builder.yml has no top-level `win:` mapping to put azureSignOptions into')
+    process.exit(1)
+  }
+  const lines = Object.entries(fields).map(([name, key]) => `    ${key}: ${JSON.stringify(process.env[name])}`)
+  out = out.replace(marker, (m) =>
+    m + '  # Azure Artifact Signing (RS_WIN_SIGN=1): the app .exe, the uninstaller and the installer\n' +
+    '  azureSignOptions:\n' + lines.join('\n') + '\n')
 }
 const afterPack = path.join(here, 'after-pack.js').replace(/[\\]/g, '/')
 out += `\nafterPack: ${afterPack}\n`
