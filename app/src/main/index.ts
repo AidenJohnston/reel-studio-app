@@ -50,7 +50,9 @@ import { createVendorConnect, type CliStatus, type VendorConnect } from './vendo
 import { runInstall, runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { withUserPathKept } from './user-path'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import type { AppInfo, CoverCandidate, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
+import { COVER_SUGGESTIONS } from '../shared/cover'
+import { createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
@@ -169,6 +171,7 @@ const jobs = createJobManager(
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
+const coverScans = createCoverScans(runEngine)
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
 const updates = createUpdateService({
   active: !TEST,
@@ -579,7 +582,15 @@ function registerIpc(): void {
     return { jobId }
   })
   handle('projects:export', (_e, slug: string, n: number) => exportVersion(slug, n))
+  handle('projects:coverCandidates', async (_e, slug: string, moments: number[], source: string): Promise<CoverCandidate[]> => {
+    const at = moments.filter((t) => Number.isFinite(t) && t >= 0).slice(0, COVER_SUGGESTIONS)
+    if (!at.length) return []
+    const r = await coverScans.scan(slug, ['--project', projectDir(slug), '--at', at.join(','), '--source', source])
+    return parseCoverCandidates(r, source, projectDir(slug))
+  })
+  handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
   handle('projects:remove', async (_e, slug: string) => {
+    await coverScans.stop(slug)
     const running = jobs.forSlug(slug)
     if (running) {
       jobs.cancel(running.id)

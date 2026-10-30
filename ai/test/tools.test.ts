@@ -38,6 +38,30 @@ describe('tool schemas', () => {
 });
 
 describe('tool implementations', () => {
+  it('text-only set_cover keeps the manual frame within the same source and 0.01 seconds', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.cover = { atSourceTime: 3.067, source: 's1', text: null, manual: true };
+    await saveProject(dir, p);
+
+    for (const atSourceTime of [3.067, 3.068]) {
+      expect((await executeTool(ctx, 'set_cover', { atSourceTime, source: null, text: 'Day 3' })).isError).toBe(false);
+      expect((await loadProject(dir)).cover).toMatchObject({ atSourceTime, source: 's1', text: 'Day 3', manual: true });
+    }
+  });
+
+  it('set_cover clears manual when it picks a new time or source', async () => {
+    const { ctx, dir } = await ctxFor();
+    for (const pick of [{ atSourceTime: 4, source: 's1' }, { atSourceTime: 3.067, source: 's2' }]) {
+      const p = await loadProject(dir);
+      p.sources = [p.sources[0], { ...p.sources[0], id: 's2' }];
+      p.cover = { atSourceTime: 3.067, source: 's1', text: null, manual: true };
+      await saveProject(dir, p);
+      expect((await executeTool(ctx, 'set_cover', { ...pick, text: 'Day 3' })).isError).toBe(false);
+      expect((await loadProject(dir)).cover).toMatchObject({ ...pick, manual: null });
+    }
+  });
+
   it('set_cut validates ids and reports duration', async () => {
     const { ctx, dir, events } = await ctxFor();
     const bad = await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w999' }] });

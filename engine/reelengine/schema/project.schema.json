@@ -158,7 +158,8 @@
         "atSourceTime": { "type": ["number", "null"], "minimum": 0 },
         "source": { "type": ["string", "null"] },
         "text": { "type": ["string", "null"] },
-        "exact": { "type": ["boolean", "null"] }
+        "exact": { "type": ["boolean", "null"] },
+        "manual": { "type": ["boolean", "null"] }
       }
     },
     "post": {

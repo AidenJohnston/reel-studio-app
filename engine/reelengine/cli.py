@@ -87,7 +87,7 @@ def cmd_cover_candidates(args):
     if not moments:
         raise EngineError("BAD_ARGS", "cover-candidates needs --at", "Reel Studio didn't say which moments to look at.")
     return render.cover_candidates(_project(args), moments, source=args.source,
-                                   root=Path(args.root) if args.root else None)
+                                   root=Path(args.root) if args.root else None, picker=args.picker)
 
 
 def cmd_verify(args):
@@ -336,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
+    sp.add_argument("--picker", action="store_true", help="stills for the app's cover picker (work/cover-picker)")
     sp.add_argument("--root")
     sp = add("cover", cmd_cover, "render cover.png only")
     sp.add_argument("--root")
