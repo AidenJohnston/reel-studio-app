@@ -120,9 +120,13 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await expect(page.getByTestId('versions').getByText('Version 2')).toBeVisible({ timeout: 10 * 60_000 })
   const style = projectJson().captions.style
   expect([style.size, style.position, style.color, !!style.box]).toEqual([126, 0.66, '#FFD60A', false])
-  // The chat and the version button say what changed (critique 1.8).
+  // The chat and the version menu say what changed (critique 1.8).
   await expect(page.getByTestId('bubble-editor').last()).toHaveText('Version 2: bigger yellow subtitles, moved up.')
-  await expect(page.getByTestId('versions').getByText('Version 2')).toHaveAttribute('title', 'Version 2: bigger yellow subtitles, moved up.')
+  await page.getByTestId('version-switch').click()
+  await expect(page.getByTestId('version-item-2')).toContainText('Bigger yellow subtitles, moved up')
+  await expect(page.getByTestId('version-item-1')).toContainText('First edit')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('version-menu')).toHaveCount(0)
   await expect(page.getByTestId('export')).toHaveText('Export Version 2')
 
   // ---- 5. "Add a song": one click, the picker, a new version with the song ----

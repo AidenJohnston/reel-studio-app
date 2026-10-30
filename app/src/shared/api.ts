@@ -42,6 +42,18 @@ export interface ChecklistItem {
   detail?: string
 }
 
+/**
+ * What made a version, recorded in app.json once, when its final render first succeeded
+ * (main/jobs.ts). A rerender that reuses the version records nothing.
+ */
+export interface VersionMade {
+  version: number
+  by: 'note' | 'hand'
+  /** The note as the person wrote it (may be empty when only files were attached), or the change made by hand. */
+  summary: string
+  at: string
+}
+
 export interface ChatMessage {
   id: string
   from: 'you' | 'editor'
@@ -90,6 +102,7 @@ export interface ProjectDetail extends ProjectSummary {
   words: Word[]
   keptIds: string[]
   checklist: ChecklistItem[]
+  versionsMade: VersionMade[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
   job: { id: string; kind: JobKind; message: string; pct: number; overall: number; secondsLeft: number | null; overdue: boolean; thinking: boolean } | null
