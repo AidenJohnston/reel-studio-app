@@ -10,6 +10,8 @@
 # Options:
 #   --identity "Developer ID Application: Name (TEAMID)"   default: the first Developer ID Application in the keychain
 #   --profile NAME      notarytool keychain profile (default reelstudio-notary; created by `xcrun notarytool store-credentials`)
+#   --keychain PATH     use a dedicated signing keychain (the Developer ID identity + the notary profile) instead of
+#                       the login keychain. The caller unlocks it first; this script only checks that it is unlocked.
 #   --app PATH          the unsigned .app to sign (default: <app-dir>/release/mac-arm64/*.app from build-mac.sh)
 #   --app-dir DIR       default <repo>/app
 #   --skip-notarize     sign + verify only
@@ -35,12 +37,13 @@ REPO="$(cd "$HERE/.." && pwd)"
 ENT_MAIN="$HERE/entitlements.main.plist"
 ENT_INHERIT="$HERE/entitlements.inherit.plist"
 ENT_NATIVE=""
-IDENTITY=""; PROFILE="reelstudio-notary"; APP_DIR="$REPO/app"; APP=""; SKIP_NOTARIZE=0; ADHOC=0
+IDENTITY=""; PROFILE="reelstudio-notary"; KEYCHAIN=""; KC_FLAG=(); APP_DIR="$REPO/app"; APP=""; SKIP_NOTARIZE=0; ADHOC=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENTITY="$2"; shift ;;
     --profile) PROFILE="$2"; shift ;;
+    --keychain) KEYCHAIN="$2"; shift ;;
     --app) APP="$2"; shift ;;
     --app-dir) APP_DIR="$2"; shift ;;
     --spike) APP_DIR="$HERE/spike" ;;
@@ -89,17 +92,20 @@ if [ "$ADHOC" = 1 ]; then
 else
   # The login keychain is locked in SSH sessions. A locked keychain makes codesign fail with
   # "errSecInternalComponent" or hang on a password dialog nobody can see.
-  if ! security show-keychain-info ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; then
-    die "The login keychain is locked or unreadable. Run this in a GUI session (Screen Sharing), or first run:  security unlock-keychain ~/Library/Keychains/login.keychain-db"
+  KC="${KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+  if ! security show-keychain-info "$KC" >/dev/null 2>&1; then
+    die "The keychain $KC is locked or unreadable. Run this in a GUI session (Screen Sharing), or first run:  security unlock-keychain $KC"
   fi
+  # With --keychain, codesign and notarytool look only in that keychain.
+  [ -z "$KEYCHAIN" ] || KC_FLAG=(--keychain "$KEYCHAIN")
   if [ -z "$IDENTITY" ]; then
-    IDENTITY="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
+    IDENTITY="$(security find-identity -v -p codesigning ${KEYCHAIN:+"$KEYCHAIN"} | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
   fi
   [ -n "$IDENTITY" ] || die "No 'Developer ID Application' certificate found in your keychain. Create one first (docs/signing-mac.md, step 1). 'Apple Development' certificates do NOT work for distribution."
   TS_FLAG=(--timestamp)
   echo "Signing as: $IDENTITY"
   if [ "$SKIP_NOTARIZE" = 0 ]; then
-    xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
+    xcrun notarytool history --keychain-profile "$PROFILE" ${KC_FLAG[@]+"${KC_FLAG[@]}"} >/dev/null 2>&1 \
       || die "notarytool profile '$PROFILE' not found or not accepted. Create it (docs/signing-mac.md, step 2):  xcrun notarytool store-credentials $PROFILE --apple-id YOU@icloud.com --team-id TEAMID"
   fi
 fi
@@ -123,7 +129,7 @@ ent_for() { # ent_for <path>  -> prints the plist path, or nothing
 
 sign() { # sign <path>
   local ent; ent="$(ent_for "$1")"
-  codesign --force --sign "$IDENTITY" --options runtime ${TS_FLAG[@]+"${TS_FLAG[@]}"} ${ent:+--entitlements "$ent"} "$1"
+  codesign --force --sign "$IDENTITY" ${KC_FLAG[@]+"${KC_FLAG[@]}"} --options runtime ${TS_FLAG[@]+"${TS_FLAG[@]}"} ${ent:+--entitlements "$ent"} "$1"
 }
 
 # ---------- 2. sign inside-out ----------
@@ -155,11 +161,11 @@ codesign -dv --verbose=2 "$SIGNED" 2>&1 | grep -E 'Authority|Identifier|flags|Te
 notarize() { # notarize <file-to-submit> <what>
   local f="$1" out
   say "Notarizing $2 (Apple usually answers in 1-10 minutes)"
-  out="$(xcrun notarytool submit "$f" --keychain-profile "$PROFILE" --wait 2>&1)" || { echo "$out"; die "notarytool submit failed"; }
+  out="$(xcrun notarytool submit "$f" --keychain-profile "$PROFILE" ${KC_FLAG[@]+"${KC_FLAG[@]}"} --wait 2>&1)" || { echo "$out"; die "notarytool submit failed"; }
   echo "$out"
   if ! echo "$out" | grep -q 'status: Accepted'; then
     local id; id="$(echo "$out" | sed -n 's/^ *id: //p' | head -1)"
-    [ -n "$id" ] && xcrun notarytool log "$id" --keychain-profile "$PROFILE" || true
+    [ -n "$id" ] && xcrun notarytool log "$id" --keychain-profile "$PROFILE" ${KC_FLAG[@]+"${KC_FLAG[@]}"} || true
     die "Apple rejected $2 (log above lists the offending files)"
   fi
 }
@@ -185,7 +191,7 @@ rm -f "$DMG"
 hdiutil create -volname "$PRODUCT" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG" >/dev/null
 rm -rf "$STAGE"
 if [ "$ADHOC" = 0 ]; then
-  codesign --force --sign "$IDENTITY" ${TS_FLAG[@]+"${TS_FLAG[@]}"} "$DMG"
+  codesign --force --sign "$IDENTITY" ${KC_FLAG[@]+"${KC_FLAG[@]}"} ${TS_FLAG[@]+"${TS_FLAG[@]}"} "$DMG"
   if [ "$SKIP_NOTARIZE" = 0 ]; then
     notarize "$DMG" "the disk image"
     xcrun stapler staple "$DMG"
