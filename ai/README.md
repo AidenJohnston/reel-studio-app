@@ -7,25 +7,24 @@ it edits `project.json` through a fixed tool set and asks the engine (via `Engin
 
 ```ts
 import { createAI } from '@reelstudio/ai';
-import { app, safeStorage, shell } from 'electron';
+import { app, safeStorage } from 'electron';
 
 const ai = createAI({
   host,                                                    // your EngineHost (docs/architecture.md section 8)
-  settingsDir: path.join(app.getPath('userData'), 'ai'),   // provider settings + encrypted tokens
-  secretStore: safeStorage,                                // tokens + Claude key encrypted at rest
-  dev: process.env.REELSTUDIO_DEV === '1',                 // also shows the retired chatgpt sign-in / replay
+  settingsDir: path.join(app.getPath('userData'), 'ai'),   // provider settings + encrypted keys
+  secretStore: safeStorage,                                // Claude key + connection keys encrypted at rest
+  dev: process.env.REELSTUDIO_DEV === '1',                 // also shows the replay provider
 });
 
-await ai.signInChatGPT((url) => shell.openExternal(url));  // system browser, loopback redirect
 await ai.setClaudeKey('sk-ant-...');                       // validated with a 1-token request
 const r = await ai.firstEdit(projectDir, onEvent, signal); // r.notice is set if the AI stopped and a simple edit was made
 await ai.applyNote(projectDir, 'music too loud at the start', onEvent);
 ```
 
-Extra methods beyond docs/architecture.md section 8: `cancelSignInChatGPT()`, `chatgptModels()`, `setModel(which, model)`,
+Extra methods beyond docs/architecture.md section 8: `setModel(which, model)`,
 `testConnection()`, `setReplayFixture(file)`, `claudeCodeStatus()`. `ProviderStatus` may carry `detail` (email / model) and `error`
 (`{code, userMessage, link?}`); `AgentResult` may carry `notice` (same shape). All errors thrown are `AIError`
-with a grandma-friendly `userMessage` and optional `link` (e.g. the ChatGPT usage page).
+with a grandma-friendly `userMessage` and optional `link` (e.g. a plan's usage page).
 
 `claude-cli` is **"Claude (your Claude Code app)"**: the person's own Claude Code app (Anthropic's `claude` CLI),
 offered to everyone and always listed in its real state. `claudeCodeStatus()` is a fresh look and returns
@@ -61,7 +60,6 @@ node dist/cli.js pick-takes --provider claude-cli|codex-cli|claude|replay [--mod
 node dist/cli.js first-edit --project DIR --provider claude-cli [--engine-cwd engine/] [--python PY] [--root ROOT] [--record s.json]
 node dist/cli.js apply-note --project DIR --note "..." --provider claude-cli [...]
 node dist/cli.js write-script --idea "..." --provider claude-cli
-node dist/cli.js chatgpt-signin | chatgpt-test | chatgpt-models | chatgpt-status | chatgpt-signout  [--settings DIR]
 ```
 
 `pick-takes` input: documented transcript.json (`{"words":[{"id","source","s","e","w"}]}`), optionally with
@@ -72,7 +70,6 @@ sent back to the model for a fix (max 3 attempts), then the command exits 1.
 ## Tests
 
 `npm test` (vitest): tool schemas (OpenAI strict-mode rules), project API, every tool against a fake engine,
-Anthropic adapter (mock HTTP SSE), Sign in with ChatGPT (mock OAuth/OIDC server: PKCE, registration, JWKS,
-refresh rotation, revocation, errors), Responses API (namespaced tools, SSE, usage limit, retries), CLI protocol,
+Anthropic adapter (mock HTTP SSE), CLI protocol,
 agent loop with a scripted model, and replays of real recorded `claude -p` sessions (`fixtures/`).
 Re-record: `RECORD_LIVE=1 npx vitest run test/fixtures.test.ts`.

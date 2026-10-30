@@ -8,7 +8,7 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `fetch_runtime.py` | Downloads, checksum-verifies and assembles `runtime/<win-x64\|mac-arm64>/{python,ffmpeg}` (CPython 3.11 + pinned deps, static ffmpeg/ffprobe). Re-runnable; skips work when up to date. `--force`, `--relock`. |
 | `hash_requirements.py`, `requirements-extra.txt`, `requirements-runtime.hashed.txt` | ONE source of truth for Python deps: `engine/requirements.txt` (+ the bundle-only extras in `requirements-extra.txt`, today pi-heif). The script writes the generated, hashed file that `fetch_runtime.py` installs with `--require-hashes --no-deps`; a stale copy stops the build (`hash_requirements.py --check`). Edit the inputs, run the script, commit. NO torch. |
 | `licenses/` | Committed GPL-3.0, LGPL-3.0, LGPL-2.1, YuNet MIT texts (checksum-pinned in `fetch_runtime.py`, which refuses to build without them) and `npm-licenses.txt` (from `gen_npm_notices.py`). Shipped as `resources/licenses/texts/`. |
-| `mirror_gpl_sources.py` | Downloads the FFmpeg + library source we owe under the GPL/LGPL into `release/gpl-sources/`. Attach everything in it to the GitHub release (see THIRD_PARTY.md). |
+| `mirror_gpl_sources.py` | Downloads the FFmpeg + library source we owe under the GPL/LGPL into `release/gpl-sources/`. Upload everything in it next to the FFmpeg zips on dl.getreelstudio.com (see THIRD_PARTY.md). |
 | `electron-builder.yml` | The config TEMPLATE (do not pass it to electron-builder directly). |
 | `make-config.js` | Fills the template's `${env.RS_*}` with absolute paths -> `.build/electron-builder.resolved.yml`. |
 | `after-pack.js` | electron-builder hook: pre-compiles Python bytecode inside the packed app before signing; with `RS_WIN_SIGN=1` it then runs `sign-win-resources.ps1`. |

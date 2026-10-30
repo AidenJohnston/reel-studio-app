@@ -238,8 +238,9 @@ Prompts are plain markdown in `ai/prompts/`.
   never shown or logged and stdin is closed, so no sign-in code passes through the app. The page only learns
   {vendor, state, step, version, plan kind, message}. A Claude sign-in whose page shows a code falls back to a
   terminal window running `claude auth login` (`claude-signin.ts`). Neither CLI is ever chosen on its own.
-- **Retired: "Sign in with ChatGPT"** (`chatgpt`, `siwc.ts`): on the first start of this version a saved session is
-  signed out (token revoked, files deleted). It stays in dev mode until `siwc.ts` is deleted.
+- **Retired: "Sign in with ChatGPT"** (0.1.2 and earlier): 0.1.3 signed a saved session out (token revoked, files
+  deleted); its code is gone since. On start, `retireSignInWithChatGPT()` deletes any files an older version left
+  and clears a choice of it, with no request to OpenAI, and the Connect screen says ChatGPT moved to the Codex app.
 - **Your own AI server** (`custom`, advanced, folded behind a link next to the API key): a connection to an
   Anthropic-compatible server (Messages API, through the same Anthropic adapter with the person's base URL) or an
   OpenAI-compatible one (Chat Completions, `ai/src/providers/openaiCompatible.ts`, because most compatible servers
@@ -249,8 +250,8 @@ Prompts are plain markdown in `ai/prompts/`.
   backend) no key is saved. Saving makes one small text request first and, if it fails, says which field to fix.
   A second request carries a 1×1 picture; if the server refuses it, the connection is saved with pictures off and
   the AI editor sends it none. The person can switch pictures on or off on the saved connection.
-- **Developer providers** (behind a dev flag, never shown to users): the retired `chatgpt` sign-in and a
-  recorded-response replay provider used by tests.
+- **Developer providers** (behind a dev flag, never shown to users): a recorded-response replay provider used by
+  tests.
 
 ## 7. B-roll treatments and animations
 
@@ -304,13 +305,11 @@ export interface EngineHost {                                // implemented by t
   reelStudioRoot(): string;                                  // <Documents>/Reel Studio
 }
 
-export interface ProviderStatus { id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'; connected: boolean; label: string; connectionId?: string }
+export interface ProviderStatus { id: 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'; connected: boolean; label: string; connectionId?: string }
 export function createAI(opts: { host: EngineHost; settingsDir: string; dev?: boolean }): {
   providers(): Promise<ProviderStatus[]>;
   active(): Promise<ProviderStatus>;
   setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>;
-  signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus>;
-  signOutChatGPT(): Promise<void>;
   setClaudeKey(key: string | null): Promise<ProviderStatus>;   // validates the key with a tiny request
   connections(): Promise<ConnectionInfo[]>;                    // the person's own servers, never their keys
   saveConnection(c: { id?: string; label: string; kind: 'anthropic' | 'openai'; baseURL: string; model: string; key?: string }):

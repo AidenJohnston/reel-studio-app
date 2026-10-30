@@ -142,13 +142,15 @@ describe('ChatGPT (your Codex app) as the AI editor', () => {
 });
 
 describe('retiring "Sign in with ChatGPT"', () => {
-  it('a saved session is signed out once (files deleted), the old choice cleared, and the Codex card is told why', async () => {
+  it('a saved session is retired once (every file deleted, nothing sent anywhere), the old choice cleared, and the Codex card is told why', async () => {
     const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, 'chatgpt-credentials.bin'), 'opaque');
+    const files = ['chatgpt-credentials.bin', 'chatgpt-credentials.json', 'chatgpt-account.json', 'chatgpt-host.json'];
+    for (const f of files) fs.writeFileSync(path.join(dir, f), 'opaque');
     fs.writeFileSync(path.join(dir, 'ai-settings.json'), JSON.stringify({ active: 'chatgpt', claudeModel: 'x' }));
-    const a = createAI({ host: new FakeHost(tmpDir()), settingsDir: dir, localClaude: { bin: null }, localCodex: { bin: null } });
+    const fetch = (async (url: string) => { throw new Error(`unexpected request to ${url}`); }) as unknown as typeof globalThis.fetch;
+    const a = createAI({ host: new FakeHost(tmpDir()), settingsDir: dir, fetch, localClaude: { bin: null }, localCodex: { bin: null } });
     expect(await a.retireSignInWithChatGPT()).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'chatgpt-credentials.bin'))).toBe(false);
+    for (const f of files) expect(fs.existsSync(path.join(dir, f))).toBe(false);
     const saved = JSON.parse(fs.readFileSync(path.join(dir, 'ai-settings.json'), 'utf8'));
     expect(saved).toEqual({ claudeModel: 'x', chatgptMoved: true });
     expect((await a.codexStatus()).chatgptMoved).toBe(true);

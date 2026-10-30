@@ -45,7 +45,7 @@ export interface EngineHost {
 }
 
 export interface ProviderStatus {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
+  id: 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string

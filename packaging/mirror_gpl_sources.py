@@ -5,10 +5,11 @@
     python packaging/mirror_gpl_sources.py --check    # verify what is already in release/gpl-sources/ (no network)
 
 WHY. The installers contain FFmpeg and FFprobe under the GPL v3 (they link x264). GPL v3 section 6(d) lets us offer
-the object code on a network server (the GitHub release) and keep the corresponding source on a server next to it.
-This script collects that source so the PERSON PUBLISHING A RELEASE can attach `release/gpl-sources/*` to the same
-GitHub release as the installers (see THIRD_PARTY.md, "FFmpeg corresponding source"). Do that for every release, and
-keep the files available for as long as that release is downloadable.
+the object code on a network server (getreelstudio.com) and keep the corresponding source on a server next to it.
+This script collects that source so the PERSON PUBLISHING A BUILD can upload `release/gpl-sources/*` to
+https://dl.getreelstudio.com/source/<FFmpeg tag>/ next to the FFmpeg zips and list them on
+https://getreelstudio.com/source.html (see THIRD_PARTY.md, "FFmpeg corresponding source"). Keep the files available
+for as long as any installer that bundles that FFmpeg is downloadable.
 
 The FFmpeg in the installers is OUR build on both platforms: packaging/ffmpeg/build.sh compiles it from the tarballs
 pinned in packaging/ffmpeg/sources.txt. This script reads that same file, so the mirror cannot drift from the build:
@@ -78,14 +79,14 @@ What is in it
   reel-studio-ffmpeg-recipe-*    THE BUILD SCRIPTS: build.sh (every configure/compile command), sources.txt (every
                                  version, URL and SHA-256 above), pack.py, README. Nothing else is linked in.
 
-To rebuild the binaries (see README.md inside the recipe archive, or packaging/ffmpeg/README.md in the repository):
+To rebuild the binaries (see README.md inside the recipe archive):
   Windows  MSYS2 UCRT64 shell:  bash packaging/ffmpeg/build.sh <workdir>
   macOS    Apple silicon:       bash packaging/ffmpeg/build.sh <workdir>
 The exact FFmpeg configure line of each binary is in BUILDINFO.txt inside the FFmpeg zip and is printed by
 `ffmpeg -version`. The toolchain is MSYS2's GCC (Windows) and Apple clang (macOS); their versions are in BUILDINFO.txt.
 
-Reel Studio's own source code is MIT licensed and is in the repository. You may replace the bundled FFmpeg with
-your own build: Reel Studio finds it through the REELENGINE_FFMPEG / REELENGINE_FFPROBE settings.
+You may replace the bundled FFmpeg with your own build: Reel Studio finds it through the REELENGINE_FFMPEG /
+REELENGINE_FFPROBE settings.
 """
 
 
@@ -161,7 +162,7 @@ def main() -> None:
     if failures:
         print("\nFAILED:\n  " + "\n  ".join(failures), file=sys.stderr)
         sys.exit(1)
-    print("\n%d files in %s. Attach ALL of them (README.txt, SHA256SUMS.txt included) to the GitHub release." % (sum(1 for _ in OUT.iterdir()), OUT))
+    print("\n%d files in %s. Upload ALL of them (README.txt, SHA256SUMS.txt included) next to the FFmpeg zips." % (sum(1 for _ in OUT.iterdir()), OUT))
 
 
 if __name__ == "__main__":

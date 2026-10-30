@@ -92,54 +92,12 @@ async function main() {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return;
   }
-  if (cmd.startsWith('chatgpt-')) {
-    // Morning manual test of "Sign in with ChatGPT" without the app. Dev only: tokens go to an
-    // owner-only file in --settings (the app uses Electron safeStorage instead).
-    const host = new PythonEngineHost({ root: typeof flags.root === 'string' ? flags.root : undefined });
-    const settingsDir = typeof flags.settings === 'string' ? flags.settings : defaultSettingsDir();
-    // no OS keychain in a plain Node CLI: tokens are only saved with an explicit --insecure-plaintext
-    const ai = createAI({ host, settingsDir, siwcIssuer: typeof flags.issuer === 'string' ? flags.issuer : undefined, allowPlaintextSecrets: !!flags['insecure-plaintext'] });
-    const show = (x: unknown) => process.stdout.write(JSON.stringify(x, null, 2) + '\n');
-    if (cmd === 'chatgpt-signin') {
-      const st = await ai.signInChatGPT(async (url) => {
-        process.stderr.write(`Opening your browser. If nothing opens, paste this link into it:\n${url}\n`);
-        await openInBrowser(url);
-      });
-      show(st);
-      if (st.connected) show({ models: await ai.chatgptModels() });
-    } else if (cmd === 'chatgpt-status') show(await ai.providers());
-    else if (cmd === 'chatgpt-models') show(await ai.chatgptModels());
-    else if (cmd === 'chatgpt-test') {
-      if (typeof flags.model === 'string') await ai.setModel('chatgpt', flags.model);
-      await ai.setActive('chatgpt');
-      try { show(await ai.testConnection()); } catch (e: any) { show(e?.toJSON ? e.toJSON() : { error: String(e?.message ?? e) }); process.exitCode = 2; }
-    } else if (cmd === 'chatgpt-signout') { await ai.signOutChatGPT(); show(await ai.providers()); }
-    return;
-  }
   process.stdout.write(`reelstudio-ai <command>
   pick-takes   --provider claude-cli|codex-cli|claude|replay [--model M] --in transcript.json --out cut.json [--record session.json]
   first-edit   --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record session.json] [--draft-only]
   apply-note   --project DIR --note TEXT --provider P [...]
   write-script --idea TEXT --provider P [...]
-  chatgpt-signin  [--settings DIR] --insecure-plaintext
-                  sign in with ChatGPT in your browser, then list models. The CLI has no OS keychain,
-                  so tokens are kept in a PLAIN file and only with --insecure-plaintext.
-                  Default settings dir: %LOCALAPPDATA%\\Reel Studio\\ai-dev (never Documents).
-  chatgpt-test    [--model SLUG]       one tiny request through your ChatGPT plan
-  chatgpt-status | chatgpt-models | chatgpt-signout
 `);
-}
-
-function openInBrowser(url: string): Promise<void> {
-  const { spawn } = require('node:child_process') as typeof import('node:child_process');
-  const [cmd, args] = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
-    : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-  return new Promise((resolve) => {
-    const c = spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true });
-    c.on('error', () => resolve());
-    c.unref();
-    resolve();
-  });
 }
 
 main().catch((e) => {
