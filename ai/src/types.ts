@@ -1,4 +1,5 @@
 // Public interface (docs/architecture.md section 8) + provider-neutral model types.
+import type { StyleProposal } from './style';
 
 /** Where a long task is, for honest overall progress + time left (the app weighs phases from history).
  * listen = transcribe, analyze = retakes/face, firstLook = the no-AI preview, edit = the AI's turns and
@@ -19,6 +20,8 @@ export interface AgentResult {
   /** rules the AI only PROPOSES: show "Remember this for next time?" Yes / No; Yes = addStyleRule(text) */
   styleSuggestions: string[];
   changed: string[];
+  /** a typed rule to ask about ("Use lowercase captions."): Yes = approveStyleProposal(it) */
+  styleProposal?: StyleProposal;
 }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 

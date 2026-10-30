@@ -59,6 +59,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   // Live subtitle preview from the drawer's Subtitles tab.
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
+  const [answerError, setAnswerError] = useState<{ id: string; text: string } | null>(null)
   // pictures, GIFs and clips on the note being written (components/NoteAttachments.tsx)
   const att = useNoteAttachments(slug, notify)
   const [noteDrop, setNoteDrop] = useState(false)
@@ -260,8 +261,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (a === 'remember-yes' || a === 'remember-no') {
       reel.style
         .answer(slug, messageId, a === 'remember-yes')
-        .then(() => load())
-        .catch((e) => notify(userMessage(e), 'error'))
+        .then(async () => {
+          setAnswerError(null)
+          await load()
+          // the buttons are gone: keep focus on the answered question, not lost to the page
+          document.getElementById(`msg-${messageId}`)?.focus()
+        })
+        .catch((e) => setAnswerError({ id: messageId, text: userMessage(e) }))
     } else if (a === 'connect') connect()
     else setDrawer(ACTION_TAB[a] ?? 'cut')
   }
@@ -519,7 +525,13 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                 <p className="muted-sm">Watch your reel, then tell me what to change. For example: "music too loud at the start".</p>
               )}
               {d.chat.map((m) => (
-                <div key={m.id} className={`bubble ${m.from}`} data-testid={`bubble-${m.from}`}>
+                <div
+                  key={m.id}
+                  id={`msg-${m.id}`}
+                  tabIndex={m.suggestion || m.proposal ? -1 : undefined}
+                  className={`bubble ${m.from}`}
+                  data-testid={`bubble-${m.from}`}
+                >
                   {m.attachments?.length ? (
                     <div className="bubble-attachments" data-testid="bubble-attachments">
                       {m.attachments.map((a) => (
@@ -528,6 +540,16 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     </div>
                   ) : null}
                   {m.text}
+                  {m.proposal && (
+                    <span className="bubble-meta" data-testid="remember-scope">
+                      For new videos. From version {m.proposal.source.version} of this video.
+                    </span>
+                  )}
+                  {answerError?.id === m.id && m.actions?.length ? (
+                    <span className="bubble-meta error" role="alert" data-testid="remember-error">
+                      {answerError.text}
+                    </span>
+                  ) : null}
                   {m.from === 'editor' && m.actions?.length ? (
                     <div className="bubble-actions">
                       {m.actions.map((a) => (
@@ -538,7 +560,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                           disabled={!!job && a !== 'connect'}
                           data-testid={`action-${a}`}
                         >
-                          {ACTION_LABELS[a]}
+                          {a === 'remember-yes' && answerError?.id === m.id ? 'Try again' : ACTION_LABELS[a]}
                         </button>
                       ))}
                     </div>
