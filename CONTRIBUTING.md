@@ -1,8 +1,6 @@
 # Contributing to Reel Studio
 
-Reel Studio is proprietary software owned by Curate Technologies LLC. Contributions come only from people who
-have signed a contributor agreement with Curate Technologies LLC, and everything you contribute is owned by
-Curate Technologies LLC under that agreement. If you have not signed one, ask before you start.
+Thanks for helping. Bug reports, fixes and small improvements are welcome.
 
 ## Before you start
 
@@ -15,7 +13,7 @@ Curate Technologies LLC under that agreement. If you have not signed one, ask be
 
 ## Set up
 
-See "Set up" in the [README](README.md). The short version:
+See "Build from source" in the [README](README.md). The short version:
 
 ```
 npm install && npm run build -w ai
@@ -31,8 +29,7 @@ cd engine && python -m pytest tests
 python scripts/leak-check/check.py   # also runs on every pull request
 ```
 
-CI runs on Linux only (Node checks, engine and animation tests). Run the tests on macOS and Windows yourself
-before asking for a merge when your change touches platform-specific code.
+CI runs Node checks on Ubuntu, macOS, and Windows, plus engine and animation tests on Ubuntu.
 Electron e2e tests run locally with `npm run e2e`; CI does not run them.
 
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
@@ -52,6 +49,7 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
   Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.
-* New dependencies need a licence that allows use in a closed-source app (permissive licences such as MIT,
-  BSD, Apache 2.0 or ISC; no GPL or AGPL code linked into the app) and, if they ship in the installer, an entry in
+* New dependencies need a license that fits the MIT app and, if they ship in the installer, an entry in
   `THIRD_PARTY.md`.
+
+By contributing you agree your work is released under the [MIT License](LICENSE).

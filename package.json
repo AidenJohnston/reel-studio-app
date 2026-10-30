@@ -2,7 +2,7 @@
   "name": "reel-studio",
   "private": true,
   "version": "0.1.4",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "workspaces": [
     "app",
     "ai"
