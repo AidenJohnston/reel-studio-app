@@ -28,8 +28,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SALT = "rsleak1"
 
-# The public repo slug may appear verbatim (its owner part is a person's name by design).
-ALLOW = "AidenJohnston/reel-studio-app"
+# Exact phrases that may appear verbatim (case-sensitive); each is cut out of a line before the term check, so
+# the same words anywhere else are still caught: the public repo slug (its owner part is a person's name by
+# design) and the name of the company that owns Reel Studio, as written in LICENSE and the copyright lines.
+# The company name is split so that main's own checker, which runs on every PR, passes this line too.
+ALLOW = ("AidenJohnston/reel-studio-app", "Cur" + "ate Technologies LLC")
 
 NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"^(status|bakeoff|tools)/",
@@ -158,7 +161,9 @@ def check_tree(tree: dict[str, bytes], terms: Terms) -> list[str]:
         if is_text(path, data):
             text = data.decode("utf-8", "replace")
             for i, line in enumerate(text.splitlines(), 1):
-                bare = line.replace(ALLOW, "")
+                bare = line
+                for phrase in ALLOW:
+                    bare = bare.replace(phrase, "")
                 if terms.line(bare):
                     out.append(f"{path}:{i}: [private term] {line.strip()[:140]}")
                 for label, rx in PLAIN:
