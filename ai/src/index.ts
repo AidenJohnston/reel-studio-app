@@ -10,8 +10,6 @@ import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore } from './style';
 import { writeFileAtomic } from './project';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
-import { SiwcAuth } from './providers/siwc';
-import { OpenAIResponsesProvider, listChatGPTModels } from './providers/openai';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 import { ReplayProvider } from './providers/replay';
 import { CONNECTION_KINDS, ConnectionKind, listConnectionModels, noRedirectFetch, normalizeBaseURL, suggestedModel } from './providers/connection';
@@ -28,8 +26,6 @@ export { runAgent } from './agent';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
-export { SiwcAuth, USAGE_URL } from './providers/siwc';
-export { OpenAIResponsesProvider, listChatGPTModels, mapResponsesError } from './providers/openai';
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 export { ReplayProvider, RecordingProvider } from './providers/replay';
 export { OpenAICompatibleProvider } from './providers/openaiCompatible';
@@ -47,7 +43,6 @@ export type { AttachmentInfo } from './attachments';
 export interface AISettings {
   active?: ProviderId;
   claudeModel?: string;
-  chatgptModel?: string;
   cliModel?: string;
   /** the model for "ChatGPT (your Codex app)"; unset = the Codex app's own default for the person's plan */
   codexModel?: string;
@@ -114,8 +109,6 @@ export interface CreateAIOptions {
   promptsDir?: string;
   /** test hooks */
   fetch?: typeof fetch;
-  siwcIssuer?: string;
-  openaiBaseURL?: string;
   anthropicBaseURL?: string;
   /** Force a specific model provider (tests). */
   providerOverride?: ModelProvider;
@@ -129,13 +122,16 @@ export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)';
 // codex-cli = the person's own Codex app (OpenAI's `codex` CLI), signed in with their ChatGPT plan.
 export const CODEX_LABEL = 'ChatGPT (your Codex app)';
 const LABELS: Record<ProviderId, string> = {
-  chatgpt: 'ChatGPT (dev)', claude: 'Claude', 'codex-cli': CODEX_LABEL, 'claude-cli': CLAUDE_CODE_LABEL, custom: 'Your own server', replay: 'Replay (dev)', none: 'No AI',
+  claude: 'Claude', 'codex-cli': CODEX_LABEL, 'claude-cli': CLAUDE_CODE_LABEL, custom: 'Your own server', replay: 'Replay (dev)', none: 'No AI',
 };
-// "Sign in with ChatGPT" (chatgpt, SIWC) is retired for people: ChatGPT goes through the person's own Codex app.
-// It stays reachable in dev mode only until siwc.ts is deleted (the release after the one-time sign-out).
+// ChatGPT goes through the person's own Codex app. (The old in-app "Sign in with ChatGPT" is gone; see
+// retireSignInWithChatGPT for what is left of it on disk after an upgrade.)
 const PEOPLE_PROVIDERS: ProviderId[] = ['claude', 'claude-cli', 'codex-cli', 'custom', 'none'];
 
 const LOCAL_CLAUDE_TTL_MS = 60_000;
+/** Files the retired "Sign in with ChatGPT" (0.1.2 and earlier) kept in the settings folder. */
+const RETIRED_CHATGPT_SESSION = ['chatgpt-credentials.bin', 'chatgpt-credentials.json'];
+const RETIRED_CHATGPT_REGISTRATION = ['chatgpt-account.json', 'chatgpt-host.json'];
 
 export function createAI(opts: CreateAIOptions) {
   let localCache: { at: number; v: LocalClaude } | null = null;
@@ -156,7 +152,6 @@ export function createAI(opts: CreateAIOptions) {
   const settingsFile = path.join(opts.settingsDir, 'ai-settings.json');
   const prompts = new Prompts(opts.promptsDir ?? defaultPromptsDir());
   const style = new StyleStore(() => opts.host.reelStudioRoot());
-  const siwc = new SiwcAuth({ settingsDir: opts.settingsDir, secretStore: opts.secretStore, fetch: opts.fetch, issuer: opts.siwcIssuer, allowPlaintextSecrets: opts.allowPlaintextSecrets });
   // One edit at a time per project (the app may double-click; the CLI may race).
   const locks = new Map<string, Promise<unknown>>();
   function exclusive<T>(dir: string, fn: () => Promise<T>): Promise<T> {
@@ -258,13 +253,6 @@ export function createAI(opts: CreateAIOptions) {
   async function statusOf(id: ProviderId): Promise<ProviderStatus> {
     const s = await settings();
     switch (id) {
-      case 'chatgpt': {
-        const sess = await siwc.session();
-        if (sess.connected && !sess.planUsage) {
-          return { id, connected: false, label: LABELS.chatgpt, detail: sess.email, error: { code: 'chatgpt_plan_not_enabled', userMessage: 'You are signed in, but Reel Studio was not allowed to use your ChatGPT plan. Sign in again and allow it.' } };
-        }
-        return { id, connected: sess.connected && sess.planUsage, label: LABELS.chatgpt, detail: sess.email };
-      }
       case 'claude': return { id, connected: !!(await claudeKey()), label: LABELS.claude, detail: s.claudeModel ?? DEFAULT_CLAUDE_MODEL };
       case 'claude-cli': {
         // detail is the CLI version at most: never the account (no e-mail, no organization)
@@ -305,7 +293,7 @@ export function createAI(opts: CreateAIOptions) {
     // claude-cli is always listed, in its real state (the Connect screen shows how to get it ready)
     // the person's own CLIs are always listed, in their real state (the Connect screen shows how to get them ready)
     const custom: ProviderId[] = (await settings()).connections?.length ? ['custom'] : [];
-    const ids: ProviderId[] = ['claude', 'claude-cli', 'codex-cli', ...custom, ...(opts.dev ? (['chatgpt', 'replay'] as ProviderId[]) : []), 'none'];
+    const ids: ProviderId[] = ['claude', 'claude-cli', 'codex-cli', ...custom, ...(opts.dev ? (['replay'] as ProviderId[]) : []), 'none'];
     await Promise.all([localClaude(true), localCodex(true)]);
     return Promise.all(ids.map(statusOf));
   }
@@ -319,19 +307,8 @@ export function createAI(opts: CreateAIOptions) {
     if (s.active === 'none') return statusOf('none');
     // Nothing chosen: an Anthropic API key, if one is saved. Never falls back to claude-cli or codex-cli: they spend
     // the person's own plan, so only their click turns them on.
-    for (const id of (opts.dev ? ['claude', 'chatgpt'] : ['claude']) as ProviderId[]) {
-      const st = await statusOf(id);
-      if (st.connected) return st;
-    }
-    return statusOf('none');
-  }
-
-  async function chatgptModel(): Promise<string> {
-    const s = await settings();
-    if (s.chatgptModel) return s.chatgptModel;
-    const models = await listChatGPTModels(siwc, { baseURL: opts.openaiBaseURL, fetch: opts.fetch });
-    if (!models.length) throw new AIError('chatgpt_no_models', 'Your ChatGPT account has no models available for Reel Studio.');
-    return models[0].slug;
+    const claude = await statusOf('claude');
+    return claude.connected ? claude : statusOf('none');
   }
 
   async function modelProvider(): Promise<ModelProvider | null> {
@@ -339,7 +316,6 @@ export function createAI(opts: CreateAIOptions) {
     const st = await active();
     const s = await settings();
     switch (st.id) {
-      case 'chatgpt': return new OpenAIResponsesProvider({ auth: siwc, model: await chatgptModel(), baseURL: opts.openaiBaseURL, fetch: opts.fetch });
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: s.claudeModel, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
         const bin = (await localClaude()).bin;
@@ -446,17 +422,6 @@ export function createAI(opts: CreateAIOptions) {
       }
       await saveSettings({ active: id, ...(id === 'claude-cli' ? { chatgptMoved: undefined } : {}) });
     },
-    async signInChatGPT(openExternal: (url: string) => Promise<void>): Promise<ProviderStatus> {
-      try {
-        const sess = await siwc.signIn(openExternal);
-        if (sess.planUsage) await saveSettings({ active: 'chatgpt' });
-      } catch (e: any) {
-        if (e instanceof AIError) return { id: 'chatgpt', connected: false, label: LABELS.chatgpt, error: e.toJSON() };
-        throw e;
-      }
-      return statusOf('chatgpt');
-    },
-    cancelSignInChatGPT(): void { siwc.cancelSignIn(); },
     /** A fresh look at the person's own Claude Code app: state, version, plan kind and the binary path (for the
      * app's sign-in window). Never an e-mail, organization or token. */
     async claudeCodeStatus(): Promise<LocalClaude> { return localClaude(true); },
@@ -466,20 +431,19 @@ export function createAI(opts: CreateAIOptions) {
       const v = await localCodex(true);
       return { ...v, ...((await settings()).chatgptMoved ? { chatgptMoved: true } : {}) };
     },
-    /** Once, at start-up: "Sign in with ChatGPT" is retired. A saved session is signed out (the renewable token revoked,
-     * the files deleted) and a choice of it cleared. Returns true when there was something to retire. */
+    /** Once, at start-up: "Sign in with ChatGPT" is retired (0.1.3) and its code is gone. What an older version left
+     * on disk is deleted (the saved session, its client registration and host id) and a choice of it cleared. Local
+     * only, no request to OpenAI any more: 0.1.3 revoked the sessions it found; one it never saw (an upgrade straight
+     * from 0.1.2) is deleted here and expires on OpenAI's side. Returns true when there was something to retire. */
     async retireSignInWithChatGPT(): Promise<boolean> {
       const s = await settings();
-      const files = ['chatgpt-credentials.bin', 'chatgpt-credentials.json'].some((f) => fs.existsSync(path.join(opts.settingsDir, f)));
-      if (!files && s.active !== 'chatgpt') return false;
-      if (files) await siwc.signOut().catch(() => undefined);
-      await saveSettings({ ...(s.active === 'chatgpt' ? { active: undefined } : {}), chatgptMoved: true });
+      const file = (f: string) => path.join(opts.settingsDir, f);
+      const session = RETIRED_CHATGPT_SESSION.some((f) => fs.existsSync(file(f)));
+      for (const f of [...RETIRED_CHATGPT_SESSION, ...RETIRED_CHATGPT_REGISTRATION]) await fsp.rm(file(f), { force: true });
+      const chosen = (s.active as string | undefined) === 'chatgpt';
+      if (!session && !chosen) return false;
+      await saveSettings({ ...(chosen ? { active: undefined } : {}), chatgptMoved: true });
       return true;
-    },
-    async signOutChatGPT(): Promise<void> {
-      await siwc.signOut();
-      const s = await settings();
-      if (s.active === 'chatgpt') await saveSettings({ active: undefined });
     },
     async setClaudeKey(key: string | null): Promise<ProviderStatus> {
       const trimmed = key?.trim() || null;
@@ -526,17 +490,14 @@ export function createAI(opts: CreateAIOptions) {
     connectionModels(q: { kind: ConnectionKind; baseURL: string; key?: string; id?: string }): Promise<ConnectionModels> {
       return oneAtATime(() => connectionModels(q));
     },
-    async setModel(which: 'claude' | 'chatgpt' | 'cli', model: string | null): Promise<void> {
+    async setModel(which: 'claude' | 'cli', model: string | null): Promise<void> {
       await saveSettings({ [`${which}Model`]: model ?? undefined } as Partial<AISettings>);
-    },
-    async chatgptModels(): Promise<{ slug: string; displayName: string }[]> {
-      return listChatGPTModels(siwc, { baseURL: opts.openaiBaseURL, fetch: opts.fetch });
     },
     async setReplayFixture(file: string | null): Promise<void> { await saveSettings({ replayFixture: file ?? undefined }); },
     /** One tiny request through the active provider (Settings "Test connection"). Throws AIError with a userMessage. */
     async testConnection(signal?: AbortSignal): Promise<{ provider: ProviderId | 'fake'; model?: string; reply: string }> {
       const p = await modelProvider();
-      if (!p) throw new AIError('no_ai', 'No AI is connected yet. Sign in with ChatGPT or add a Claude key in Settings.');
+      if (!p) throw new AIError('no_ai', 'No AI is connected yet. Connect Claude or ChatGPT in Settings.');
       const r = await p.complete({ system: 'Reply with exactly the word OK.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Say OK.' }] }], tools: [], jsonOnly: true, signal });
       return { provider: p.id, model: p.model, reply: r.text.trim() };
     },

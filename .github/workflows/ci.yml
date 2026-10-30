@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      all_os:
+        description: Also run the Node job on macOS and Windows (paid minutes; they are normally tested by hand)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -17,7 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
+        # Linux only on pull requests and pushes: macOS and Windows are tested by hand before a release. A manual run
+        # (Actions > CI > Run workflow) with "all_os" ticked adds them.
+        os: ${{ fromJSON(inputs.all_os && '["ubuntu-24.04", "macos-15", "windows-latest"]' || '["ubuntu-24.04"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

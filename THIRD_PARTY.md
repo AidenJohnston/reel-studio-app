@@ -1,6 +1,6 @@
 # Third-party software in Reel Studio
 
-Reel Studio itself is MIT licensed (see `LICENSE`). The installer also contains the programs below.
+Reel Studio itself is proprietary software (see `LICENSE`). The installer also contains the programs below.
 Each keeps its own license. This list is what `packaging/fetch_runtime.py` downloads, so the URLs and
 SHA-256 values here are the ones the script verifies. If you change one, change the other.
 
@@ -14,7 +14,7 @@ The installed app carries this file and the full license texts under `resources/
 
 Reel Studio runs `ffmpeg` and `ffprobe` as **separate programs** (it starts them as child processes and talks to them
 through files and pipes). It does not link against them, so the GPL applies to those two programs only and not to
-Reel Studio's own MIT code. The two programs are GPL v3 because they include x264 (GPL-2.0-or-later) and are built
+Reel Studio's own code. The two programs are GPL v3 because they include x264 (GPL-2.0-or-later) and are built
 with `--enable-gpl --enable-version3`.
 
 **We build them ourselves**, on both platforms, from pinned source tarballs with a script in this repository
@@ -22,13 +22,14 @@ with `--enable-gpl --enable-version3`.
 minimal on purpose: only what the engine needs. This replaces the third-party builds used until 2026-10-17 (gyan.dev on
 Windows, martin-riedl.de on macOS), whose library versions or build script were not fully public.
 
-| Platform | File (GitHub release tagged `ffmpeg-7.1.1-rs2`) | SHA-256 |
+| Platform | File (at `https://dl.getreelstudio.com/source/ffmpeg-7.1.1-rs2/<file>`) | SHA-256 |
 |---|---|---|
 | Windows x64 | `ffmpeg-7.1.1-rs2-win-x64.zip` (`ffmpeg.exe`, `ffprobe.exe`, `BUILDINFO.txt`) | `08e0d8ebce07751f2b14de86d0a47594d39564af2439ce79f23121a12ffd2b7f` |
 | macOS arm64 | `ffmpeg-7.1.1-rs2-macos-arm64.zip` (`ffmpeg`, `ffprobe`, `BUILDINFO.txt`) | `950d3faa4385a8a4eaa0d92baf8f6c043b8e9207a50a7d24e97935d68033bf45` |
 
 `packaging/fetch_runtime.py` pins those two hashes. The zips are the files `build.sh` writes to `release/ffmpeg/`; the
-person publishing a release uploads exactly those to the release (`packaging/ffmpeg/README.md`, "Releasing a new build").
+person publishing a build uploads exactly those to `dl.getreelstudio.com/source/ffmpeg-7.1.1-rs2/`
+(`packaging/ffmpeg/README.md`, "Releasing a new build").
 
 What is linked in (all of it is in the source mirror, below):
 
@@ -68,21 +69,21 @@ is opened only if that vendor's driver is on the machine (checked at run time; w
 
 #### FFmpeg corresponding source (GPL v3 section 6): the compliance statement
 
-We convey the FFmpeg and FFprobe binaries inside the installers, which are downloaded from getreelstudio.com (from 0.1.3
-on; 0.1.0 to 0.1.2 were GitHub release assets). GPL v3 section 6(d) lets us do that and keep the Corresponding Source on
-a different server, provided there are "clear directions next to the object code
+We convey the FFmpeg and FFprobe binaries inside the installers, which are downloaded from getreelstudio.com. GPL v3
+section 6(d) lets us do that and keep the Corresponding Source on a different server, provided there are "clear directions next to the object code
 saying where to find the Corresponding Source" and it stays available "as long as needed to satisfy these
 requirements". Our offer:
 
 1. **The Corresponding Source of the two programs, for both platforms, is exactly the set of files in the folder
-   `release/gpl-sources/`** that `python packaging/mirror_gpl_sources.py` produces, and that is attached to the GitHub
-   release [`ffmpeg-7.1.1-rs2`](https://github.com/AidenJohnston/reel-studio-app/releases/tag/ffmpeg-7.1.1-rs2) (and to
-   the app releases v0.1.0 to v0.1.2): the unmodified FFmpeg 7.1.1 source (`ffmpeg-7.1.1.tar.xz` with its signature), the source of
-   every library in the table above, and `reel-studio-ffmpeg-recipe-rs2.tar.gz`, which holds "the scripts used to control
-   compilation and installation" (`build.sh`, `sources.txt` with every version, URL and SHA-256, `pack.py`, `README.md`).
-   FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **They stay on that release as long as any
-   installer that bundles these binaries is downloadable; a release with a new FFmpeg build gets its own source release
-   first.** The download pages and every app release's notes link to it.
+   `release/gpl-sources/`** that `python packaging/mirror_gpl_sources.py` produces. **Complete corresponding source
+   for FFmpeg and its libraries, plus the build recipe, is at https://getreelstudio.com/source.html** (a list of every
+   file with its licence and SHA-256), each file downloadable from
+   `https://dl.getreelstudio.com/source/ffmpeg-7.1.1-rs2/<file>`: the unmodified FFmpeg 7.1.1 source
+   (`ffmpeg-7.1.1.tar.xz` with its signature), the source of every library in the table above, and
+   `reel-studio-ffmpeg-recipe-rs2.tar.gz`, which holds "the scripts used to control compilation and installation" (`build.sh`, `sources.txt` with every version, URL and SHA-256, `pack.py`, `README.md`).
+   FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **They stay online as long as any installer
+   that bundles these binaries is downloadable; a new FFmpeg build gets its own source folder first.** The download
+   pages link to it.
 2. **Anyone can rebuild the binaries**: one command on each platform (`bash packaging/ffmpeg/build.sh <workdir>`, in an
    MSYS2 UCRT64 shell on Windows or a normal terminal on Apple silicon; the setup is in `packaging/ffmpeg/README.md`).
    The script downloads each source, refuses any file whose SHA-256 differs from `sources.txt`, and compiles. The only
@@ -141,7 +142,7 @@ Production dependency tree of the app plus the front-end libraries vite bundles 
 | Package | License | Copyright |
 |---|---|---|
 | react, react-dom, scheduler 19 / 0.28 | MIT | Meta Platforms, Inc. and affiliates |
-| @reelstudio/ai (this repo) | MIT | Reel Studio |
+| @reelstudio/ai (part of Reel Studio) | Proprietary (see `LICENSE`) | Reel Studio |
 | @anthropic-ai/sdk 0.135.0 | MIT | Anthropic, PBC |
 | @opentelemetry/api 1.9.1 | Apache-2.0 | OpenTelemetry Authors |
 | json-schema-to-ts 3.1.1, ts-algebra 2.0.0 | MIT | Thomas Aribart |

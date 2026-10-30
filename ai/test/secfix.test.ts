@@ -5,8 +5,8 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  createAI, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent, transcriptPath, AIError, PythonEngineHost, SiwcAuth,
-  listChatGPTModels, AnthropicProvider,
+  createAI, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent, transcriptPath, AIError, PythonEngineHost,
+  AnthropicProvider,
 } from '../src';
 import { DATA_BOUNDARY } from '../src/editor';
 import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
@@ -323,13 +323,6 @@ describe('finding 26: no plaintext secrets without an explicit flag', () => {
     expect((await dev.setClaudeKey('sk-ant-test')).connected).toBe(true);
   });
 
-  it('ChatGPT tokens are not written to a plain file without the flag', async () => {
-    const dir = tmpDir('siwc ');
-    const a = new SiwcAuth({ settingsDir: dir, issuer: 'http://127.0.0.1:9' });
-    await expect((a as any).saveCredentials({ access_token: 'x' })).rejects.toMatchObject({ code: 'no_secure_storage' });
-    expect(fs.existsSync(path.join(dir, 'chatgpt-credentials.json'))).toBe(false);
-  });
-
   it('the dev CLI keeps settings outside Documents', () => {
     const d = devSettingsDir({ LOCALAPPDATA: 'C:\\Users\\v\\AppData\\Local' }, 'win32');
     expect(d).toMatch(/AppData/);
@@ -402,17 +395,10 @@ describe('finding 36: cross-process edit lock, serialised style writes', () => {
   });
 });
 
-describe('finding 37: no empty hashtags, model listing times out', () => {
+describe('finding 37: no empty hashtags', () => {
   it('write_post refuses "#"', async () => {
     const { ctx } = await ctxFor();
     const r = await executeTool(ctx, 'write_post', { caption: 'x', hashtags: ['a', 'b', 'c', 'd', ''], keywords: [] });
     expect(r.isError).toBe(true);
-  });
-
-  it('listChatGPTModels gives up on a hung host', async () => {
-    const hang = ((_u: string, init: any) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(new Error('aborted'))))) as any;
-    const t0 = Date.now();
-    await expect(listChatGPTModels({ accessToken: async () => 't' } as any, { fetch: hang, timeoutMs: 100 })).rejects.toMatchObject({ code: 'offline' });
-    expect(Date.now() - t0).toBeLessThan(5000);
   });
 });

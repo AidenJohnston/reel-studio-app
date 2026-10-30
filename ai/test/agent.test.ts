@@ -174,11 +174,11 @@ describe('no AI connected', () => {
     const localClaude = { bin: null }; // no Claude Code app here (never runs the real one)
     const localCodex = { bin: null }; // nor the real Codex app
     expect((await createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).providers()).map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'none']);
-    expect((await createAI({ host, settingsDir: tmpDir(), dev: true, localClaude, localCodex }).providers()).map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'chatgpt', 'replay', 'none']);
+    expect((await createAI({ host, settingsDir: tmpDir(), dev: true, localClaude, localCodex }).providers()).map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
     await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('claude-cli')).rejects.toMatchObject({ code: 'not_available' });
     await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('codex-cli')).rejects.toMatchObject({ code: 'not_available' });
-    // the retired in-app ChatGPT sign-in can no longer be chosen outside dev mode
-    await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('chatgpt')).rejects.toMatchObject({ code: 'not_available' });
+    // the retired in-app ChatGPT sign-in (an id an old ai-settings.json may still name) cannot be chosen
+    await expect(createAI({ host, settingsDir: tmpDir(), localClaude, localCodex }).setActive('chatgpt' as never)).rejects.toMatchObject({ code: 'not_available' });
   });
 });
 

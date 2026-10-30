@@ -7,7 +7,6 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject, saveProject, AIError, validateAttachments, readAttachment, listAttachments } from '../src';
 import { toAnthropicMessages } from '../src/providers/anthropic';
-import { toResponsesInput } from '../src/providers/openai';
 import { renderConversation, renderDelta } from '../src/providers/cli';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
 
@@ -224,10 +223,6 @@ describe('attachments: every provider sends first-message images', () => {
   it('Anthropic', () => {
     const m = toAnthropicMessages(req.messages);
     expect((m[0].content as any[]).filter((c) => c.type === 'image').map((c) => c.source.data)).toEqual(['QUJD', 'REVG']);
-  });
-  it('OpenAI (ChatGPT)', () => {
-    const m = toResponsesInput(req.messages);
-    expect(m[0].content.filter((c: any) => c.type === 'input_image').map((c: any) => c.image_url)).toEqual(['data:image/jpeg;base64,QUJD', 'data:image/jpeg;base64,REVG']);
   });
   it('CLI providers: the full conversation (fresh process or a new session) carries them on every turn', () => {
     const r = renderConversation(req);

@@ -33,7 +33,7 @@ export interface EngineHost {
 export interface CaptureResult { path: string; url: string; site: string; title: string; width: number; height: number }
 
 /** custom = a connection to the person's own Anthropic- or OpenAI-compatible server (providers/connection.ts) */
-export type ProviderId = 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none';
+export type ProviderId = 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none';
 export interface ProviderStatus {
   id: ProviderId; connected: boolean; label: string; detail?: string; error?: UserFacingError;
   /** id === 'custom': which saved connection */

@@ -183,9 +183,8 @@ describe('the Claude Code choice in the provider list', () => {
   it('dev mode adds the retired ChatGPT sign-in and replay with their dev labels', async () => {
     const ai = createAI({ ...noProvider(), dev: true, localClaude: { bin: '/x/claude', run: signedIn } });
     const list = await ai.providers();
-    expect(list.map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'chatgpt', 'replay', 'none']);
+    expect(list.map((p) => p.id)).toEqual(['claude', 'claude-cli', 'codex-cli', 'replay', 'none']);
     expect(list.find((p) => p.id === 'codex-cli')!.label).toBe('ChatGPT (your Codex app)');
-    expect(list.find((p) => p.id === 'chatgpt')!.label).toBe('ChatGPT (dev)');
     expect(list.find((p) => p.id === 'replay')!.label).toBe('Replay (dev)');
     expect(list.find((p) => p.id === 'claude-cli')!.label).toBe('Claude (your Claude Code app)');
   });

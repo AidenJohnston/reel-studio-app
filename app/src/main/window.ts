@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { isStrictlyInsideFolder } from './inside-folder'
 import type { AppCommand, JobEvent } from '../shared/api'
-import { RELEASES_REPO } from '../shared/config'
+import { SITE_URL } from '../shared/config'
 
 export const PAPER = '#f7f5f1'
 export const INK = '#1d1b18'
@@ -164,7 +164,7 @@ export function installMenu(send: (c: AppCommand) => void, dev: boolean): void {
     { role: 'windowMenu' },
     {
       role: 'help',
-      submenu: [{ label: 'Reel Studio on GitHub', click: () => void shell.openExternal(`https://github.com/${RELEASES_REPO}`) }]
+      submenu: [{ label: 'Reel Studio website', click: () => void shell.openExternal(SITE_URL) }]
     }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
