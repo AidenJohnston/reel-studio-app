@@ -3,7 +3,7 @@
   "productName": "Reel Studio Spike",
   "version": "0.0.1",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "description": "Packaging spike: proves a packaged Electron app can run the bundled Python + ffmpeg.",
   "author": "Reel Studio",
   "main": "./out/main/index.js",

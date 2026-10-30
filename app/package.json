@@ -3,7 +3,7 @@
   "productName": "Reel Studio",
   "version": "0.1.4",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "description": "Turn a raw talking-head video into a finished Reel.",
   "author": {
     "name": "Reel Studio"

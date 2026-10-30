@@ -86,7 +86,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
       <section className="panel">
         <h2>About</h2>
         <p className="muted" style={{ marginTop: 6 }}>
-          Reel Studio {info.version}. No accounts, no tracking.
+          Reel Studio {info.version}. Open source (MIT). No accounts, no tracking.
         </p>
         {checkUpdates !== null && (
           <>
