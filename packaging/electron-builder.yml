@@ -24,7 +24,7 @@
 
 appId: dev.reelstudio.app
 productName: Reel Studio
-copyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+copyright: "Copyright (c) 2026 Curate Technologies LLC"
 asar: true
 npmRebuild: false
 nodeGypRebuild: false
@@ -108,7 +108,7 @@ mac:
   # Unsigned here on purpose. packaging/sign-mac.sh signs every nested binary inside-out, notarizes and staples.
   identity: null
   extendInfo:
-    NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+    NSHumanReadableCopyright: "Copyright (c) 2026 Curate Technologies LLC"
 
 dmg:
   title: Reel Studio

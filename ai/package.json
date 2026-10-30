@@ -2,7 +2,7 @@
   "name": "@reelstudio/ai",
   "version": "0.1.3",
   "private": true,
-  "license": "MIT",
+  "license": "UNLICENSED",
   "description": "Reel Studio AI editor: providers, prompts, tools, agent loop.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
