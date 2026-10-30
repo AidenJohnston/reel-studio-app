@@ -119,8 +119,7 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 crash reporting.
 
 One request happens without you asking: at most once a day it asks `dl.getreelstudio.com/latest.json` whether a
-newer version is out and, only if that fails, GitHub's public releases list
-(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only a generic
+newer version is out, sending only a generic
 `User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so; nothing
 is downloaded or installed. Turn it off in Settings with "Check for updates".
 
