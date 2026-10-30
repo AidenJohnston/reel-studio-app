@@ -1,18 +1,26 @@
 // "Update available" notice. NOT an updater: it only tells the person a newer version is out and opens the
-// release page in their browser. Mac auto-update needs Developer ID signing, and an updater that installs
+// download page in their browser. Mac auto-update needs Developer ID signing, and an updater that installs
 // unsigned code is a worse hole than the one it closes.
 //
-// Privacy (the release notes promise "No account, no telemetry"): at most one GET a day to GitHub's public
-// releases list, with a generic User-Agent and nothing else that could identify the person. Node's fetch has
-// no cookie jar, so no Electron session cookies can ride along. Off with Settings > "Check for updates".
+// Privacy (the release notes promise "No account, no telemetry"): at most one GET a day to getreelstudio.com
+// (a small JSON file naming the newest version), and only if that fails, one to GitHub's public releases
+// list. Both carry a generic User-Agent and nothing else that could identify the person. Node's fetch has no
+// cookie jar, so no Electron session cookies can ride along. Off with Settings > "Check for updates".
 //
 // This file never imports electron: index.ts wires it to app.getVersion(), shell.openExternal and the
 // settings store, and tests drive it with fakes.
 import { RELEASES_REPO } from '../shared/config'
 import type { UpdateNotice } from '../shared/api'
 
+/** Where the installers are sold. Any page on this origin may be opened as a download page. */
+export const SITE_ORIGIN = 'https://getreelstudio.com'
+/** The page a notice opens when the site's answer names no usable page. */
+export const UPDATE_PAGE = `${SITE_ORIGIN}/update.html`
+/** `{ "version": "0.1.3", "url": "https://getreelstudio.com/update.html", ... }`, asked first. */
+export const LATEST_URL = 'https://dl.getreelstudio.com/latest.json'
+/** GitHub's public releases list, asked only when the site cannot be reached. */
 export const RELEASES_API = `https://api.github.com/repos/${RELEASES_REPO}/releases`
-/** Every release page lives under here. The ONLY URLs the notice may open. */
+/** Every GitHub release page lives under here. Besides the site, the ONLY URLs the notice may open. */
 export const RELEASE_PAGE_ORIGIN = 'https://github.com'
 export const RELEASE_PAGE_PREFIX = `/${RELEASES_REPO}/releases/`
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -22,6 +30,8 @@ export const FIRST_CHECK_DELAY_MS = 8_000
 
 /** App releases only: `v1.2.3`. Other tags (e.g. `ffmpeg-7.1.1-rs2`, `v1.2`, `v1.2.3-beta`) are not app versions. */
 const TAG_RE = /^v(\d+)\.(\d+)\.(\d+)$/
+/** The site's `version`: a plain `1.2.3`, no `v`, no suffix. */
+const SITE_VERSION_RE = /^\d+\.\d+\.\d+$/
 /** The running app's own version: `1.2.3`, optionally with a pre-release suffix (`1.2.3-beta.1`). */
 const APP_VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/
 
@@ -53,9 +63,10 @@ export function isNewer(release: string, current: string): boolean {
   return d > 0 || (d === 0 && c.pre)
 }
 
-/** Only `https://github.com/AidenJohnston/reel-studio-app/releases/...`. Parsed, not string-matched, so
- * `..`, `%2e%2e`, backslashes, `user@`, other ports or look-alike hosts cannot sneak past. Returns the
- * normalised URL to open, or null. */
+/** Only pages on `https://getreelstudio.com` (any path) and
+ * `https://github.com/AidenJohnston/reel-studio-app/releases/...`. Parsed, not string-matched, so `..`,
+ * `%2e%2e`, backslashes, `user@`, `http://`, other ports or look-alike hosts (`getreelstudio.com.evil.example`)
+ * cannot sneak past. Returns the normalised URL to open, or null. */
 export function allowedReleaseUrl(url: unknown): string | null {
   if (typeof url !== 'string' || url.length > 2048) return null
   let u: URL
@@ -64,8 +75,9 @@ export function allowedReleaseUrl(url: unknown): string | null {
   } catch {
     return null
   }
-  if (u.origin !== RELEASE_PAGE_ORIGIN || u.username || u.password) return null
-  if (!u.pathname.startsWith(RELEASE_PAGE_PREFIX)) return null
+  if (u.username || u.password) return null
+  if (u.origin === SITE_ORIGIN) return u.href
+  if (u.origin !== RELEASE_PAGE_ORIGIN || !u.pathname.startsWith(RELEASE_PAGE_PREFIX)) return null
   return u.href
 }
 
@@ -89,12 +101,21 @@ export function newestRelease(list: unknown): UpdateNotice | null {
   return { version: best.t.join('.'), url: allowedReleaseUrl(best.url) ?? pageFor(best.tag) }
 }
 
+/** The site's `latest.json` as a notice, or null if it is not `{ version: "X.Y.Z", ... }`. Its `url` is used
+ * only if it points at the site or our GitHub releases; otherwise the update page. Never throws on odd data. */
+export function siteLatest(body: unknown): UpdateNotice | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const { version, url } = body as { version?: unknown; url?: unknown }
+  if (typeof version !== 'string' || !SITE_VERSION_RE.test(version)) return null
+  return { version, url: allowedReleaseUrl(url) ?? UPDATE_PAGE }
+}
+
 // ---- the stored state (main/settings.ts) --------------------------------------------------------
 
 export interface UpdateState {
   /** Settings > "Check for updates". Default on. */
   checkUpdates: boolean
-  /** When GitHub was last asked (ms since 1970), or null. Only answered or rate-limited asks count. */
+  /** When the site (or GitHub) was last asked (ms since 1970), or null. Only answered or rate-limited asks count. */
   updateCheckedAt: number | null
   /** The newest release found by the last check, kept so a launch inside the 24 h still shows it. */
   updateLatest: UpdateNotice | null
@@ -127,7 +148,7 @@ export function noticeToShow(s: UpdateState, current: string, now: number): Upda
   return { version: l.version, url }
 }
 
-// ---- the request ---------------------------------------------------------------------------------
+// ---- the requests --------------------------------------------------------------------------------
 
 export type FetchLike = (url: string, init: { headers: Record<string, string>; signal: AbortSignal; redirect: 'follow' }) => Promise<{
   ok: boolean
@@ -138,12 +159,30 @@ export type FetchLike = (url: string, init: { headers: Record<string, string>; s
 
 export type AskResult = { kind: 'ok'; latest: UpdateNotice | null } | { kind: 'rate-limited' } | { kind: 'failed'; why: string }
 
-/** The exact headers sent. Nothing else: no token, no cookie, no machine or user detail. */
-export function requestHeaders(appVersion: string): Record<string, string> {
-  return { 'User-Agent': `ReelStudio/${appVersion}`, Accept: 'application/vnd.github+json' }
+/** The exact headers sent, to either server. Nothing else: no token, no cookie, no machine or user detail. */
+export function requestHeaders(appVersion: string, accept = 'application/vnd.github+json'): Record<string, string> {
+  return { 'User-Agent': `ReelStudio/${appVersion}`, Accept: accept }
 }
 
-/** One GET of the releases list. Never throws. */
+const failure = (e: unknown): AskResult => ({
+  kind: 'failed',
+  why: (e as Error)?.name === 'TimeoutError' ? 'timeout' : String((e as Error)?.message ?? e).slice(0, 120)
+})
+
+/** One GET of the site's `latest.json`. A failure of any kind (down, slow, odd answer) means GitHub is asked
+ * instead; a readable answer, newer or not, is a finished check. Never throws. */
+export async function askSite(fetchFn: FetchLike, appVersion: string, timeoutMs = TIMEOUT_MS): Promise<AskResult> {
+  try {
+    const res = await fetchFn(LATEST_URL, { headers: requestHeaders(appVersion, 'application/json'), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' })
+    if (!res.ok) return { kind: 'failed', why: `HTTP ${res.status}` }
+    const latest = siteLatest(await res.json())
+    return latest ? { kind: 'ok', latest } : { kind: 'failed', why: 'unreadable latest.json' }
+  } catch (e) {
+    return failure(e)
+  }
+}
+
+/** One GET of GitHub's releases list. Never throws. */
 export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutMs = TIMEOUT_MS): Promise<AskResult> {
   try {
     const res = await fetchFn(RELEASES_API, { headers: requestHeaders(appVersion), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' })
@@ -155,7 +194,7 @@ export async function askGitHub(fetchFn: FetchLike, appVersion: string, timeoutM
     if (!res.ok) return { kind: 'failed', why: `HTTP ${res.status}` }
     return { kind: 'ok', latest: newestRelease(await res.json()) }
   } catch (e) {
-    return { kind: 'failed', why: (e as Error)?.name === 'TimeoutError' ? 'timeout' : String((e as Error)?.message ?? e).slice(0, 120) }
+    return failure(e)
   }
 }
 
@@ -170,20 +209,27 @@ export interface CheckDeps {
 }
 
 /**
- * Ask GitHub if it is time to, remember the answer, and return what to show (null = nothing). Throttled to
- * once per 24 h. An offline or failed ask is not remembered as a check, so the next launch tries again; a
- * rate-limited one is (so we stop asking for the day). Never throws: offline must be invisible.
+ * Ask the site (and only if that fails, GitHub) if it is time to, remember the answer, and return what to show
+ * (null = nothing). Throttled to once per 24 h. An offline or failed ask is not remembered as a check, so the
+ * next launch tries again; a rate-limited one is (so we stop asking for the day). Never throws: offline must
+ * be invisible.
  */
 export async function checkForUpdate(d: CheckDeps): Promise<UpdateNotice | null> {
   try {
     let s = await d.load()
     if (isDue(s, d.now())) {
-      const r = await askGitHub(d.fetch, d.version)
+      let source = 'getreelstudio.com'
+      let r = await askSite(d.fetch, d.version)
+      if (r.kind !== 'ok') {
+        d.log(`[update] site unreachable (${r.kind === 'failed' ? r.why : r.kind}): asking GitHub`)
+        source = 'GitHub'
+        r = await askGitHub(d.fetch, d.version)
+      }
       // The person may have switched checks off while the request was out.
       if (!(await d.load()).checkUpdates) return null
       if (r.kind === 'ok') {
         await d.save({ updateCheckedAt: d.now(), updateLatest: r.latest })
-        d.log(`[update] checked: newest ${r.latest?.version ?? 'none'}, running ${d.version}`)
+        d.log(`[update] checked (${source}): newest ${r.latest?.version ?? 'none'}, running ${d.version}`)
       } else if (r.kind === 'rate-limited') {
         await d.save({ updateCheckedAt: d.now() })
         d.log('[update] GitHub rate limit: trying again tomorrow')
@@ -247,7 +293,7 @@ export function createUpdateService(d: ServiceDeps) {
       }
       return status()
     },
-    /** Never trusts the renderer: anything but one of our release pages is refused. */
+    /** Never trusts the renderer: anything but the site or one of our release pages is refused. */
     async open(url: unknown) {
       const ok = allowedReleaseUrl(url)
       if (!ok) {
@@ -261,7 +307,7 @@ export function createUpdateService(d: ServiceDeps) {
       await d.save({ updateDismissed: { version, at: d.now() } })
       pushed = null // so tomorrow's check (app left open) can show it again
     },
-    /** First check a little after launch, then a look every hour (the 24 h throttle decides if GitHub is asked). */
+    /** First check a little after launch, then a look every hour (the 24 h throttle decides if anyone is asked). */
     start(firstDelayMs = FIRST_CHECK_DELAY_MS, everyMs = 60 * 60 * 1000) {
       if (!d.active) return
       first = setTimeout(() => void run(), firstDelayMs)
