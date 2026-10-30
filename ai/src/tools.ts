@@ -676,7 +676,8 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   while (fs.existsSync(path.join(dir, `anim-${template}-${n}.mov`)) || fs.existsSync(path.join(dir, `anim-${template}-${n}.webm`))) n++;
   const out = path.join(dir, `anim-${template}-${n}.mov`);      // qtrle .mov + .anim.json sidecar
   ctx.emit({ type: 'status', message: 'Making an animation' });
-  const written = await ctx.host.renderAnimation(template, params, out);
+  const project = await loadProject(ctx.projectDir);
+  const written = await ctx.host.renderAnimation(template, params, out, project.format.fps);
   const abs = written && path.isAbsolute(written) ? written : out;
   // project.json only holds paths inside the project: never an absolute one
   let asset: string;

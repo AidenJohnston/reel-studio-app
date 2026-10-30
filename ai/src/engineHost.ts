@@ -33,8 +33,8 @@ export class PythonEngineHost implements EngineHost {
   constructor(private readonly o: PythonEngineHostOptions = {}) {}
   reelStudioRoot(): string { return this.o.root ?? defaultRoot(); }
 
-  async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
-    if (this.o.renderAnimation) return this.o.renderAnimation(template, params, outPath);
+  async renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string> {
+    if (this.o.renderAnimation) return this.o.renderAnimation(template, params, outPath, fps);
     throw { code: 'NO_ANIMATION_RENDERER', userMessage: 'Animations are only available in the app. Use a text card instead.' };
   }
 
