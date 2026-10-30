@@ -17,8 +17,8 @@ through files and pipes). It does not link against them, so the GPL applies to t
 Reel Studio's own code. The two programs are GPL v3 because they include x264 (GPL-2.0-or-later) and are built
 with `--enable-gpl --enable-version3`.
 
-**We build them ourselves**, on both platforms, from pinned source tarballs with a script in this repository
-(`packaging/ffmpeg/build.sh`; every source's version, URL and SHA-256 is in `packaging/ffmpeg/sources.txt`). They are
+**We build them ourselves**, on both platforms, from pinned source tarballs with our build script (`build.sh`; every source's version, URL and SHA-256 is in
+`sources.txt`; both are published in `reel-studio-ffmpeg-recipe-rs2.tar.gz` next to the source, see below). They are
 minimal on purpose: only what the engine needs. This replaces the third-party builds used until 2026-10-17 (gyan.dev on
 Windows, martin-riedl.de on macOS), whose library versions or build script were not fully public.
 
@@ -84,8 +84,9 @@ requirements". Our offer:
    FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **They stay online as long as any installer
    that bundles these binaries is downloadable; a new FFmpeg build gets its own source folder first.** The download
    pages link to it.
-2. **Anyone can rebuild the binaries**: one command on each platform (`bash packaging/ffmpeg/build.sh <workdir>`, in an
-   MSYS2 UCRT64 shell on Windows or a normal terminal on Apple silicon; the setup is in `packaging/ffmpeg/README.md`).
+2. **Anyone can rebuild the binaries**: unpack `reel-studio-ffmpeg-recipe-rs2.tar.gz` and run one command on each
+   platform (`bash build.sh <workdir>`, in an MSYS2 UCRT64 shell on Windows or a normal terminal on Apple silicon; the
+   setup is in the archive's `README.md`).
    The script downloads each source, refuses any file whose SHA-256 differs from `sources.txt`, and compiles. The only
    inputs not in the mirror are the build tools (MSYS2's GCC, nasm, meson, ninja, pkgconf; Apple's clang; GNU
    m4/autoconf/automake/libtool and pkgconf on macOS, which `sources.txt` pins); they are not part of the binaries
