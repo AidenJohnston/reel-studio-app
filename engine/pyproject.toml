@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "reelengine"
 version = "0.1.2"
 description = "Deterministic media engine for Reel Studio: transcribe, cut, caption, render."
-license = { text = "MIT" }
+license = { text = "Proprietary" }
 requires-python = ">=3.11,<3.12"
 dependencies = [
   "numpy>=1.26",
