@@ -11,9 +11,11 @@ Proven on Windows x64 and macOS arm64 by `spike/`.
 | `mirror_gpl_sources.py` | Downloads the FFmpeg + library source we owe under the GPL/LGPL into `release/gpl-sources/`. Attach everything in it to the GitHub release (see THIRD_PARTY.md). |
 | `electron-builder.yml` | The config TEMPLATE (do not pass it to electron-builder directly). |
 | `make-config.js` | Fills the template's `${env.RS_*}` with absolute paths -> `.build/electron-builder.resolved.yml`. |
-| `after-pack.js` | electron-builder hook: pre-compiles Python bytecode inside the packed app before signing. |
-| `build-win.ps1` / `build-mac.sh` | One command each: fetch runtime, build the app JS, package. `-Spike` / `--spike` packages the spike instead of `app/`. |
+| `after-pack.js` | electron-builder hook: pre-compiles Python bytecode inside the packed app before signing; with `RS_WIN_SIGN=1` it then runs `sign-win-resources.ps1`. |
+| `build-win.ps1` / `build-mac.sh` | One command each: fetch runtime, build the app JS, package. `-Spike` / `--spike` packages the spike instead of `app/`. `build-win.ps1 -Sign` signs (see "Signing the Windows build"). |
 | `check-win-unpacked.ps1` | Fails if `release\win-unpacked\resources` holds a `.venv` (the README's engine dev venv). `build-win.ps1` runs it after packaging. |
+| `sign-win-resources.ps1` | Signs every `.exe`/`.dll`/`.pyd`/`.node` in `win-unpacked` that has no signature yet with Azure Artifact Signing, in one `Invoke-TrustedSigning` call; leaves validly signed files alone. |
+| `check-win-signatures.ps1` | Fails unless every PE file in `win-unpacked` and the installer verify (`Get-AuthenticodeSignature`) and the installer's CN matches `RS_AZURE_PUBLISHER`. Works on an installed copy too. |
 | `test-win-install.ps1` | Silent-installs a built installer into a folder with spaces, runs `--self-test`, prints every check, uninstalls. |
 | `sign-mac.sh` | Developer ID sign (inside-out) + notarize + staple + dmg. Run it in a GUI session. Guide: `docs/signing-mac.md`. |
 | `entitlements.main.plist` / `entitlements.inherit.plist` | Hardened-runtime entitlements: `allow-jit` only, for the Electron main process and its helper apps. Python, ffmpeg and every dylib are signed with none. |
@@ -35,6 +37,60 @@ packaging/sign-mac.sh             # run in a GUI session: sign + notarize + stap
 
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.
+
+## Signing the Windows build
+
+`build-win.ps1 -Sign` signs the installer, the uninstaller, the app `.exe` and every bundled `.exe`/`.dll`/`.pyd`/`.node`
+with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/) (formerly Trusted Signing). Without
+`-Sign` nothing changes: the build is unsigned, as before. None of the values below is in the repo; they come from the
+environment of the shell that runs the build.
+
+Once, on the build PC:
+
+1. In Azure: an Artifact Signing account, a completed identity validation, a *Public Trust* certificate profile, and an
+   app registration (service principal) with the *Artifact Signing Certificate Profile Signer* role on the account.
+2. The [TrustedSigning PowerShell module](https://www.powershellgallery.com/packages/TrustedSigning), 0.5.0 or newer:
+   `Install-Module -Name TrustedSigning -Scope CurrentUser`. Install it in the PowerShell electron-builder will use:
+   `pwsh.exe` if that is installed, otherwise Windows PowerShell (`powershell.exe`); each has its own module folder.
+   On first use the module downloads `signtool.exe` (Windows SDK build tools) and the Azure signing client itself.
+3. A .NET SDK (`dotnet --list-sdks` must list one; `winget install -e --id Microsoft.DotNet.SDK.8`): the module installs
+   its `sign` tool with `dotnet tool install`, an SDK command.
+
+Per build, in the environment (never on a command line that ends up in the repo, never committed):
+
+| Variable | What |
+|---|---|
+| `RS_AZURE_ENDPOINT` | The account's regional endpoint, for example `https://<region>.codesigning.azure.net` |
+| `RS_AZURE_ACCOUNT` | The Artifact Signing account name |
+| `RS_AZURE_PROFILE` | The certificate profile name |
+| `RS_AZURE_PUBLISHER` | The certificate's subject as Windows shows it, ideally the full DN (`CN=Example Publisher, O=Example Publisher, L=City, S=State, C=US`); the `CN=` value alone also works. electron-builder writes it into the app as `publisherName`, and electron-updater refuses an update installer whose certificate does not match it. |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | The service principal. Read by the TrustedSigning module (Azure `EnvironmentCredential`); the build scripts only check that they are set and never print them. |
+
+Then:
+
+```
+powershell -ExecutionPolicy Bypass -File packaging\build-win.ps1 -Sign      # or set RS_WIN_SIGN=1
+```
+
+What happens, in order:
+
+* `build-win.ps1` checks the variables, the module (for the shell electron-builder will use) and the .NET SDK before the
+  slow steps, and names what is missing (never a value).
+* `make-config.js` puts `win.azureSignOptions` (endpoint, account, profile, publisher) into the resolved config.
+* `after-pack.js` runs `sign-win-resources.ps1`: every PE file under `release\win-unpacked` with no signature (about
+  160, in `resources\python`, `resources\ffmpeg` and Electron's own DLLs) goes to ONE `Invoke-TrustedSigning` call
+  (SHA-256, timestamped at `http://timestamp.acs.microsoft.com`). Files already signed by Microsoft, the PSF, NVIDIA or
+  Intel are left alone; a file whose signature does not verify stops the build. Not `win.signExts`: electron-builder
+  signs extraResources one file at a time while copying them (a PowerShell + signtool process each) and re-signs the
+  already-signed ones.
+* electron-builder (26.15.3) signs `Reel Studio.exe`, the uninstaller and the installer through the same module. It
+  also runs `Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -Scope CurrentUser` on every signed build,
+  so the build PC needs access to the PowerShell Gallery.
+* `check-win-signatures.ps1` fails the build if the installer does not verify, its CN is not `RS_AZURE_PUBLISHER`, or any
+  PE file in the package is left unsigned. Run it by hand on an installed copy to check a release.
+
+About 170 signatures per build (the Basic tier allows 5,000 a month). A signed installer passes Smart App Control and
+shows the publisher's name in the SmartScreen box; the box itself disappears only once the certificate has reputation.
 
 ## What the installed app looks like (the contract with `app/`)
 

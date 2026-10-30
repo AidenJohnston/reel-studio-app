@@ -16,7 +16,7 @@ Double-click the file.
 
 Don't worry, this is normal, and it does not mean something is wrong with the file.
 
-Windows shows this box for any program from a small, new publisher that hasn't paid Microsoft for a "known publisher" stamp yet. Reel Studio is exactly that. You can still install it:
+Windows shows this box for any program from a small or new publisher until enough people have installed it without trouble, and it starts over with every new version. So you may see it even when the box names Reel Studio's publisher instead of "Unknown publisher". You can still install it:
 
 1. Click the small words **More info** (in the middle of the box, under the message).
 2. A new button appears at the bottom. Click **Run anyway**.

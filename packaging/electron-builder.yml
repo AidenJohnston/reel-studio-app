@@ -123,7 +123,11 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  # Unsigned for now. A real certificate removes the SmartScreen warning; see docs/install-windows.md.
+  # Unsigned unless RS_WIN_SIGN=1. Then make-config.js inserts `azureSignOptions` (Azure Artifact Signing, from the
+  # RS_AZURE_* variables) into this mapping and electron-builder signs the app .exe, the uninstaller and the installer
+  # with it; after-pack.js has signed every other unsigned .exe/.dll/.pyd/.node before that (packaging/README.md,
+  # "Signing the Windows build"). A signature puts the publisher's name in the SmartScreen box; the box itself only
+  # goes away once the certificate has built reputation (docs/install-windows.md).
 
 nsis:
   oneClick: true              # one click, no wizard pages
