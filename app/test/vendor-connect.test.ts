@@ -147,6 +147,20 @@ describe('installing the vendor app: the vendor\'s own script, as a FILE', () =>
     await expect(p).rejects.toMatchObject({ name: 'AbortError' })
     expect(calls[1].args).toContain(String(calls[0].child.pid))
   })
+
+  it('Cancel pressed after the download, before the installer starts: nothing runs', async () => {
+    const ctrl = new AbortController()
+    const { spawn, calls } = fakeSpawn()
+    const download = script()
+    const fetchThenCancel = async () => {
+      const res = await download()
+      ctrl.abort() // the download is done; Cancel lands while the script is being saved
+      return res
+    }
+    const p = runInstall({ vendor: 'claude', platform: 'win32', dir: tmp(), env: ENV, fetch: fetchThenCancel, spawn, signal: ctrl.signal })
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' })
+    expect(calls).toHaveLength(0)
+  })
 })
 
 // ---- the sign-in ----------------------------------------------------------------------------------------------------
