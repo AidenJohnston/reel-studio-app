@@ -222,6 +222,10 @@ a { color: inherit; }
 .leave { align-items: center; }
 .leave p { font-size: 14px; max-width: 460px; }
 .phone.working .phone-screen video.still { filter: saturate(.85); }
+/* Working: the phone shows paper, not a black screen, until the take's first frame is decoded; then it fades in. */
+.phone-screen.waiting { background: var(--soft); }
+.phone-screen > video.still { opacity: 0; transition: opacity .2s var(--ease); }
+.phone-screen > video.still.shown { opacity: 1; }
 .phone-scan { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,.16) 50%, transparent 100%); background-size: 100% 40%; background-repeat: no-repeat; animation: scan 3.2s ease-in-out infinite; pointer-events: none; }
 @keyframes scan { from { background-position: 0 -40%; } to { background-position: 0 140%; } }
 
@@ -373,10 +377,12 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 
 /* The engine's subtitle look, drawn over the phone (live preview) and in the swatches. */
 .sub-sample {
-  position: absolute; left: 50%; transform: translate(-50%, -50%); max-width: 88%; width: max-content; text-align: center;
-  font-family: 'Reel Subtitles', Montserrat, 'Segoe UI', sans-serif; font-weight: 600; line-height: 1.1; pointer-events: none;
-  white-space: normal; overflow-wrap: break-word; animation: fade .15s ease-out;
+  position: absolute; left: 50%; transform: translate(-50%, -50%); width: max-content; text-align: center;
+  font-family: 'Reel Subtitles', Montserrat, 'Segoe UI', sans-serif; font-weight: 600; pointer-events: none;
+  white-space: pre; animation: fade .15s ease-out;
 }
+/* SubtitleSample breaks the lines itself, the engine's way; the browser never wraps or splits a word. */
+.sub-sample span { display: block; }
 
 /* Instagram stand-in: faint, so you see what it would cover. */
 .ig { position: absolute; inset: 0; pointer-events: none; color: #fff; }

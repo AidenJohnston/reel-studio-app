@@ -9,6 +9,7 @@ import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinkin
 import { SendToPhone } from '../components/SendToPhone'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
+import { DevicePreview } from '../components/DevicePreview'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
@@ -307,21 +308,23 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
       <div className="reel">
         <div className="reel-left">
-          <PhonePlayer
-            key={changePreview ?? version?.video ?? 'none'}
-            src={changePreview ?? version?.video ?? null}
-            poster={version?.cover}
-            autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
-            subtitle={drawer === 'captions' && preview ? preview : null}
-            still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
-            stillMirrored={d.project.sources?.[0]?.mirror === true}
-            instagram={igOverlay}
-            caption={d.project.post?.caption}
-            original={d.sourceVideo}
-            holdingOriginal={holding}
-            onDuration={setDuration}
-            dragFile={version && !version.draft ? version.videoPath : null}
-          />
+          <DevicePreview instagram={igOverlay && !holding} caption={d.project.post?.caption}>
+            <PhonePlayer
+              key={changePreview ?? version?.video ?? 'none'}
+              src={changePreview ?? version?.video ?? null}
+              poster={version?.cover}
+              autoPlayMuted={!!changePreview || (fresh && version?.n === d.versions[d.versions.length - 1]?.n)}
+              subtitle={drawer === 'captions' && preview ? preview : null}
+              still={drawer === 'captions' && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
+              stillMirrored={d.project.sources?.[0]?.mirror === true}
+              instagram={igOverlay}
+              caption={d.project.post?.caption}
+              original={d.sourceVideo}
+              holdingOriginal={holding}
+              onDuration={setDuration}
+              dragFile={version && !version.draft ? version.videoPath : null}
+            />
+          </DevicePreview>
           {changePreview && (
             <p className="muted-sm center" data-testid="change-preview">Here's your change. I'm making the full-quality version.</p>
           )}
