@@ -25,24 +25,30 @@ for (const [a, n] of [
   ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
 ] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv4')
 for (const [a, n] of [
-  ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['100::', 64]
+  ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8], ['2001:db8::', 32], ['2001::', 32], ['2002::', 16], ['100::', 64],
+  ['64:ff9b:1::', 48]
 ] as [string, number][]) BLOCKED.addSubnet(a, n, 'ipv6')
 
-/** True for loopback, private, link-local, CGNAT, multicast, reserved and unspecified addresses. */
+/** The IPv4 address inside a NAT64 (64:ff9b::/96) address. BlockList already checks IPv4-mapped ones as IPv4. */
+function nat64IPv4(v6: string): string | null {
+  const [head, tail] = new URL(`http://[${v6}]/`).hostname.slice(1, -1).split('::')
+  const h = head ? head.split(':') : []
+  const t = tail ? tail.split(':') : []
+  const g = [...h, ...Array<string>(8 - h.length - t.length).fill('0'), ...t].map((x) => parseInt(x, 16))
+  const nat64 = g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)
+  return nat64 ? `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}` : null
+}
+
+/** True for loopback, private, link-local, CGNAT, multicast, reserved and unspecified addresses,
+ * and those IPv4 addresses written as IPv4-mapped or NAT64 IPv6. Local-use NAT64 (64:ff9b:1::/48)
+ * is refused whole: where its IPv4 address sits depends on the network's prefix length. */
 export function isBlockedAddress(ip: string): boolean {
   const bare = ip.replace(/^\[|\]$/g, '').split('%')[0]
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(bare) ?? /^64:ff9b::(\d+\.\d+\.\d+\.\d+)$/i.exec(bare)
-  if (mapped) return BLOCKED.check(mapped[1], 'ipv4')
   const fam = net.isIP(bare)
   if (fam === 4) return BLOCKED.check(bare, 'ipv4')
   if (fam === 6) {
-    const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(bare)
-    if (hex) {
-      const a = parseInt(hex[1], 16)
-      const b = parseInt(hex[2], 16)
-      return BLOCKED.check(`${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`, 'ipv4')
-    }
-    return BLOCKED.check(bare, 'ipv6')
+    const v4 = nat64IPv4(bare)
+    return v4 ? BLOCKED.check(v4, 'ipv4') : BLOCKED.check(bare, 'ipv6')
   }
   return true
 }

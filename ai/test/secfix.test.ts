@@ -3,6 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
+import * as http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import {
   createAI, executeTool, newToolState, loadProject, StyleStore, ToolContext, AgentEvent, transcriptPath, AIError, PythonEngineHost, SiwcAuth,
@@ -11,7 +13,7 @@ import {
 import { DATA_BOUNDARY } from '../src/editor';
 import { withCacheBreakpoint, toAnthropicMessages } from '../src/providers/anthropic';
 import { withEditLock } from '../src/index';
-import { childEnv, devSettingsDir, isBlockedAddress, safeResolve } from '../src/safety';
+import { childEnv, devSettingsDir, guardedFetch, isBlockedAddress, pinnedFetch, safeResolve } from '../src/safety';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir, tinyPng } from './helpers';
 
 const PUBLIC = async () => ['93.184.215.14'];
@@ -23,6 +25,16 @@ async function ctxFor(extra: Partial<ToolContext> = {}) {
   const events: AgentEvent[] = [];
   const ctx: ToolContext = { projectDir: dir, host, style: new StyleStore(() => root), emit: (e) => events.push(e), state: newToolState(), supportsImages: true, lookupImpl: PUBLIC, ...extra };
   return { ctx, host, dir, root };
+}
+
+async function localSite(): Promise<{ port: number; close: () => void }> {
+  const srv = http.createServer((q, r) => {
+    if (q.url === '/r') { r.writeHead(302, { location: '/a.png' }); r.end(); return; }
+    if (q.url === '/999') { r.writeHead(999); r.end(); return; }
+    r.writeHead(200, { 'content-type': 'image/png' }); r.end(tinyPng());
+  });
+  await new Promise<void>((ok) => srv.listen(0, '127.0.0.1', ok));
+  return { port: (srv.address() as AddressInfo).port, close: () => srv.close() };
 }
 
 const addBroll = (asset: string) => ({ anchor: { from: 'w29', to: 'w30' }, treatment: 'full-frame', asset, search: null, animation: null, params: nullP });
@@ -150,6 +162,37 @@ describe('finding 5: downloads are http(s) to public hosts, capped, timed, and r
     const r = await executeTool(ctx, 'fetch_image', { url: 'https://example.com/slow.png', name: null });
     expect(r.isError).toBe(true);
     expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it('a name that answers public for the check and loopback for the connection is not fetched', async () => {
+    const site = await localSite();
+    const answers = [['93.184.215.14']];
+    const rebinding = async () => answers.shift() ?? ['127.0.0.1'];
+    try {
+      await expect(guardedFetch(`http://localhost:${site.port}/a.png`, { lookup: rebinding, maxBytes: 1e6 })).rejects.toMatchObject({ code: 'BLOCKED_HOST' });
+    } finally { site.close(); }
+  });
+
+  it('the pinned download connects to the checked address and follows its redirect', async () => {
+    const site = await localSite();
+    const f = pinnedFetch(async () => ['127.0.0.1']);
+    try {
+      const got = await guardedFetch(`http://pics.example:${site.port}/r`, { lookup: PUBLIC, fetchImpl: f, maxBytes: 1e6 });
+      expect(got.url).toBe(`http://pics.example:${site.port}/a.png`);
+      expect(got.res.headers.get('content-type')).toBe('image/png');
+      expect(got.body.equals(tinyPng())).toBe(true);
+      await expect(guardedFetch(`http://pics.example:${site.port}/999`, { lookup: PUBLIC, fetchImpl: f, maxBytes: 1e6 })).rejects.toThrow('download failed with HTTP 999');
+    } finally { site.close(); }
+  });
+
+  it.each(['2002::1', '2002:0808:0808::1', '2001::1', '2001:0:808:808:0:0:f7f7:f7f7'])(
+    'refuses tunnel address %s even when its embedded IPv4 is public', (ip) => {
+      expect(isBlockedAddress(ip)).toBe(true);
+    });
+
+  it('NAT64 and IPv4-mapped spellings of private addresses are refused, NAT64 of a public one is not', () => {
+    for (const ip of ['64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '64:ff9b::127.0.0.1', '64:ff9b:1::a00:1', '::ffff:127.0.0.1', '::ffff:7f00:1']) expect(isBlockedAddress(ip), ip).toBe(true);
+    expect(isBlockedAddress('64:ff9b::808:808')).toBe(false);
   });
 
   it('bytes that are not an image are refused whatever the content-type says', async () => {
