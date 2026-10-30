@@ -46,11 +46,12 @@ this project. Credits: [docs/images/CREDITS.md](docs/images/CREDITS.md).
 
 ## Download and install
 
-Get the latest installer from the [Releases page](https://github.com/AidenJohnston/reel-studio-app/releases/latest).
+[Buy Reel Studio at getreelstudio.com](https://getreelstudio.com/): $99 once (perpetual license plus all 1.x
+updates) or $20 a month, cancel anytime. The download link for the installers is on the page right after
+payment, and the app tells you when a newer version is out. Buying funds development and gets you the signed
+builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
 
-The installers are free and the code is MIT. If Reel Studio saves you time, [buy it at getreelstudio.com](https://getreelstudio.com/):
-$99 once (perpetual license plus all 1.x updates) or $20 a month, cancel anytime. Buying funds development and
-gets you the signed builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
+The code is MIT, so anyone can [build it themselves](#build-from-source) for free.
 
 | System | File | Guide |
 |---|---|---|
@@ -117,10 +118,11 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-One request happens without you asking: at most once a day it asks GitHub's public releases list
-(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`) whether a newer version is out, sending only a
-generic `User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so;
-nothing is downloaded or installed. Turn it off in Settings with "Check for updates".
+One request happens without you asking: at most once a day it asks `dl.getreelstudio.com/latest.json` whether a
+newer version is out and, only if that fails, GitHub's public releases list
+(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only a generic
+`User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so; nothing
+is downloaded or installed. Turn it off in Settings with "Check for updates".
 
 ## Build from source
 

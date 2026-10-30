@@ -475,7 +475,7 @@ export interface ReelApi {
     status(): Promise<UpdateStatus>
     /** Settings > "Check for updates". Turning it on checks at once (still at most once a day). */
     setEnabled(on: boolean): Promise<UpdateStatus>
-    /** Open the release page in the browser. Main opens only our GitHub releases pages. */
+    /** Open the download page in the browser. Main opens only getreelstudio.com and our GitHub releases pages. */
     open(url: string): Promise<void>
     /** "Not now": hide it until a newer version comes out, or until tomorrow. */
     dismiss(version: string): Promise<void>
