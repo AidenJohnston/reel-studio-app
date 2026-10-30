@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppInfo } from '../../../shared/api'
-import { RELEASES_URL } from '../../../shared/config'
+import { UPDATE_PAGE_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { ConnectAI, DevProviders, ModelDownload, usingLine } from '../components/connect'
@@ -100,8 +100,8 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
           </>
         )}
         <div className="row" style={{ marginTop: 12 }}>
-          {/* Opens the releases page in the browser (window open handler). The automatic check is main/update-check.ts. */}
-          <a className="btn ghost" href={RELEASES_URL} target="_blank" rel="noreferrer">
+          {/* Opens the site's download page in the browser (window open handler). The automatic check is main/update-check.ts. */}
+          <a className="btn ghost" href={UPDATE_PAGE_URL} target="_blank" rel="noreferrer">
             <Icon name="external" size={16} /> Check for a newer version
           </a>
         </div>

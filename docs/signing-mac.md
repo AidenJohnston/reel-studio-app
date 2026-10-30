@@ -145,7 +145,5 @@ After the first successful notarized release, delete the **Open Anyway** section
 
 ## Windows
 
-Not signed yet. A code-signing certificate for Windows (an "OV" or "EV" certificate from a certificate
-authority, roughly $100 to $400 a year) removes the blue SmartScreen box (EV removes it immediately; OV
-after the app builds reputation). When you have one, electron-builder signs automatically if you set
-`CSC_LINK` (path to the `.pfx`) and `CSC_KEY_PASSWORD` before running `packaging/build-win.ps1`.
+The Windows build is signed with Azure Artifact Signing when built with `packaging/build-win.ps1 -Sign`. Setup and the
+environment it needs: [packaging/README.md](../packaging/README.md), "Signing the Windows build".

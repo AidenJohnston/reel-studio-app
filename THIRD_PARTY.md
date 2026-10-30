@@ -68,19 +68,21 @@ is opened only if that vendor's driver is on the machine (checked at run time; w
 
 #### FFmpeg corresponding source (GPL v3 section 6): the compliance statement
 
-We convey the FFmpeg and FFprobe binaries as a download (the GitHub release). GPL v3 section 6(d) lets us do that and
-keep the Corresponding Source on a server beside it, provided there are "clear directions next to the object code
+We convey the FFmpeg and FFprobe binaries inside the installers, which are downloaded from getreelstudio.com (from 0.1.3
+on; 0.1.0 to 0.1.2 were GitHub release assets). GPL v3 section 6(d) lets us do that and keep the Corresponding Source on
+a different server, provided there are "clear directions next to the object code
 saying where to find the Corresponding Source" and it stays available "as long as needed to satisfy these
 requirements". Our offer:
 
 1. **The Corresponding Source of the two programs, for both platforms, is exactly the set of files in the folder
-   `release/gpl-sources/`** that `python packaging/mirror_gpl_sources.py` produces, and that is attached to the same GitHub
-   release as the installers: the unmodified FFmpeg 7.1.1 source (`ffmpeg-7.1.1.tar.xz` with its signature), the source of
+   `release/gpl-sources/`** that `python packaging/mirror_gpl_sources.py` produces, and that is attached to the GitHub
+   release [`ffmpeg-7.1.1-rs2`](https://github.com/AidenJohnston/reel-studio-app/releases/tag/ffmpeg-7.1.1-rs2) (and to
+   the app releases v0.1.0 to v0.1.2): the unmodified FFmpeg 7.1.1 source (`ffmpeg-7.1.1.tar.xz` with its signature), the source of
    every library in the table above, and `reel-studio-ffmpeg-recipe-rs2.tar.gz`, which holds "the scripts used to control
    compilation and installation" (`build.sh`, `sources.txt` with every version, URL and SHA-256, `pack.py`, `README.md`).
-   FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **Whoever publishes a release attaches every
-   file in that folder to the release and keeps them there as long as the installers are downloadable.** The release notes
-   say where they are (`docs/RELEASE-NOTES-*.md`).
+   FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **They stay on that release as long as any
+   installer that bundles these binaries is downloadable; a release with a new FFmpeg build gets its own source release
+   first.** The download pages and every app release's notes link to it.
 2. **Anyone can rebuild the binaries**: one command on each platform (`bash packaging/ffmpeg/build.sh <workdir>`, in an
    MSYS2 UCRT64 shell on Windows or a normal terminal on Apple silicon; the setup is in `packaging/ffmpeg/README.md`).
    The script downloads each source, refuses any file whose SHA-256 differs from `sources.txt`, and compiles. The only
