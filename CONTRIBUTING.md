@@ -29,8 +29,7 @@ cd engine && python -m pytest tests
 python scripts/leak-check/check.py   # also runs on every pull request
 ```
 
-CI runs on Linux (Node checks, engine and animation tests). Run the tests on macOS and Windows yourself
-when your change touches platform-specific code.
+CI runs Node checks on Ubuntu, macOS, and Windows, plus engine and animation tests on Ubuntu.
 Electron e2e tests run locally with `npm run e2e`; CI does not run them.
 
 The leak check refuses private names, personal paths, e-mail addresses, media files and anything over 5 MB.
