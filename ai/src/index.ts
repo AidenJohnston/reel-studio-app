@@ -514,6 +514,10 @@ export function createAI(opts: CreateAIOptions) {
     async removeStyleRule(id: string) { return style.remove(id); },
     /** The user said Yes to a proposed rule (AgentResult.styleSuggestions). Returns the saved rule. */
     async addStyleRule(text: string) { return (await style.add(text)).rule; },
+    /** My style started over because its file was damaged; the damaged copy is kept next to it. */
+    async styleWasDamaged() { return style.wasDamaged(); },
+    /** My style: the user edited a rule's words, or paused or resumed it. */
+    async updateStyleRule(id: string, patch: { text?: string; paused?: boolean }) { return style.update(id, patch); },
   };
 }
 
