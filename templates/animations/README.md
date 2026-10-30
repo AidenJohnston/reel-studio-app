@@ -179,5 +179,5 @@ off the face in `top` (a card's soft shadow may touch the hairline).
 
 Fonts are in `templates/fonts/` (Inter, Fraunces, Montserrat, JetBrains Mono; SIL OFL 1.1, see
 `OFL.txt`). No library is vendored: the easing is ~10 lines in `_lib/runtime.js`. GSAP was not used
-because its current license is not an OSI license and restricts some competing tools, which does not
-sit well inside an MIT app.
+because its current license is not an OSI license and restricts some competing tools; a 10-line easing
+needs no extra license terms.
