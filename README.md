@@ -6,8 +6,8 @@ puts your own music under your voice, adds b-roll and a cover, and writes the po
 notes in plain English ("music too loud at the start") and get a new version. Paste, drop or attach a picture,
 GIF or short clip to a note ("put this over my face when I say 'the ick'") and it goes on those words.
 
-It is a free, open source desktop app for **macOS (Apple silicon)** and **Windows 10/11 (64-bit)**.
-No accounts, no telemetry, no subscription.
+It is an open source desktop app for **macOS (Apple silicon)** and **Windows 10/11 (64-bit)**.
+No account, no telemetry: your videos stay on your computer.
 
 <p align="center">
   <img src="docs/images/reel.png" alt="The Reel screen: a finished reel in a phone preview, a list of what Reel Studio did, and a box for notes" width="760">

@@ -49,9 +49,10 @@ Reel Studio downloads its speech helper once (this is how it "listens" to your v
 
 Reel Studio does not update itself yet, but it tells you when a new version is out: a small note at the bottom left says
 **Reel Studio 0.1.1 is out.** (with the new number) and **Download** opens the download page in your browser. You can also open
-**Settings** and click **Check for a newer version** any time. When a new version is out, download the new **Reel-Studio-...-arm64.dmg** from the
-same page you got the first one from (the version number is in the file name), drag the new **Reel Studio** onto
-**Applications** and choose **Replace**. Your videos, music and settings are untouched. Only download it from that page.
+**Settings** and click **Check for a newer version** any time. Both open [getreelstudio.com/update.html](https://getreelstudio.com/update.html):
+in the browser you bought with it shows **Download now** straight away; anywhere else, enter the email you paid with and it
+sends you a fresh link. Open the new **Reel-Studio-...-arm64.dmg**, drag the new **Reel Studio** onto **Applications** and
+choose **Replace**. Your videos, music and settings are untouched. Only download it from that page or from your download email.
 
 ## Removing it
 
@@ -62,6 +63,6 @@ Drag **Reel Studio** from **Applications** to the Trash. Your **Documents > Reel
 | What you see | What to do |
 |---|---|
 | "Open Anyway" isn't in Privacy & Security | You need to try opening the app once first (step 3). The button shows up for about an hour after that. |
-| "Reel Studio is damaged and can't be opened" | This is the same Mac safety check, worded more harshly, and **downloading the file again does not help** (your Mac marks every download the same way). It happens when the app was copied out of the disk image in a way that broke its seal, or with a 0.1.0 build whose seal was damaged. First make sure you dragged the app out of the **.dmg** you downloaded (do not unzip it or copy it from another Mac). Then, only on version 0.1.0, open **Terminal** (Spotlight: type Terminal) and paste exactly this line, press Return, and open the app again: `xattr -dr com.apple.quarantine "/Applications/Reel Studio.app"`. A notarized release never shows this message; if one does, the download is damaged, so download it again from the release page. |
+| "Reel Studio is damaged and can't be opened" | This is the same Mac safety check, worded more harshly, and **downloading the file again does not help** (your Mac marks every download the same way). It happens when the app was copied out of the disk image in a way that broke its seal, or with a 0.1.0 build whose seal was damaged. First make sure you dragged the app out of the **.dmg** you downloaded (do not unzip it or copy it from another Mac). Then, only on version 0.1.0, open **Terminal** (Spotlight: type Terminal) and paste exactly this line, press Return, and open the app again: `xattr -dr com.apple.quarantine "/Applications/Reel Studio.app"`. A notarized release never shows this message; if one does, the download is damaged, so download it again from your download link. |
 | "Not enough disk space" | Free up 2 GB, then try again. |
 | The first-time download stops | Check your internet, quit Reel Studio (Command-Q), and open it again. It carries on where it stopped. |
