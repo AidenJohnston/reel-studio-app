@@ -364,9 +364,9 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .toggle { display: flex; gap: 12px; align-items: center; cursor: pointer; font-weight: 600; min-height: 32px; }
 .slider { width: 100%; max-width: 420px; }
 .cover-img { width: 180px; border-radius: 12px; display: block; background: var(--soft); aspect-ratio: 9/16; object-fit: cover; }
-.swatches { display: flex; gap: 12px; flex-wrap: wrap; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
 .swatch { border: 0; background: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font: inherit; font-weight: 600; font-size: 14.5px; color: var(--ink-2); border-radius: 12px; }
-.swatch-frame { width: 92px; aspect-ratio: 3/4; border-radius: 12px; background: linear-gradient(170deg, #8a8178, #4a433d 70%); position: relative; overflow: hidden; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s; }
+.swatch-frame { width: 74px; aspect-ratio: 3/4; border-radius: 12px; background: linear-gradient(170deg, #8a8178, #4a433d 70%); position: relative; overflow: hidden; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .12s; }
 .swatch:hover .swatch-frame { outline-color: var(--line-2); }
 .swatch.on .swatch-frame { outline-color: var(--ink); }
 .swatch.on { color: var(--ink); }
@@ -375,8 +375,15 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .sub-sample {
   position: absolute; left: 50%; transform: translate(-50%, -50%); max-width: 88%; width: max-content; text-align: center;
   font-family: 'Reel Subtitles', Montserrat, 'Segoe UI', sans-serif; font-weight: 600; line-height: 1.1; pointer-events: none;
-  white-space: normal; overflow-wrap: break-word; animation: fade .15s ease-out;
+  white-space: nowrap; animation: fade .15s ease-out;
 }
+/* SubtitleSample breaks the lines itself, the engine's way; the browser never wraps or splits a word. */
+.sub-sample > span { display: block; }
+/* captions.POP_IN: from 80% to full size in 120 ms, decelerating */
+@media (prefers-reduced-motion: no-preference) {
+  .sub-sample.pop { animation: fade .15s ease-out, sub-pop .12s cubic-bezier(.25, .75, .5, 1); }
+}
+@keyframes sub-pop { from { scale: .8; } }
 
 /* Instagram stand-in: faint, so you see what it would cover. */
 .ig { position: absolute; inset: 0; pointer-events: none; color: #fff; }

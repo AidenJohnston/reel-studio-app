@@ -128,7 +128,7 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('drawer-undo')).toHaveCount(0)
   expect((await firstWord.getAttribute('class'))!.includes('cut')).toBe(wasCut)
   await page.getByTestId('tab-captions').click()
-  await page.getByTestId('cap-look-box').click()
+  await page.getByTestId('cap-look-boxed').click()
   await expect(page.getByTestId('sub-preview')).toBeVisible()
   await shot(page, 'd-06-drawer-subtitles-box')
   await page.keyboard.press('Escape')
