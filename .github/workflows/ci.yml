@@ -69,7 +69,7 @@ jobs:
         run: |
           uv venv --python 3.11 engine/.venv
           # CI encodes HEIC samples; the packaged app keeps decode-only pi-heif.
-          uv pip install --python engine/.venv -c engine/requirements.txt -r packaging/requirements-extra.txt -e 'engine[dev]' 'pytest<10' pillow-heif
+          uv pip install --python engine/.venv -c engine/requirements.txt -r packaging/requirements-extra.txt -e 'engine[dev,reference]' 'pytest<10' pillow-heif
       - name: Verify FFmpeg capabilities
         shell: bash
         run: |
