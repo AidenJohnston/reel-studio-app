@@ -58,6 +58,7 @@ import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
+import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -180,6 +181,35 @@ const updates = createUpdateService({
   log,
   openExternal: (url) => shell.openExternal(url),
   send: (n) => broadcast('update:change', n)
+})
+// The buyer's download key for automatic updates (main/update-key.ts). It arrives as a reelstudio://updates?key=…
+// link (open-url on macOS, the command line on Windows) or pasted in Settings. Links that come before the app
+// is ready wait for it.
+const updateKey = createUpdateKeyService({ load: loadSettings, save: saveSettings, log, send: (s) => broadcast('updateKey:change', s) })
+let ready = false
+const waitingKeyLinks: string[] = []
+function acceptKeyLink(url: string): void {
+  if (!ready) {
+    waitingKeyLinks.push(url)
+    return
+  }
+  void updateKey
+    .fromLink(url)
+    .then((s) => {
+      if (!s?.on || !win) return
+      if (win.isMinimized()) win.restore()
+      win.focus()
+      void dialog.showMessageBox(win, {
+        type: 'info',
+        message: 'Automatic updates are on',
+        detail: 'When a new version comes out, Reel Studio downloads it and asks before installing it. You can turn this off in Settings > About.'
+      })
+    })
+    .catch((e) => log(`[updates] key link: ${String(e)}`))
+}
+app.on('open-url', (e, url) => {
+  e.preventDefault()
+  acceptKeyLink(url)
 })
 
 // ---- helpers ------------------------------------------------------------------------------------
@@ -640,6 +670,14 @@ function registerIpc(): void {
   handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))
   handle('update:open', (_e, url: unknown) => updates.open(url))
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
+  handle('updateKey:status', () => updateKey.status())
+  // Read here, not in the page: the page never needs the key, and main already has the clipboard.
+  handle('updateKey:paste', async () => {
+    const s = await updateKey.fromText(clipboard.readText())
+    if (!s) throw { code: 'NO_KEY', userMessage: 'That is not a Reel Studio download link. Copy the link from your receipt email, then click Paste again.' }
+    return s
+  })
+  handle('updateKey:clear', () => updateKey.clear())
 
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
@@ -711,7 +749,10 @@ function createWindow(): void {
 
 const gotLock = TEST || app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
-app.on('second-instance', () => {
+app.on('second-instance', (_e, argv) => {
+  // Windows: a reelstudio:// link opened while the app runs arrives as the new instance's command line.
+  const link = argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
+  if (link) acceptKeyLink(link)
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()
@@ -760,6 +801,12 @@ app.whenReady().then(async () => {
   registerIpc()
   createWindow()
   updates.start() // a few seconds after the window, so launch is never slower
+  // reelstudio:// links open this app (Windows writes it per user; macOS also reads Info.plist). Not in dev or tests,
+  // which would point the scheme at a bare Electron.
+  if (app.isPackaged && !TEST && !app.isDefaultProtocolClient(PROTOCOL) && !app.setAsDefaultProtocolClient(PROTOCOL)) log('[updates] could not register reelstudio:// links')
+  ready = true
+  const firstLink = process.argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
+  for (const url of [...waitingKeyLinks.splice(0), ...(firstLink ? [firstLink] : [])]) acceptKeyLink(url)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

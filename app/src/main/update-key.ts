@@ -1,0 +1,154 @@
+// The buyer's download key, which turns on automatic updates. The updater (not in this file) sends it to
+// dl.getreelstudio.com/u/ as `Authorization: Bearer <key>` with each update download, so the server can check the
+// purchase is still active. It is sent nowhere else, and never with the daily "is there a newer version" check
+// (main/update-check.ts), which stays anonymous.
+//
+// How the key gets here, with no typing:
+//   1. The receipt email / thanks page links getreelstudio.com/updates.html#key=…, whose button opens
+//      `reelstudio://updates?key=…`. The OS hands that link to the app: `open-url` on macOS, the command line
+//      (first launch) or `second-instance` (already running) on Windows.
+//   2. Settings > About > "Paste my download link": any link from the receipt email, or the page's link.
+//
+// The key is a signed token (`v1.<claims>.<signature>`): the Stripe checkout id, the plan and an expiry, no
+// name or email. Its claims are readable without the server's secret, which is how Settings can say "monthly".
+// This file never imports electron: index.ts wires it to the settings store, and tests drive it with fakes.
+import type { UpdateKeyStatus } from '../shared/api'
+
+export const PROTOCOL = 'reelstudio'
+/** The only `reelstudio://` link the app acts on. */
+export const UPDATES_HOST = 'updates'
+export const KEY_RE = /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+const MAX_KEY = 512
+const MAX_INPUT = 4096
+
+export interface UpdateKeyState {
+  /** The download key, or null (automatic updates off). */
+  updateKey: string | null
+}
+
+export const UPDATE_KEY_DEFAULTS: UpdateKeyState = { updateKey: null }
+
+
+function validKey(k: unknown): k is string {
+  return typeof k === 'string' && k.length <= MAX_KEY && KEY_RE.test(k)
+}
+
+/** The key from a `reelstudio://updates?key=…` link, or null for anything else (another host, path, scheme). */
+export function keyFromProtocolUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > MAX_INPUT) return null
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return null
+  }
+  if (u.protocol !== `${PROTOCOL}:` || u.hostname !== UPDATES_HOST) return null
+  if (u.pathname !== '' && u.pathname !== '/') return null
+  const k = u.searchParams.get('key')
+  return validKey(k) ? k : null
+}
+
+/** Windows passes the link on the command line: the first argument that is one, if any. */
+export function keyFromArgv(argv: readonly string[]): string | null {
+  for (const a of argv) {
+    if (typeof a === 'string' && a.toLowerCase().startsWith(`${PROTOCOL}:`)) {
+      const k = keyFromProtocolUrl(a)
+      if (k) return k
+    }
+  }
+  return null
+}
+
+/** Whatever the person pasted: the bare key, the `reelstudio://` link, the updates page link
+ * (`…/updates.html#key=…`), a download link from the receipt email (`…/d/<key>/<file>`), or an update-page
+ * link with `?token=…`. Only links on getreelstudio.com and its subdomains count. */
+export function keyFromText(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.trim()
+  if (!text || text.length > MAX_INPUT) return null
+  if (validKey(text)) return text
+  const viaProtocol = keyFromProtocolUrl(text)
+  if (viaProtocol) return viaProtocol
+  let u: URL
+  try {
+    u = new URL(text)
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'https:' || !(u.hostname === 'getreelstudio.com' || u.hostname.endsWith('.getreelstudio.com'))) return null
+  const fromHash = /(?:^#|&)key=([^&]+)/.exec(u.hash)
+  if (fromHash) {
+    const k = decodeURIComponent(fromHash[1])
+    if (validKey(k)) return k
+  }
+  const fromQuery = u.searchParams.get('token') ?? u.searchParams.get('key')
+  if (validKey(fromQuery)) return fromQuery
+  const fromPath = /^\/d\/([^/]+)\//.exec(u.pathname)
+  if (fromPath && validKey(fromPath[1])) return fromPath[1]
+  return null
+}
+
+/** The plan named inside the key (readable without the server's secret; the server checks the signature). */
+export function planOf(key: string | null): 'monthly' | 'once' | null {
+  if (!validKey(key)) return null
+  try {
+    const body = key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(Buffer.from(body, 'base64').toString('utf8')) as { p?: unknown }
+    return claims.p === 'monthly' || claims.p === 'once' ? claims.p : null
+  } catch {
+    return null
+  }
+}
+
+export interface UpdateKeyDeps {
+  load(): Promise<UpdateKeyState>
+  save(patch: Partial<UpdateKeyState>): Promise<unknown>
+  log(line: string): void
+  /** Tell the page (Settings) the status changed. */
+  send(s: UpdateKeyStatus): void
+}
+
+export function createUpdateKeyService(d: UpdateKeyDeps) {
+  const status = (key: string | null): UpdateKeyStatus => ({ on: validKey(key), plan: planOf(key) })
+  async function store(key: string, from: string): Promise<UpdateKeyStatus> {
+    await d.save({ updateKey: key })
+    const s = status(key)
+    d.log(`[updates] automatic updates turned on (key from ${from}, plan ${s.plan ?? '?'})`) // never the key
+    d.send(s)
+    return s
+  }
+  return {
+    /** For the updater: the key to send to dl.getreelstudio.com/u/, or null. */
+    async get(): Promise<string | null> {
+      const k = (await d.load()).updateKey
+      return validKey(k) ? k : null
+    },
+    async status(): Promise<UpdateKeyStatus> {
+      return status((await d.load()).updateKey)
+    },
+    /** A `reelstudio://` link from the OS. null when it is not ours or carries no valid key (then nothing changes). */
+    async fromLink(url: unknown): Promise<UpdateKeyStatus | null> {
+      const k = keyFromProtocolUrl(url)
+      if (!k) {
+        if (typeof url === 'string') d.log('[updates] ignored a reelstudio:// link that carries no valid key')
+        return null
+      }
+      return store(k, 'link')
+    },
+    /** Settings > "Paste my download link". null when the text holds no key. */
+    async fromText(text: unknown): Promise<UpdateKeyStatus | null> {
+      const k = keyFromText(text)
+      return k ? store(k, 'paste') : null
+    },
+    /** Settings > "Turn off", or the updater after the server said the key is not ours (401). */
+    async clear(): Promise<UpdateKeyStatus> {
+      await d.save({ updateKey: null })
+      d.log('[updates] automatic updates turned off (key removed)')
+      const s = status(null)
+      d.send(s)
+      return s
+    }
+  }
+}
+
+export type UpdateKeyService = ReturnType<typeof createUpdateKeyService>

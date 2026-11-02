@@ -482,6 +482,21 @@ export interface ReelApi {
     /** A notice to show, or null to hide it (checks switched off). */
     onChange(cb: (n: UpdateNotice | null) => void): () => void
   }
+  /** Automatic updates: the buyer's download key (main/update-key.ts). The page never sees the key itself. */
+  updateKey: {
+    status(): Promise<UpdateKeyStatus>
+    /** Settings > "Paste my download link": main reads the clipboard. Rejects with NO_KEY if it holds no key. */
+    paste(): Promise<UpdateKeyStatus>
+    /** Settings > "Turn off". */
+    clear(): Promise<UpdateKeyStatus>
+    onChange(cb: (s: UpdateKeyStatus) => void): () => void
+  }
+}
+
+/** Automatic updates on or off, and the plan the key names. */
+export interface UpdateKeyStatus {
+  on: boolean
+  plan: 'monthly' | 'once' | null
 }
 
 /** A newer Reel Studio is out. `url` is its download page on getreelstudio.com. */

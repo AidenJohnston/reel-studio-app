@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppInfo } from '../../../shared/api'
+import type { AppInfo, UpdateKeyStatus } from '../../../shared/api'
 import { UPDATE_PAGE_URL } from '../../../shared/config'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
@@ -17,6 +17,29 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
       .then((st) => setCheckUpdates(st.enabled))
       .catch(() => {})
   }, [])
+  const [autoUpdates, setAutoUpdates] = useState<UpdateKeyStatus | null>(null)
+  useEffect(() => {
+    reel.updateKey
+      .status()
+      .then(setAutoUpdates)
+      .catch(() => {})
+    return reel.updateKey.onChange(setAutoUpdates)
+  }, [])
+  const pasteKey = async () => {
+    try {
+      setAutoUpdates(await reel.updateKey.paste())
+      notify('Automatic updates are on.')
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    }
+  }
+  const clearKey = async () => {
+    try {
+      setAutoUpdates(await reel.updateKey.clear())
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    }
+  }
   const toggleUpdates = async (on: boolean) => {
     setCheckUpdates(on)
     try {
@@ -88,6 +111,30 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <p className="muted" style={{ marginTop: 6 }}>
           Reel Studio {info.version}. Open source (MIT). No accounts, no tracking.
         </p>
+        {autoUpdates !== null && (
+          <div style={{ marginTop: 12 }} data-testid="auto-updates">
+            <p style={{ margin: 0 }}>
+              <strong>Automatic updates:</strong>{' '}
+              {autoUpdates.on ? `on${autoUpdates.plan === 'monthly' ? ' (monthly plan)' : ''}` : 'off'}
+            </p>
+            <p className="muted-sm" style={{ margin: '2px 0 0' }}>
+              {autoUpdates.on
+                ? 'New versions download by themselves and Reel Studio asks before installing. Only those downloads carry your download key, so the server can check your purchase.'
+                : 'Turn them on with the link in your receipt email: copy it, then paste it here.'}
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              {autoUpdates.on ? (
+                <button className="btn ghost" onClick={() => void clearKey()} data-testid="auto-updates-off">
+                  Turn off
+                </button>
+              ) : (
+                <button className="btn ghost" onClick={() => void pasteKey()} data-testid="auto-updates-paste">
+                  Paste my download link
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {checkUpdates !== null && (
           <>
             <label className="toggle" style={{ marginTop: 12 }}>
