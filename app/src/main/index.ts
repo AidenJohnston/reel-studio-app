@@ -202,7 +202,7 @@ function acceptKeyLink(url: string): void {
       void dialog.showMessageBox(win, {
         type: 'info',
         message: 'Automatic updates are on',
-        detail: 'When a new version comes out, Reel Studio downloads it and asks before installing it. You can turn this off in Settings > About.'
+        detail: 'When a new version comes out, Reel Studio offers to update itself: say yes and it downloads the new version and installs it when you restart. You can turn this off in Settings > About.'
       })
     })
     .catch((e) => log(`[updates] key link: ${String(e)}`))

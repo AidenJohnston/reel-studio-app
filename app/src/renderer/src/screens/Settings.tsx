@@ -119,7 +119,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
             </p>
             <p className="muted-sm" style={{ margin: '2px 0 0' }}>
               {autoUpdates.on
-                ? 'New versions download by themselves and Reel Studio asks before installing. Only those downloads carry your download key, so the server can check your purchase.'
+                ? 'When a new version comes out, Reel Studio offers to update itself. Only that download carries your download key, so the server can check your purchase.'
                 : 'Turn them on with the link in your receipt email: copy it, then paste it here.'}
             </p>
             <div className="row" style={{ marginTop: 8 }}>
