@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, ROOT, SHOTS, dropFiles, launch, makeMedia, passFirstRun, shot } from './helpers'
+import { BASE, SHOTS, dropFiles, launch, makeMedia, passFirstRun, root, shot } from './helpers'
 
 test.beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true })
@@ -122,7 +122,7 @@ test('make a reel end to end', async () => {
   await page.getByTestId('export').click()
   await expect(page.getByText('Saved to your computer')).toBeVisible({ timeout: 120_000 })
   await shot(page, '13-export')
-  const exported = readdirSync(join(ROOT, 'Library', 'Exports'))
+  const exported = readdirSync(join(root(), 'Library', 'Exports'))
   expect(exported.some((f) => / - Version 2\.mp4$/.test(f))).toBe(true)
   await expect(page.getByTestId('export-name')).toContainText('- Version 2.mp4')
   expect(exported.some((f) => f.endsWith('caption.txt'))).toBe(true)
