@@ -1188,6 +1188,12 @@ const tools: ToolDef[] = [
       let text: string;
       try { text = cleanRuleText(args.rule); } catch { throw new ToolInputError('rule is empty'); }
       const existing = await ctx.style.find(text);
+      if (existing && existing.paused && noteAsksToRemember(ctx.userNote)) {
+        // The note asks again for a rule paused in My style: add() turns it back on. Not in styleRuleIds, because
+        // undoing this note must not delete a rule that was there before it.
+        const r = await ctx.style.add(text);
+        return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
+      }
       if (existing) return { content: { ok: true, alreadySaved: existing.text } };
       if (noteAsksToRemember(ctx.userNote)) {
         const r = await ctx.style.add(text);

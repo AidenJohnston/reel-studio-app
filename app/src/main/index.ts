@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
@@ -27,6 +28,7 @@ import {
   readProject,
   readWords,
   recoverInterrupted,
+  serialized,
   titleFromFile,
   uniqueSlug,
   updateAppState,
@@ -36,7 +38,7 @@ import {
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
 import { createLiveVideos } from './live-video'
-import { rememberQuestion, styleConsent } from './style-consent'
+import { answerStyleQuestion, rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
@@ -270,13 +272,17 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
 /** The editor's reply into the chat, then one "Remember this for next time?" per My style rule the AI
  * proposed or saved (a saved one is taken out again until the user says Yes): main/style-consent.ts. */
 async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: string): Promise<{ summary: string; version: number; quiet: true }> {
-  const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions)
+  const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions, r.styleProposal)
   if (c.undo.length) {
     const rules = await ai.styleRules().catch(() => [])
-    for (const rule of rules) if (c.undo.includes(rule.text)) await ai.removeStyleRule(rule.id).catch(() => undefined)
+    // a typed rule was saved with the person's Yes; only sentences the AI saved on its own are undone
+    for (const rule of rules) if (c.undo.includes(rule.text) && !rule.payload) await ai.removeStyleRule(rule.id).catch(() => undefined)
   }
   await addChat(slug, 'editor', c.summary, r.version)
   for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
+  if (r.styleProposal) {
+    await addChat(slug, 'editor', rememberQuestion(r.styleProposal.text), undefined, ['remember-yes', 'remember-no'], undefined, undefined, r.styleProposal)
+  }
   return { summary: c.summary, version: r.version, quiet: true }
 }
 
@@ -615,21 +621,35 @@ function registerIpc(): void {
 
   handle('style:rules', () => ai.styleRules())
   handle('style:remove', (_e, id: string) => ai.removeStyleRule(id))
-  // "Remember this for next time?" Yes saves the rule; either answer replaces the buttons with a plain reply.
-  handle('style:answer', async (_e, slug: string, messageId: string, yes: boolean) => {
-    const st = await readAppState(slug)
-    const m = st.chat.find((x) => x.id === messageId)
-    if (!m?.suggestion || !m.actions?.includes('remember-yes')) return
-    if (yes) {
-      if (!ai.addStyleRule) throw { code: 'NOT_READY', userMessage: 'I could not save that to My style. Try again later.' }
-      await ai.addStyleRule(m.suggestion)
-    }
-    await updateAppState(slug, (s) => {
-      const x = s.chat.find((y) => y.id === messageId)
-      if (x) delete x.actions
-    })
-    await addChat(slug, 'editor', yes ? "Saved. I'll do that in your next videos too. You can remove it in My style." : 'OK, only for this video.')
+  handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  handle('style:update', (_e, id: string, patch: { text?: unknown; paused?: unknown }) => {
+    if (!ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'I could not change that in My style. Try again later.' }
+    const text = typeof patch?.text === 'string' ? patch.text : undefined
+    if (text !== undefined && !text.trim()) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press Remove.' }
+    return ai.updateStyleRule(id, { text, paused: typeof patch?.paused === 'boolean' ? patch.paused : undefined })
   })
+  handle('style:answer', (_e, slug: string, messageId: string, yes: boolean) =>
+    answerStyleQuestion(
+      {
+        chat: async (s) => (await readAppState(s)).chat,
+        addStyleRule: ai.addStyleRule?.bind(ai),
+        approveStyleProposal: ai.approveStyleProposal?.bind(ai),
+        declineStyleProposal: ai.declineStyleProposal?.bind(ai),
+        // one write: a crash can never leave the question without its buttons and without the reply
+        settle: async (s, id, reply) => {
+          await updateAppState(s, (st) => {
+            const x = st.chat.find((y) => y.id === id)
+            if (x) delete x.actions
+            st.chat.push({ id: randomUUID(), from: 'editor', text: reply, at: new Date().toISOString() })
+          })
+        },
+        serialized
+      },
+      slug,
+      messageId,
+      !!yes
+    )
+  )
 
   handle('script:write', (_e, idea: string) => {
     if (!String(idea ?? '').trim()) throw { code: 'EMPTY', userMessage: 'Tell me your idea in a sentence or two first.' }
