@@ -29,6 +29,7 @@ export const RETRY_WAITS = [2, 4, 8, 16, 30]
 /** Give up (and offer Finish posting) after this long without a byte getting through. */
 export const GIVE_UP_MS = 5 * 60_000
 const PROGRESS_EVERY_MS = 250
+const PENDING_KEEP_MS = 3 * 24 * 3600_000
 /** How long Connect YouTube waits for the browser: the server's link lives 10 minutes. */
 const ATTEMPT_WAIT_MS = 10 * 60_000 + 30_000
 const ATTEMPT_OUTCOMES: ConnectOutcome[] = ['connected', 'denied', 'missing_permission', 'no_channel', 'failed', 'cancelled', 'expired']
@@ -428,9 +429,10 @@ export function createPostingService(d: PostingDeps) {
 
   // ---- posting --------------------------------------------------------------------------------------
 
+  /** The stopped posts still worth offering: the server gives up on an unfinished upload after 2 days. */
   const pendingList = async (): Promise<PendingEntry[]> => {
     const l = await d.loadPending().catch(() => [])
-    return Array.isArray(l) ? l.filter((e) => e && typeof e.uploadId === 'string') : []
+    return Array.isArray(l) ? l.filter((e) => e && typeof e.uploadId === 'string' && d.now() - Number(e.startedAt) < PENDING_KEEP_MS) : []
   }
   async function dropPending(uploadId: string): Promise<void> {
     const l = await pendingList()

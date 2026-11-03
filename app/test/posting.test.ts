@@ -495,6 +495,18 @@ describe('posting', () => {
     expect(t.pending).toHaveLength(1)
   })
 
+  it('a stopped post older than 3 days is not offered (the server has given up on it)', async () => {
+    const t = await ready()
+    t.fake.state.faults.push({ on: 'chunk', network: true, times: 1 })
+    t.fake.state.faults.push({ on: 'status', network: true, times: 100 })
+    await t.svc.post(req())
+    t.fake.state.faults.length = 0
+    t.advance(3 * 24 * 3600_000)
+    expect(await t.svc.pending('my-video', 2)).toBeNull()
+    await t.svc.post(req()) // the next post writes the list without it
+    expect(t.pending).toEqual([])
+  })
+
   it('Start over cancels the stopped post on the server and forgets it', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, times: 1 })
