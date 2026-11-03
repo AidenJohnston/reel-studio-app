@@ -2,8 +2,8 @@
 // (test/fake-posting.ts): the key is traded once and only on a click, a dropped connection carries on from what the
 // server really has, a stopped post can be finished later, and every server error becomes the plain words in
 // shared/posting.ts. Nothing secret ever reaches the log.
-import { describe, expect, it } from 'vitest'
-import { createPostingService, postingConfig, userErrorFor, GIVE_UP_MS, type PendingEntry, type PostingDeps, type StoredSession } from '../src/main/posting'
+import { describe, expect, it, vi } from 'vitest'
+import { createPostingService, isVideoLink, postingConfig, troubleOf, userErrorFor, GIVE_UP_MS, type PendingEntry, type PostingDeps, type StoredSession } from '../src/main/posting'
 import { POSTING_ERRORS, FIELD_ERRORS, PRICING_URL } from '../src/shared/posting'
 import type { PostingStatus, PostProgress, PostRequest } from '../src/shared/api'
 import { createFakePosting, type FakePosting } from './fake-posting'
@@ -87,6 +87,15 @@ async function ready(o: Parameters<typeof world>[0] = {}) {
   await t.svc.signIn()
   t.fake.state.connections.set('cs_test_1', { status: 'connected', channelName: 'My channel', channelUrl: 'https://www.youtube.com/@me' })
   return t
+}
+
+/** Puts `fn` between the app and the fake server: it sees every call and can answer instead, or change the answer. */
+function intercept(t: ReturnType<typeof world>, fn: (call: { method: string; path: string; length: number }, real: () => Promise<Response>) => Promise<Response>) {
+  const real = t.fake.fetch
+  t.deps.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const length = init?.body instanceof Uint8Array ? init.body.length : 0
+    return fn({ method: init?.method ?? 'GET', path: new URL(String(input)).pathname, length }, () => real(input, init))
+  }) as typeof fetch
 }
 
 const req = (extra: Partial<PostRequest> = {}): PostRequest => ({ video: VIDEO, slug: 'my-video', version: 2, title: 'How I got my first job', description: 'A short one.', privacy: 'private', madeForKids: false, ...extra })
@@ -432,6 +441,7 @@ describe('posting', () => {
     expect(t.sleeps).toEqual([2000, 4000])
     const retrying = t.progress.filter((x) => x.step === 'retrying')
     expect(retrying.map((x) => x.retryInSec)).toEqual([2, 4])
+    expect(retrying.map((x) => x.retryReason)).toEqual(['offline', 'offline'])
     // after the drop the next chunk starts at the server's count (UNIT), not at 0 or the app's own guess
     expect(t.fake.state.calls.filter((c) => c.startsWith('PUT')).map((c) => c.split(' ')[3].split('-')[0])).toEqual(['0', String(UNIT), String(2 * UNIT)])
   })
@@ -442,6 +452,8 @@ describe('posting', () => {
     t.fake.state.faults.push({ on: 'status', status: 502, body: { error: 'platform_error', retry: true }, times: 5 })
     expect((await t.svc.post(req())).step).toBe('done')
     expect(t.sleeps).toEqual([2000, 4000, 8000, 16000, 30000, 30000])
+    // the sheet says YouTube is busy, not that this computer's connection dropped
+    expect(new Set(t.progress.filter((x) => x.step === 'retrying').map((x) => x.retryReason))).toEqual(new Set(['youtube']))
   })
 
   it('after 5 minutes without progress it stops; Finish posting picks it up later', async () => {
@@ -630,6 +642,166 @@ describe('posting', () => {
   })
 })
 
+describe('posting: the server failing for a moment', () => {
+  it('a 500 on a chunk (a database blip) is tried again, not the end of the post', async () => {
+    const t = await ready()
+    t.fake.state.faults.push({ on: 'chunk', status: 500, body: { error: 'server_error' } })
+    const p = await t.svc.post(req())
+    expect(p.step).toBe('done')
+    expect(Buffer.from(uploaded(t).bytes).equals(Buffer.from(t.bytes))).toBe(true)
+    expect(t.progress.find((x) => x.step === 'retrying')?.retryReason).toBe('server')
+  })
+
+  it("an edge error page that isn't our JSON (522, then a cut-off GET) is tried again too", async () => {
+    const t = await ready()
+    let puts = 0
+    let gets = 0
+    intercept(t, async (c, real) => {
+      if (c.method === 'PUT' && ++puts === 2) return new Response('<html>522 Connection timed out</html>', { status: 522 })
+      if (c.method === 'GET' && c.path.startsWith('/v1/uploads/') && ++gets === 1) return new Response('{"status":', { status: 200 })
+      return real()
+    })
+    expect((await t.svc.post(req())).step).toBe('done')
+    expect(Buffer.from(uploaded(t).bytes).equals(Buffer.from(t.bytes))).toBe(true)
+  })
+
+  it('YouTube took the last chunk but the server answered 500: the GET finds the video, nothing is sent twice', async () => {
+    const t = await ready()
+    intercept(t, async (c, real) => {
+      const res = await real()
+      return c.method === 'PUT' && uploaded(t)?.status === 'done' ? new Response(JSON.stringify({ error: 'server_error' }), { status: 500 }) : res
+    })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'done', result: { videoId: 'dQw4w9WgXcQ' } })
+    expect(t.fake.state.calls.filter((c) => c.startsWith('POST /v1/uploads'))).toHaveLength(1)
+    expect(t.fake.state.calls.filter((c) => c.startsWith('PUT'))).toHaveLength(3)
+    expect(t.pending).toEqual([])
+  })
+
+  it('gave up while the server kept failing: SERVER, kept, and Finish posting can pick it up', async () => {
+    const t = await ready()
+    t.fake.state.faults.push({ on: 'chunk', status: 500, body: { error: 'server_error' } })
+    t.fake.state.faults.push({ on: 'status', status: 500, body: { error: 'server_error' }, times: 100 })
+    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: true, error: { code: 'SERVER', userMessage: POSTING_ERRORS.SERVER } })
+    expect(t.pending).toHaveLength(1)
+    t.fake.state.faults.length = 0
+    expect((await t.svc.resume(t.pending[0].uploadId)).step).toBe('done')
+  })
+
+  it('a final server error part way (not one to retry) still keeps the post for Finish posting', async () => {
+    const t = await ready()
+    t.fake.state.faults.push({ on: 'chunk', status: 400, body: { error: 'bad_request', field: 'content_range' } })
+    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: true, error: { code: 'SERVER' } })
+    expect(t.pending).toHaveLength(1)
+  })
+
+  it('troubleOf: what is safe to try again', () => {
+    expect(troubleOf(502, { error: 'platform_error', retry: true })).toBe('PLATFORM')
+    expect(troubleOf(502, { error: 'platform_error', retry: false })).toBeNull()
+    expect(troubleOf(500, { error: 'server_error' })).toBe('SERVER')
+    expect(troubleOf(503, { error: 'not_configured', what: 'db' })).toBeNull()
+    expect(troubleOf(522, null)).toBe('SERVER')
+    expect(troubleOf(200, null)).toBe('SERVER')
+    for (const [status, body] of [[409, { error: 'reconnect_needed' }], [410, { error: 'upload_expired' }], [429, { error: 'quota' }], [401, null], [403, null], [404, null]] as const)
+      expect(troubleOf(status, body), String(status)).toBeNull()
+  })
+})
+
+describe('posting on a slow connection', () => {
+  it('a chunk that runs out of time is sent in smaller pieces, so the post still gets through', async () => {
+    const MiB = 1024 * 1024
+    const t = await ready({ size: 3 * MiB + 1000, chunkSize: 4 * MiB })
+    // this uplink only gets 1 MiB through before the timeout
+    const lengths: number[] = []
+    intercept(t, async (c, real) => {
+      if (c.method === 'PUT') lengths.push(c.length)
+      if (c.method === 'PUT' && c.length > MiB) throw new DOMException('The operation timed out.', 'TimeoutError')
+      return real()
+    })
+    const p = await t.svc.post(req())
+    expect(p.step).toBe('done')
+    expect(Buffer.from(uploaded(t).bytes).equals(Buffer.from(t.bytes))).toBe(true)
+    expect(lengths.slice(0, 4)).toEqual([3 * MiB + 1000, 2 * MiB, MiB, MiB]) // halved twice, then each goes through
+    expect(t.logs.some((l) => l.includes('ran out of time'))).toBe(true)
+  })
+
+  it('a chunk is never made smaller than 256 KiB', async () => {
+    const t = await ready({ size: 600_000, chunkSize: UNIT })
+    const lengths: number[] = []
+    intercept(t, async (c, real) => {
+      if (c.method === 'PUT' && lengths.push(c.length) <= 2) throw new DOMException('The operation timed out.', 'TimeoutError')
+      return real()
+    })
+    expect((await t.svc.post(req())).step).toBe('done')
+    expect(lengths.slice(0, 3)).toEqual([UNIT, UNIT, UNIT])
+  })
+})
+
+describe('posting: the YouTube connection changed on the server', () => {
+  it('connect again needed (the weekly Testing expiry): the post fails RECONNECT and the pages hear it at once', async () => {
+    const t = await ready()
+    t.advance(31_000)
+    expect((await t.svc.status()).youtube?.state).toBe('connected') // cached for 30 seconds
+    t.fake.state.connections.set('cs_test_1', { status: 'reconnect', channelName: 'My channel', channelUrl: null })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'failed', error: { code: 'RECONNECT' } })
+    await vi.waitFor(() => expect(t.changes.at(-1)?.youtube?.state).toBe('reconnect'))
+    expect((await t.svc.status()).youtube?.state).toBe('reconnect') // not the cached "connected"
+  })
+
+  it('disconnected on another computer: NOT_CONNECTED, and the pages show no channel', async () => {
+    const t = await ready()
+    t.advance(31_000)
+    expect((await t.svc.status()).youtube?.state).toBe('connected')
+    t.fake.state.connections.clear()
+    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', error: { code: 'NOT_CONNECTED' } })
+    await vi.waitFor(() => expect(t.changes.at(-1)).toMatchObject({ signedIn: true, youtube: null }))
+  })
+
+  it('the upload was removed part way (its connection removed elsewhere): EXPIRED, not a server error, and the pages hear it', async () => {
+    const t = await ready()
+    t.advance(31_000)
+    expect((await t.svc.status()).youtube?.state).toBe('connected')
+    t.onChunk = (start) => {
+      if (start !== UNIT) return
+      t.fake.state.connections.clear()
+      t.fake.state.uploads.clear()
+    }
+    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: false, error: { code: 'EXPIRED', userMessage: POSTING_ERRORS.EXPIRED } })
+    expect(t.pending).toEqual([])
+    await vi.waitFor(() => expect(t.changes.at(-1)?.youtube).toBeNull())
+  })
+})
+
+describe('posting: the links after a post', () => {
+  it("are made from the video's id; the server's own url strings are never used", async () => {
+    const t = await ready()
+    intercept(t, async (_c, real) => {
+      const res = await real()
+      const b = (await res.json()) as any
+      if (b?.status === 'done') {
+        b.video.url = 'https://phish.example/watch'
+        b.video.studioUrl = 'https://www.youtube.com/redirect?q=https://phish.example'
+      }
+      return new Response(JSON.stringify(b), { status: res.status })
+    })
+    const p = await t.svc.post(req())
+    expect(p.result).toMatchObject({ videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', studioUrl: 'https://studio.youtube.com/video/dQw4w9WgXcQ/edit' })
+  })
+
+  it("a video id that isn't one: SERVER, and the post is not offered again", async () => {
+    const t = await ready()
+    intercept(t, async (_c, real) => {
+      const res = await real()
+      const b = (await res.json()) as any
+      if (b?.status === 'done') b.video.id = '../../evil?x='
+      return new Response(JSON.stringify(b), { status: res.status })
+    })
+    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: false, error: { code: 'SERVER' } })
+    expect(t.pending).toEqual([])
+  })
+})
+
 describe('userErrorFor: every server error has plain words', () => {
   const table: [number, unknown, string][] = [
     [400, { error: 'bad_request', field: 'title' }, 'BAD_FIELD'],
@@ -666,11 +838,30 @@ describe('userErrorFor: every server error has plain words', () => {
 })
 
 describe('openLink', () => {
-  it('opens only YouTube pages over https', async () => {
+  const ID = 'dQw4w9WgXcQ'
+  it("opens only a video's own YouTube pages over https", async () => {
     const t = world()
-    for (const u of ['https://studio.youtube.com/video/abc/edit', 'https://www.youtube.com/watch?v=abc', 'https://youtu.be/abc']) await t.svc.openLink(u)
-    for (const u of ['http://www.youtube.com/watch?v=abc', 'https://evil.example/', 'https://www.youtube.com.evil.example/', 'file:///etc/passwd', 'javascript:alert(1)']) await t.svc.openLink(u)
-    expect(t.opened).toEqual(['https://studio.youtube.com/video/abc/edit', 'https://www.youtube.com/watch?v=abc', 'https://youtu.be/abc'])
+    const good = [`https://studio.youtube.com/video/${ID}/edit`, `https://www.youtube.com/watch?v=${ID}`, `https://youtu.be/${ID}`]
+    for (const u of good) await t.svc.openLink(u)
+    for (const u of [
+      `http://www.youtube.com/watch?v=${ID}`,
+      'https://evil.example/',
+      'https://www.youtube.com.evil.example/',
+      'https://www.youtube.com/redirect?q=https://phish.example',
+      `https://www.youtube.com/watch?v=${ID}&redirect=https://phish.example`,
+      `https://studio.youtube.com/video/${ID}/edit?next=x`,
+      'https://studio.youtube.com/video/abc/edit',
+      'file:///etc/passwd',
+      'javascript:alert(1)'
+    ])
+      await t.svc.openLink(u)
+    expect(t.opened).toEqual(good)
+  })
+  it('isVideoLink', () => {
+    expect(isVideoLink(`https://youtu.be/${ID}`)).toBe(true)
+    expect(isVideoLink(`https://youtu.be/${ID}/x`)).toBe(false)
+    expect(isVideoLink(`https://www.youtube.com:8443/watch?v=${ID}`)).toBe(false)
+    expect(isVideoLink(null)).toBe(false)
   })
 })
 

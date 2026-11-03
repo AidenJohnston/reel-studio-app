@@ -22,6 +22,10 @@ const CHUNK_UNIT = 256 * 1024
 const DEFAULT_CHUNK = 8 * 1024 * 1024
 const MAX_CHUNK = 16 * 1024 * 1024
 const CHUNK_TIMEOUT_MS = 120_000
+/** A chunk gets at least the time it needs at this many bytes a second, so a slow uplink still gets through. */
+const SLOWEST_UPLINK = 32 * 1024
+/** Chunks in a row that go through before a chunk halved after a timeout grows again. */
+const GROW_AFTER = 4
 const CALL_TIMEOUT_MS = 30_000
 const ME_CACHE_MS = 30_000
 /** Waits between tries after a dropped connection, in seconds; the last one repeats. */
@@ -33,7 +37,8 @@ const PENDING_KEEP_MS = 3 * 24 * 3600_000
 /** How long Connect YouTube waits for the browser: the server's link lives 10 minutes. */
 const ATTEMPT_WAIT_MS = 10 * 60_000 + 30_000
 const ATTEMPT_OUTCOMES: ConnectOutcome[] = ['connected', 'denied', 'missing_permission', 'no_channel', 'failed', 'cancelled', 'expired']
-const YOUTUBE_LINK_HOSTS = ['www.youtube.com', 'studio.youtube.com', 'youtu.be']
+/** A YouTube video id, as the server checks it. */
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{6,32}$/
 
 /** This computer's sign-in, as stored (encrypted where the OS can: main/posting-ipc.ts). */
 export interface StoredSession {
@@ -133,8 +138,8 @@ const fail = (code: PostingErrorCode, field?: PostField): PostingError => {
 }
 const asUser = (e: PostingError): UserError => ({ code: e.code, userMessage: e.userMessage, ...(e.link ? { link: e.link } : {}) })
 
-/** What the server answered (any status), or `net` when it couldn't be reached. */
-type Answer = { net: false; status: number; body: any } | { net: true; aborted: boolean }
+/** What the server answered (any status), or `net` when it couldn't be reached (`timedOut`: it ran out of time). */
+type Answer = { net: false; status: number; body: any } | { net: true; aborted: boolean; timedOut: boolean }
 
 /** The posting server's error (section 2 of the contract) as the user error the app shows. */
 export function userErrorFor(status: number, body: any): PostingError {
@@ -183,15 +188,47 @@ function failedReason(reason: unknown): PostingError {
 
 const PRIVACIES: PostPrivacy[] = ['private', 'unlisted', 'public']
 
+/** The video's two links, made here from its id: the server's own url strings are never opened or copied. */
 function resultOf(video: any, asked: PostPrivacy): PostResult {
-  const id = String(video?.id ?? '')
+  const id = typeof video?.id === 'string' ? video.id : ''
+  if (!VIDEO_ID_RE.test(id)) throw fail('SERVER')
   return {
     videoId: id,
-    videoUrl: typeof video?.url === 'string' ? video.url : `https://www.youtube.com/watch?v=${id}`,
-    studioUrl: typeof video?.studioUrl === 'string' ? video.studioUrl : `https://studio.youtube.com/video/${id}/edit`,
+    videoUrl: `https://www.youtube.com/watch?v=${id}`,
+    studioUrl: `https://studio.youtube.com/video/${id}/edit`,
     privacy: PRIVACIES.includes(video?.privacy) ? video.privacy : asked,
     channelName: typeof video?.channelName === 'string' ? video.channelName : null
   }
+}
+
+/** The only links openLink opens: a video's watch page, short link or YouTube Studio page. */
+export function isVideoLink(raw: unknown): boolean {
+  let u: URL
+  try {
+    u = new URL(String(raw))
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port || u.hash) return false
+  const isId = (s: string | null | undefined): boolean => !!s && VIDEO_ID_RE.test(s)
+  if (u.hostname === 'www.youtube.com') return u.pathname === '/watch' && [...u.searchParams.keys()].join() === 'v' && isId(u.searchParams.get('v'))
+  if (u.search) return false
+  if (u.hostname === 'studio.youtube.com') return isId(/^\/video\/([^/]+)\/edit$/.exec(u.pathname)?.[1])
+  if (u.hostname === 'youtu.be') return isId(/^\/([^/]+)$/.exec(u.pathname)?.[1])
+  return false
+}
+
+/**
+ * A server answer mid-upload that is safe to try again, and whose trouble it is; null = a real error. Safe because
+ * the next step is a GET that re-reads how much YouTube has, so nothing is sent twice. That covers YouTube's own
+ * hiccups (502 retry), our server failing for a moment (a 500 from a database blip), and anything that isn't our
+ * JSON at all (an edge error page, a cut-off answer).
+ */
+export function troubleOf(status: number, body: any): 'PLATFORM' | 'SERVER' | null {
+  const error = typeof body?.error === 'string' ? body.error : null
+  if (error === 'platform_error') return body.retry === true ? 'PLATFORM' : null
+  if (error) return status >= 500 && error !== 'not_configured' ? 'SERVER' : null
+  return status === 401 || status === 403 || status === 404 ? null : 'SERVER'
 }
 
 const device = (p: NodeJS.Platform): 'Windows' | 'Mac' | 'Linux' => (p === 'win32' ? 'Windows' : p === 'darwin' ? 'Mac' : 'Linux')
@@ -245,8 +282,8 @@ export function createPostingService(d: PostingDeps) {
     let res: Response
     try {
       res = await d.fetch(`${d.baseUrl}${path}`, { method, headers, body: body as RequestInit['body'], signal, redirect: 'error' })
-    } catch {
-      return { net: true, aborted: !!o.signal?.aborted }
+    } catch (e) {
+      return { net: true, aborted: !!o.signal?.aborted, timedOut: timeout.aborted || (e as Error | null)?.name === 'TimeoutError' }
     }
     let parsed: any = null
     try {
@@ -266,24 +303,40 @@ export function createPostingService(d: PostingDeps) {
     void broadcast()
   }
 
-  /** A call with this computer's session; throws the user error for anything but 2xx. */
-  async function api(method: string, path: string, o: { json?: unknown; signal?: AbortSignal } = {}): Promise<any> {
+  /** A call with this computer's session; throws the user error for anything but 2xx. `upload`: an upload's own route. */
+  async function api(method: string, path: string, o: { json?: unknown; signal?: AbortSignal; upload?: boolean } = {}): Promise<any> {
     const s = await session()
     if (!s) throw fail(signedOutByServer ? 'SIGNED_OUT' : 'NOT_CONNECTED')
-    const a = await request(method, path, { ...o, auth: s.session })
+    const a = await request(method, path, { json: o.json, signal: o.signal, auth: s.session })
     if (a.net) throw fail('OFFLINE')
     if (a.status >= 200 && a.status < 300) return a.body ?? {}
-    throw await problem(a.status, a.body)
+    throw await problem(a.status, a.body, o.upload)
   }
 
-  /** The user error for a server answer, after its side effects (sign-in gone, subscription ended). */
-  async function problem(status: number, body: any): Promise<PostingError> {
-    const e = userErrorFor(status, body)
+  let refreshing = false
+  /** The YouTube connection changed on the server (connect again, removed, no channel): forget the cached /v1/me
+   * and tell the pages, so the Post sheet offers Connect YouTube instead of the form. */
+  function connectionChanged(): void {
+    me = null
+    if (refreshing) return // the refresh itself got the same answer
+    refreshing = true
+    void broadcast(true)
+      .catch(() => undefined)
+      .finally(() => (refreshing = false))
+  }
+
+  /** The user error for a server answer, after its side effects (sign-in gone, subscription ended, connection
+   * changed). `upload`: the answer is about one upload, so a 404 means it is gone (its connection was removed or
+   * replaced on another computer). */
+  async function problem(status: number, body: any, upload = false): Promise<PostingError> {
+    const gone = upload && status === 404
+    const e = gone ? fail('EXPIRED') : userErrorFor(status, body)
     if (e.code === 'SIGNED_OUT') await lostSession()
     if (e.code === 'ENDED' && !ended) {
       ended = true
       void broadcast()
     }
+    if (gone || e.code === 'RECONNECT' || e.code === 'NOT_CONNECTED' || e.code === 'NO_CHANNEL') connectionChanged()
     return e
   }
 
@@ -445,7 +498,7 @@ export function createPostingService(d: PostingDeps) {
 
   function emit(r: Running, step: PostStep, patch: Partial<PostProgress> = {}): PostProgress {
     const p: PostProgress = { uploadId: r.uploadId, slug: r.slug, version: r.version, step, sent: r.last.sent, total: r.last.total, ...patch }
-    const changed = p.step !== r.last.step || p.retryInSec !== r.last.retryInSec
+    const changed = p.step !== r.last.step || p.retryInSec !== r.last.retryInSec || p.retryReason !== r.last.retryReason
     r.last = p
     const t = d.now()
     if (changed || t - r.lastSentAt >= PROGRESS_EVERY_MS) {
@@ -456,14 +509,17 @@ export function createPostingService(d: PostingDeps) {
   }
 
   /** Sends the file from `start` until YouTube has all of it, riding out dropped connections. */
-  async function sendFrom(r: Running, entry: PendingEntry, start: number, chunk: number, asked: PostPrivacy): Promise<PostProgress> {
+  async function sendFrom(r: Running, entry: PendingEntry, start: number, fullChunk: number, asked: PostPrivacy): Promise<PostProgress> {
     const s = await session()
     if (!s) throw fail('SIGNED_OUT')
     const path = `/v1/uploads/${encodeURIComponent(entry.uploadId)}`
     let received = start
     let lastProgress = d.now()
     let tries = 0
-    let lastTrouble: PostingErrorCode = 'OFFLINE'
+    let lastTrouble: Trouble = 'OFFLINE'
+    // Halved after a chunk runs out of time (a slow uplink), grown back once chunks go through again.
+    let chunk = fullChunk
+    let okInARow = 0
     emit(r, 'sending', { sent: received })
 
     const finish = async (video: unknown): Promise<PostProgress> => {
@@ -493,7 +549,7 @@ export function createPostingService(d: PostingDeps) {
           bytes,
           range: `bytes ${received}-${received + length - 1}/${entry.size}`,
           signal: r.controller.signal,
-          timeoutMs: CHUNK_TIMEOUT_MS
+          timeoutMs: Math.max(CHUNK_TIMEOUT_MS, Math.ceil((length / SLOWEST_UPLINK) * 1000))
         })
         if (r.cancelled) throw new Cancelled()
         if (!a.net) {
@@ -503,6 +559,10 @@ export function createPostingService(d: PostingDeps) {
             if (b.received > received) {
               lastProgress = d.now()
               tries = 0
+              if (++okInARow >= GROW_AFTER && chunk < fullChunk) {
+                chunk = Math.min(fullChunk, chunk * 2)
+                okInARow = 0
+              }
             }
             received = b.received // always the server's count: YouTube may have kept only part of the chunk
             emit(r, 'sending', { sent: received })
@@ -513,24 +573,33 @@ export function createPostingService(d: PostingDeps) {
             continue
           }
           if (a.status === 409 && b.error === 'upload_finished') {
-            const g = await api('GET', path)
+            const g = await api('GET', path, { upload: true })
             const next = await settle(g)
             if (typeof next !== 'number') return next
             received = next
             continue
           }
-          if (!(a.status === 502 && b.error === 'platform_error' && b.retry === true)) throw await problem(a.status, b)
-          lastTrouble = 'PLATFORM'
-        } else lastTrouble = 'OFFLINE'
+          const trouble = troubleOf(a.status, a.body)
+          if (!trouble) throw await problem(a.status, b, true)
+          lastTrouble = trouble
+        } else {
+          lastTrouble = 'OFFLINE'
+          if (a.timedOut && chunk > CHUNK_UNIT) {
+            // Too slow to send this much in time: smaller chunks, so each one can get through.
+            chunk = Math.max(CHUNK_UNIT, Math.floor(chunk / 2 / CHUNK_UNIT) * CHUNK_UNIT)
+            d.log(`[posting] ${entry.uploadId}: a chunk ran out of time; now sending ${chunk} bytes at a time`)
+          }
+        }
+        okInARow = 0
       }
 
-      // A dropped connection, or YouTube having a moment: wait, ask how much it really has, carry on.
+      // A dropped connection, or YouTube or our server having a moment: wait, ask how much YouTube has, carry on.
       for (;;) {
         if (d.now() - lastProgress >= GIVE_UP_MS) throw new GaveUp(lastTrouble, received)
         const wait = RETRY_WAITS[Math.min(tries, RETRY_WAITS.length - 1)]
         tries++
-        emit(r, 'retrying', { sent: received, retryInSec: wait })
-        d.log(`[posting] ${entry.uploadId}: ${lastTrouble === 'OFFLINE' ? 'connection dropped' : 'YouTube busy'} at ${received} bytes; trying again in ${wait} s`)
+        emit(r, 'retrying', { sent: received, retryInSec: wait, retryReason: RETRY_REASON[lastTrouble] })
+        d.log(`[posting] ${entry.uploadId}: ${TROUBLE_LOG[lastTrouble]} at ${received} bytes; trying again in ${wait} s`)
         await d.sleep(wait * 1000, r.controller.signal).catch(() => undefined)
         if (r.cancelled) throw new Cancelled()
         const g = await request('GET', path, { auth: s.session, signal: r.controller.signal })
@@ -539,11 +608,13 @@ export function createPostingService(d: PostingDeps) {
           lastTrouble = 'OFFLINE'
           continue
         }
-        if (g.status === 502 && g.body?.error === 'platform_error' && g.body?.retry === true) {
-          lastTrouble = 'PLATFORM'
+        const ok = g.status === 200 && typeof g.body?.status === 'string'
+        const trouble = ok ? null : troubleOf(g.status, g.body)
+        if (trouble) {
+          lastTrouble = trouble
           continue
         }
-        if (g.status !== 200) throw await problem(g.status, g.body)
+        if (!ok) throw await problem(g.status, g.body, true)
         const next = await settle(g.body)
         if (typeof next !== 'number') return next
         if (next > received) {
@@ -597,10 +668,12 @@ export function createPostingService(d: PostingDeps) {
         const u = e instanceof PostingError ? e : fail('SERVER')
         if (!(e instanceof PostingError)) d.log(`[posting] ${r.uploadId ?? 'post'}: ${String(e)}`)
         else d.log(`[posting] ${r.uploadId ?? 'post'} failed: ${u.code}`)
-        // Kept: a dropped connection (Finish posting) and a lost sign-in (uploads outlive it: sign in, then finish).
-        const keep = u.code === 'OFFLINE' || u.code === 'SIGNED_OUT' || u.code === 'FILE_CHANGED'
+        // Kept: a dropped connection or a server error part way (Finish posting: YouTube keeps what it has), and a
+        // lost sign-in (uploads outlive it: sign in, then finish).
+        const keep = u.code === 'OFFLINE' || u.code === 'SERVER' || u.code === 'SIGNED_OUT' || u.code === 'FILE_CHANGED'
         if (r.uploadId && !keep) await dropPending(r.uploadId)
-        return emit(r, 'failed', { error: asUser(u), canResume: u.code === 'OFFLINE' && !!r.uploadId })
+        const kept = !!r.uploadId && (await pendingList()).some((x) => x.uploadId === r.uploadId)
+        return emit(r, 'failed', { error: asUser(u), canResume: (u.code === 'OFFLINE' || u.code === 'SERVER') && kept })
       } finally {
         running = null
       }
@@ -659,7 +732,7 @@ export function createPostingService(d: PostingDeps) {
     return run(entry.slug, entry.version, entry.size, async (r) => {
       r.uploadId = entry.uploadId
       r.last = { ...r.last, uploadId: entry.uploadId, sent: entry.sent ?? 0 }
-      const g = await api('GET', `/v1/uploads/${encodeURIComponent(entry.uploadId)}`, { signal: r.controller.signal })
+      const g = await api('GET', `/v1/uploads/${encodeURIComponent(entry.uploadId)}`, { signal: r.controller.signal, upload: true })
       const asked = entry.privacy && PRIVACIES.includes(entry.privacy) ? entry.privacy : 'private'
       if (g?.status === 'done') {
         await dropPending(entry.uploadId)
@@ -771,22 +844,20 @@ export function createPostingService(d: PostingDeps) {
     },
     async openLink(url: unknown): Promise<void> {
       off()
-      let u: URL
-      try {
-        u = new URL(String(url))
-      } catch {
-        return
-      }
-      if (u.protocol !== 'https:' || !YOUTUBE_LINK_HOSTS.includes(u.hostname) || u.username || u.password) return
-      await d.openExternal(u.toString())
+      if (isVideoLink(url)) await d.openExternal(new URL(String(url)).toString())
     }
   }
 }
 
+/** Why a chunk didn't go through and is being tried again. */
+type Trouble = 'OFFLINE' | 'PLATFORM' | 'SERVER'
+const RETRY_REASON: Record<Trouble, NonNullable<PostProgress['retryReason']>> = { OFFLINE: 'offline', PLATFORM: 'youtube', SERVER: 'server' }
+const TROUBLE_LOG: Record<Trouble, string> = { OFFLINE: 'connection dropped', PLATFORM: 'YouTube busy', SERVER: 'posting server error' }
+
 class Cancelled extends Error {}
 class GaveUp extends Error {
   constructor(
-    readonly code: 'OFFLINE' | 'PLATFORM',
+    readonly code: Trouble,
     readonly received: number
   ) {
     super(code)

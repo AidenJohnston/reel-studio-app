@@ -590,6 +590,8 @@ export interface PostProgress {
   total: number
   /** step 'retrying': seconds until the next try */
   retryInSec?: number
+  /** step 'retrying': whose trouble it was (this computer's connection, YouTube, or the posting server) */
+  retryReason?: 'offline' | 'youtube' | 'server'
   result?: PostResult
   error?: UserError
   /** step 'failed': Finish posting can pick up where it stopped */
