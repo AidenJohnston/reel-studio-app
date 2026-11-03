@@ -121,10 +121,9 @@ turns them into `packaging/requirements-runtime.hashed.txt`, which `fetch_runtim
 | pillow | HPND | |
 | **pi-heif** | BSD-3-Clause (wrapper); wheel libraries LGPL-3.0 | HEIC/HEIF stills (iPhone photos), decode only. The wheels contain exactly two libraries, **libheif 1.23.0 (LGPL-3.0) and libde265 1.1.0 (LGPL-3.0)**, as separate `.dll` / `.dylib` files that can be replaced (LGPL). **It replaces pillow-heif, whose wheels also bundle x265 (GPL-2.0+) and load it in-process: pillow-heif must never be installed** (`fetch_runtime.py`'s smoke test fails the build if it is). Verified 2026-10-17: no x265, aom, dav1d or other encoder strings in the win_amd64 or macOS arm64 libheif. LGPL source: `pillow_heif-1.4.0.tar.gz` (carries `libheif/build_libs.py`, the build recipe), `libheif-1.23.0.tar.gz`, `libde265-1.1.0.tar.gz`, all in the source mirror above. HEVC is a patent-encumbered codec; decoding HEIC is what iPhones' own photos need, so this is the same exposure every photo app with HEIC import has. |
 | opencv-python-headless | Apache-2.0 | 5.0.0.93, the version the engine's tests ran against; wheel bundles FFmpeg libraries (LGPL-2.1, `texts/lgpl-2.1.txt`) |
-| faster-whisper | MIT | speech to text |
+| faster-whisper | MIT | speech to text. Installed without PyAV (`av`), which it only uses to decode audio files: the engine hands it decoded samples, and PyAV's wheels carry GPL x264/x265 libraries. `fetch_runtime.py` fails the build if PyAV or any `libx264`/`libx265` file is in the runtime. |
 | ctranslate2 | MIT | the inference engine under faster-whisper (CPU only, no torch) |
 | onnxruntime | MIT | voice activity detection used by faster-whisper |
-| av (PyAV) | BSD-3-Clause | wheel bundles FFmpeg libraries (LGPL-2.1, `texts/lgpl-2.1.txt`) |
 | tokenizers, huggingface_hub, hf-xet | Apache-2.0 | download and tokenise the speech model |
 | yt-dlp | The Unlicense | downloads videos from links the user pastes |
 | jsonschema, referencing, rpds-py, attrs | MIT | validates project files |
