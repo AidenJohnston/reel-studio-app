@@ -1,6 +1,6 @@
 # Third-party components shipped with the Reel Studio engine
 
-Reel Studio is MIT-licensed. Everything below is redistributed under its own license. Packaging
+Reel Studio is licensed under the GNU AGPL v3 only. Everything below is redistributed under its own license. Packaging
 (`packaging/`) must copy this file plus the license files named here into the app bundle.
 
 ## Bundled in the `reelengine` package
@@ -55,7 +55,7 @@ a patent-encumbered codec; whether to ship it is a legal decision, not a technic
 - Needed filters: `subtitles` (libass), `zscale` (HDR tone mapping, optional), `scale`, `overlay`,
   `tpad`, `loudnorm`/`ebur128`, `alimiter`. Encoders: `libx264`, `aac`; drafts also use
   `h264_videotoolbox` (macOS) / `h264_nvenc` / `h264_amf` / `h264_qsv` (Windows: NVIDIA / AMD / Intel) when the machine has one.
-- A static GPL build is fine for an MIT app when shipped as a separate executable the engine runs
+- A static GPL build is fine for an AGPL app when shipped as a separate executable the engine runs
   as a subprocess. Ship its `LICENSE` (GPL 2.0+/LGPL) and a link to the exact source of the build
   used. The installers ship Reel Studio's own FFmpeg 7.1.1 build (`packaging/ffmpeg/`, every source pinned in
   `sources.txt`, mirrored by `packaging/mirror_gpl_sources.py`); see the root `THIRD_PARTY.md`.
