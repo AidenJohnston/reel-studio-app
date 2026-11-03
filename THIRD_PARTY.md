@@ -1,6 +1,6 @@
 # Third-party software in Reel Studio
 
-Reel Studio itself is MIT licensed (see `LICENSE`). The installer also contains the programs below.
+Reel Studio itself is licensed under the GNU AGPL v3 only (see `LICENSE` and `NOTICE.md`). The installer also contains the programs below.
 Each keeps its own license. This list is what `packaging/fetch_runtime.py` downloads, so the URLs and
 SHA-256 values here are the ones the script verifies. If you change one, change the other.
 
@@ -143,7 +143,7 @@ Production dependency tree of the app plus the front-end libraries vite bundles 
 | Package | License | Copyright |
 |---|---|---|
 | react, react-dom, scheduler 19 / 0.28 | MIT | Meta Platforms, Inc. and affiliates |
-| @reelstudio/ai (this repo) | MIT | Reel Studio |
+| @reelstudio/ai (this repo) | AGPL-3.0-only | Curate Technologies LLC and contributors |
 | @anthropic-ai/sdk 0.135.0 | MIT | Anthropic, PBC |
 | @opentelemetry/api 1.9.1 | Apache-2.0 | OpenTelemetry Authors |
 | json-schema-to-ts 3.1.1, ts-algebra 2.0.0 | MIT | Thomas Aribart |

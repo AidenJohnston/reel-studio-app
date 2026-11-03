@@ -86,7 +86,11 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
       <section className="panel">
         <h2>About</h2>
         <p className="muted" style={{ marginTop: 6 }}>
-          Reel Studio {info.version}. Open source (MIT). No accounts, no tracking.
+          Reel Studio {info.version}. Open source (AGPL-3.0). No accounts, no tracking.
+        </p>
+        <p className="muted-sm" style={{ marginTop: 6 }}>
+          Copyright 2026 Curate Technologies LLC and contributors. You may share and change it under the GNU AGPL v3, and it
+          comes with no warranty. License: gnu.org/licenses/agpl-3.0. Source: github.com/getcurate/reel-studio.
         </p>
         {checkUpdates !== null && (
           <>
