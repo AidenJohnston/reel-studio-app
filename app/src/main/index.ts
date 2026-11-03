@@ -690,7 +690,8 @@ function registerIpc(): void {
     secrets: safeStorage,
     appVersion: app.getVersion(),
     getKey: () => updateKey.get(),
-    openExternal: (url) => shell.openExternal(url),
+    // test runs never open the browser (e2e/posting.spec.ts plays the person clicking Allow)
+    openExternal: (url) => (TEST ? Promise.resolve(log('[posting] test run: browser not opened')) : shell.openExternal(url)),
     send: broadcast,
     log
   })
