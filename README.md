@@ -51,7 +51,7 @@ updates) or $20 a month, cancel anytime. The download link for the installers is
 payment, and the app tells you when a newer version is out. Buying funds development and gets you the signed
 builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
 
-The code is MIT, so anyone can [build it themselves](#build-from-source) for free.
+The code is AGPL-3.0, so anyone can [build it themselves](#build-from-source) for free.
 
 | System | File | Guide |
 |---|---|---|
@@ -129,7 +129,7 @@ You need Node.js 22 or newer and Python 3.11. For development on a machine witho
 `ffmpeg` and `ffprobe` (7.1 recommended) on your PATH.
 
 ```
-git clone https://github.com/AidenJohnston/reel-studio-app.git
+git clone https://github.com/getcurate/reel-studio.git
 cd reel-studio-app
 npm install
 npm run build -w ai          # the app loads the built AI package
@@ -180,7 +180,7 @@ Packaging details, signing and notarizing: [packaging/README.md](packaging/READM
 
 ## License and third-party notices
 
-Reel Studio is released under the [MIT License](LICENSE).
+Reel Studio is released under the [GNU Affero General Public License v3.0](LICENSE). Versions up to and including 0.1.4 were released under the MIT License and stay available under it.
 
 The installers also contain other programs, each under its own license: FFmpeg and FFprobe (GPL v3, run
 as separate programs), Python and its libraries, Electron, fonts (SIL OFL and Apache 2.0), and the YuNet face
