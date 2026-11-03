@@ -8,6 +8,9 @@
 //      `reelstudio://updates?key=…`. The OS hands that link to the app: `open-url` on macOS, the command line
 //      (first launch) or `second-instance` (already running) on Windows.
 //   2. Settings > About > "Paste my download link": any link from the receipt email, or the page's link.
+// Any web page can open a reelstudio:// link, and the key decides whose subscription this computer's updates and
+// posting use, so a key from a link is saved only after the person says yes (confirmLink). A pasted one needs no
+// question: the person copied it themselves.
 //
 // The key is a signed token (`v1.<claims>.<signature>`): the Stripe checkout id, the plan and an expiry, no
 // name or email. Its claims are readable without the server's secret, which is how Settings can say "monthly".
@@ -106,6 +109,8 @@ export interface UpdateKeyDeps {
   log(line: string): void
   /** Tell the page (Settings) the status changed. */
   send(s: UpdateKeyStatus): void
+  /** Ask before saving a key from a link. `replacing`: a different key is saved now. True = yes. */
+  confirmLink(o: { replacing: boolean }): Promise<boolean>
 }
 
 export function createUpdateKeyService(d: UpdateKeyDeps) {
@@ -126,14 +131,21 @@ export function createUpdateKeyService(d: UpdateKeyDeps) {
     async status(): Promise<UpdateKeyStatus> {
       return status((await d.load()).updateKey)
     },
-    /** A `reelstudio://` link from the OS. null when it is not ours or carries no valid key (then nothing changes). */
-    async fromLink(url: unknown): Promise<UpdateKeyStatus | null> {
+    /** A `reelstudio://` link from the OS. null when it is not ours, carries no valid key, or the person said no
+     * (then nothing changes). `asked`: the person was asked and said yes, so there is nothing more to tell them. */
+    async fromLink(url: unknown): Promise<(UpdateKeyStatus & { asked: boolean }) | null> {
       const k = keyFromProtocolUrl(url)
       if (!k) {
         if (typeof url === 'string') d.log('[updates] ignored a reelstudio:// link that carries no valid key')
         return null
       }
-      return store(k, 'link')
+      const current = (await d.load()).updateKey
+      if (current === k) return { ...status(k), asked: false } // the same key again: nothing to ask
+      if (!(await d.confirmLink({ replacing: validKey(current) }))) {
+        d.log('[updates] a reelstudio:// link offered a download key; not saved (the person said no)')
+        return null
+      }
+      return { ...(await store(k, 'link')), asked: true }
     },
     /** Settings > "Paste my download link". null when the text holds no key. */
     async fromText(text: unknown): Promise<UpdateKeyStatus | null> {

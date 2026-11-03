@@ -73,29 +73,59 @@ describe('planOf', () => {
   })
 })
 
-function fakes(start: UpdateKeyState = { updateKey: null }) {
+function fakes(start: UpdateKeyState = { updateKey: null }, yes = true) {
   let state = { ...start }
   const logs: string[] = []
   const sent: UpdateKeyStatus[] = []
+  const asked: { replacing: boolean }[] = []
   const svc = createUpdateKeyService({
     load: async () => state,
     save: async (p) => (state = { ...state, ...p }),
     log: (l) => logs.push(l),
-    send: (s) => sent.push(s)
+    send: (s) => sent.push(s),
+    confirmLink: async (o) => (asked.push(o), yes)
   })
-  return { svc, logs, sent, state: () => state }
+  return { svc, logs, sent, asked, state: () => state }
 }
 
 describe('createUpdateKeyService', () => {
   it('a link turns updates on: stored, reported (plan, never the key), logged without the key', async () => {
     const f = fakes()
     expect(await f.svc.status()).toEqual({ on: false, plan: null })
-    expect(await f.svc.fromLink(`reelstudio://updates?key=${K}`)).toEqual({ on: true, plan: 'monthly' })
+    expect(await f.svc.fromLink(`reelstudio://updates?key=${K}`)).toEqual({ on: true, plan: 'monthly', asked: true })
+    expect(f.asked).toEqual([{ replacing: false }])
     expect(f.state().updateKey).toBe(K)
     expect(await f.svc.get()).toBe(K)
     expect(f.sent).toEqual([{ on: true, plan: 'monthly' }])
     expect(f.logs.join('\n')).not.toContain(K.split('.')[2])
     expect(JSON.stringify(f.sent)).not.toContain('v1.')
+  })
+  it('a key from a link is saved only after a yes: any web page can open a reelstudio:// link', async () => {
+    const f = fakes({ updateKey: null }, false)
+    expect(await f.svc.fromLink(`reelstudio://updates?key=${K}`)).toBeNull()
+    expect(f.state().updateKey).toBeNull()
+    expect(f.sent).toEqual([])
+    expect(f.logs.join(' ')).toContain('not saved')
+  })
+  it('a link never swaps the saved key for another without asking, and says it would replace it', async () => {
+    const mine = key('once')
+    const no = fakes({ updateKey: mine }, false)
+    expect(await no.svc.fromLink(`reelstudio://updates?key=${K}`)).toBeNull()
+    expect(no.asked).toEqual([{ replacing: true }])
+    expect(no.state().updateKey).toBe(mine)
+    const yes = fakes({ updateKey: mine }, true)
+    expect(await yes.svc.fromLink(`reelstudio://updates?key=${K}`)).toMatchObject({ on: true, plan: 'monthly', asked: true })
+    expect(yes.state().updateKey).toBe(K)
+  })
+  it('the same key again asks nothing', async () => {
+    const f = fakes({ updateKey: K }, false)
+    expect(await f.svc.fromLink(`reelstudio://updates?key=${K}`)).toEqual({ on: true, plan: 'monthly', asked: false })
+    expect(f.asked).toEqual([])
+  })
+  it('pasting asks nothing: the person copied the key themselves', async () => {
+    const f = fakes({ updateKey: key('once') }, false)
+    expect(await f.svc.fromText(K)).toEqual({ on: true, plan: 'monthly' })
+    expect(f.asked).toEqual([])
   })
   it('a link that is not ours changes nothing', async () => {
     const f = fakes({ updateKey: K })
