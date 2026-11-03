@@ -26,6 +26,7 @@ const api: ReelApi = {
     pathForFile: (f) => webUtils.getPathForFile(f),
     chooseFolder: () => call('app:chooseFolder'),
     setRoot: (p) => call('app:setRoot', p),
+    setFasterExports: (on) => call('app:setFasterExports', on),
     onCommand: (cb) => on<AppCommand>('app:command', cb),
     startDrag: (file) => ipcRenderer.send('app:startDrag', file)
   },

@@ -132,8 +132,8 @@ describe('rendering (playwright)', { skip: !pw && 'playwright not installed' }, 
     } finally { await s.close(); }
   });
 
-  it('renders a qtrle .mov with alpha, swapping the extension, into a path with spaces', async () => {
-    const r = await renderAnimation({ template: 'price-tag', params: { value: '$20', oldValue: '$50', duration: 1 }, outPath: path.join(dir, 'out dir', 'price tag.webm'), adapter });
+  it('fails if a fractional project rate is rounded when rendering the transparent .mov', async () => {
+    const r = await renderAnimation({ template: 'price-tag', params: { value: '$20', oldValue: '$50', duration: 1 }, outPath: path.join(dir, 'out dir', 'price tag.webm'), fps: 30000 / 1001, adapter });
     assert.equal(path.extname(r.path), '.mov');
     assert.ok(existsSync(r.path));
     assert.equal(r.frames, 30);
@@ -141,5 +141,7 @@ describe('rendering (playwright)', { skip: !pw && 'playwright not installed' }, 
     assert.equal(side.kind, 'reelstudio-animation');
     const probe = execFileSync(findFfmpeg().replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1'), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,pix_fmt,width,height', '-of', 'csv=p=0', r.path]).toString().trim();
     assert.equal(probe, 'qtrle,1080,1920,argb');
+    const rate = execFileSync(findFfmpeg().replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1'), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', r.path]).toString().trim();
+    assert.equal(rate, '30000/1001');
   });
 });
