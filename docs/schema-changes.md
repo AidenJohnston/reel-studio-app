@@ -35,3 +35,16 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   never flipped; every reader of the face box in output pixels mirrors x (`x' = W - x - w`). Written by the AI's
   `set_mirror` tool and by the "Flip picture (it's mirrored)" toggle in "Edit it myself"; turning it off removes
   the field, so the project matches one that never had it.
+
+## 2026-10-22 (snap zooms)
+
+- `zooms[].style` (`"snap"`, absent = the hard punch-in as before): the zoom eases in over about 0.22 s
+  (ease-out) and back over about 0.3 s (a critically damped spring), with motion blur only while the scale
+  moves. Motion never runs across a jump cut. Either end falls back to the hard cut of a default zoom where
+  easing would look wrong: the punch-in when the zoom directly follows another zoom or a cut falls inside
+  it; the release when the zoom runs into the next one, ends under face-hiding b-roll, is too short to
+  hold (under about 0.8 s) or has a cut inside its release. A cut right after the last word takes the
+  release itself. A snap whose fixed point (the point the picture grows out of) is far enough from the
+  face to carry the eyes more than 9% of the frame's width punches in and releases hard, like a default
+  zoom. A face-centred zoom gets there when the face sits high and off centre.
+  Written by the AI's `set_zoom` tool.

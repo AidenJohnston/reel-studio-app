@@ -188,7 +188,7 @@ class RenderCtx:
     progress: Callable[[str, float, str], None]
 
 broll.build_layers(ctx) -> list[Layer]   # Layer(path, kind:'image'|'video', t0, t1, x, y, w, h, rotate_deg, z, fade_in, fade_out)
-zoom.build_zooms(ctx) -> list[ZoomSpan]  # ZoomSpan(t0, t1, scale, cx, cy)
+zoom.build_zooms(ctx) -> list[ZoomSpan]  # ZoomSpan(t0, t1, scale, cx, cy, ramp_in, ramp_out)
 music.build_audio(ctx, voice_wav) -> Path   # final mixed wav at -14 LUFS integrated
 cover.render(ctx, out_png) -> Path
 ```
