@@ -5,3 +5,9 @@
 .post-note { background: var(--amber-soft); color: var(--amber-ink); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 14px; }
 .post-error { background: var(--red-soft); color: var(--red-ink); border-radius: var(--radius-sm); padding: 10px 12px; }
 .post-note a, .post-error a { color: inherit; }
+/* The Reel page's third button (PostButton, only while posting is on): the phone gives up its height (one button
+   and the gap above it, 44 + 12px) so all three buttons stay in view. styles.css keeps 250px for the other two. */
+.reel-left:has(> .post-reel-btn) .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 340px); }
+@media (max-width: 1180px) {
+  .reel-left:has(> .post-reel-btn) .phone { width: clamp(220px, calc((100vh - var(--titlebar) - 306px) * 9 / 16 + 24px), 300px); }
+}

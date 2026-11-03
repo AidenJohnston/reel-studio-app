@@ -7,13 +7,13 @@ import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
-import { PostButton } from '../components/PostButton'
-import { PostSheet } from '../components/PostSheet'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
+import { PostButton } from '../components/PostButton'
+import { PostSheet } from '../components/PostSheet'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -306,6 +306,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   const many = d.versions.length > 1
   const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
+  const postAbout = { slug, version: version?.n ?? 0, title: d.title, durationSec: duration } // for "Post to YouTube"
 
   return (
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
@@ -650,16 +651,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
-      {exporting && (
-        <ExportDialog
-          result={exporting}
-          phoneFirst={phoneFirst}
-          postFirst={postFirst}
-          about={{ slug, version: version?.n ?? 0, title: d.title, durationSec: duration }}
-          onClose={() => setExporting(null)}
-          onSaveCaption={(t) => savePost(t, true)}
-        />
-      )}
+      {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} postFirst={postFirst} about={postAbout} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
     </div>
   )
 }
@@ -697,7 +689,7 @@ function ExportDialog({
   if (result === 'busy')
     return (
       <Modal testid="export-dialog">
-        <h2>Getting it ready for Instagram</h2>
+        <h2>{postFirst ? 'Getting it ready for YouTube' : 'Getting it ready for Instagram'}</h2>
         <div className="row">
           <Spinner /> <span className="muted">This takes a moment.</span>
         </div>

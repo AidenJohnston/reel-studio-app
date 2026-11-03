@@ -61,10 +61,16 @@ test('post to YouTube: connect, a dropped connection, done, Settings', async () 
     await page.getByTestId('file-input').setInputFiles([media.video])
     await expect(page.getByTestId('player')).toBeVisible({ timeout: 10 * 60_000 })
     await expect(page.getByTestId('post-youtube-reel')).toBeEnabled({ timeout: 10 * 60_000 })
+    // the third button under the phone stays in view at the default window size (the phone gives up the room)
+    await expect(page.getByTestId('post-youtube-reel')).toBeInViewport({ ratio: 1 })
     await page.getByTestId('post-youtube-reel').click()
 
-    // Not connected yet: Connect YouTube signs in with the key, then waits for the browser.
+    // Not signed in on this computer yet: Sign in first (the connection belongs to the purchase, so until then the
+    // app can't tell whether it is there).
     const sheet = page.getByTestId('post-sheet')
+    await expect(sheet).toHaveAttribute('data-state', 'signed_out')
+    await page.getByTestId('post-sign-in').click()
+    // Not connected yet: Connect YouTube waits for the browser.
     await expect(sheet).toHaveAttribute('data-state', 'not_connected')
     await shot(page, 'posting-1-connect')
     await page.getByTestId('post-connect').click()
@@ -112,6 +118,9 @@ test('post to YouTube: connect, a dropped connection, done, Settings', async () 
     await page.getByTestId('posting-sign-out-everywhere').click()
     await page.getByTestId('confirm-yes').click()
     await expect(page.getByTestId('posting-sign-in')).toContainText('Not signed in.')
+    // the connection stays, as the confirm box said: Settings doesn't call it "not connected"
+    await expect(page.getByTestId('posting-youtube')).toContainText('YouTube: sign in to see your channel')
+    await expect(page.getByTestId('posting-connect')).toHaveCount(0)
     expect(fake.state.sessions.size).toBe(0)
     expect(fake.state.connections.size).toBe(1) // the YouTube connection belongs to the purchase, not this computer
   } finally {

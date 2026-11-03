@@ -40,7 +40,7 @@ export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, stri
   UPLOAD_LIMIT: "YouTube says your channel can't take more videos today. Try again tomorrow.",
   RATE_LIMITED: 'Too many tries in a row. Wait a minute, then try again.',
   EXPIRED: 'YouTube stopped waiting for the rest of this video. Click Post to YouTube to send it again from the start.',
-  OFFLINE: "Reel Studio can't reach its posting server. Check your internet connection, then click Finish posting.",
+  OFFLINE: "Reel Studio can't reach its posting server. Check your internet connection, then try again.",
   PLATFORM: "YouTube didn't take the video. Try again in a few minutes.",
   NOT_CONFIGURED: "Posting to YouTube isn't switched on yet. Try again later.",
   SERVER: 'Something went wrong on the posting server. Try again in a few minutes.',
@@ -132,7 +132,9 @@ export function sheetState(s: PostingStatus | null, o: { progress?: PostProgress
   if (o.connecting || s.connecting) return 'connecting'
   if (s.ended) return 'ended'
   if (!s.hasKey && !s.signedIn) return 'no_key'
-  if (s.signedOutByServer && !s.signedIn) return 'signed_out'
+  // Not signed in on this computer: the YouTube connection belongs to the purchase, so it can't be seen (or said to
+  // be missing) until Sign in.
+  if (!s.signedIn) return 'signed_out'
   if (!s.youtube) return 'not_connected'
   if (s.youtube.state === 'reconnect') return 'reconnect'
   if (o.pending) return 'resume'
@@ -155,9 +157,12 @@ export const POST_COPY = {
   noKey: 'Posting uses the download key from your receipt email, so the posting server knows you subscribe. Copy the link from that email, then paste it here.',
   ended: 'Posting needs an active subscription, and yours has ended.',
   signedOut: 'This computer was signed out of posting, maybe with Sign out everywhere. Sign in again to post.',
+  signIn: 'Sign in to post from this computer. It uses the download key from your receipt email. If your YouTube channel is already connected, you can post straight after.',
   notConnected: 'Connect your YouTube channel once. You sign in on Google\'s own page, and Reel Studio never sees your password. Reel Studio posts only when you click Post.',
   reconnect: "YouTube needs you to connect again. Google asks for this every week until Reel Studio's YouTube access is approved.",
-  connecting: "Finish in your browser. I opened Google's page: pick your channel, then click Allow.",
+  // The second sentence stays while Google hasn't verified Reel Studio's YouTube access.
+  connecting:
+    "Finish in your browser. I opened Google's page: pick your channel, then click Allow. Google may say it hasn't verified Reel Studio yet: that's expected while Google reviews it, so click Continue.",
   notThisChannel: 'Not this channel? Change it in Settings.',
   descriptionHelp: 'Shown under your video on YouTube.',
   privacyHelp: 'Start with Only me: check it in YouTube Studio, then make it public there.',
@@ -204,4 +209,50 @@ export const disconnectBody = (channelName: string | null): string =>
 export function signedInLine(otherComputers: number): string {
   if (otherComputers <= 0) return 'Signed in on this computer.'
   return `Signed in on this computer. And on ${otherComputers} other computer${otherComputers === 1 ? '' : 's'}.`
+}
+
+/** The signed_out screen: after the server ended the sign-in, or simply not signed in on this computer yet. */
+export const signedOutCopy = (s: PostingStatus): string => (s.signedOutByServer ? POST_COPY.signedOut : POST_COPY.signIn)
+
+/** Settings > Posting's YouTube line. Signed out, the connection can't be seen, so it isn't called missing. */
+export function youtubeLine(s: PostingStatus): string {
+  if (!s.signedIn) return s.hasKey ? 'sign in to see your channel' : 'not connected'
+  if (!s.youtube) return 'not connected'
+  return s.youtube.state === 'reconnect' ? 'needs connecting again' : s.youtube.channelName ?? 'connected'
+}
+
+/** The main button under a failed post: the one its message tells the person to click. null = none (ended). */
+export type FailedAction = 'finish' | 'sign_in' | 'connect' | 'post_again' | 'start_over' | 'try_again'
+export const FAILED_BUTTONS: Record<FailedAction, string> = {
+  finish: 'Finish posting',
+  sign_in: 'Sign in',
+  connect: 'Connect YouTube',
+  post_again: 'Post to YouTube',
+  start_over: 'Start over',
+  try_again: 'Try again'
+}
+export function failedAction(p: PostProgress): FailedAction | null {
+  if (p.canResume && p.uploadId) return 'finish'
+  switch (p.error?.code) {
+    case 'ENDED':
+      return null // the message carries Subscribe again
+    case 'SIGNED_OUT':
+      return 'sign_in'
+    case 'RECONNECT':
+    case 'NOT_CONNECTED':
+    case 'NO_CHANNEL':
+      return 'connect'
+    case 'EXPIRED':
+      return 'post_again'
+    case 'FILE_CHANGED':
+      return 'start_over'
+    default:
+      return 'try_again'
+  }
+}
+
+/** The line while a post waits to try again, by whose trouble it was. */
+export function retryLine(reason: PostProgress['retryReason'], seconds: number): string {
+  const why = reason === 'youtube' ? 'YouTube is busy.' : reason === 'server' ? 'The posting server is having trouble.' : 'The connection dropped.'
+  return `${why} Trying again in ${seconds} second${seconds === 1 ? '' : 's'}…`
 }

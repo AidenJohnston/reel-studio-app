@@ -6,6 +6,7 @@ import type { PendingPost, PostPrivacy, PostProgress } from '../../../shared/api
 import {
   CONNECT_NOTES,
   DONE_PRIVACY,
+  FAILED_BUTTONS,
   FIELD_ERRORS,
   POST_COPY,
   PRICING_URL,
@@ -16,10 +17,13 @@ import {
   defaultDescription,
   defaultTitle,
   descriptionProblem,
+  failedAction,
   megabytes,
   pct,
   privacyChanged,
+  retryLine,
   sheetState,
+  signedOutCopy,
   titleProblem
 } from '../../../shared/posting'
 import { errorCode, reel, userMessage } from '../api'
@@ -92,6 +96,7 @@ export function PostSheet({
   useEffect(() => {
     if (!ready) return
     let live = true
+    setPendingChecked(false) // signed in again: a post kept for after Sign in shows up
     reel.posting
       .pending(slug, version)
       .then((p) => live && setPending(p))
@@ -135,6 +140,16 @@ export function PostSheet({
       await refresh()
     })
   const signIn = () => run(async () => setStatus(await reel.posting.signIn()))
+  // From a failed post: fix what its message says, then the sheet carries on from its normal screens.
+  const signInAgain = () =>
+    run(async () => {
+      setStatus(await reel.posting.signIn())
+      setEditing(true)
+    })
+  const connectAgain = () => {
+    setEditing(true)
+    void connect()
+  }
   const connect = async () => {
     setConnecting(true)
     setNote(null)
@@ -249,7 +264,7 @@ export function PostSheet({
   } else if (state === 'signed_out') {
     body = (
       <>
-        <p>{POST_COPY.signedOut}</p>
+        <p>{signedOutCopy(status!)}</p>
         {noteLine}
         <div className="row">
           <button className="btn primary" onClick={() => void signIn()} disabled={working} data-testid="post-sign-in">
@@ -311,7 +326,7 @@ export function PostSheet({
         {state === 'sending' ? (
           <p data-testid="post-sending">Sending your video to YouTube… {percent}%</p>
         ) : (
-          <p data-testid="post-retrying">The connection dropped. Trying again in {secondsLeft ?? p.retryInSec ?? 0} seconds…</p>
+          <p data-testid="post-retrying">{retryLine(p.retryReason, secondsLeft ?? p.retryInSec ?? 0)}</p>
         )}
         <p className="muted-sm">
           {p.total > 0 ? `${megabytes(p.sent)} of ${megabytes(p.total)} MB. ` : ''}
@@ -326,6 +341,15 @@ export function PostSheet({
     )
   } else if (state === 'failed') {
     const p = progress!
+    const action = failedAction(p)
+    const onAction: Record<NonNullable<typeof action>, () => void> = {
+      finish: () => void resume(p.uploadId!),
+      sign_in: () => void signInAgain(),
+      connect: connectAgain,
+      post_again: () => setEditing(true),
+      start_over: () => setEditing(true),
+      try_again: () => setEditing(true)
+    }
     body = (
       <>
         <p className="post-error" role="alert" data-testid="post-error">
@@ -336,17 +360,14 @@ export function PostSheet({
             </a>
           )}
         </p>
-        <div className="row">
-          {p.canResume && p.uploadId ? (
-            <button className="btn primary" onClick={() => void resume(p.uploadId!)} data-testid="post-finish">
-              Finish posting
+        {noteLine}
+        {action && (
+          <div className="row">
+            <button className="btn primary" onClick={onAction[action]} disabled={working} data-testid={action === 'finish' ? 'post-finish' : 'post-try-again'} data-action={action}>
+              {FAILED_BUTTONS[action]}
             </button>
-          ) : (
-            <button className="btn primary" onClick={() => setEditing(true)} data-testid="post-try-again">
-              Try again
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </>
     )
   } else if (state === 'done') {

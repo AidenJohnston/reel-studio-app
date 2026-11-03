@@ -23,7 +23,7 @@ export function usePostingStatus(): [PostingStatus | null, (s: PostingStatus) =>
 }
 
 /** The button under "Send to my phone" (Reel page) and in the Export box. Renders nothing while posting is off. */
-export function PostButton({ onClick, disabled, title, className = 'btn export-btn', testid = 'post-youtube-reel' }: { onClick: () => void; disabled?: boolean; title?: string; className?: string; testid?: string }) {
+export function PostButton({ onClick, disabled, title, className = 'btn export-btn post-reel-btn', testid = 'post-youtube-reel' }: { onClick: () => void; disabled?: boolean; title?: string; className?: string; testid?: string }) {
   const [s] = usePostingStatus()
   if (!s?.enabled) return null
   return (

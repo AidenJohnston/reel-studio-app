@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   CONNECT_NOTES,
   DONE_PRIVACY,
+  FAILED_BUTTONS,
   FIELD_ERRORS,
   POST_COPY,
   POSTING_ERRORS,
@@ -15,12 +16,16 @@ import {
   defaultTitle,
   descriptionProblem,
   disconnectBody,
+  failedAction,
   pct,
   postingError,
   privacyChanged,
+  retryLine,
   sheetState,
   signedInLine,
-  titleProblem
+  signedOutCopy,
+  titleProblem,
+  youtubeLine
 } from '../src/shared/posting'
 import type { PostingStatus, PostProgress } from '../src/shared/api'
 
@@ -42,11 +47,19 @@ describe('sheetState', () => {
     expect(sheetState(null, {})).toBe('loading')
     expect(sheetState(S({ hasKey: false, signedIn: false, youtube: null }), {})).toBe('no_key')
     expect(sheetState(S({ signedIn: false, signedOutByServer: true, youtube: null }), {})).toBe('signed_out')
-    expect(sheetState(S({ signedIn: false, youtube: null }), {})).toBe('not_connected')
+    expect(sheetState(S({ signedIn: false, youtube: null }), {})).toBe('signed_out')
     expect(sheetState(S({ youtube: null }), {})).toBe('not_connected')
     expect(sheetState(S({ youtube: { state: 'reconnect', channelName: null, channelUrl: null } }), {})).toBe('reconnect')
     expect(sheetState(S(), {})).toBe('form')
     expect(sheetState(S(), { pending: { uploadId: 'u', slug: 's', version: 1, sent: 1, total: 2 } })).toBe('resume')
+  })
+  it('not signed in here: Sign in first, never "not connected" (the connection belongs to the purchase and stays)', () => {
+    // after Sign out or Sign out everywhere on this computer, signedOutByServer is false
+    const out = S({ signedIn: false, youtube: null })
+    expect(sheetState(out, {})).toBe('signed_out')
+    expect(signedOutCopy(out)).toBe(POST_COPY.signIn)
+    expect(signedOutCopy(S({ signedIn: false, signedOutByServer: true, youtube: null }))).toBe(POST_COPY.signedOut)
+    expect(POST_COPY.signIn).not.toMatch(/Sign out everywhere/)
   })
   it('an ended subscription comes before everything but a running post', () => {
     expect(sheetState(S({ ended: true, hasKey: false, signedIn: false }), {})).toBe('ended')
@@ -93,6 +106,13 @@ describe('the form', () => {
     expect(pct(5, 10)).toBe(50)
     expect(pct(0, 0)).toBe(0)
   })
+  it('Settings > Posting never says "not connected" just because this computer is signed out', () => {
+    expect(youtubeLine(S({ signedIn: false, youtube: null }))).toBe('sign in to see your channel')
+    expect(youtubeLine(S({ signedIn: false, hasKey: false, youtube: null }))).toBe('not connected')
+    expect(youtubeLine(S({ youtube: null }))).toBe('not connected')
+    expect(youtubeLine(S())).toBe('My channel')
+    expect(youtubeLine(S({ youtube: { state: 'reconnect', channelName: 'My channel', channelUrl: null } }))).toBe('needs connecting again')
+  })
   it('Settings lines', () => {
     expect(signedInLine(0)).toBe('Signed in on this computer.')
     expect(signedInLine(1)).toBe('Signed in on this computer. And on 1 other computer.')
@@ -105,6 +125,40 @@ describe('the form', () => {
   })
 })
 
+describe('a failed post', () => {
+  const F = (code: string, extra: Partial<PostProgress> = {}): PostProgress => ({ ...P('failed'), error: { code, userMessage: 'x' }, ...extra })
+  it('offers the button its message names', () => {
+    expect(failedAction(F('OFFLINE', { canResume: true }))).toBe('finish')
+    expect(failedAction(F('SERVER', { canResume: true }))).toBe('finish')
+    expect(failedAction(F('OFFLINE'))).toBe('try_again')
+    expect(failedAction(F('SIGNED_OUT'))).toBe('sign_in')
+    for (const c of ['RECONNECT', 'NOT_CONNECTED', 'NO_CHANNEL']) expect(failedAction(F(c)), c).toBe('connect')
+    expect(failedAction(F('EXPIRED'))).toBe('post_again')
+    expect(failedAction(F('FILE_CHANGED'))).toBe('start_over')
+    expect(failedAction(F('ENDED'))).toBeNull()
+    expect(failedAction(F('QUOTA'))).toBe('try_again')
+  })
+  it('every message that names a button is shown above that button', () => {
+    const named: [string, string][] = [
+      ['SIGNED_OUT', FAILED_BUTTONS.sign_in],
+      ['EXPIRED', FAILED_BUTTONS.post_again],
+      ['FILE_CHANGED', FAILED_BUTTONS.start_over]
+    ]
+    for (const [code, button] of named) {
+      expect(POSTING_ERRORS[code as keyof typeof POSTING_ERRORS], code).toContain(`Click ${button}`)
+      expect(FAILED_BUTTONS[failedAction(F(code))!]).toBe(button)
+    }
+    // OFFLINE shows in Settings and before an upload exists too, where there is no Finish posting
+    expect(POSTING_ERRORS.OFFLINE).not.toMatch(/Finish posting/)
+  })
+  it('the retry line says whose trouble it is', () => {
+    expect(retryLine('offline', 8)).toBe('The connection dropped. Trying again in 8 seconds…')
+    expect(retryLine(undefined, 2)).toBe('The connection dropped. Trying again in 2 seconds…')
+    expect(retryLine('youtube', 4)).toBe('YouTube is busy. Trying again in 4 seconds…')
+    expect(retryLine('server', 1)).toBe('The posting server is having trouble. Trying again in 1 second…')
+  })
+})
+
 describe('copy', () => {
   const all = [
     ...Object.values(POSTING_ERRORS),
@@ -112,7 +166,10 @@ describe('copy', () => {
     ...Object.values(POST_COPY),
     ...Object.values(CONNECT_NOTES).filter(Boolean),
     ...Object.values(DONE_PRIVACY),
-    ...Object.values(SETTINGS_COPY)
+    ...Object.values(SETTINGS_COPY),
+    ...Object.values(FAILED_BUTTONS),
+    retryLine('youtube', 2),
+    retryLine('server', 2)
   ].join(' ')
   it('no em dashes, no jargon', () => {
     expect(all).not.toMatch(/[–—]/)
@@ -121,12 +178,14 @@ describe('copy', () => {
   it('the components use it', () => {
     const src = (f: string) => readFileSync(join(__dirname, '..', 'src', 'renderer', 'src', 'components', f), 'utf8')
     const sheet = src('PostSheet.tsx')
-    for (const k of ['noKey', 'ended', 'signedOut', 'notConnected', 'reconnect', 'connecting', 'privacyHelp', 'kidsHelp', 'notAShort', 'keepOpen', 'doneHeading'])
+    for (const k of ['noKey', 'ended', 'notConnected', 'reconnect', 'connecting', 'privacyHelp', 'kidsHelp', 'notAShort', 'keepOpen', 'doneHeading'])
       expect(sheet, k).toContain(`POST_COPY.${k}`)
+    for (const f of ['signedOutCopy(', 'failedAction(', 'FAILED_BUTTONS[', 'retryLine(']) expect(sheet, f).toContain(f)
     expect(sheet).toContain('CONNECT_NOTES')
     expect(sheet).toContain('TERMS_URL')
     const settings = src('PostingSettings.tsx')
     for (const k of ['intro', 'coming', 'privacy', 'everywhereBody']) expect(settings, k).toContain(`SETTINGS_COPY.${k}`)
+    expect(settings).toContain('youtubeLine(s)')
     expect(src('PostButton.tsx')).toContain('enabled')
   })
 })

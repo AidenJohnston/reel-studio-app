@@ -1,7 +1,7 @@
 // Settings > Posting: which channel is connected, Disconnect, and this computer's sign-in (Sign out, Sign out
 // everywhere). Renders nothing unless posting is turned on (REELSTUDIO_POSTING=1). main/posting.ts does the work.
 import { useState } from 'react'
-import { CONNECT_NOTES, POST_COPY, PRICING_URL, SETTINGS_COPY, disconnectBody, signedInLine } from '../../../shared/posting'
+import { CONNECT_NOTES, POST_COPY, PRICING_URL, SETTINGS_COPY, disconnectBody, signedInLine, youtubeLine } from '../../../shared/posting'
 import { reel, userMessage } from '../api'
 import { usePostingStatus } from './PostButton'
 import { Confirm, Spinner } from './ui'
@@ -68,7 +68,7 @@ export function PostingSettings() {
         <div className="stack" style={{ gap: 14 }}>
           <div className="stack" style={{ gap: 6 }} data-testid="posting-youtube">
             <p style={{ margin: 0 }}>
-              <strong>YouTube:</strong> {yt ? (yt.state === 'reconnect' ? 'needs connecting again' : yt.channelName ?? 'connected') : 'not connected'}
+              <strong>YouTube:</strong> {youtubeLine(s)}
             </p>
             {waiting ? (
               <div className="row" style={{ alignItems: 'flex-start' }}>
@@ -77,7 +77,7 @@ export function PostingSettings() {
                   Cancel
                 </button>
               </div>
-            ) : (
+            ) : !s.signedIn ? null /* Sign in, just below, comes first: the connection can't be seen until then */ : (
               <div className="row">
                 {yt?.state === 'connected' ? (
                   <button className="btn ghost" onClick={() => setConfirm('disconnect')} disabled={working} data-testid="posting-disconnect">
