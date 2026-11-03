@@ -243,6 +243,8 @@ interface Running {
   version: number
   controller: AbortController
   cancelled: boolean
+  /** The privacy asked for: the result's privacy if YouTube's answer doesn't say. */
+  asked: PostPrivacy
   last: PostProgress
   lastSentAt: number
   done: Promise<PostProgress>
@@ -637,6 +639,7 @@ export function createPostingService(d: PostingDeps) {
       version,
       controller: new AbortController(),
       cancelled: false,
+      asked: 'private',
       last: { uploadId: null, slug, version, step: 'starting', sent: 0, total },
       lastSentAt: 0,
       done: null as never as Promise<PostProgress>
@@ -650,8 +653,22 @@ export function createPostingService(d: PostingDeps) {
         if (e instanceof Cancelled || r.cancelled) {
           if (r.uploadId) {
             const s = await session()
-            if (s) await request('DELETE', `/v1/uploads/${encodeURIComponent(r.uploadId)}`, { auth: s.session })
+            const a = s ? await request('DELETE', `/v1/uploads/${encodeURIComponent(r.uploadId)}`, { auth: s.session }) : null
             await dropPending(r.uploadId)
+            // Stop came after YouTube already had the whole video: it is posted, so say so.
+            if (a && !a.net && a.status === 200 && a.body?.status === 'done') {
+              const result = (() => {
+                try {
+                  return resultOf(a.body.video, r.asked)
+                } catch {
+                  return null
+                }
+              })()
+              if (result) {
+                d.log(`[posting] ${r.uploadId}: stopped after YouTube had all of it; posted`)
+                return emit(r, 'done', { sent: r.last.total, result })
+              }
+            }
           }
           d.log(`[posting] stopped ${r.uploadId ?? 'before it started'}`)
           return emit(r, 'cancelled')
@@ -699,6 +716,7 @@ export function createPostingService(d: PostingDeps) {
     const slug = String(req.slug)
     const version = Number(req.version) || 0
     return run(slug, version, size, async (r) => {
+      r.asked = req.privacy
       const b = await api('POST', '/v1/uploads', {
         signal: r.controller.signal,
         json: {
@@ -734,6 +752,7 @@ export function createPostingService(d: PostingDeps) {
       r.last = { ...r.last, uploadId: entry.uploadId, sent: entry.sent ?? 0 }
       const g = await api('GET', `/v1/uploads/${encodeURIComponent(entry.uploadId)}`, { signal: r.controller.signal, upload: true })
       const asked = entry.privacy && PRIVACIES.includes(entry.privacy) ? entry.privacy : 'private'
+      r.asked = asked
       if (g?.status === 'done') {
         await dropPending(entry.uploadId)
         return emit(r, 'done', { sent: entry.size, result: resultOf(g.video, asked) })

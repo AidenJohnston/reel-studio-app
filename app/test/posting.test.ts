@@ -542,6 +542,22 @@ describe('posting', () => {
     expect(t.progress.at(-1)?.step).toBe('cancelled')
   })
 
+  it('Stop after YouTube already had the last chunk: the server says done, so the post is done', async () => {
+    const t = await ready()
+    intercept(t, async (call, real) => {
+      const res = await real()
+      if (call.method === 'PUT' && uploaded(t).status === 'done') void t.svc.cancel()
+      return res
+    })
+    const p = await t.svc.post(req({ privacy: 'unlisted' }))
+    expect(p.step).toBe('done')
+    expect(p.result).toMatchObject({ videoId: 'dQw4w9WgXcQ', privacy: 'unlisted' })
+    expect(t.fake.state.calls.some((c) => c.startsWith('DELETE /v1/uploads/'))).toBe(true)
+    expect(uploaded(t).status).toBe('done')
+    expect(t.pending).toEqual([])
+    expect(t.progress.at(-1)?.step).toBe('done')
+  })
+
   it('Stop while waiting to try again', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, times: 1 })

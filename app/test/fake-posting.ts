@@ -200,6 +200,8 @@ export function createFakePosting(opts: { origin?: string; chunkSize?: number } 
       const u = state.uploads.get(up[1])
       if (!u || u.sid !== s.sid) return err(404, 'not_found')
       if (method === 'DELETE') {
+        // Like the server: YouTube already has the whole video, so it is done, not cancelled.
+        if (u.status === 'done') return json(200, { ok: true, ...(await uploadAnswer(u).json()) })
         u.status = 'cancelled'
         return json(200, { ok: true })
       }
