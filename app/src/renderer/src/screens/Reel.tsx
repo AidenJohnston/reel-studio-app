@@ -7,6 +7,8 @@ import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
+import { PostButton } from '../components/PostButton'
+import { PostSheet } from '../components/PostSheet'
 import { Icon } from '../components/icons'
 import { PhonePlayer, type SubtitleLook } from '../components/Player'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
@@ -48,6 +50,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
   const [drawer, setDrawer] = useState<Tab | null>(null)
   const [exporting, setExporting] = useState<'busy' | ExportResult | null>(null)
   const [phoneFirst, setPhoneFirst] = useState(false) // export straight into "Send to my phone"
+  const [postFirst, setPostFirst] = useState(false) // export straight into "Post to YouTube"
   const [postDraft, setPostDraft] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -129,9 +132,10 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     covers.current.set(url, img)
   }, [version?.cover])
 
-  const doExport = useCallback(async (toPhone = false) => {
+  const doExport = useCallback(async (toPhone = false, toPost = false) => {
     if (!version || job || exporting) return
     setPhoneFirst(toPhone)
+    setPostFirst(toPost)
     setExporting('busy')
     try {
       setExporting(await reel.projects.exportVersion(slug, version.n))
@@ -381,6 +385,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           <button className="btn export-btn" onClick={() => void doExport(true)} disabled={!version || !!job} data-testid="send-to-phone-reel" title={job ? 'Wait for this version to finish' : undefined}>
             <Icon name="send" /> Send to my phone
           </button>
+          <PostButton onClick={() => void doExport(false, true)} disabled={!version || !!job} title={job ? 'Wait for this version to finish' : undefined} />
         </div>
 
         <div className="reel-right">
@@ -645,7 +650,16 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
-      {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
+      {exporting && (
+        <ExportDialog
+          result={exporting}
+          phoneFirst={phoneFirst}
+          postFirst={postFirst}
+          about={{ slug, version: version?.n ?? 0, title: d.title, durationSec: duration }}
+          onClose={() => setExporting(null)}
+          onSaveCaption={(t) => savePost(t, true)}
+        />
+      )}
     </div>
   )
 }
@@ -658,16 +672,22 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 function ExportDialog({
   result,
   phoneFirst,
+  postFirst,
+  about,
   onClose,
   onSaveCaption
 }: {
   result: 'busy' | ExportResult
   phoneFirst?: boolean
+  postFirst?: boolean
+  about: { slug: string; version: number; title: string; durationSec: number | null }
   onClose: () => void
   onSaveCaption: (t: string) => Promise<boolean>
 }) {
   const [opened, setOpened] = useState(false)
   const [phone, setPhone] = useState(!!phoneFirst)
+  const [post, setPost] = useState(!!postFirst)
+  const [posting, setPosting] = useState(false) // a post is being sent: Stop is the way out, not Esc
   const [caption, setCaption] = useState(result === 'busy' ? '' : result.caption)
   const [copied, setCopied] = useState(false)
   useEffect(() => {
@@ -689,6 +709,14 @@ function ExportDialog({
     return (
       <Modal onClose={onClose} wide testid="export-dialog">
         <SendToPhone video={result.video} caption={caption} onBack={() => setPhone(false)} />
+      </Modal>
+    )
+
+  // "Post to YouTube" (components/PostSheet.tsx), only when posting is turned on.
+  if (post)
+    return (
+      <Modal onClose={posting ? undefined : onClose} wide testid="export-dialog">
+        <PostSheet video={result.video} {...about} caption={caption} onBack={() => setPost(false)} onClose={onClose} onBusy={setPosting} />
       </Modal>
     )
 
@@ -765,6 +793,7 @@ function ExportDialog({
           <a className="btn small" href={INSTAGRAM_URL} target="_blank" rel="noreferrer" data-testid="open-instagram">
             <Icon name="instagram" size={16} /> Open Instagram
           </a>
+          <PostButton className="btn small" testid="post-youtube" onClick={() => setPost(true)} />
         </div>
       </div>
 

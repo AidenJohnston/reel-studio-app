@@ -1,0 +1,7 @@
+/* "Post to YouTube" (components/PostSheet.tsx). Same tokens as styles.css. */
+.post-sheet p { margin: 0; }
+.post-privacy { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.post-privacy legend { padding: 0; margin-bottom: 8px; }
+.post-note { background: var(--amber-soft); color: var(--amber-ink); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 14px; }
+.post-error { background: var(--red-soft); color: var(--red-ink); border-radius: var(--radius-sm); padding: 10px 12px; }
+.post-note a, .post-error a { color: inherit; }
