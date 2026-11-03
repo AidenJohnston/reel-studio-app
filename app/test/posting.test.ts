@@ -114,7 +114,9 @@ describe('postingConfig (REELSTUDIO_POSTING, REELSTUDIO_POSTING_URL)', () => {
     expect(on('http://[::1]:8788').baseUrl).toBe('http://[::1]:8788')
   })
   it('anything else keeps posting off and says so in the log', () => {
-    for (const bad of ['http://post.example.com', 'ftp://x', 'not a url', 'https://u:p@post.test', 'https://post.test/?a=1']) {
+    const withUser = new URL('https://post.test')
+    withUser.username = 'someone' // a user name in the address
+    for (const bad of ['http://post.example.com', 'ftp://x', 'not a url', withUser.href, 'https://post.test/?a=1']) {
       const logs: string[] = []
       expect(postingConfig({ REELSTUDIO_POSTING: '1', REELSTUDIO_POSTING_URL: bad }, D, (l) => logs.push(l)).enabled).toBe(false)
       expect(logs).toEqual(['[posting] REELSTUDIO_POSTING_URL is not a usable address; posting stays off'])
@@ -334,6 +336,13 @@ describe('Connect YouTube', () => {
     expect((await t.svc.connect('youtube')).outcome).toBe('connected')
     expect(t.opened).toHaveLength(2)
     expect(t.opened[0]).not.toBe(t.opened[1])
+  })
+
+  it("waits by this computer's clock, so a clock that is off doesn't make every connect run out", async () => {
+    const t = world()
+    t.fake.state.now = () => t.now() - 3 * 3600_000 // the server's clock is 3 hours behind
+    t.onOpen = allow(t)
+    expect((await t.svc.connect('youtube')).outcome).toBe('connected')
   })
 
   it('a second Connect while one waits gets the same answer', async () => {

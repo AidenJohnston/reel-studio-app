@@ -29,6 +29,8 @@ export const RETRY_WAITS = [2, 4, 8, 16, 30]
 /** Give up (and offer Finish posting) after this long without a byte getting through. */
 export const GIVE_UP_MS = 5 * 60_000
 const PROGRESS_EVERY_MS = 250
+/** How long Connect YouTube waits for the browser: the server's link lives 10 minutes. */
+const ATTEMPT_WAIT_MS = 10 * 60_000 + 30_000
 const ATTEMPT_OUTCOMES: ConnectOutcome[] = ['connected', 'denied', 'missing_permission', 'no_channel', 'failed', 'cancelled', 'expired']
 const YOUTUBE_LINK_HOSTS = ['www.youtube.com', 'studio.youtube.com', 'youtu.be']
 
@@ -364,7 +366,9 @@ export function createPostingService(d: PostingDeps) {
     }
     await d.openExternal(u.toString())
     d.log(`[posting] opened the YouTube connect page (${b.attemptId})`) // never the link: it carries a one-time token
-    return { attemptId: b.attemptId, openUrl: u.toString(), expiresAt: Number(b.expiresAt) || d.now() + 10 * 60_000, pollMs: Math.max(500, Number(b.pollMs) || 2000) }
+    // Timed on this computer's clock, not the server's expiresAt: a clock that is a few minutes off would otherwise
+    // give up at once. The server answers 'expired' itself when the link runs out.
+    return { attemptId: b.attemptId, openUrl: u.toString(), expiresAt: d.now() + ATTEMPT_WAIT_MS, pollMs: Math.max(500, Number(b.pollMs) || 2000) }
   }
 
   async function runConnect(controller: AbortController): Promise<ConnectOutcome> {
