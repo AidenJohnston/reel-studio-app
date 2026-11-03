@@ -1,4 +1,7 @@
 """Caption defaults = the proven default look (grandma test: captions were small, grey and on the chest)."""
+import re
+
+from conftest import mkwords
 from reelengine import captions, project
 
 
@@ -36,3 +39,25 @@ def test_box_style_draws_an_opaque_box():
     f = _style_line(ass)
     assert f[15] == "3"                    # BorderStyle 3 = opaque box in the outline colour
     assert float(f[16]) >= captions.BOX_PAD and float(f[17]) == 0.0
+
+
+def test_highlight_lights_each_spoken_word_in_turn_and_the_pop_runs_once_across_them():
+    words = mkwords([(0.0, 0.07, "Make"), (0.08, 0.35, "it"), (0.4, 1.2, "pop.")])
+    cap = {"style": {"highlight": "#FFD60A", "pop": True}}
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    events = [l.split(",", 9) for l in ass.splitlines() if l.startswith("Dialogue:")]
+    # one event per word, each ending where the next starts: the line never blinks between words
+    assert [(e[1], e[2]) for e in events] == [("0:00:00.00", "0:00:00.08"), ("0:00:00.08", "0:00:00.40"),
+                                              ("0:00:00.40", "0:00:01.20")]
+    assert [re.findall(r"\{\\1c&H0AD6FF&\}(\w+)", e[9]) for e in events] == [["MAKE"], ["IT"], ["POP"]]
+    assert {re.sub(r"\{[^}]*\}", "", e[9]) for e in events} == {"MAKE IT POP"}
+    # the 120 ms grow carries on through the second word's event instead of restarting or stopping
+    assert [re.findall(r"\\t\((-?\d+),(\d+)", e[9]) for e in events] == [[("0", "120")], [("-80", "40")], []]
+
+
+def test_a_line_with_a_word_that_is_only_punctuation_is_drawn_without_the_highlight():
+    words = mkwords([(0.0, 0.3, "so"), (0.35, 0.5, "—"), (0.55, 1.0, "yeah")])
+    cap = {"style": {"highlight": "#FFD60A"}}
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    events = [l.split(",", 9)[9] for l in ass.splitlines() if l.startswith("Dialogue:")]
+    assert len(events) == 1 and "\\1c" not in events[0] and events[0].endswith("SO — YEAH")

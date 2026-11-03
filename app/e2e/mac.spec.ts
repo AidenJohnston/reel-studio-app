@@ -365,7 +365,7 @@ TAKES.forEach((take, i) => {
       // ---- manual: yellow subtitles; the window goes to the background so "ready" is a real notification ----
       await page.getByTestId('edit-myself').click()
       await page.getByTestId('tab-captions').click()
-      await page.getByTestId('cap-look-yellow').click()
+      await page.getByTestId('cap-color-yellow').click()
       await snap(page, `${TAG}-${i}-04-yellow-picked`)
       const t3 = Date.now()
       await page.getByTestId('make-version').click()
