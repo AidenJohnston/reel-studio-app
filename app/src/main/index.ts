@@ -59,6 +59,7 @@ import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
+import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -680,6 +681,19 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
+  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  setupPosting({
+    handle,
+    env: process.env,
+    settingsDir: settingsDir(),
+    exportsDir: () => binDir('exports'),
+    secrets: safeStorage,
+    appVersion: app.getVersion(),
+    getKey: () => updateKey.get(),
+    openExternal: (url) => shell.openExternal(url),
+    send: broadcast,
+    log
+  })
 
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
