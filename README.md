@@ -51,7 +51,7 @@ updates) or $20 a month, cancel anytime. The download link for the installers is
 payment, and the app tells you when a newer version is out. Buying funds development and gets you the signed
 builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
 
-The code is MIT, so anyone can [build it themselves](#build-from-source) for free.
+The code is open source (AGPL-3.0), so anyone can [build it themselves](#build-from-source) for free.
 
 | System | File | Guide |
 |---|---|---|
@@ -180,7 +180,11 @@ Packaging details, signing and notarizing: [packaging/README.md](packaging/READM
 
 ## License and third-party notices
 
-Reel Studio is released under the [MIT License](LICENSE).
+Reel Studio is released under the [GNU Affero General Public License, version 3 only](LICENSE). If you distribute a
+modified version, or run one that people use over a network, you have to offer them its source under the same license.
+The videos you make are yours and are not covered by it. Versions through 0.1.4 stay under the MIT License.
+[NOTICE.md](NOTICE.md) has the details, including the additional permissions and the rules for the name and logo. The
+source of any release is this repository at that version's tag.
 
 The installers also contain other programs, each under its own license: FFmpeg and FFprobe (GPL v3, run
 as separate programs), Python and its libraries, Electron, fonts (SIL OFL and Apache 2.0), and the YuNet face

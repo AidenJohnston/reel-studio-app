@@ -1,6 +1,6 @@
 # Third-party software in Reel Studio
 
-Reel Studio itself is MIT licensed (see `LICENSE`). The installer also contains the programs below.
+Reel Studio itself is licensed under the GNU AGPL v3 only (see `LICENSE` and `NOTICE.md`). The installer also contains the programs below.
 Each keeps its own license. This list is what `packaging/fetch_runtime.py` downloads, so the URLs and
 SHA-256 values here are the ones the script verifies. If you change one, change the other.
 
