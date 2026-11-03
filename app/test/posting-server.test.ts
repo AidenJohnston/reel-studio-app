@@ -44,6 +44,8 @@ describe.skipIf(!SERVER)('posting: the app against the real posting Worker and t
   /** Cut the connection on this chunk PUT (counted from 1), after this many bytes. */
   let dropChunk = { number: 0, afterBytes: 0 }
   let chunkPuts = 0
+  /** Runs when the Worker has answered the chunk that ends the file, before the app sees that answer. */
+  let onLastChunkAnswered: (() => void) | null = null
   let proxyDrops = 0
   const logs: string[] = []
   const browserPages: { status: number; text: string }[] = []
@@ -96,7 +98,14 @@ describe.skipIf(!SERVER)('posting: the app against the real posting Worker and t
     proxy = http.createServer((req, res) => {
       const isChunk = req.method === 'PUT' && /^\/v1\/uploads\//.test(req.url ?? '') && !/^bytes \*\//.test(String(req.headers['content-range'] ?? ''))
       const drop = isChunk && ++chunkPuts === dropChunk.number ? dropChunk.afterBytes : null
+      const range = /^bytes \d+-(\d+)\/(\d+)$/.exec(String(req.headers['content-range'] ?? ''))
+      const isLast = isChunk && !!range && Number(range[1]) + 1 === Number(range[2])
       const up = http.request({ host: upstream.hostname, port: upstream.port, method: req.method, path: req.url, headers: req.headers }, (ur) => {
+        if (isLast && onLastChunkAnswered) {
+          const f = onLastChunkAnswered
+          onLastChunkAnswered = null
+          f()
+        }
         res.writeHead(ur.statusCode ?? 502, ur.headers)
         ur.pipe(res)
       })
@@ -187,6 +196,19 @@ describe.skipIf(!SERVER)('posting: the app against the real posting Worker and t
     const arrived = await fake(`/__fake/upload?id=${(await fake('/__fake/state')).uploads.at(-1).id}`)
     expect(arrived.sha256).toBe(createHash('sha256').update(file).digest('hex'))
     expect(await restarted.svc.pending('reel', 3)).toBeNull()
+  }, 120_000)
+
+  it('Stop pressed after the last chunk reached YouTube: the server says it is posted, and so does the app', async () => {
+    const before = (await fake('/__fake/state')).uploads.length
+    onLastChunkAnswered = () => void a.svc.cancel()
+    const done = await a.svc.post({ video, slug: 'reel', version: 4, title: 'Stopped too late', description: '', privacy: 'unlisted', madeForKids: false })
+    expect(onLastChunkAnswered).toBeNull()
+    expect(done).toMatchObject({ step: 'done', result: { privacy: 'unlisted' } })
+    const st = await fake('/__fake/state')
+    expect(st.uploads.length).toBe(before + 1)
+    expect((await fake(`/__fake/upload?id=${st.uploads.at(-1).id}`)).done).toBe(true)
+    expect(logs.some((l) => l.includes('stopped after YouTube had all of it'))).toBe(true)
+    expect(await a.svc.pending('reel', 4)).toBeNull()
   }, 120_000)
 
   it("YouTube's daily limits come through as the app's own messages", async () => {
