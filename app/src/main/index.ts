@@ -673,7 +673,8 @@ function registerIpc(): void {
   handle('updateKey:status', () => updateKey.status())
   // Read here, not in the page: the page never needs the key, and main already has the clipboard.
   handle('updateKey:paste', async () => {
-    const s = await updateKey.fromText(clipboard.readText())
+    // Electron 44's clipboard.readText() returns a promise: without the await, every paste is "not a link".
+    const s = await updateKey.fromText(await clipboard.readText())
     if (!s) throw { code: 'NO_KEY', userMessage: 'That is not a Reel Studio download link. Copy the link from your receipt email, then click Paste again.' }
     return s
   })
