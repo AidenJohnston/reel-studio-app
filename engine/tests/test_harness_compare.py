@@ -74,8 +74,11 @@ def test_audio_offset_sign_and_size():
 def test_level_delta_reads_half_volume_as_6_db_and_ignores_pauses():
     rate = 48000
     tone = 0.5 * np.sin(2 * np.pi * 220 * np.arange(rate) / rate)
-    tone[: rate // 2] = 0.0                                   # a pause, quieter than the floor
-    assert compare.level_delta_db(tone, tone * 0.5, rate, 0.1, -45.0) == pytest.approx(6.02, abs=0.01)
+    tone[: rate // 2] = 0.0                                   # a pause in the reference
+    cand = tone * 0.5
+    # hiss where the reference pauses: a level there means nothing, so it must not count
+    cand[: rate // 2] = np.random.default_rng(1).normal(0, 0.05, rate // 2)
+    assert compare.level_delta_db(tone, cand, rate, 0.1, -45.0) == pytest.approx(6.02, abs=0.01)
 
 
 def test_timestamps_match_reports_count_and_first_slip():

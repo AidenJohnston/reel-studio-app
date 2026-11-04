@@ -23,6 +23,9 @@ LEVEL_WINDOW = 0.1
 LEVEL_FLOOR_DB = -45.0
 # The offset search spans +-0.5 s: far wider than any plausible slip, small enough to stay unambiguous.
 MAX_LAG = 0.5
+# A preview's audio may differ in length from the reference stretch by up to two AAC frames (the
+# encoder pads the last one); more than that is missing or extra sound.
+AUDIO_LENGTH_SLACK = 2048
 
 
 class Tally:
@@ -65,6 +68,8 @@ def check_final(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list
         failures.append(f"timestamps: {why}")
     if media.audio_packets_md5(ffmpeg, ref) != media.audio_packets_md5(ffmpeg, cand):
         failures.append("audio packets differ")
+    elif media.audio_timing(ffprobe, ref) != media.audio_timing(ffprobe, cand):
+        failures.append("audio packets are identical but play at different times")
     w, h = media.video_size(ffprobe, ref)
     if media.video_size(ffprobe, cand) != (w, h):
         failures.append(f"size {media.video_size(ffprobe, cand)} != reference {(w, h)}")
@@ -88,19 +93,20 @@ def _preview_rows(tally: Tally, th: dict) -> list:
 
 
 def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list, th: dict,
-                        fps: float, start: float = 0.0, ref_w: int = 1080) -> dict:
-    """A draft (start 0) or a window (start = its first output second) against the reference."""
+                        fps: float, start: float = 0.0, end: float = math.inf) -> dict:
+    """A draft (all of the reference) or a window (the reference's output seconds [start, end))
+    against the reference. The range comes from the request, not the candidate, so a short output
+    fails the frame count."""
     failures = []
     w, h = media.video_size(ffprobe, cand)
     rp_all = media.video_pts(ffprobe, ref)
     cp = media.video_pts(ffprobe, cand)
-    end = start + (cp[-1] + 1.0 / fps if cp else 0.0)
     eps = 1e-6
     picked = [i for i, t in enumerate(rp_all) if start - eps <= t < end - eps]
     why = compare.timestamps_match([rp_all[i] - start for i in picked], cp, tol=0.5 / fps)
     if why:
         failures.append(f"timestamps: {why}")
-    band = _band(captions, w, h, w / ref_w)
+    band = _band(captions, w, h, w / media.video_size(ffprobe, ref)[0])
     tally = Tally()
     want = set(picked)
     cand_frames = media.iter_frames(ffmpeg, cand, w, h)
@@ -112,9 +118,10 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
             break
         tally.add(rp_all[i], compare.frame_metrics(a, b, band))
     rows = _preview_rows(tally, th)
-    dur = len(cp) / fps
-    ra = media.audio_mono(ffmpeg, ref, start=start, duration=dur)
+    ra = media.audio_mono(ffmpeg, ref, start=start, duration=len(picked) / fps)
     ca = media.audio_mono(ffmpeg, cand)
+    if abs(len(ca) - len(ra)) > AUDIO_LENGTH_SLACK:
+        failures.append(f"audio is {len(ca) / media.AUDIO_RATE:.3f}s, reference stretch {len(ra) / media.AUDIO_RATE:.3f}s")
     off_ms = 1000.0 * compare.audio_offset(ra, ca, media.AUDIO_RATE, MAX_LAG)
     lvl = compare.level_delta_db(ra, ca, media.AUDIO_RATE, LEVEL_WINDOW, LEVEL_FLOOR_DB)
     rows += [("audioOffsetMs", abs(off_ms), compare.verdict(abs(off_ms), maximum=th.get("audioOffsetMaxMs")), None),
@@ -122,8 +129,7 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
     return _result(rows, failures, {"size": [w, h], "frames": len(cp)})
 
 
-def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict,
-                ref_w: int = 1080) -> dict:
+def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict) -> dict:
     """One still `frames --times t` made: the first reference frame at or after t (what ffmpeg's
     accurate input seek in frames.py returns), scaled to the still's size."""
     b = media.read_image(png)
@@ -136,5 +142,5 @@ def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, capti
             a = fr
             break
     tally = Tally()
-    tally.add(rp[idx], compare.frame_metrics(a, b, _band(captions, w, h, w / ref_w)))
+    tally.add(rp[idx], compare.frame_metrics(a, b, _band(captions, w, h, w / media.video_size(ffprobe, ref)[0])))
     return _result(_preview_rows(tally, th), [], {"size": [w, h]})

@@ -3,7 +3,7 @@
   pin     print the sha256 of this FFmpeg/ffprobe and the current commit, for a person to pin
   setup   check the pins, write out the reference engine, generate the corpus, render references
   run     setup, then replay every session --runs times (after one untimed warm-up) and check
-          the first timed run's outputs; writes report.json and report.md under the work folder
+          every distinct output; writes report.json and report.md under the work folder
   agree   do two run reports agree within config.agreeWithinPct on the session wait?
 """
 from __future__ import annotations
@@ -102,8 +102,7 @@ def setup(c: Ctx, ids=None) -> dict:
             made[entry["id"]] = corpus.build_synthetic(str(c.ffmpeg), c.ref, entry["synthetic"], d, c.root)
         take = replay.Take(entry["id"], d)
         sizes[entry["id"]] = corpus.take_bytes(d)
-        takes[entry["id"]] = (take, replay.build_references(take, c.ref, c.work / "refs", c.scratch, c.pins,
-                                                            sha256_file(song), str(c.ffprobe)))
+        takes[entry["id"]] = (take, replay.build_references(take, c.ref, c.work / "refs", c.scratch, c.pins, c.root))
     return {"takes": takes, "made": made, "mediaBytes": sizes, "songBytes": song.stat().st_size}
 
 
@@ -164,14 +163,15 @@ def cmd_run(a) -> int:
             cache = c.scratch / "cache-run"
             shutil.rmtree(cache, ignore_errors=True)
             cand.env = c.env(cache)
-            keep = out_dir / "outputs" / tid if r == 0 else None
+            keep = out_dir / "outputs" / tid / f"run{r + 1}"
             results[tid].append(replay.replay(take, cand, refs, c.scratch, keep, str(c.ffprobe)))
         report["load"].append(load_sample())
     th = c.cfg["thresholds"]
     for tid in ids:
         take, refs = s["takes"][tid]
         rs = results[tid]
-        checked = replay.check_take(take, refs, rs[0], str(c.ffmpeg), str(c.ffprobe), th)
+        checked = replay.check_take(take, refs, rs, str(c.ffmpeg), str(c.ffprobe), th)
+        replay.prune_duplicates(rs)
         steps = []
         for k, step in enumerate(take.session):
             steps.append({"note": step["note"], "moment": refs[k]["moment"], "window": refs[k]["window"],

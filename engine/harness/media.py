@@ -82,6 +82,15 @@ def audio_mono(ffmpeg: str, path: Path, start: float = 0.0, duration: float = No
     return np.frombuffer(_run(cmd).stdout, dtype=np.float32)
 
 
+def audio_timing(ffprobe: str, path: Path) -> dict:
+    """When each audio packet plays: the stream's start and edit (trims the encoder delay) and
+    every packet's pts and duration. Identical payloads at different times are not identical audio."""
+    info = json.loads(_run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
+                            "stream=start_pts,start_time,time_base,nb_frames:packet=pts,duration",
+                            "-print_format", "json", path]).stdout)
+    return {"stream": info.get("streams"), "packets": [(p.get("pts"), p.get("duration")) for p in info.get("packets", [])]}
+
+
 def audio_packets_md5(ffmpeg: str, path: Path) -> str:
     """md5 of the encoded audio packets: "audio bytes identical" means this matches."""
     out = _run([ffmpeg, "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c", "copy",

@@ -93,16 +93,18 @@ def audio_offset(ref: np.ndarray, cand: np.ndarray, rate: int, max_lag: float) -
 
 
 def level_delta_db(ref: np.ndarray, cand: np.ndarray, rate: int, window: float, floor_db: float) -> float:
-    """Largest difference in RMS level (dB) between matching `window`-second slices, over slices
-    where the reference is louder than `floor_db` dBFS (silence has no meaningful level). 0.0 when
-    no slice is loud enough."""
+    """Largest difference in RMS level (dB) between matching `window`-second slices (the last one
+    may be shorter), over slices where the reference is louder than `floor_db` dBFS: a pause has no
+    meaningful level. 0.0 when no slice is loud enough. Lengths are checked separately."""
     step = max(1, int(round(window * rate)))
-    n = min(len(ref), len(cand)) // step * step
+    n = min(len(ref), len(cand))
     if n == 0:
         return 0.0
+    edges = list(range(0, n, step)) + [n]
 
     def db(x: np.ndarray) -> np.ndarray:
-        rms = np.sqrt(np.mean(x[:n].astype(np.float64).reshape(-1, step) ** 2, axis=1))
+        x = x.astype(np.float64)
+        rms = np.array([np.sqrt(np.mean(x[a:b] ** 2)) for a, b in zip(edges, edges[1:])])
         return 20.0 * np.log10(np.maximum(rms, 1e-10))
 
     r, c = db(ref), db(cand)
