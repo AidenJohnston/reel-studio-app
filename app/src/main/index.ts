@@ -1799,11 +1799,10 @@ async function selfTestAndQuit(): Promise<void> {
 }
 
 const pendingOpenFiles: string[] = []
-let setupDone = false
 function queueOpenFiles(files: string[]): void {
   pendingOpenFiles.push(...files)
-  // Early open-file events must wait until IPC and the app's services are ready.
-  if (!setupDone) return
+  // Early open-file events wait, like key links, until IPC and the app's services are ready.
+  if (!ready) return
   if (!win || win.isDestroyed()) {
     createWindow() // The new renderer drains pendingOpenFiles on mount.
   } else {
@@ -1824,14 +1823,8 @@ app.on('second-instance', (_event, argv, cwd) => {
   // Windows: a reelstudio:// link opened while the app runs arrives as the new instance's command line.
   const link = argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   if (link) acceptKeyLink(link)
+  // Also brings the window back (or makes a new one) when the launch opened no file.
   queueOpenFiles(filesFromArgv(argv, cwd, !!process.defaultApp))
-  // The window is destroyed but the app still running when it was closed on macOS, or when closing it on Windows
-  // or Linux started a quit that is waiting for a drive save. A null window means startup has not opened it yet.
-  if (win?.isDestroyed()) return createWindow()
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
 })
 
 app.whenReady().then(async () => {
@@ -1913,7 +1906,6 @@ app.whenReady().then(async () => {
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir()])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
   registerIpc()
-  setupDone = true
   createWindow()
   // What a quit, a plan limit or no internet paused last time goes on now, or when it can (main/pause.ts). Sleep
   // was a different run of the app, so it waits only for the network.

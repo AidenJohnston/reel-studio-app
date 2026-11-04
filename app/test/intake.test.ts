@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { filesFromClipboardItems, type ClipboardEntry } from '../src/main/intake'
+import { filesFromArgv, filesFromClipboardItems, type ClipboardEntry } from '../src/main/intake'
 
 const item = (formats: Record<string, string>): ClipboardEntry => ({
   types: Object.keys(formats),
@@ -36,5 +36,18 @@ describe('filesFromClipboardItems', () => {
 
   it('finds nothing in plain text', async () => {
     expect(await filesFromClipboardItems([item({ 'text/plain': join(tmpdir(), 'a.mp4') })])).toEqual([])
+  })
+})
+
+describe('filesFromArgv', () => {
+  const exe = join(tmpdir(), 'Reel Studio', 'Reel Studio.exe')
+  const video = join(tmpdir(), 'Zoë take #1.mp4')
+
+  it('fails if a download-key link or the after-update restart flag is taken for an opened file', () => {
+    expect(filesFromArgv([exe, 'reelstudio://updates?key=v1.abc.def'], tmpdir(), false)).toEqual([])
+    expect(filesFromArgv([exe, 'ReelStudio://updates?key=v1.abc.def'], tmpdir(), false)).toEqual([])
+    expect(filesFromArgv([exe, '--updated'], tmpdir(), false)).toEqual([])
+    expect(filesFromArgv([exe, '--allow-file-access-from-files', video], tmpdir(), false)).toEqual([video])
+    expect(filesFromArgv([exe, 'Zoë take #1.mp4'], tmpdir(), false)).toEqual([video])
   })
 })
