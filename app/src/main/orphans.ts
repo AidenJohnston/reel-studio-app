@@ -5,6 +5,7 @@
 // closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
+import { uptime } from 'node:os'
 import { basename, join } from 'node:path'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
@@ -12,7 +13,9 @@ import { groupAlive, isAlive, killTree } from './proctree'
 /** `stop` ends a pid's process tree and reports whether all of it is gone (proctree killTree). */
 export function createPidRegistry(dir: string, stop: (pid: number) => Promise<boolean> = killTree) {
   const file = join(dir, 'engines.json')
-  const engines = new Map<number, string | null>()
+  // `startedAt`: the clock when the engine was registered, right after it started; 0.1.x and earlier
+  // builds of this list have none
+  const engines = new Map<number, { project: string | null; startedAt?: number }>()
   // A list that cannot be read may hide engines that are still running. It is kept aside, and every
   // start looks for them among the running processes (stillWorking) until a look finds none.
   const unreadable = join(dir, 'engines.unreadable.json')
@@ -21,7 +24,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
     const tmp = `${file}.${process.pid}.tmp`
     const fd = openSync(tmp, 'w')
     try {
-      writeSync(fd, JSON.stringify([...engines].map(([pid, project]) => ({ pid, project }))))
+      writeSync(fd, JSON.stringify([...engines].map(([pid, e]) => ({ pid, ...e }))))
       fsyncSync(fd)
     } finally {
       closeSync(fd)
@@ -55,7 +58,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
   }
   return {
     add(pid: number, project: string | null): void {
-      engines.set(pid, project)
+      engines.set(pid, { project, startedAt: Date.now() })
       save()
     },
     remove(pid: number): void {
@@ -66,11 +69,11 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
      * stop, which stay registered for the next start. While the list cannot be read, or names an
      * engine with no video (`unknown`), it also has every project a running engine or ffmpeg names. */
     async reap(): Promise<{ stopped: number; stillRunning: string[]; unknown: boolean }> {
-      let old: { pid: number; project: string | null }[] = []
+      let old: { pid: number; project: string | null; startedAt?: number }[] = []
       let unknown = existsSync(unreadable)
       try {
         // a plain pid list was written by 0.1.x
-        old = JSON.parse(readFileSync(file, 'utf8')).map((e: number | { pid: number; project: string | null }) => (typeof e === 'number' ? { pid: e, project: null } : e))
+        old = JSON.parse(readFileSync(file, 'utf8')).map((e: number | { pid: number; project: string | null; startedAt?: number }) => (typeof e === 'number' ? { pid: e, project: null } : e))
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
           unknown = true
@@ -83,15 +86,15 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       }
       let stopped = 0
       const stillRunning: string[] = []
-      for (const { pid, project } of old) {
+      for (const { pid, project, startedAt } of old) {
         if (!(typeof pid === 'number' && pid > 0)) continue
-        const left = await leftRunning(pid)
+        const left = await leftRunning(pid, typeof startedAt === 'number' ? startedAt : undefined)
         if (left === 'gone') continue
         if (left === 'ours' && (await stop(pid))) {
           stopped++
           continue
         }
-        engines.set(pid, project)
+        engines.set(pid, typeof startedAt === 'number' ? { project, startedAt } : { project })
         // a 0.1.x list names no video, and a group that may not be ours is never stopped: which video
         // either writes to is as unknown as with an unreadable list
         if (project && left === 'ours') stillRunning.push(project)
@@ -200,13 +203,29 @@ async function isOursByProgram(p: { pid: number; cmdline: string }): Promise<boo
   return /^ff(mpeg|probe)$/.test(program) || (/^python/.test(program) && isOurEngine(p.cmdline))
 }
 
-/** What a previous run's engine left running from this pid. 'ours': the engine itself (after a crash
- * the pid may belong to someone else's python, pid reuse is routine on Windows, so only a command line
- * that is really our engine counts), or on macOS/Linux the process group of an engine that died, while
- * everything in it is an engine or ffmpeg. 'unsure': that group holds anything else. The list survives
- * a reboot, after which the number can lead any daemon's group, so such a group is never signalled. */
-async function leftRunning(pid: number): Promise<'ours' | 'unsure' | 'gone'> {
-  if (isAlive(pid)) return isOurEngine(await processCommandLine(pid)) ? 'ours' : 'gone'
+/** How far apart the clock when an engine was registered and the start time the system reports for
+ * it may be: ps reports whole seconds, and the app registers the engine right after spawning it. */
+const SAME_START_MS = 10_000
+
+/** What a previous run's engine left running from this pid, judged by when it started, never by its
+ * command line alone (a command line can say anything):
+ * - nothing outlives a restart of the computer, and after one the number can belong to anyone;
+ * - a live process with that pid is ours only if it is our engine and started when ours did (pid reuse
+ *   is routine on Windows);
+ * - on macOS/Linux, a process group with that number whose leader died is the group our engine led:
+ *   neither system hands out a number while a group still holds it. Its members are checked too.
+ * 'unsure' (left alone, kept on the list, and the scan decides which video stays closed): the members
+ * hold something else, or the start time cannot be read. Entries from 0.1.x have no start time and are
+ * judged by their command line as before. */
+async function leftRunning(pid: number, startedAt?: number): Promise<'ours' | 'unsure' | 'gone'> {
+  if (startedAt !== undefined && startedAt < Date.now() - uptime() * 1000 - 60_000) return 'gone'
+  if (isAlive(pid)) {
+    const p = await processInfo(pid)
+    if (!p || !isOurEngine(p.cmdline)) return 'gone'
+    if (startedAt === undefined) return 'ours'
+    if (p.startedAt === null) return 'unsure'
+    return Math.abs(p.startedAt - startedAt) <= SAME_START_MS ? 'ours' : 'gone'
+  }
   if (process.platform === 'win32' || !groupAlive(pid)) return 'gone'
   const members = await groupMembers(pid)
   if (!members) return 'unsure'
@@ -233,6 +252,33 @@ export function isOurEngine(cmdline: string | null): boolean {
   const words = head.trim().split(/\s+/)
   const first = words.findIndex((w) => /^python[\d.]*(\.exe)?$/i.test(w.replace(/["']/g, '').split(/[\\/]/).pop() ?? ''))
   return first >= 0 && first === words.length - 1
+}
+
+/** A running process's command line and the clock time it started (null when the system won't say), or
+ * null if it is gone or cannot be read. */
+function processInfo(pid: number): Promise<{ cmdline: string; startedAt: number | null } | null> {
+  return new Promise((resolve) => {
+    const id = Math.floor(pid)
+    if (process.platform === 'win32') {
+      // labelled lines: a start time Windows won't give leaves only the command line
+      const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${id}"; if ($p) { try { 'T:' + ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() } catch {}; 'C:' + $p.CommandLine }`
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15000 }, (_err, out) => {
+        const lines = (out ?? '').split(/\r?\n/)
+        const cmdline = lines.find((l) => l.startsWith('C:'))?.slice(2).trim()
+        const at = Number(lines.find((l) => l.startsWith('T:'))?.slice(2).trim())
+        resolve(cmdline ? { cmdline, startedAt: Number.isFinite(at) && at > 0 ? at : null } : null)
+      })
+    } else {
+      // etime: how long it has run, [[dd-]hh:]mm:ss
+      execFile('ps', ['-p', String(id), '-o', 'etime=,args='], (err, out) => {
+        const m = err ? null : /^\s*(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s+(.*\S)/.exec(out)
+        if (!m) return resolve(null)
+        const [, d, h, mi, s, cmdline] = m
+        const ran = (((Number(d ?? 0) * 24 + Number(h ?? 0)) * 60 + Number(mi)) * 60 + Number(s)) * 1000
+        resolve({ cmdline, startedAt: Date.now() - ran })
+      })
+    }
+  })
 }
 
 /** Full command line of a running process, or null if it is gone (or cannot be read). */
