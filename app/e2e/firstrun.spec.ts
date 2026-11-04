@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, SHOTS, launch, shot } from './helpers'
+import { BASE, SHOTS, launch, passMacStage, shot } from './helpers'
 
 test.skip(process.env.REELSTUDIO_E2E_FIRSTRUN !== '1', 'set REELSTUDIO_E2E_FIRSTRUN=1 to run')
 
@@ -16,6 +16,7 @@ test('first run downloads the listening model with progress', async () => {
   const { app, page } = await launch({ REELSTUDIO_MODELS_DIR: models, REELENGINE_MODEL: model })
   try {
     await page.getByTestId('get-started').click()
+    await passMacStage(page)
     await shot(page, 'firstrun/01-download')
     const t0 = Date.now()
     await page.getByTestId('download-model').click()

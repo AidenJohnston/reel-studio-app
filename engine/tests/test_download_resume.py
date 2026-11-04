@@ -37,6 +37,7 @@ class Plan:
     def __init__(self, drops):
         self.drops = list(drops)      # e.g. [("close", 700_000), ("reset", 400_000), ("chunked", 300_000)]
         self.requests = []            # (start offset, how it ended)
+        self.paths = []               # every path asked for, in order
         self.lock = threading.Lock()
         self.throttle = 0.0           # seconds per 64 KB chunk
 
@@ -55,6 +56,7 @@ def _server(plan: Plan):
             pass
 
         def do_GET(self):
+            plan.paths.append(self.path)
             if self.path.startswith("/api/models/"):
                 body = json.dumps({"siblings": [
                     {"rfilename": n, "lfs": {"size": len(d), "sha256": hashlib.sha256(d).hexdigest()}}
@@ -219,3 +221,25 @@ def test_killed_mid_download_then_run_again_resumes(env, tmp_path):
     assert out.returncode == 0, out.stderr[-2000:]
     assert (d / "model.bin").read_bytes() == MODEL
     assert plan.requests[-1][0] >= have > 0                     # resumed, not restarted
+
+
+def test_a_pinned_model_downloads_its_revision_and_refuses_other_bytes(env, monkeypatch):
+    """small.en ships pinned (models/speech-models.json): no index lookup, the exact revision, and a
+    file whose bytes differ from the pinned SHA-256 is never kept."""
+    d, start = env
+    plan = Plan([])
+    start(plan)
+    pin = {"repo": "Systran/faster-whisper-tiny.en", "revision": "0123abc",
+           "files": [{"name": n, "size": len(b), "sha256": hashlib.sha256(b).hexdigest()} for n, b in FILES.items()]}
+    monkeypatch.setitem(transcribe.PINNED_MODELS, "tiny.en", pin)
+    transcribe.download_model("tiny.en")
+    assert (d / "model.bin").read_bytes() == MODEL
+    assert not any(p.startswith("/api/") for p in plan.paths)
+    assert all("/resolve/0123abc/" in p for p in plan.paths), plan.paths
+
+    for f in d.iterdir():
+        f.unlink()
+    pin["files"][1]["sha256"] = "0" * 64                         # config.json: same size, other bytes
+    with pytest.raises(EngineError) as e:
+        transcribe.download_model("tiny.en")
+    assert e.value.code == "DOWNLOAD_CORRUPT" and not (d / "config.json").exists()
