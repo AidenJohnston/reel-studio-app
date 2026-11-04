@@ -2,9 +2,15 @@ import { clipboard } from 'electron'
 import { spawn } from 'node:child_process'
 import { isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PROTOCOL } from './update-key'
 
+/** The files a launch was asked to open (Open with, or a second launch). Switches such as the `--updated` the
+ * installer adds when it restarts the app after an update are not files, and neither is a reelstudio:// link:
+ * update-key.ts takes those. */
 export function filesFromArgv(argv: string[], cwd: string, defaultApp: boolean): string[] {
-  return argv.slice(defaultApp ? 2 : 1).filter((arg) => !arg.startsWith('-')).map((arg) => isAbsolute(arg) ? arg : resolve(cwd, arg))
+  return argv.slice(defaultApp ? 2 : 1)
+    .filter((arg) => !arg.startsWith('-') && !arg.toLowerCase().startsWith(`${PROTOCOL}:`))
+    .map((arg) => isAbsolute(arg) ? arg : resolve(cwd, arg))
 }
 
 export async function clipboardFiles(): Promise<string[]> {
