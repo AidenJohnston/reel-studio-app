@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -55,6 +56,14 @@ def _rename_words(pdir: Path) -> None:
     tfile.write_text(json.dumps({"words": words}), encoding="utf-8")
 
 
+def _asset(pdir: Path, image: Path) -> str:
+    """The picture copied into the project, as fetch-image stores one (project.json refuses absolute paths)."""
+    d = pdir / "work" / "assets"
+    d.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(image, d / image.name)
+    return f"work/assets/{image.name}"
+
+
 def _layer_item(pdir: Path, bid: str) -> dict:
     items = json.loads((pdir / "work" / "layers" / "layers.json").read_text(encoding="utf-8"))["items"]
     return next(i for i in items if i["id"] == bid)
@@ -70,9 +79,9 @@ def test_a_still_without_a_draft_is_the_drafts_frame(tmp_path, monkeypatch):
     fx.make_project(pdir, _moving_take(tmp_path / "media" / "moving.mp4"), keep=((0.05, 2.45), (3.25, 7.05)))
     _rename_words(pdir)
     ctx = fx.make_ctx(pdir)
-    card = fx.synth_images(tmp_path / "img")["screenshot"]
+    card = _asset(pdir, fx.synth_images(tmp_path / "img")["screenshot"])
     fx.set_project(ctx, broll=[{"id": "b1", "anchor": {"from": fx.word_near(ctx, 3.6), "to": fx.word_near(ctx, 4.8)},
-                                "leadIn": 0.13, "treatment": "card-above-head", "asset": str(card), "params": {}}],
+                                "leadIn": 0.13, "treatment": "card-above-head", "asset": card, "params": {}}],
                    zooms=[{"anchor": {"from": fx.word_near(ctx, 0.4), "to": fx.word_near(ctx, 1.6)}, "scale": 1.3}])
     times = [0.5, 1.23, 2.68, 2.72, 4.0, 4.6, 5.03, 6.5]
 
@@ -116,16 +125,17 @@ def test_a_still_without_a_draft_is_the_drafts_frame(tmp_path, monkeypatch):
 
 
 def test_frames_reuses_a_render_only_while_it_shows_the_project(tmp_path, monkeypatch):
-    """A preview whose picture no longer matches the project must not be shown as the edit; a change that no
-    frame shows (music, post text) must not cost a fresh drawing."""
+    """A preview whose picture no longer matches the project (captions, the transcript, the face track, a
+    preview that stopped before its last step) must not be shown as the edit; a change that no frame shows
+    (music, post text) must not cost a fresh drawing."""
     monkeypatch.setenv("REELENGINE_DRAFT_ENCODER", "libx264")
     monkeypatch.setenv("REELENGINE_ROOT", str(tmp_path))
     pdir = tmp_path / "p"
     fx.make_project(pdir, fx.synth_video(tmp_path / "media" / "take.mp4", dur=4.0), keep=((0.05, 3.25),))
     ctx = fx.make_ctx(pdir)
-    poster = fx.synth_images(tmp_path / "img")["portrait"]
+    poster = _asset(pdir, fx.synth_images(tmp_path / "img")["portrait"])
     fx.set_project(ctx, broll=[{"id": "b1", "anchor": {"from": fx.word_near(ctx, 1.6), "to": fx.word_near(ctx, 2.0)},
-                                "leadIn": 0.13, "treatment": "full-frame", "asset": str(poster), "params": {}}])
+                                "leadIn": 0.13, "treatment": "full-frame", "asset": poster, "params": {}}])
 
     def edit(fn) -> None:
         proj = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
@@ -160,6 +170,14 @@ def test_frames_reuses_a_render_only_while_it_shows_the_project(tmp_path, monkey
     tfile.write_text(before.decode("utf-8").replace('"word0"', '"hello"'), encoding="utf-8")
     assert frames.run(pdir, [0.4])["source"] == "edit"               # the captions' words changed
     tfile.write_bytes(before)
+    assert frames.run(pdir, [0.4])["source"] == "render"
+
+    face = pdir / "work" / "face.json"                               # analyze wrote a face track
+    face.write_text(json.dumps({"sources": {"s1": {"width": 1080, "height": 1920,
+                                                   "median": {"x": 100, "y": 200, "w": 300, "h": 300}}}}),
+                    encoding="utf-8")
+    assert frames.run(pdir, [0.4])["source"] == "edit"
+    face.unlink()
     assert frames.run(pdir, [0.4])["source"] == "render"
 
     # A preview that stopped after replacing its mp4 but before writing its manifest
