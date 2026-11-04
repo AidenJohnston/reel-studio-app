@@ -49,7 +49,8 @@ export interface InstallStep {
 /** The download key store (main/update-key.ts). */
 export interface KeyStore {
   get(): Promise<string | null>
-  clear(): Promise<unknown>
+  isCurrent(key: string): Promise<boolean>
+  clearIfCurrent(key: string): Promise<boolean>
 }
 
 /** The HTTP status of an electron-updater failure, or null. Reading the yml fails with an HttpError carrying
@@ -107,10 +108,13 @@ export function electronUpdaterBackend(opts: {
     if (status === 404) return 'feed' // no update for this platform in the current release
     if (status !== 401 && status !== 403) return null
     // A key saved while this request was out is not the one the server refused: offer the download again.
-    if ((await opts.keys.get()) !== key) throw new Error('The download key changed while the update was downloading. Try again.')
-    if (status === 403) return 'not-entitled'
+    const changed = new Error('The download key changed while the update was downloading. Try again.')
+    if (status === 403) {
+      if (!(await opts.keys.isCurrent(key))) throw changed
+      return 'not-entitled'
+    }
     // No key or not ours: it can never work, so automatic updates are off until a new key arrives.
-    await opts.keys.clear()
+    if (!(await opts.keys.clearIfCurrent(key))) throw changed
     return 'key-rejected'
   }
 
