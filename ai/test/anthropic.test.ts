@@ -221,7 +221,7 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
     expect(retried.content[0]).toEqual(thinking);
   });
 
-  it('a refusal stops with a plain message instead of an empty reply', async () => {
+  it('a refusal stops with a plain message instead of an empty reply, without the key a server echoes', async () => {
     const m = await mockAnthropic((_b, _q, res) => streamBlocks(res, [], { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber', explanation: null } }));
     const p = new AnthropicProvider({ apiKey: 'k', baseURL: m.url });
     const e: any = await p.complete({ system: 's', tools, messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }] }).catch((x) => x);
@@ -229,5 +229,11 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
     expect(e.code).toBe('claude_refused');
     expect(e.retryable).toBe(false);
     expect(e.message).toContain('cyber');
+    server!.close(); server = null;
+    const echo = await mockAnthropic((_b, _q, res) => streamBlocks(res, [], { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'sk-echoed-key', explanation: null } }));
+    const custom = new AnthropicProvider({ id: 'custom', apiKey: 'sk-echoed-key', baseURL: echo.url, model: 'm', maxRetries: 0 });
+    const e2: any = await custom.complete({ system: 's', tools, messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }] }).catch((x) => x);
+    expect(e2.code).toBe('claude_refused');
+    expect(e2.message).not.toContain('sk-echoed-key');
   });
 });

@@ -30,13 +30,15 @@ function supportsAdaptiveThinking(model: string): boolean {
   return version >= (family === 'haiku' ? 5.5 : 4.6);
 }
 
+const THINKING_BETA = 'thinking-binding-controls-2026-08-01';
+
 /** pruneImages edits older tool results every step, and an edit before a thinking block invalidates
  * it: live, the default "error" answered 400 ("Invalid `signature` in `thinking` block"), while
  * "drop_block" answered 200 and dropped only the affected blocks. */
 function thinkingParams(model: string) {
   if (!supportsAdaptiveThinking(model)) return {};
   return {
-    betas: ['thinking-binding-controls-2026-08-01'],
+    betas: [THINKING_BETA],
     thinking: { type: 'adaptive' as const, block_binding: { prefix_mismatch_behavior: 'drop_block' as const } },
   };
 }
@@ -151,8 +153,7 @@ export function mapAnthropicError(err: any): AIError {
   return new AIError('claude_error', 'Something went wrong talking to Claude. Try again.', { status, detail: err?.message });
 }
 
-// anthropic-beta carries thinkingParams' block_binding control; without it the request is invalid.
-const SENT_HEADERS = ['accept', 'content-type', 'anthropic-version', 'anthropic-beta'];
+const SENT_HEADERS = ['accept', 'content-type', 'anthropic-version'];
 
 const STREAM_ERROR_STATUS: Record<string, number> = {
   invalid_request_error: 400, authentication_error: 401, permission_error: 403, not_found_error: 404,
@@ -197,6 +198,9 @@ export class AnthropicProvider implements ModelProvider {
         const v = built.get(h);
         if (v) headers.set(h, v);
       }
+      // thinkingParams' block_binding needs its beta header. The SDK also adds any anthropic-beta from
+      // ANTHROPIC_CUSTOM_HEADERS, so only the beta this file asks for goes out.
+      if (built.get('anthropic-beta')?.split(',').some((b) => b.trim() === THINKING_BETA)) headers.set('anthropic-beta', THINKING_BETA);
       return base(input, { ...init, headers });
     }) as typeof fetch;
     this.client = new Anthropic({
@@ -230,7 +234,8 @@ export class AnthropicProvider implements ModelProvider {
       if (msg.stop_reason === 'refusal') {
         const category = msg.stop_details?.category;
         const who = this.id === 'custom' ? 'The AI' : 'Claude';
-        throw new AIError('claude_refused', `${who} would not help with this edit. Try wording your note a different way.`, { detail: `${who} refused${category ? ` (category: ${category})` : ''}` });
+        // the category comes from the server, which may echo the key
+        throw withoutSecret(new AIError('claude_refused', `${who} would not help with this edit. Try wording your note a different way.`, { detail: `${who} refused${category ? ` (category: ${category})` : ''}` }), this.apiKey);
       }
       const text = msg.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('');
       const toolCalls = msg.content
