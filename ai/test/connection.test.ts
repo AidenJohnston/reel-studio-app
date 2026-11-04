@@ -179,7 +179,7 @@ describe('what reaches the person\'s server, and what comes back', () => {
   it('no credential from the environment rides along with the key', async () => {
     const saved = { token: process.env.ANTHROPIC_AUTH_TOKEN, headers: process.env.ANTHROPIC_CUSTOM_HEADERS };
     process.env.ANTHROPIC_AUTH_TOKEN = 'env-token-should-stay-home';
-    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key\nX-Leak: env-secret\nAnthropic-Beta: env-beta';
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer env-header-token\nX-Api-Key: env-key\nX-Leak: env-secret\nAnthropic-Beta: env-beta, thinking-binding-controls-2026-08-01';
     try {
       const ai = createAI({ host: new FakeHost(tmpDir()), settingsDir: tmpDir(), secretStore: fakeSafeStorage, localClaude: { bin: null } });
       expect((await ai.saveConnection({ label: 'P', kind: 'anthropic', baseURL: mock.origin, model: 'mock-small', key: KEY })).error).toBeUndefined();

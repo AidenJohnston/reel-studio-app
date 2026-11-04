@@ -35,13 +35,10 @@ const THINKING_BETA = 'thinking-binding-controls-2026-08-01';
 /** pruneImages edits older tool results every step, and an edit before a thinking block invalidates
  * it: live, the default "error" answered 400 ("Invalid `signature` in `thinking` block"), while
  * "drop_block" answered 200 and dropped only the affected blocks. */
-function thinkingParams(model: string) {
-  if (!supportsAdaptiveThinking(model)) return {};
-  return {
-    betas: [THINKING_BETA],
-    thinking: { type: 'adaptive' as const, block_binding: { prefix_mismatch_behavior: 'drop_block' as const } },
-  };
-}
+const THINKING_PARAMS = {
+  betas: [THINKING_BETA],
+  thinking: { type: 'adaptive' as const, block_binding: { prefix_mismatch_behavior: 'drop_block' as const } },
+};
 
 export interface AnthropicOptions {
   apiKey: string;
@@ -179,6 +176,10 @@ export class AnthropicProvider implements ModelProvider {
   private client: Anthropic;
   private maxTokens: number;
   private apiKey: string;
+  /** Thinking settings and their beta header go only to Anthropic's own API, for a model that takes adaptive
+   * thinking. A person's own server may not know the dated beta, so it keeps the request it had before
+   * thinking was replayed (and complete() records no blocks for it). */
+  private sendsThinking: boolean;
 
   constructor(opts: AnthropicOptions) {
     this.id = opts.id ?? 'claude';
@@ -186,6 +187,7 @@ export class AnthropicProvider implements ModelProvider {
     this.model = opts.model || DEFAULT_CLAUDE_MODEL;
     this.maxTokens = opts.maxTokens ?? 16000;
     this.apiKey = opts.apiKey;
+    this.sendsThinking = this.id === 'claude' && supportsAdaptiveThinking(this.model);
     // Everything explicit, because the SDK reads the environment: ANTHROPIC_BASE_URL (could send the key to another
     // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (any header, on every request),
     // ANTHROPIC_LOG (debug logs print error bodies that may echo the key), and with no key it looks for credentials
@@ -198,21 +200,15 @@ export class AnthropicProvider implements ModelProvider {
         const v = built.get(h);
         if (v) headers.set(h, v);
       }
-      // thinkingParams' block_binding needs its beta header. The SDK also adds any anthropic-beta from
-      // ANTHROPIC_CUSTOM_HEADERS, so only the beta this file asks for goes out.
-      if (built.get('anthropic-beta')?.split(',').some((b) => b.trim() === THINKING_BETA)) headers.set('anthropic-beta', THINKING_BETA);
+      // THINKING_PARAMS' block_binding needs its beta header. The SDK would also pass on an anthropic-beta from
+      // ANTHROPIC_CUSTOM_HEADERS, so the header comes from this provider alone.
+      if (this.sendsThinking) headers.set('anthropic-beta', THINKING_BETA);
       return base(input, { ...init, headers });
     }) as typeof fetch;
     this.client = new Anthropic({
       apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? 'https://api.anthropic.com', fetch: onlyThisKey as any,
       logLevel: 'off', maxRetries: opts.maxRetries ?? 2, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
     });
-  }
-
-  /** A person's own server may not know the dated beta, so it keeps the request and history it had
-   * before thinking was replayed: no thinking settings here, and no recorded blocks in complete(). */
-  private thinking() {
-    return this.id === 'claude' ? thinkingParams(this.model) : {};
   }
 
   private mapError(err: any): AIError {
@@ -224,7 +220,7 @@ export class AnthropicProvider implements ModelProvider {
       const stream = this.client.beta.messages.stream({
         model: this.model,
         max_tokens: this.maxTokens,
-        ...this.thinking(),
+        ...(this.sendsThinking ? THINKING_PARAMS : {}),
         // Cache the long, stable prefix (system prompt + tool definitions) across agent steps.
         system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
         messages: withCacheBreakpoint(toAnthropicMessages(req.messages)),
@@ -260,7 +256,7 @@ export class AnthropicProvider implements ModelProvider {
    * model that rejects them fails here, at setup, instead of on every edit. */
   async ping(): Promise<void> {
     try {
-      await this.client.beta.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }], ...this.thinking() });
+      await this.client.beta.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }], ...(this.sendsThinking ? THINKING_PARAMS : {}) });
     } catch (err: any) {
       throw this.mapError(err);
     }
