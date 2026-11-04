@@ -272,6 +272,8 @@ def write_captions(proj: Path, vdir: Path, data: dict) -> None:
     transcript = proj / "work" / "transcript.json"
     # a project rendered before it was transcribed (tests that render straight after init) has no lines
     if cap.get("enabled") is False or not transcript.exists():
+        # no captions: an empty report, as the real engine writes, never an older render's lines
+        (vdir / "captions.json").write_text(json.dumps({"cues": []}), "utf-8")
         return
     words = json.loads(transcript.read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
