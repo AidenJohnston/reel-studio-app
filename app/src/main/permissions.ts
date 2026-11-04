@@ -13,15 +13,16 @@ const listAndWrite: Probe = async (p) => {
  * macOS has no API that reports Documents access without asking, so try the access and read the answer from the
  * error, like T3 Code's Safari cookie check (SafariCookies.ts): privacy (TCC) refuses with EPERM. EACCES is ordinary
  * file rights (or a read-only drive), which System Settings cannot fix, so it is `unusable`, not `denied`. A folder
- * that does not exist yet has not been asked about.
+ * that does not exist yet has not been asked about. Only macOS has that privacy setting: Node on Windows reports an
+ * ordinary "access denied" as EPERM too, and there no setting can fix it either.
  */
-export async function probeFolder(root: string, probe: Probe = listAndWrite): Promise<FolderAccess> {
+export async function probeFolder(root: string, platform: string, probe: Probe = listAndWrite): Promise<FolderAccess> {
   try {
     await probe(root)
     return 'allowed'
   } catch (e) {
     const code = (e as NodeJS.ErrnoException)?.code
-    if (code === 'EPERM') return 'denied'
+    if (code === 'EPERM' && platform === 'darwin') return 'denied'
     if (code === 'ENOENT') return 'not-asked'
     return 'unusable'
   }
@@ -42,7 +43,10 @@ export type NotifyResult = 'shown' | 'failed' | 'pending'
 /**
  * Electron cannot read the macOS notification setting, and its `show` event fires when a notification is scheduled,
  * not when macOS lets it appear. So Reel Studio can learn a refusal (the `failed` event) but never a yes: a wanted
- * notification is `unverified`, including after a restart or a later change in System Settings.
+ * notification is `unverified`, including after a restart or a later change in System Settings. Electron 44 emits
+ * `failed` on macOS when UNUserNotificationCenter refuses to add the notification (cocoa_notification.mm), which is
+ * how macOS answers an app that was told no; it does not pass on the answer to its first question. Not yet seen on
+ * a real Mac, so `unverified` keeps its own Open System Settings way out.
  */
 export function notifyAccess(o: { supported: boolean; wanted: boolean; result: NotifyResult | null }): NotifyAccess {
   if (!o.supported) return 'unsupported'
@@ -102,7 +106,7 @@ export function createPermissions(d: PermissionDeps) {
       await d.ensureRoot()
       makeFailed = false
     } catch (e) {
-      makeFailed = (e as NodeJS.ErrnoException)?.code !== 'EPERM'
+      makeFailed = !(d.platform === 'darwin' && (e as NodeJS.ErrnoException)?.code === 'EPERM')
     }
   }
   let lastNotify: NotifyResult | null = null
@@ -112,11 +116,11 @@ export function createPermissions(d: PermissionDeps) {
     // Before the person pressed Allow (or chose a folder), never look: the look itself is what makes macOS ask.
     if (!touched) return 'not-asked'
     if (fakes.folder) return fakes.folder
-    let now = await probeFolder(d.root(), d.probe)
+    let now = await probeFolder(d.root(), d.platform, d.probe)
     if (now === 'not-asked' && wanted) {
       // Turned on in System Settings after a "no": the folder was never made, so make it now.
       await make()
-      now = await probeFolder(d.root(), d.probe)
+      now = await probeFolder(d.root(), d.platform, d.probe)
     }
     return now === 'allowed' && makeFailed ? 'unusable' : now
   }

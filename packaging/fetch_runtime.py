@@ -51,6 +51,7 @@ REQUIRED_LICENSES = {
     "lgpl-3.0.txt": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",  # libheif, libde265 (pi-heif)
     "lgpl-2.1.txt": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",  # FFmpeg libs inside the opencv wheel
     "yunet-MIT.txt": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958", # YuNet face model
+    "t3code-MIT.txt": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43", # first run's Mac checklist and helper
 }
 
 PBS_TAG = "20261013"
