@@ -5,7 +5,7 @@
 // closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
 
@@ -158,9 +158,8 @@ function namesFolder(cmdline: string, dir: string): boolean {
   return false
 }
 
-/** Every running process with its full command line (`key` is its pid, or on macOS/Linux its process
- * group with `key: 'pgid'`), or null when the list cannot be read. */
-function processList(key: 'pid' | 'pgid' = 'pid'): Promise<{ pid: number; cmdline: string }[] | null> {
+/** Every running process with its full command line, or null when the list cannot be read. */
+function processList(): Promise<{ pid: number; cmdline: string }[] | null> {
   return new Promise((resolve) => {
     const parse = (err: Error | null, out: string): void =>
       resolve(err ? null : out.split(/\r?\n/).flatMap((line) => {
@@ -172,12 +171,33 @@ function processList(key: 'pid' | 'pgid' = 'pid'): Promise<{ pid: number; cmdlin
       const list = '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }'
       execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', list], { windowsHide: true, timeout: 30000, maxBuffer: big }, parse)
     } else {
-      // Without a UTF-8 locale (an app opened from the Finder has none) macOS ps escapes every
-      // non-ASCII byte, and "Zoë" would never match the folder it names.
-      const env = { ...process.env, LC_ALL: process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8' }
-      execFile('ps', ['-A', '-ww', '-o', `${key}=,args=`], { env, timeout: 30000, maxBuffer: big }, parse)
+      execFile('ps', ['-A', '-ww', '-o', 'pid=,args='], { env: psEnv(), timeout: 30000, maxBuffer: big }, parse)
     }
   })
+}
+
+/** Without a UTF-8 locale (an app opened from the Finder has none) macOS ps escapes every non-ASCII
+ * byte, and "Zoë" would never match the folder it names. */
+function psEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, LC_ALL: process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8' }
+}
+
+/** macOS/Linux: the processes in process group `pgid`, or null when they cannot be listed. */
+function groupMembers(pgid: number): Promise<{ pid: number; cmdline: string }[] | null> {
+  return new Promise((resolve) => {
+    execFile('ps', ['-A', '-ww', '-o', 'pgid=,pid=,args='], { env: psEnv(), timeout: 30000, maxBuffer: 64 * 1024 * 1024 }, (err, out) =>
+      resolve(err ? null : out.split(/\r?\n/).flatMap((line) => {
+        const m = /^\s*(\d+)\s+(\d+)\s+(.*\S)/.exec(line)
+        return m && Number(m[1]) === pgid ? [{ pid: Number(m[2]), cmdline: m[3] }] : []
+      })))
+  })
+}
+
+/** A process an engine of ours starts or is, judged by the program it runs (`ps -o comm`), never by
+ * words in its arguments: `worker.py --encoder ffmpeg` is not ffmpeg. False once it has exited. */
+async function isOursByProgram(p: { pid: number; cmdline: string }): Promise<boolean> {
+  const program = basename((await processName(p.pid)) ?? '').toLowerCase()
+  return /^ff(mpeg|probe)$/.test(program) || (/^python/.test(program) && isOurEngine(p.cmdline))
 }
 
 /** What a previous run's engine left running from this pid. 'ours': the engine itself (after a crash
@@ -188,10 +208,10 @@ function processList(key: 'pid' | 'pgid' = 'pid'): Promise<{ pid: number; cmdlin
 async function leftRunning(pid: number): Promise<'ours' | 'unsure' | 'gone'> {
   if (isAlive(pid)) return isOurEngine(await processCommandLine(pid)) ? 'ours' : 'gone'
   if (process.platform === 'win32' || !groupAlive(pid)) return 'gone'
-  const members = (await processList('pgid'))?.filter((p) => p.pid === pid)
+  const members = await groupMembers(pid)
   if (!members) return 'unsure'
   if (!members.length) return 'gone'
-  return members.every((p) => isOurEngine(p.cmdline) || FFMPEG.test(p.cmdline)) ? 'ours' : 'unsure'
+  return (await Promise.all(members.map(isOursByProgram))).every(Boolean) ? 'ours' : 'unsure'
 }
 
 /** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */
