@@ -100,6 +100,14 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
   expect((await media(page, 'player')).paused).toBe(true)
   // the page behind is out of reach for Tab and screen readers
   expect(await page.evaluate(() => document.getElementById('root')!.inert)).toBe(true)
+  // Windows draws its window buttons over the top right of the page (the title bar overlay). Exit sits below them.
+  const underButtons = await page.evaluate(() => {
+    const o = (navigator as Navigator & { windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect } }).windowControlsOverlay
+    if (!o?.visible) return null
+    const exit = document.querySelector('[data-testid=exit-fullscreen]')!.getBoundingClientRect()
+    return exit.top < o.getTitlebarAreaRect().bottom
+  })
+  expect(underButtons ?? false).toBe(false)
   await page.waitForTimeout(400)
   await page.screenshot({ path: join(SHOTS, 'fullscreen-02-open.png') })
 
