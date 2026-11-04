@@ -9,12 +9,12 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROOT, SHOTS, launch, makeMedia, passFirstRun } from './helpers'
+import { SHOTS, launch, makeMedia, passFirstRun, root } from './helpers'
 
 const OUT = process.env.REELSTUDIO_E2E_SHOTS ?? SHOTS
 
 function project(): any {
-  const dir = join(ROOT, 'Projects')
+  const dir = join(root(), 'Projects')
   return JSON.parse(readFileSync(join(dir, readdirSync(dir)[0], 'project.json'), 'utf8'))
 }
 

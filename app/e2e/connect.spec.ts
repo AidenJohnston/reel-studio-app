@@ -130,6 +130,33 @@ test('install failed: plain words, Try again, Install it myself (the vendor\'s p
   await app.close()
 })
 
+test('a failed connect keeps its message after the AI change that ends it', async () => {
+  const { app, page, info, claude } = await connectScreen('install_failed')
+  test.skip(info.ai !== 'mock', 'the mock plays the vendor states')
+  // Every connect, failed ones too, ends with an AI change, and Settings re-renders on it. That re-render must not
+  // look at the vendor again: its fresh "idle" would wipe the failed step and its message.
+  await page.evaluate(() => {
+    const w = window as unknown as { aiChanges: number }
+    w.aiChanges = 0
+    window.reel.ai.onChange(() => void w.aiChanges++)
+  })
+  await page.getByTestId('connect-claude').click()
+  await expect(claude).toHaveAttribute('data-step', 'failed')
+  await expect.poll(() => page.evaluate(() => (window as unknown as { aiChanges: number }).aiChanges)).toBeGreaterThan(0)
+  // let React commit the re-render, and any vendor status it asked for come back
+  await page.evaluate(async () => {
+    const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
+    await frame()
+    await frame()
+    await window.reel.ai.vendorStatus('claude')
+    await frame()
+  })
+  await page.waitForTimeout(500)
+  await expect(claude).toHaveAttribute('data-step', 'failed')
+  await expect(page.getByTestId('vendor-message-claude')).toContainText("couldn't reach Anthropic")
+  await app.close()
+})
+
 test('the browser page never comes back: Open it again, the window fallback, and choosing ChatGPT instead', async () => {
   const { app, page, info, userData, claude } = await connectScreen('browser', 'signed_out')
   test.skip(info.ai !== 'mock', 'the mock plays the vendor states')

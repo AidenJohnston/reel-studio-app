@@ -48,6 +48,11 @@ export function VendorCards({ activeId, onConnected }: { activeId?: ProviderInfo
     }
   }, [])
 
+  // A ref, not an effect dependency: a parent passing a new callback (Settings re-renders on every AI change, and
+  // a connect ends with one) must not look again, or that fresh "idle" wipes the failed step and its message.
+  const onConnectedRef = useRef(onConnected)
+  onConnectedRef.current = onConnected
+
   useEffect(() => {
     void refresh('claude')
     void refresh('chatgpt')
@@ -56,10 +61,10 @@ export function VendorCards({ activeId, onConnected }: { activeId?: ProviderInfo
       if (i.step === 'installing') setInstalled((s) => ({ ...s, [i.vendor]: true }))
       if (i.step === 'done') {
         setInstalled((s) => ({ ...s, [i.vendor]: false }))
-        void reel.ai.active().then(onConnected).catch(() => undefined)
+        void reel.ai.active().then((p) => onConnectedRef.current(p)).catch(() => undefined)
       }
     })
-  }, [refresh, onConnected])
+  }, [refresh])
 
   // Back to the window (after "Install it myself", or signing in some other way): look again, unless a connect runs.
   useEffect(() => {
