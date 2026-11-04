@@ -13,7 +13,9 @@ import { createUpdater } from '../src/main/updater'
 import { updateAction } from '../src/shared/update'
 
 const KEY = 'v1.eyJwIjoibW9udGhseSJ9.c2lnbmF0dXJl'
-const info = (version: string): UpdateInfo => ({ version, files: [], path: 'x.zip', sha512: 'x', releaseDate: '2026-11-04' })
+const OTHER_KEY = 'v1.eyJwIjoib25jZSJ9.b3RoZXI'
+const zipName = (version: string) => `Reel-Studio-${version}-arm64-mac.zip`
+const info = (version: string, file = zipName(version)): UpdateInfo => ({ version, files: [{ url: file, sha512: 'x', size: 1 }], path: file, sha512: 'x', releaseDate: '2026-11-04' })
 
 /** electron-updater as the backend drives it. Records the headers each request would carry. */
 class FakeUpdater extends EventEmitter implements UpdaterLike {
@@ -28,7 +30,7 @@ class FakeUpdater extends EventEmitter implements UpdaterLike {
   updateConfigPath: string | null = null
   feeds: unknown[] = []
   /** The headers electron-updater would send to the update server, per request. */
-  sent: { request: 'yml' | 'file'; headers: Record<string, string> | null }[] = []
+  sent: { request: 'yml' | 'file'; headers: UpdaterLike['requestHeaders'] }[] = []
   checkError: unknown = null
   downloadError: unknown = null
   constructor(private yml: UpdateInfo, private file = 'update.zip', private newer = true) {
@@ -66,7 +68,7 @@ function keyStore(initial: string | null = KEY) {
   return { store, keys: { get: async () => store.key, clear: async () => { store.key = null; store.cleared++ } } }
 }
 
-const noCheck: InstallStep = { showInstaller: false, verify: async () => {} }
+const noCheck: InstallStep = { fileName: zipName, showInstaller: false, verify: async () => {} }
 
 function wire(updater: FakeUpdater, opts: { key?: string | null; install?: InstallStep } = {}) {
   const s = site()
@@ -82,7 +84,7 @@ function wire(updater: FakeUpdater, opts: { key?: string | null; install?: Insta
     save: async () => undefined, busy: () => ({ exporting: false, working: 0 }), prepareToQuit: async () => undefined,
     openExternal: async () => undefined, send: () => {}, log: () => {}, now: () => 1000
   })
-  return { u, backend, site: s, store, lines }
+  return { u, backend, site: s, store, keys, lines }
 }
 
 /** builder-util-runtime 9.7.0's errors: reading the yml rejects with an HttpError (statusCode, JSON body in the
@@ -169,18 +171,38 @@ describe('what the update server answers', () => {
     expect(store.key).toBe(KEY)
   })
 
-  it('fails if a release with no update for this platform, or a feed naming another version, downloads or hides the update', async () => {
+  it('fails if a 401 or 403 for a key replaced during the download clears the new key or sends the person to the page', async () => {
+    for (const status of [401, 403]) {
+      const updater = new FakeUpdater(info('0.1.3'))
+      const { u, store } = wire(updater)
+      await u.check('button')
+      // The person pastes another key while the request with the old one is out; the old one is then refused.
+      updater.checkForUpdates = async () => {
+        store.key = OTHER_KEY
+        throw ymlRefused(status, '{}')
+      }
+      await u.download()
+      expect(store).toMatchObject({ key: OTHER_KEY, cleared: 0 })
+      expect(u.state()).toMatchObject({ status: 'error', errorContext: 'download', mode: 'install' })
+      expect(updateAction(u.state())).toBe('download')
+    }
+  })
+
+  it('fails if a release with no update for this platform, or a feed naming another version or file, downloads or hides the update', async () => {
     for (const updater of [
       Object.assign(new FakeUpdater(info('0.1.3')), { checkError: ymlMissing() }),
       new FakeUpdater(info('0.1.4')),
-      new FakeUpdater(info('0.1.3'), 'update.zip', false)
+      new FakeUpdater(info('0.1.3'), 'update.zip', false),
+      // A yml naming a file anywhere else would take the key with it.
+      new FakeUpdater(info('0.1.3', 'https://elsewhere.example/Reel-Studio-0.1.3-arm64-mac.zip')),
+      new FakeUpdater(info('0.1.3', '../d/Reel-Studio-0.1.3-arm64-mac.zip'))
     ]) {
       const { u, lines } = wire(updater)
       await u.check('button')
       await u.download()
       expect(u.state()).toMatchObject({ status: 'error', mode: 'page', keyNeeded: false, availableVersion: '0.1.3' })
       expect(updater.sent.filter((r) => r.request === 'file')).toEqual([])
-      expect(lines.join('\n')).toMatch(/0\.1\.3: the update feed offers|refused 0\.1\.3: HTTP 404/)
+      expect(lines.join('\n')).toMatch(/0\.1\.3: the update feed (offers|names)|refused 0\.1\.3: HTTP 404/)
     }
   })
 })

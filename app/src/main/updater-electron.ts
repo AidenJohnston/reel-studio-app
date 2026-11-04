@@ -37,6 +37,9 @@ export type UpdaterLike = Pick<
 }
 
 export interface InstallStep {
+  /** The one file the feed may name for `version`. The download key goes with that request, so a yml naming any
+   * other file (or another host) is refused before anything is downloaded. */
+  fileName(version: string): string
   /** Throws if the downloaded file must not be installed as `version`. */
   verify(file: string, version: string): Promise<void>
   /** Windows: show the NSIS progress window while it installs. Squirrel.Mac ignores it. */
@@ -98,17 +101,17 @@ export function electronUpdaterBackend(opts: {
   // which download() below handles; this one matters for the install.
   u.on('error', (e) => opts.onError(e))
 
-  /** A refusal from the update server, as the updater handles it, or null for any other failure. */
-  async function refusal(e: unknown): Promise<PageReason | null> {
+  /** A refusal from the update server for `key`, as the updater handles it, or null for any other failure. */
+  async function refusal(e: unknown, key: string): Promise<PageReason | null> {
     const status = httpStatus(e)
-    if (status === 401) {
-      // No key or not ours: it can never work, so automatic updates are off until a new key arrives.
-      await opts.keys.clear()
-      return 'key-rejected'
-    }
-    if (status === 403) return 'not-entitled'
     if (status === 404) return 'feed' // no update for this platform in the current release
-    return null
+    if (status !== 401 && status !== 403) return null
+    // A key saved while this request was out is not the one the server refused: offer the download again.
+    if ((await opts.keys.get()) !== key) throw new Error('The download key changed while the update was downloading. Try again.')
+    if (status === 403) return 'not-entitled'
+    // No key or not ours: it can never work, so automatic updates are off until a new key arrives.
+    await opts.keys.clear()
+    return 'key-rejected'
   }
 
   return {
@@ -130,7 +133,7 @@ export function electronUpdaterBackend(opts: {
         try {
           r = await u.checkForUpdates()
         } catch (e) {
-          const refused = await refusal(e)
+          const refused = await refusal(e, key)
           if (!refused) throw e
           opts.log(`[update] the update feed refused ${version}: HTTP ${httpStatus(e)}`)
           return refused
@@ -142,13 +145,22 @@ export function electronUpdaterBackend(opts: {
           opts.log(`[update] ${version}: the update feed offers ${r.updateInfo.version}${r.isUpdateAvailable ? '' : ', which is not newer than this copy'}`)
           return 'feed'
         }
+        // electron-updater resolves each file against the feed URL and sends the key with it, so only the expected
+        // plain file name may pass (a full URL would take the key to another host). Redirects to another origin
+        // drop the Authorization header (builder-util-runtime 9.7.0, prepareRedirectUrlOptions).
+        const expected = opts.install.fileName(version)
+        const named = r.updateInfo.files?.length ? r.updateInfo.files.map((f) => f.url) : [r.updateInfo.path]
+        if (!named.every((url) => url === expected)) {
+          opts.log(`[update] ${version}: the update feed names ${named.map((u) => String(u).slice(0, 120)).join(', ')}, not ${expected}`)
+          return 'feed'
+        }
         u.on('download-progress', progress)
         try {
           const files = await u.downloadUpdate()
           downloaded = { file: files[0], version }
           return null
         } catch (e) {
-          const refused = await refusal(e)
+          const refused = await refusal(e, key)
           if (!refused) throw e
           opts.log(`[update] the update server refused the download of ${version}: HTTP ${httpStatus(e)}`)
           return refused
@@ -178,6 +190,8 @@ export function electronUpdaterBackend(opts: {
 /** Squirrel.Mac installs whatever app the ZIP holds, so read its version before handing it over. */
 export function macBundleCheck(running: string): InstallStep {
   return {
+    // packaging/sign-mac.sh writes it; the update server's latest-mac.yml names it
+    fileName: (version) => `Reel-Studio-${version}-arm64-mac.zip`,
     showInstaller: false,
     async verify(zip, selected) {
       const exec = promisify(execFile)
