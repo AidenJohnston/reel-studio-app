@@ -2,21 +2,21 @@
   "reference": {
     "engineCommit": "d4185a3cc35165d5a0c2d1f24569ee0a64f0386d",
     "ffmpegBuild": "ffmpeg-7.1.1-rs2 (packaging/fetch_runtime.py)",
-    "ffmpegSha256": {"win32": null, "darwin": null},
-    "ffprobeSha256": {"win32": null, "darwin": null}
+    "ffmpegSha256": {"win32": "12655dcac4af7d0f4e8774c935293ef1e95bc555b45f9f9fbf7df2c551077f1e", "darwin": null},
+    "ffprobeSha256": {"win32": "7c09e2580e1a81fc6c8fc51ed0236e9f95d02e991a21dea8a74e637bc8f67469", "darwin": null}
   },
   "runs": 5,
   "agreeWithinPct": 5,
   "thresholds": {
     "approved": false,
-    "source": "Not set yet. The first harness runs on main measure these; a person approves the values.",
+    "source": "Proposed from one run on main (Windows 11, pinned FFmpeg, harness-1, 2026-11-04), not approved by a person. Correct previews scored caption-band PSNR 34.0-45.5 dB, other PSNR 37.4-41.6 dB, mean color delta up to 1.59, audio offset 0 ms, level delta up to 0.15 dB; windows hit by the caption regrouping bug scored 10.1-12.0 dB in the caption band. Each preview bound sits well outside the correct range; 25 dB is roughly halfway between the two caption groups. Finals were byte-identical to the reference, which says nothing about how far a final may drift, so the final bounds stay unset.",
     "final": {"psnrMinDb": null, "captionPsnrMinDb": null},
     "preview": {
-      "captionPsnrMinDb": null,
-      "otherPsnrMinDb": null,
-      "meanColorMaxDelta": null,
-      "audioOffsetMaxMs": null,
-      "audioLevelMaxDb": null
+      "captionPsnrMinDb": 25.0,
+      "otherPsnrMinDb": 30.0,
+      "meanColorMaxDelta": 4.0,
+      "audioOffsetMaxMs": 2.0,
+      "audioLevelMaxDb": 1.0
     }
   },
   "heldOut": ["rotated"],

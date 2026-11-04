@@ -43,6 +43,9 @@ def test_identical_preview_passes_and_a_shifted_caption_fails_only_the_caption_b
     assert moved["captionPsnr"] < 15
     # ... while everything outside it is untouched, so only a strict caption check can see it
     assert moved["otherPsnr"] == math.inf
+    # the one-pass numbers are the plain definition's
+    assert moved["captionPsnr"] == pytest.approx(compare.psnr(scene(), scene(caption_dy=6), band))
+    assert moved["framePsnr"] == pytest.approx(compare.psnr(scene(), scene(caption_dy=6)))
 
 
 def test_darkened_frame_fails_the_mean_color_bound():

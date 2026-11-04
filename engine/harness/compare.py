@@ -59,10 +59,26 @@ def mean_color_delta(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.max(np.abs(ma - mb)))
 
 
+def _psnr_from(sse: float, samples: int) -> float:
+    return math.inf if samples == 0 or sse == 0 else 10.0 * math.log10(PEAK * PEAK * samples / sse)
+
+
 def frame_metrics(ref: np.ndarray, cand: np.ndarray, band: np.ndarray) -> dict:
-    """The three per-frame numbers both checks use."""
-    return {"captionPsnr": psnr(ref, cand, band), "otherPsnr": psnr(ref, cand, ~band),
-            "framePsnr": psnr(ref, cand), "meanColorDelta": mean_color_delta(ref, cand)}
+    """The per-frame numbers both checks use. Same values as psnr() over the band, outside it and
+    over the frame, from one pass of squared differences (the checks run this on every frame)."""
+    if ref.shape != cand.shape:
+        raise ValueError(f"frame sizes differ: {ref.shape} vs {cand.shape}")
+    if np.array_equal(ref, cand):
+        return {"captionPsnr": math.inf, "otherPsnr": math.inf, "framePsnr": math.inf, "meanColorDelta": 0.0}
+    d = ref.astype(np.int32) - cand.astype(np.int32)
+    per_px = np.einsum("ijk,ijk->ij", d, d)              # squared error summed over the channels
+    total = float(per_px.sum())
+    inside = float(per_px[band].sum())
+    ch = ref.shape[2]
+    n_in = int(band.sum()) * ch
+    n_all = per_px.size * ch
+    return {"captionPsnr": _psnr_from(inside, n_in), "otherPsnr": _psnr_from(total - inside, n_all - n_in),
+            "framePsnr": _psnr_from(total, n_all), "meanColorDelta": mean_color_delta(ref, cand)}
 
 
 def timestamps_match(ref: Sequence[float], cand: Sequence[float], tol: float) -> Optional[str]:
