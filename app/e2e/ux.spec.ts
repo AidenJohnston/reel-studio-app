@@ -128,6 +128,15 @@ test('no AI: honest checklist, note -> button, caption controls, add song + pict
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('version-menu')).toHaveCount(0)
   await expect(page.getByTestId('export')).toHaveText('Export Version 2')
+  // A reply's button changes the newest version, so with an older one on screen it switches back first.
+  await page.getByTestId('version-prev').click()
+  await expect(page.getByTestId('version-latest')).toBeVisible()
+  await page.getByTestId('bubble-editor').getByTestId('action-open-captions').first().click()
+  await expect(page.getByTestId('caption-controls')).toBeVisible()
+  await expect(page.getByTestId('version-latest')).toHaveCount(0)
+  await expect(page.getByTestId('export')).toHaveText('Export Version 2')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('drawer')).toHaveCount(0)
 
   // ---- 5. "Add a song": one click, the picker, a new version with the song ----
   await answerFilePicker(app, media.song)
