@@ -77,7 +77,10 @@ def _edge_width(row):
 
 def test_snap_zoom_follows_its_curve(renders):
     rows = renders["snap"]["rows"]
-    k0, k1 = _zoomed(renders[None]["rows"])
+    # This fixture's word anchors plus the 50 ms tail occupy [28, 110) at 30 fps.
+    # The hard zoom is not a clock: its trim/fps chain loses its last frame on
+    # Gyan FFmpeg 7.1, so measuring its end would sample this release a frame early.
+    k0, k1 = 28, 110
     s_end = W / (round(W / 1.12 / 2) * 2)
 
     # the shutter of frame k is centred a quarter frame in
