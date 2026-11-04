@@ -5,10 +5,10 @@ import { pollPermissions } from '../src/shared/permission-poll'
 const err = (code: string) => Object.assign(new Error(code), { code })
 
 it('reads folder access from the error: EPERM is macOS privacy, EACCES is not', async () => {
-  expect(await probeFolder('/x', async () => [])).toBe('allowed')
-  expect(await probeFolder('/x', async () => Promise.reject(err('EPERM')))).toBe('denied')
-  expect(await probeFolder('/x', async () => Promise.reject(err('EACCES')))).toBe('unusable')
-  expect(await probeFolder('/x', async () => Promise.reject(err('ENOENT')))).toBe('not-asked')
+  expect(await probeFolder('/x', 'darwin', async () => [])).toBe('allowed')
+  expect(await probeFolder('/x', 'darwin', async () => Promise.reject(err('EPERM')))).toBe('denied')
+  expect(await probeFolder('/x', 'darwin', async () => Promise.reject(err('EACCES')))).toBe('unusable')
+  expect(await probeFolder('/x', 'darwin', async () => Promise.reject(err('ENOENT')))).toBe('not-asked')
 })
 
 const mac = (over: Partial<PermissionDeps> = {}) =>
@@ -25,6 +25,14 @@ const mac = (over: Partial<PermissionDeps> = {}) =>
     openPane: async () => {},
     ...over
   })
+
+it('on Windows an EPERM folder is one to replace, not a Mac privacy switch to turn on', async () => {
+  // Node reports an ordinary "access denied" on Windows as EPERM, e.g. a network share the account can't list
+  const probe = async () => Promise.reject(err('EPERM'))
+  expect(await probeFolder('\\\\server\\share', 'win32', probe)).toBe('unusable')
+  const perms = mac({ platform: 'win32', touched: true, probe })
+  expect((await perms.status()).folder).toBe('unusable')
+})
 
 it('never looks at the folder before Allow, because looking is what makes macOS ask', async () => {
   const probe = vi.fn(async () => [])
