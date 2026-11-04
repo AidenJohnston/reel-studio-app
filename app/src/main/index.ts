@@ -60,7 +60,7 @@ import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc
 import { autoUpdater } from 'electron-updater'
 import { LATEST_URL, type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
-import { UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck } from './updater-electron'
+import { UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
@@ -256,7 +256,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,

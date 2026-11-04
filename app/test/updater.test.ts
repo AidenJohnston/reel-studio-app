@@ -237,8 +237,8 @@ describe('"Not now"', () => {
   })
 })
 
-it('fails if a copy that cannot replace itself tries to: Windows (for now), a Mac app outside Applications, no update feed', () => {
-  expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true })).toBe('page')
+it('fails if Windows cannot install in-app, or a copy that cannot replace itself tries to', () => {
+  expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: false, hasFeed: true })).toBe('page')
   for (const platform of ['win32', 'darwin'] as const) expect(updateMode({ platform, inApplications: true, hasFeed: false })).toBe('page')

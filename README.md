@@ -129,9 +129,9 @@ Settings › About). That stores your download key in the app's settings file. T
 Stripe checkout id, the plan and a date), never your email or name. With automatic updates on, Reel Studio offers
 to update itself: say yes and it downloads the new version and installs it when you restart. Only that download
 carries the key: when you click **Download update**, electron-updater asks `dl.getreelstudio.com/u/` for the update
-description (`latest-mac.yml`) and then the file it names, sending the key in an `Authorization` header so the
-server can check the purchase is still active, its own `User-Agent: electron-builder`, and
-`x-user-staging-id: 00000000-0000-0000-0000-000000000000`, the same for every copy. The daily check above never
+description (`latest-mac.yml` on a Mac, `latest.yml` on Windows) and then the file it names, sending the key in an
+`Authorization` header so the server can check the purchase is still active, its own `User-Agent: electron-builder`,
+and `x-user-staging-id: 00000000-0000-0000-0000-000000000000`, the same for every copy. The daily check above never
 carries the key. Without a key, or when the server turns it down, the button opens the download page in your
 browser instead.
 

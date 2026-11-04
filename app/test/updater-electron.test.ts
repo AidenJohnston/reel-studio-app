@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { SAME_FOR_EVERYONE, UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, type InstallStep, type UpdaterLike } from '../src/main/updater-electron'
+import { SAME_FOR_EVERYONE, UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller, type InstallStep, type UpdaterLike } from '../src/main/updater-electron'
 import { LATEST_URL, UPDATE_PAGE, type FetchLike } from '../src/main/update-check'
 import { createUpdater } from '../src/main/updater'
 import { updateAction } from '../src/shared/update'
@@ -210,16 +210,22 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
   }
 })
 
-it('fails if the Mac hands Squirrel an unchecked bundle, or shows an installer window', async () => {
+it('fails if Windows installs without its progress window or the Mac hands Squirrel an unchecked bundle', async () => {
+  const calls: { platform: string; args: unknown[] }[] = []
   const checked: string[] = []
-  const calls: unknown[][] = []
-  const updater = new FakeUpdater(info('0.1.3'), 'mac-download')
-  updater.quitAndInstall = (...args: unknown[]) => void calls.push(args)
   const mac = { ...macBundleCheck('0.1.2'), verify: async (file: string) => void checked.push(file) }
-  const { backend } = wire(updater, { install: mac })
-  await backend.download('0.1.3', () => {})
-  await backend.verify()
-  backend.install()
-  expect(checked).toEqual(['mac-download'])
-  expect(calls).toEqual([[true, true]])
+  for (const [platform, install] of [['win32', windowsInstaller], ['darwin', mac]] as const) {
+    const updater = new FakeUpdater(info('0.1.3'), `${platform}-download`)
+    updater.quitAndInstall = (...args: unknown[]) => void calls.push({ platform, args })
+    const { backend } = wire(updater, { install })
+    await backend.download('0.1.3', () => {})
+    await backend.verify()
+    backend.install()
+  }
+  // quitAndInstall(isSilent, isForceRunAfter): NSIS shows its window and reopens the app; Squirrel.Mac has no window.
+  expect(calls).toEqual([
+    { platform: 'win32', args: [false, true] },
+    { platform: 'darwin', args: [true, true] }
+  ])
+  expect(checked).toEqual(['darwin-download'])
 })

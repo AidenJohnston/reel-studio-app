@@ -13,7 +13,7 @@ import { basename, join } from 'node:path'
 import { launch, passFirstRun, shot, userData } from './helpers'
 
 /** The copies that install updates themselves (main/update-machine.ts updateMode). */
-const INSTALLS = process.platform === 'darwin'
+const INSTALLS = process.platform === 'darwin' || process.platform === 'win32'
 const WIN = process.platform === 'win32'
 const CURRENT = '0.1.4' // app/package.json
 const NEXT = '0.1.5'
@@ -152,6 +152,8 @@ test('fails if the daily check carries the key, or a missing, refused or accepte
     await shot(page, 'update-downloaded')
     expect(seen.filter((r) => r.path.startsWith('/u/')).every((r) => r.auth === `Bearer ${KEY}`)).toBe(true)
     expect(seen.filter((r) => r.path === '/latest.json').every((r) => r.auth === null)).toBe(true)
+    // On Windows, confirming runs the downloaded installer and quits the app; the random-byte payload cannot be
+    // run, so the test stops at the question.
     await button.click()
     const confirm = page.getByTestId('confirm')
     await expect(confirm).toContainText(`Install update ${NEXT} and restart Reel Studio?`)
