@@ -186,7 +186,7 @@ export function ShowMeHow({
    * progress bar says, when the open tab's own words would be wrong (a flip from the Cut tab). */
   onRerender: (change: string, label?: string) => void
   /** The subtitle look to preview on the phone (Subtitles tab), or null. */
-  onPreview?: (p: { look: SubtitleLook; text: string; at: number } | null) => void
+  onPreview?: (p: { look: SubtitleLook; text: string; at: number; lit?: number } | null) => void
   onTab?: (t: Tab) => void
 }) {
   const notify = useNotify()
@@ -318,7 +318,8 @@ export function ShowMeHow({
   }
 
   // A line clicked or typed in the Subtitles list shows on the phone instead of the sample.
-  const [shown, setShown] = useState<{ text: string; at: number; words: number } | null>(null)
+  // `lit` is the word the frame is on, so Karaoke lights it as the export does there.
+  const [shown, setShown] = useState<{ text: string; at: number; words: number; lit: number } | null>(null)
   const maxWords = Number(capStyle.maxWords ?? 3)
   const sample = useMemo(() => sampleLine(d.words, kept, maxWords), [d.words, kept, maxWords])
   const line = shown ?? sample
@@ -326,9 +327,9 @@ export function ShowMeHow({
   const lookJson = JSON.stringify(capStyle)
   useEffect(() => {
     if (!onPreview) return
-    onPreview(tab === 'captions' && subsOn ? { look: sampleLook(capStyle, line), text: line.text, at: line.at } : null)
+    onPreview(tab === 'captions' && subsOn ? { look: sampleLook(capStyle, line), text: line.text, at: line.at, lit: shown?.lit ?? 0 } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subsOn, lookJson, line.text, line.at, line.words])
+  }, [tab, subsOn, lookJson, line.text, line.at, line.words, shown?.lit])
   const lines = useMemo(() => subtitleLines(d.captionLines, kept, d.project.captions, p.captions, wordText), [d.captionLines, kept, d.project.captions, p.captions, wordText])
   const firstSource = d.project.sources?.[0]?.id
   const wordById = useMemo(() => new Map(d.words.map((w) => [w.id, w])), [d.words])
@@ -501,9 +502,16 @@ export function ShowMeHow({
                         onEdit={(edit) => setPatch((x) => ({ ...x, captions: edit({ enabled: true, ...d.project.captions, ...x.captions }) }))}
                         onShow={(text, token) => {
                           const w = wordById.get(token.ids[0])
-                          const at = w && (!w.source || w.source === firstSource) ? w.s + 0.05 : line.at
+                          const onWord = w && (!w.source || w.source === firstSource)
                           const shownText = previewText(text)
-                          setShown({ text: shownText, at, words: shownText.split(' ').length })
+                          const row = lines.find((l) => l.includes(token)) ?? []
+                          const before = row.slice(0, Math.max(0, row.indexOf(token))).map((t) => t.w).join(' ')
+                          setShown({
+                            text: shownText,
+                            at: onWord ? w.s + 0.05 : line.at,
+                            words: shownText.split(' ').length,
+                            lit: onWord ? before.split(' ').filter(Boolean).length : 0
+                          })
                         }}
                       />
                     </>

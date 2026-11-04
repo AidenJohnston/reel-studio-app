@@ -46,10 +46,10 @@ const measure: Measure = (text, size, outline) => {
 
 /**
  * The engine's subtitle look drawn in CSS at the size of `width` (the preview's width in px), with the lines
- * broken where the engine breaks them. The sample shows the moment its first word is spoken, so a highlight
- * lights that word.
+ * broken where the engine breaks them. The sample shows the moment word `lit` (counted from 0) is spoken, so
+ * a highlight lights that word.
  */
-export function SubtitleSample({ look, text, width, testid }: { look: SubtitleLook; text: string; width: number; testid?: string }) {
+export function SubtitleSample({ look, text, width, testid, lit = 0 }: { look: SubtitleLook; text: string; width: number; testid?: string; lit?: number }) {
   const fontReady = useSubtitleFont()
   const k = width / ENGINE_WIDTH
   const fit = fitLook(look, text, measure)
@@ -70,12 +70,14 @@ export function SubtitleSample({ look, text, width, testid }: { look: SubtitleLo
   return (
     <div className={`sub-sample${look.pop ? ' pop' : ''}`} style={style} data-testid={testid} data-lines={fit.lines.length} aria-hidden>
       {fit.lines.map((line, i) => {
-        if (!look.highlight || i > 0) return <span key={i}>{line}</span>
-        const [first, ...rest] = line.split(' ')
+        const words = line.split(' ')
+        const at = lit - fit.lines.slice(0, i).reduce((n, l) => n + l.split(' ').length, 0)
+        if (!look.highlight || at < 0 || at >= words.length) return <span key={i}>{line}</span>
         return (
           <span key={i}>
-            <span style={{ color: look.highlight }}>{first}</span>
-            {rest.length ? ` ${rest.join(' ')}` : ''}
+            {words.slice(0, at).map((w) => `${w} `).join('')}
+            <span style={{ color: look.highlight }}>{words[at]}</span>
+            {at + 1 < words.length ? ` ${words.slice(at + 1).join(' ')}` : ''}
           </span>
         )
       })}
@@ -128,7 +130,7 @@ export function PhonePlayer({
   /** First arrival after Working: start playing, muted, with a "Tap for sound" chip. */
   autoPlayMuted?: boolean
   /** Live preview of the subtitle style (the drawer). */
-  subtitle?: { look: SubtitleLook; text: string } | null
+  subtitle?: { look: SubtitleLook; text: string; lit?: number } | null
   /** Faint Instagram buttons + caption area over the video. */
   instagram?: boolean
   caption?: string
@@ -253,7 +255,7 @@ export function PhonePlayer({
               <video className={`raw-video on${stillMirrored ? ' mirrored' : ''}`} key={still} src={still} preload="auto" muted playsInline disablePictureInPicture aria-hidden />
             )}
             {holdingOriginal && <div className="phone-tag">Original</div>}
-            {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={width} testid="sub-preview" />}
+            {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} lit={subtitle.lit} width={width} testid="sub-preview" />}
             {instagram && !holdingOriginal && <InstagramOverlay caption={caption} />}
             {!playing && !holdingOriginal && !(still && subtitle) && (
               <button className="big-play" onClick={toggle} aria-label="Play" data-testid="play">
