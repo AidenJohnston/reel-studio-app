@@ -276,7 +276,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         .then(() => load())
         .catch((e) => notify(userMessage(e), 'error'))
     } else if (a === 'connect') connect()
-    else setDrawer(ACTION_TAB[a] ?? 'cut')
+    else onLatest(() => setDrawer(ACTION_TAB[a] ?? 'cut'))()
   }
 
   const lengthOf = older ? d.versions[d.versions.length - 1]?.video : (changePreview ?? version?.video)
@@ -314,8 +314,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     if (c.key === 'captions') extras.push({ key: c.key, label: 'Turn subtitles on', run: () => setDrawer('captions'), testid: 'change-captions' })
   }
   const done = d.checklist.filter((c) => c.done)
-  // The Change links, extras and "Edit it myself" change the newest version: with an older one on screen,
-  // switch to the newest first, so what changes is what is shown.
+  // The Change links, extras, "Edit it myself" and a reply's buttons change the newest version: with an
+  // older one on screen, switch to the newest first, so what changes is what is shown.
   const onLatest = (run: () => void) => () => {
     if (older && latestN !== undefined) setSelected(latestN)
     run()
