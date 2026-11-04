@@ -125,6 +125,8 @@ export function FullScreenReel({
       aria-modal
       aria-label="Your reel, full screen"
       tabIndex={-1}
+      // React passes a portal's events to its React parents; the phone's dragStart would drag the reel file out.
+      onDragStart={(e) => e.stopPropagation()}
       data-testid="fullscreen"
     >
       <div className={`fs-frame${playing ? '' : ' paused'}`}>

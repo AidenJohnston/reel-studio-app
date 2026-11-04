@@ -251,9 +251,12 @@ a { color: inherit; }
 .scrub-time { color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
 .scrub input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px; background: linear-gradient(90deg, #fff var(--pct, 0%), rgba(255,255,255,.35) var(--pct, 0%)); cursor: pointer; }
 .scrub input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 0; }
-/* "Full screen" sits top left on the reel and shows with the play controls (hover or keyboard focus). */
-.fs-open { position: absolute; top: 14px; left: 14px; display: inline-flex; gap: 6px; align-items: center; border: 0; border-radius: 999px; padding: 0 12px 0 10px; min-height: 32px; background: rgba(0,0,0,.6); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; opacity: 0; transition: opacity .2s, transform .12s var(--ease); }
-.phone-screen:hover .fs-open, .fs-open:focus-visible { opacity: 1; }
+/* "Full screen" sits top left on the reel and shows with the play controls (hover or keyboard focus).
+   Hidden, it takes no clicks: a tap on a touch screen reaches the video, and the hover that tap leaves
+   shows the button for the next one. A screen that cannot hover at all always shows it. */
+.fs-open { position: absolute; top: 14px; left: 14px; display: inline-flex; gap: 6px; align-items: center; border: 0; border-radius: 999px; padding: 0 12px 0 10px; min-height: 32px; background: rgba(0,0,0,.6); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s, transform .12s var(--ease); }
+.phone-screen:hover .fs-open, .fs-open:focus-visible { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .fs-open { opacity: 1; pointer-events: auto; } }
 .fs-open:active, .fs-exit:active { transform: scale(.97); }
 
 /* ---- full screen: the reel at its true 9:16 shape, the full height of the screen, on the phone's
