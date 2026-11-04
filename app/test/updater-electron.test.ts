@@ -64,8 +64,18 @@ function site(version = '0.1.3') {
 }
 
 function keyStore(initial: string | null = KEY) {
-  const store = { key: initial, cleared: 0 }
-  return { store, keys: { get: async () => store.key, clear: async () => { store.key = null; store.cleared++ } } }
+  const store = { key: initial as string | null, cleared: 0 }
+  const keys = {
+    get: async () => store.key,
+    isCurrent: async (k: string) => store.key === k,
+    clearIfCurrent: async (k: string) => {
+      if (store.key !== k) return false
+      store.key = null
+      store.cleared++
+      return true
+    }
+  }
+  return { store, keys }
 }
 
 const noCheck: InstallStep = { fileName: zipName, showInstaller: false, verify: async () => {} }
