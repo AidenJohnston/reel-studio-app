@@ -35,6 +35,9 @@
     {"id": "rotated", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 10, "codec": "h264",
       "rotation": 90, "bitrate": "6M", "seed": 3}},
     {"id": "long-take", "synthetic": {"width": 1080, "height": 1920, "fps": 30, "seconds": 90, "codec": "h264",
-      "keepSeconds": [40, 62], "bitrate": "2500k", "grain": 4, "seed": 4}}
+      "keepSeconds": [40, 62], "bitrate": "2500k", "grain": 4, "seed": 4}},
+    {"id": "long-take-4k", "synthetic": {"width": 2160, "height": 3840, "fps": 30, "seconds": 300, "codec": "hevc",
+      "bitDepth": 8, "transfer": "sdr", "keepSeconds": [[15, 26], [75, 86], [135, 146], [195, 206], [255, 266]],
+      "bitrate": "8M", "grain": 4, "seed": 5}}
   ]
 }

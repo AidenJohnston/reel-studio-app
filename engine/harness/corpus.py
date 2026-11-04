@@ -199,8 +199,11 @@ def _keep_ranges(ids: list) -> list:
 def session_states(base: dict, words: list, retake: list, keep_seconds=None) -> list:
     """(note, state, moment word id) for a five-note session: first cut, caption style, a cut in
     the middle, one caption word fixed, music. Each state is a full project.json."""
+    # keepSeconds is one [start, end] span or a list of them (a long take cut down to a few stretches)
+    spans = None if keep_seconds is None else (
+        keep_seconds if isinstance(keep_seconds[0], list) else [keep_seconds])
     kept = [w for w in words if w["id"] not in retake
-            and (keep_seconds is None or keep_seconds[0] <= w["s"] and w["e"] <= keep_seconds[1])]
+            and (spans is None or any(a <= w["s"] and w["e"] <= b for a, b in spans))]
     ids = [w["id"] for w in kept]
 
     def state(keep_ids, **changes) -> dict:
