@@ -98,7 +98,8 @@ def slugify(text: str, fallback: str = "video") -> str:
 
 
 def read_json(path: Path):
-    with open(path, "r", encoding="utf-8") as fh:
+    # utf-8-sig: a byte-order mark, which some Windows editors write, is not JSON (the AI's readJson strips it too)
+    with open(path, "r", encoding="utf-8-sig") as fh:
         return json.load(fh)
 
 
