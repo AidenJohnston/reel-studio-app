@@ -35,6 +35,14 @@ export interface Word {
   source?: string
 }
 
+/** A caption word as the engine drew it, the transcript words it came from, and its speech run (lines in
+ * different runs have a long silence between them). */
+export interface CaptionToken {
+  w: string
+  ids: string[]
+  run: number
+}
+
 export interface ChecklistItem {
   key: string
   label: string
@@ -89,6 +97,8 @@ export interface ProjectDetail extends ProjectSummary {
   versions: VersionInfo[]
   words: Word[]
   keptIds: string[]
+  /** The caption lines of the last full render, word by word (engine work/captions.json). */
+  captionLines: CaptionToken[][]
   checklist: ChecklistItem[]
   chat: ChatMessage[]
   lastError: { code: string; userMessage: string } | null
@@ -117,7 +127,11 @@ export interface ProjectJson {
   captions?: {
     enabled: boolean
     style?: Record<string, unknown>
-    corrections?: { from: string; to: string }[]
+    /** `at` (through `through`): fixes only that word, made of those words, while it is heard as `from` (the Subtitles list). */
+    corrections?: { from: string; to: string; at?: string; through?: string }[]
+    /** word ids that start a caption line; lines starting at `to` that go onto the line ending at `from` */
+    split?: string[]
+    join?: { from: string; to: string }[]
   }
   music?: {
     enabled: boolean

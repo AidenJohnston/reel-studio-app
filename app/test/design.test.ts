@@ -60,6 +60,15 @@ describe('version messages', () => {
     expect(describeChange(p, { captions: { enabled: true, style: { size: 105, position: 0.66 } } })).toBe('subtitles moved up')
   })
 
+  it('describes retyping an existing one-place fix', () => {
+    const fix = { from: 'cloud', to: 'Claude', at: 'w2' }
+    const p = base({ captions: { enabled: true, corrections: [fix] } })
+    const change = describeChange(p, { captions: { enabled: true, corrections: [{ ...fix, to: 'CLAUDE' }] } })
+    expect(versionMessage(2, change)).toBe('Version 2: fixed a word.')
+    expect(describeChange(p, { captions: { enabled: true, corrections: [{ ...fix }] } })).toBe('')
+    expect(describeChange(p, { captions: { enabled: true, corrections: [] } })).toBe('')
+  })
+
   it('describes cuts, music, pictures and the cover', () => {
     const p = base()
     expect(describeChange(p, {}, 2)).toBe('brought back 2 words')
