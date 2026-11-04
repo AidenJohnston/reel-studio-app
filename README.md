@@ -57,10 +57,9 @@ once, and you never manage them. You see versions of your video and steer them w
   shouldn't have to give the same note twice.
 - **It tests versions for you.** Testing short-form by hand means posting every version. Reel Studio will cut several
   versions of one video, with a different hook, first line or pace, and rank them before you post.
-- **You see every change right away.** We're building our own FFmpeg pipeline for drafts. A ranking model we train
-  picks the frames that matter most, those render first and the rest fill in after, so you watch the agents work
-  instead of waiting for a full render. The render scheduler will be specified and model-checked in TLA+, so a fast
-  draft never drops or reorders a frame.
+- **You see every change right away.** We're building our own renderer: an FFmpeg for exactly the edits Reel Studio
+  makes, and faster than FFmpeg at them because it does nothing else. A ranking model we train picks the frames that
+  matter most, and those render first, so you watch the agents work instead of waiting for a full render.
 
 We're also studying why people keep watching a short, which says more than whether they clicked on it. From a large
 set of public short-form videos, their transcripts and how each one did, we're distilling a method a model can apply
