@@ -38,8 +38,13 @@ Rules:
    deletes it first.
 5. `cover` (cover only) writes into `preview/`.
 6. `frames --render-id <id>` reads that render and nothing else, and `frames --file <video>` the render that file
-   is (see Render identity). Its stills go to `work/frames/`.
-7. `--project-file work/...` makes `render`, `anim-context` and `cover-candidates` read (and `render`
+   is (see Render identity). With neither, `frames` shows the edit as it is now (`--project-file` for a
+   note's copy): it reads the newest full render, preview or final (never a window slice), whose
+   manifest carries the edit's current picture key (`pictureKey`: the edit without its music, notes and
+   post text, the files the picture reads, the transcript and the engine) and that binds as one render.
+   When none does, it draws the stills from the project without making a preview. Its stills go to
+   `work/frames/`.
+7. `--project-file work/...` makes `render`, `anim-context`, `cover-candidates` and `frames` read (and `render`
    patch `version` into) that document instead of `project.json`. A final rendered from such a copy
    never takes a number `project.json` has already saved: the engine refuses it (`PROJECT_CHANGED`).
 8. `version.json` records `{ "parent": N }`, or null for Version 1. The engine writes it before

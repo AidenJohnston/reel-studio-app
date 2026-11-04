@@ -126,7 +126,7 @@ it("fails if the AI's view of the project carries every note's receipt", async (
   expect(view.notes).toEqual([{ version: 1, text: 'keep the second take', applied: ['cut'], at: '2026-10-22T00:00:00Z' }]);
 });
 
-it('fails if look_at_frames on a project rendered before render ids gives up instead of making a preview', async () => {
+it('fails if look_at_frames on a project rendered before render ids gives up instead of showing the edit', async () => {
   const { root, dir } = await makeProject();
   const p = await loadProject(dir);
   p.version = 1;
@@ -139,9 +139,10 @@ it('fails if look_at_frames on a project rendered before render ids gives up ins
   expect(JSON.parse((await executeTool(ctx, 'render_draft', {})).content).skipped).toBeTruthy();
   const r = await executeTool(ctx, 'look_at_frames', { times: [1], words: null });
   expect(r.isError, String(r.content)).toBe(false);
-  const draft = ctx.state.renders.at(-1)!;
-  expect(draft.draft).toBe(true);
-  expect(host.calls.find((c) => c.command === 'frames')!.args).toEqual(expect.arrayContaining(['--render-id', draft.result.renderId]));
+  // #150: with no render id to point at, the engine shows the edit itself (a render that still shows it, or
+  // stills drawn from the project; engine test_frames_without_draft.py), so no preview has to be made
+  expect(host.calls.find((c) => c.command === 'frames')!.args).not.toContain('--render-id');
+  expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
 });
 
 it('fails if a took-back note that saved a My style rule makes or names a version', async () => {
@@ -175,7 +176,7 @@ it("fails if a note that changed nothing gives its reply a version, or a took-ba
   expect(undone.summary).toBe("That left your video the same as before, so I didn't make a new version.");
 });
 
-it('fails if look_at_frames, after a skipped preview and then a preview that failed, shows the old version as the current edit', async () => {
+it('fails if look_at_frames, after a skipped preview and then a preview that failed, points at the old version as the current edit', async () => {
   const { root, dir } = await makeProject();
   const host = new FakeHost(root);
   await host.runEngine('render', ['--project', dir]);
@@ -185,7 +186,13 @@ it('fails if look_at_frames, after a skipped preview and then a preview that fai
   await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
   host.failRender = true;
   expect((await executeTool(ctx, 'render_draft', {})).isError).toBe(true);
+  const old = host.calls.filter((c) => c.command === 'render').length;
   const r = await executeTool(ctx, 'look_at_frames', { times: [1], words: null });
-  expect(r.isError, String(r.content)).toBe(true);
-  expect(host.calls.some((c) => c.command === 'frames')).toBe(false);
+  // #150: the cut changed since every render, so frames names no render and the engine shows the edit as
+  // it is now; it reuses a render only while its picture key matches (engine test_frames_without_draft.py)
+  expect(r.isError, String(r.content)).toBe(false);
+  const asked = host.calls.filter((c) => c.command === 'frames');
+  expect(asked).toHaveLength(1);
+  expect(asked[0].args).not.toContain('--render-id');
+  expect(host.calls.filter((c) => c.command === 'render')).toHaveLength(old);
 });

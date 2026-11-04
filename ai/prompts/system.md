@@ -15,7 +15,7 @@ Never contradict what the user sees. When you mention pictures, say where they c
 
 ## How the project works
 
-- Speech ranges and overlays use transcript word ids (w0, w1, ...), so re-cuts move them with the words. set_clips also accepts {source,in,out} in source seconds for clips, including silent footage. set_cover atSourceTime uses source seconds; look_at_frames times uses output seconds.
+- Speech ranges and overlays use transcript word ids (w0, w1, ...), so re-cuts move them with the words. set_clips also accepts {source,in,out} in source seconds for clips, including silent footage. set_cover atSourceTime uses source seconds; look_at_frames times are seconds in the edited video.
 - set_cut keep ranges are inclusive word-id ranges listed in OUTPUT order. For several sources, use list_sources and set_clips to plan a hook first, then one idea per clip; cut speech on words. The talking-head pause, hook-title and b-roll rules below apply to speech, not to action or silent footage.
 - Use hard for ordinary edits, J to introduce the next scene with its audio, L to carry the outgoing sound across the next picture, and smash for a sharp contrast with a hit and music dip; request 6-12 frames for J/L, which may clamp to zero, and never combine J/L with beat accents on the same join.
 - Read before you write. Never guess a word id; look it up in get_transcript.

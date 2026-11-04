@@ -50,7 +50,9 @@ def bind(manifest_path: Path) -> dict:
     return {"manifest": man, "video": video, "verify": rep}
 
 
-def _manifests(project_dir: Path):
+def manifests(project_dir: Path):
+    """Every render manifest of a project, with its path: saved versions, the preview, and a note's
+    previews (render.current_render looks through them too)."""
     # a note renders its previews into its own work/notes/<id>/ (render --out, docs/versions.md)
     project_dir = Path(project_dir)
     found = [*(project_dir / "versions").glob("*/render*.json"), *(project_dir / "work" / "notes").glob("*/render*.json")]
@@ -66,7 +68,7 @@ def _manifests(project_dir: Path):
 def resolve(project_dir: Path, render_id: str) -> dict:
     if not re.fullmatch(r"r_[0-9a-f]{32}", render_id or ""):
         raise mismatch(f"not a render id: {render_id!r}")
-    for path, man in _manifests(project_dir):
+    for path, man in manifests(project_dir):
         if man.get("renderId") == render_id:
             return bind(path)
     raise mismatch(f"render {render_id} is no longer on disk")
@@ -85,7 +87,7 @@ def for_file(video: Path, project_dir: Path | None = None) -> dict:
             continue
     if project_dir is not None:
         digest = video_digest(video)
-        for path, man in _manifests(project_dir):
+        for path, man in manifests(project_dir):
             if man.get("videoSha256") == digest:
                 return bind(path)
     raise mismatch(f"{video} has no render record")

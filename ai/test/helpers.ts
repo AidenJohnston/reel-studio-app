@@ -198,7 +198,17 @@ export class FakeHost implements EngineHost {
         return { timeline: { words: r.words }, layers: r.layers };
       }
       case 'frames': {
-        const times = args[args.indexOf('--times') + 1].split(',').map(Number);
+        const times = args.includes('--times') ? args[args.indexOf('--times') + 1].split(',').map(Number) : [];
+        // like frames.py: without a render id, --words are found on the edit's own timeline
+        if (args.includes('--words')) {
+          const { cut } = withDefaults(p);
+          const at = approxOutputTimes(JSON.parse(await fsp.readFile(path.join(dir, 'work', 'transcript.json'), 'utf8')), cut.keep, cut.gapCap);
+          for (const id of args[args.indexOf('--words') + 1].split(',')) {
+            const w = at.get(id);
+            if (!w) throw { code: 'BAD_ARGS', userMessage: `Word ${id} is not in the cut.` };
+            times.push(Math.round(((w.s + w.e) / 2) * 100) / 100);
+          }
+        }
         const fd = path.join(dir, 'work', 'frames');
         await fsp.mkdir(fd, { recursive: true });
         const frames = [];

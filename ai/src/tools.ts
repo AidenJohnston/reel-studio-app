@@ -42,8 +42,6 @@ export interface ToolState {
   toolCalls: number;
   /** fields changed since the last render (render_draft skips when none of them can be seen) */
   dirty?: Set<string>;
-  /** render_draft was skipped (nothing visible changed): look_at_frames looks at the current version instead */
-  previewSkipped?: boolean;
   /** an undone repair's preview overwrote versions/preview/: no earlier preview is on disk (editor.ts finalize) */
   previewReplaced?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
@@ -384,8 +382,9 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
   };
 }
 
-/** Engine commands that read the edit: during a note they read its private copy. */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates']);
+/** Engine commands that read the edit: during a note they read its private copy (`frames` without a
+ * render id shows the edit). */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames']);
 
 function projectArgs(ctx: ToolContext, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
@@ -562,8 +561,6 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 /** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
 export async function doRender(ctx: ToolContext, draft: boolean, announce = true): Promise<RenderInfo> {
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
-  // a skipped preview stood for the edit as it was then: from here on only this render does
-  ctx.state.previewSkipped = false;
   const out = draft && ctx.note ? ['--out', ctx.note.dir] : [];
   const parent = ctx.note?.parent ? ['--parent', String(ctx.note.parent)] : [];
   if (ctx.note?.mergeParent !== undefined) parent.push('--merge-parent', String(ctx.note.mergeParent));
@@ -2033,7 +2030,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'render_draft',
-    description: 'Render a quick preview of the current edit. Needed before look_at_frames.',
+    description: 'Render a quick preview of the whole edit and check it.',
     parameters: S.obj({}),
     async run(ctx) {
       const drafts = ctx.state.renders.filter((r) => r.draft && !r.checker).length;
@@ -2045,7 +2042,6 @@ const tools: ToolDef[] = [
       const prior = ctx.state.renders.at(-1);
       if (!visibleChangeSinceRender(ctx) && (prior || ctx.state.changed.size)) {
         const lint = await engine(ctx, 'lint-edit');
-        ctx.state.previewSkipped = true;
         const visualChanges = prior?.result?.visualChanges as any;
         if (visualChanges) addCutStyleVerdicts(visualChanges, ctx.project?.cutStyle?.preset);
         return { content: { ok: true, skipped: 'Nothing visible changed since the last preview, so I did not make a new one. The final video after finish includes your change. Do not render again for this.', version: prior?.version ?? null, issues: lint.issues ?? [], fixed: lint.fixed ?? [], ...(visualChanges ? { visualChanges } : {}) } };
@@ -2108,19 +2104,18 @@ const tools: ToolDef[] = [
   },
   {
     name: 'look_at_frames',
-    description: 'See still frames from your last preview. Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
+    description: 'See still frames of the current edit, with or without a preview (no need to render first). Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
     parameters: S.obj({
-      times: S.opt(S.arr(S.num(), 'seconds in the rendered video')),
+      times: S.opt(S.arr(S.num(), 'seconds in the edited video')),
       words: S.opt(S.arr(S.str(), 'word ids')),
     }),
     async run(ctx, args) {
-      if (!ctx.state.renders.length && !ctx.state.previewSkipped) throw new ToolInputError('call render_draft first');
-      // a version rendered before render ids has none to inspect: make a preview of it instead
-      const renderId: string | undefined = ctx.state.renders.length ? ctx.state.renders.at(-1)!.result?.renderId
-        : await fsp.readFile(path.join(ctx.projectDir, 'versions', `v${(await load(ctx)).p.version}`, 'render.json'), 'utf8')
-          .then((s) => JSON.parse(s).renderId).catch(() => undefined) ?? (await doRender(ctx, true)).result?.renderId;
-      if (!renderId) throw new ToolInputError('there is no preview to look at; the final video after finish includes the change');
-      const shown: RenderReports = await engine(ctx, 'inspect-render', ['--render-id', renderId]);
+      // This task's own render, with nothing visible changed since: look at exactly that render, on its
+      // own word times and layers (render identity). Otherwise the engine shows the edit as it is now,
+      // from a render that still shows it or drawn straight from the project, so no preview is needed.
+      const own: string | undefined = visibleChangeSinceRender(ctx) ? undefined : ctx.state.renders.at(-1)?.result?.renderId;
+      if (!own) return lookAtEdit(ctx, args);
+      const shown: RenderReports = await engine(ctx, 'inspect-render', ['--render-id', own]);
       const times: number[] = [...(args.times ?? [])];
       for (const id of args.words ?? []) {
         const w = shown.timeline.words.find((x) => x.id === id);
@@ -2129,26 +2124,8 @@ const tools: ToolDef[] = [
       }
       if (!times.length) throw new ToolInputError('give times or words');
       const { pick, moved } = settleOnAnimations(shown.layers, times.slice(0, 6));
-      const r = await engine(ctx, 'frames', ['--render-id', renderId, '--times', pick.join(',')]);
-      const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
-        typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
-      const images: ImagePart[] = [];
-      for (const f of frames) {
-        const abs = path.isAbsolute(f.path) ? f.path : path.join(ctx.projectDir, f.path);
-        try {
-          const buf = await fsp.readFile(abs);
-          images.push({ type: 'image', mime: MIME[path.extname(abs).toLowerCase()] ?? 'image/png', base64: buf.toString('base64'), path: abs });
-        } catch { /* missing frame reported below */ }
-      }
-      ctx.emit({ type: 'status', message: 'Checking how it looks' });
-      return {
-        content: {
-          frames: frames.map((f) => ({ time: f.time, file: path.basename(f.path) })),
-          ...(moved.length ? { animationsSampledAtEnd: moved } : {}),
-          note: ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.',
-        },
-        images: ctx.supportsImages ? images : undefined,
-      };
+      const r = await engine(ctx, 'frames', ['--render-id', own, '--times', pick.join(',')]);
+      return framesSeen(ctx, r, pick, moved);
     },
   },
   {
@@ -2165,13 +2142,15 @@ const tools: ToolDef[] = [
 /** `inspect-render`: one render's own word times and layer records (engine render_identity.py). */
 interface RenderReports { timeline: { words: { id: string; s: number; e: number }[] }; layers: LayerRecord[] }
 interface LayerRecord { id: string; treatment?: string; zone?: string; t0?: number; t1?: number; skipped?: string }
+type Moved = { asked: number; sampled: number; id: string };
 
 /** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
  * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
- * move to its settled end (0.15 s before it ends), and the result says so. */
-function settleOnAnimations(recs: LayerRecord[], times: number[]): { pick: number[]; moved: { asked: number; sampled: number; id: string }[] } {
+ * move to its settled end (0.15 s before it ends), and the result says so. The engine applies the same
+ * rule to stills of the edit (render.settle_on_animations). */
+function settleOnAnimations(recs: LayerRecord[], times: number[]): { pick: number[]; moved: Moved[] } {
   const anims = recs.filter((r): r is LayerRecord & { t0: number; t1: number } => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
-  const moved: { asked: number; sampled: number; id: string }[] = [];
+  const moved: Moved[] = [];
   const pick = times.map((tm) => {
     const a = anims.find((r) => tm >= r.t0 && tm < r.t1);
     if (!a) return tm;
@@ -2180,6 +2159,42 @@ function settleOnAnimations(recs: LayerRecord[], times: number[]): { pick: numbe
     return end;
   });
   return { pick, moved };
+}
+
+/** look_at_frames with no render of its own to point at: the engine's `frames` without a render id
+ * shows the edit as it is now (a note's copy), finds each word on that picture's own timeline and
+ * moves a time inside an animation to its settled end. With no render that still shows the edit it
+ * draws the stills, writing work/render/ as a render does, so it waits for the first look. */
+async function lookAtEdit(ctx: ToolContext, args: { times?: number[] | null; words?: string[] | null }): Promise<ToolOutput> {
+  const times = (args.times ?? []).slice(0, 6);
+  const words = (args.words ?? []).slice(0, 6 - times.length);
+  if (!times.length && !words.length) throw new ToolInputError('give times or words');
+  if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
+  const r = await engine(ctx, 'frames', [...(times.length ? ['--times', times.join(',')] : []), ...(words.length ? ['--words', words.join(',')] : [])]);
+  return framesSeen(ctx, r, times, Array.isArray(r?.animationsSampledAtEnd) ? r.animationsSampledAtEnd : []);
+}
+
+/** The frames the engine wrote, read back as images for a model that can see them. */
+async function framesSeen(ctx: ToolContext, r: any, pick: number[], moved: Moved[]): Promise<ToolOutput> {
+  const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
+    typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
+  const images: ImagePart[] = [];
+  for (const f of frames) {
+    const abs = path.isAbsolute(f.path) ? f.path : path.join(ctx.projectDir, f.path);
+    try {
+      const buf = await fsp.readFile(abs);
+      images.push({ type: 'image', mime: MIME[path.extname(abs).toLowerCase()] ?? 'image/png', base64: buf.toString('base64'), path: abs });
+    } catch { /* missing frame reported below */ }
+  }
+  ctx.emit({ type: 'status', message: 'Checking how it looks' });
+  return {
+    content: {
+      frames: frames.map((f) => ({ time: f.time, file: path.basename(f.path) })),
+      ...(moved.length ? { animationsSampledAtEnd: moved } : {}),
+      note: ctx.supportsImages ? `${images.length} image(s) attached in order.` : 'This model cannot see images; trust the project instead.',
+    },
+    images: ctx.supportsImages ? images : undefined,
+  };
 }
 
 export function cleanSummary(s: string): string {
