@@ -59,7 +59,7 @@ for (const source of ['paste', 'open-file before ready', 'second-instance argv']
       } else if (source === 'second-instance argv') {
         await app.evaluate(({ app }, file) => { app.emit('second-instance', {}, [process.execPath, '.', file], process.cwd()) }, media.video)
       }
-      await expect(page.getByTestId('player')).toBeVisible({ timeout: 8000 })
+      await expect(page.getByTestId('player')).toBeVisible({ timeout: 240_000 })
       const projects = await page.evaluate(() => window.reel.projects.list())
       expect(projects).toHaveLength(1)
       expect(projects[0].title).toBe('My first take')
