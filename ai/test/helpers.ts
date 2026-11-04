@@ -74,6 +74,9 @@ export function tinyPng(rgb: [number, number, number] = [200, 30, 30]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** A JSON file as the engine reads it (project.py read_json): a leading byte-order mark is skipped. */
+const readEngineJson = async (file: string): Promise<any> => JSON.parse((await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
+
 /** A project after its first edit, as every note finds it: a cut, and (`render`) Version 1. */
 export async function firstVersion(dir: string, host: FakeHost, render = true): Promise<void> {
   const pj = path.join(dir, 'project.json');
@@ -120,7 +123,7 @@ export class FakeHost implements EngineHost {
       throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
     }
     const pj = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
-    const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
+    const p = await readEngineJson(pj);
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
     switch (command) {
       case 'transcribe': {
@@ -150,7 +153,7 @@ export class FakeHost implements EngineHost {
         }
         const v = (p.version ?? 0) + 1;
         // like render.py: a note's copy never renders over a version project.json saved since it was made
-        if (!draft && args.includes('--project-file') && v <= JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).version) {
+        if (!draft && args.includes('--project-file') && v <= (await readEngineJson(path.join(dir, 'project.json'))).version) {
           throw { code: 'PROJECT_CHANGED', userMessage: 'Your video was changed somewhere else while I worked on your note.' };
         }
         const vd = draft ? (args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', 'preview')) : path.join(dir, 'versions', `v${v}`);
