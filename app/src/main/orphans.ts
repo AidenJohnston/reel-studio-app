@@ -1,12 +1,11 @@
 // Engine processes left running by a hard crash of the app (power cut, force quit) would keep
 // rendering into a project the next app instance is about to resume. We record each engine's pid and
 // project in a small file, from its start until it and everything it started have exited, and at
-// startup stop whatever of ours is still running. A project with something we could not stop stays
-// closed until nothing of ours runs in it.
+// startup stop whatever can be shown to be ours (leftRunning). A project with something we could not
+// stop, or would not signal, stays closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
-import { uptime } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
 
@@ -95,8 +94,8 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           continue
         }
         engines.set(pid, typeof startedAt === 'number' ? { project, startedAt } : { project })
-        // a 0.1.x list names no video, and a group that may not be ours is never stopped: which video
-        // either writes to is as unknown as with an unreadable list
+        // a 0.1.x list names no video, and what may not be ours is never stopped: which video either
+        // writes to is as unknown as with an unreadable list
         if (project && left === 'ours') stillRunning.push(project)
         else unknown = true
       }
@@ -185,52 +184,29 @@ function psEnv(): NodeJS.ProcessEnv {
   return { ...process.env, LC_ALL: process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8' }
 }
 
-/** macOS/Linux: the processes in process group `pgid`, or null when they cannot be listed. */
-function groupMembers(pgid: number): Promise<{ pid: number; cmdline: string }[] | null> {
-  return new Promise((resolve) => {
-    execFile('ps', ['-A', '-ww', '-o', 'pgid=,pid=,args='], { env: psEnv(), timeout: 30000, maxBuffer: 64 * 1024 * 1024 }, (err, out) =>
-      resolve(err ? null : out.split(/\r?\n/).flatMap((line) => {
-        const m = /^\s*(\d+)\s+(\d+)\s+(.*\S)/.exec(line)
-        return m && Number(m[1]) === pgid ? [{ pid: Number(m[2]), cmdline: m[3] }] : []
-      })))
-  })
-}
-
-/** A process an engine of ours starts or is, judged by the program it runs (`ps -o comm`), never by
- * words in its arguments: `worker.py --encoder ffmpeg` is not ffmpeg. False once it has exited. */
-async function isOursByProgram(p: { pid: number; cmdline: string }): Promise<boolean> {
-  const program = basename((await processName(p.pid)) ?? '').toLowerCase()
-  return /^ff(mpeg|probe)$/.test(program) || (/^python/.test(program) && isOurEngine(p.cmdline))
-}
-
 /** How far apart the clock when an engine was registered and the start time the system reports for
  * it may be: ps reports whole seconds, and the app registers the engine right after spawning it. */
 const SAME_START_MS = 10_000
 
-/** What a previous run's engine left running from this pid, judged by when it started, never by its
- * command line alone (a command line can say anything):
- * - nothing outlives a restart of the computer, and after one the number can belong to anyone;
- * - a live process with that pid is ours only if it is our engine and started when ours did (pid reuse
- *   is routine on Windows);
- * - on macOS/Linux, a process group with that number whose leader died is the group our engine led:
- *   neither system hands out a number while a group still holds it. Its members are checked too.
- * 'unsure' (left alone, kept on the list, and the scan decides which video stays closed): the members
- * hold something else, or the start time cannot be read. Entries from 0.1.x have no start time and are
- * judged by their command line as before. */
+/** What a previous run's engine left running from this pid. After a crash nothing proves who holds a
+ * number now (pids are reused, routinely on Windows, and a command line can say anything), so only
+ * what can be shown to be our engine is ever signalled:
+ * - 'ours': a live process that runs our engine and started within SAME_START_MS of when ours was
+ *   registered (an entry from 0.1.x has no start time and is judged by its command line, as before);
+ * - 'unsure': anything that may be ours but cannot be shown to be: a start time that does not match or
+ *   cannot be read, a process that cannot be read, or on macOS/Linux a process group with that number
+ *   whose leader died (left alone: our leftover ffmpeg finishes on its own). It stays on the list, and
+ *   the scan keeps closed the video something still works in;
+ * - 'gone': nothing runs from that number, or something that is not our engine does. */
 async function leftRunning(pid: number, startedAt?: number): Promise<'ours' | 'unsure' | 'gone'> {
-  if (startedAt !== undefined && startedAt < Date.now() - uptime() * 1000 - 60_000) return 'gone'
   if (isAlive(pid)) {
     const p = await processInfo(pid)
-    if (!p || !isOurEngine(p.cmdline)) return 'gone'
+    if (!p) return isAlive(pid) ? 'unsure' : 'gone'
+    if (!isOurEngine(p.cmdline)) return 'gone'
     if (startedAt === undefined) return 'ours'
-    if (p.startedAt === null) return 'unsure'
-    return Math.abs(p.startedAt - startedAt) <= SAME_START_MS ? 'ours' : 'gone'
+    return p.startedAt !== null && Math.abs(p.startedAt - startedAt) <= SAME_START_MS ? 'ours' : 'unsure'
   }
-  if (process.platform === 'win32' || !groupAlive(pid)) return 'gone'
-  const members = await groupMembers(pid)
-  if (!members) return 'unsure'
-  if (!members.length) return 'gone'
-  return (await Promise.all(members.map(isOursByProgram))).every(Boolean) ? 'ours' : 'unsure'
+  return process.platform !== 'win32' && groupAlive(pid) ? 'unsure' : 'gone'
 }
 
 /** Our engine is always started as `python [interpreter options] -m reelengine <command>` (engine.ts).
