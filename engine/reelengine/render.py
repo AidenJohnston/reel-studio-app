@@ -458,10 +458,8 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
     hw = tools.hwaccel() if fast else None
     hdr_dec = []
     if fast and any(src_meta[lane["source"]].get("hdr") for lane in lanes):
-        hdr_dec = tools.hwaccel_to_memory(encoder)
-        if hdr_dec[:1] == ["-init_hw_device"]:
-            cmd += hdr_dec[:2]                 # a global option: once, before the first input
-            hdr_dec = hdr_dec[2:]
+        devices, hdr_dec = tools.hwaccel_to_memory(encoder)
+        cmd += devices                         # global options: once, before the first input
     seg_input, seg_chain = {}, {}
     chains, labels = [], []
     for li, lane in enumerate(lanes):
