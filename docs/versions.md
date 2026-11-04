@@ -25,7 +25,9 @@ Rules:
    same edit overwrites it); otherwise it makes `v(N+1)`.
 5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
    `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+6. `frames` reads the newest full render, preview or final (never a window slice), whose manifest
+   carries the project's current picture key. When none does, it draws the stills from the project
+   into `preview/frames/` without making a preview.
 
 ## Render result (engine `done.result`)
 
