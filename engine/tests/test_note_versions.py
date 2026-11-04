@@ -61,6 +61,18 @@ def test_the_same_edit_gets_its_saved_version_back_untouched(project):
     assert {f.name: f.read_bytes() for f in v1.iterdir() if f.is_file()} == before
 
 
+def test_a_saved_version_missing_a_file_is_left_alone_and_the_render_gets_the_next_number(project):
+    engine(project, "render")
+    v1 = project / "versions" / "v1"
+    (v1 / "render.json").unlink()
+    before = {f.name: f.read_bytes() for f in v1.iterdir() if f.is_file()}
+
+    again = engine(project, "render")
+    assert again["version"] == 2 and not again.get("reused")
+    assert {f.name: f.read_bytes() for f in v1.iterdir() if f.is_file()} == before
+    assert json.loads((project / "project.json").read_text())["version"] == 2
+
+
 @pytest.mark.needs_libass
 def test_changed_words_make_a_new_version_with_their_subtitles(project):
     p = json.loads((project / "project.json").read_text())

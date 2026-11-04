@@ -404,8 +404,8 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     return []
   }
   // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
-  // (a higher one is a note that was never saved). Drafts live in `versions/preview/`
-  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
+  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
+  // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
