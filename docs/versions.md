@@ -94,9 +94,12 @@ words for that change claim, so "Cut 2 words" for words brought back, or "Cut a 
 
 ## What the app shows
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4` and whose number is at most
-  `project.json`'s `version`, sorted by number. Folders without `export.mp4` (from older builds) are
-  not shown. If `project.json` cannot be read, no chip is shown.
+- **Version chips** = folders `vN` with N up to `project.json`'s `version` that contain
+  `export.mp4`, sorted by number. Folders without `export.mp4` (from older builds, or an AI run
+  whose final render failed) and folders above `version` are not shown.
+- **The Subtitles list** shows the lines in `captions.json` of `v{version}`, or of `versions/preview/`
+  while there is no version; a version made before reports moved beside their render has them in
+  `work/captions.json`.
 - **While an AI run is working**, the player may show its latest draft (the `render` event with
   `draft: true`): a note's own drafts, which go away with the note.
 - **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
