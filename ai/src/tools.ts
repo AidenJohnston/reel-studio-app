@@ -31,8 +31,6 @@ export interface ToolState {
   toolCalls: number;
   /** fields changed since the last render (render_draft skips when none of them can be seen) */
   dirty?: Set<string>;
-  /** render_draft was skipped (nothing visible changed): look_at_frames may use the newest render on disk */
-  previewSkipped?: boolean;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
 }
@@ -1200,7 +1198,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'render_draft',
-    description: 'Render a quick preview of the current edit. Needed before look_at_frames.',
+    description: 'Render a quick preview of the whole edit and check it.',
     parameters: S.obj({}),
     async run(ctx) {
       const drafts = ctx.state.renders.filter((r) => r.draft).length;
@@ -1211,7 +1209,6 @@ const tools: ToolDef[] = [
       // show the same frames. The full-quality render after finish includes the change anyway.
       const prior = ctx.state.renders.at(-1);
       if (!visibleChangeSinceRender(ctx) && (prior || ctx.state.changed.size)) {
-        ctx.state.previewSkipped = true;
         return { content: { ok: true, skipped: 'Nothing visible changed since the last preview, so I did not make a new one. The final video after finish includes your change. Do not render again for this.', version: prior?.version ?? null } };
       }
       const info = await doRender(ctx, true);
@@ -1263,13 +1260,12 @@ const tools: ToolDef[] = [
   },
   {
     name: 'look_at_frames',
-    description: 'See still frames from the latest render. Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
+    description: 'See still frames of the current edit, with or without a preview (no need to render first). Give output-video seconds (times) or word ids (words; the frame where each word is said). Max 6.',
     parameters: S.obj({
-      times: S.opt(S.arr(S.num(), 'seconds in the rendered video')),
+      times: S.opt(S.arr(S.num(), 'seconds in the edited video')),
       words: S.opt(S.arr(S.str(), 'word ids')),
     }),
     async run(ctx, args) {
-      if (!ctx.state.renders.length && !ctx.state.previewSkipped) throw new ToolInputError('call render_draft first');
       const { p, t } = await load(ctx);
       const times: number[] = [...(args.times ?? [])];
       if (args.words?.length) {
@@ -1281,8 +1277,12 @@ const tools: ToolDef[] = [
         }
       }
       if (!times.length) throw new ToolInputError('give times or words');
-      const { pick, moved } = await settleOnAnimations(ctx, times.slice(0, 6));
+      const pick = times.slice(0, 6);
+      // With no up-to-date render the engine draws the stills, writing work/render/ as a render does.
+      if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
       const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
+      // the engine moves a time inside an animation to its settled end (render.settle_on_animations)
+      const moved = Array.isArray(r?.animationsSampledAtEnd) ? r.animationsSampledAtEnd : [];
       const frames: { time: number; path: string }[] = (Array.isArray(r) ? r : (r?.frames ?? [])).map((f: any, i: number) =>
         typeof f === 'string' ? { time: pick[i], path: f } : { time: f.time ?? f.t ?? pick[i], path: f.path ?? f.file });
       const images: ImagePart[] = [];
@@ -1314,24 +1314,6 @@ const tools: ToolDef[] = [
     },
   },
 ];
-
-/** A frame in the middle of an animation shows a count-up half way or half the words (live e2e: the
- * model read a count-up mid-way and reported the wrong number). Times inside an animation's window
- * move to its settled end (0.15 s before it ends), and the result says so. */
-async function settleOnAnimations(ctx: ToolContext, times: number[]): Promise<{ pick: number[]; moved: { asked: number; sampled: number; id: string }[] }> {
-  let recs: any[] = [];
-  try { recs = JSON.parse(await fsp.readFile(path.join(ctx.projectDir, 'work', 'layers', 'layers.json'), 'utf8'))?.items ?? []; } catch { /* no layers yet */ }
-  const anims = recs.filter((r) => (r?.treatment === 'animation' || r?.zone === 'animation' || r?.zone === 'full') && typeof r.t0 === 'number' && typeof r.t1 === 'number' && !r.skipped);
-  const moved: { asked: number; sampled: number; id: string }[] = [];
-  const pick = times.map((tm) => {
-    const a = anims.find((r) => tm >= r.t0 && tm < r.t1);
-    if (!a) return tm;
-    const end = Math.round(Math.max(a.t0, a.t1 - 0.15) * 100) / 100;
-    if (end !== tm) moved.push({ asked: tm, sampled: end, id: String(a.id) });
-    return end;
-  });
-  return { pick, moved };
-}
 
 export function cleanSummary(s: string): string {
   return String(s ?? '').replace(/\s*—\s*/g, ', ').replace(/\s*–\s*/g, ' to ').trim();
