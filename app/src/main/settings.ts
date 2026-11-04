@@ -4,8 +4,9 @@ import { dirname } from 'node:path'
 import { settingsFile } from './paths'
 import { writeJson } from './store'
 import { UPDATE_DEFAULTS, type UpdateState } from './update-check'
+import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
 
-export interface Settings extends UpdateState {
+export interface Settings extends UpdateState, UpdateKeyState {
   firstRunDone: boolean
   root: string | null
   /** Written by the 0.1.0/0.1.1 local-Claude-Code builds (a one-time automatic AI pick); read once by ai-carryover.ts. */
@@ -14,7 +15,7 @@ export interface Settings extends UpdateState {
   aiCarriedOver: boolean
 }
 
-const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS }
+const DEFAULTS: Settings = { firstRunDone: false, root: null, aiAutoPicked: false, aiCarriedOver: false, ...UPDATE_DEFAULTS, ...UPDATE_KEY_DEFAULTS }
 
 export async function loadSettings(): Promise<Settings> {
   try {

@@ -123,6 +123,12 @@ newer version is out, sending only a generic
 `User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so; nothing
 is downloaded or installed. Turn it off in Settings with "Check for updates".
 
+Automatic updates are off until you turn them on with the link in your receipt email (or by pasting it in
+Settings › About). That stores your download key in the app's settings file. The key names your purchase (the
+Stripe checkout id, the plan and a date), never your email or name, and the app sends it only to
+`dl.getreelstudio.com/u/`, in a request header with each update download, so the server can check the purchase
+is still active. The daily check above never carries it.
+
 ## Build from source
 
 You need Node.js 22 or newer and Python 3.11. For development on a machine without the bundled runtime, put
