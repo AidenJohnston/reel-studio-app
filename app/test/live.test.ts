@@ -161,13 +161,17 @@ describe('job manager (main): the contract on the wire', () => {
       tickMs: 15
     })
     const held: { emit?: (e: { type: 'status'; message: string; pct: number; phase: 'final' }) => void } = {}
+    let running!: () => void
+    const started = new Promise<void>((r) => (running = r))
     const id = jobs.start(slug, 'rerender', async (emit, signal) => {
       held.emit = emit
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
-      await new Promise((r) => signal.addEventListener('abort', r, { once: true }))
+      const stopped = new Promise((r) => signal.addEventListener('abort', r, { once: true }))
+      running()
+      await stopped
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     })
-    await new Promise((r) => setTimeout(r, 30))
+    await started
     jobs.cancel(id)
     await jobs.forSlug(slug)?.done
     // the runner rejected at once; the dying engine's last progress line arrives after the job ended

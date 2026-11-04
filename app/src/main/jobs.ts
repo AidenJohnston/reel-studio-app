@@ -59,6 +59,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
     const tracker = new ProgressTracker(kind, 0, history)
     let phase: Phase | undefined
     let ended = false
+    let failed = false
     // `thinking` is state, not a one-off: the once-a-second repeats keep saying it until the AI answers
     const status = (): void => {
       const snap = tracker.snapshot()
@@ -120,7 +121,8 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           } else if (e.type === 'render') {
             const r = e
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })))
+            // a job that succeeds waits for these before `done`; one that fails or is stopped drops the ones still on their way
+            pending.push(video.then((v) => void (failed || send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }))))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
@@ -141,6 +143,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })
       } catch (e) {
         end()
+        failed = true
         const err = toUserError(e)
         const cancelled = err.code === 'CANCELLED' || abort.signal.aborted
         if (!cancelled) log(`[job ${kind}] ${err.code}: ${err.message ?? ''}`)
