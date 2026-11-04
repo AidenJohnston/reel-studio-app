@@ -122,20 +122,26 @@ test('see it on: phone shapes, Instagram view on each, remembered', async () => 
     await page.screenshot({ path: join(OUT, 'subtitles-big.png') })
     await page.keyboard.press('Escape')
 
-    // On the SE Instagram trims the reel's top and bottom, so the viewer is shorter than the reel. The
-    // preview puts a Lower subtitle where the export does: at 0.75 of the whole reel, not of the viewer.
-    const se = DEVICES.find((d) => d.id === 'iphone-se')!
-    await page.getByTestId('device-pick').selectOption(se.id)
-    await page.getByTestId('edit-myself').click()
-    await page.getByTestId('tab-captions').click()
-    await page.getByTestId('cap-pos-lower').click()
-    await expect(sub).toBeVisible()
-    const screen = (await page.locator('.phone-screen').boundingBox())!
-    const line = (await sub.boundingBox())!
-    const { video } = placeReel(se)
-    const want = screen.y + ((video.y + 0.75 * video.h) / se.screen.h) * screen.height
-    expect(Math.abs(line.y + line.height / 2 - want)).toBeLessThan(2) // the viewer's 0.75 lands about 6px higher
-    await page.keyboard.press('Escape')
+    // The preview puts a Lower subtitle where the export does: centred on the reel, at 0.75 of its height. On
+    // the SE Instagram trims the reel's top and bottom, so that is 0.75 of the whole reel, not of the viewer;
+    // on the taller phones the reel is drawn bigger than the screen is wide, and the line stays centred.
+    for (const d of DEVICES) {
+      await page.getByTestId('device-pick').selectOption(d.id)
+      await page.getByTestId('edit-myself').click()
+      await page.getByTestId('tab-captions').click()
+      await page.getByTestId('cap-pos-lower').click()
+      await expect(sub).toBeVisible()
+      const screen = (await page.locator('.phone-screen').boundingBox())!
+      const line = (await sub.boundingBox())!
+      const { video } = placeReel(d)
+      const want = {
+        x: screen.x + ((video.x + video.w / 2) / d.screen.w) * screen.width,
+        y: screen.y + ((video.y + 0.75 * video.h) / d.screen.h) * screen.height
+      }
+      expect(Math.abs(line.x + line.width / 2 - want.x), `${d.id} x`).toBeLessThan(2)
+      expect(Math.abs(line.y + line.height / 2 - want.y), `${d.id} y`).toBeLessThan(2) // the SE's viewer put it about 6px higher
+      await page.keyboard.press('Escape')
+    }
   } finally {
     await app.close().catch(() => {})
   }
