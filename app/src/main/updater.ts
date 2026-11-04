@@ -292,6 +292,8 @@ export function createUpdater(d: UpdaterDeps) {
             applyFound(answer)
             return { accepted: true, state }
           }
+          state = { ...state, notes: withNotes(answer.notes) }
+          remember({ updateNotes: answer.notes })
           confirmed = version
         }
         const page = await d.backend!.download(version, (p) => {

@@ -85,8 +85,8 @@ function noteDate(d: unknown): string | null {
   return day.getUTCFullYear() === Number(m[1]) && day.getUTCMonth() === Number(m[2]) - 1 && day.getUTCDate() === Number(m[3]) ? d as string : null
 }
 
-/** The `notes` of latest.json (or of settings saved earlier): only well-formed entries, newest first, at most
- * five. Anything else is dropped, never thrown. */
+/** The `notes` of latest.json (or of settings saved earlier): only well-formed entries, one per version, newest
+ * version first, at most five. Anything else is dropped, never thrown. */
 export function releaseNotes(notes: unknown): ReleaseNote[] {
   if (!Array.isArray(notes)) return []
   const out: ReleaseNote[] = []
@@ -97,9 +97,9 @@ export function releaseNotes(notes: unknown): ReleaseNote[] {
     if (typeof version !== 'string' || !SITE_VERSION_RE.test(version) || !day || typeof text !== 'string' || text.length > MAX_NOTE_LENGTH) continue
     if (out.some((o) => o.version === version)) continue
     out.push({ version, date: day, text: text.trim() })
-    if (out.length === MAX_NOTES) break
   }
-  return out
+  const triple = (v: string) => v.split('.').map(Number) as Triple
+  return out.sort((a, b) => cmp(triple(b.version), triple(a.version))).slice(0, MAX_NOTES)
 }
 
 // ---- the request ---------------------------------------------------------------------------------

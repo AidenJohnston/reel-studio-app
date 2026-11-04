@@ -171,6 +171,9 @@ describe("latest.json's release notes (What's new)", () => {
       note('0.1.3'), note('0.1.2'), note('0.1.1'), note('0.1.0'), note('0.0.9')
     ]
     expect(releaseNotes(notes).map((n) => n.version)).toEqual(['0.1.9', '0.1.3', '0.1.2', '0.1.1', '0.1.0'])
+    // Out of order (an older settings file, or a server that appended): still newest first, the oldest dropped.
+    expect(releaseNotes([note('0.1.10'), note('0.0.9'), note('0.2.0'), note('0.1.2'), note('0.1.9'), note('0.1.11')]).map((n) => n.version))
+      .toEqual(['0.2.0', '0.1.11', '0.1.10', '0.1.9', '0.1.2'])
     for (const bad of [null, 'notes', { 0: note('0.1.3') }]) expect(releaseNotes(bad)).toEqual([])
     const w = site(async () => reply(200, latestJson('0.1.0', { notes: [note('0.1.0')] })))
     expect(await newerOnSite(w.fetch, '0.1.0')).toEqual({ update: null, notes: [{ version: '0.1.0', date: '2026-11-04', text: '- What 0.1.0 changed' }] })

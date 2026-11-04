@@ -491,6 +491,15 @@ describe("What's new", () => {
     await b.u.check('button')
     expect(b.u.state().notes.map((n) => [n.version, n.newer])).toEqual([['0.1.3', true], ['0.1.2', false]])
 
+    // Downloading a release remembered from an earlier run asks latest.json again; its notes replace the saved ones.
+    const c = setup(async () => v013, { memory: { updateLatest: { version: '0.1.3', url: PAGE }, updateNotes: [note('0.1.2')] }, notes: () => [note('0.1.3'), note('0.1.2')] })
+    await c.u.init()
+    expect(c.u.state().notes.map((n) => n.version)).toEqual(['0.1.2'])
+    await c.u.download()
+    expect(c.u.state()).toMatchObject({ status: 'downloaded', downloadedVersion: '0.1.3' })
+    expect(c.u.state().notes.map((n) => n.version)).toEqual(['0.1.3', '0.1.2'])
+    expect(c.memory().updateNotes.map((n) => n.version)).toEqual(['0.1.3', '0.1.2'])
+
     const off = setup(async () => null, { memory: a.memory(), disabledReason: 'Updates are off in test runs.' })
     await off.u.init()
     expect(off.u.state().notes).toEqual([])

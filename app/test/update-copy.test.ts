@@ -35,7 +35,15 @@ it("fails if a release note's bullets show as one paragraph, keep their markdown
     { kind: 'p', text: 'Thanks for the reports.' },
     { kind: 'list', items: ['One more'] }
   ])
-  // A calendar day, whatever the time zone: midnight UTC would show the day before in the Americas.
-  expect(noteDay('2026-11-04')).toBe(new Date(2026, 10, 4).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+  // A calendar day, whatever the time zone: read as midnight UTC it would show November 3 west of UTC.
+  const tz = process.env.TZ
+  process.env.TZ = 'America/Chicago'
+  try {
+    expect(noteDay('2026-11-04')).toBe(new Date(2026, 10, 4).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+    expect(noteDay('2026-11-04')).not.toBe(new Date(2026, 10, 3).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+  } finally {
+    if (tz === undefined) delete process.env.TZ
+    else process.env.TZ = tz
+  }
   expect(noteDay('soon')).toBeNull()
 })
