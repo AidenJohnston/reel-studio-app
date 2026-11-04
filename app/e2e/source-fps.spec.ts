@@ -19,6 +19,7 @@ test('fails if the faster exports setting is not saved or applied to new project
     await toggle.focus()
     await running.page.keyboard.press('Space')
     await expect(toggle).toBeChecked()
+    await expect(toggle).toBeEnabled() // saved
     await running.app.close()
     running = await launch(env)
     await openSettings(running.page)
@@ -30,6 +31,7 @@ test('fails if the faster exports setting is not saved or applied to new project
     expect(JSON.parse(readFileSync(file, 'utf8')).format.fps).toBe(30)
     await running.page.getByTestId('faster-exports').uncheck()
     await expect(running.page.getByTestId('faster-exports')).not.toBeChecked()
+    await expect(running.page.getByTestId('faster-exports')).toBeEnabled() // saved before the next video starts
     const next = await running.page.evaluate((file) => window.reel.projects.create([file]), video)
     const nextFile = join(root(), 'Projects', next.slug, 'project.json')
     await expect.poll(() => existsSync(nextFile)).toBe(true)
