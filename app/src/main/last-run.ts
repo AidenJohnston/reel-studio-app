@@ -2,7 +2,7 @@
 // because an engine list that can't be read sends the app looking for engines in the videos under
 // the root this run uses.
 import { basename } from 'node:path'
-import type { createPidRegistry } from './orphans'
+import { projectFolders, type createPidRegistry } from './orphans'
 import { setRootOverride } from './paths'
 import { loadSettings, type Settings } from './settings'
 import { ensureRoot, recoverInterrupted } from './store'
@@ -16,7 +16,11 @@ export async function settleLastRun(
   const settings = await loadSettings()
   if (settings.root) setRootOverride(settings.root)
   await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const { stopped, stillRunning, unknown } = await registry.reap()
+  const { stopped, stillRunning, unknown } = await registry.reap().catch((e) => {
+    // nothing then says which videos are safe: none opens at this start, as when processes can't be listed
+    log(`[start] could not settle the engines the last run left, so every video stays closed: ${String(e)}`)
+    return { stopped: 0, stillRunning: projectFolders(), unknown: false }
+  })
   if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
   if (unknown) log('[start] the engine list from the last run could not be read, or names an engine with no video; looked for engines and ffmpeg still working in a video')
   // something there would not stop, or is still running, and may still be writing: the project stays closed

@@ -84,28 +84,37 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       let stopped = 0
       const stillRunning: string[] = []
       for (const { pid, project } of old) {
-        if (!(typeof pid === 'number' && pid > 0 && (await leftRunning(pid)))) continue
-        if (await stop(pid)) {
+        if (!(typeof pid === 'number' && pid > 0)) continue
+        const left = await leftRunning(pid)
+        if (left === 'gone') continue
+        if (left === 'ours' && (await stop(pid))) {
           stopped++
           continue
         }
         engines.set(pid, project)
-        // a 0.1.x list names no video: which one it writes to is as unknown as with an unreadable list
-        if (project) stillRunning.push(project)
+        // a 0.1.x list names no video, and a group that may not be ours is never stopped: which video
+        // either writes to is as unknown as with an unreadable list
+        if (project && left === 'ours') stillRunning.push(project)
         else unknown = true
       }
       save()
       if (!unknown) return { stopped, stillRunning, unknown }
       const folders = projectFolders()
       const working = await stillWorking(folders)
-      if (working && !working.length) rmSync(unreadable, { force: true })
+      if (working && !working.length) {
+        try {
+          rmSync(unreadable, { force: true })
+        } catch {
+          // on Windows another program (a scanner, an indexer) may have it open: the next start looks once more
+        }
+      }
       // with no process list nothing says which videos are safe: none opens at this start
       return { stopped, stillRunning: [...new Set([...stillRunning, ...(working ?? folders)])], unknown }
     }
   }
 }
 
-function projectFolders(): string[] {
+export function projectFolders(): string[] {
   try {
     return readdirSync(projectsDir(), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(projectsDir(), e.name))
   } catch {
@@ -149,8 +158,9 @@ function namesFolder(cmdline: string, dir: string): boolean {
   return false
 }
 
-/** Every running process with its full command line, or null when the list cannot be read. */
-function processList(): Promise<{ pid: number; cmdline: string }[] | null> {
+/** Every running process with its full command line (`key` is its pid, or on macOS/Linux its process
+ * group with `key: 'pgid'`), or null when the list cannot be read. */
+function processList(key: 'pid' | 'pgid' = 'pid'): Promise<{ pid: number; cmdline: string }[] | null> {
   return new Promise((resolve) => {
     const parse = (err: Error | null, out: string): void =>
       resolve(err ? null : out.split(/\r?\n/).flatMap((line) => {
@@ -165,17 +175,23 @@ function processList(): Promise<{ pid: number; cmdline: string }[] | null> {
       // Without a UTF-8 locale (an app opened from the Finder has none) macOS ps escapes every
       // non-ASCII byte, and "Zoë" would never match the folder it names.
       const env = { ...process.env, LC_ALL: process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8' }
-      execFile('ps', ['-A', '-ww', '-o', 'pid=,args='], { env, timeout: 30000, maxBuffer: big }, parse)
+      execFile('ps', ['-A', '-ww', '-o', `${key}=,args=`], { env, timeout: 30000, maxBuffer: big }, parse)
     }
   })
 }
 
-/** Something of ours still runs from this pid: the engine itself (after a crash the pid may belong to
- * someone else's python, pid reuse is routine on Windows, so only a command line that is really our
- * engine counts), or on macOS/Linux what is left in the process group of an engine that died. */
-async function leftRunning(pid: number): Promise<boolean> {
-  if (isAlive(pid)) return isOurEngine(await processCommandLine(pid))
-  return process.platform !== 'win32' && groupAlive(pid)
+/** What a previous run's engine left running from this pid. 'ours': the engine itself (after a crash
+ * the pid may belong to someone else's python, pid reuse is routine on Windows, so only a command line
+ * that is really our engine counts), or on macOS/Linux the process group of an engine that died, while
+ * everything in it is an engine or ffmpeg. 'unsure': that group holds anything else. The list survives
+ * a reboot, after which the number can lead any daemon's group, so such a group is never signalled. */
+async function leftRunning(pid: number): Promise<'ours' | 'unsure' | 'gone'> {
+  if (isAlive(pid)) return isOurEngine(await processCommandLine(pid)) ? 'ours' : 'gone'
+  if (process.platform === 'win32' || !groupAlive(pid)) return 'gone'
+  const members = (await processList('pgid'))?.filter((p) => p.pid === pid)
+  if (!members) return 'unsure'
+  if (!members.length) return 'gone'
+  return members.every((p) => isOurEngine(p.cmdline) || FFMPEG.test(p.cmdline)) ? 'ours' : 'unsure'
 }
 
 /** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */

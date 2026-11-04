@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { settleLastRun } from '../src/main/last-run'
 import { createPidRegistry } from '../src/main/orphans'
-import { settingsDir } from '../src/main/paths'
+import { projectsDir, settingsDir } from '../src/main/paths'
 import { killTree } from '../src/main/proctree'
 import { saveSettings } from '../src/main/settings'
 import { APP_DIR, PYTHON, setupPaths } from './helpers'
@@ -29,4 +29,14 @@ describe('the start after a crash', () => {
       await killTree(engine.pid!)
     }
   }, 60000)
+
+  it('when the engines the last run left cannot be settled, it still starts, with every video closed', async () => {
+    setupPaths()
+    for (const slug of ['bread', 'cake']) mkdirSync(join(projectsDir(), slug, 'work'), { recursive: true })
+    const registry = createPidRegistry(settingsDir())
+    registry.reap = () => Promise.reject(Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' }))
+    const closed: string[] = []
+    await settleLastRun(registry, (slug) => closed.push(slug), () => undefined)
+    expect(closed.sort()).toEqual(['bread', 'cake'])
+  })
 })

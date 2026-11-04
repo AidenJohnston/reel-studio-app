@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
@@ -191,6 +191,71 @@ describe('orphaned engine reaper', () => {
     expect(unknown).toBe(true)
     expect(stillRunning).toEqual([open])
     await killTree(left.pid!)
+  }, 60000)
+
+  // The list outlives a reboot, and a recorded number can then lead some daemon's group whose leader exited
+  // (a double fork). Only a group that holds nothing but our engine and ffmpeg is ours to stop.
+  it.skipIf(process.platform === 'win32')('a dead engine\'s group is stopped only while it holds just our engine, never someone else\'s group with that number', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const sleeper = join(APP_DIR, 'test', 'fixtures', 'sleeper')
+    const [bread, cake] = ['bread', 'cake'].map((slug) => join(projectsDir(), slug))
+    for (const p of [bread, cake]) mkdirSync(join(p, 'work'), { recursive: true })
+    // a group leader that starts one process and exits, leaving the group with no leader
+    const orphanGroup = async (cmd: string): Promise<{ leader: number; member: number }> => {
+      const sh = spawn('sh', ['-c', `${cmd} >/dev/null 2>&1 & echo $!`], { cwd: sleeper, stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+      let out = ''
+      sh.stdout.on('data', (d) => (out += d))
+      await once(sh, 'exit')
+      return { leader: sh.pid!, member: Number(out.trim()) }
+    }
+    const theirs = await orphanGroup('sleep 60')
+    const ours = await orphanGroup(`'${PYTHON}' -s -E -m reelengine sleep --project '${cake}'`)
+    try {
+      await new Promise((r) => setTimeout(r, 300))
+      const last = createPidRegistry(settings)
+      last.add(theirs.leader, bread)
+      last.add(ours.leader, cake)
+      const { stopped, stillRunning } = await createPidRegistry(settings).reap()
+      expect(stopped).toBe(1)
+      expect(isAlive(ours.member)).toBe(false)
+      expect(isAlive(theirs.member)).toBe(true)
+      // nothing of ours works in bread, so it opens; the entry stays for the next start to look at again
+      expect(stillRunning).toEqual([])
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: theirs.leader, project: bread }])
+    } finally {
+      for (const pid of [theirs.member, ours.member]) if (isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
+  }, 60000)
+
+  it('a start goes on when the list set aside last time cannot be deleted (on Windows another program may hold it)', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const unreadable = join(settings, 'engines.unreadable.json')
+    writeFileSync(unreadable, '[{"pid":4242,"proj')
+    let release: () => Promise<void>
+    if (process.platform === 'win32') {
+      // open without sharing delete, as a virus scanner or an indexer may
+      const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+        `$f = [IO.File]::Open('${unreadable.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'held'; [Console]::In.ReadLine(); $f.Close()`], { stdio: ['pipe', 'pipe', 'inherit'] })
+      await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve()))
+      release = async () => {
+        holder.stdin.end('\n')
+        await once(holder, 'exit')
+      }
+    } else {
+      chmodSync(settings, 0o555)
+      release = async () => chmodSync(settings, 0o755)
+    }
+    try {
+      const { stillRunning, unknown } = await createPidRegistry(settings).reap()
+      expect(unknown).toBe(true)
+      expect(stillRunning).toEqual([])
+    } finally {
+      await release()
+    }
+    // still there, so the next start looks once more
+    expect(existsSync(unreadable)).toBe(true)
   }, 60000)
 
   it('recognises only our engine command line', () => {

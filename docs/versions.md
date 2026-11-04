@@ -62,7 +62,9 @@ An engine call settles only after the engine and everything it started have exit
 Linux the engine runs as its own process group and the host stops what is left of the group after
 any exit; if something survives SIGKILL the call fails with `ENGINE_STUCK` and the app keeps that
 project closed until it restarts. On Windows the engine puts itself in a Job Object that ends its
-children when it exits (`engine/reelengine/contain.py`).
+children when it exits (`engine/reelengine/contain.py`). If Windows refuses the Job Object, the engine
+logs it and runs anyway; Stop still ends its whole tree, but an engine crash can then leave its ffmpeg
+running.
 
 A closed project refuses everything that would write to it: jobs, manual edits, attachments, notes
 and deleting the video. Each refusal asks the creator to restart Reel Studio first
