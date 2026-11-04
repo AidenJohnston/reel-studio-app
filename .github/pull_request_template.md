@@ -8,6 +8,7 @@
 
 <!-- List checks actually run and results. Note failures, skips, and untested platforms. -->
 <!-- For visible changes, include matched running-app captures; add video for motion. -->
+<!-- Say which items of "Check every surface" in AGENTS.md applied. -->
 
 ## Compatibility
 
@@ -15,3 +16,5 @@
 New dependencies shipped in the installer must be listed in THIRD_PARTY.md. -->
 
 Changelog: <!-- One user-facing sentence, or None with a reason. -->
+
+Agent: <!-- If an agent did any of the work, the model and harness, for example "Claude Opus 5.5 in Claude Code". Otherwise None. -->

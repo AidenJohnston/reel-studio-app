@@ -45,6 +45,8 @@ put them under a `testdata/` folder (it is git-ignored) or point `REELENGINE_TES
 PRs are squash-merged. The PR title becomes the single commit on main, so use Conventional Commits: `type(scope): subject`.
 
 * Keep a change focused, add a test for a bug you fix, and use the PR template to explain the change and verification.
+* Before you open one, go through "Check every surface" in [AGENTS.md](AGENTS.md). It's written for coding agents
+  and applies to people too.
 * Put a `Changelog:` line in the PR description. At the next release, create `CHANGELOG.md` from the PRs' `Changelog:` lines.
   Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
