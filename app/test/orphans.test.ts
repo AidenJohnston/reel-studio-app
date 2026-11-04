@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { createPidRegistry, isOurEngine, processCommandLine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
@@ -214,24 +214,35 @@ describe('orphaned engine reaper', () => {
     writeFileSync(join(pkg, '__main__.py'), 'import time\ntime.sleep(60)\n')
     // a group leader that starts these and exits, leaving the group with no leader
     const groups: number[] = []
-    const orphanGroup = async (cmds: { run: string; shows: string }[]): Promise<number[]> => {
+    const orphanGroup = async (cmds: { run: string; program: string; shows: string }[]): Promise<number[]> => {
       const sh = spawn('sh', ['-c', cmds.map((c) => `${c.run} >/dev/null 2>&1 & echo $!`).join('; ')], { cwd: join(settings, 'engine'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
       groups.push(sh.pid!)
       let out = ''
       sh.stdout.on('data', (d) => (out += d))
       await once(sh, 'exit')
       const members = out.trim().split(/\s+/).map(Number)
-      // each runs its own program by now, not a copy of sh forked to start it
+      // each runs its own program by now, not the copy of sh forked to start it (whose command line
+      // already holds the same words)
       for (const [k, pid] of members.entries()) {
-        for (let i = 0; i < 100 && !(await processCommandLine(pid))?.includes(cmds[k].shows); i++) await new Promise((r) => setTimeout(r, 50))
+        const ready = async (): Promise<boolean> =>
+          basename((await processName(pid)) ?? '').toLowerCase().startsWith(cmds[k].program) && !!(await processCommandLine(pid))?.includes(cmds[k].shows)
+        let ok = await ready()
+        for (let i = 0; i < 100 && !ok; i++) {
+          await new Promise((r) => setTimeout(r, 50))
+          ok = await ready()
+        }
+        if (!ok) throw new Error(`${cmds[k].run} never started`)
       }
       return members
     }
     // someone else's: a worker whose arguments happen to name ffmpeg
-    const theirs = await orphanGroup([{ run: `'${PYTHON}' -c 'import time; time.sleep(60)' --encoder ffmpeg`, shows: 'time.sleep' }])
+    const theirs = await orphanGroup([
+      { run: `'${PYTHON}' -c 'import time; time.sleep(60)' --encoder ffmpeg`, program: 'python', shows: 'time.sleep' },
+      { run: `'${PYTHON}' -c 'import time; time.sleep(60)' -m reelengine render`, program: 'python', shows: 'time.sleep' }
+    ])
     const ours = await orphanGroup([
-      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, shows: 'reelengine' },
-      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', shows: 'anullsrc' }
+      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, program: 'python', shows: 'reelengine' },
+      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', program: 'ffmpeg', shows: 'anullsrc' }
     ])
     try {
       const last = createPidRegistry(settings)
@@ -290,6 +301,9 @@ describe('orphaned engine reaper', () => {
     expect(isOurEngine('/r/python/bin/python3 -s -E -m reelengine transcribe')).toBe(true)
     expect(isOurEngine('python -m jupyter notebook')).toBe(false)
     expect(isOurEngine('python -c "import reelengine"')).toBe(false)
+    // a script that is handed those words as arguments is not our engine
+    expect(isOurEngine('python3 /srv/worker.py -m reelengine render')).toBe(false)
+    expect(isOurEngine('/Applications/Reel Studio.app/Contents/Resources/python/bin/python3 -s -E -B -X utf8 -u -m reelengine render')).toBe(true)
     expect(isOurEngine(null)).toBe(false)
   })
 })
