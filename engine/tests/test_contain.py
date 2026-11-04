@@ -1,15 +1,17 @@
 """The Windows Job Object setup (contain.py), against a stand-in kernel32: these are the calls and
 their failure handling. That Windows then ends ffmpeg with the engine needs a Windows machine."""
 import ctypes
-import io
 import json
+import subprocess
 import sys
 import wave
+from pathlib import Path
 
 import pytest
 
-from reelengine import cli, contain, proto
 from reelengine.contain import KILL_ON_JOB_CLOSE, contain_children
+
+ENGINE = Path(__file__).resolve().parents[1]
 
 
 class Kernel32:
@@ -58,33 +60,39 @@ def test_an_engine_windows_will_not_contain_logs_why_and_runs_anyway(monkeypatch
     assert "no Job Object (Windows error 5)" in capsys.readouterr().err
 
 
+# Runs the engine the way the app does (python -m reelengine), in its own process, with only joining
+# the job refused: a real Job Object is made and set up first.
+REFUSING_JOIN = r"""
+import ctypes, runpy, sys
+from reelengine import contain
+real = ctypes.WinDLL("kernel32", use_last_error=True)
+
+class Refusing:
+    def __getattr__(self, name):
+        return getattr(real, name)
+
+    @staticmethod
+    def AssignProcessToJobObject(job, process):
+        ctypes.set_last_error(5)
+        return 0
+
+contain_children = contain.contain_children
+contain.contain_children = lambda: contain_children(Refusing())
+sys.argv = ["reelengine", *sys.argv[1:]]
+runpy.run_module("reelengine", run_name="__main__", alter_sys=True)
+"""
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="the real kernel32 calls and the engine's own start-up")
-def test_on_windows_a_command_finishes_when_the_engine_cannot_join_its_job(monkeypatch, capsys, tmp_path):
-    """A real Job Object is made and set up; only joining it is refused, as Windows may refuse it."""
-    real = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    class Refusing:
-        def __getattr__(self, name):
-            return getattr(real, name)
-
-        @staticmethod
-        def AssignProcessToJobObject(job, process):
-            ctypes.set_last_error(5)
-            return 0
-
-    monkeypatch.setattr(contain, "contain_children", lambda: contain_children(Refusing()))
+def test_on_windows_a_command_finishes_when_the_engine_cannot_join_its_job(tmp_path):
     song = tmp_path / "tone.wav"
     with wave.open(str(song), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(8000)
         w.writeframes(b"\0\0" * 8000)
-    out = io.StringIO()
-    proto.set_stream(out)
-    try:
-        code = cli.main(["probe", str(song)])
-    finally:
-        proto.set_stream(None)
-    assert code == 0, out.getvalue()
-    assert json.loads(out.getvalue().splitlines()[-1])["event"] == "done"
-    assert "no Job Object (Windows error 5)" in capsys.readouterr().err
+    proc = subprocess.run([sys.executable, "-c", REFUSING_JOIN, "probe", str(song)], cwd=ENGINE,
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout.splitlines()[-1])["event"] == "done"
+    assert "no Job Object (Windows error 5)" in proc.stderr

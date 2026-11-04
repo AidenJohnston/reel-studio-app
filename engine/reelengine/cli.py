@@ -423,9 +423,6 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
-        if sys.platform == "win32":
-            from .contain import contain_children
-            contain_children()
         if args.project and args.command not in NOT_PROJECT_WRITES:
             from . import owner
             owner.check(Path(args.project), args.owner)
