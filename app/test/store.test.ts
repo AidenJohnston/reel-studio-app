@@ -191,6 +191,15 @@ describe('project store', () => {
     expect((await detail('kappa')).captionLines).toEqual([[{ w: 'now', ids: ['w0'], run: 0 }]])
   })
 
+  it('before there is a version, the Subtitles list shows the preview\'s lines', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('lambda', {})
+    mkdirSync(join(dir, 'versions', 'preview'), { recursive: true })
+    writeFileSync(join(dir, 'versions', 'preview', 'captions.json'), JSON.stringify({ cues: [{ run: 0, tokens: [{ w: 'first', ids: ['w0'] }] }] }))
+    expect((await detail('lambda')).captionLines).toEqual([[{ w: 'first', ids: ['w0'], run: 0 }]])
+  })
+
   // Stop pressed while "Checking your video", or a failed cover: the export is in v2 but project.json
   // still says 1, and the next final render deletes v2 to make a different video under that number.
   it('a final render that stopped before it was saved is not shown as a version', async () => {
