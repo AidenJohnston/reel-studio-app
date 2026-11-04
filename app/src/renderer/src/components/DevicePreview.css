@@ -42,7 +42,9 @@
    Its position is a fraction of the whole reel, so on a phone that trims the reel's top and bottom it uses the
    video rectangle, not the viewer. */
 .device-frame:not([data-device="any"]) .phone-screen { --sub-top: var(--dev-video-top); --sub-h: var(--dev-video-h); }
-.device-frame:not([data-device="any"]) .phone-screen > .sub-sample { scale: var(--dev-reel-scale); }
+/* Scale after the centring translate, in one transform: the separate `scale` property applies on top of
+   `transform`, so it also scaled the -50% offsets and pulled a wide line left of centre. */
+.device-frame:not([data-device="any"]) .phone-screen > .sub-sample { transform: translate(-50%, -50%) scale(var(--dev-reel-scale)); }
 /* Instagram view draws this phone's real layout instead of the plain phone's stand-in buttons. */
 .device-frame:not([data-device="any"]) .ig { display: none; }
 /* A narrow phone at the smallest window has about 155px of screen. The range input's default minimum width
