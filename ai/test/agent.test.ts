@@ -156,6 +156,23 @@ describe('agent loop with a scripted model', () => {
     expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
   });
 
+  it('part of a note\'s final render would not stop: the note ends with that error and saves nothing, not even its preview as the version', async () => {
+    const { dir, host, settingsDir } = await setup();
+    host.afterRenderFiles = ({ draft }) => {
+      if (!draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    const notesBefore = JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).notes;
+    const m = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.4 }), call('render_draft')] },
+      { toolCalls: [call('finish', { summary_for_user: 'I gave the pauses more room.' })] },
+    ]);
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    expect(JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).notes).toEqual(notesBefore);
+    const versions = await fsp.readdir(path.join(dir, 'versions')).catch(() => [] as string[]);
+    const written = await Promise.all(versions.map((v) => fsp.access(path.join(dir, 'versions', v, 'notes.md')).then(() => v, () => null)));
+    expect(written.filter(Boolean)).toEqual([]);
+  });
+
   it('cancel stops the loop', async () => {
     const { dir, host, settingsDir } = await setup();
     const ac = new AbortController();
