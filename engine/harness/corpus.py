@@ -151,16 +151,25 @@ def make_source(ffmpeg: str, spec: dict, wav: Path, out: Path) -> dict:
              if spec.get("transfer") == "hlg" else
              ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    stage = out.with_name(out.stem + ".stage.mp4") if spec.get("rotation") else out
+    remux = []
+    if spec["codec"] == "hevc":
+        # Hardware HEVC encoders may leave the color fields out of the bitstream, and the engine's
+        # probe decides HDR from them (probe.py HDR_TRANSFERS). Write them into the SPS so the HLG
+        # stand-in really reads as HLG: primaries/transfer/matrix as H.273 codes.
+        p_, t_, m_ = (9, 18, 9) if spec.get("transfer") == "hlg" else (1, 1, 1)
+        remux += ["-bsf:v", f"hevc_metadata=colour_primaries={p_}:transfer_characteristics={t_}:"
+                            f"matrix_coefficients={m_}:video_full_range_flag=0"]
+    stage = out.with_name(out.stem + ".stage.mp4") if (remux or spec.get("rotation")) else out
     _run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", graph, "-i", wav,
           *(["-vf", ",".join(vf)] if vf else []), *(["-fps_mode", "vfr"] if spec.get("vfr") else []),
           *vargs, *color, "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", str(RATE),
           "-t", str(secs), "-movflags", "+faststart", stage])
-    if spec.get("rotation"):
-        _run([ffmpeg, "-y", "-v", "error", "-display_rotation:v:0", str(spec["rotation"]), "-i", stage,
-              "-map", "0", "-c", "copy", "-movflags", "+faststart", out])
+    if stage != out:
+        rot = ["-display_rotation:v:0", str(spec["rotation"])] if spec.get("rotation") else []
+        _run([ffmpeg, "-y", "-v", "error", *rot, "-i", stage, "-map", "0", "-c", "copy", *remux,
+              *color, "-movflags", "+faststart", out])
         stage.unlink()
-    return {"encoder": enc, "args": vargs + color}
+    return {"encoder": enc, "args": vargs + color + remux}
 
 
 # --- project and session ------------------------------------------------------------------------
