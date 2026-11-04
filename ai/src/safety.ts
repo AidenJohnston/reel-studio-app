@@ -158,7 +158,7 @@ export function pinnedFetch(resolve: (host: string) => Promise<string[]>): Fetch
       const headers = new Headers();
       for (let i = 0; i < res.rawHeaders.length; i += 2) headers.append(res.rawHeaders[i], res.rawHeaders[i + 1]);
       const status = res.statusCode!;
-      if (status > 599) { res.destroy(); fail(new BlockedUrlError(`download failed with HTTP ${status}`, 'NETWORK')); return; }   // Response refuses it; LinkedIn sends 999
+      if (status < 200 || status > 599) { res.destroy(); fail(new BlockedUrlError(`download failed with HTTP ${status}`, 'NETWORK')); return; }   // Response only accepts 200–599; LinkedIn sends 999
       const noBody = status === 204 || status === 205 || status === 304;
       if (noBody) res.resume();
       ok(new Response(noBody ? null : (Readable.toWeb(res) as ReadableStream), { status, headers }));
