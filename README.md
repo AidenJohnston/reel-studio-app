@@ -46,26 +46,55 @@ this project. Credits: [docs/images/CREDITS.md](docs/images/CREDITS.md).
 
 ## Where it's going
 
-Today Reel Studio makes one finished reel from one raw video. We're building it into a full studio for making
-short-form content, growing an audience with it and posting it everywhere. Several agents work on your computer at
-once, and you never manage them. You see versions of your video and steer them with notes.
+Reel Studio is going to be an all-in-one content creation platform that helps you create and grow your audience, at
+scale. Turn a raw talking-head video into polished short-form content, with agents working on your machine and a
+desktop app where you control what they do, then share it across your socials. It works with your Claude Code and
+Codex subscriptions.
 
-- **Your content stays yours.** Everything runs on your computer, and every part of Reel Studio is open source under
-  the AGPL, so you, or your company's security team, can read exactly what happens to your videos. Anyone who ships a
-  changed copy, or runs one as a service, has to publish their changes under the same license.
-- **It learns from every note.** A fix you make once becomes a rule that every later edit is checked against, so you
-  shouldn't have to give the same note twice.
-- **It tests versions for you.** Testing short-form by hand means posting every version. Reel Studio will cut several
-  versions of one video, with a different hook, first line or pace, and rank them before you post.
-- **You see every change right away.** We're building our own renderer: an FFmpeg for exactly the edits Reel Studio
-  makes, and faster than FFmpeg at them because it does nothing else. A ranking model we train picks the frames that
-  matter most, and those render first, so you watch the agents work instead of waiting for a full render.
+It's going to be T3 Code, but with all the agentic surfaces hidden behind the actual user experience. Several agents
+work on one video at once. You never manage them. You see the video, what changed, and the versions to pick from,
+and you can stop or undo anything.
 
-We're also studying why people keep watching a short, which says more than whether they clicked on it. From a large
-set of public short-form videos, their transcripts and how each one did, we're distilling a method a model can apply
-to any script: why one hook holds people and another loses them. Reel Studio will use it to review your drafts the way
-different viewers would, and we'll measure those reviews against how videos actually performed rather than having one
-model argue with another.
+Why Reel Studio:
+
+1. **OSS, trust and control over your content.** Everything runs on your computer, and the code is AGPL, so you, or
+   a company's security team, can read exactly what happens to your videos and build it yourself. A company can check
+   that for itself instead of taking a vendor's word for it.
+2. **Truly continual learning.** We're building a system that never makes the same mistake. When you correct
+   something, it becomes a rule. A rule the engine can check, like caption size, how loud the music sits under your
+   voice, or nothing covering your eyes, is checked on every render, and the agent can't hand you a video that
+   breaks it. A rule about taste can't be checked, so for those we measure how often it's followed instead of
+   promising.
+3. **Parallel and autonomous A/B testing,** because testing short form means getting real content out, and that's
+   hard. Agents make several versions of one video in parallel, with a different hook, first line or pace. You pick
+   one, or approve them all and post them as Instagram trial reels, which go to people who don't follow you first,
+   and see how each did. One post against another is noisy, so it tells you when the result isn't clear yet.
+4. **Unparalleled rendering speed, and a QC UI and experience where you see your changes immediately.** We're going
+   to push the performance of this app to a ridiculous point. For our use case that means a system that is FFmpeg,
+   but faster:
+   - your 4K footage is decoded once, into a lighter copy made in the background when you import it, instead of on
+     every edit;
+   - the engine knows exactly which frames an edit changed, from the project file, so it renders those first and you
+     see stills of the agents at work within a second, then the moments around them, then the whole draft;
+   - anything an edit didn't touch is reused, not rendered again.
+
+   Agents build most of it. Every change is checked frame by frame against today's renderer, on footage we shot on
+   our own phones, so faster never means different.
+
+### Why shorts work
+
+We want to study the cognitive mechanisms of human attention for short form: not click-through rate, but whether
+people keep watching, and why. Then distill it into a methodology models can use to analyze why something would work,
+and apply the same approach to your drafts, in the form of subjective reviewers.
+
+Reel Studio knows every edit decision in a video, down to the word. If you opt in, we line that up with how the
+video actually did: YouTube's retention curve, and Instagram's average watch time and how many people skip in the
+first three seconds. Human panels compare two hooks side by side. Nothing leaves your computer unless you turn this
+on.
+
+We don't think adversarial review, one model arguing with another, is the way to go. A reviewer only counts for what
+it can predict on videos it hasn't seen, against a simple baseline we set in advance, the same way we check the
+renderer.
 
 ## Download and install
 
