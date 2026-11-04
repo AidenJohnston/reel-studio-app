@@ -550,13 +550,14 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         cur = f"o{li}"
         k += 1
     if ass_name:
-        # The caption track is timed on the full video's clock. A window that starts t_shift seconds in
-        # reads it at that clock (microsecond timestamps, so an off-grid start stays exact), then
-        # returns to its own frame timestamps.
+        # The caption track is timed on the full video's clock. Each segment is trimmed to the nearest
+        # frame, so a window's frame k is the full render's frame round(t_shift * fps) + k: the track is
+        # read at that frame's timestamp (the stream is on the 1/fps base the `fps` filter set), which
+        # gives libass the same millisecond the full render gives it, then the frame gets its own back.
         to_full = from_full = ""
         if t_shift > 0:
-            to_full = f"settb=AVTB,setpts=PTS+round({_f(t_shift)}/TB),"
-            from_full = f",setpts=PTS-round({_f(t_shift)}/TB),settb=1/{fps}"
+            k0 = round(t_shift * fps)
+            to_full, from_full = f"setpts=PTS+{k0},", f",setpts=PTS-{k0}"
         chains.append(f"[{cur}]{to_full}subtitles=filename={ass_name}:fontsdir=fonts{from_full}[capd]")
         cur = "capd"
     chains.append(f"[{cur}]format=yuv420p[vout]")
