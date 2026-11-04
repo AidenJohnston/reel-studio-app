@@ -193,7 +193,15 @@ export function UpdateButton() {
               <div className={`update-pop-sub${s.status === 'error' ? ' failed' : ''}`}>{updateSubline(s)}</div>
             </div>
             {kind === 'failed' && (
-              <button className="update-pop-quiet" tabIndex={tab} onClick={() => !busy && void act(s)} data-testid="update-retry">
+              <button
+                className="update-pop-quiet"
+                tabIndex={tab}
+                onClick={() => {
+                  btn.current?.focus() // Retry disappears once the download starts; the pill stays
+                  if (!busy) void act(s)
+                }}
+                data-testid="update-retry"
+              >
                 Retry
               </button>
             )}

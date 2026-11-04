@@ -113,7 +113,7 @@ a { color: inherit; }
 @media (hover: hover) and (pointer: fine) {
   .update-pill:not([aria-disabled]):hover { background: var(--control-hover); }
 }
-.update-pill:active { transform: scale(.98); }
+.update-pill:active:not(:focus-visible) { transform: scale(.98); } /* pointer presses only: keyboard actions never animate */
 .update-pill:focus-visible { outline-offset: -2px; border-radius: 999px; }
 .update-pill[aria-disabled] { cursor: default; }
 .update-pill[aria-disabled]:active { transform: none; }
@@ -595,7 +595,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
   .progress > div::after, .phone-scan { display: none; }
-  .update-pop, .update-strip, .update-pill:active { transform: none; }
+  .update-pop, .update-strip, .update-pill:active:not(:focus-visible) { transform: none; }
 }
 
 /* Connect Claude / Connect ChatGPT (components/vendor-connect.tsx) */
