@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -48,10 +49,10 @@ def test_fails_if_vfr_source_is_not_normalized(tmp_path, source):
     init.run(directory, "Variable phone reel", [vfr])
     saved = project.load(directory)
     video = directory / saved["sources"][0]["path"]
-    frames = subprocess.run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0",
-                             "-show_entries", "frame=best_effort_timestamp_time", "-of", "csv=p=0",
-                             str(video)], capture_output=True, text=True, check=True).stdout
-    times = [float(line.strip().strip(",")) for line in frames.splitlines() if line.strip().strip(",")]
+    frames = json.loads(subprocess.run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0",
+                                        "-show_entries", "frame=best_effort_timestamp_time", "-of", "json",
+                                        str(video)], capture_output=True, text=True, check=True).stdout)["frames"]
+    times = [float(f["best_effort_timestamp_time"]) for f in frames]
     assert all(abs(b - a - 1 / 30) < 0.00001 for a, b in zip(times, times[1:]))
     assert saved["format"]["fps"] == 30
     assert probe.probe(video, quick=True)["fps"] == 30
@@ -110,14 +111,17 @@ def test_a_steady_mkv_without_a_frame_count_keeps_its_rate_and_is_copied(tmp_pat
 
 def test_a_variable_rate_clip_with_odd_sides_is_prepared(tmp_path):
     odd = tmp_path / "odd.mp4"
-    subprocess.run([tools.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=171x303:rate=60:duration=2",
+    # testsrc draws RGB, so the sides stay odd (testsrc2's 4:2:0 would round them to even first)
+    subprocess.run([tools.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", "testsrc=size=171x303:rate=60:duration=2",
                     "-f", "lavfi", "-i", "sine=duration=2", "-vf", "select='if(lt(t,1),1,not(mod(n,2)))'",
                     "-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv444p",
                     "-c:a", "aac", "-shortest", str(odd)], check=True)
     directory = tmp_path / "reel"
+    assert (probe.probe(odd)["width"], probe.probe(odd)["height"]) == (171, 303)
     init.run(directory, "Odd reel", [odd])
     s = project.load(directory)["sources"][0]
     assert (s["width"], s["height"], s["fps"]) == (170, 302, 30)
+    assert probe.probe(directory / s["path"])["pixFmt"] == "yuv420p"
 
 
 def test_probe_samples_frame_timing_only_when_asked(monkeypatch, source):
