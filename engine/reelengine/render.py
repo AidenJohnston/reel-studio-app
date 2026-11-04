@@ -1212,9 +1212,10 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                                                          enc, out_part, graph, fast=False),
                                          dur, on_pct, timeout=max(600, dur * 40), what="video render", cwd=rwork)
         err = None
-        if encoder != "libx264" and "-hwaccel" in cmd:
+        if encoder != "libx264" and "-hwaccel" in cmd and exc.code != "TIMEOUT":
             # Hardware decode AND a GPU encoder: keep the encoder first, so a decoder that can't open
-            # this file doesn't get a working encoder marked as failed for days.
+            # this file doesn't get a working encoder marked as failed for days. Not after a timeout:
+            # a third full timeout would leave the user waiting half an hour.
             try:
                 err = slow(encoder)
             except EngineError as exc2:
