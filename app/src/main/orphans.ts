@@ -221,12 +221,18 @@ export function isOurEngine(cmdline: string | null): boolean {
   const m = cmdline ? /\s-m\s+reelengine(\s|$)/.exec(cmdline) : null
   if (!cmdline || !m) return false
   let head = cmdline.slice(0, m.index).trimEnd()
-  // engine.ts passes -s -E -B -X utf8 -u; -X and -W take a value
+  // interpreter options, from the end: flags (-s -E -B -u, or -sE), and -X / -W with their value,
+  // attached (-Xutf8) or not (-X utf8), quoted when it has spaces
   for (let prev = ''; prev !== head; ) {
     prev = head
-    head = head.replace(/\s+-[XW]\s+\S+$/, '').replace(/\s+-[A-Za-z]+$/, '')
+    head = head.replace(/\s+-[XW]\s*(?:"[^"]*"|'[^']*'|\S+)$/, '').replace(/\s+-[A-Za-z]+$/, '')
   }
-  return /(^|[\\/"'\s])python[\d.]*(\.exe)?["']?$/i.test(head)
+  // What is left is the program. Its path may hold spaces (an app bundle, a quoted Windows path), so it
+  // is the words up to the first one that names a python, and nothing may follow that one: in
+  // `python3 /srv/python -m reelengine`, python3 runs a script.
+  const words = head.trim().split(/\s+/)
+  const first = words.findIndex((w) => /^python[\d.]*(\.exe)?$/i.test(w.replace(/["']/g, '').split(/[\\/]/).pop() ?? ''))
+  return first >= 0 && first === words.length - 1
 }
 
 /** Full command line of a running process, or null if it is gone (or cannot be read). */

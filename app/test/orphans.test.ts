@@ -296,6 +296,9 @@ describe('orphaned engine reaper', () => {
     expect(isOurEngine('python -c "import reelengine"')).toBe(false)
     // a script that is handed those words as arguments is not our engine
     expect(isOurEngine('python3 /srv/worker.py -m reelengine render')).toBe(false)
+    expect(isOurEngine('python3 /srv/python -m reelengine render')).toBe(false)
+    expect(isOurEngine('/usr/bin/python3 -Xutf8 -Wignore::DeprecationWarning -m reelengine render')).toBe(true)
+    expect(isOurEngine('"C:\\Program Files\\Py\\python.exe" -W "ignore:a warning" -m reelengine render')).toBe(true)
     expect(isOurEngine('/Applications/Reel Studio.app/Contents/Resources/python/bin/python3 -s -E -B -X utf8 -u -m reelengine render')).toBe(true)
     expect(isOurEngine(null)).toBe(false)
   })
