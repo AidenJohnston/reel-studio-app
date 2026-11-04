@@ -15,12 +15,13 @@ from PIL import Image
 
 import fixtures as fx
 from reelengine import probe, render, tools
+from reelengine.proto import EngineError
 from reelengine.render_ctx import Segment
 
 HLG_SRC = {"id": "s1", "width": 2160, "height": 3840, "rotation": 0, "fps": 30, "hdr": True}
 
 
-def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, use_hw: bool = True):
+def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = True):
     """build_video_cmd for one 2 s segment of a 4K HLG take: (command, filter graph text)."""
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.delenv("REELENGINE_HWACCEL", raising=False)
@@ -35,7 +36,7 @@ def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, use_hw: bool = 
     graph = tmp_path / "graph.txt"
     cmd = render.build_video_cmd(ctx, [Segment("s1", 1.0, 3.0, 0.0)], {"s1": HLG_SRC}, {"s1": Path("take.mov")},
                                  {}, w, h, [], [], None, Path("voice.wav"), 0.0, 2.0, 0.0,
-                                 "libx264", tmp_path / "out.mp4", graph, use_hw=use_hw)
+                                 "libx264", tmp_path / "out.mp4", graph, fast=fast)
     return cmd, graph.read_text(encoding="utf-8")
 
 
@@ -49,10 +50,13 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
     assert "-hwaccel_output_format" not in cmd
 
 
-def test_software_retry_keeps_the_draft_order(tmp_path, monkeypatch):
-    cmd, graph = _graph(tmp_path, monkeypatch, draft=True, platform="win32", use_hw=False)
+def test_retry_is_the_draft_from_before(tmp_path, monkeypatch):
+    """The retry must not repeat what may have failed: hardware decode, or `scale` refusing the
+    source's colour matrix before zscale sees it."""
+    cmd, graph = _graph(tmp_path, monkeypatch, draft=True, platform="win32", fast=False)
     assert "-hwaccel" not in cmd
-    assert f"scale=540:960:flags=fast_bilinear,{render.HDR_CHAIN},setsar=1[v0]" in graph
+    assert (f"setpts=PTS-STARTPTS,{render.HDR_CHAIN},scale=540:960:flags=fast_bilinear,format=yuv420p,setsar=1[v0]"
+            in graph)
 
 
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
@@ -72,10 +76,13 @@ def hlg_take(path: Path, dur: float = 4.0) -> Path:
     vf = (f"color=c=0x808080:s={w}x{h}:r=30:d={dur},"
           f"drawbox=x=0:y=0:w={w // 2}:h={h // 2}:color=0xd02020:t=fill,"
           f"drawbox=x={w // 2}:y=0:w={w // 2}:h={h // 2}:color=0x2020d0:t=fill")
+    # The -color_* flags alone left the transfer out of the stream (FFmpeg 7.1.1, Windows 11), and the
+    # engine decides HDR from it (probe.HDR_TRANSFERS): write it into the SPS as H.273 codes instead.
     subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", vf,
                     "-f", "lavfi", "-i", f"sine=f=220:d={dur}:sample_rate=48000",
                     "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le",
-                    "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+                    "-bsf:v", "h264_metadata=colour_primaries=9:transfer_characteristics=18:"
+                              "matrix_coefficients=9:video_full_range_flag=0",
                     "-c:a", "aac", "-shortest", str(path)], check=True)
     return path
 
@@ -88,16 +95,25 @@ def _picture(mp4: Path, out: Path, size: tuple) -> np.ndarray:
     return np.asarray(im, dtype=np.float64)[: size[1] // 2]
 
 
-def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch):
-    if "zscale" not in tools.filters():
-        pytest.skip("this FFmpeg has no zscale, so it never tonemaps")
-    take = hlg_take(tmp_path / "media" / "hlg.mp4")
-    assert probe.probe(take)["hdr"]
-    pdir = tmp_path / "proj"
+@pytest.fixture(scope="module")
+def take(tmp_path_factory):
+    path = hlg_take(tmp_path_factory.mktemp("hlg media") / "hlg.mp4")
+    assert probe.probe(path)["hdr"]
+    return path
+
+
+def _project(pdir: Path, take: Path) -> Path:
     fx.make_project(pdir, take, keep=((0.5, 3.5),))
     p = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
-    p["sources"][0]["hdr"] = True
+    p["sources"][0]["hdr"] = True                      # as `init` records it from the probe
     (pdir / "project.json").write_text(json.dumps(p, indent=1), encoding="utf-8")
+    return pdir
+
+
+def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
+    if "zscale" not in tools.filters():
+        pytest.skip("this FFmpeg has no zscale, so it never tonemaps")
+    pdir = _project(tmp_path / "proj", take)
     # the software path, which every machine falls back to (the hardware one is checked by the harness)
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
     monkeypatch.setattr(tools, "hwaccel_to_memory", lambda: None)
@@ -109,3 +125,33 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch):
     assert red[0] > red[2] and blue[2] > blue[0]                                    # a picture, not a wash
     for region in (np.s_[40:440, 20:250], np.s_[40:440, 290:520]):
         assert np.abs(d[region].mean(axis=(0, 1)) - f[region].mean(axis=(0, 1))).max() < 3.0
+
+
+@pytest.mark.parametrize("broken", ["decoder", "encoder"])
+def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monkeypatch, take, broken):
+    """A draft that fails with hardware decode and a GPU encoder retries with software decode and the
+    same encoder; only if that fails too is the encoder marked as failed (for days, tools.py)."""
+    gpu = "mpeg4"                       # stands in for h264_nvenc: present in every FFmpeg build
+    monkeypatch.setitem(tools.HW_ENCODER_OPTS, gpu, ["-q:v", "5"])
+    monkeypatch.setattr(tools, "draft_encoder", lambda: gpu)
+    monkeypatch.setattr(tools, "hwaccel", lambda: None)
+    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda: "d3d11va")
+    marked, hw_decode_per_attempt = [], []
+    monkeypatch.setattr(tools, "mark_encoder_failed", marked.append)
+    real = tools.ffmpeg_progress
+
+    def progress(cmd, *a, **kw):
+        if kw.get("what") == "video render":
+            hw_decode, enc = "-hwaccel" in cmd, cmd[cmd.index("-c:v") + 1]
+            hw_decode_per_attempt.append(hw_decode)
+            if (broken == "decoder" and hw_decode) or (broken == "encoder" and enc == gpu):
+                raise EngineError("FFMPEG_FAILED", f"simulated {broken} failure", "")
+        return real(cmd, *a, **kw)
+
+    monkeypatch.setattr(tools, "ffmpeg_progress", progress)
+    res = render.run(_project(tmp_path / "proj", take), draft=True, root=tmp_path, verify=False, cover=False)
+    assert hw_decode_per_attempt[0]                                  # the fast path used hardware decode
+    if broken == "decoder":
+        assert res["encoder"] == gpu and marked == []
+    else:
+        assert res["encoder"] == "libx264" and marked == [gpu]

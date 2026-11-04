@@ -162,7 +162,7 @@ def test_brightness_trial_reaches_video_filter(tmp_path):
     graph = tmp_path / "graph.txt"
     render.build_video_cmd(ctx, tl.segments, {"s1": {"width": 1080, "height": 1920, "fps": 30}},
         {"s1": tmp_path / "take.mp4"}, {}, 540, 960, [], [], None, tmp_path / "audio.wav",
-        0, tl.duration, 0, "libx264", tmp_path / "out.mp4", graph, use_hw=False)
+        0, tl.duration, 0, "libx264", tmp_path / "out.mp4", graph, fast=False)
     assert "exposure=exposure=" in graph.read_text()
 
 

@@ -673,12 +673,16 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
 def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
                     out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
                     audio: Path, audio_seek: float, dur: float, t_shift: float, encoder: str,
-                    out_part: Path, graph_file: Path, use_hw: bool = True) -> list:
+                    out_part: Path, graph_file: Path, fast: bool = True) -> list:
+    """The draft/final ffmpeg command; writes the filter graph to `graph_file`. fast=False is the
+    draft path from before hardware decode for HDR: no -hwaccel, and an HDR source tonemapped before
+    the crop and scale. render.run retries a failed draft that way."""
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
     lanes = plan_lanes(segments)
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner"]
-    hw = tools.hwaccel() if (ctx.draft and use_hw) else None
+    fast = ctx.draft and fast
+    hw = tools.hwaccel() if fast else None
     seg_input, seg_chain = {}, {}
     chains, labels = [], []
     for li, lane in enumerate(lanes):
@@ -691,7 +695,7 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
             if hdr:
-                dec = tools.hwaccel_to_memory() if (ctx.draft and use_hw) else None
+                dec = tools.hwaccel_to_memory() if fast else None
             else:
                 dec = hw if hw != "cuda" else None
             if dec:
@@ -699,10 +703,11 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             pre = None
             reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
             if hdr and "zscale" in tools.filters():
-                # A draft tonemaps the cropped, scaled frame (540x960, 1/16 of a 4K one); the result is
-                # within PSNR 43 dB of tonemapping first (frame 60 of the 4K HLG stand-in, Windows 11).
-                # Finals keep tonemap-then-scale, so their bytes don't change.
-                per_seg = (reframe + "," + HDR_CHAIN if ctx.draft
+                # A fast draft tonemaps the cropped, scaled frame (540x960, 1/16 of a 4K one); the
+                # result is within PSNR 43 dB of tonemapping first (frame 60 of the 4K HLG stand-in,
+                # Windows 11). Finals and the retry keep tonemap-then-scale: finals so their bytes
+                # don't change, the retry because zscale reads colour matrices `scale` refuses (ICtCp).
+                per_seg = (reframe + "," + HDR_CHAIN if fast
                            else HDR_CHAIN + "," + reframe + ",format=yuv420p")
             else:
                 per_seg = reframe + ",format=yuv420p"
@@ -1196,20 +1201,30 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                                     cwd=rwork, user_message="I couldn't finish making your video. "
                                                             "Please try again.")
     except EngineError as exc:
-        if draft:
-            log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
-            warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+        if not draft:
+            raise
+        log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
+        warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+
+        def slow(enc: str) -> str:
+            return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h,
+                                                         layers, zooms, ass_name, audio, audio_seek, dur, t_shift,
+                                                         enc, out_part, graph, fast=False),
+                                         dur, on_pct, timeout=max(600, dur * 40), what="video render", cwd=rwork)
+        err = None
+        if encoder != "libx264" and "-hwaccel" in cmd:
+            # Hardware decode AND a GPU encoder: keep the encoder first, so a decoder that can't open
+            # this file doesn't get a working encoder marked as failed for days.
+            try:
+                err = slow(encoder)
+            except EngineError as exc2:
+                log(f"# software decode with {encoder} failed too: {exc2.message[-400:]}")
+        if err is None:
             failed_encoder, encoder = encoder, "libx264"
-            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
-                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
-                                  use_hw=False)
-            err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                        cwd=rwork)
+            err = slow(encoder)
             if failed_encoder != "libx264":
                 # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
                 tools.mark_encoder_failed(failed_encoder)
-        else:
-            raise
     timings["encode"] = round(time.time() - t, 2)
     if font_path is not None:
         bad = check_fontselect(err, Path(font_path))
