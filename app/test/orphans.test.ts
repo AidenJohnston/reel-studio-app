@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { tmpdir, uptime } from 'node:os'
+import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createPidRegistry, isOurEngine, processCommandLine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
@@ -193,27 +193,30 @@ describe('orphaned engine reaper', () => {
     await killTree(left.pid!)
   }, 60000)
 
-  // The list outlives a reboot, and a recorded number can then lead some daemon's group whose leader exited
-  // (a double fork). Only a group that holds nothing but our engine and ffmpeg is ours to stop.
-  it.skipIf(process.platform === 'win32')('a dead engine\'s group is stopped only while it holds just our engine and ffmpeg, never someone else\'s group with that number', async () => {
+  // With the leader dead nothing shows who holds the number now: after a crash it can be reused, even
+  // within one boot, by someone else's group that runs ffmpeg. So such a group is never signalled; a
+  // leftover ffmpeg of ours finishes on its own, and the video it works in stays closed meanwhile.
+  it.skipIf(process.platform === 'win32')('a process group whose leader died is never signalled, and the video it works in stays closed', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
-    const [bread, cake] = ['bread', 'cake'].map((slug) => join(projectsDir(), slug))
-    for (const p of [bread, cake]) mkdirSync(join(p, 'work'), { recursive: true })
+    const cake = join(projectsDir(), 'cake')
+    mkdirSync(join(cake, 'work'), { recursive: true })
     // an engine that starts nothing itself, so its group holds only what this test puts there
     const pkg = join(settings, 'engine', 'reelengine')
     mkdirSync(pkg, { recursive: true })
     writeFileSync(join(pkg, '__init__.py'), '')
     writeFileSync(join(pkg, '__main__.py'), 'import time\ntime.sleep(60)\n')
+    const cmds = [
+      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, program: 'python', shows: 'reelengine' },
+      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', program: 'ffmpeg', shows: 'anullsrc' }
+    ]
     // a group leader that starts these and exits, leaving the group with no leader
-    const groups: number[] = []
-    const orphanGroup = async (cmds: { run: string; program: string; shows: string }[]): Promise<number[]> => {
-      const sh = spawn('sh', ['-c', cmds.map((c) => `${c.run} >/dev/null 2>&1 & echo $!`).join('; ')], { cwd: join(settings, 'engine'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
-      groups.push(sh.pid!)
-      let out = ''
-      sh.stdout.on('data', (d) => (out += d))
-      await once(sh, 'exit')
-      const members = out.trim().split(/\s+/).map(Number)
+    const sh = spawn('sh', ['-c', cmds.map((c) => `${c.run} >/dev/null 2>&1 & echo $!`).join('; ')], { cwd: join(settings, 'engine'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+    let out = ''
+    sh.stdout.on('data', (d) => (out += d))
+    await once(sh, 'close')
+    const members = out.trim().split(/\s+/).map(Number)
+    try {
       // each runs its own program by now, not the copy of sh forked to start it (whose command line
       // already holds the same words)
       for (const [k, pid] of members.entries()) {
@@ -226,40 +229,24 @@ describe('orphaned engine reaper', () => {
         }
         if (!ok) throw new Error(`${cmds[k].run} never started`)
       }
-      return members
-    }
-    // someone else's: a worker whose arguments happen to name ffmpeg
-    const theirs = await orphanGroup([
-      { run: `'${PYTHON}' -c 'import time; time.sleep(60)' --encoder ffmpeg`, program: 'python', shows: 'time.sleep' },
-      { run: `'${PYTHON}' -c 'import time; time.sleep(60)' -m reelengine render`, program: 'python', shows: 'time.sleep' }
-    ])
-    const ours = await orphanGroup([
-      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, program: 'python', shows: 'reelengine' },
-      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', program: 'ffmpeg', shows: 'anullsrc' }
-    ])
-    try {
-      const last = createPidRegistry(settings)
-      last.add(groups[0], bread)
-      last.add(groups[1], cake)
+      createPidRegistry(settings).add(sh.pid!, cake)
       const { stopped, stillRunning } = await createPidRegistry(settings).reap()
-      expect(stopped).toBe(1)
-      expect(ours.some(isAlive)).toBe(false)
-      expect(theirs.every(isAlive)).toBe(true)
-      // nothing of ours works in bread, so it opens; the entry stays for the next start to look at again
-      expect(stillRunning).toEqual([])
-      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: groups[0], project: bread, startedAt: expect.any(Number) }])
+      expect(stopped).toBe(0)
+      expect(members.every(isAlive)).toBe(true)
+      expect(stillRunning).toEqual([cake])
+      // kept, so the next start looks again
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: sh.pid, project: cake, startedAt: expect.any(Number) }])
     } finally {
-      for (const g of groups) {
-        try {
-          process.kill(-g, 'SIGKILL')
-        } catch {
-          /* gone */
-        }
+      try {
+        process.kill(-sh.pid!, 'SIGKILL')
+      } catch {
+        /* gone */
       }
     }
   }, 60000)
 
-  // Windows hands a dead engine's number to the next process routinely, and that may be another engine
+  // Windows hands a dead engine's number to the next process routinely, and that may be another engine:
+  // left alone, kept on the list, and the scan decides which video stays closed
   it('a number now held by an engine that started after ours was recorded is not stopped', async () => {
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
     const later = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
@@ -271,29 +258,6 @@ describe('orphaned engine reaper', () => {
       expect(isAlive(later.pid!)).toBe(true)
     } finally {
       await killTree(later.pid!)
-    }
-  }, 60000)
-
-  // After a restart the number can lead anyone's group, even one that runs ffmpeg
-  it.skipIf(process.platform === 'win32')('an engine recorded before the computer last started is never stopped', async () => {
-    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
-    const sh = spawn('sh', ['-c', 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null - >/dev/null 2>&1 & echo $!'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true })
-    let out = ''
-    sh.stdout.on('data', (d) => (out += d))
-    await once(sh, 'exit')
-    const member = Number(out.trim())
-    try {
-      for (let i = 0; i < 100 && basename((await processName(member)) ?? '') !== 'ffmpeg'; i++) await new Promise((r) => setTimeout(r, 50))
-      writeFileSync(join(settings, 'engines.json'), JSON.stringify([{ pid: sh.pid, project: null, startedAt: Date.now() - uptime() * 1000 - 3_600_000 }]))
-      const { stopped } = await createPidRegistry(settings).reap()
-      expect(stopped).toBe(0)
-      expect(isAlive(member)).toBe(true)
-    } finally {
-      try {
-        process.kill(-sh.pid!, 'SIGKILL')
-      } catch {
-        /* gone */
-      }
     }
   }, 60000)
 
