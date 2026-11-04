@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, uptime } from 'node:os'
 import { basename, join } from 'node:path'
 import { createPidRegistry, isOurEngine, processCommandLine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
@@ -92,7 +92,7 @@ describe('orphaned engine reaper', () => {
     expect(stillRunning).toEqual([project])
     expect(existsSync(join(project, OWNER_LOCK))).toBe(true)
     expect(existsSync(join(other, OWNER_LOCK))).toBe(false)
-    expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project }])
+    expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project, startedAt: expect.any(Number) }])
     await killTree(left.pid!)
   }, 60000)
 
@@ -254,7 +254,7 @@ describe('orphaned engine reaper', () => {
       expect(theirs.every(isAlive)).toBe(true)
       // nothing of ours works in bread, so it opens; the entry stays for the next start to look at again
       expect(stillRunning).toEqual([])
-      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: groups[0], project: bread }])
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: groups[0], project: bread, startedAt: expect.any(Number) }])
     } finally {
       for (const g of groups) {
         try {
@@ -262,6 +262,44 @@ describe('orphaned engine reaper', () => {
         } catch {
           /* gone */
         }
+      }
+    }
+  }, 60000)
+
+  // Windows hands a dead engine's number to the next process routinely, and that may be another engine
+  it('a number now held by an engine that started after ours was recorded is not stopped', async () => {
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const later = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    try {
+      await once(later, 'spawn')
+      writeFileSync(join(settings, 'engines.json'), JSON.stringify([{ pid: later.pid, project: null, startedAt: Date.now() - 30_000 }]))
+      const { stopped } = await createPidRegistry(settings).reap()
+      expect(stopped).toBe(0)
+      expect(isAlive(later.pid!)).toBe(true)
+    } finally {
+      await killTree(later.pid!)
+    }
+  }, 60000)
+
+  // After a restart the number can lead anyone's group, even one that runs ffmpeg
+  it.skipIf(process.platform === 'win32')('an engine recorded before the computer last started is never stopped', async () => {
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const sh = spawn('sh', ['-c', 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null - >/dev/null 2>&1 & echo $!'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+    let out = ''
+    sh.stdout.on('data', (d) => (out += d))
+    await once(sh, 'exit')
+    const member = Number(out.trim())
+    try {
+      for (let i = 0; i < 100 && basename((await processName(member)) ?? '') !== 'ffmpeg'; i++) await new Promise((r) => setTimeout(r, 50))
+      writeFileSync(join(settings, 'engines.json'), JSON.stringify([{ pid: sh.pid, project: null, startedAt: Date.now() - uptime() * 1000 - 3_600_000 }]))
+      const { stopped } = await createPidRegistry(settings).reap()
+      expect(stopped).toBe(0)
+      expect(isAlive(member)).toBe(true)
+    } finally {
+      try {
+        process.kill(-sh.pid!, 'SIGKILL')
+      } catch {
+        /* gone */
       }
     }
   }, 60000)
