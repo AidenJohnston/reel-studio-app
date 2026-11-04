@@ -96,6 +96,16 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
     expect(last[1]).toEqual({ type: 'text', text: 'keep going' });
   });
 
+  it('a recorded reply with only thinking goes back with a text block after it', () => {
+    const thinking = { type: 'thinking', thinking: 'Nothing to change.', signature: 'SIG-T==' };
+    const msgs = toAnthropicMessages([
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', text: '', toolCalls: [], raw: { stop_reason: 'end_turn', anthropicContent: [thinking] } },
+      { role: 'user', content: [{ type: 'text', text: 'keep going' }] },
+    ]);
+    expect(msgs[1]).toEqual({ role: 'assistant', content: [thinking, { type: 'text', text: '(no reply)' }] });
+  });
+
   it('bad key -> friendly error; rate limit -> retryable', async () => {
     const m = await mockAnthropic((_b, _q, res) => res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })));
     const p = new AnthropicProvider({ apiKey: 'bad', baseURL: m.url });
@@ -180,6 +190,23 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
       expect(r.body.thinking).toEqual({ type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
       expect(r.headers['anthropic-beta']).toContain('thinking-binding-controls-2026-08-01');
     }
+  });
+
+  it("a person's own server gets no thinking settings and no replayed thinking", async () => {
+    const thinking = { type: 'thinking', thinking: 'Read it first.', signature: 'SIG-C==' };
+    const m = await mockAnthropic((_b, _q, res) => streamBlocks(res, [thinking, { type: 'tool_use', id: 'toolu_1', name: 'set_cut', input: { keep: [] } }], { stop_reason: 'tool_use' }));
+    const p = new AnthropicProvider({ id: 'custom', apiKey: 'k', baseURL: m.url, model: 'claude-sonnet-5-5', maxRetries: 0 });
+    const messages: ChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }];
+    const r = await p.complete({ system: 's', tools, messages });
+    messages.push({ role: 'assistant', text: r.text, toolCalls: r.toolCalls, raw: r.raw });
+    messages.push({ role: 'tool', results: [{ callId: 'toolu_1', name: 'set_cut', content: 'ok' }] });
+    await p.complete({ system: 's', tools, messages });
+    await p.ping().catch(() => undefined);
+    for (const { body, headers } of m.bodies) {
+      expect(body.thinking).toBeUndefined();
+      expect(headers['anthropic-beta']).toBeUndefined();
+    }
+    expect(m.bodies[1].body.messages[1].content).toEqual([{ type: 'tool_use', id: 'toolu_1', name: 'set_cut', input: { keep: [] } }]);
   });
 
   it('a JSON-correction retry sends the first reply back with its thinking unchanged', async () => {

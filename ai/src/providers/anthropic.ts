@@ -10,7 +10,7 @@ type MessageParam = Anthropic.Beta.BetaMessageParam;
 /** What a Claude reply leaves in its assistant message's `raw`. `anthropicContent` is the reply's
  * content blocks exactly as the API returned them (thinking included), so the next step can send
  * them back unchanged; the key name keeps any other provider from reading them. */
-interface AnthropicRaw { stop_reason: Anthropic.Beta.BetaStopReason | null; anthropicContent: Anthropic.Beta.BetaContentBlock[] }
+interface AnthropicRaw { stop_reason: Anthropic.Beta.BetaStopReason | null; anthropicContent?: Anthropic.Beta.BetaContentBlock[] }
 
 function recordedContent(raw: unknown): Anthropic.Beta.BetaContentBlock[] | undefined {
   const c = (raw as Partial<AnthropicRaw> | undefined)?.anthropicContent;
@@ -69,7 +69,13 @@ export function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
     } else if (m.role === 'assistant') {
       // A Claude reply goes back as Claude sent it: thinking blocks must return unchanged and in order.
       const recorded = recordedContent(m.raw);
-      if (recorded) { out.push({ role: 'assistant', content: [...recorded] }); continue; }
+      if (recorded) {
+        // A reply that only thought, then stopped, still says something: drop_block may remove its
+        // thinking, and an assistant turn can't be empty.
+        const answered = recorded.some((b) => b.type === 'text' || b.type === 'tool_use');
+        out.push({ role: 'assistant', content: answered ? [...recorded] : [...recorded, { type: 'text', text: '(no reply)' }] });
+        continue;
+      }
       // Written by another provider: rebuild from text and calls.
       const content: Anthropic.Beta.BetaContentBlockParam[] = [];
       if (m.text) content.push({ type: 'text', text: m.text });
@@ -145,7 +151,8 @@ export function mapAnthropicError(err: any): AIError {
   return new AIError('claude_error', 'Something went wrong talking to Claude. Try again.', { status, detail: err?.message });
 }
 
-const SENT_HEADERS = ['accept', 'content-type', 'anthropic-version'];
+// anthropic-beta carries thinkingParams' block_binding control; without it the request is invalid.
+const SENT_HEADERS = ['accept', 'content-type', 'anthropic-version', 'anthropic-beta'];
 
 const STREAM_ERROR_STATUS: Record<string, number> = {
   invalid_request_error: 400, authentication_error: 401, permission_error: 403, not_found_error: 404,
@@ -198,6 +205,12 @@ export class AnthropicProvider implements ModelProvider {
     });
   }
 
+  /** A person's own server may not know the dated beta, so it keeps the request and history it had
+   * before thinking was replayed: no thinking settings here, and no recorded blocks in complete(). */
+  private thinking() {
+    return this.id === 'claude' ? thinkingParams(this.model) : {};
+  }
+
   private mapError(err: any): AIError {
     return withoutSecret(this.id === 'custom' ? mapAnthropicConnectionError(err, this.model) : mapAnthropicError(err), this.apiKey);
   }
@@ -207,7 +220,7 @@ export class AnthropicProvider implements ModelProvider {
       const stream = this.client.beta.messages.stream({
         model: this.model,
         max_tokens: this.maxTokens,
-        ...thinkingParams(this.model),
+        ...this.thinking(),
         // Cache the long, stable prefix (system prompt + tool definitions) across agent steps.
         system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
         messages: withCacheBreakpoint(toAnthropicMessages(req.messages)),
@@ -216,7 +229,8 @@ export class AnthropicProvider implements ModelProvider {
       const msg = await stream.finalMessage();
       if (msg.stop_reason === 'refusal') {
         const category = msg.stop_details?.category;
-        throw new AIError('claude_refused', 'Claude would not help with this edit. Try wording your note a different way.', { detail: `Claude refused${category ? ` (category: ${category})` : ''}` });
+        const who = this.id === 'custom' ? 'The AI' : 'Claude';
+        throw new AIError('claude_refused', `${who} would not help with this edit. Try wording your note a different way.`, { detail: `${who} refused${category ? ` (category: ${category})` : ''}` });
       }
       const text = msg.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('');
       const toolCalls = msg.content
@@ -226,7 +240,7 @@ export class AnthropicProvider implements ModelProvider {
         throw new AIError(this.id === 'custom' ? 'connection_truncated' : 'claude_truncated', `${this.id === 'custom' ? 'The AI' : 'Claude'} ran out of room on that step. Try again.`, { retryable: true });
       }
       const u: any = msg.usage ?? {};
-      const raw: AnthropicRaw = { stop_reason: msg.stop_reason, anthropicContent: msg.content };
+      const raw: AnthropicRaw = { stop_reason: msg.stop_reason, ...(this.id === 'claude' ? { anthropicContent: msg.content } : {}) };
       return { text, toolCalls, raw, usage: {
         input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens ?? undefined, cacheWrite: u.cache_creation_input_tokens ?? undefined,
       } };
@@ -241,7 +255,7 @@ export class AnthropicProvider implements ModelProvider {
    * model that rejects them fails here, at setup, instead of on every edit. */
   async ping(): Promise<void> {
     try {
-      await this.client.beta.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }], ...thinkingParams(this.model) });
+      await this.client.beta.messages.create({ model: this.model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }], ...this.thinking() });
     } catch (err: any) {
       throw this.mapError(err);
     }
