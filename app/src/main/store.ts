@@ -210,13 +210,16 @@ const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 export async function listVersions(dir: string): Promise<VersionInfo[]> {
   const vdir = join(dir, 'versions')
   let names: string[] = []
+  let saved: number
   try {
     names = await fs.readdir(vdir)
+    saved = Number(JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8')).version) || 0
   } catch {
     return []
   }
-  // docs/versions.md: a version is a `vN` folder with `export.mp4`. Drafts live in `versions/preview/`
-  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
+  // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
+  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
+  // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
@@ -233,7 +236,7 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
   }
   for (const name of names) {
     const m = /^v(\d+)$/.exec(name)
-    if (!m) continue
+    if (!m || Number(m[1]) > saved) continue
     const d = join(vdir, name)
     const video = join(d, 'export.mp4')
     if (!existsSync(video) || existsSync(join(d, '.rendering'))) continue

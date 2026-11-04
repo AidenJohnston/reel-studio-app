@@ -742,11 +742,15 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
     vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
-    if not preview and version == committed and (vdir / "export.mp4").exists() and (vdir / "render.json").exists():
+    if not preview and version == committed:
         # a saved version is never rewritten: the same edit gets its video back
-        made = projmod.read_json(vdir / "render.json")
-        made.pop("segmentsDetail", None)
-        return dict(made, file=str(vdir / "export.mp4"), versionDir=str(vdir), reused=True)
+        if (vdir / "export.mp4").exists() and (vdir / "render.json").exists():
+            made = projmod.read_json(vdir / "render.json")
+            made.pop("segmentsDetail", None)
+            return dict(made, file=str(vdir / "export.mp4"), versionDir=str(vdir), reused=True)
+        # one with a file missing (removed by hand) is left as it is too: this render is the next version
+        version = committed + 1
+        vdir = project_dir / "versions" / f"v{version}"
     if not preview and version > committed and vdir.exists():
         shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
     vdir.mkdir(parents=True, exist_ok=True)
@@ -935,11 +939,11 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         # the reports that describe THIS video live beside it (verify, the AI's frame checks, e2e); a
         # report this render did not make is removed, so a reused folder never keeps an older one
         projmod.write_json(vdir / "captions.json", {"cues": cap_report})
-        for report, name in ((layers_report, "layers.json"), (Path(audio).with_suffix(".json"), "mix.json")):
+        for report, dst_name in ((layers_report, "layers.json"), (Path(audio).with_suffix(".json"), "mix.json")):
             if report.exists():
-                copy_whole(report, vdir / name)
+                copy_whole(report, vdir / dst_name)
             else:
-                (vdir / name).unlink(missing_ok=True)
+                (vdir / dst_name).unlink(missing_ok=True)
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
         manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000])
