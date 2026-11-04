@@ -116,6 +116,41 @@ describe('tool implementations', () => {
     expect(ctx.state.summaries).toEqual([]);
   });
 
+  it.each([
+    { name: 'one word', heard: ['script', 'script'], end: 'w0', scoped: { from: 'script', to: 'JavaScript', at: 'w0' } },
+    { name: 'a phrase', heard: ['type', 'script', 'type', 'script'], end: 'w1', scoped: { from: 'type script', to: 'TypeScript', at: 'w0', through: 'w1' } },
+  ])('respects subtitle edits scoped to $name when checking whether an AI correction applies', async ({ heard, end, scoped }) => {
+    const { ctx, dir, events } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    heard.forEach((w, i) => { transcript.words[i].w = w; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: end }] });
+    const seeded = await loadProject(dir);
+    seeded.captions.corrections = [scoped];
+    await saveProject(dir, seeded);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const eventCount = events.length;
+    const proposed = { from: scoped.from, to: 'Code' };
+    const blocked = await executeTool(ctx, 'add_caption_correction', proposed);
+    expect(blocked.isError).toBe(true);
+    expect(blocked.summary).toBeUndefined();
+    expect(events).toHaveLength(eventCount);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+
+    // The other occurrence is still editable; the subtitle edit applies only at its anchor.
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: `w${heard.length - 1}` }] });
+    expect((await executeTool(ctx, 'add_caption_correction', proposed)).isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([scoped, proposed]);
+
+    // A stale subtitle edit must not block the words heard after re-transcription.
+    const stale = await loadProject(dir);
+    stale.captions.corrections = [{ ...scoped, from: 'something else' }];
+    await saveProject(dir, stale);
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: end }] });
+    expect((await executeTool(ctx, 'add_caption_correction', proposed)).isError).toBe(false);
+  });
+
   it('fails if a fully shadowed correction is saved or reported as fixed', async () => {
     const { ctx, dir, events } = await ctxFor();
     const file = path.join(dir, 'work', 'transcript.json');
