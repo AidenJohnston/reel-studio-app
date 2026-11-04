@@ -338,8 +338,7 @@ def hwaccel() -> Optional[str]:
     if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
         return None
     if "hwaccel" not in _CACHE:
-        out = text_run([ffmpeg(), "-hide_banner", "-hwaccels"], 30, "ffmpeg -hwaccels", check=False)
-        names = set((out.stdout or "").split())
+        names = hwaccels()
         pick = None
         if sys.platform == "darwin" and "videotoolbox" in names:
             pick = "videotoolbox"
@@ -347,6 +346,31 @@ def hwaccel() -> Optional[str]:
             pick = "cuda"
         _CACHE["hwaccel"] = pick
     return _CACHE["hwaccel"]
+
+
+def hwaccels() -> set:
+    """The hardware decode methods this ffmpeg was built with (`ffmpeg -hwaccels`)."""
+    if "hwaccels" not in _CACHE:
+        out = text_run([ffmpeg(), "-hide_banner", "-hwaccels"], 30, "ffmpeg -hwaccels", check=False)
+        _CACHE["hwaccels"] = set((out.stdout or "").split())
+    return _CACHE["hwaccels"]
+
+
+# Hardware decode whose frames come back to system memory, for HDR drafts: their tonemap runs in
+# software (zscale), so the frames have to end up there anyway. On Windows this is D3D11VA, which any
+# DirectX 11 GPU offers. Not CUDA: the product's FFmpeg is built without NVDEC, so `-hwaccel cuda`
+# decodes in software without saying so (pinned 7.1.1-rs2, Windows 11, 2026-11-04).
+HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
+
+
+def hwaccel_to_memory() -> Optional[str]:
+    """`-hwaccel` for a draft whose filters run in software, or None (not built in, another platform,
+    or REELENGINE_HWACCEL=0). A GPU that can't decode the codec or profile leaves ffmpeg decoding in
+    software; a render that fails outright is retried in software by render.run."""
+    if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
+        return None
+    name = HWACCEL_TO_MEMORY.get(sys.platform)
+    return name if name in hwaccels() else None
 
 
 def machine() -> dict:
