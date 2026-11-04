@@ -634,7 +634,9 @@ export function ShowMeHow({
                 aria-label="Moment for your cover"
                 min={0}
                 max={Math.max(1, Math.floor(sourceDuration))}
-                step={0.5}
+                // A tenth of a second, the precision of the line under it, so a picked frame (3.067 s) puts the
+                // thumb where that line says (3.1), not at 3.0. Page Up/Down still move a tenth of the range.
+                step={0.1}
                 value={coverTime}
                 onChange={(e) =>
                   set('cover', { ...(p.cover ?? { source: 's1', text: null }), atSourceTime: Number(e.target.value), exact: null, manual: null } as ProjectJson['cover'])
