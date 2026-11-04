@@ -4,6 +4,8 @@ import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvi
 import { mapConnectionError, tookTooLong, unreachable, withoutSecret, wrongAddress } from './connection';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
+/** The same key's small model, for short text (version titles). */
+export const SMALL_CLAUDE_MODEL = 'claude-haiku-5-5';
 
 export interface AnthropicOptions {
   apiKey: string;

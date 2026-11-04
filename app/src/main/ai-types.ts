@@ -118,6 +118,8 @@ export interface AI {
   removeConnection?(id: string): Promise<void>
   setConnectionImages?(id: string, supportsImages: boolean): Promise<void>
   connectionModels?(q: { kind: ConnectionInfo['kind']; baseURL: string; key?: string; id?: string }): Promise<{ models: string[]; suggested: string | null; needsKey: boolean }>
+  /** One small-model call that rewords a version's title and summary; null when the connection has no small model. Optional: older packages lack it. */
+  rewordVersion?(text: { title: string; summary: string }, signal?: AbortSignal): Promise<{ title: string; summary: string } | null>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */

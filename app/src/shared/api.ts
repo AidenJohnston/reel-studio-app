@@ -27,6 +27,8 @@ export interface VersionInfo {
   createdAt: string
   /** what this version changed since the one before, from `versions/vN/receipts.json`; absent for versions made before receipts existed */
   facts?: EditFact[]
+  /** the AI connection's rewording of the title and summary, already checked against `facts` (`versions/vN/title.json`) */
+  wording?: { title: string; summary: string }
   /** a `vN` rendered before receipts existed (its render.json has no renderId): its tooltip is the chat reply */
   beforeReceipts?: true
 }
