@@ -107,19 +107,20 @@ describe('project reservations', () => {
     writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
     const jobs = createJobManager(() => undefined, () => undefined)
     const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
-    // the engine finishes only once both attachments are in it, and then one at a time
-    const inEngine: (() => void)[] = []
+    // the engine finishes only once both attachments are in it, and then each when this test says so
+    const inEngine = new Map<string, () => void>()
     let bothIn: () => void = () => undefined
     const both = new Promise<void>((resolve) => (bothIn = resolve))
     registerAttachmentIpc({
       handle: (ch, fn) => void handlers.set(ch, fn),
       runEngine: async (_cmd, args) => {
-        const asset = `work/assets/attach-${String(inEngine.length).padStart(8, '0')}-shot.png`
+        const name = args[args.indexOf('--name') + 1]
+        const asset = `work/assets/attach-${String(inEngine.size).padStart(8, '0')}-shot.png`
         writeFileSync(join(dir, ...asset.split('/')), '')
-        writeFileSync(join(dir, ...asset.split('/')) + '.attach.json', JSON.stringify({ asset, name: args[args.indexOf('--name') + 1], kind: 'image', bytes: 1 }))
+        writeFileSync(join(dir, ...asset.split('/')) + '.attach.json', JSON.stringify({ asset, name, kind: 'image', bytes: 1 }))
         await new Promise<void>((resolve) => {
-          inEngine.push(resolve)
-          if (inEngine.length === 2) bothIn()
+          inEngine.set(name, resolve)
+          if (inEngine.size === 2) bothIn()
         })
         return { asset }
       },
@@ -137,11 +138,11 @@ describe('project reservations', () => {
     await Promise.race([both, first, second])
     expect(() => jobs.start(slug, 'rerender', async () => ({ summary: 'never' }))).toThrow(expect.objectContaining({ code: 'BUSY' }))
     await expect(jobs.hold(slug, async () => undefined)).rejects.toMatchObject({ code: 'BUSY' })
-    inEngine[0]()
+    inEngine.get('one.png')!()
     expect((await first).attached).toHaveLength(1)
     // the one still running keeps the lock that tells tools run by hand to stay out
     expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
-    inEngine[1]()
+    inEngine.get('two.png')!()
     expect((await second).attached).toHaveLength(1)
     expect(existsSync(join(dir, OWNER_LOCK))).toBe(false)
     await expect(jobs.hold(slug, async () => 'edited')).resolves.toBe('edited')
