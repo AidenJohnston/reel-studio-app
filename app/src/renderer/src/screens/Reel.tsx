@@ -492,7 +492,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
           </div>
 
           {aiOff && !bannerHidden && (
-            // Why the reel is simpler, and that nothing is locked. The way to connect is the button under the player.
+            // Why the reel is simpler, and that nothing is locked. The way to connect is the Notes panel's connect line.
             <div className="banner" data-testid="ai-banner">
               <span>No AI editor yet, so I made a simple cut. You can still change anything under Edit it myself.</span>
               <button
@@ -580,7 +580,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   {m.moment && !typedMoment(m.text) && <><span className="bubble-moment">{clock(m.moment.at)}</span> </>}
                   {m.text}
                   {m.moment && <span className="bubble-quote" title={m.moment.quote}>"{m.moment.quote}"</span>}
-                  {/* "Connect" is the change button under the player, once; not in every old reply */}
+                  {/* "Connect" is the Notes panel's connect line, once; not in every old reply */}
                   {m.from === 'editor' && m.actions?.some((a) => a !== 'connect') ? (
                     <div className="bubble-actions">
                       {m.actions.filter((a) => a !== 'connect').map((a) => (

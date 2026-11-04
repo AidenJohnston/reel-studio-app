@@ -223,7 +223,7 @@ export function App() {
               ) : (
                 <>
                   <div className="muted-sm">No AI editor connected.</div>
-                  {/* the Reel screen has its own, on the change button under the player */}
+                  {/* the Reel screen has its own: the connect line in its Notes panel */}
                   {shown.name !== 'reel' && (
                     <button className="link" style={{ padding: '4px 0' }} onClick={() => go({ name: 'connect', back: shown })} data-testid="sidebar-connect">
                       Connect one
