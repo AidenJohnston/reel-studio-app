@@ -30,8 +30,10 @@ def _link_or_copy(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-# What renders write: never part of a take's inputs, so a cold copy leaves them out.
-GENERATED = ("versions", "work/render", "work/captions.json")
+# What the engine writes (renders, b-roll layers, cover search, transcription audio): never part of
+# a take's inputs, so a cold copy leaves them out.
+GENERATED = ("versions", "work/render", "work/layers", "work/cover-candidates", "work/audio",
+             "work/captions.json")
 
 
 def project_inputs(project: Path) -> list:
@@ -149,7 +151,13 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
             shutil.copy2(call.result["file"], tmp / "export.mp4")
-            shutil.copy2(proj / "work" / "captions.json", tmp / "captions.json")
+            cap_file = proj / "work" / "captions.json"
+            if cap_file.exists():
+                shutil.copy2(cap_file, tmp / "captions.json")
+            elif (state.get("captions") or {}).get("enabled", True):
+                raise RuntimeError(f"reference render of {take.id} {step['state']} wrote no captions.json")
+            else:                       # captions off: no band, the whole frame is checked loosely
+                (tmp / "captions.json").write_text('{"cues": []}', encoding="utf-8")
             manifest = json.loads((Path(call.result["versionDir"]) / "render.json").read_text(encoding="utf-8"))
             (tmp / "segments.json").write_text(json.dumps(manifest["segmentsDetail"]), encoding="utf-8")
             (tmp / "done.json").write_text(json.dumps({"seconds": round(call.seconds, 2), "result": call.result}, indent=1),

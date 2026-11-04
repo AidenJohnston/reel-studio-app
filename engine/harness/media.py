@@ -82,13 +82,25 @@ def audio_mono(ffmpeg: str, path: Path, start: float = 0.0, duration: float = No
     return np.frombuffer(_run(cmd).stdout, dtype=np.float32)
 
 
-def audio_timing(ffprobe: str, path: Path) -> dict:
-    """When each audio packet plays: the stream's start and edit (trims the encoder delay) and
-    every packet's pts and duration. Identical payloads at different times are not identical audio."""
+def audio_timing(ffprobe: str, path: Path) -> list:
+    """When each audio packet plays, as exact seconds (pts and duration times the time base), so
+    two files that write the same times in different units compare equal. Identical payloads at
+    different times are not identical audio."""
+    from fractions import Fraction
     info = json.loads(_run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
-                            "stream=start_pts,start_time,time_base,nb_frames:packet=pts,duration",
-                            "-print_format", "json", path]).stdout)
-    return {"stream": info.get("streams"), "packets": [(p.get("pts"), p.get("duration")) for p in info.get("packets", [])]}
+                            "stream=time_base:packet=pts,duration", "-print_format", "json", path]).stdout)
+    tb = Fraction(info["streams"][0]["time_base"])
+    return [(Fraction(int(p["pts"])) * tb, Fraction(int(p.get("duration") or 0)) * tb)
+            for p in info.get("packets", []) if p.get("pts") not in (None, "N/A")]
+
+
+def audio_lead(ffprobe: str, path: Path) -> float:
+    """Seconds the first audio sample plays after the first video frame (negative = before). Raw
+    decoded samples drop this, so a preview whose audio is merely timestamped late would look in
+    sync without it."""
+    streams = probe(ffprobe, path)["streams"]
+    start = {s["codec_type"]: float(s.get("start_time") or 0.0) for s in streams if s["codec_type"] in ("audio", "video")}
+    return start.get("audio", 0.0) - start.get("video", 0.0)
 
 
 def audio_packets_md5(ffmpeg: str, path: Path) -> str:
