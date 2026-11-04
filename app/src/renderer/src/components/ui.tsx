@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { droppedPaths, reel } from '../api'
 import { Icon } from './icons'
 
@@ -36,7 +36,7 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
     return () => clearTimeout(t)
   }, [text, kind, onClose])
   return (
-    <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast">
+    <div className={`toast${kind === 'error' ? ' error' : ''}`} role={kind === 'error' ? 'alert' : 'status'} data-testid="toast" data-over-dialogs>
       <span>{text}</span>
       {kind === 'error' && (
         <button className="icon-btn on-dark" onClick={onClose} aria-label="Close" title="Close">
@@ -47,23 +47,67 @@ export function Toast({ text, kind, onClose }: { text: string; kind?: 'error' | 
   )
 }
 
-// Modals can stack (a Confirm over a dialog); the title bar stays dimmed until the last one closes.
-let openModals = 0
+/** Open dialogs in the order they opened. The newest one decides what is inert. */
+const openDialogs: HTMLElement[] = []
+/** Elements a dialog made inert. Inert set by anything else is never undone here. */
+const madeInert = new Set<HTMLElement>()
+/** A node added next to the page while a dialog is open (a toast, the drop overlay) gets the same rule. */
+const added = new MutationObserver(holdBackground)
 
-/** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it. */
+/**
+ * Makes everything outside the newest open dialog inert: each sibling of its backdrop and of each
+ * ancestor, except a toast (data-over-dialogs), which stays readable and closable. Undoes what no
+ * longer applies, so the page comes back only when the last dialog closes, in whatever order.
+ */
+function holdBackground(): void {
+  added.disconnect()
+  const behind = new Set<HTMLElement>()
+  for (let branch = openDialogs.at(-1)?.parentElement; branch?.parentElement; branch = branch.parentElement) {
+    added.observe(branch.parentElement, { childList: true })
+    for (const sibling of branch.parentElement.children) {
+      if (sibling instanceof HTMLElement && sibling !== branch && !sibling.hasAttribute('data-over-dialogs') && (madeInert.has(sibling) || !sibling.inert)) behind.add(sibling)
+    }
+  }
+  for (const el of madeInert) {
+    if (behind.has(el)) continue
+    el.inert = false
+    madeInert.delete(el)
+  }
+  for (const el of behind) {
+    el.inert = true
+    madeInert.add(el)
+  }
+}
+
+/** Keyboard-reachable controls inside `root`, in document order. */
+function tabbable(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')).filter(
+    (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0
+  )
+}
+
+/**
+ * A dialog. Esc and a click outside close it (when it can be closed); focus moves into it, Tab and
+ * Shift+Tab wrap inside it, and everything behind it is inert until the last open dialog closes.
+ * The Windows title bar strip stays dimmed for as long as any dialog is open.
+ */
 export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (openModals++ === 0) void reel.app.dimTitleBar(true)
-    return () => {
-      if (--openModals === 0) void reel.app.dimTitleBar(false)
-    }
-  }, [])
-  useEffect(() => {
+  // A layout effect: its cleanup runs before React removes the dialog, so holdBackground never sees a
+  // detached dialog on top of the stack (and the page is inert before the first paint).
+  useLayoutEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
     const prev = document.activeElement as HTMLElement | null
-    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button')
-    first?.focus()
-    return () => prev?.focus?.()
+    if (openDialogs.push(dialog) === 1) void reel.app.dimTitleBar(true)
+    holdBackground()
+    ;(dialog.querySelector<HTMLElement>('[data-autofocus]') ?? dialog.querySelector<HTMLElement>('button'))?.focus()
+    return () => {
+      openDialogs.splice(openDialogs.indexOf(dialog), 1)
+      if (!openDialogs.length) void reel.app.dimTitleBar(false)
+      holdBackground() // before focusing: an inert element cannot take focus
+      prev?.focus()
+    }
   }, [])
   useEffect(() => {
     if (!onClose) return
@@ -78,7 +122,22 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
   }, [onClose])
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal aria-labelledby={labelledBy} data-testid={testid}>
+      <div
+        ref={ref}
+        className={`modal${wide ? ' wide' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return
+          const controls = tabbable(e.currentTarget)
+          if (e.target !== (e.shiftKey ? controls[0] : controls.at(-1))) return
+          e.preventDefault()
+          ;(e.shiftKey ? controls.at(-1) : controls[0])?.focus()
+        }}
+        role="dialog"
+        aria-modal
+        aria-labelledby={labelledBy}
+        data-testid={testid}
+      >
         {children}
       </div>
     </div>
@@ -87,9 +146,10 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
 
 /** "Are you sure?" with the safe choice in focus. */
 export function Confirm(props: { title: string; body: string; yes: string; no: string; danger?: boolean; onYes: () => void; onNo: () => void }) {
+  const titleId = useId()
   return (
-    <Modal onClose={props.onNo} testid="confirm">
-      <h2>{props.title}</h2>
+    <Modal onClose={props.onNo} testid="confirm" labelledBy={titleId}>
+      <h2 id={titleId}>{props.title}</h2>
       <p className="muted">{props.body}</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn ghost" onClick={props.onNo} data-autofocus data-testid="confirm-no">
