@@ -10,7 +10,7 @@ import { Icon } from '../components/icons'
 import { SubtitleSample } from '../components/Player'
 import { SubtitleLines } from '../components/SubtitleLines'
 import { previewText, subtitleLines } from '../../../shared/subtitle-lines'
-import { CAPTION_PRESETS, applyPreset, lookFromStyle, presetOf, sampleLine, sampleLook, type SubtitleLook } from '../../../shared/caption-presets'
+import { CAPTION_PRESETS, applyPreset, lookFromStyle, lookPosition, presetOf, sampleLine, sampleLook, type SubtitleLook } from '../../../shared/caption-presets'
 
 export type Tab = 'cut' | 'captions' | 'music' | 'broll' | 'cover' | 'post'
 const TABS: { key: Tab; label: string }[] = [
@@ -56,7 +56,7 @@ const SIZES = [
 ]
 const POSITIONS = [
   { key: 'higher', label: 'Higher', position: 0.66 },
-  { key: 'lower', label: 'Lower', position: 0.75 }
+  { key: 'lower', label: 'Lower', position: 0.75 } // picking it writes the look's own position (lookPosition)
 ]
 const COLORS = [
   { key: 'white', label: 'White', color: '#FFFFFF' },
@@ -466,7 +466,7 @@ export function ShowMeHow({
                     label="Position"
                     value={positionKey(capStyle)}
                     options={POSITIONS}
-                    onPick={(k) => setCapStyle({ position: POSITIONS.find((x) => x.key === k)!.position })}
+                    onPick={(k) => setCapStyle({ position: k === 'lower' ? lookPosition(capStyle) : POSITIONS.find((x) => x.key === k)!.position })}
                   />
                   <h3>Colour</h3>
                   <Seg testid="cap-color" label="Colour" value={colorKey(capStyle)} options={COLORS} onPick={(k) => setCapStyle({ color: COLORS.find((x) => x.key === k)!.color })} />

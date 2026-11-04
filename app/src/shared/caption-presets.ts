@@ -2,7 +2,7 @@
 // (engine/reelengine/captions.py draws them); Size, Position and Colour, or a note to the AI editor, fine-tune
 // from there. All of them use the one subtitle face the engine ships and the preview loads.
 import type { Word } from './api'
-import { BOX_PAD, MARGIN_FRAC, fitCaption, type Measure } from './caption-fit'
+import { BOX_PAD, SAFE_WIDTH, fitCaption, type Measure } from './caption-fit'
 
 type CaptionStyle = Record<string, unknown>
 
@@ -11,21 +11,24 @@ const BASE = { font: 'Montserrat SemiBold', outlineColor: '#000000', shadow: 0, 
 export const CAPTION_PRESETS: { key: string; label: string; style: CaptionStyle }[] = [
   // engine/reelengine/project.py DEFAULT_CAPTION_STYLE
   { key: 'clean', label: 'Clean', style: { ...BASE, size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8 } },
-  { key: 'bold-pop', label: 'Bold pop', style: { ...BASE, size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true } },
+  // 0.73 is ai/src/project.ts lowestCaptionPosition at size 126 and outline 12: at BASE's 0.75 a cue that wraps
+  // reaches under Instagram's caption and username
+  { key: 'bold-pop', label: 'Bold pop', style: { ...BASE, size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true, position: 0.73 } },
   { key: 'karaoke', label: 'Karaoke', style: { ...BASE, size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, highlight: '#FFD60A' } },
   { key: 'boxed', label: 'Boxed', style: { ...BASE, size: 96, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, box: true } },
   { key: 'minimal', label: 'Minimal', style: { ...BASE, size: 84, maxWords: 4, case: 'lower', color: '#FFFFFF', outline: 5 } }
 ]
 
 /**
- * The style after picking look `key` over `current`. Position always carries over. Size carries over only
- * when the person picked it in the Size row (`sizePicked`); otherwise the look's own size applies.
+ * The style after picking look `key` over `current`. Position carries over once it was moved off the current
+ * look's own position; otherwise the new look's own position applies. Size carries over only when the person
+ * picked it in the Size row (`sizePicked`); otherwise the look's own size applies.
  */
 export function applyPreset(key: string, current: CaptionStyle = {}): CaptionStyle {
   const preset = CAPTION_PRESETS.find((p) => p.key === key)
   if (!preset) throw new Error(`no caption preset "${key}"`)
   const style: CaptionStyle = { ...preset.style, preset: key }
-  if (current.position != null) style.position = current.position
+  if (current.position != null && current.position !== lookPosition(current)) style.position = current.position
   if (current.sizePicked === true && current.size != null) Object.assign(style, { size: current.size, sizePicked: true })
   return style
 }
@@ -47,6 +50,11 @@ export function presetOf(st: CaptionStyle): string | null {
   if (CAPTION_PRESETS.some((p) => p.key === st.preset)) return st.preset as string
   const like = CAPTION_PRESETS.find((p) => LOOK_KEYS.every((k) => drawn(st, k) === drawn(p.style, k)))
   return like?.key ?? null
+}
+
+/** The default position of the look `st` is drawn as (presetOf), or 0.75 when it matches none. */
+export function lookPosition(st: CaptionStyle): number {
+  return Number(CAPTION_PRESETS.find((p) => p.key === presetOf(st))?.style.position ?? 0.75)
 }
 
 /** The subtitle look, in the engine's own units (1080 x 1920 frame). */
@@ -88,7 +96,7 @@ function applyCase(text: string, c: string): string {
 /** The size and lines the engine gives `text` in this look (captions.render_ass at 1080 wide). */
 export function fitLook(look: SubtitleLook, text: string, measure: Measure): { size: number; lines: string[] } {
   const outline = look.box ? Math.max(look.outline, BOX_PAD) : look.outline
-  return fitCaption(applyCase(text, look.case), look.size, 1080 * (1 - 2 * MARGIN_FRAC), outline, measure)
+  return fitCaption(applyCase(text, look.case), look.size, SAFE_WIDTH, outline, measure)
 }
 
 /**

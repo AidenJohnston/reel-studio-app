@@ -7,16 +7,19 @@ describe('caption presets', () => {
     const base = { font: 'Montserrat SemiBold', outlineColor: '#000000', shadow: 0, position: 0.75 }
     expect(CAPTION_PRESETS.map((p) => applyPreset(p.key))).toEqual([
       { ...base, preset: 'clean', size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8 },
-      { ...base, preset: 'bold-pop', size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true },
+      { ...base, preset: 'bold-pop', size: 126, maxWords: 2, case: 'upper', color: '#FFFFFF', outline: 12, pop: true, position: 0.73 },
       { ...base, preset: 'karaoke', size: 105, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, highlight: '#FFD60A' },
       { ...base, preset: 'boxed', size: 96, maxWords: 3, case: 'upper', color: '#FFFFFF', outline: 8, box: true },
       { ...base, preset: 'minimal', size: 84, maxWords: 4, case: 'lower', color: '#FFFFFF', outline: 5 }
     ])
   })
 
-  it('picking a look keeps Position, and a Size the person picked through every switch', () => {
+  it('picking a look keeps a Position moved off the look\'s own, and a Size the person picked through every switch', () => {
     const clean = applyPreset('clean')
     expect(applyPreset('bold-pop', { ...clean, position: 0.66 })).toMatchObject({ preset: 'bold-pop', size: 126, position: 0.66 })
+    // a position nobody moved follows the look, both ways
+    expect(applyPreset('clean', applyPreset('bold-pop', clean)).position).toBe(0.75)
+    expect(applyPreset('bold-pop', { ...clean, preset: undefined }).position).toBe(0.73)
     // Big in the Size row (ShowMeHow writes size and sizePicked), then Bold pop, whose own size is Big, then Minimal
     const minimal = applyPreset('minimal', applyPreset('bold-pop', { ...clean, size: 126, sizePicked: true }))
     expect(minimal).toMatchObject({ preset: 'minimal', size: 126, sizePicked: true })
@@ -44,17 +47,29 @@ describe('caption presets', () => {
   // The same stand-in measurer was handed to engine captions.fit (with captions.apply_case and, for a box,
   // the outline raised to BOX_PAD as render_ass does); these are its results at 1080 wide.
   const measure: Measure = (text, size, outline) => [...text].reduce((w, ch) => w + (ch === ' ' ? 0.25 : 0.6), 0) * (size / 1.562) + 2 * outline
-  const ENGINE: Record<string, { size: number; lines: string[] }> = {
-    clean: { size: 67, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    'bold-pop': { size: 119, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
-    karaoke: { size: 67, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    boxed: { size: 66, lines: ['INTERNATIONALIZATION EVERYWHERE TODAY'] },
-    minimal: { size: 67, lines: ['internationalization everywhere today'] }
+  const ENGINE: Record<string, Record<string, { size: number; lines: string[] }>> = {
+    'Internationalization everywhere today': {
+      clean: { size: 101, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      'bold-pop': { size: 100, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      karaoke: { size: 101, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      boxed: { size: 96, lines: ['INTERNATIONALIZATION', 'EVERYWHERE TODAY'] },
+      minimal: { size: 57, lines: ['internationalization everywhere today'] }
+    },
+    // the widest three-word line in the eval clips: it now ends clear of Instagram's right-side buttons
+    "Someone's personal brand": {
+      clean: { size: 89, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      'bold-pop': { size: 88, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      karaoke: { size: 89, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      boxed: { size: 86, lines: ["SOMEONE'S PERSONAL BRAND"] },
+      minimal: { size: 84, lines: ["someone's personal brand"] }
+    }
   }
 
   it('the preview sizes and breaks each look\'s line where the engine does', () => {
-    for (const p of CAPTION_PRESETS) {
-      expect([p.key, fitLook(lookFromStyle(applyPreset(p.key)), 'Internationalization everywhere today', measure)]).toEqual([p.key, ENGINE[p.key]])
+    for (const [text, byLook] of Object.entries(ENGINE)) {
+      for (const p of CAPTION_PRESETS) {
+        expect([text, p.key, fitLook(lookFromStyle(applyPreset(p.key)), text, measure)]).toEqual([text, p.key, byLook[p.key]])
+      }
     }
   })
 })

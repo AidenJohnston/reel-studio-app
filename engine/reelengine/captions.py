@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from . import tools
+from . import tools, verify
 from .proto import EngineError
 
 MAX_WORDS = 3
@@ -486,12 +486,20 @@ class Measurer:
 
 def fit(text: str, base: float, safe_w: float, outline: float, meas: Measurer):
     """(size, lines). Shrink-only; wrap to two lines rather than shrink below MIN_SHRINK."""
+    def shrunk(fs: float, lines: list) -> int:
+        # The ratio scales the outline along with the letters, and drawn widths are not linear in size,
+        # so the estimate can still overhang by a few pixels.
+        fs = max(10, int(fs))
+        while fs > 10 and max(meas.width(t, fs, outline) for t in lines) > safe_w:
+            fs -= 1
+        return fs
+
     w = meas.width(text, base, outline)
     if w <= safe_w:
         return int(base), [text]
-    fs = base * safe_w / w
+    fs = shrunk(base * safe_w / w, [text])
     if fs >= base * MIN_SHRINK or " " not in text:
-        return max(10, int(fs)), [text]
+        return fs, [text]
     parts = text.split(" ")
     best = None
     for k in range(1, len(parts)):
@@ -500,8 +508,9 @@ def fit(text: str, base: float, safe_w: float, outline: float, meas: Measurer):
         if best is None or widest < best[0]:
             best = (widest, [a, b])
     widest, lines = best
-    fs = base if widest <= safe_w else base * safe_w / widest
-    return max(10, int(fs)), lines
+    if widest <= safe_w:
+        return int(base), lines
+    return shrunk(base * safe_w / widest, lines), lines
 
 
 # --- ASS --------------------------------------------------------------------------------------
@@ -633,7 +642,9 @@ def render_ass(cues: list, cap: dict, width: int, height: int, position_spans=No
     outline *= scale
     shadow *= scale
     margin = MARGIN_FRAC * width
-    safe_w = width - 2 * margin
+    # a centred line also stays clear of verify's right edge, by one more pixel because the cue
+    # report rounds each box to whole pixels
+    safe_w = 2 * min(width / 2 - margin, verify.ig_right_limit(width) - width / 2 - 1)
     meas = Measurer(fpath, metrics)
     head = (
         "[Script Info]\n"

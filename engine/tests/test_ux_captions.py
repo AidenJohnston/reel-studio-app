@@ -2,7 +2,7 @@
 import re
 
 from conftest import mkwords
-from reelengine import captions, project
+from reelengine import captions, project, verify
 
 
 def _style_line(ass: str) -> list:
@@ -32,6 +32,44 @@ def test_default_render_is_solid_outline_no_grey_shadow():
     x, y, w, h = report[0]["box"]
     assert abs((y + h / 2) - 1440) <= 2   # centred at 0.75 of 1920
     assert y + h <= 1920 - 415            # bottom clears the 425 px margin (+ outline)
+
+
+def test_the_widest_default_line_stays_clear_of_instagrams_right_buttons():
+    # the widest three-word cue in the eval clips; at the old 6.5% margins it ended at x 1007
+    words = mkwords([(0.0, 0.4, "someone's"), (0.4, 0.8, "personal"), (0.8, 1.3, "brand.")])
+    _, report, _, _ = captions.render_ass(captions.build_cues(words, {}), {}, 1080, 1920)
+    assert verify.caption_report(report, (1080, 1920))[0] == "PASS"
+
+
+# The looks in app/src/shared/caption-presets.ts at the lowest position ai/src/project.ts lowestCaptionPosition
+# gives each (ai/test/tools.test.ts). Karaoke draws the same box as Clean.
+LOOKS_AT_LOWEST = [
+    ({"size": 105, "maxWords": 3, "case": "upper", "outline": 8}, 0.75),                 # Clean
+    ({"size": 126, "maxWords": 2, "case": "upper", "outline": 12, "pop": True}, 0.73),   # Bold pop
+    ({"size": 96, "maxWords": 3, "case": "upper", "outline": 8, "box": True}, 0.75),     # Boxed
+    ({"size": 84, "maxWords": 4, "case": "lower", "outline": 5}, 0.76),                  # Minimal
+]
+
+
+def _bottom(words, style):
+    cap = {"style": style}
+    _, report, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    x, y, w, h = report[0]["box"]
+    return report[0]["lines"], y + h
+
+
+def test_a_cue_wrapped_to_two_lines_at_the_lowest_position_clears_instagrams_caption():
+    band = 1920 * (1 - verify.IG_BOTTOM_FRAC)
+    three = mkwords([(0.0, 0.5, "photography"), (0.5, 1.0, "fundamentals"), (1.0, 1.5, "explained")])
+    four = mkwords([(0.0, 0.6, "internationalization"), (0.6, 1.2, "everywhere"), (1.2, 1.8, "internationalization"),
+                    (1.8, 2.4, "everywhere")])
+    for style, lowest in LOOKS_AT_LOWEST:
+        lines, bottom = _bottom(four if style["maxWords"] == 4 else three, {**style, "position": lowest})
+        assert lines == 2 and bottom <= band, (style, lines, bottom)
+    # at 0.77, the limit for one line, a Clean cue that wraps reaches under Instagram's caption (y 1579)
+    words = mkwords([(0.0, 0.5, "absolutely"), (0.5, 1.0, "unbelievable"), (1.0, 1.5, "results")])
+    lines, bottom = _bottom(words, {**LOOKS_AT_LOWEST[0][0], "position": 0.77})
+    assert lines == 2 and bottom > band
 
 
 def test_box_style_draws_an_opaque_box():
