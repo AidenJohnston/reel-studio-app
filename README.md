@@ -44,6 +44,30 @@ version, or leave it as it is.
 The demo reel in these pictures is a cartoon presenter with a synthetic voice and a synthesised song, all made for
 this project. Credits: [docs/images/CREDITS.md](docs/images/CREDITS.md).
 
+## Where it's going
+
+Today Reel Studio makes one finished reel from one raw video. We're building it into a full studio for making
+short-form content, growing an audience with it and posting it everywhere. Several agents work on your computer at
+once, and you never manage them. You see versions of your video and steer them with notes.
+
+- **Your content stays yours.** Everything runs on your computer, and every part of Reel Studio is open source under
+  the AGPL, so you, or your company's security team, can read exactly what happens to your videos. Anyone who ships a
+  changed copy, or runs one as a service, has to publish their changes under the same license.
+- **It learns from every note.** A fix you make once becomes a rule that every later edit is checked against, so you
+  shouldn't have to give the same note twice.
+- **It tests versions for you.** Testing short-form by hand means posting every version. Reel Studio will cut several
+  versions of one video, with a different hook, first line or pace, and rank them before you post.
+- **You see every change right away.** We're building our own FFmpeg pipeline for drafts. A ranking model we train
+  picks the frames that matter most, those render first and the rest fill in after, so you watch the agents work
+  instead of waiting for a full render. The render scheduler will be specified and model-checked in TLA+, so a fast
+  draft never drops or reorders a frame.
+
+We're also studying why people keep watching a short, which says more than whether they clicked on it. From a large
+set of public short-form videos, their transcripts and how each one did, we're distilling a method a model can apply
+to any script: why one hook holds people and another loses them. Reel Studio will use it to review your drafts the way
+different viewers would, and we'll measure those reviews against how videos actually performed rather than having one
+model argue with another.
+
 ## Download and install
 
 Get the latest installer from the [Releases page](https://github.com/AidenJohnston/reel-studio-app/releases/latest).
