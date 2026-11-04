@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
 import { OWNER_LOCK } from '../src/main/owner'
 import type { IpcMainInvokeEvent } from 'electron'
+import type { AttachResult } from '../src/shared/api'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
 import { projectDir } from '../src/main/store'
@@ -131,7 +132,8 @@ describe('project reservations', () => {
       clipboardImage: async () => null,
       choose: async () => null
     })
-    const shot = (name: string) => handlers.get('notes:attachData')!({} as IpcMainInvokeEvent, slug, { name, mime: 'image/png', bytes: new Uint8Array([1]) })
+    // the handlers are registered as returning unknown (Electron's ipcMain.handle); attachData returns this
+    const shot = (name: string) => handlers.get('notes:attachData')!({} as IpcMainInvokeEvent, slug, { name, mime: 'image/png', bytes: new Uint8Array([1]) }) as Promise<AttachResult>
     const first = shot('one.png')
     const second = shot('two.png')
     // a refused one ends the race with its error
