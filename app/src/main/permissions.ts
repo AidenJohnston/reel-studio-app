@@ -122,7 +122,8 @@ export function createPermissions(d: PermissionDeps) {
       await make()
       now = await probeFolder(d.root(), d.platform, d.probe)
     }
-    return now === 'allowed' && makeFailed ? 'unusable' : now
+    // a folder that could not be made is still missing, which reads as not asked: say it can't be used
+    return makeFailed && (now === 'allowed' || now === 'not-asked') ? 'unusable' : now
   }
 
   const showTest = async (): Promise<void> => {

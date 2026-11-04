@@ -32,6 +32,9 @@ it('on Windows an EPERM folder is one to replace, not a Mac privacy switch to tu
   expect(await probeFolder('\\\\server\\share', 'win32', probe)).toBe('unusable')
   const perms = mac({ platform: 'win32', touched: true, probe })
   expect((await perms.status()).folder).toBe('unusable')
+  // the folder could not be made at all: it stays missing, and Allow must not be offered forever
+  const missing = mac({ platform: 'win32', ensureRoot: async () => Promise.reject(err('EPERM')), probe: async () => Promise.reject(err('ENOENT')) })
+  expect((await missing.allowFolder()).folder).toBe('unusable')
 })
 
 it('never looks at the folder before Allow, because looking is what makes macOS ask', async () => {
