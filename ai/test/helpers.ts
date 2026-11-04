@@ -3,7 +3,8 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
+import { randomUUID } from 'node:crypto';
+import { approxOutputTimes, EngineHost, EngineProgress, Transcript, Word, withDefaults, Project, CompletionRequest, CompletionResponse, ModelProvider, ToolCall } from '../src';
 
 export function tmpDir(prefix = 'rs ai '): string {
   // Spaces + non-ASCII on purpose (the dev box user folder has a space).
@@ -84,6 +85,8 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** what `inspect-render` answers per render id: that render's word times and layer records */
+  private readonly rendered = new Map<string, { words: { id: string; s: number; e: number }[]; layers: unknown[] }>();
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -121,7 +124,20 @@ export class FakeHost implements EngineHost {
         const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
         await fsp.mkdir(vd, { recursive: true });
         await fsp.writeFile(path.join(vd, draft ? 'draft.mp4' : 'export.mp4'), 'fake');
-        return { version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, ...this.renderExtra };
+        const renderId = `r_${randomUUID().replaceAll('-', '')}`;
+        const { cut } = withDefaults(p);
+        const words = await fsp.readFile(path.join(dir, 'work', 'transcript.json'), 'utf8')
+          .then((s) => [...approxOutputTimes(JSON.parse(s), cut.keep, cut.gapCap)].map(([id, w]) => ({ id, ...w })), () => []);
+        const layers = await fsp.readFile(path.join(dir, 'work', 'layers', 'layers.json'), 'utf8').then((s) => JSON.parse(s).items, () => []);
+        this.rendered.set(renderId, { words, layers });
+        await fsp.writeFile(path.join(vd, draft ? 'render_draft.json' : 'render.json'), JSON.stringify({ renderId, file: draft ? 'draft.mp4' : 'export.mp4' }));
+        const jobId = args.includes('--job-id') ? args[args.indexOf('--job-id') + 1] : null;
+        return { renderId, version: v, preview: draft, draft, duration: 12.3, verify: { ok: true }, receipt: { jobId, renderId, version: v, facts: [] }, ...this.renderExtra };
+      }
+      case 'inspect-render': {
+        const r = this.rendered.get(args[args.indexOf('--render-id') + 1]);
+        if (!r) throw { code: 'RENDER_MISMATCH', userMessage: 'That preview was replaced by a newer one.' };
+        return { timeline: { words: r.words }, layers: r.layers };
       }
       case 'frames': {
         const times = args[args.indexOf('--times') + 1].split(',').map(Number);
