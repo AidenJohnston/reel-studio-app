@@ -43,13 +43,18 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
     (project_dir / "work").mkdir(parents=True, exist_ok=True)
     (project_dir / "versions").mkdir(parents=True, exist_ok=True)
     steady = []
+    # the app shows preparing as its own step (main/index.ts), so its percent covers only the clips re-encoded,
+    # by length; copying is instant
+    prep = [i for i, (_, info) in enumerate(infos, start=1) if info["variableFrameRate"] and not info["hdr"]]
+    prep_total = sum(infos[i - 1][1]["duration"] for i in prep) or 1.0
     for i, (f, info) in enumerate(infos, start=1):
         dst = media / _media_name(i, f)
         # Only a clip whose frame timing varies is re-encoded, to a steady 30 fps. Steady clips are copied
         # whatever their rates, and the renderer turns each into the project rate. An HDR clip is copied
         # too: this 8-bit encode would flatten its colour, and the renderer already reads it as it is.
-        if info["variableFrameRate"] and not info["hdr"]:
-            progress("init", 100 * (i - 1) / len(infos), PREPARING, force=True)
+        if i in prep:
+            done = sum(infos[k - 1][1]["duration"] for k in prep if k < i)
+            progress("init", 100 * done / prep_total, PREPARING, force=True)
             dst = dst.with_suffix(".mp4")
             dst.parent.mkdir(parents=True, exist_ok=True)
             part = dst.with_suffix(".part.mp4")
@@ -63,7 +68,7 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
                      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                      "-progress", "pipe:1", "-nostats", str(part)],
                     info["duration"],
-                    lambda pct: progress("init", (100 * (i - 1) + pct) / len(infos), PREPARING),
+                    lambda pct: progress("init", (100 * done + pct * info["duration"]) / prep_total, PREPARING),
                     max(300, info["duration"] * 10), "prepare constant frame rate video")
                 part.replace(dst)
             finally:
