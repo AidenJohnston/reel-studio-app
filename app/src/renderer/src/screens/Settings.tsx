@@ -12,12 +12,17 @@ import { useNotify } from '../App'
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
   const notify = useNotify()
   const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null)
+  // The switch moves when pressed, not when main has saved it: main can be busy with a video for a while.
+  const [fasterExports, setFasterExports] = useState(info.fasterExports)
+  useEffect(() => setFasterExports(info.fasterExports), [info.fasterExports])
   const [savingExports, setSavingExports] = useState(false)
   const toggleExports = async (on: boolean) => {
+    setFasterExports(on)
     setSavingExports(true)
     try {
       onInfo(await reel.app.setFasterExports(on))
     } catch (e) {
+      setFasterExports(!on)
       notify(userMessage(e), 'error')
     } finally {
       setSavingExports(false)
@@ -98,7 +103,7 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
       <section className="panel">
         <h2>Exports</h2>
         <label className="toggle" style={{ minHeight: 44 }}>
-          <input type="checkbox" checked={info.fasterExports} disabled={savingExports}
+          <input type="checkbox" checked={fasterExports} disabled={savingExports}
             onChange={(e) => void toggleExports(e.target.checked)} aria-describedby="export-rate-help" data-testid="faster-exports" />
           Faster exports (less smooth motion)
         </label>
