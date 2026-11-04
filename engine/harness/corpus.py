@@ -246,6 +246,9 @@ def build_synthetic(ffmpeg: str, reference, spec: dict, take_dir: Path, root: Pa
     (proj_dir / "work" / "transcript.json").write_text(
         json.dumps({"language": "en", "model": "synthetic", "words": words}, indent=1), encoding="utf-8")
     base = json.loads((proj_dir / "project.json").read_text(encoding="utf-8"))
+    if spec.get("transfer") == "hlg" and not base["sources"][0].get("hdr"):
+        raise RuntimeError(f"{take_dir.name}: the engine probes this HLG stand-in as SDR, so it would "
+                           f"not exercise the HDR path ({enc['encoder']})")
     steps = []
     (take_dir / "states").mkdir(exist_ok=True)
     for k, (note, st, moment) in enumerate(session_states(base, words, retake, spec.get("keepSeconds"))):
