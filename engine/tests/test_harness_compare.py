@@ -145,11 +145,14 @@ def test_reference_copy_is_refused_once_edited(tmp_path):
 HLG = {"width": 2160, "height": 3840, "codec": "hevc", "transfer": "hlg", "seed": 1}
 
 
-def fake_take(d, hdr: bool, rotation: int = 0, spec=None):
+def fake_take(d, hdr: bool, rotation: int = 0, spec=None, state_hdr=None):
     (d / "project" / "work").mkdir(parents=True)
-    (d / "project" / "project.json").write_text(json.dumps({"sources": [{"id": "s1", "hdr": hdr, "rotation": rotation}]}))
+    (d / "states").mkdir()
+    src = lambda h: json.dumps({"sources": [{"id": "s1", "hdr": h, "rotation": rotation}]})
+    (d / "project" / "project.json").write_text(src(hdr))
+    (d / "states" / "00.json").write_text(src(hdr if state_hdr is None else state_hdr))
     (d / "project" / "work" / "transcript.json").write_text("{}")
-    (d / "session.json").write_text('{"steps": []}')
+    (d / "session.json").write_text('{"steps": [{"state": "states/00.json"}]}')
     if spec is not None:
         (d / corpus.SPEC_FILE).write_text(json.dumps({"key": corpus.spec_key(spec)}))
     return d
@@ -167,6 +170,9 @@ def test_hlg_take_the_engine_reads_as_sdr_is_refused(tmp_path):
     with pytest.raises(RuntimeError, match="hdr=False"):
         corpus.validate(HLG, fake_take(tmp_path / "a", hdr=False, spec=HLG))
     corpus.validate(HLG, fake_take(tmp_path / "b", hdr=True, spec=HLG))
+    # the states are what both engines render: a stale one is refused even when the project is right
+    with pytest.raises(RuntimeError, match="states/00.json: hdr=False"):
+        corpus.validate(HLG, fake_take(tmp_path / "s", hdr=True, spec=HLG, state_hdr=False))
     with pytest.raises(RuntimeError, match="rotation"):
         corpus.validate({"rotation": 90}, fake_take(tmp_path / "c", hdr=False, rotation=0))
 
@@ -184,6 +190,8 @@ def fake_reference(d):
 
 def test_reference_cache_whose_files_changed_is_refused(tmp_path):
     assert replay.reference_ready(tmp_path / "none", "none", PINS) is False
+    with pytest.raises(Refusal, match="lost its manifest"):           # at check time it must exist
+        replay.reference_ready(tmp_path / "none", "none", PINS, require=True)
     d = fake_reference(tmp_path / "k1")
     assert replay.reference_ready(d, "k1", PINS) is True
     (d / "export.mp4").write_bytes(b"another render")
@@ -202,6 +210,8 @@ def test_preview_sizes_follow_the_output_format():
     fmt = {"width": 1080, "height": 1920}
     assert replay.preview_size(fmt, 0.5) == (540, 960)
     assert replay.still_size((540, 960), 540) == (540, 960)
+    # a landscape draft: FFmpeg's -2 rounds 151.875 * 2 to 304, not down to 302
+    assert replay.still_size((960, 540), 540) == (540, 304)
 
 
 def test_still_of_the_wrong_size_fails_before_any_comparison(tmp_path):
