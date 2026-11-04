@@ -84,6 +84,15 @@ def test_level_delta_reads_half_volume_as_6_db_and_ignores_pauses():
     assert compare.level_delta_db(tone, cand, rate, 0.1, -45.0) == pytest.approx(6.02, abs=0.01)
 
 
+def test_level_delta_counts_the_last_partial_slice():
+    rate = 48000
+    n = rate + rate // 20                                     # 1.05 s: ten full slices and half of one
+    tone = 0.5 * np.sin(2 * np.pi * 220 * np.arange(n) / rate)
+    cut_short = tone.copy()
+    cut_short[rate:] = 0.0                                    # the closing 50 ms went silent
+    assert compare.level_delta_db(tone, cut_short, rate, 0.1, -45.0) > 20
+
+
 def test_timestamps_match_reports_count_and_first_slip():
     ref = [i / 30 for i in range(30)]
     assert compare.timestamps_match(ref, list(ref), tol=1e-6) is None

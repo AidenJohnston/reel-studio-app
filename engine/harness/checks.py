@@ -9,6 +9,7 @@ and for video the audio at the same offset with close levels.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from pathlib import Path
 from typing import Optional
@@ -83,8 +84,13 @@ def check_final(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list
         return _result([], failures, {})
     band = _band(captions, w, h, 1.0)
     tally = Tally()
-    for i, (a, b) in enumerate(zip(media.iter_frames(ffmpeg, ref, w, h), media.iter_frames(ffmpeg, cand, w, h))):
-        tally.add(rp[i] if i < len(rp) else i, compare.frame_metrics(a, b, band))
+    n = 0
+    for a, b in itertools.zip_longest(media.iter_frames(ffmpeg, ref, w, h), media.iter_frames(ffmpeg, cand, w, h)):
+        if a is None or b is None:
+            failures.append(f"decoded frames differ in number after frame {n}")
+            break
+        tally.add(rp[n] if n < len(rp) else n, compare.frame_metrics(a, b, band))
+        n += 1
     rows = [(m, tally.mins[m], compare.verdict(tally.mins[m], th.get(k)), tally.where.get(m))
             for m, k in (("framePsnr", "psnrMinDb"), ("captionPsnr", "captionPsnrMinDb"))]
     return _result(rows, failures, {})
@@ -116,6 +122,7 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
     want = set(picked)
     cand_frames = media.iter_frames(ffmpeg, cand, w, h)
     last = max(picked, default=-1)
+    compared = 0
     for i, a in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i > last:
             break
@@ -125,12 +132,17 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
         if b is None:
             break
         tally.add(rp_all[i], compare.frame_metrics(a, b, band))
+        compared += 1
+    if compared != len(picked) or next(cand_frames, None) is not None:
+        failures.append(f"decoded {compared} comparable frames, expected {len(picked)}")
     rows = _preview_rows(tally, th)
     ra = media.audio_mono(ffmpeg, ref, start=start, duration=len(picked) / fps)
     ca = media.audio_mono(ffmpeg, cand)
     if abs(len(ca) - len(ra)) > AUDIO_LENGTH_SLACK:
         failures.append(f"audio is {len(ca) / media.AUDIO_RATE:.3f}s, reference stretch {len(ra) / media.AUDIO_RATE:.3f}s")
-    off_ms = 1000.0 * compare.audio_offset(ra, ca, media.AUDIO_RATE, MAX_LAG)
+    # where the samples sit, plus where the container says they start relative to the picture
+    skew = media.audio_lead(ffprobe, cand) - media.audio_lead(ffprobe, ref)
+    off_ms = 1000.0 * (compare.audio_offset(ra, ca, media.AUDIO_RATE, MAX_LAG) + skew)
     lvl = compare.level_delta_db(ra, ca, media.AUDIO_RATE, LEVEL_WINDOW, LEVEL_FLOOR_DB)
     rows += [("audioOffsetMs", abs(off_ms), compare.verdict(abs(off_ms), maximum=th.get("audioOffsetMaxMs")), None),
              ("audioLevelDb", lvl, compare.verdict(lvl, maximum=th.get("audioLevelMaxDb")), None)]
