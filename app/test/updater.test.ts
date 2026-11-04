@@ -2,6 +2,7 @@
 // "Not now", restarting safely, and what a missing or refused download key does.
 import { createJobManager } from '../src/main/jobs'
 import { AUTO_UPDATES_PAGE, UPDATE_PAGE, newerOnSite, type FetchLike } from '../src/main/update-check'
+import type { ReleaseNote } from '../src/shared/update'
 import { describe, expect, it, vi } from 'vitest'
 import { createUpdater, type PageReason, type UpdateBackend } from '../src/main/updater'
 import { disabledReason, updateMode, type UpdateMemory } from '../src/main/update-machine'
@@ -23,15 +24,17 @@ function setup(
     mode?: 'install' | 'page'
     /** A download key is saved. Default yes. */
     keyed?: boolean
+    /** The notes every answered check carries. */
+    notes?: () => ReleaseNote[]
   } = {}
 ) {
   const installs: number[] = []
   const opened: string[] = []
-  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, ...opts.memory }
+  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [], ...opts.memory }
   let now = 1000
   const key = { saved: opts.keyed ?? true }
   const backend: UpdateBackend = {
-    check: found,
+    check: async () => ({ update: await found(), notes: opts.notes?.() ?? [] }),
     hasKey: async () => key.saved,
     download: async (version, p) => (await (opts.download ?? (async (_v, pr) => [0, 40, 100].forEach(pr)))(version, p)) ?? null,
     verify: opts.verify ?? (async () => undefined),
@@ -271,7 +274,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   const { u } = setup(async () => v013, {
     prepareToQuit: () => new Promise((_resolve, reject) => { fail = reject }),
     load: () => new Promise((resolve) => {
-      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null })
+      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [] })
       reading()
     })
   })
@@ -313,7 +316,7 @@ it.each(['HTTP failure', 'malformed JSON', 'timeout'])('fails if a failed reques
     if (failure === 'timeout') throw new DOMException('The operation timed out', 'TimeoutError')
     return { ok: failure !== 'HTTP failure', status: failure === 'HTTP failure' ? 500 : 200, json: async () => JSON.parse('{broken') }
   })
-  const check = () => newerOnSite(fetch, '0.1.2')
+  const check = async () => (await newerOnSite(fetch, '0.1.2')).update
   const first = setup(check, { memory: { updateCheckedAt: -86_400_000 } })
   await first.u.init()
   await first.u.check('auto')
@@ -462,5 +465,34 @@ describe('the download key', () => {
     expect(u.state()).toMatchObject({ status: 'error', mode: 'page', keyNeeded: false, availableVersion: '0.1.3' })
     expect(showsUpdateButton(u.state())).toBe(true)
     expect(updateAction(u.state())).toBe('open-page')
+  })
+})
+
+describe("What's new", () => {
+  const note = (version: string): ReleaseNote => ({ version, date: '2026-11-04', text: `- ${version}` })
+  it('fails if the notes are lost when up to date or offline, mark the wrong versions new, or survive a test run', async () => {
+    let online = true
+    const a = setup(async () => {
+      if (!online) throw new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')
+      return null
+    }, { notes: () => [note('0.1.2'), note('0.1.1')] })
+    await a.u.init()
+    await a.u.check('button')
+    expect(a.u.state().status).toBe('up-to-date')
+    expect(a.u.state().notes.map((n) => [n.version, n.newer])).toEqual([['0.1.2', false], ['0.1.1', false]])
+
+    online = false
+    const reopened = setup(async () => Promise.reject(new Error('offline')), { memory: a.memory() })
+    await reopened.u.init()
+    await reopened.u.check('button')
+    expect(reopened.u.state().notes.map((n) => n.version)).toEqual(['0.1.2', '0.1.1'])
+
+    const b = setup(async () => v013, { notes: () => [note('0.1.3'), note('0.1.2')] })
+    await b.u.check('button')
+    expect(b.u.state().notes.map((n) => [n.version, n.newer])).toEqual([['0.1.3', true], ['0.1.2', false]])
+
+    const off = setup(async () => null, { memory: a.memory(), disabledReason: 'Updates are off in test runs.' })
+    await off.u.init()
+    expect(off.u.state().notes).toEqual([])
   })
 })

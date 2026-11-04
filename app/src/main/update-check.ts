@@ -9,6 +9,7 @@
 // This file never imports electron, so tests drive it with fakes.
 import { SITE_URL } from '../shared/config'
 import type { UpdateNotice } from '../shared/api'
+import type { ReleaseNote } from '../shared/update'
 
 /** Where the installers are sold. Pages on this origin are the ONLY URLs the notice may open. */
 export const SITE_ORIGIN = SITE_URL
@@ -71,6 +72,36 @@ export function siteLatest(body: unknown): UpdateNotice | null {
   return { version, url: allowedReleaseUrl(url) ?? UPDATE_PAGE }
 }
 
+const NOTE_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+/** Same limits as the update server (site worker, manifest.ts): five notes, 4000 characters each. */
+export const MAX_NOTES = 5
+const MAX_NOTE_LENGTH = 4000
+
+/** A real calendar day in YYYY-MM-DD, or null. */
+function noteDate(d: unknown): string | null {
+  const m = typeof d === 'string' ? NOTE_DATE_RE.exec(d) : null
+  if (!m) return null
+  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  return day.getUTCFullYear() === Number(m[1]) && day.getUTCMonth() === Number(m[2]) - 1 && day.getUTCDate() === Number(m[3]) ? d as string : null
+}
+
+/** The `notes` of latest.json (or of settings saved earlier): only well-formed entries, newest first, at most
+ * five. Anything else is dropped, never thrown. */
+export function releaseNotes(notes: unknown): ReleaseNote[] {
+  if (!Array.isArray(notes)) return []
+  const out: ReleaseNote[] = []
+  for (const n of notes) {
+    if (!n || typeof n !== 'object') continue
+    const { version, date, text } = n as Record<string, unknown>
+    const day = noteDate(date)
+    if (typeof version !== 'string' || !SITE_VERSION_RE.test(version) || !day || typeof text !== 'string' || text.length > MAX_NOTE_LENGTH) continue
+    if (out.some((o) => o.version === version)) continue
+    out.push({ version, date: day, text: text.trim() })
+    if (out.length === MAX_NOTES) break
+  }
+  return out
+}
+
 // ---- the request ---------------------------------------------------------------------------------
 
 export type FetchLike = (url: string, init: { headers: Record<string, string>; signal: AbortSignal; redirect: 'follow' }) => Promise<{
@@ -79,7 +110,7 @@ export type FetchLike = (url: string, init: { headers: Record<string, string>; s
   json(): Promise<unknown>
 }>
 
-export type AskResult = { kind: 'ok'; latest: UpdateNotice } | { kind: 'failed'; why: string }
+export type AskResult = { kind: 'ok'; latest: UpdateNotice; notes: ReleaseNote[] } | { kind: 'failed'; why: string }
 
 /** The exact headers sent. Nothing else: no token, no cookie, no machine or user detail. */
 export function requestHeaders(appVersion: string): Record<string, string> {
@@ -92,17 +123,24 @@ export async function askSite(fetchFn: FetchLike, appVersion: string, timeoutMs 
   try {
     const res = await fetchFn(url, { headers: requestHeaders(appVersion), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' })
     if (!res.ok) return { kind: 'failed', why: `HTTP ${res.status}` }
-    const latest = siteLatest(await res.json())
-    return latest ? { kind: 'ok', latest } : { kind: 'failed', why: 'unreadable latest.json' }
+    const body = await res.json()
+    const latest = siteLatest(body)
+    return latest ? { kind: 'ok', latest, notes: releaseNotes((body as { notes?: unknown }).notes) } : { kind: 'failed', why: 'unreadable latest.json' }
   } catch (e) {
     return { kind: 'failed', why: (e as Error)?.name === 'TimeoutError' ? 'timeout' : String((e as Error)?.message ?? e).slice(0, 120) }
   }
 }
 
-/** The release latest.json names if it is newer than `appVersion`, else null. Throws when the site could not
- * tell, so the updater tries again later. `url` is a local server in the update e2e. */
-export async function newerOnSite(fetchFn: FetchLike, appVersion: string, url = LATEST_URL): Promise<UpdateNotice | null> {
+export interface SiteAnswer {
+  /** The release latest.json names if it is newer than the running app, else null. */
+  update: UpdateNotice | null
+  notes: ReleaseNote[]
+}
+
+/** Asks latest.json. Throws when the site could not tell, so the updater tries again later. `url` is a local
+ * server in the update e2e. */
+export async function newerOnSite(fetchFn: FetchLike, appVersion: string, url = LATEST_URL): Promise<SiteAnswer> {
   const r = await askSite(fetchFn, appVersion, TIMEOUT_MS, url)
   if (r.kind === 'failed') throw new Error(r.why)
-  return isNewer(r.latest.version, appVersion) ? r.latest : null
+  return { update: isNewer(r.latest.version, appVersion) ? r.latest : null, notes: r.notes }
 }

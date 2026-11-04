@@ -1,6 +1,6 @@
 // The pure rules behind main/updater.ts: when to check, what a remembered answer still means, when the
 // strip is snoozed, which copies can install, and the plain words for each failure.
-import type { UpdateMode, UpdateState } from '../shared/update'
+import type { ReleaseNote, UpdateMode, UpdateState } from '../shared/update'
 import { UPDATE_PAGE, allowedReleaseUrl, isNewer } from './update-check'
 
 export const FIRST_CHECK_DELAY_MS = 15_000
@@ -33,9 +33,11 @@ export interface UpdateMemory {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
+  /** The notes the last answered check carried, for What's new while offline. */
+  updateNotes: ReleaseNote[]
 }
 
-export const UPDATE_MEMORY_DEFAULTS: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }
+export const UPDATE_MEMORY_DEFAULTS: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [] }
 
 /** The release an earlier check found, if it is still newer than the running app. A link that is not on the site
  * (a GitHub release page saved by an older version) becomes the update page. */

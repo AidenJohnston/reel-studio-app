@@ -7,6 +7,8 @@ import { reel } from '../api'
 import { useNotify } from '../App'
 import { Icon } from './icons'
 import { openAutoUpdatesPage, useUpdateActions, useUpdateState } from './update'
+import { NoteText } from './About'
+import { FadeScroll } from './ui'
 
 const R = 14
 const RING = 2 * Math.PI * R
@@ -137,6 +139,7 @@ export function UpdateButton() {
   const kind = updateIcon(s)
   const busy = s.status === 'downloading' || pending
   const version = s.downloadedVersion ?? s.availableVersion
+  const coming = s.notes.filter((n) => n.newer)
   const tab = open ? 0 : -1
   const notNow = async (): Promise<void> => {
     if (!version) return
@@ -178,7 +181,7 @@ export function UpdateButton() {
           data-instant={instant || undefined}
           style={pos ? ({ left: pos.left, bottom: pos.bottom, '--room': `${pos.room}px` } as React.CSSProperties) : undefined}
           role="region"
-          aria-label={`Reel Studio ${version ?? ''} update`}
+          aria-label={`What's new in Reel Studio ${version ?? ''}`}
           aria-hidden={!open}
           onPointerEnter={(e) => enter(e, false)}
           onPointerLeave={leave}
@@ -200,6 +203,16 @@ export function UpdateButton() {
               </button>
             )}
           </div>
+          {coming.length > 0 && (
+            <FadeScroll className="update-notes" testid="update-notes">
+              {coming.map((n) => (
+                <section key={n.version}>
+                  <h3>{coming.length === 1 ? "What's new" : `What's new in ${n.version}`}</h3>
+                  <NoteText text={n.text} />
+                </section>
+              ))}
+            </FadeScroll>
+          )}
           {s.keyNeeded && (
             <div className="update-pop-body">
               <p>{AUTO_UPDATES_PITCH}</p>

@@ -28,6 +28,11 @@ let latest = CURRENT
 /** How the /u/ feed answers a request carrying the key. */
 let entitlement: 'ok' | 'bad key' | 'not entitled' = 'ok'
 const seen: { path: string; auth: string | null }[] = []
+/** latest.json's notes, newest first, as the update server writes them. */
+const notes = () => [
+  ...(latest === NEXT ? [{ version: NEXT, date: '2026-11-04', text: '- **Updates install themselves.** Say yes and restart.\n- Captions you can drag' }] : []),
+  { version: CURRENT, date: '2026-10-30', text: 'Send to my phone over a QR code.' }
+]
 
 function refuse(req: IncomingMessage): [number, object] | null {
   const auth = req.headers.authorization ?? ''
@@ -46,7 +51,7 @@ test.beforeAll(async () => {
     const path = (req.url ?? '').split('?')[0]
     seen.push({ path, auth: req.headers.authorization ?? null })
     const json = (status: number, body: object) => void res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body))
-    if (path === '/latest.json') return json(200, { version: latest, url: 'https://getreelstudio.com/update.html', files: {}, notes: [] })
+    if (path === '/latest.json') return json(200, { version: latest, url: 'https://getreelstudio.com/update.html', files: {}, notes: notes() })
     if (!path.startsWith('/u/')) return void res.writeHead(404).end()
     const no = refuse(req)
     if (no) return json(...no)
@@ -90,22 +95,32 @@ test('fails if the daily check carries the key, or a missing, refused or accepte
   try {
     await passFirstRun(page)
     await page.getByTestId('nav-settings').click()
-    const row = page.getByTestId('update-settings')
+    const row = page.getByTestId('about')
     await row.scrollIntoViewIfNeeded()
-    await expect(row).toContainText(`You have Reel Studio ${CURRENT}`)
-    await expect(page.getByTestId('update-releases-link')).toHaveAttribute('href', 'https://getreelstudio.com/update.html')
+    await expect(page.getByTestId('update-settings-text')).toHaveText(`Version ${CURRENT}`)
+    await expect(page.getByTestId('whats-new')).toContainText('Release notes show here after Reel Studio checks for updates.')
 
     latest = NEXT
     await page.getByTestId('update-settings-button').click()
     const button = page.getByTestId('update-button')
     const pop = page.getByTestId('update-popover')
     await expect(button).toContainText('Open download page')
-    await expect(row).toContainText(`Reel Studio ${NEXT} is out.`)
+    await expect(page.getByTestId('update-settings-text')).toHaveText(`Version ${CURRENT} · ${NEXT} is out`)
+    // What's new: the release on offer, marked new, then the installed one.
+    await expect(page.getByTestId(`release-${NEXT}`).locator('.release-tag')).toHaveText('New')
+    await expect(page.getByTestId(`release-${NEXT}`).locator('li')).toHaveText(['Updates install themselves. Say yes and restart.', 'Captions you can drag'])
+    await expect(page.getByTestId(`release-${CURRENT}`).locator('.release-tag')).toHaveText('Installed')
+    await page.getByTestId('about-license').click()
+    await expect(page.getByTestId('legal')).toContainText('GNU AFFERO GENERAL PUBLIC LICENSE')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('legal')).toHaveCount(0)
     // No key yet: the page, and on a copy that can install, the way to turn automatic updates on.
     await page.getByTestId('nav-settings').focus()
     await page.keyboard.press('Tab') // keyboard focus opens the card
     await expect(pop).toHaveAttribute('data-open', 'true')
     await expect(pop).toContainText('Update available')
+    await expect(page.getByTestId('update-notes')).toContainText('Updates install themselves.')
+    await expect(page.getByTestId('update-notes')).not.toContainText('QR code') // the installed version's notes stay in Settings
     if (INSTALLS) await expect(page.getByTestId('update-turn-on')).toBeVisible()
     else await expect(page.getByTestId('update-turn-on')).toHaveCount(0)
     await shot(page, 'update-no-key')

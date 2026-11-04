@@ -7,6 +7,7 @@ import {
   engineEnv,
   engineMode,
   initPaths,
+  legalFile,
   projectsDir,
   pythonExe,
   reelStudioRoot,
@@ -462,6 +463,11 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:legal', (_e, doc: unknown) => fs.readFile(legalFile(doc), 'utf8'))
+  handle('app:showLegal', (_e, doc: unknown) => {
+    const file = legalFile(doc)
+    if (!TEST) shell.showItemInFolder(file)
+  })
   handle('app:dimTitleBar', (_e, on: boolean) => {
     if (process.platform !== 'darwin' && win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay(on === true))
   })

@@ -80,7 +80,7 @@ function wire(updater: FakeUpdater, opts: { key?: string | null; install?: Insta
   })
   const u = createUpdater({
     version: '0.1.2', mode: 'install', disabledReason: null, backend,
-    load: async () => ({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null }),
+    load: async () => ({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [] }),
     save: async () => undefined, busy: () => ({ exporting: false, working: 0 }), prepareToQuit: async () => undefined,
     openExternal: async () => undefined, send: () => {}, log: () => {}, now: () => 1000
   })

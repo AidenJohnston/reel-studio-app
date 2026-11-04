@@ -2,7 +2,7 @@
 // request (one server, never GitHub, never the download key) and the download-page allowlist (main/update-check.ts).
 // When it runs, and what the app does with the answer, is main/updater.ts (test/updater.test.ts).
 import { describe, expect, it } from 'vitest'
-import { LATEST_URL, SITE_ORIGIN, UPDATE_PAGE, allowedReleaseUrl, askSite, isNewer, newerOnSite, siteLatest, type FetchLike } from '../src/main/update-check'
+import { LATEST_URL, SITE_ORIGIN, UPDATE_PAGE, allowedReleaseUrl, askSite, isNewer, newerOnSite, releaseNotes, siteLatest, type FetchLike } from '../src/main/update-check'
 import { loadSettings, saveSettings } from '../src/main/settings'
 import { setupPaths } from './helpers'
 
@@ -128,15 +128,15 @@ describe('download page allowlist', () => {
 describe('the site is the only server', () => {
   it('a newer version on the site: the version and the site page', async () => {
     const w = site(async () => reply(200, latestJson('0.1.1', { url: `${SITE_ORIGIN}/download` })))
-    expect(await newerOnSite(w.fetch, '0.1.0')).toEqual({ version: '0.1.1', url: `${SITE_ORIGIN}/download` })
+    expect((await newerOnSite(w.fetch, '0.1.0')).update).toEqual({ version: '0.1.1', url: `${SITE_ORIGIN}/download` })
     expect(w.urls()).toEqual([LATEST_URL])
   })
   it('a page that is not ours in the answer: the update page instead', async () => {
-    expect(await newerOnSite(site(async () => reply(200, latestJson('0.1.1', { url: 'https://evil.example/update.html' }))).fetch, '0.1.0')).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
-    expect(await newerOnSite(site(async () => reply(200, { version: '0.1.1' })).fetch, '0.1.0')).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
+    expect((await newerOnSite(site(async () => reply(200, latestJson('0.1.1', { url: 'https://evil.example/update.html' }))).fetch, '0.1.0')).update).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
+    expect((await newerOnSite(site(async () => reply(200, { version: '0.1.1' })).fetch, '0.1.0')).update).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
   })
   it('the site says the running version, or an older one: nothing to offer, and no error', async () => {
-    for (const v of ['0.1.0', '0.0.9']) expect(await newerOnSite(site(async () => reply(200, latestJson(v))).fetch, '0.1.0')).toBeNull()
+    for (const v of ['0.1.0', '0.0.9']) expect((await newerOnSite(site(async () => reply(200, latestJson(v))).fetch, '0.1.0')).update).toBeNull()
   })
   const siteFailures: [string, Answer][] = [
     ['server error', siteDown],
@@ -157,6 +157,26 @@ describe('the site is the only server', () => {
   })
 })
 
+describe("latest.json's release notes (What's new)", () => {
+  const note = (version: string, extra: Record<string, unknown> = {}) => ({ version, date: '2026-11-04', text: `- What ${version} changed`, ...extra })
+  it('fails if a malformed note reaches What\'s new, a good one is dropped, or more than five show', async () => {
+    const notes = [
+      note('0.1.9'),
+      note('0.1.8', { date: '2026-02-30' }), // not a day
+      note('0.1.7', { date: '2026-11-04T10:00:00Z' }),
+      note('v0.1.6'),
+      note('0.1.5', { text: 7 }),
+      note('0.1.4', { text: 'x'.repeat(4001) }),
+      note('0.1.9'), // the same version twice
+      note('0.1.3'), note('0.1.2'), note('0.1.1'), note('0.1.0'), note('0.0.9')
+    ]
+    expect(releaseNotes(notes).map((n) => n.version)).toEqual(['0.1.9', '0.1.3', '0.1.2', '0.1.1', '0.1.0'])
+    for (const bad of [null, 'notes', { 0: note('0.1.3') }]) expect(releaseNotes(bad)).toEqual([])
+    const w = site(async () => reply(200, latestJson('0.1.0', { notes: [note('0.1.0')] })))
+    expect(await newerOnSite(w.fetch, '0.1.0')).toEqual({ update: null, notes: [{ version: '0.1.0', date: '2026-11-04', text: '- What 0.1.0 changed' }] })
+  })
+})
+
 describe('fails without throwing', () => {
   it('a slow server is cut off after the timeout', async () => {
     const slow: FetchLike = (_u, init) =>
@@ -168,7 +188,7 @@ describe('fails without throwing', () => {
     expect(await askSite(async () => reply(200, '{not json'), '0.1.0')).toMatchObject({ kind: 'failed' })
     expect(await askSite(async () => reply(200, { version: 'latest' }), '0.1.0')).toEqual({ kind: 'failed', why: 'unreadable latest.json' })
     expect(await askSite(async () => Promise.reject(new TypeError('fetch failed')), '0.1.0')).toEqual({ kind: 'failed', why: 'fetch failed' })
-    expect(await askSite(async () => reply(200, latestJson('0.1.3')), '0.1.0')).toEqual({ kind: 'ok', latest: { version: '0.1.3', url: UPDATE_PAGE } })
+    expect(await askSite(async () => reply(200, latestJson('0.1.3')), '0.1.0')).toEqual({ kind: 'ok', latest: { version: '0.1.3', url: UPDATE_PAGE }, notes: [] })
   })
 })
 

@@ -4,6 +4,8 @@ import type { ChatAction } from './notes'
 import type { UpdateActionResult, UpdateBusy, UpdateState } from './update'
 export type { ChatAction } from './notes'
 
+export type LegalDoc = 'license' | 'notices'
+
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
 
 export type ScreenStatus = 'new' | 'working' | 'ready' | 'interrupted' | 'failed'
@@ -390,6 +392,10 @@ export interface ReelApi {
     onCommand(cb: (c: AppCommand) => void): () => void
     /** Drag a finished file out of the app (desktop, folder, browser upload box). Call from dragstart. */
     startDrag(file: string): void
+    /** Settings › About: the license (GNU AGPL v3) or THIRD_PARTY.md, as shipped with this copy. */
+    legal(doc: LegalDoc): Promise<string>
+    /** Show that file in Finder / File Explorer. */
+    showLegal(doc: LegalDoc): Promise<void>
   }
   model: {
     status(): Promise<ModelStatus>

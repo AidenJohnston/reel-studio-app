@@ -7,7 +7,7 @@ import { FOLDER_APP } from '../components/ui'
 import { PostingSettings } from '../components/PostingSettings'
 import { Icon } from '../components/icons'
 import { useUpdateState } from '../components/update'
-import { UpdateSettingsRow } from '../components/UpdateSettings'
+import { AboutPanel, WhatsNew } from '../components/About'
 import { useNotify } from '../App'
 
 export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go }) {
@@ -102,57 +102,43 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
 
       <PostingSettings />
 
-      <section className="panel">
-        <h2>About</h2>
-        <p className="muted" style={{ marginTop: 6 }}>
-          Reel Studio {info.version}. Open source (AGPL-3.0). No accounts, no tracking.
-        </p>
-        <p className="muted-sm" style={{ marginTop: 6 }}>
-          Copyright 2026 Curate Technologies LLC and contributors. You may share and change it under the GNU AGPL v3, and it
-          comes with no warranty. License: gnu.org/licenses/agpl-3.0. Source: github.com/getcurate/reel-studio.
-        </p>
-        {autoUpdates !== null && (
-          <div style={{ marginTop: 12 }} data-testid="auto-updates">
-            <p style={{ margin: 0 }}>
-              <strong>Automatic updates:</strong>{' '}
-              {autoUpdates.on ? `on${autoUpdates.plan === 'monthly' ? ' (monthly plan)' : ''}` : 'off'}
-            </p>
-            <p className="muted-sm" style={{ margin: '2px 0 0' }}>
-              {autoUpdates.on
-                ? 'When a new version comes out, Reel Studio offers to update itself. Only that download carries your download key, so the server can check your purchase.'
-                : 'Turn them on with the link in your receipt email: copy it, then paste it here.'}
-            </p>
-            <div className="row" style={{ marginTop: 8 }}>
-              {autoUpdates.on ? (
-                <button className="btn ghost" onClick={() => void clearKey()} data-testid="auto-updates-off">
-                  Turn off
-                </button>
-              ) : (
-                <button className="btn ghost" onClick={() => void pasteKey()} data-testid="auto-updates-paste">
-                  Paste my download link
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-        {update !== null && (
-          <>
-            <label className="toggle" style={{ marginTop: 12 }}>
-              <input type="checkbox" checked={update.autoCheck} onChange={(e) => void toggleUpdates(e.target.checked)} data-testid="check-updates" />
-              Check for updates
-            </label>
-            <p className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
-              Once a day, Reel Studio asks getreelstudio.com if there is a newer version. Nothing about you or your videos is sent.
-            </p>
-          </>
-        )}
-        <UpdateSettingsRow />
-        {info.engine.mode === 'fake' && (
-          <p className="muted-sm" style={{ marginTop: 6 }}>
-            Test engine in use.
-          </p>
-        )}
-      </section>
+      {update && (
+        <>
+          <AboutPanel
+            s={update}
+            onToggle={(on) => void toggleUpdates(on)}
+            keys={
+              autoUpdates !== null && (
+                <div style={{ marginTop: 12 }} data-testid="auto-updates">
+                  <p style={{ margin: 0 }}>
+                    <strong>Automatic updates:</strong>{' '}
+                    {autoUpdates.on ? `on${autoUpdates.plan === 'monthly' ? ' (monthly plan)' : ''}` : 'off'}
+                  </p>
+                  <p className="muted-sm" style={{ margin: '2px 0 0' }}>
+                    {autoUpdates.on
+                      ? 'When a new version comes out, Reel Studio offers to update itself. Only that download carries your download key, so the server can check your purchase.'
+                      : 'Turn them on with the link in your receipt email: copy it, then paste it here.'}
+                  </p>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    {autoUpdates.on ? (
+                      <button className="btn ghost" onClick={() => void clearKey()} data-testid="auto-updates-off">
+                        Turn off
+                      </button>
+                    ) : (
+                      <button className="btn ghost" onClick={() => void pasteKey()} data-testid="auto-updates-paste">
+                        Paste my download link
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            }
+          >
+            {info.engine.mode === 'fake' && <p className="muted-sm about-foot">Test engine in use.</p>}
+          </AboutPanel>
+          <WhatsNew s={update} />
+        </>
+      )}
     </div>
   )
 }

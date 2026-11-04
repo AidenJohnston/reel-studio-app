@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { initialUpdateState, type UpdateMode, type UpdateState } from '../src/shared/update'
-import { updateButtonLabel, updateIcon, updateSubline, updateSummary } from '../src/renderer/src/components/update-copy'
+import { noteBlocks, noteDay, updateButtonLabel, updateIcon, updateSubline, updateSummary } from '../src/renderer/src/components/update-copy'
 
 const offered = (mode: UpdateMode, patch: Partial<UpdateState> = {}): UpdateState => ({
   ...initialUpdateState('0.1.2', mode, true, null),
@@ -25,4 +25,17 @@ it('fails if page mode promises a download, or install mode stops offering one',
   }
   expect(updateButtonLabel(offered('install'))).toBe('Download update')
   expect(updateSummary(offered('install'))).toBe('Reel Studio 0.1.3 is ready to download.')
+})
+
+it("fails if a release note's bullets show as one paragraph, keep their markdown, or its date shifts a day", () => {
+  const text = "## What's new\n\n- **Updates install themselves.** Say yes.\n* Captions you can drag\n\nThanks for the reports.\n- One more"
+  expect(noteBlocks(text)).toEqual([
+    { kind: 'p', text: "What's new" },
+    { kind: 'list', items: ['Updates install themselves. Say yes.', 'Captions you can drag'] },
+    { kind: 'p', text: 'Thanks for the reports.' },
+    { kind: 'list', items: ['One more'] }
+  ])
+  // A calendar day, whatever the time zone: midnight UTC would show the day before in the Americas.
+  expect(noteDay('2026-11-04')).toBe(new Date(2026, 10, 4).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+  expect(noteDay('soon')).toBeNull()
 })

@@ -66,6 +66,74 @@ export function updateSubline(s: UpdateState): string {
   return `Reel Studio ${offered(s)}`
 }
 
+export function aboutStatus(s: UpdateState): string {
+  const v = offered(s)
+  const now = `Version ${s.currentVersion}`
+  switch (s.status) {
+    case 'checking':
+      return `${now} · Checking for updates…`
+    case 'up-to-date':
+      return `${now} · Up to date`
+    case 'available':
+      return `${now} · ${v} is ${s.mode === 'page' ? 'out' : 'ready to download'}`
+    case 'downloading':
+      return `${now} · Downloading ${v}${pct(s)}`
+    case 'downloaded':
+      return `${now} · ${v} is downloaded`
+    case 'installing':
+      return `${now} · Restarting to update…`
+    case 'error':
+      return updateAction(s) === 'install' ? `${now} · ${v} is downloaded` : updateAction(s) !== 'none' ? `${now} · ${v} is out` : now
+    default:
+      return now
+  }
+}
+
+export function aboutButton(s: UpdateState): string {
+  const action = updateAction(s)
+  if (action === 'open-page') return 'Open download page'
+  if (action !== 'none') return s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download'
+  if (s.status === 'checking') return 'Checking…'
+  if (s.status === 'downloading') return 'Downloading…'
+  if (s.status === 'installing') return 'Restarting…'
+  if (s.status === 'up-to-date') return 'Check again'
+  if (s.status === 'error') return 'Try again'
+  return 'Check now'
+}
+
+export type NoteBlock = { kind: 'p'; text: string } | { kind: 'list'; items: string[] }
+
+const BULLET = /^\s*[-*•]\s+/
+/** `**bold**` and `__bold__` show as plain words: a note is text, never markup. */
+const plain = (line: string): string => line.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_m, a, b) => a ?? b).trim()
+
+/** A release note's lines as paragraphs and bullet lists (consecutive "- " or "* " lines). A "#" heading line
+ * becomes a paragraph; blank lines only separate. */
+export function noteBlocks(text: string): NoteBlock[] {
+  const out: NoteBlock[] = []
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue
+    const last = out.at(-1)
+    if (BULLET.test(raw)) {
+      const item = plain(raw.replace(BULLET, ''))
+      if (!item) continue
+      if (last?.kind === 'list') last.items.push(item)
+      else out.push({ kind: 'list', items: [item] })
+    } else {
+      const line = plain(raw.replace(/^\s*#+\s*/, ''))
+      if (line) out.push({ kind: 'p', text: line })
+    }
+  }
+  return out
+}
+
+/** "November 4, 2026" for a note's YYYY-MM-DD, read as a calendar day (no time zone shift), or null. */
+export function noteDay(date: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
 export interface InstallQuestion {
   title: string
   body: string

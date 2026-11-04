@@ -6,7 +6,7 @@
 // saved, or when the update server refuses the key: 401 (not ours) clears it, 403 (the purchase no longer
 // includes updates) keeps it. Without a key the window also offers "Turn on automatic updates".
 import type { MessageBoxOptions } from 'electron'
-import { AUTO_UPDATES_PAGE, UPDATE_PAGE, allowedReleaseUrl } from './update-check'
+import { AUTO_UPDATES_PAGE, UPDATE_PAGE, allowedReleaseUrl, isNewer, releaseNotes, type SiteAnswer } from './update-check'
 import {
   FIRST_CHECK_DELAY_MS,
   BUSY_RETRY_MS,
@@ -22,7 +22,6 @@ import {
   type UpdateMemory
 } from './update-machine'
 import { initialUpdateState, updateAction, type UpdateActionResult, type UpdateBusy, type UpdateMode, type UpdateState } from '../shared/update'
-import type { UpdateNotice } from '../shared/api'
 
 /**
  * Why an update this copy could install opens the download page instead.
@@ -34,8 +33,9 @@ import type { UpdateNotice } from '../shared/api'
 export type PageReason = 'no-key' | 'key-rejected' | 'not-entitled' | 'feed'
 
 export interface UpdateBackend {
-  /** The anonymous daily check: the newer release, or null. Throws when the site could not tell. */
-  check(): Promise<UpdateNotice | null>
+  /** The anonymous daily check: the newer release (or null) and the release notes. Throws when the site could
+   * not tell. */
+  check(): Promise<SiteAnswer>
   /** Whether a download key is saved. Asks no server. */
   hasKey(): Promise<boolean>
   /** Downloads `version` with the saved key. Resolves to null when it is downloaded, or to why it must come
@@ -104,6 +104,7 @@ export function createUpdater(d: UpdaterDeps) {
   const remember = (patch: Partial<UpdateMemory>): void =>
     void d.save(patch).catch((e) => d.log(`[update] could not save: ${why(e)}`))
   const enabled = (): boolean => d.disabledReason === null && d.backend !== null
+  const withNotes = (notes: unknown): UpdateState['notes'] => releaseNotes(notes).map((n) => ({ ...n, newer: isNewer(n.version, d.version) }))
 
   /** How `version` is offered: installed here, or its download page (with "Turn on automatic updates" when only
    * a key is missing). */
@@ -129,8 +130,10 @@ export function createUpdater(d: UpdaterDeps) {
     snoozeEnd.unref?.()
   }
 
-  function applyFound(found: UpdateNotice | null): void {
+  function applyFound({ update: found, notes }: SiteAnswer): void {
     confirmed = found?.version ?? null
+    state = { ...state, notes: withNotes(notes) }
+    remember({ updateNotes: notes })
     if (found) {
       const url = allowedReleaseUrl(found.url) ?? UPDATE_PAGE
       const downloaded = state.downloadedVersion === found.version
@@ -145,7 +148,7 @@ export function createUpdater(d: UpdaterDeps) {
     } else {
       set(state.downloadedVersion
         ? { ...state, status: 'downloaded', availableVersion: state.downloadedVersion, downloadPercent: 100, message: null, errorContext: null }
-        : { ...initialUpdateState(d.version, d.mode, state.autoCheck, null), status: 'up-to-date' })
+        : { ...initialUpdateState(d.version, d.mode, state.autoCheck, null), status: 'up-to-date', notes: state.notes })
       if (state.status === 'up-to-date') remember({ updateLatest: null })
       d.log('[update] up to date')
     }
@@ -255,7 +258,7 @@ export function createUpdater(d: UpdaterDeps) {
       await readKey()
       const kept = stillNewer(mem.updateLatest, d.version)
       if (mem.updateLatest && !kept) remember({ updateLatest: null })
-      const first: UpdateState = { ...state, autoCheck: mem.checkUpdates }
+      const first: UpdateState = { ...state, autoCheck: mem.checkUpdates, notes: enabled() ? withNotes(mem.updateNotes) : [] }
       set(mem.checkUpdates ? offerRemembered(first, mem.updateLatest) : first)
       armSnoozeEnd()
     },
@@ -284,9 +287,9 @@ export function createUpdater(d: UpdaterDeps) {
       d.log(`[update] downloading ${version}`)
       try {
         if (confirmed !== version) {
-          const found = await d.backend!.check()
-          if (found?.version !== version) {
-            applyFound(found)
+          const answer = await d.backend!.check()
+          if (answer.update?.version !== version) {
+            applyFound(answer)
             return { accepted: true, state }
           }
           confirmed = version

@@ -3,6 +3,15 @@ export type UpdateStatus = 'disabled' | 'idle' | 'checking' | 'available' | 'dow
 
 export type UpdateErrorContext = 'check' | 'download' | 'install'
 
+/** One release's notes from latest.json: newest first, at most five (the update server keeps that many). */
+export interface ReleaseNote {
+  version: string
+  /** YYYY-MM-DD, the day it was published. */
+  date: string
+  /** A few short lines; a line starting with "- " or "* " is a bullet. */
+  text: string
+}
+
 /** install: this copy can download and install the update itself. page: it opens the download page instead. */
 export type UpdateMode = 'install' | 'page'
 
@@ -18,6 +27,8 @@ export interface UpdateState {
   downloadedVersion: string | null
   /** The download page on getreelstudio.com that latest.json names. */
   releaseUrl: string | null
+  /** What's new: the notes latest.json carries, newest first. `newer`: a version after the running one. */
+  notes: (ReleaseNote & { newer: boolean })[]
   downloadPercent: number | null
   message: string | null
   errorContext: UpdateErrorContext | null
@@ -45,6 +56,7 @@ export function initialUpdateState(currentVersion: string, mode: UpdateMode, aut
     availableVersion: null,
     downloadedVersion: null,
     releaseUrl: null,
+    notes: [],
     downloadPercent: null,
     message: disabledReason,
     errorContext: null,
