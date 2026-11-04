@@ -100,10 +100,11 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
         <label className="toggle" style={{ minHeight: 44 }}>
           <input type="checkbox" checked={info.fasterExports} disabled={savingExports}
             onChange={(e) => void toggleExports(e.target.checked)} aria-describedby="export-rate-help" data-testid="faster-exports" />
-          Faster exports (30 fps)
+          Faster exports (less smooth motion)
         </label>
         <p id="export-rate-help" className="muted-sm" style={{ margin: '2px 0 0 30px' }}>
-          For new videos. Leave off to keep smoother motion from 60 fps footage.
+          For new videos. Leave it off to keep smooth phone footage smooth in the finished video. Previews while you edit are quick
+          either way.
         </p>
       </section>
 

@@ -285,7 +285,14 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       await runEngine(
         'init',
         ['--project', dir, '--title', initArgs.title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...initArgs.files],
-        (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
+        // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
+        // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
+        (p) =>
+          emit(
+            p.message === 'Preparing your video'
+              ? { type: 'status', message: p.message, pct: Math.round(p.pct), phase: 'prepare' }
+              : { type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }
+          ),
         signal
       )
     }

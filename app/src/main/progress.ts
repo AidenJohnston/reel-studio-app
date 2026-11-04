@@ -13,6 +13,8 @@ export interface SpeedHistory { v: 1; phases: Partial<Record<string, PhaseModel>
 
 /** Seconds = base + perMin x minutes of raw video. From status/speed.md (Windows, RTX 4070, Claude Code). */
 export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
+  // only when the engine re-encodes a variable frame rate clip at import (engine init.py); no measurement yet
+  'first-edit:prepare': { base: 2, perMin: 15 },
   'first-edit:listen': { base: 6, perMin: 8 },
   'first-edit:analyze': { base: 2, perMin: 4 },
   'first-edit:edit': { base: 45, perMin: 12 },
@@ -29,7 +31,7 @@ const PLAN: Record<string, Timed[]> = {
 }
 
 /** Phases where the reported percent is real work done (an engine command), not a milestone. */
-const REAL_PCT = new Set<Phase>(['listen', 'analyze', 'final'])
+const REAL_PCT = new Set<Phase>(['prepare', 'listen', 'analyze', 'final'])
 
 export { timeLeftText as formatEta } from '../shared/progress'
 
@@ -70,7 +72,11 @@ export class ProgressTracker {
   update(phase: Phase | undefined, pct: number | undefined): void {
     if (phase && phase !== 'firstLook') {
       let i = this.phases.indexOf(phase)
-      if (i < 0) {
+      if (i < 0 && this.cur < 0) {
+        // a step only some jobs have, before every planned one (preparing a clip at import)
+        this.phases.unshift(phase)
+        i = 0
+      } else if (i < 0) {
         // e.g. a fast note goes straight to final: drop the phases it skips
         this.phases.push(phase)
         i = this.phases.length - 1

@@ -230,6 +230,8 @@ def run(path: Path, expect_duration: Optional[float] = None, project_dir: Option
             fmt = (int(p["format"]["width"]), int(p["format"]["height"]))
         except (ValueError, KeyError):
             pass
+    if man and man.get("fps"):      # a draft renders below the project rate (render.preview_fps)
+        exp_fps = float(man["fps"])
     if project_dir is not None:
         cj = Path(project_dir) / "work" / "captions.json"
         if cj.exists() and fmt:

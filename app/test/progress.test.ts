@@ -26,6 +26,21 @@ describe('honest progress', () => {
     expect(seen[24]).toBeGreaterThan(seen[4])
   })
 
+  it('a clip re-encoded at import has its own first step that moves with the engine, not a jump to the end', () => {
+    let now = 0
+    const t = new ProgressTracker('first-edit', 300, empty(), () => now)
+    const seen: number[] = []
+    t.update('prepare', 0); seen.push(t.snapshot().overall)
+    now += 30_000; t.update('prepare', 60); seen.push(t.snapshot().overall)
+    t.update('listen', 0); seen.push(t.snapshot().overall)
+    expect(seen[0]).toBeLessThan(5)
+    expect(seen[1]).toBeGreaterThan(seen[0])
+    expect(seen[1]).toBeLessThan(15)
+    expect(seen[2]).toBeGreaterThanOrEqual(seen[1])
+    expect(seen[2]).toBeLessThan(25)
+    expect(t.finish().prepare).toBe(30)
+  })
+
   it('estimates time left from the video length, and never says 0 while still working', () => {
     let now = 0
     const short = new ProgressTracker('first-edit', 44, empty(), () => now)

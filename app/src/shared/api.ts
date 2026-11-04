@@ -159,7 +159,7 @@ export interface ProjectJson {
 export type JobKind = 'first-edit' | 'note' | 'rerender' | 'export' | 'script'
 
 /** The steps of a job, tagged by the ai package on its status events (main/progress.ts times them). */
-export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
+export type Phase = 'prepare' | 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
 
 /**
  * What a running job reports to main (jobs.ts `Emit`): the ai package's AgentEvent plus what main adds

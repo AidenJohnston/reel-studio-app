@@ -80,11 +80,11 @@ def _sample_frame_cadence(path: Path, stream: dict, duration: float) -> tuple[fl
     rate, tolerance = windows[0]
     if any(abs(other - rate) > tolerance + error for other, error in windows[1:]):
         return 0.0, True
-    frame_count = stream.get("nb_frames") or stream.get("nb_read_packets")
+    # MKV, WebM and MPEG-TS carry no frame count, so for them the windows alone decide
     try:
-        frame_count = int(frame_count)
+        frame_count = int(stream.get("nb_frames") or stream.get("nb_read_packets"))
     except (TypeError, ValueError):
-        return 0.0, True
+        return rate, False
     timebase = float(Fraction(stream.get("time_base") or "0/1"))
     if abs(frame_count - duration * rate) > 1.0 + rate * timebase:
         return 0.0, True
@@ -120,7 +120,10 @@ def ffprobe_json(path: Path) -> dict:
     return json.loads(proc.stdout or "{}")
 
 
-def probe(path: Path, quick: bool = False) -> dict:
+def probe(path: Path, quick: bool = False, cadence: bool = False) -> dict:
+    """`cadence`: also sample the frame timing (four more ffprobe runs), for `init` only. Then `fps` is the
+    rate the timestamps show and `variableFrameRate` says whether they vary; without it `fps` is the
+    stream's stated average and `variableFrameRate` is absent."""
     path = Path(path)
     if not path.exists():
         raise EngineError("NOT_FOUND", f"no such file: {path}",
@@ -133,14 +136,15 @@ def probe(path: Path, quick: bool = False) -> dict:
               and not (s.get("disposition") or {}).get("attached_pic")), None)
     a = next((s for s in streams if s.get("codec_type") == "audio"), None)
     duration = float(fmt.get("duration") or 0.0)
-    cadence_fps, sampled_vfr = _sample_frame_cadence(path, v, duration) if v and ext not in IMAGE_EXT else (0.0, False)
+    sampled = cadence and v is not None and ext not in IMAGE_EXT
+    cadence_fps, sampled_vfr = _sample_frame_cadence(path, v, duration) if sampled else (0.0, False)
     out = {
         "path": str(path),
         "duration": round(duration, 3),
         "hasVideo": v is not None,
         "hasAudio": a is not None,
         "fps": cadence_fps or (_fps(v) if v else 0.0),
-        "variableFrameRate": sampled_vfr,
+        **({"variableFrameRate": sampled_vfr} if sampled else {}),
         "width": int(v.get("width") or 0) if v else 0,
         "height": int(v.get("height") or 0) if v else 0,
         "rotation": _rotation(v) if v else 0,

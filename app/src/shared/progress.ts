@@ -3,7 +3,7 @@
 
 /** The steps of a first edit, in plain words, with how much of the total time each one usually takes. */
 export const STAGES: { label: string; match: RegExp; weight: number }[] = [
-  { label: 'Copying your video', match: /copy|getting started/i, weight: 4 },
+  { label: 'Copying your video', match: /copy|prepar|getting started/i, weight: 4 },
   { label: 'Listening to your video', match: /listen|transcri|speech/i, weight: 30 },
   { label: 'Picking your best takes', match: /take|retake|cut|pause/i, weight: 10 },
   { label: 'Adding subtitles', match: /caption|subtitle/i, weight: 5 },
