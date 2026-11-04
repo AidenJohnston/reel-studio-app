@@ -96,7 +96,7 @@ The app records each engine's pid, project and start time in `engines.json` (in 
 until the engine's whole group is gone, and at startup stops engines a crashed run left behind: only a
 live process that runs the engine and started when the recorded one did. Anything else that may be
 left (a start time that doesn't match, a group whose engine died but whose ffmpeg runs on) is not
-signalled; it stays listed and keeps closed the project it works in until it ends. A project whose
+signalled; it stays listed and keeps its project closed, and the next start after it ends opens it. A project whose
 engine would not stop stays closed. When `engines.json` cannot be read, the app instead looks at the
 running processes: a project stays closed only while an engine or ffmpeg names its folder in its
 arguments, and every other project opens. It keeps looking at each start until it finds none

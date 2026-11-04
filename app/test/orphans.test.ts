@@ -254,15 +254,23 @@ describe('orphaned engine reaper', () => {
 
   // Windows hands a dead engine's number to the next process routinely, and that may be another engine:
   // left alone, kept on the list, and the scan decides which video stays closed
-  it('a number now held by an engine that started after ours was recorded is not stopped', async () => {
+  it('a number now held by an engine that started after ours was recorded is not stopped, and the video stays closed', async () => {
+    setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const bread = join(projectsDir(), 'bread')
+    mkdirSync(join(bread, 'work'), { recursive: true })
     const later = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
     try {
       await once(later, 'spawn')
-      writeFileSync(join(settings, 'engines.json'), JSON.stringify([{ pid: later.pid, project: null, startedAt: Date.now() - 30_000 }]))
-      const { stopped } = await createPidRegistry(settings).reap()
+      const recorded = { pid: later.pid, project: bread, startedAt: Date.now() - 30_000 }
+      writeFileSync(join(settings, 'engines.json'), JSON.stringify([recorded]))
+      const { stopped, stillRunning, unknown } = await createPidRegistry(settings).reap()
       expect(stopped).toBe(0)
       expect(isAlive(later.pid!)).toBe(true)
+      expect(stillRunning).toEqual([bread])
+      expect(unknown).toBe(true)
+      // kept, so the next start looks again
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([recorded])
     } finally {
       await killTree(later.pid!)
     }

@@ -65,8 +65,9 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       save()
     },
     /** Stops engines a previous run left behind. `stillRunning`: the projects of those that would not
-     * stop, which stay registered for the next start. While the list cannot be read, or names an
-     * engine with no video (`unknown`), it also has every project a running engine or ffmpeg names. */
+     * stop or could not be shown to be ours (leftRunning), which stay registered for the next start.
+     * While the list cannot be read, names an engine with no video, or holds one of those uncertain
+     * entries (`unknown`), it also has every project a running engine or ffmpeg names. */
     async reap(): Promise<{ stopped: number; stillRunning: string[]; unknown: boolean }> {
       let old: { pid: number; project: string | null; startedAt?: number }[] = []
       let unknown = existsSync(unreadable)
@@ -94,10 +95,10 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           continue
         }
         engines.set(pid, typeof startedAt === 'number' ? { project, startedAt } : { project })
-        // a 0.1.x list names no video, and what may not be ours is never stopped: which video either
-        // writes to is as unknown as with an unreadable list
-        if (project && left === 'ours') stillRunning.push(project)
-        else unknown = true
+        // what may still write to its video keeps it closed; a 0.1.x entry names no video, and what may
+        // not be ours may have started others: the scan looks for those as with an unreadable list
+        if (project) stillRunning.push(project)
+        if (!project || left === 'unsure') unknown = true
       }
       save()
       if (!unknown) return { stopped, stillRunning, unknown }
@@ -195,16 +196,19 @@ const SAME_START_MS = 10_000
  *   registered (an entry from 0.1.x has no start time and is judged by its command line, as before);
  * - 'unsure': anything that may be ours but cannot be shown to be: a start time that does not match or
  *   cannot be read, a process that cannot be read, or on macOS/Linux a process group with that number
- *   whose leader died (left alone: our leftover ffmpeg finishes on its own). It stays on the list, and
- *   the scan keeps closed the video something still works in;
+ *   whose leader died (left alone: our leftover ffmpeg finishes on its own). It stays on the list, its
+ *   video stays closed, and the scan looks for any other video something still works in;
  * - 'gone': nothing runs from that number, or something that is not our engine does. */
 async function leftRunning(pid: number, startedAt?: number): Promise<'ours' | 'unsure' | 'gone'> {
   if (isAlive(pid)) {
     const p = await processInfo(pid)
-    if (!p) return isAlive(pid) ? 'unsure' : 'gone'
-    if (!isOurEngine(p.cmdline)) return 'gone'
-    if (startedAt === undefined) return 'ours'
-    return p.startedAt !== null && Math.abs(p.startedAt - startedAt) <= SAME_START_MS ? 'ours' : 'unsure'
+    if (p) {
+      if (!isOurEngine(p.cmdline)) return 'gone'
+      if (startedAt === undefined) return 'ours'
+      return p.startedAt !== null && Math.abs(p.startedAt - startedAt) <= SAME_START_MS ? 'ours' : 'unsure'
+    }
+    if (isAlive(pid)) return 'unsure'
+    // it exited while being read: what it started may still run in its group
   }
   return process.platform !== 'win32' && groupAlive(pid) ? 'unsure' : 'gone'
 }
