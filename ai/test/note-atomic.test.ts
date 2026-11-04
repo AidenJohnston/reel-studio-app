@@ -202,3 +202,15 @@ describe('a note that finishes is saved in one write', () => {
     expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-3', applied: [], reply: 'It already looks right to me.' });
   });
 });
+
+describe('a project.json some Windows editors saved with a byte-order mark', () => {
+  it('takes a note like any other project', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    await fsp.writeFile(path.join(dir, 'project.json'), '﻿' + (await read()));
+    await createAI({ host, settingsDir, providerOverride: new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.3 })] },
+      finish('I tightened the pauses.'),
+    ]) }).applyNote(dir, 'tighter', () => undefined);
+    expect(JSON.parse(await read()).cut.gapCap).toBe(0.3);
+  });
+});

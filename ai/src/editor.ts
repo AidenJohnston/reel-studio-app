@@ -560,7 +560,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', 'Something went wrong starting your note. Try again.', { detail: `note id ${JSON.stringify(id)}` });
   const dir = path.join(projectDir, 'work', 'notes', id);
   const base = await fsp.readFile(path.join(projectDir, PROJECT_FILE));
-  const liveProject = withDefaults(JSON.parse(base.toString('utf8')));
+  // as loadProject reads it: a byte-order mark some Windows editors write is not JSON
+  const liveProject = withDefaults(JSON.parse(base.toString('utf8').replace(/^\uFEFF/, '')));
   const baseVersion = liveProject.version;
   // a branched note (opts.base) edits that saved version's edit, and its version records that one as its parent
   const parent = opts.base ?? baseVersion;
