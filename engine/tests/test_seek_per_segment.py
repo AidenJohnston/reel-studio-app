@@ -13,6 +13,14 @@ FPS = 30
 W, H = 192, 320
 BITS = 11          # frame numbers up to 2047, one bit per cell of a 4 x 3 grid
 CELL_W, CELL_H = 48, 107
+# Every frame 3n+1 or 3n+2 at 30 fps sits at a time no float prints exactly (31/30 = 1.0333...),
+# which is where losing the half-frame margin would gain or drop a frame.
+#
+# Source frames [a, b) kept, in order: the first two 0.27 s apart (one input); the third and fourth
+# 15.4 s and 18.4 s past the previous segment, beyond MIN_SEEK_GAP, so each gets its own input,
+# seeked to 17.4 s and 37.4 s (neither exact in binary).
+SPANS = [(31, 89), (97, 152), (613, 661), (1213, 1262)]
+VFR_DROP = "not(eq(mod(n,7),3))*not(eq(mod(n,11),5))"      # frame durations of 1/30 and 2/30 s
 
 
 def _segments(frame_spans):
@@ -23,18 +31,14 @@ def _segments(frame_spans):
     return out, t
 
 
-# Source frames [a, b) kept, in order: the first two sit 0.2 s apart (one input), the last two are
-# 15 s and 18 s past the previous segment, beyond MIN_SEEK_GAP, so each gets its own input.
-SPANS = [(30, 90), (96, 150), (600, 660), (1200, 1260)]
-
-
-def _cmd(tmp_path, src: Path, segs, dur):
-    ctx = RenderCtx(project={}, project_dir=tmp_path, root=tmp_path, out_timeline=segs,
+def _cmd(work: Path, src: Path, segs, dur):
+    work.mkdir(parents=True, exist_ok=True)
+    ctx = RenderCtx(project={}, project_dir=work, root=work, out_timeline=segs,
                     word_out_time=lambda _w: 0.0, is_kept=lambda _w: True,   # is_kept: required on beta (multi-source)
                     duration=dur, fmt={"width": W, "height": H, "fps": FPS},
-                    draft=False, work=tmp_path, ffmpeg=tools.ffmpeg(), ffprobe="ffprobe",
+                    draft=False, work=work, ffmpeg=tools.ffmpeg(), ffprobe="ffprobe",
                     progress=lambda *a: None)
-    audio = tmp_path / "voice.wav"
+    audio = work / "voice.wav"
     with wave.open(str(audio), "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
@@ -42,7 +46,7 @@ def _cmd(tmp_path, src: Path, segs, dur):
         wf.writeframes(bytes(4 * int(48000 * (dur + 1))))
     meta = {"s1": {"width": W, "height": H, "fps": FPS, "rotation": 0}}
     return render.build_video_cmd(ctx, segs, meta, {"s1": src}, {}, W, H, [], [], None, audio, 0.0, dur, 0.0,
-                                  "libx264", tmp_path / "out.mp4", tmp_path / "graph.txt")
+                                  "libx264", work / "out.mp4", work / "graph.txt")
 
 
 def _source_seeks(cmd, src: Path):
@@ -61,8 +65,8 @@ def _source_seeks(cmd, src: Path):
 def test_far_segments_are_reached_by_their_own_input_seek(tmp_path):
     src = tmp_path / "take.mp4"
     segs, dur = _segments(SPANS)
-    # 20 s and 40 s less SEEK_PREROLL; the first input starts at the top (1 s - preroll < 0)
-    assert _source_seeks(_cmd(tmp_path, src, segs, dur), src) == [None, "17", "37"]
+    # the first input starts at the top (1.03 s - SEEK_PREROLL < 0)
+    assert _source_seeks(_cmd(tmp_path, src, segs, dur), src) == [None, "17.4", "37.4"]
 
 
 def test_heavy_cut_opens_at_most_max_lanes_inputs_skipping_the_largest_gaps():
@@ -77,12 +81,16 @@ def test_heavy_cut_opens_at_most_max_lanes_inputs_skipping_the_largest_gaps():
     assert [l["seek"] for l in lanes] == [7.0, 45.0, 104.0, 154.0, 164.0, 185.0]
 
 
-def _numbered_source(path: Path, seconds: float) -> None:
-    """Each frame shows its own number in binary, one bit per cell (white = 1)."""
+def _numbered_source(path: Path, seconds: float, vfr: bool = False) -> None:
+    """Each frame shows its source frame number in binary, one bit per cell (white = 1). With
+    `vfr`, some frames are dropped, so the rest keep their numbers at uneven intervals."""
     cell = f"(floor(X/{CELL_W})+4*floor(Y/{CELL_H}))"
     lum = f"if(lt({cell},{BITS}),16+219*mod(floor(N/pow(2,{cell})),2),128)"
-    subprocess.run([tools.ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i",
-                    f"color=c=gray:s={W}x{H}:r={FPS}:d={seconds},format=yuv420p,geq=lum='{lum}':cb=128:cr=128",
+    graph = f"color=c=gray:s={W}x{H}:r={FPS}:d={seconds},format=yuv420p,geq=lum='{lum}':cb=128:cr=128"
+    if vfr:
+        graph += f",select='{VFR_DROP}'"
+    subprocess.run([tools.ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i", graph,
+                    *(["-fps_mode", "vfr"] if vfr else []),
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-g", str(FPS), "-pix_fmt", "yuv420p",
                     str(path)], check=True)
 
@@ -101,11 +109,28 @@ def _frame_numbers(path: Path) -> list:
     return out
 
 
+def _render(work: Path, src: Path) -> tuple:
+    segs, dur = _segments(SPANS)
+    cmd = _cmd(work, src, segs, dur)
+    subprocess.run(cmd, cwd=work, capture_output=True, check=True)
+    return _frame_numbers(work / "out.mp4"), len(_source_seeks(cmd, src))
+
+
 def test_each_seeked_segment_starts_on_its_exact_source_frame(tmp_path):
     src = tmp_path / "take.mp4"
     _numbered_source(src, 44)
-    segs, dur = _segments(SPANS)
-    cmd = _cmd(tmp_path, src, segs, dur)
-    subprocess.run(cmd, cwd=tmp_path, capture_output=True, check=True)
-    expected = [n for a, b in SPANS for n in range(a, b)]
-    assert _frame_numbers(tmp_path / "out.mp4") == expected
+    frames, inputs = _render(tmp_path / "out", src)
+    assert inputs == 3
+    assert frames == [n for a, b in SPANS for n in range(a, b)]
+
+
+def test_seeked_render_of_a_vfr_take_matches_the_single_lane_render(tmp_path, monkeypatch):
+    # A VFR take has no exact answer to write down (which frame a cut lands on depends on the
+    # dropped ones), so the reference is the path every render used before: one input, no seeks.
+    src = tmp_path / "take.mp4"
+    _numbered_source(src, 44, vfr=True)
+    seeked, inputs = _render(tmp_path / "seeked", src)
+    monkeypatch.setattr(render, "video_lanes", render.plan_lanes)
+    single, one = _render(tmp_path / "single", src)
+    assert (inputs, one) == (3, 1)
+    assert seeked == single

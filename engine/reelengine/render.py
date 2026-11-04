@@ -285,8 +285,9 @@ def video_lanes(segments: list) -> list:
     """plan_lanes, but a lane that would decode through more than MIN_SEEK_GAP of cut-away footage
     starts again as a new input seeked to just before its next segment. A 5-minute take cut to
     45 s otherwise decodes the whole span between its first and last kept second. The largest gaps
-    are skipped first, up to MAX_VIDEO_LANES inputs in all. Each piece is opened and trimmed the
-    same way a reordered cut's lanes already are, so the frames it yields are the same."""
+    are split first, and only while the total stays within MAX_VIDEO_LANES; the lanes plan_lanes
+    needs are all kept, even past it. Each piece is opened and trimmed the same way a reordered
+    cut's lanes already are, so the frames it yields are the same."""
     lanes = plan_lanes(segments)
     gaps = []
     for li, lane in enumerate(lanes):
