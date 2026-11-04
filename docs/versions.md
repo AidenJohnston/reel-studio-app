@@ -28,9 +28,10 @@ Rules:
    stopped, or was cut off by a quit or crash): nobody shows it, and the next final render of that
    number deletes it first.
 4. **A saved version is never rewritten.** A final render of an edit unchanged since `vN` was rendered
-   (the same edit, and the same files it reads, the transcript included) returns `vN` as it is
+   (the same edit, engine version, and files it reads, the transcript included) returns `vN` as it is
    (`reused: true`, nothing encoded); otherwise it makes `v(N+1)`, also when `vN` has lost its
-   `export.mp4` or `render.json`. A note that only changes the caption therefore keeps its version
+   `export.mp4` or `render.json`. Versions without a recorded engine version get a new number too.
+   A note that only changes the caption therefore keeps its version
    number, and `vN/project.json` keeps the caption it was made with; `project.json` has the new one,
    which is what Export writes. A `vN` folder above `project.json`'s `version` is an attempt that was
    never saved: the app does not list it (`listVersions`), and the next final render of that number

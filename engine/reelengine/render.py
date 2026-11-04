@@ -27,6 +27,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+import reelengine
+
 from . import captions as capmod, cut as cutmod, project as projmod, render_identity, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
@@ -58,7 +60,7 @@ def _opt_module(name: str):
 # --- versions -----------------------------------------------------------------------------------
 
 def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None) -> dict:
-    """{path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
+    """Engine version and {path: [size, mtime_ns]} of every file the edit reads. project.json alone cannot tell that a
     song or picture was REPLACED under the same name, or that the words changed: the transcript sets
     the cut's timings and the burned-in subtitles."""
     refs = [s.get("path") for s in proj.get("sources") or []]
@@ -76,7 +78,7 @@ def asset_fingerprint(project_dir: Path, proj: dict, root: Optional[Path] = None
             out[r] = [st.st_size, st.st_mtime_ns]
         except (EngineError, OSError):
             out[r] = None
-    return out
+    return {"engineVersion": reelengine.__version__, "assets": out}
 
 
 def pick_version(project_dir: Path, proj: dict, root: Optional[Path] = None) -> int:
@@ -98,8 +100,8 @@ def pick_version(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
                     if any(t.get("parent_version") == cur and t.get("variable") == "caption" for t in trials):
                         same = False
                 fp = vdir / "assets.json"
-                if same and fp.exists():
-                    same = projmod.read_json(fp) == asset_fingerprint(project_dir, proj, root)
+                if same:
+                    same = fp.exists() and projmod.read_json(fp) == asset_fingerprint(project_dir, proj, root)
                 if same:
                     return cur
             except (ValueError, OSError):
