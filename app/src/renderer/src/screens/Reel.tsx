@@ -323,7 +323,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
 
   const many = d.versions.length > 1
   const exportLabel = version && many ? `Export Version ${version.n}` : 'Export for Instagram'
-  const postAbout = { slug, version: version?.n ?? 0, title: d.title, durationSec: duration } // for "Post to YouTube"
+  // for "Post to YouTube": the length of the version it posts, the one on screen
+  const postAbout = { slug, version: version?.n ?? 0, title: d.title, durationSec: (version && lengths[version.video]) || null }
 
   return (
     <div className={`page reel-page${fresh ? ' fresh' : ''}`}>
