@@ -9,7 +9,7 @@ import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState }
 import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
-import { projectDir } from '../src/main/store'
+import { projectDir, readAppState } from '../src/main/store'
 import { setupPaths } from './helpers'
 
 const J = { jobId: 'j1', slug: 's' }
@@ -98,6 +98,16 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('fails if a failed export lands in the editor chat or marks the video as failed', async () => {
+    setupPaths()
+    const slug = 'export-fails'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const jobs = createJobManager(() => undefined, () => undefined)
+    jobs.start(slug, 'export', async () => { throw { code: 'ENOSPC', userMessage: 'Your disk is full.' } })
+    await jobs.forSlug(slug)?.done
+    expect(await readAppState(slug)).toMatchObject({ chat: [], lastError: null })
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'

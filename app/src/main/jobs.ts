@@ -139,9 +139,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
           await updateAppState(slug, (s) => {
             s.job = null
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
-            if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
+            // An export failure is shown in the export dialog; the video itself is fine.
+            if (!cancelled && kind !== 'export') s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
-          if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
+          if (!cancelled && kind !== 'first-edit' && kind !== 'export') await addChat(slug, 'editor', err.userMessage).catch(() => {})
         }
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {
