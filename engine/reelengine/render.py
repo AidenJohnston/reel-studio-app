@@ -1367,8 +1367,11 @@ def burn_captions(ctx: RenderCtx, proj: dict, tl, broll_report: list, rwork: Pat
 def picture_key(project_dir: Path, proj: dict, root: Optional[Path] = None) -> str:
     """Everything the picture of a full render depends on: the edit without its music (sound only), the
     notes and the post text (edit_signature), the files the picture reads, the transcript the captions
-    are timed from, and the engine build. A render whose manifest carries the key a project has now
-    shows that project's frames (current_render)."""
+    are timed from, and the engine itself. The files outside project.json are the face track (the crop
+    and where cards go) and the app's rendered animations (a remade one keeps its id and file name). The
+    engine is its version plus its code and bundled fonts, as cover_key keys on cover code (a dev build
+    changes them without a new version). A render whose manifest carries the key a project has now shows
+    that project's frames (current_render)."""
     silent = dict(proj, music=None)
     try:
         transcript = hashlib.sha256(projmod.transcript_path(project_dir, proj).read_bytes()).hexdigest()
@@ -1378,8 +1381,22 @@ def picture_key(project_dir: Path, proj: dict, root: Optional[Path] = None) -> s
     # which a rewrite with the same words changes
     assets = asset_fingerprint(project_dir, silent, root)
     assets["assets"].pop(projmod.TRANSCRIPT_REL, None)
+    work, here = Path(project_dir) / "work", Path(__file__).parent
+
+    def stats(base: Path, files) -> dict:
+        out = {}
+        for f in files:
+            try:
+                st = f.stat()
+                out[f.relative_to(base).as_posix()] = [st.st_size, st.st_mtime_ns]
+            except OSError:
+                continue
+        return out
     blob = json.dumps({"edit": projmod.edit_signature(silent), "assets": assets,
-                       "transcript": transcript, "engine": reelengine.__version__}, sort_keys=True, ensure_ascii=False)
+                       "work": stats(work, [*work.glob("face*.json"), *(work / "animations").glob("*")]),
+                       "transcript": transcript, "engine": reelengine.__version__,
+                       "engineFiles": stats(here, [*here.glob("*.py"), *(here / "fonts").rglob("*")])},
+                      sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -1456,6 +1473,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     graph (build_video_cmd) over a one-frame window: the same layers, zooms and full-length caption
     track, with no sound and no encode. `words` adds the middle of each word on the edit's timeline. It
     writes work/render/ and work/layers/ as a render does, so it must never run beside one."""
+    t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir, file=project_file)
     root = tools.root_dir(str(root) if root else None)
@@ -1476,14 +1494,17 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     layers, zooms, layer_items, _, broll_report = overlays(ctx, proj, tl, warnings)
     ass_name, _, font_path = burn_captions(ctx, proj, tl, broll_report, rwork, warnings)
     times, moved = settle_on_animations(layer_items, times)
+    timings = {"setup": round(time.time() - t_start, 2), "stills": []}
 
     W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(proj["format"]["fps"])
-    out_w = int(round(width / 2)) * 2
-    out_h = int(round(H * out_w / W / 2)) * 2
+    # drawn at the draft's own size, then scaled as frames.from_video scales a draft frame
+    out_w = int(round(W * DRAFT_SCALE / 2)) * 2
+    out_h = int(round(H * DRAFT_SCALE / 2)) * 2
     n_frames = max(1, int(round(tl.duration * fps)))
     one = 1.0 / fps
     out = []
     for n, t in enumerate(times):
+        t_still = time.time()
         k = frame_at(t, fps, n_frames)
         a = k / fps
         segments = cutmod.window_segments(tl.segments, a, a + one)
@@ -1506,10 +1527,16 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
                 raise EngineError("FONT_SUBSTITUTED", f"libass used a different font: {bad}",
                                   "Your captions came out in the wrong font, so I stopped. Please "
                                   "reinstall Reel Studio.")
-        os.replace(part, png)
+        if out_w == width:
+            os.replace(part, png)
+        else:
+            tools.text_run([ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(part),
+                            "-vf", f"scale={width}:-2", str(png)], 60, "still scale")
         out.append({"t": round(a, 3), "file": str(png)})
+        timings["stills"].append(round(time.time() - t_still, 2))
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
-    return {"frames": out, "animationsSampledAtEnd": moved, "size": [out_w, out_h], "warnings": warnings}
+    return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
+            "timings": timings}
 
 
 def cover_key(ctx, proj: dict) -> str:
