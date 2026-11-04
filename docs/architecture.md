@@ -63,7 +63,12 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 `<Documents>/Reel Studio/Library/` with subfolders `Raw takes/`, `B-roll/`, `Music/`, `Images/`, `Exports/`
 (plain folder names on purpose, so anyone can open them in Finder or Explorer). User style lives in
 `<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
-listed in My style but the AI doesn't read it. An older version ignores `paused`. A file there that can't be parsed is kept as `My style.damaged.json`
+listed in My style but the AI doesn't read it, and the app doesn't apply it. A rule may also carry a typed `payload`
+the app applies itself when a new video is made (only `{"kind":"caption-case","case":"lower"}` so far), plus `source`
+(project, title, version) and `consent` (the question the person said Yes to). `forgotten` lists the questions of
+removed rules, so answering one again cannot bring a rule back. All of these are optional. An older version ignores `paused`, reads a
+typed rule as a plain sentence, cannot answer a typed question, and may drop `forgotten` if it
+rewrites the file. A file there that can't be parsed is kept as `My style.damaged.json`
 (`My style.damaged 2.json` and so on if that name is taken) and a new one starts, with the copy's name in
 `damaged`; My style says so while the copy is there.
 
