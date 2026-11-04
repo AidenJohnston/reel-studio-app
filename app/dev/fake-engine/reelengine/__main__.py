@@ -343,8 +343,8 @@ def cmd_render(args: list[str]) -> dict:
     (vdir / ("render_draft.json" if draft else "render.json")).write_text(json.dumps(timeline), "utf-8")
     (vdir / "project.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     (vdir / ".rendering").unlink()
+    write_captions(proj, vdir, data)
     if not draft:
-        write_captions(proj, vdir, data)
         data["version"] = n
         save(proj, data, file)
     progress("render", 100, "Done")

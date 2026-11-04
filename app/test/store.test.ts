@@ -321,6 +321,15 @@ describe('project store', () => {
     expect((await detail('kappa')).captionLines).toEqual([[{ w: 'now', ids: ['w0'], run: 0 }]])
   })
 
+  it('before there is a version, the Subtitles list shows the preview\'s lines', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('lambda', {})
+    mkdirSync(join(dir, 'versions', 'preview'), { recursive: true })
+    writeFileSync(join(dir, 'versions', 'preview', 'captions.json'), JSON.stringify({ cues: [{ run: 0, tokens: [{ w: 'first', ids: ['w0'] }] }] }))
+    expect((await detail('lambda')).captionLines).toEqual([[{ w: 'first', ids: ['w0'], run: 0 }]])
+  })
+
   it("fails if a version stops carrying its receipts' facts, or a version from before receipts loses its chat tooltip", async () => {
     setupPaths()
     await ensureRoot()
