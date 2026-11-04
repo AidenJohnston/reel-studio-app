@@ -38,8 +38,10 @@
 .device-frame:not([data-device="any"]) .phone-screen > video {
   position: absolute; left: var(--dev-viewer-left); top: var(--dev-viewer-top); width: var(--dev-viewer-w); height: var(--dev-viewer-h);
 }
-/* The drawer's subtitle preview (Player.tsx SubtitleSample) sits on the reel, not the whole screen, at the reel's size. */
-.device-frame:not([data-device="any"]) .phone-screen { --sub-top: var(--dev-viewer-top); --sub-h: var(--dev-viewer-h); }
+/* The drawer's subtitle preview (Player.tsx SubtitleSample) sits on the reel, not the whole screen, at the reel's size.
+   Its position is a fraction of the whole reel, so on a phone that trims the reel's top and bottom it uses the
+   video rectangle, not the viewer. */
+.device-frame:not([data-device="any"]) .phone-screen { --sub-top: var(--dev-video-top); --sub-h: var(--dev-video-h); }
 .device-frame:not([data-device="any"]) .phone-screen > .sub-sample { scale: var(--dev-reel-scale); }
 /* Instagram view draws this phone's real layout instead of the plain phone's stand-in buttons. */
 .device-frame:not([data-device="any"]) .ig { display: none; }

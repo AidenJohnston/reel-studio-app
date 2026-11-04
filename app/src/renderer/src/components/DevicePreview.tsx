@@ -42,6 +42,10 @@ function frameVars(d: Device): CSSProperties {
     '--dev-viewer-top': pct(viewer.y / d.screen.h),
     '--dev-viewer-w': pct(viewer.w / d.screen.w),
     '--dev-viewer-h': pct(viewer.h / d.screen.h),
+    // The whole reel, trimmed parts included. The export places subtitles on this, which differs from the
+    // viewer when Instagram trims the reel's top and bottom (the SE).
+    '--dev-video-top': pct(video.y / d.screen.h),
+    '--dev-video-h': pct(video.h / d.screen.h),
     // how much bigger the reel is drawn than the screen is wide, when Instagram trims its sides
     '--dev-reel-scale': video.w / d.screen.w
   } as CSSProperties
