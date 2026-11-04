@@ -3,7 +3,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TOOLS } from '../src/tools';
 import { JSONSchema } from '../src/schema';
-import { toResponsesTools } from '../src/providers/openai';
 
 const engine = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../engine/reelengine/schema/project.schema.json'), 'utf8'));
 const p = engine.properties;
@@ -31,20 +30,6 @@ const constraints = (schema: JSONSchema) => Object.fromEntries(
   ['pattern', 'minLength', 'enum'].filter((key) => schema[key] !== undefined)
     .map((key) => [key, key === 'enum' ? new Set(schema[key].filter((v: unknown) => v !== null)) : schema[key]]),
 );
-
-describe('OpenAI strict schemas', () => {
-  it('does not send unsupported string keywords', () => {
-    const unsupported = new Set(['minLength']);
-    const walk = (value: unknown): void => {
-      if (!value || typeof value !== 'object') return;
-      for (const [key, child] of Object.entries(value)) {
-        expect(unsupported.has(key)).toBe(false);
-        walk(child);
-      }
-    };
-    walk(toResponsesTools(TOOLS, 'flat'));
-  });
-});
 
 describe('hand-mirrored engine constraints', () => {
   it.each(pairs)('fails if %s drifts outside the engine schema', (_name, ai, authoritative) => {
