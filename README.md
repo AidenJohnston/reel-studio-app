@@ -76,10 +76,15 @@ Why Reel Studio:
      every edit;
    - the engine knows exactly which frames an edit changed, from the project file, so it renders those first and you
      see stills of the agents at work within a second, then the moments around them, then the whole draft;
-   - anything an edit didn't touch is reused, not rendered again.
+   - anything an edit didn't touch is reused, not rendered again;
+   - a draft keeps what matters most and lets the rest go. Where the cuts land, the caption words and their timing,
+     what covers your face and how it sounds all match the export. Only detail too small to see at preview size is
+     dropped.
 
-   Agents build most of it. Every change is checked frame by frame against today's renderer, on footage we shot on
-   our own phones, so faster never means different.
+   Agents build most of it, and their one goal is less waiting. They keep cutting work out of a render until a check
+   against today's renderer fails, figure out why it failed, find a faster patch that passes, and repeat. The check
+   compares every frame, on footage we shot on our own phones, and the agents can't change it, so faster never means
+   different.
 
 ### Why shorts work
 
