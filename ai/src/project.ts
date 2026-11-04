@@ -313,33 +313,58 @@ const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').tr
 /** Mirrors captions.py's stitch_numbers, normalize_corrections and apply_corrections matching. */
 export function captionCorrectionProblem(kept: readonly Word[], corrections: CaptionCorrection[], proposed: CaptionCorrection): string | null {
   const bare = (word: string) => word.trim().replace(/^["'(\[¿¡]+/, '').replace(/[.,!?;:"')\]…]+$/, '').toLowerCase();
-  const words: string[] = [];
+  const words: { w: string; ids: string[]; fixed: boolean }[] = [];
   for (let i = 0; i < kept.length; i++) {
     const word = kept[i].w;
     const next = kept[i + 1]?.w;
     if (/^\$?\p{Decimal_Number}+$/u.test(word.trim()) && next && /^,\p{Decimal_Number}{3}/u.test(next.trim())) {
-      words.push(word.trim() + next.trim());
+      words.push({ w: word.trim() + next.trim(), ids: [kept[i].id, kept[i + 1].id], fixed: false });
       i++;
-    } else words.push(word);
+    } else words.push({ w: word, ids: [kept[i].id], fixed: false });
   }
   const tokens = (text: string) => text.trim().split(/\s+/).filter(Boolean);
   const single = new Map<string, CaptionCorrection>();
   const spans: { correction: CaptionCorrection; from: string[]; to: string[] }[] = [];
+  const at = new Map<string, CaptionCorrection>();
+  const heard = new Map(kept.map((word) => [word.id, word.w]));
+  const heardIds = [...heard.keys()];
+  const heardWords = [...heard.values()];
   for (const correction of corrections) {
     const from = tokens(correction.from).map(bare);
     const to = tokens(correction.to);
+    if (correction.at) {
+      const i = heardIds.indexOf(correction.at), j = heardIds.indexOf(correction.through ?? correction.at);
+      const now = tokens(heardWords.slice(i, j + 1).join(' ')).map(bare);
+      if (i < 0 || j < 0 || (now.length === from.length && now.every((word, k) => word === from[k]))) {
+        at.set(correction.at, correction);
+      }
+      continue;
+    }
     if (!from.length) continue;
     if (from.length === 1 && to.length === 1) single.set(from[0], correction);
     else spans.push({ correction, from, to });
   }
-  const remaining = words.map((w) => ({ w, fixed: false }));
+  const remaining = words;
   const applied = new Set<string>();
+  // Subtitle edits run first, merge their anchored span and protect it from global corrections.
+  for (let i = 0; i < remaining.length; i++) {
+    const prev = remaining[i - 1]?.ids ?? [];
+    const fix = remaining[i].ids.map((id) => !prev.includes(id) ? at.get(id) : undefined).find(Boolean);
+    if (!fix) continue;
+    const through = fix.through ? remaining.findIndex((word, k) => k >= i && word.ids.includes(fix.through!)) : i;
+    const count = (through < 0 ? i : through) - i + 1;
+    const merged = remaining.slice(i, i + count);
+    remaining.splice(i, count, { w: fix.to || merged.map((word) => word.w).join(' '),
+      ids: [...new Set(merged.flatMap((word) => word.ids))], fixed: true });
+    applied.add(fix.from);
+  }
   for (let i = 0; i < remaining.length; i++) {
     for (const span of spans) {
-      if (!span.from.every((word, k) => remaining[i + k] && bare(remaining[i + k].w) === word)) continue;
+      if (!span.from.every((word, k) => remaining[i + k] && !remaining[i + k].fixed && bare(remaining[i + k].w) === word)) continue;
       if (span.correction === proposed) return null;
       applied.add(span.correction.from);
-      remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, fixed: true })));
+      const ids = remaining.slice(i, i + span.from.length).flatMap((word) => word.ids);
+      remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, ids, fixed: true })));
       i += Math.max(0, span.to.length - 1);
       break;
     }
