@@ -40,7 +40,7 @@ function renderModule(): Promise<RenderModule> {
 let adapter: Adapter | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
-export function renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
+export function renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps = 30): Promise<string> {
   const run = async (): Promise<string> => {
     const mod = await renderModule()
     adapter ??= mod.createElectronAdapter(BrowserWindow)
@@ -49,6 +49,7 @@ export function renderAnimation(template: string, params: Record<string, unknown
         template,
         params,
         outPath,
+        fps,
         adapter,
         ffmpeg: ffmpegPath(),
         templatesRoot: template === TEST_TEMPLATE ? testAnimationDir() : templatesDir()

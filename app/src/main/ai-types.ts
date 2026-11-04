@@ -35,7 +35,7 @@ export interface EngineHost {
     onProgress?: (p: { stage: string; pct: number; message: string }) => void,
     signal?: AbortSignal
   ): Promise<any>
-  renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string>
+  renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>
   reelStudioRoot(): string
   captureWebsite?(
     url: string,
