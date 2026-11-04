@@ -76,8 +76,18 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
     v.currentTime = 4
     await v.play()
   })
+  // At rest the button is hidden, and a tap there reaches the video, not a button nobody saw (a touch
+  // screen has no hover to show it first).
+  await page.mouse.move(0, 0)
+  const hit = () =>
+    page.getByTestId('open-fullscreen').evaluate((b) => {
+      const r = b.getBoundingClientRect()
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === b
+    })
+  expect(await hit()).toBe(false)
   await page.getByTestId('phone').hover()
   await expect(page.getByTestId('open-fullscreen')).toHaveText('Full screen')
+  expect(await hit()).toBe(true)
   await page.screenshot({ path: join(SHOTS, 'fullscreen-01-reel.png') })
 
   // ---- open: real full screen, true 9:16 frame, playback carried in, the phone stopped ----
