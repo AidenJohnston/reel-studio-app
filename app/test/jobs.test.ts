@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
+import { OWNER_LOCK } from '../src/main/owner'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
@@ -31,6 +32,73 @@ async function stuckVideo() {
   return { slug, dir, partial, jobs, id, appJsonWhileRunning }
 }
 
+describe('project reservations', () => {
+  it('keeps a project closed when an attachment engine cannot stop', async () => {
+    setupPaths()
+    const slug = 'stuck-attachment'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async () => { throw STUCK },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.hold(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    await expect(handlers.get('notes:attachFiles')!({} as IpcMainInvokeEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject(STUCK)
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
+    expect(() => jobs.start(slug, 'rerender', async () => ({ summary: 'never' }))).toThrow(expect.objectContaining(STUCK))
+    await expect(jobs.hold(slug, async () => undefined)).rejects.toMatchObject(STUCK)
+  })
+  it('rejects an attachment admitted while a manual update holds the project', async () => {
+    setupPaths()
+    const slug = 'held-reel'
+    const dir = projectDir(slug)
+    mkdirSync(join(dir, 'work'), { recursive: true })
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const jobs = createJobManager(() => undefined, () => undefined)
+    const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
+    const engineCalls: string[][] = []
+    registerAttachmentIpc({
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      runEngine: async (cmd, args) => {
+        engineCalls.push([cmd, ...args])
+        return null
+      },
+      log: () => undefined,
+      projectDir,
+      readProject: async () => ({ broll: [] }) as any,
+      reserve: (s, fn) => jobs.hold(s, fn),
+      clipboardImage: async () => null,
+      choose: async () => null
+    })
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: () => void = () => undefined
+    const manualEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const manual = jobs.hold(slug, async () => {
+      entered()
+      await held
+    })
+    await manualEntered
+    const noEvent = {} as IpcMainInvokeEvent
+    await expect(handlers.get('notes:attachFiles')!(noEvent, slug, ['/tmp/a.png'])).rejects.toMatchObject({ code: 'BUSY' })
+    expect(engineCalls).toEqual([])
+    release()
+    await manual
+  })
+})
+
 describe('a job whose engine would not stop', () => {
   it('keeps the video closed, its partial version in place and app.json as the job left it', async () => {
     const { slug, dir, partial, jobs, id, appJsonWhileRunning } = await stuckVideo()
@@ -42,6 +110,8 @@ describe('a job whose engine would not stop', () => {
     expect(existsSync(join(partial, '.rendering'))).toBe(true)
     expect(readFileSync(join(dir, 'app.json'), 'utf8')).toBe(appJsonWhileRunning)
     expect(JSON.parse(appJsonWhileRunning).job.id).toBe(id)
+    // the job never lets go of the project, so the engine and AI CLIs run by hand stay out too
+    expect(existsSync(join(dir, OWNER_LOCK))).toBe(true)
     // other videos are not affected
     expect(jobs.isClosed('another-reel')).toBe(false)
   })
@@ -62,8 +132,7 @@ describe('a job whose engine would not stop', () => {
       readProject: async () => {
         throw new Error('a closed video is never read')
       },
-      busy: (s) => jobs.isClosed(s),
-      refuse: (s) => jobs.refuseIfBusy(s),
+      reserve: (s, fn) => jobs.hold(s, fn),
       clipboardImage: async () => ({ mime: 'image/png', bytes: new Uint8Array([1]) }),
       choose: async () => ['/tmp/a.png']
     })
