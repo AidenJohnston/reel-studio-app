@@ -19,9 +19,10 @@ FPS = 30
 DRAFT_W = 540
 # Words of different lengths, so lines grouped differently look different.
 TEXT = "so here is the short videos everyone makes and nobody really watches until the end".split()
-# Proposed bounds (dB). A wrong caption line scores 10 to 12 in the caption band (#148), a frame early or
-# late about 23 in the moving square's band, a missing card under 20 in its box. What separates a match
-# from these is the preview's lossy encode against the lossless still.
+# Bounds in dB, proposed, not approved. On Windows with FFmpeg 7.1.1 a still and the draft's frame scored
+# at least 46.7 in every region (the draft's lossy encode against the lossless still); the same still read
+# without the window caption clock scored 13.8 in the caption band, and the frame after it 23.4 in the
+# square's band. A missing card was not measured.
 CAPTION_DB, SQUARE_DB, CARD_DB, FRAME_DB = 30.0, 30.0, 30.0, 30.0
 
 
