@@ -1,3 +1,7 @@
+// Overall progress and "about N minutes left" for long jobs. The ai package tags its status events
+// with a phase (listen, analyze, edit, final). Each phase's length comes from what it took on THIS
+// computer before (speed-history.json), else from the defaults below, and engine phases still ahead
+// are rescaled by how fast this job's finished engine phases ran. The AI wait never rescales them.
 import { performance } from 'node:perf_hooks'
 import type { JobKind, Phase } from '../shared/api'
 
@@ -37,6 +41,10 @@ export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
   'rerender:final': { base: 6, perMin: 22 }
 }
 
+function defaultModel(key: string): Omit<PhaseModel, 'n'> {
+  return DEFAULTS[key] ?? DEFAULTS[key.replace('first-edit-basic:', 'first-edit:')] ?? { base: 10, perMin: 10 }
+}
+
 const PLAN: Record<string, Timed[]> = {
   'first-edit': ['listen', 'analyze', 'edit', 'final'],
   'first-edit-basic': ['listen', 'analyze', 'final'],
@@ -70,8 +78,7 @@ export class ProgressTracker {
   }
 
   private default(phase: Timed): number {
-    const key = `${this.kind}:${phase}`
-    const d = DEFAULTS[key] ?? DEFAULTS[key.replace('first-edit-basic:', 'first-edit:')] ?? { base: 10, perMin: 10 }
+    const d = defaultModel(`${this.kind}:${phase}`)
     return Math.max(2, d.base + d.perMin * (this.mediaSec / 60))
   }
 
@@ -107,6 +114,9 @@ export class ProgressTracker {
     return this.default(phase) * (phase === 'edit' ? 1 : this.factor() ?? 1)
   }
 
+  /** A status event. `phase` moves the job forward, never back; phases it jumps over cost nothing.
+   * A step's own percent is ignored, because engine substeps each reach 100%. `aggregate` marks a
+   * whole-job percent (the engine's `render` stage), which then drives the bar and time left. */
   update(phase: Phase | undefined, pct: number | undefined, aggregate = false): void {
     const t = this.now()
     if (aggregate && pct !== undefined && Number.isFinite(pct)) {
@@ -127,6 +137,8 @@ export class ProgressTracker {
     this.phaseStart = t
   }
 
+  /** 0-99 overall percent (never decreasing) and seconds left. etaSec null with overdue means the last
+   * phase outlived its estimate ("Still working, almost there"); null without it means no honest number. */
   snapshot(): { overall: number; etaSec: number | null; overdue: boolean } {
     if (this.cur < 0) return { overall: this.best, etaSec: null, overdue: false }
     const estimates = this.phases.map((p) => this.spent[p] === 0 ? 0 : this.phaseEstimate(p))
@@ -135,6 +147,8 @@ export class ProgressTracker {
     const elapsed = Math.max(0, (this.now() - this.phaseStart) / 1000)
     const later = estimates.slice(this.cur + 1).reduce((a, b) => a + b, 0)
     const remaining = Math.max(0, current - elapsed) + later
+    // A first AI step with no local history is a guess: once an engine phase has shown this computer's
+    // speed, time left budgets the AI step separately from the engine work around it.
     const observed = this.factor() !== undefined
     const unknownEdit = this.phases.slice(this.cur).includes('edit') && !this.local('edit')
     const aiBudget = unknownEdit && observed ? this.phaseEstimate('edit') : 0
@@ -142,6 +156,7 @@ export class ProgressTracker {
     const other = this.phases[this.cur] === 'edit' ? later : remaining - aiBudget
     const displayRemaining = aiBudget ? Math.max(1, aiBudget - aiElapsed) + other : remaining
     const phaseBudget = Math.max(current, elapsed)
+    // A whole-job percent, when the engine sends one, projects the rest from the job's own pace.
     const aggregateLeft = this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart
       ? (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct - (this.now() - this.jobStart) / 1000
       : undefined
@@ -172,12 +187,18 @@ export class ProgressTracker {
     if (sec > 0 && Number.isFinite(sec)) this.spent[this.phases[this.cur]] = sec
   }
 
+  /** Seconds each phase took, for learn(); the current phase ends now. */
   finish(): Partial<Record<Timed, number>> {
     if (this.cur >= 0 && this.spent[this.phases[this.cur]] === undefined) this.recordPhase(this.now())
     return { ...this.spent }
   }
 }
 
+/** Folds one finished job's phase times into the history. The AI step's wait hardly depends on clip
+ * length, so `edit` is learned as flat seconds. An engine phase keeps its default's shape (a fixed
+ * start plus a cost per minute of video) and learns one speed factor, so a short clip neither turns
+ * startup time into a per-minute cost nor makes a long video look free. With earlier history, the
+ * new time counts for 30%; both are compared at this clip's length, whatever shape the old entry has. */
 export function learn(history: SpeedHistory, kind: ProgressKind, mediaSec: number, spent: Partial<Record<Timed, number>>): SpeedHistory {
   const out: SpeedHistory = { v: 1, phases: { ...history.phases } }
   if (!(mediaSec > 0) || !Number.isFinite(mediaSec)) return out
@@ -186,14 +207,18 @@ export function learn(history: SpeedHistory, kind: ProgressKind, mediaSec: numbe
     if (!sec || sec <= 0 || !Number.isFinite(sec)) continue
     const key = `${kind}:${phase}`
     const previous = out.phases[key]
-    // Fixed startup and AI latency must not become a per-minute cost after a short clip.
-    // A measured phase can be faster than the fallback startup cost, as in the basic-edit fixture.
-    const base = Math.min(sec, (DEFAULTS[key] ?? DEFAULTS[key.replace('first-edit-basic:', 'first-edit:')])?.base ?? 10)
-    const prev = previous && previous.n > 0 && previous.base === base ? previous : undefined
-    const measured = Math.max(0, sec - base) / min
-    if (!Number.isFinite(measured)) continue
-    const a = prev ? 0.3 : 1
-    out.phases[key] = { base, perMin: (prev?.perMin ?? measured) * (1 - a) + measured * a, n: (prev?.n ?? 0) + 1 }
+    const before = previous && previous.n > 0 ? previous.base + previous.perMin * min : NaN
+    const known = Number.isFinite(before)
+    const blended = known ? before * 0.7 + sec * 0.3 : sec
+    const n = (known ? previous!.n : 0) + 1
+    if (phase === 'edit') {
+      out.phases[key] = { base: blended, perMin: 0, n }
+      continue
+    }
+    const d = defaultModel(key)
+    const speed = blended / (d.base + d.perMin * min)
+    if (!Number.isFinite(speed)) continue
+    out.phases[key] = { base: d.base * speed, perMin: d.perMin * speed, n }
   }
   return out
 }
