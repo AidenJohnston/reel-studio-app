@@ -2,18 +2,16 @@
 # Packaging installs exactly this into the bundled python-build-standalone runtime:
 #   python -m pip install --no-deps -r requirements.txt && python -m pip install --no-deps .
 # No torch. Regenerate after changing pyproject.toml:
-#   uv pip compile pyproject.toml --universal --python-version 3.11 --no-header -o requirements.txt
-# (then put this header back). Optional extra not included: pillow-heif (see THIRD_PARTY.md).
+#   uv pip compile pyproject.toml --universal --python-version 3.11 --no-header --no-emit-package av -o requirements.txt
+# (then put this header back and drop uv's "excluded" footer). Optional extra not included: pillow-heif (see THIRD_PARTY.md).
+# No PyAV (`av`): faster-whisper needs it only to decode audio FILES, the engine always hands it decoded samples,
+# and its wheels carry GPL x264/x265 libraries. reelengine/nopyav.py stands in for it.
 anyio==4.15.1 ; sys_platform != 'emscripten'
     # via httpx2
 attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
-av==18.1.0 ; python_full_version < '3.12'
-    # via faster-whisper
-av==19.0.1 ; python_full_version >= '3.12'
-    # via faster-whisper
 click==8.5.0
     # via huggingface-hub
 colorama==0.4.6 ; sys_platform == 'win32'
