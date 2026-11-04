@@ -269,8 +269,11 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   } catch {
     return removed
   }
-  // a folder above project.json's version is a final no note or render ever saved (docs/versions.md)
-  const saved = await readJson<{ version?: number } | null>(join(dir, 'project.json'), null)
+  // a folder up to project.json's version is a saved version, and stays even with a file missing
+  // (render.py never encodes into it); one above it is a final no note or render ever saved
+  // (docs/versions.md); null: project.json can't be read, so only the files decide
+  const p = await readJson<{ version?: unknown } | null>(join(dir, 'project.json'), null)
+  const saved = p ? Number(p.version) || 0 : null
   for (const name of names) {
     // The engine's scratch previews (docs/versions.md) are the engine's to overwrite (review 31).
     if (name === PREVIEW_DIR) continue
@@ -284,11 +287,10 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
       }
       continue
     }
+    const n = /^v(\d+)$/.exec(name)
     const finished =
-      /^v\d+$/.test(name) &&
-      !(saved && Number(name.slice(1)) > (Number(saved.version) || 0)) &&
-      VIDEO_NAMES.some((v) => existsSync(join(d, v))) &&
-      !existsSync(join(d, '.rendering'))
+      !!n &&
+      (saved !== null ? Number(n[1]) <= saved : VIDEO_NAMES.some((v) => existsSync(join(d, v))) && !existsSync(join(d, '.rendering')))
     if (!finished) {
       await fs.rm(d, { recursive: true, force: true })
       removed.push(d)
@@ -528,7 +530,12 @@ export async function detail(slug: string): Promise<ProjectDetail> {
   const words = await readWords(dir, project)
   const kept = keptIds(words, project.cut?.keep)
   const st = await readAppState(slug)
-  const captionLines = readCaptionLines(await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  // the lines of the saved version (or of the preview before there is one): each render keeps its
+  // caption report beside its video (docs/versions.md); a version made before that left it in work/
+  const shown = join(dir, 'versions', project.version ? `v${project.version}` : PREVIEW_DIR)
+  const captionLines = readCaptionLines(
+    (await readJson<unknown>(join(shown, 'captions.json'), null)) ?? (await readJson<unknown>(join(dir, 'work', 'captions.json'), null))
+  )
   const brollThumbs: Record<string, string> = {}
   for (const b of project.broll ?? []) {
     const a = typeof b.asset === 'string' ? b.asset : ''
