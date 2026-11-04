@@ -119,6 +119,13 @@ test('send to my phone: QR link, phone fetch, Sent!, fallbacks', async () => {
   await expect(page.getByTestId('phone-fallbacks')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Email it to yourself')
   await expect(page.getByTestId('phone-why')).toHaveText('School, work and hotel Wi-Fi often block this. Use one of these instead:')
+  // After switching Wi-Fi the old code points at an address this computer no longer has: the row makes a new one.
+  await expect(page.getByTestId('phone-check-wifi')).toContainText('Fix that, then click Make a new code and scan it.')
+  await page.getByTestId('phone-wifi-renew').click()
+  await expect(page.getByTestId('phone-qr')).not.toHaveAttribute('data-url', url2)
+  const url3 = await qrUrl(page)
+  expect(url3).not.toBe(url2) // a new phone:start, so a new token
+  await expect.poll(() => fetch(url2).then((r) => r.status, () => 'closed')).toBe('closed')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('iCloud Drive')
   await expect(page.getByTestId('phone-fallbacks')).toContainText('Use a cable')
   if (process.platform === 'darwin') await expect(page.getByTestId('phone-airdrop')).toBeVisible()
@@ -128,7 +135,7 @@ test('send to my phone: QR link, phone fetch, Sent!, fallbacks', async () => {
   await page.getByTestId('phone-fallbacks').screenshot({ path: join(SHOTS, 'phone-06-fallbacks.png') })
   await page.getByTestId('phone-back').click()
   await expect(page.getByText('Saved to your computer')).toBeVisible()
-  await expect.poll(() => fetch(url2).then((r) => r.status, () => 'closed')).toBe('closed')
+  await expect.poll(() => fetch(url3).then((r) => r.status, () => 'closed')).toBe('closed')
 
   await app.close()
 })

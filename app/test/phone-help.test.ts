@@ -89,6 +89,13 @@ describe('SendToPhone.tsx uses it', () => {
     expect(src).toContain('{PHONE_HELP.why}')
     expect(src).not.toMatch(/drive below/) // a drive can now be above email
   })
+  it('the Wi-Fi check, before the why line and the other ways, only while the page has not opened', () => {
+    expect(src.split('{PHONE_HELP.check}')).toHaveLength(2)
+    expect(src).toMatch(/\{!sent && !error && \(\s*<>\s*<div className="phone-way" data-testid="phone-check-wifi">(?:(?!\)\})[\s\S])*\{PHONE_HELP\.check\}/)
+    const at = src.indexOf('{PHONE_HELP.check}')
+    expect(at).toBeLessThan(src.indexOf('{PHONE_HELP.why}'))
+    expect(at).toBeLessThan(src.indexOf('fallbackOrder(IS_MAC).map('))
+  })
   it('the "Phone can\'t open it?" link still opens the other ways without waiting', () => {
     expect(src).toMatch(/onClick=\{\(\) => setHelp\(true\)\} data-testid="phone-cant"/)
   })
