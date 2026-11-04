@@ -32,10 +32,10 @@ def _psnr(a: np.ndarray, b: np.ndarray) -> float:
 
 def test_window_starting_mid_line_shows_the_full_videos_lines(tmp_path, monkeypatch):
     """The window used to regroup only its own words into lines: starting inside the line "SO HERE IS"
-    it showed "HERE IS THE", a line the full video never has (about 10 dB in the caption band)."""
+    it showed "HERE IS THE", a line the full video never has."""
     monkeypatch.setenv("REELENGINE_DRAFT_ENCODER", "libx264")   # both previews through one encoder
     pdir = tmp_path / "p"
-    fx.make_project(pdir, fx.synth_video(tmp_path / "media" / "take.mp4", dur=8.0), keep=((0.85, 6.85),))
+    fx.make_project(pdir, fx.synth_video(tmp_path / "media" / "take.mp4", dur=8.0), keep=((0.05, 6.05),))
     tfile = pdir / "work" / "transcript.json"
     words = json.loads(tfile.read_text(encoding="utf-8"))["words"]
     for i, w in enumerate(words):
@@ -45,9 +45,9 @@ def test_window_starting_mid_line_shows_the_full_videos_lines(tmp_path, monkeypa
     full = render.run(pdir, draft=True, root=tmp_path, verify=False)
     # the caption report lives beside the video it describes (#87)
     boxes = [c["box"] for c in json.loads((Path(full["versionDir"]) / "captions.json").read_text(encoding="utf-8"))["cues"]]
-    # Word k plays at output 0.1 + 0.4k s for 0.3 s (0.1 s of lead-in before the first word), three
-    # words to a line. 0.6 s is inside the first line's second word, 2.6 s inside the third line's
-    # first word: the window starts and ends mid-line and mid-word, on the frame grid.
+    # Word k plays at output 0.05 + 0.4k s for 0.3 s, three words to a line: "SO HERE IS", "THE SHORT
+    # VIDEOS", "EVERYONE MAKES AND". 0.6 s is inside "HERE" and 2.6 s inside "EVERYONE", so the window
+    # starts and ends mid-line and mid-word, on the frame grid.
     a, b = 0.6, 2.6
     win = render.run(pdir, draft=True, window=f"{a}:{b}", root=tmp_path, verify=False)
 
