@@ -144,12 +144,15 @@ def write_reference_manifest(d: Path, key: str, pins: dict) -> None:
         "files": {n: sha256_file(d / n) for n in REF_FILES}}, indent=1), encoding="utf-8")
 
 
-def reference_ready(d: Path, key: str, pins: dict) -> bool:
+def reference_ready(d: Path, key: str, pins: dict, require: bool = False) -> bool:
     """True when `d` holds a finished reference for `key`; False when there is none yet (or one from
-    before manifests existed, which is rebuilt). Refuses a reference whose files or origin differ
-    from its manifest: a replaced or edited reference would decide every check."""
+    before manifests existed, which setup rebuilds). Refuses a reference whose files or origin differ
+    from its manifest: a replaced or edited reference would decide every check. `require`: the
+    reference must exist (checking time: setup made it, so a missing manifest means tampering)."""
     mf = d / REF_MANIFEST
     if not mf.exists():
+        if require:
+            raise Refusal(f"reference {d} lost its manifest after setup. Delete it and run setup again.")
         return False
     m = json.loads(mf.read_text(encoding="utf-8"))
     bad = []
@@ -287,8 +290,10 @@ def preview_size(fmt: dict, scale: float) -> tuple:
 
 
 def still_size(preview: tuple, width: int) -> tuple:
-    """frames.py scales the draft to `width` wide, height kept in proportion and even."""
-    return width, int(width * preview[1] / preview[0]) // 2 * 2
+    """frames.py scales the draft with `scale=<width>:-2`: FFmpeg's scale_eval.c sets the height to
+    av_rescale(width, h, w * 2) * 2, which rounds to the nearest even number, ties away from zero."""
+    num, den = width * preview[1], preview[0] * 2
+    return width, (2 * num + den) // (2 * den) * 2
 
 
 def pair_stills(times: list, names: list) -> list:
@@ -319,7 +324,7 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
 
     steps = []
     for k, (step, ref) in enumerate(zip(take.session, refs)):
-        reference_ready(ref["dir"], ref["key"], pins)     # unchanged since setup, or refuse
+        reference_ready(ref["dir"], ref["key"], pins, require=True)     # unchanged since setup, or refuse
         export = ref["dir"] / "export.mp4"
         caps = json.loads((ref["dir"] / "captions.json").read_text(encoding="utf-8"))["cues"]
         a, b = ref["window"]

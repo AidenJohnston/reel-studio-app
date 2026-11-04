@@ -293,13 +293,17 @@ def validate(spec, take_dir: Path) -> None:
         raise RuntimeError(f"take {take_dir.name} is missing {', '.join(missing)}")
     if spec is None:
         return
-    src = json.loads((take_dir / "project" / "project.json").read_text(encoding="utf-8"))["sources"][0]
+    # the base project and every state: the states are what the engines render
+    files = ["project/project.json"] + [st["state"] for st in
+                                        json.loads((take_dir / "session.json").read_text(encoding="utf-8"))["steps"]]
     problems = []
-    if bool(src.get("hdr")) != (spec.get("transfer") == "hlg"):
-        problems.append(f"the engine reads hdr={bool(src.get('hdr'))}, the spec says transfer={spec.get('transfer', 'sdr')}")
-    # rotated or not: the display matrix's sign convention can turn a spec of 90 into a probed 270
-    if bool(int(src.get("rotation") or 0) % 360) != bool(int(spec.get("rotation") or 0) % 360):
-        problems.append(f"the engine reads rotation {src.get('rotation') or 0}, the spec says {spec.get('rotation') or 0}")
+    for rel in files:
+        src = json.loads((take_dir / rel).read_text(encoding="utf-8"))["sources"][0]
+        if bool(src.get("hdr")) != (spec.get("transfer") == "hlg"):
+            problems.append(f"{rel}: hdr={bool(src.get('hdr'))}, the spec says transfer={spec.get('transfer', 'sdr')}")
+        # rotated or not: the display matrix's sign convention can turn a spec of 90 into a probed 270
+        if bool(int(src.get("rotation") or 0) % 360) != bool(int(spec.get("rotation") or 0) % 360):
+            problems.append(f"{rel}: rotation {src.get('rotation') or 0}, the spec says {spec.get('rotation') or 0}")
     if problems:
         raise RuntimeError(f"take {take_dir.name} does not match its spec: {'; '.join(problems)}. "
                            f"Delete {take_dir} and run setup again.")
