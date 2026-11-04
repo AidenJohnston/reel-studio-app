@@ -463,11 +463,22 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
-            if hw and hw != "cuda" and not hdr:
-                cmd += ["-hwaccel", hw]
+            if hdr:
+                dec = tools.hwaccel_to_memory() if (ctx.draft and use_hw) else None
+            else:
+                dec = hw if hw != "cuda" else None
+            if dec:
+                cmd += ["-hwaccel", dec]
             pre = None
-            tm = HDR_CHAIN + "," if hdr and "zscale" in tools.filters() else ""
-            per_seg = tm + reframe_filter(src, out_w, out_h, face, ctx.draft) + ",format=yuv420p"
+            reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
+            if hdr and "zscale" in tools.filters():
+                # A draft tonemaps the cropped, scaled frame (540x960, 1/16 of a 4K one); the result is
+                # within PSNR 43 dB of tonemapping first (frame 60 of the 4K HLG stand-in, Windows 11).
+                # Finals keep tonemap-then-scale, so their bytes don't change.
+                per_seg = (reframe + "," + HDR_CHAIN if ctx.draft
+                           else HDR_CHAIN + "," + reframe + ",format=yuv420p")
+            else:
+                per_seg = reframe + ",format=yuv420p"
         cmd += no_rotate_args(src)
         if lane["seek"] > 0:
             cmd += ["-ss", _f(lane["seek"])]
