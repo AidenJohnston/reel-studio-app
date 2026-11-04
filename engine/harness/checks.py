@@ -103,13 +103,24 @@ def _preview_rows(tally: Tally, th: dict) -> list:
             ("meanColorDelta", mx, compare.verdict(mx, maximum=th.get("meanColorMaxDelta")), tally.where.get("meanColorDelta"))]
 
 
+def _wrong_size(got: tuple, want: tuple):
+    """Comparing at the candidate's own size would let a tiny output with the right average color
+    pass, so a preview must have the size it is supposed to have before anything is compared."""
+    if tuple(got) != tuple(want):
+        return _result([], [f"size {got[0]}x{got[1]}, required {want[0]}x{want[1]}"], {"size": list(got)})
+    return None
+
+
 def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list, th: dict,
-                        fps: float, start: float = 0.0, end: float = math.inf) -> dict:
+                        fps: float, want: tuple, start: float = 0.0, end: float = math.inf) -> dict:
     """A draft (all of the reference) or a window (the reference's output seconds [start, end))
     against the reference. The range comes from the request, not the candidate, so a short output
-    fails the frame count."""
+    fails the frame count; the size comes from the output format (`want`)."""
     failures = []
     w, h = media.video_size(ffprobe, cand)
+    bad = _wrong_size((w, h), want)
+    if bad:
+        return bad
     rp_all = media.video_pts(ffprobe, ref)
     cp = media.video_pts(ffprobe, cand)
     eps = 1e-6
@@ -149,11 +160,15 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
     return _result(rows, failures, {"size": [w, h], "frames": len(cp)})
 
 
-def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict) -> dict:
+def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict,
+                want: tuple) -> dict:
     """One still `frames --times t` made: the first reference frame at or after t (what ffmpeg's
-    accurate input seek in frames.py returns), scaled to the still's size."""
+    accurate input seek in frames.py returns), scaled to the required still size `want`."""
     b = media.read_image(png)
     h, w = b.shape[:2]
+    bad = _wrong_size((w, h), want)
+    if bad:
+        return bad
     rp = media.video_pts(ffprobe, ref)
     idx = next((i for i, x in enumerate(rp) if x >= t - 1e-6), len(rp) - 1)
     a: Optional[object] = None

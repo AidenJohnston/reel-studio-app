@@ -1,13 +1,15 @@
 """The speed harness's checks have one right answer each: these pin them on made-up frames,
-sounds and a throwaway git repo, with no engine or FFmpeg involved."""
+sounds, folders and a throwaway git repo. No engine runs; one test makes a tiny video with FFmpeg."""
+import json
 import math
+import os
 import shutil
 import subprocess
 
 import numpy as np
 import pytest
 
-from harness import compare, replay
+from harness import checks, compare, corpus, replay
 from harness.engines import Refusal, extract_reference, git_blob_id, verify_reference
 
 W, H = 540, 960            # preview size; caption boxes are in 1080x1920 output pixels
@@ -136,3 +138,124 @@ def test_reference_copy_is_refused_once_edited(tmp_path):
     (dest / "reelengine" / "extra.py").write_text("")
     with pytest.raises(Refusal, match="extra"):
         verify_reference(repo, commit, dest)
+
+
+# --- what the harness trusts on disk -------------------------------------------------------------
+
+HLG = {"width": 2160, "height": 3840, "codec": "hevc", "transfer": "hlg", "seed": 1}
+
+
+def fake_take(d, hdr: bool, rotation: int = 0, spec=None, state_hdr=None):
+    (d / "project" / "work").mkdir(parents=True)
+    (d / "states").mkdir()
+    src = lambda h: json.dumps({"sources": [{"id": "s1", "hdr": h, "rotation": rotation}]})
+    (d / "project" / "project.json").write_text(src(hdr))
+    (d / "states" / "00.json").write_text(src(hdr if state_hdr is None else state_hdr))
+    (d / "project" / "work" / "transcript.json").write_text("{}")
+    (d / "session.json").write_text('{"steps": [{"state": "states/00.json"}]}')
+    if spec is not None:
+        (d / corpus.SPEC_FILE).write_text(json.dumps({"key": corpus.spec_key(spec)}))
+    return d
+
+
+def test_take_made_by_older_code_or_another_spec_is_rebuilt(tmp_path):
+    old = fake_take(tmp_path / "old", hdr=False)                    # a corpus from before spec.json
+    assert corpus.needs_build(HLG, old)
+    cur = fake_take(tmp_path / "cur", hdr=True, spec=HLG)
+    assert not corpus.needs_build(HLG, cur)
+    assert corpus.needs_build(dict(HLG, seed=2), cur)
+
+
+def test_hlg_take_the_engine_reads_as_sdr_is_refused(tmp_path):
+    with pytest.raises(RuntimeError, match="hdr=False"):
+        corpus.validate(HLG, fake_take(tmp_path / "a", hdr=False, spec=HLG))
+    corpus.validate(HLG, fake_take(tmp_path / "b", hdr=True, spec=HLG))
+    # the states are what both engines render: a stale one is refused even when the project is right
+    with pytest.raises(RuntimeError, match="states/00.json: hdr=False"):
+        corpus.validate(HLG, fake_take(tmp_path / "s", hdr=True, spec=HLG, state_hdr=False))
+    with pytest.raises(RuntimeError, match="rotation"):
+        corpus.validate({"rotation": 90}, fake_take(tmp_path / "c", hdr=False, rotation=0))
+    # a state whose first source looks right but whose sources differ (the real one listed second)
+    d = fake_take(tmp_path / "d", hdr=True, spec=HLG)
+    (d / "states" / "00.json").write_text(json.dumps({"sources": [{"id": "s2", "hdr": True},
+                                                                  {"id": "s1", "hdr": False}]}))
+    with pytest.raises(RuntimeError, match="sources differ"):
+        corpus.validate(HLG, d)
+
+
+PINS = {"engineCommit": "c0ffee", "ffmpeg": {"sha256": "ff"}}
+
+
+def fake_reference(d):
+    d.mkdir()
+    for n in replay.REF_FILES:
+        (d / n).write_bytes(n.encode())
+    replay.write_reference_manifest(d, d.name, PINS)
+    return d
+
+
+def test_reference_cache_whose_files_changed_is_refused(tmp_path):
+    assert replay.reference_ready(tmp_path / "none", "none", PINS) is False
+    with pytest.raises(Refusal, match="lost its manifest"):           # at check time it must exist
+        replay.reference_ready(tmp_path / "none", "none", PINS, require=True)
+    d = fake_reference(tmp_path / "k1")
+    assert replay.reference_ready(d, "k1", PINS) is True
+    (d / "export.mp4").write_bytes(b"another render")
+    with pytest.raises(Refusal, match="export.mp4 changed"):
+        replay.reference_ready(d, "k1", PINS)
+    e = fake_reference(tmp_path / "k2")
+    with pytest.raises(Refusal, match="made by"):
+        replay.reference_ready(e, "k2", {"engineCommit": "c0ffee", "ffmpeg": {"sha256": "other"}})
+    legacy = tmp_path / "k3"
+    legacy.mkdir()
+    (legacy / "done.json").write_text("{}")                         # from before manifests: rebuild
+    assert replay.reference_ready(legacy, "k3", PINS) is False
+
+
+def test_checking_refuses_a_reference_that_lost_its_manifest_after_setup(tmp_path):
+    from types import SimpleNamespace
+    d = fake_reference(tmp_path / "k1")
+    (d / replay.REF_MANIFEST).unlink()
+    take = SimpleNamespace(session=[{"state": "states/00.json"}])
+    refs = [{"dir": d, "key": "k1", "format": {"width": 1080, "height": 1920}, "window": [0.0, 2.0],
+             "stills": [1.0], "fps": 30.0}]
+    with pytest.raises(Refusal, match="lost its manifest"):
+        replay.check_take(take, refs, [], "ffmpeg", "ffprobe", {"preview": {}, "final": {}}, PINS,
+                          {"previewScale": 0.5, "stillWidth": 540})
+
+
+def test_preview_sizes_follow_the_output_format():
+    fmt = {"width": 1080, "height": 1920}
+    assert replay.preview_size(fmt, 0.5) == (540, 960)
+    assert replay.still_size((540, 960), 540) == (540, 960)
+    # a landscape draft: FFmpeg's -2 rounds 151.875 * 2 to 304, not down to 302
+    assert replay.still_size((960, 540), 540) == (540, 304)
+
+
+def test_still_of_the_wrong_size_fails_before_any_comparison(tmp_path):
+    from PIL import Image
+    png = tmp_path / "tiny.png"
+    Image.new("RGB", (54, 96), (90, 90, 90)).save(png)
+    # the reference path does not exist: reaching it would raise instead of failing on size
+    r = checks.check_still("ffmpeg", "ffprobe", tmp_path / "no-ref.mp4", png, 1.0, [], {}, (540, 960))
+    assert r["status"] == "fail" and "size 54x96, required 540x960" in r["failures"][0]
+
+
+FFMPEG = os.environ.get("REELENGINE_FFMPEG") or shutil.which("ffmpeg")
+FFPROBE = os.environ.get("REELENGINE_FFPROBE") or shutil.which("ffprobe")
+
+
+@pytest.mark.skipif(not (FFMPEG and FFPROBE), reason="needs ffmpeg and ffprobe")
+def test_draft_of_the_wrong_size_fails_before_any_comparison(tmp_path):
+    tiny = tmp_path / "tiny.mp4"
+    subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=54x96:d=0.2:r=30",
+                    "-pix_fmt", "yuv420p", str(tiny)], check=True)
+    r = checks.check_preview_video(FFMPEG, FFPROBE, tmp_path / "no-ref.mp4", tiny, [], {}, 30.0, (540, 960))
+    assert r["status"] == "fail" and "size 54x96, required 540x960" in r["failures"][0]
+
+
+def test_every_still_is_paired_with_a_requested_time():
+    assert replay.pair_stills([1.0, 1.5], ["still1", "still0"]) == [(1.0, "still0"), (1.5, "still1")]
+    # an extra still, or a requested time with none, comes back half empty (check_take fails it)
+    assert replay.pair_stills([1.0], ["still0", "still1"])[1] == (None, "still1")
+    assert replay.pair_stills([1.0, 1.5], ["still0"])[1] == (1.5, None)

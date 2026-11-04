@@ -3,6 +3,7 @@
     <take>/project/            made by `reelengine init`, plus work/transcript.json
     <take>/states/NN.json      each a full project.json, in session order
     <take>/session.json        {"steps": [{"note", "state", "moment": {"word": id}}]}
+    <take>/spec.json           generated takes only: the spec and generator they were made from
 
 Generated takes are built at setup time under the harness work folder (git ignores testdata/, and
 media never goes in git). A real take is the same folder prepared by a person under
@@ -16,6 +17,7 @@ about how real faces or voices compress.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import subprocess
@@ -33,6 +35,10 @@ SCRIPT = ("so here is the thing nobody tells you about editing short videos. you
           "from start to finish.")
 RETAKE_PHRASE = 1          # the second sentence is said twice; the first attempt is cut
 HEVC_ENCODERS = ("hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox")
+# Bump when the generator's output changes for the same spec, so takes made by older code are rebuilt
+# (2: HEVC color fields written with hevc_metadata).
+GENERATOR = 2
+SPEC_FILE = "spec.json"
 
 
 # --- script and transcript ----------------------------------------------------------------------
@@ -246,9 +252,6 @@ def build_synthetic(ffmpeg: str, reference, spec: dict, take_dir: Path, root: Pa
     (proj_dir / "work" / "transcript.json").write_text(
         json.dumps({"language": "en", "model": "synthetic", "words": words}, indent=1), encoding="utf-8")
     base = json.loads((proj_dir / "project.json").read_text(encoding="utf-8"))
-    if spec.get("transfer") == "hlg" and not base["sources"][0].get("hdr"):
-        raise RuntimeError(f"{take_dir.name}: the engine probes this HLG stand-in as SDR, so it would "
-                           f"not exercise the HDR path ({enc['encoder']})")
     steps = []
     (take_dir / "states").mkdir(exist_ok=True)
     for k, (note, st, moment) in enumerate(session_states(base, words, retake, spec.get("keepSeconds"))):
@@ -256,6 +259,8 @@ def build_synthetic(ffmpeg: str, reference, spec: dict, take_dir: Path, root: Pa
         (take_dir / name).write_text(json.dumps(st, indent=2), encoding="utf-8")
         steps.append({"note": note, "state": name, "moment": {"word": moment}})
     (take_dir / "session.json").write_text(json.dumps({"steps": steps}, indent=2), encoding="utf-8")
+    # last: a take without this file is unfinished or from older code, and is rebuilt
+    (take_dir / SPEC_FILE).write_text(json.dumps({"key": spec_key(spec), "spec": spec}, indent=1), encoding="utf-8")
     return {"source": enc, "words": len(words)}
 
 
@@ -264,6 +269,50 @@ def ensure_song(root: Path) -> Path:
     if not p.exists():
         write_wav(p, song_audio())
     return p
+
+
+def spec_key(spec: dict) -> str:
+    return hashlib.sha256(json.dumps({"generator": GENERATOR, "spec": spec}, sort_keys=True).encode()).hexdigest()
+
+
+def needs_build(spec: dict, take_dir: Path) -> bool:
+    """A generated take is reused only when it was finished by this generator from this spec."""
+    try:
+        return json.loads((take_dir / SPEC_FILE).read_text(encoding="utf-8")).get("key") != spec_key(spec)
+    except (OSError, ValueError):
+        return True
+
+
+def validate(spec, take_dir: Path) -> None:
+    """Run before every use of a take, made now or long ago: the engine must read the source the
+    way the spec says, or the take measures the wrong path (an HLG clip read as SDR never
+    tonemaps). `spec` is None for real footage, which only has to have the corpus layout."""
+    missing = [n for n in ("project/project.json", "project/work/transcript.json", "session.json")
+               if not (take_dir / n).is_file()]
+    if missing:
+        raise RuntimeError(f"take {take_dir.name} is missing {', '.join(missing)}")
+    if spec is None:
+        return
+    # the base project and every state: the states are what the engines render
+    files = ["project/project.json"] + [st["state"] for st in
+                                        json.loads((take_dir / "session.json").read_text(encoding="utf-8"))["steps"]]
+    problems = []
+    base = json.loads((take_dir / files[0]).read_text(encoding="utf-8"))["sources"]
+    if len(base) != 1:
+        problems.append(f"{files[0]}: a generated take has one source, found {len(base)}")
+    for rel in files:
+        sources = json.loads((take_dir / rel).read_text(encoding="utf-8"))["sources"]
+        if sources != base:            # renders pick metadata by source id: every state must agree
+            problems.append(f"{rel}: its sources differ from project/project.json")
+        src = sources[0]
+        if bool(src.get("hdr")) != (spec.get("transfer") == "hlg"):
+            problems.append(f"{rel}: hdr={bool(src.get('hdr'))}, the spec says transfer={spec.get('transfer', 'sdr')}")
+        # rotated or not: the display matrix's sign convention can turn a spec of 90 into a probed 270
+        if bool(int(src.get("rotation") or 0) % 360) != bool(int(spec.get("rotation") or 0) % 360):
+            problems.append(f"{rel}: rotation {src.get('rotation') or 0}, the spec says {spec.get('rotation') or 0}")
+    if problems:
+        raise RuntimeError(f"take {take_dir.name} does not match its spec: {'; '.join(problems)}. "
+                           f"Delete {take_dir} and run setup again.")
 
 
 def take_bytes(take_dir: Path) -> int:
