@@ -1,7 +1,8 @@
 // Overall progress and "about N minutes left" for long jobs. The ai package tags its status events
 // with a phase (listen, analyze, edit, final). Each phase's length comes from what it took on THIS
-// computer before (speed-history.json), else from the defaults below, and engine phases still ahead
-// are rescaled by how fast this job's finished engine phases ran. The AI wait never rescales them.
+// computer before (speed-history.json), else from the defaults below. Engine phases still ahead with no
+// history of their own are rescaled by how fast this job's finished engine phases ran; the AI wait
+// never rescales them.
 import { performance } from 'node:perf_hooks'
 import type { JobKind, Phase } from '../shared/api'
 
