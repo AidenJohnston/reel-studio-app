@@ -440,7 +440,7 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    reserve: (slug, fn) => jobs.hold(slug, fn),
+    reserve: (slug, fn) => jobs.share(slug, fn),
     clipboardImage: async () => {
       // Electron's async clipboard: the first item that carries a picture, as bytes
       for (const item of await clipboard.read()) {

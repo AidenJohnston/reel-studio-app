@@ -44,6 +44,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
 
   /** Projects a manual edit is writing right now: no job may start on them meanwhile. */
   const held = new Set<string>()
+  /** Projects attachments are adding files to or removing their own from (`share`). The note box sends
+   * several at once, and each writes only its own uniquely named files, so they run side by side and
+   * share one owner lock, which the last of them lets go of. Jobs and manual edits wait for them all. */
+  const sharing = new Map<string, { count: number; owner: Promise<ProjectOwner>; closing?: Promise<void> }>()
   /** Projects an engine process may still be writing to after its job ended (ENGINE_STUCK): nothing
    * runs on them and they stay closed until Reel Studio restarts and its leftovers are reaped. */
   const stuck = new Map<string, { code: string; userMessage: string }>()
@@ -52,7 +56,12 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   function refuseIfBusy(slug: string): void {
     const s = stuck.get(slug)
     if (s) throw s
-    if (forSlug(slug) || held.has(slug)) throw BUSY
+    if (forSlug(slug) || held.has(slug) || sharing.has(slug)) throw BUSY
+  }
+
+  function keepStuck(slug: string, e: unknown): void {
+    const err = e as { code?: string; userMessage?: string }
+    if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
   }
 
   function forSlug(slug: string): Running | undefined {
@@ -188,14 +197,42 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
       try {
         return await fn(owner.token)
       } catch (e) {
-        const err = e as { code?: string; userMessage?: string }
-        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
+        keepStuck(slug, e)
         throw e
       } finally {
         if (!stuck.has(slug)) await owner.release()
       }
     } finally {
       held.delete(slug)
+    }
+  }
+
+  /** Runs an attachment change: refused while a job runs on the project or a manual edit holds it, but
+   * never by another attachment. No job or manual edit starts until every one of them is done. */
+  async function share<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
+    // the last one is still letting go of the lock: a lock claimed now could be the one it deletes
+    for (let prev = sharing.get(slug); prev?.closing; prev = sharing.get(slug)) await prev.closing
+    const closed = stuck.get(slug)
+    if (closed) throw closed
+    if (forSlug(slug) || held.has(slug)) throw BUSY
+    let entry = sharing.get(slug)
+    if (!entry) sharing.set(slug, (entry = { count: 0, owner: claimProject(projectDir(slug)) }))
+    entry.count++
+    try {
+      const owner = await entry.owner
+      return await fn(owner.token)
+    } catch (e) {
+      keepStuck(slug, e)
+      throw e
+    } finally {
+      if (--entry.count === 0) {
+        const last = entry
+        last.closing = (async () => {
+          if (!stuck.has(slug)) await last.owner.then((o) => o.release(), () => undefined).catch((e) => log(`[attach] could not let go of ${slug}: ${String(e)}`))
+          sharing.delete(slug)
+        })()
+        await last.closing
+      }
     }
   }
 
@@ -207,8 +244,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
   return {
     start,
     hold,
-    /** Throws while a job runs on the project, a manual edit holds it, or it is kept closed: a note or
-     * deleting the video must wait. */
+    share,
+    /** Throws while a job runs on the project, a manual edit or an attachment holds it, or it is kept
+     * closed: a note or deleting the video must wait. */
     refuseIfBusy,
     isClosed,
     keepClosed,

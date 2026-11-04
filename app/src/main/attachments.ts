@@ -187,7 +187,8 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** Reserve the project in the job lane and provide its owner token to engine work. */
+  /** Reserve the project in the job lane (jobs.share: other attachments may run meanwhile) and provide
+   * its owner token to engine work. */
   reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
   /** the picture on the system clipboard (null = none) */
   clipboardImage: () => Promise<{ mime: string; bytes: Uint8Array } | null>
