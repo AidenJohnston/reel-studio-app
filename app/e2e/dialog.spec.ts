@@ -69,6 +69,7 @@ test('dialogs: Tab stays inside, the page behind is inert, toasts stay usable, t
     })
 
     await test.step('Tab and Shift+Tab wrap inside the dialog; the page behind it takes no focus', async () => {
+      await page.getByTestId('confirm-no').focus() // closing the toast above moved focus; start from the first control
       await page.keyboard.press('Shift+Tab')
       await expect(page.getByTestId('confirm-yes')).toBeFocused()
       await page.keyboard.press('Tab')
@@ -93,11 +94,13 @@ test('dialogs: Tab stays inside, the page behind is inert, toasts stay usable, t
     })
 
     await test.step('nested dialogs, the inner one closed first: the page stays inert until the outer one closes', async () => {
+      await page.getByTestId('confirm-no').focus()
       await openExportOnTop()
       expect(await inert(page, 'confirm')).toBe(true) // the outer dialog is behind the inner one
       await exportDialog.getByRole('button', { name: 'Done' }).click()
       await expect(exportDialog).toHaveCount(0)
       expect(await inert(page, 'confirm')).toBe(false)
+      await expect(page.getByTestId('confirm-no')).toBeFocused() // focus goes back where it was before Export opened
       expect(await inert(page, 'nav-settings')).toBe(true)
       await page.getByTestId('confirm-no').click()
       await expect(confirm).toHaveCount(0)

@@ -79,11 +79,18 @@ function holdBackground(): void {
   }
 }
 
-/** Keyboard-reachable controls inside `root`, in document order. */
+/** Keyboard-reachable controls inside `root`, in document order. A radio group is one stop, as the browser
+ * tabs it: its checked radio, or its first one when none is checked. */
 function tabbable(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')).filter(
+  const all = Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')).filter(
     (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0
   )
+  const radios = (name: string) => all.filter((r): r is HTMLInputElement => r instanceof HTMLInputElement && r.type === 'radio' && r.name === name)
+  return all.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || !el.name) return true
+    const group = radios(el.name)
+    return el.checked || (!group.some((r) => r.checked) && group[0] === el)
+  })
 }
 
 /**
@@ -101,7 +108,8 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
     const prev = document.activeElement as HTMLElement | null
     if (openDialogs.push(dialog) === 1) void reel.app.dimTitleBar(true)
     holdBackground()
-    ;(dialog.querySelector<HTMLElement>('[data-autofocus]') ?? dialog.querySelector<HTMLElement>('button'))?.focus()
+    // A dialog with nothing to press yet (Export while it works) takes focus itself: the page behind is inert now.
+    ;(dialog.querySelector<HTMLElement>('[data-autofocus]') ?? dialog.querySelector<HTMLElement>('button') ?? dialog).focus()
     return () => {
       openDialogs.splice(openDialogs.indexOf(dialog), 1)
       if (!openDialogs.length) void reel.app.dimTitleBar(false)
@@ -129,10 +137,12 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
         onKeyDown={(e) => {
           if (e.key !== 'Tab') return
           const controls = tabbable(e.currentTarget)
-          if (e.target !== (e.shiftKey ? controls[0] : controls.at(-1))) return
+          // From the dialog itself, or past either end: wrap. With no controls, focus stays on the dialog.
+          if (e.target !== e.currentTarget && e.target !== (e.shiftKey ? controls[0] : controls.at(-1))) return
           e.preventDefault()
           ;(e.shiftKey ? controls.at(-1) : controls[0])?.focus()
         }}
+        tabIndex={-1}
         role="dialog"
         aria-modal
         aria-labelledby={labelledBy}
