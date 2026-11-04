@@ -160,9 +160,9 @@ describe('job manager (main): the contract on the wire', () => {
       mediaSeconds: async () => 30,
       tickMs: 15
     })
-    let emitLate: ((e: { type: 'status'; message: string; pct: number; phase: 'final' }) => void) | null = null
+    const held: { emit?: (e: { type: 'status'; message: string; pct: number; phase: 'final' }) => void } = {}
     const id = jobs.start(slug, 'rerender', async (emit, signal) => {
-      emitLate = emit
+      held.emit = emit
       emit({ type: 'status', message: 'Making the full-quality video', pct: 1, phase: 'final' })
       await new Promise((r) => signal.addEventListener('abort', r, { once: true }))
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }
@@ -171,7 +171,7 @@ describe('job manager (main): the contract on the wire', () => {
     jobs.cancel(id)
     await jobs.forSlug(slug)?.done
     // the runner rejected at once; the dying engine's last progress line arrives after the job ended
-    emitLate!({ type: 'status', message: 'Putting it all together', pct: 40, phase: 'final' })
+    held.emit!({ type: 'status', message: 'Putting it all together', pct: 40, phase: 'final' })
     await new Promise((r) => setTimeout(r, 60))
     const end = events.findIndex((e) => e.type === 'cancelled')
     expect(end).toBeGreaterThan(-1)
