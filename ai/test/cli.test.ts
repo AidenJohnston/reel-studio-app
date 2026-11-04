@@ -48,10 +48,12 @@ describe('what each CLI call ran on (provenance)', () => {
   it('claude-cli keeps the cache counts and the model the CLI reported, on every turn of a live session', async () => {
     const dir = tmpDir();
     const script = path.join(dir, 'fake-claude.js');
-    // like `claude -p --input-format stream-json`: system/init once at start, then assistant + result per stdin line
+    // like `claude -p --input-format stream-json`: system/init once at start, then assistant + result per stdin line;
+    // the second turn answers on another model with other cache counts (a fallback), so turns must not blend
     fs.writeFileSync(script, `const lines=require('fs').readFileSync(${JSON.stringify(fixture('claude-stream.jsonl'))},'utf8').trim().split('\\n');
-process.stdout.write(lines[0]+'\\n');let buf='';
-process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\\n'))>=0){buf=buf.slice(i+1);process.stdout.write(lines[1]+'\\n'+lines[2]+'\\n')}});`);
+process.stdout.write(lines[0]+'\\n');let buf='';let n=0;
+const turn=(l)=>n===1?l:l.split('claude-sonnet-5-5-20261001').join('claude-opus-5-5').split('"cache_read_input_tokens":18000').join('"cache_read_input_tokens":7');
+process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\\n'))>=0){buf=buf.slice(i+1);n++;process.stdout.write(turn(lines[1])+'\\n'+turn(lines[2])+'\\n')}});`);
     const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true, cliVersion: '2.1.0' });
     const tools = toolSchemas(['finish']);
     const messages: any[] = [{ role: 'user', content: [{ type: 'text', text: 'TASK' }] }];
@@ -65,8 +67,8 @@ process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\\n'))>=0){buf=bu
       cliVersion: '2.1.296', effort: null, usage: { input: 12, output: 240, cacheRead: 18000, cacheWrite: 5321 },
     };
     expect(r1.provenance).toEqual(expected);
-    // init came once, with the first turn; the second turn still knows the version
-    expect(r2.provenance).toEqual(expected);
+    // init came once, with the first turn; the second turn still knows the version and reports only its own model
+    expect(r2.provenance).toEqual({ ...expected, reportedModels: ['claude-opus-5-5'], usage: { ...expected.usage, cacheRead: 7 } });
     // the token budget still sees input + output only (measurement must not change when a run stops)
     expect(r1.usage).toEqual({ input: 12, output: 240 });
   });
