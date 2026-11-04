@@ -365,8 +365,9 @@ HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
 # Devices to open before the inputs on Windows, per draft encoder. ffmpeg hands an encoder any
 # device it opened whose type the encoder accepts, and NVENC and AMF accept D3D11. NVENC failed with
 # the decoder's D3D11 device on either GPU of the test laptop (AMD iGPU or RTX 4060: "Unable to lock
-# D3D11VA surface", then "EncodeAPI Internal Error"); given a CUDA device first, it takes that one and
-# works. AMF works with a D3D11 device on its own GPU. The decoder always uses the device named dec.
+# D3D11VA surface", then "EncodeAPI Internal Error"). NVENC lists CUDA before D3D11 among its hardware
+# configurations, so with a CUDA device open ffmpeg hands it that one, and the draft works. AMF works
+# with a D3D11 device on its own GPU. The decoder always uses the device named dec.
 # (Windows 11, pinned FFmpeg 7.1.1-rs2, 2026-11-04.)
 D3D11_DEVICES = {
     "h264_nvenc": ["cuda=enc", "d3d11va=dec"],

@@ -1214,10 +1214,11 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                                                          enc, out_part, graph, fast=False),
                                          dur, on_pct, timeout=max(600, dur * 40), what="video render", cwd=rwork)
         err = None
-        if encoder != "libx264" and "-hwaccel" in cmd and exc.code != "TIMEOUT":
-            # Hardware decode AND a GPU encoder: keep the encoder first, so a decoder that can't open
-            # this file doesn't get a working encoder marked as failed for days. Not after a timeout:
-            # a third full timeout would leave the user waiting half an hour.
+        # Hardware decode AND a GPU encoder: either may have failed, so keep the encoder first and a
+        # decoder that can't open this file doesn't get a working encoder marked as failed for days.
+        # Not after a timeout: a third full timeout would leave the user waiting half an hour.
+        both_gpu = encoder != "libx264" and "-hwaccel" in cmd
+        if both_gpu and exc.code != "TIMEOUT":
             try:
                 err = slow(encoder)
             except EngineError as exc2:
@@ -1225,8 +1226,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         if err is None:
             failed_encoder, encoder = encoder, "libx264"
             err = slow(encoder)
-            if failed_encoder != "libx264":
+            if failed_encoder != "libx264" and not (both_gpu and exc.code == "TIMEOUT"):
                 # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
+                # (After a timeout with hardware decode, nothing showed the encoder was at fault.)
                 tools.mark_encoder_failed(failed_encoder)
     timings["encode"] = round(time.time() - t, 2)
     if font_path is not None:
