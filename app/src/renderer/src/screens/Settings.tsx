@@ -5,6 +5,7 @@ import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { ConnectAI, DevProviders, ModelDownload, usingLine } from '../components/connect'
 import { FOLDER_APP } from '../components/ui'
+import { PostingSettings } from '../components/PostingSettings'
 import { Icon } from '../components/icons'
 import { useNotify } from '../App'
 
@@ -105,6 +106,8 @@ export function Settings({ info, onInfo }: { info: AppInfo; onInfo: (i: AppInfo)
           <DevProviders />
         </section>
       )}
+
+      <PostingSettings />
 
       <section className="panel">
         <h2>About</h2>

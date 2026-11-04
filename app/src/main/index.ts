@@ -59,6 +59,7 @@ import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
+import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -185,7 +186,31 @@ const updates = createUpdateService({
 // The buyer's download key for automatic updates (main/update-key.ts). It arrives as a reelstudio://updates?key=…
 // link (open-url on macOS, the command line on Windows) or pasted in Settings. Links that come before the app
 // is ready wait for it.
-const updateKey = createUpdateKeyService({ load: loadSettings, save: saveSettings, log, send: (s) => broadcast('updateKey:change', s) })
+const UPDATES_ON_DETAIL = 'When a new version comes out, Reel Studio offers to update itself: say yes and it downloads the new version and installs it when you restart. You can turn this off in Settings > About.'
+function showWindow(): void {
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.focus()
+}
+const updateKey = createUpdateKeyService({
+  load: loadSettings,
+  save: saveSettings,
+  log,
+  send: (s) => broadcast('updateKey:change', s),
+  // Any web page can open a reelstudio:// link, so a key from one is saved only after a yes.
+  confirmLink: async ({ replacing }) => {
+    showWindow()
+    const opts: Electron.MessageBoxOptions = {
+      type: 'question',
+      buttons: [replacing ? 'Use this key' : 'Turn on', 'Cancel'],
+      defaultId: replacing ? 1 : 0,
+      cancelId: 1,
+      message: replacing ? 'Use the download key from this link instead?' : 'Turn on automatic updates with the download key from this link?',
+      detail: `Only say yes if you just clicked the button in your Reel Studio receipt email or on its thanks page. The key decides whose subscription this computer uses for updates and for posting.\n\n${replacing ? 'It replaces the download key saved on this computer now.' : UPDATES_ON_DETAIL}`
+    }
+    return (await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))).response === 0
+  }
+})
 let ready = false
 const waitingKeyLinks: string[] = []
 function acceptKeyLink(url: string): void {
@@ -196,14 +221,9 @@ function acceptKeyLink(url: string): void {
   void updateKey
     .fromLink(url)
     .then((s) => {
-      if (!s?.on || !win) return
-      if (win.isMinimized()) win.restore()
-      win.focus()
-      void dialog.showMessageBox(win, {
-        type: 'info',
-        message: 'Automatic updates are on',
-        detail: 'When a new version comes out, Reel Studio offers to update itself: say yes and it downloads the new version and installs it when you restart. You can turn this off in Settings > About.'
-      })
+      if (!s?.on || s.asked || !win) return // asked: the yes was enough
+      showWindow()
+      void dialog.showMessageBox(win, { type: 'info', message: 'Automatic updates are on', detail: UPDATES_ON_DETAIL })
     })
     .catch((e) => log(`[updates] key link: ${String(e)}`))
 }
@@ -680,6 +700,20 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
+  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  setupPosting({
+    handle,
+    env: process.env,
+    settingsDir: settingsDir(),
+    exportsDir: () => binDir('exports'),
+    secrets: safeStorage,
+    appVersion: app.getVersion(),
+    getKey: () => updateKey.get(),
+    // test runs never open the browser (e2e/posting.spec.ts plays the person clicking Allow)
+    openExternal: (url) => (TEST ? Promise.resolve(log('[posting] test run: browser not opened')) : shell.openExternal(url)),
+    send: broadcast,
+    log
+  })
 
   handle('dev:renderTestAnimation', (_e, outPath: string, fullSize?: boolean, template?: string, params?: Record<string, unknown>) => {
     if (!TEST && app.isPackaged) throw { code: 'NOT_ALLOWED', userMessage: 'Not available.' }
