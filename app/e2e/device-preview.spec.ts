@@ -8,7 +8,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEVICES } from '../src/shared/devices'
+import { DEVICES, placeReel } from '../src/shared/devices'
 import { BASE, launch, makeMedia, passFirstRun, SHOTS } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'devices-'))
@@ -120,6 +120,21 @@ test('see it on: phone shapes, Instagram view on each, remembered', async () => 
     expect(lines.length).toBeGreaterThan(0)
     for (const word of lines.join(' ').split(' ')) expect(heard, word).toContain(word)
     await page.screenshot({ path: join(OUT, 'subtitles-big.png') })
+    await page.keyboard.press('Escape')
+
+    // On the SE Instagram trims the reel's top and bottom, so the viewer is shorter than the reel. The
+    // preview puts a Lower subtitle where the export does: at 0.75 of the whole reel, not of the viewer.
+    const se = DEVICES.find((d) => d.id === 'iphone-se')!
+    await page.getByTestId('device-pick').selectOption(se.id)
+    await page.getByTestId('edit-myself').click()
+    await page.getByTestId('tab-captions').click()
+    await page.getByTestId('cap-pos-lower').click()
+    await expect(sub).toBeVisible()
+    const screen = (await page.locator('.phone-screen').boundingBox())!
+    const line = (await sub.boundingBox())!
+    const { video } = placeReel(se)
+    const want = screen.y + ((video.y + 0.75 * video.h) / se.screen.h) * screen.height
+    expect(Math.abs(line.y + line.height / 2 - want)).toBeLessThan(2) // the viewer's 0.75 lands about 6px higher
     await page.keyboard.press('Escape')
   } finally {
     await app.close().catch(() => {})
