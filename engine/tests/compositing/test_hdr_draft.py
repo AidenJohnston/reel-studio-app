@@ -54,13 +54,13 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
 
 
 def test_nvenc_never_gets_the_decoders_d3d11_device(tmp_path, monkeypatch):
-    """ffmpeg hands NVENC any D3D11 device it opened, and NVENC fails on the decoder's; a CUDA device
-    opened first is the one it takes. Devices are global options: before the first input even when
-    that input is SDR, and once, as ffmpeg refuses a second device with the same name."""
+    """ffmpeg hands NVENC a device it opened, CUDA before D3D11, and NVENC fails on the decoder's
+    D3D11 device; so a CUDA device must be open too. Devices are global options: before the first
+    input even when that input is SDR, and once each, as ffmpeg refuses a second device with a name."""
     cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc",
                     hdr=(False, True, True))
     first_input = cmd.index("-i")
-    assert [cmd[j + 1] for j in range(first_input) if cmd[j] == "-init_hw_device"] == ["cuda=enc", "d3d11va=dec"]
+    assert sorted(cmd[j + 1] for j in range(first_input) if cmd[j] == "-init_hw_device") == ["cuda=enc", "d3d11va=dec"]
     assert cmd.count("-init_hw_device") == 2
     assert "-hwaccel" not in cmd[: cmd.index("take-s1.mov")]               # the SDR take: unchanged
     for take in ("take-s2.mov", "take-s3.mov"):
@@ -138,6 +138,7 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
     monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ([], []))
     draft = render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False)
+    assert not any("fast preview path" in w for w in draft.get("warnings") or [])   # the new graph ran
     final = render.run(pdir, draft=False, root=tmp_path, verify=False)
     d = _picture(Path(draft["file"]), tmp_path / "d.png", (540, 960))
     f = _picture(Path(final["file"]), tmp_path / "f.png", (540, 960))
@@ -147,10 +148,11 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
         assert np.abs(d[region].mean(axis=(0, 1)) - f[region].mean(axis=(0, 1))).max() < 3.0
 
 
-@pytest.mark.parametrize("broken", ["decoder", "encoder"])
+@pytest.mark.parametrize("broken", ["decoder", "encoder", "timeout"])
 def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monkeypatch, take, broken):
     """A draft that fails with hardware decode and a GPU encoder retries with software decode and the
-    same encoder; only if that fails too is the encoder marked as failed (for days, tools.py)."""
+    same encoder; only if that fails too is the encoder marked as failed (for days, tools.py). After
+    a timeout it goes straight to libx264 and marks nothing, since nothing pointed at the encoder."""
     gpu = "mpeg4"                       # stands in for h264_nvenc: present in every FFmpeg build
     monkeypatch.setitem(tools.HW_ENCODER_OPTS, gpu, ["-q:v", "5"])
     monkeypatch.setattr(tools, "draft_encoder", lambda: gpu)
@@ -164,6 +166,8 @@ def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monke
         if kw.get("what") == "video render":
             hw_decode, enc = "-hwaccel" in cmd, cmd[cmd.index("-c:v") + 1]
             hw_decode_per_attempt.append(hw_decode)
+            if broken == "timeout" and hw_decode:
+                raise EngineError("TIMEOUT", "simulated hang", "")
             if (broken == "decoder" and hw_decode) or (broken == "encoder" and enc == gpu):
                 raise EngineError("FFMPEG_FAILED", f"simulated {broken} failure", "")
         return real(cmd, *a, **kw)
@@ -173,5 +177,7 @@ def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monke
     assert hw_decode_per_attempt[0]                                  # the fast path used hardware decode
     if broken == "decoder":
         assert res["encoder"] == gpu and marked == []
+    elif broken == "timeout":
+        assert res["encoder"] == "libx264" and marked == []
     else:
         assert res["encoder"] == "libx264" and marked == [gpu]
