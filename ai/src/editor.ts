@@ -330,7 +330,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', 'Something went wrong starting your note. Try again.', { detail: `note id ${JSON.stringify(id)}` });
   const dir = path.join(projectDir, 'work', 'notes', id);
   const base = await fsp.readFile(path.join(projectDir, PROJECT_FILE));
-  const baseVersion = withDefaults(JSON.parse(base.toString('utf8'))).version;
+  // as loadProject reads it: a byte-order mark some Windows editors write is not JSON
+  const baseVersion = withDefaults(JSON.parse(base.toString('utf8').replace(/^\uFEFF/, ''))).version;
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
     await writeFileAtomic(file, base);
