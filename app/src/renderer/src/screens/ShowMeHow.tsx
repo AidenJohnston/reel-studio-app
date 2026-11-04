@@ -504,13 +504,15 @@ export function ShowMeHow({
                           const w = wordById.get(token.ids[0])
                           const onWord = w && (!w.source || w.source === firstSource)
                           const shownText = previewText(text)
-                          const row = lines.find((l) => l.includes(token)) ?? []
-                          const before = row.slice(0, Math.max(0, row.indexOf(token))).map((t) => t.w).join(' ')
+                          const row = (lines.find((l) => l.includes(token)) ?? []).filter((t) => t.shown)
+                          const count = (ts: typeof row) => ts.reduce((n, t) => n + t.shown.split(' ').filter(Boolean).length, 0)
                           setShown({
                             text: shownText,
                             at: onWord ? w.s + 0.05 : line.at,
-                            words: shownText.split(' ').length,
-                            lit: onWord ? before.split(' ').filter(Boolean).length : 0
+                            // the line's timed words: a fix that writes several over one ("hello there") has one start, and
+                            // the export draws that line unlit, as sampleLook does when the text has more words than this
+                            words: row.length,
+                            lit: onWord ? count(row.slice(0, Math.max(0, row.indexOf(token)))) : 0
                           })
                         }}
                       />
