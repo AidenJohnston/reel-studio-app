@@ -61,6 +61,7 @@ import { createUpdateService } from './update-check'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
+import { createWindowHolder } from './window-holder'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
@@ -139,6 +140,7 @@ const TEST_VENDOR_ENV = testVendorEnv(process.env, process.platform)
 const cliBaseEnv = (): NodeJS.ProcessEnv => TEST_VENDOR_ENV ?? process.env
 const TEST_LOGIN_ENV = testVendorLoginEnv(process.env, process.platform)
 let win: BrowserWindow | null = null
+const windows = createWindowHolder<BrowserWindow>()
 
 function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
@@ -187,10 +189,11 @@ const updates = createUpdateService({
 // link (open-url on macOS, the command line on Windows) or pasted in Settings. Links that come before the app
 // is ready wait for it.
 const UPDATES_ON_DETAIL = 'When a new version comes out, Reel Studio offers to update itself: say yes and it downloads the new version and installs it when you restart. You can turn this off in Settings > About.'
-function showWindow(): void {
-  if (!win) return
-  if (win.isMinimized()) win.restore()
-  win.focus()
+function showWindow(): BrowserWindow {
+  const live = windows.getLive() ?? createWindow()
+  if (live.isMinimized()) live.restore()
+  live.focus()
+  return live
 }
 const updateKey = createUpdateKeyService({
   load: loadSettings,
@@ -199,7 +202,7 @@ const updateKey = createUpdateKeyService({
   send: (s) => broadcast('updateKey:change', s),
   // Any web page can open a reelstudio:// link, so a key from one is saved only after a yes.
   confirmLink: async ({ replacing }) => {
-    showWindow()
+    const live = showWindow()
     const opts: Electron.MessageBoxOptions = {
       type: 'question',
       buttons: [replacing ? 'Use this key' : 'Turn on', 'Cancel'],
@@ -208,7 +211,7 @@ const updateKey = createUpdateKeyService({
       message: replacing ? 'Use the download key from this link instead?' : 'Turn on automatic updates with the download key from this link?',
       detail: `Only say yes if you just clicked the button in your Reel Studio receipt email or on its thanks page. The key decides whose subscription this computer uses for updates and for posting.\n\n${replacing ? 'It replaces the download key saved on this computer now.' : UPDATES_ON_DETAIL}`
     }
-    return (await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))).response === 0
+    return (await dialog.showMessageBox(live, opts)).response === 0
   }
 })
 let ready = false
@@ -221,9 +224,9 @@ function acceptKeyLink(url: string): void {
   void updateKey
     .fromLink(url)
     .then((s) => {
-      if (!s?.on || s.asked || !win) return // asked: the yes was enough
-      showWindow()
-      void dialog.showMessageBox(win, { type: 'info', message: 'Automatic updates are on', detail: UPDATES_ON_DETAIL })
+      if (!s?.on || s.asked) return // asked: the yes was enough
+      const live = showWindow()
+      void dialog.showMessageBox(live, { type: 'info', message: 'Automatic updates are on', detail: UPDATES_ON_DETAIL })
     })
     .catch((e) => log(`[updates] key link: ${String(e)}`))
 }
@@ -764,23 +767,28 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 }
 
 // ---- window -------------------------------------------------------------------------------------
-function createWindow(): void {
-  win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
+function createWindow(): BrowserWindow {
+  const created = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
+  win = windows.track(created)
   installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
-  win.once('ready-to-show', () => win?.show())
+  created.once('ready-to-show', () => created.show())
   // Stop flashing the taskbar once the person is back.
-  win.on('focus', () => win?.flashFrame(false))
+  created.on('focus', () => created.flashFrame(false))
   // The animation renderer keeps a hidden offscreen window; it must not keep the app alive.
-  win.on('closed', () => void closeAnimationRenderer())
+  created.on('closed', () => {
+    if (win === created) win = null
+    void closeAnimationRenderer()
+  })
   // Links open in the system browser; the app window never navigates away.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  created.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   // The app is one page: it never navigates (review 30). Links go out through the handler above.
-  win.webContents.on('will-navigate', (e) => e.preventDefault())
-  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else void win.loadFile(join(__dirname, '../renderer/index.html'))
+  created.webContents.on('will-navigate', (e) => e.preventDefault())
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) void created.loadURL(process.env.ELECTRON_RENDERER_URL)
+  else void created.loadFile(join(__dirname, '../renderer/index.html'))
+  return created
 }
 
 const gotLock = TEST || app.requestSingleInstanceLock()
@@ -789,10 +797,7 @@ app.on('second-instance', (_e, argv) => {
   // Windows: a reelstudio:// link opened while the app runs arrives as the new instance's command line.
   const link = argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   if (link) acceptKeyLink(link)
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  if (ready) showWindow()
 })
 
 app.whenReady().then(async () => {
@@ -844,7 +849,7 @@ app.whenReady().then(async () => {
   const firstLink = process.argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   for (const url of [...waitingKeyLinks.splice(0), ...(firstLink ? [firstLink] : [])]) acceptKeyLink(url)
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    showWindow()
   })
 })
 
