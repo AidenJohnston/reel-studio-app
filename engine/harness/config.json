@@ -5,6 +5,11 @@
     "ffmpegSha256": {"win32": "12655dcac4af7d0f4e8774c935293ef1e95bc555b45f9f9fbf7df2c551077f1e", "darwin": null},
     "ffprobeSha256": {"win32": "7c09e2580e1a81fc6c8fc51ed0236e9f95d02e991a21dea8a74e637bc8f67469", "darwin": null}
   },
+  "sizes": {
+    "why": "What a preview must measure before it is compared: render.py renders drafts and windows at DRAFT_SCALE of the output format, frames.py writes stills 540 wide.",
+    "previewScale": 0.5,
+    "stillWidth": 540
+  },
   "runs": 5,
   "agreeWithinPct": 5,
   "thresholds": {

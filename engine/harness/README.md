@@ -39,16 +39,21 @@ until the full draft is ready; then the final export.
 ## Checks
 
 The reference is the engine at `reference.engineCommit`, written out of git's object store into
-`testdata/harness/reference/` and checked blob by blob against that commit before every run. Its
-final render of each state is the truth for that state. The harness refuses to run if FFmpeg or
-ffprobe do not match the hashes pinned for this platform, or if the reference copy was edited.
+`testdata/harness/reference/` and checked blob by blob against that commit each time `setup` or
+`run` starts. Its final render of each state is the truth for that state. Each reference render is
+stored with a manifest of its files' sha256, the engine commit and the FFmpeg hash, and is checked
+against it when `setup` or `run` starts and again just before the checks. The harness refuses to
+run if FFmpeg or ffprobe do not match the hashes pinned for this platform, if the reference engine
+copy was edited, or if a reference render no longer matches its manifest.
 
 Every distinct output of every run is checked (outputs are compared by hash, so a deterministic
 engine is checked once per output).
 
 - **Final:** frame count and timestamps exact, audio packets identical in bytes and timing, per-frame PSNR above
   `final.psnrMinDb` and above `final.captionPsnrMinDb` inside the caption band.
-- **Draft, window, still:** the reference scaled to the preview's size (area averaging), then per
+- **Draft, window, still:** the output must first have the size `sizes` in `config.json` requires
+  (drafts and windows half the output format, stills 540 wide), and every still requested, and no
+  other, must exist. Then the reference scaled to that size (area averaging), and per
   frame: PSNR inside the caption band (strict), PSNR elsewhere (loose), and the largest per-channel
   difference of the frame means. The frame count comes from the requested range, not the output.
   Drafts and windows also check the audio length, its offset against the same stretch of the
@@ -71,7 +76,12 @@ folder:
 <take>/project/          made by `reelengine init`, plus work/transcript.json
 <take>/states/NN.json    each a full project.json, in session order
 <take>/session.json      {"steps": [{"note": "...", "state": "states/00.json", "moment": {"word": "w12"}}]}
+<take>/spec.json         generated takes only: the spec and generator version they were made from
 ```
+
+A generated take is rebuilt when its `spec.json` is missing or differs. Every take, new or old, is
+validated each time `setup` or `run` starts: the engine must read an HLG stand-in as HDR and a
+rotated one as rotated, or the harness refuses.
 
 The `synthetic` entries are generated with the pinned FFmpeg at setup: stand-ins for a 4K HEVC
 SDR talking head, the same clip as 10-bit HLG, a variable-frame-rate clip, a rotated clip, and a

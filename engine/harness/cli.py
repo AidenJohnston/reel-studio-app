@@ -97,9 +97,14 @@ def setup(c: Ctx, ids=None) -> dict:
         if ids and entry["id"] not in ids:
             continue
         d = c.take_dir(entry)
-        if "synthetic" in entry and not (d / "session.json").exists():
+        spec = entry.get("synthetic")
+        if spec is not None and corpus.needs_build(spec, d):
             shutil.rmtree(d, ignore_errors=True)
-            made[entry["id"]] = corpus.build_synthetic(str(c.ffmpeg), c.ref, entry["synthetic"], d, c.root)
+            made[entry["id"]] = corpus.build_synthetic(str(c.ffmpeg), c.ref, spec, d, c.root)
+        try:
+            corpus.validate(spec, d)
+        except RuntimeError as e:
+            raise Refusal(str(e))
         take = replay.Take(entry["id"], d)
         sizes[entry["id"]] = corpus.take_bytes(d)
         takes[entry["id"]] = (take, replay.build_references(take, c.ref, c.work / "refs", c.scratch, c.pins, c.root))
@@ -170,7 +175,7 @@ def cmd_run(a) -> int:
     for tid in ids:
         take, refs = s["takes"][tid]
         rs = results[tid]
-        checked = replay.check_take(take, refs, rs, str(c.ffmpeg), str(c.ffprobe), th)
+        checked = replay.check_take(take, refs, rs, str(c.ffmpeg), str(c.ffprobe), th, c.pins, c.cfg["sizes"])
         replay.prune_duplicates(rs)
         steps = []
         for k, step in enumerate(take.session):

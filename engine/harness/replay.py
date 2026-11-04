@@ -17,7 +17,7 @@ import statistics
 from pathlib import Path
 
 from . import checks, media
-from .engines import Engine, sha256_file
+from .engines import Engine, Refusal, sha256_file
 
 STEPS = ("draft", "still", "window")
 
@@ -132,6 +132,42 @@ def reference_key(state: dict, inputs: dict, library: dict, pins: dict) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
 
+REF_FILES = ("export.mp4", "captions.json", "segments.json", "done.json")
+REF_MANIFEST = "manifest.json"
+
+
+def write_reference_manifest(d: Path, key: str, pins: dict) -> None:
+    """Written last, once every file is in place: what the reference was made from and the sha256
+    of each file it holds."""
+    (d / REF_MANIFEST).write_text(json.dumps({
+        "key": key, "engineCommit": pins["engineCommit"], "ffmpegSha256": pins["ffmpeg"]["sha256"],
+        "files": {n: sha256_file(d / n) for n in REF_FILES}}, indent=1), encoding="utf-8")
+
+
+def reference_ready(d: Path, key: str, pins: dict) -> bool:
+    """True when `d` holds a finished reference for `key`; False when there is none yet (or one from
+    before manifests existed, which is rebuilt). Refuses a reference whose files or origin differ
+    from its manifest: a replaced or edited reference would decide every check."""
+    mf = d / REF_MANIFEST
+    if not mf.exists():
+        return False
+    m = json.loads(mf.read_text(encoding="utf-8"))
+    bad = []
+    if m.get("key") != key or d.name != key:
+        bad.append(f"made for key {m.get('key')}")
+    if m.get("engineCommit") != pins["engineCommit"] or m.get("ffmpegSha256") != pins["ffmpeg"]["sha256"]:
+        bad.append(f"made by engine {m.get('engineCommit')} / ffmpeg {m.get('ffmpegSha256')}")
+    files = m.get("files") or {}
+    for n in REF_FILES:
+        if not (d / n).is_file():
+            bad.append(f"{n} missing")
+        elif files.get(n) != sha256_file(d / n):
+            bad.append(f"{n} changed")
+    if bad:
+        raise Refusal(f"reference {d} does not match its manifest ({'; '.join(bad)}). Delete it and run setup again.")
+    return True
+
+
 def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: Path, pins: dict,
                      root: Path) -> list:
     """The reference final of every state (cached by reference_key), and the preview plan each
@@ -141,8 +177,9 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
     out = []
     for step in take.session:
         state = take.state(step)
-        d = refs_root / reference_key(state, inputs, library, pins)
-        if not (d / "done.json").exists():
+        key = reference_key(state, inputs, library, pins)
+        d = refs_root / key
+        if not reference_ready(d, key, pins):
             proj = scratch / f"ref-{take.id}"
             copy_project(take.project, proj)
             write_state(proj, state)
@@ -162,6 +199,7 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
             (tmp / "segments.json").write_text(json.dumps(manifest["segmentsDetail"]), encoding="utf-8")
             (tmp / "done.json").write_text(json.dumps({"seconds": round(call.seconds, 2), "result": call.result}, indent=1),
                                            encoding="utf-8")
+            write_reference_manifest(tmp, key, pins)
             shutil.rmtree(d, ignore_errors=True)
             os.replace(tmp, d)
             shutil.rmtree(proj, ignore_errors=True)
@@ -169,7 +207,7 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
         done = json.loads((d / "done.json").read_text(encoding="utf-8"))
         fps = float(state["format"]["fps"])
         t = moment_time(segs, words, step["moment"]["word"])
-        out.append({"dir": d, "moment": round(t, 3), "fps": fps,
+        out.append({"dir": d, "key": key, "format": state["format"], "moment": round(t, 3), "fps": fps,
                     **plan_previews(t, float(done["result"]["duration"]), fps)})
     return out
 
@@ -242,7 +280,31 @@ def _merge(results: list) -> dict:
     return dict(pick, distinctChecked=len(results))
 
 
-def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th: dict) -> dict:
+def preview_size(fmt: dict, scale: float) -> tuple:
+    """The size a draft or window must have: the output format scaled the way render.py makes
+    previews (even dimensions)."""
+    return int(round(fmt["width"] * scale / 2)) * 2, int(round(fmt["height"] * scale / 2)) * 2
+
+
+def still_size(preview: tuple, width: int) -> tuple:
+    """frames.py scales the draft to `width` wide, height kept in proportion and even."""
+    return width, int(width * preview[1] / preview[0]) // 2 * 2
+
+
+def pair_stills(times: list, names: list) -> list:
+    """[(time or None, name or None)]: each requested still time with the still made for it. A
+    still nobody asked for, or a time with no still, comes back half empty and fails."""
+    order = sorted(names, key=lambda n: int(n[len("still"):]))
+    n = max(len(times), len(order))
+    return [(times[j] if j < len(times) else None, order[j] if j < len(order) else None) for j in range(n)]
+
+
+def _missing(what: str) -> dict:
+    return {"status": "fail", "failures": [what], "metrics": {}, "distinctChecked": 0}
+
+
+def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th: dict, pins: dict,
+               sizes: dict) -> dict:
     """Check every distinct output of every run (outputs are compared by hash, so a deterministic
     engine is checked once per output and a run that rendered something different is not trusted
     on the strength of another run's check)."""
@@ -257,18 +319,30 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
 
     steps = []
     for k, (step, ref) in enumerate(zip(take.session, refs)):
+        reference_ready(ref["dir"], ref["key"], pins)     # unchanged since setup, or refuse
         export = ref["dir"] / "export.mp4"
         caps = json.loads((ref["dir"] / "captions.json").read_text(encoding="utf-8"))["cues"]
         a, b = ref["window"]
         pv = th["preview"]
+        want = preview_size(ref["format"], sizes["previewScale"])
+        still_want = still_size(want, sizes["stillWidth"])
+        names = sorted({n for run in runs for n in run["files"][k] if n.startswith("still")})
+        stills = []
+        for j, (t, name) in enumerate(pair_stills(ref["stills"], names)):
+            if t is None:
+                stills.append(_missing(f"{name}: a still nobody asked for"))
+            elif name is None or any(name not in run["files"][k] for run in runs):
+                stills.append(_missing(f"no still for {t}s in every run"))
+            else:
+                stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want)
+                                      for f in distinct(lambda r, name=name: r["files"][k][name])]))
         steps.append({
-            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"])
+            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want)
                              for f in distinct(lambda r: r["files"][k]["draft"])]),
-            "window": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], start=a, end=b)
+            "window": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want,
+                                                         start=a, end=b)
                               for f in distinct(lambda r: r["files"][k]["window"])]),
-            "still": [_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv)
-                              for f in distinct(lambda r, j=j: r["files"][k][f"still{j}"])])
-                      for j, t in enumerate(ref["stills"])]})
+            "still": stills})
     last = refs[-1]["dir"]
     caps = json.loads((last / "captions.json").read_text(encoding="utf-8"))["cues"]
     final = _merge([checks.check_final(ffmpeg, ffprobe, last / "export.mp4", f, caps, th["final"])
