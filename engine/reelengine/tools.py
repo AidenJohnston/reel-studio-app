@@ -362,15 +362,27 @@ def hwaccels() -> set:
 # decodes in software without saying so (pinned 7.1.1-rs2, Windows 11, 2026-11-04).
 HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
 
+# The adapter vendor of each Windows GPU encoder. ffmpeg gives an encoder any device it opened for
+# decoding whose type the encoder accepts, and NVENC, AMF and Quick Sync all accept D3D11. So the
+# decode device has to sit on the GPU that encodes: NVENC handed the default adapter's device (the
+# laptop's AMD iGPU) failed with "CreateInputBuffer failed" (Windows 11, RTX 4060 Laptop, 2026-11-04).
+D3D11_VENDOR = {"h264_nvenc": "0x10de", "h264_amf": "0x1002", "h264_qsv": "0x8086"}
 
-def hwaccel_to_memory() -> Optional[str]:
-    """`-hwaccel` for a draft whose filters run in software, or None (not built in, another platform,
+
+def hwaccel_to_memory(encoder: str) -> list:
+    """Input options for hardware decode into system memory, for a draft whose filters run in
+    software and that encodes with `encoder`; [] when there is none (not built in, another platform,
     or REELENGINE_HWACCEL=0). A GPU that can't decode the codec or profile leaves ffmpeg decoding in
     software; a render that fails outright is retried in software by render.run."""
     if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
-        return None
+        return []
     name = HWACCEL_TO_MEMORY.get(sys.platform)
-    return name if name in hwaccels() else None
+    if name not in hwaccels():
+        return []
+    if name == "d3d11va" and encoder in D3D11_VENDOR:
+        return ["-init_hw_device", f"d3d11va=dec:,vendor_id={D3D11_VENDOR[encoder]}",
+                "-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
+    return ["-hwaccel", name]
 
 
 def machine() -> dict:

@@ -21,8 +21,9 @@ from reelengine.render_ctx import Segment
 HLG_SRC = {"id": "s1", "width": 2160, "height": 3840, "rotation": 0, "fps": 30, "hdr": True}
 
 
-def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = True):
-    """build_video_cmd for one 2 s segment of a 4K HLG take: (command, filter graph text)."""
+def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = True, encoder: str = "libx264",
+           takes: int = 1):
+    """build_video_cmd for a 2 s segment of each of `takes` 4K HLG takes: (command, filter graph text)."""
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.delenv("REELENGINE_HWACCEL", raising=False)
     monkeypatch.setattr(tools, "_CACHE", {"hwaccels": {"cuda", "dxva2", "qsv", "d3d11va", "videotoolbox"},
@@ -33,9 +34,12 @@ def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = Tr
     ctx = SimpleNamespace(ffmpeg="ffmpeg", fmt={"width": 1080, "height": 1920, "fps": 30}, draft=draft)
     w, h = (540, 960) if draft else (1080, 1920)
     graph = tmp_path / "graph.txt"
-    cmd = render.build_video_cmd(ctx, [Segment("s1", 1.0, 3.0, 0.0)], {"s1": HLG_SRC}, {"s1": Path("take.mov")},
-                                 {}, w, h, [], [], None, Path("voice.wav"), 0.0, 2.0, 0.0,
-                                 "libx264", tmp_path / "out.mp4", graph, fast=fast)
+    ids = [f"s{i}" for i in range(1, takes + 1)]
+    segs = [Segment(sid, 1.0, 3.0, 2.0 * i) for i, sid in enumerate(ids)]
+    cmd = render.build_video_cmd(ctx, segs, {sid: {**HLG_SRC, "id": sid} for sid in ids},
+                                 {sid: Path(f"take-{sid}.mov") for sid in ids}, {}, w, h, [], [], None,
+                                 Path("voice.wav"), 0.0, 2.0 * takes, 0.0, encoder, tmp_path / "out.mp4", graph,
+                                 fast=fast)
     return cmd, graph.read_text(encoding="utf-8")
 
 
@@ -45,8 +49,22 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
     assert f"setpts=PTS-STARTPTS,scale=540:960:flags=fast_bilinear,{render.HDR_CHAIN},setsar=1[v0]" in graph
     # frames come back to system memory for zscale; on Windows never CUDA, which this FFmpeg can't decode with
     assert cmd[cmd.index("-hwaccel") + 1] == decoder
-    assert cmd.index("-hwaccel") < cmd.index("take.mov")
+    assert cmd.index("-hwaccel") < cmd.index("take-s1.mov")
     assert "-hwaccel_output_format" not in cmd
+
+
+def test_windows_decodes_on_the_gpu_that_encodes(tmp_path, monkeypatch):
+    """ffmpeg gives NVENC the D3D11 device opened for decoding; on the default adapter (a laptop's
+    AMD or Intel iGPU) NVENC fails to open. Two HDR takes share one device: ffmpeg refuses a second
+    device with the same name."""
+    cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc", takes=2)
+    assert cmd.count("-init_hw_device") == 1
+    assert cmd[cmd.index("-init_hw_device") + 1] == "d3d11va=dec:,vendor_id=0x10de"
+    for take in ("take-s1.mov", "take-s2.mov"):
+        i = cmd.index(take)
+        h = max(j for j in range(i) if cmd[j] == "-hwaccel")
+        assert cmd[h:h + 4] == ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
+        assert "-i" not in cmd[h:i - 1]                                  # ...as options of this input
 
 
 def test_retry_is_the_draft_from_before(tmp_path, monkeypatch):
@@ -115,7 +133,7 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
     pdir = _project(tmp_path / "proj", take)
     # the software path, which every machine falls back to (the hardware one is checked by the harness)
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
-    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda: None)
+    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: [])
     draft = render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False)
     final = render.run(pdir, draft=False, root=tmp_path, verify=False)
     d = _picture(Path(draft["file"]), tmp_path / "d.png", (540, 960))
@@ -134,7 +152,7 @@ def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monke
     monkeypatch.setitem(tools.HW_ENCODER_OPTS, gpu, ["-q:v", "5"])
     monkeypatch.setattr(tools, "draft_encoder", lambda: gpu)
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
-    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda: "d3d11va")
+    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ["-hwaccel", "d3d11va"])
     marked, hw_decode_per_attempt = [], []
     monkeypatch.setattr(tools, "mark_encoder_failed", marked.append)
     real = tools.ffmpeg_progress
