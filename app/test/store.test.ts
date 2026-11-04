@@ -172,6 +172,25 @@ describe('project store', () => {
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[1, false]])
   })
 
+  it('cleanup after a failed job keeps a saved version that has lost its video', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('iota', { versions: [1] })
+    await fs.rm(join(dir, 'versions', 'v1', 'export.mp4'))
+    await cleanPartialVersions(dir)
+    expect(existsSync(join(dir, 'versions', 'v1', 'cover.png'))).toBe(true)
+  })
+
+  it('the Subtitles list shows the lines of the saved version, not an older render\'s', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('kappa', { versions: [1] })
+    const cues = (w: string) => ({ cues: [{ run: 0, tokens: [{ w, ids: ['w0'] }] }] })
+    writeFileSync(join(dir, 'versions', 'v1', 'captions.json'), JSON.stringify(cues('now')))
+    writeFileSync(join(dir, 'work', 'captions.json'), JSON.stringify(cues('before')))
+    expect((await detail('kappa')).captionLines).toEqual([[{ w: 'now', ids: ['w0'], run: 0 }]])
+  })
+
   // Stop pressed while "Checking your video", or a failed cover: the export is in v2 but project.json
   // still says 1, and the next final render deletes v2 to make a different video under that number.
   it('a final render that stopped before it was saved is not shown as a version', async () => {

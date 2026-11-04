@@ -44,9 +44,12 @@ Rules:
 
 ## What the app shows
 
-- **Version chips** = folders matching `^v\d+$` that contain `export.mp4`, sorted by number.
-  Folders without `export.mp4` (from older builds, or an AI run whose final render failed) are
-  not shown.
+- **Version chips** = folders `vN` with N up to `project.json`'s `version` that contain
+  `export.mp4`, sorted by number. Folders without `export.mp4` (from older builds, or an AI run
+  whose final render failed) and folders above `version` are not shown.
+- **The Subtitles list** shows the lines in `captions.json` of `v{version}`, or of `versions/preview/`
+  while there is no version; a version made before reports moved beside their render has them in
+  `work/captions.json`.
 - **While an AI run is working**, the player may show `versions/preview/draft.mp4` (the `render`
   event with `draft: true`).
 - **`AgentResult.version`** is the version to select after a run. In the rare case its folder has
