@@ -1,6 +1,7 @@
 """The Windows Job Object setup (contain.py), against a stand-in kernel32: these are the calls and
 their failure handling. That Windows then ends ffmpeg with the engine needs a Windows machine."""
 import ctypes
+import io
 import json
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from reelengine import cli, contain, proto
 from reelengine.contain import KILL_ON_JOB_CLOSE, contain_children
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -58,6 +60,19 @@ def test_an_engine_windows_will_not_contain_logs_why_and_runs_anyway(monkeypatch
     contain_children(k32)
     assert k32.closed == [7]
     assert "no Job Object (Windows error 5)" in capsys.readouterr().err
+
+
+def test_a_direct_call_of_the_engine_cli_never_joins_a_job(monkeypatch):
+    """Tests call cli.main inside pytest: only the engine process (cli.run) may join the job."""
+    joined = []
+    monkeypatch.setattr(contain, "contain_children", lambda *a: joined.append(a))
+    monkeypatch.setattr(sys, "platform", "win32")
+    proto.set_stream(io.StringIO())
+    try:
+        cli.main(["probe", "missing.mp4"])
+    finally:
+        proto.set_stream(None)
+    assert joined == []
 
 
 # Runs the engine the way the app does (python -m reelengine), in its own process, with only joining
