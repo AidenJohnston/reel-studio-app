@@ -393,6 +393,13 @@ describe('finding 36: cross-process edit lock, serialised style writes', () => {
     await Promise.all(['One rule', 'Two rule', 'Three rule', 'Four rule', 'Five rule'].map((r) => s.add(r)));
     expect((await s.list()).length).toBe(5);
   });
+
+  it('two stores on the same My style saving at once keep both rules', async () => {
+    const root = tmpDir('style ');
+    const [a, b] = [new StyleStore(() => root), new StyleStore(() => root)];
+    await Promise.all([a.add('One rule'), b.add('Two rule')]);
+    expect((await a.list()).map((r) => r.text).sort()).toEqual(['One rule.', 'Two rule.']);
+  });
 });
 
 describe('finding 37: no empty hashtags', () => {

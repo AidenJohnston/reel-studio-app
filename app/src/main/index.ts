@@ -615,6 +615,7 @@ function registerIpc(): void {
 
   handle('style:rules', () => ai.styleRules())
   handle('style:remove', (_e, id: string) => ai.removeStyleRule(id))
+  handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
   // "Remember this for next time?" Yes saves the rule; either answer replaces the buttons with a plain reply.
   handle('style:answer', async (_e, slug: string, messageId: string, yes: boolean) => {
     const st = await readAppState(slug)
