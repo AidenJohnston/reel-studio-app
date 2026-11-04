@@ -456,6 +456,12 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner"]
     fast = ctx.draft and fast
     hw = tools.hwaccel() if fast else None
+    hdr_dec = []
+    if fast and any(src_meta[lane["source"]].get("hdr") for lane in lanes):
+        hdr_dec = tools.hwaccel_to_memory(encoder)
+        if hdr_dec[:1] == ["-init_hw_device"]:
+            cmd += hdr_dec[:2]                 # a global option: once, before the first input
+            hdr_dec = hdr_dec[2:]
     seg_input, seg_chain = {}, {}
     chains, labels = [], []
     for li, lane in enumerate(lanes):
@@ -468,14 +474,9 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
             if hdr:
-                dec = tools.hwaccel_to_memory(encoder) if fast else []
-            else:
-                dec = ["-hwaccel", hw] if hw and hw != "cuda" else []
-            if dec[:1] == ["-init_hw_device"]:
-                if dec[1] not in cmd:          # one named device for every input; a second is refused
-                    cmd += dec[:2]
-                dec = dec[2:]
-            cmd += dec
+                cmd += hdr_dec
+            elif hw and hw != "cuda":
+                cmd += ["-hwaccel", hw]
             pre = None
             reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
             if hdr and "zscale" in tools.filters():

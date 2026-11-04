@@ -22,8 +22,8 @@ HLG_SRC = {"id": "s1", "width": 2160, "height": 3840, "rotation": 0, "fps": 30, 
 
 
 def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = True, encoder: str = "libx264",
-           takes: int = 1):
-    """build_video_cmd for a 2 s segment of each of `takes` 4K HLG takes: (command, filter graph text)."""
+           hdr: tuple = (True,)):
+    """build_video_cmd for a 2 s segment of each take, 4K, HLG where `hdr` says so: (command, graph text)."""
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.delenv("REELENGINE_HWACCEL", raising=False)
     monkeypatch.setattr(tools, "_CACHE", {"hwaccels": {"cuda", "dxva2", "qsv", "d3d11va", "videotoolbox"},
@@ -34,11 +34,11 @@ def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = Tr
     ctx = SimpleNamespace(ffmpeg="ffmpeg", fmt={"width": 1080, "height": 1920, "fps": 30}, draft=draft)
     w, h = (540, 960) if draft else (1080, 1920)
     graph = tmp_path / "graph.txt"
-    ids = [f"s{i}" for i in range(1, takes + 1)]
+    ids = [f"s{i}" for i in range(1, len(hdr) + 1)]
     segs = [Segment(sid, 1.0, 3.0, 2.0 * i) for i, sid in enumerate(ids)]
-    cmd = render.build_video_cmd(ctx, segs, {sid: {**HLG_SRC, "id": sid} for sid in ids},
+    cmd = render.build_video_cmd(ctx, segs, {sid: {**HLG_SRC, "id": sid, "hdr": h} for sid, h in zip(ids, hdr)},
                                  {sid: Path(f"take-{sid}.mov") for sid in ids}, {}, w, h, [], [], None,
-                                 Path("voice.wav"), 0.0, 2.0 * takes, 0.0, encoder, tmp_path / "out.mp4", graph,
+                                 Path("voice.wav"), 0.0, 2.0 * len(hdr), 0.0, encoder, tmp_path / "out.mp4", graph,
                                  fast=fast)
     return cmd, graph.read_text(encoding="utf-8")
 
@@ -55,16 +55,19 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
 
 def test_windows_decodes_on_the_gpu_that_encodes(tmp_path, monkeypatch):
     """ffmpeg gives NVENC the D3D11 device opened for decoding; on the default adapter (a laptop's
-    AMD or Intel iGPU) NVENC fails to open. Two HDR takes share one device: ffmpeg refuses a second
-    device with the same name."""
-    cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc", takes=2)
+    AMD or Intel iGPU) NVENC fails to open. The device is a global option, so it goes before the
+    first input even when that input is SDR, and only once: ffmpeg refuses a second device named dec."""
+    cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc",
+                    hdr=(False, True, True))
     assert cmd.count("-init_hw_device") == 1
-    assert cmd[cmd.index("-init_hw_device") + 1] == "d3d11va=dec:,vendor_id=0x10de"
-    for take in ("take-s1.mov", "take-s2.mov"):
+    d = cmd.index("-init_hw_device")
+    assert cmd[d + 1] == "d3d11va=dec:,vendor_id=0x10de" and d < cmd.index("-i")
+    assert "-hwaccel" not in cmd[: cmd.index("take-s1.mov")]               # the SDR take: unchanged
+    for take in ("take-s2.mov", "take-s3.mov"):
         i = cmd.index(take)
         h = max(j for j in range(i) if cmd[j] == "-hwaccel")
         assert cmd[h:h + 4] == ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
-        assert "-i" not in cmd[h:i - 1]                                  # ...as options of this input
+        assert cmd[i - 1] == "-i" and "-i" not in cmd[h:i - 1]           # ...as options of this input
 
 
 def test_retry_is_the_draft_from_before(tmp_path, monkeypatch):
