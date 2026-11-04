@@ -54,15 +54,15 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
     assert "-hwaccel_output_format" not in cmd
 
 
-def test_windows_decodes_on_the_gpu_that_encodes(tmp_path, monkeypatch):
-    """ffmpeg gives NVENC the D3D11 device opened for decoding; on the default adapter (a laptop's
-    AMD or Intel iGPU) NVENC fails to open. The device is a global option, so it goes before the
-    first input even when that input is SDR, and only once: ffmpeg refuses a second device named dec."""
+def test_nvenc_never_gets_the_decoders_d3d11_device(tmp_path, monkeypatch):
+    """ffmpeg hands NVENC any D3D11 device it opened, and NVENC fails on the decoder's; a CUDA device
+    opened first is the one it takes. Devices are global options: before the first input even when
+    that input is SDR, and once, as ffmpeg refuses a second device with the same name."""
     cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc",
                     hdr=(False, True, True))
-    assert cmd.count("-init_hw_device") == 1
-    d = cmd.index("-init_hw_device")
-    assert cmd[d + 1] == "d3d11va=dec:,vendor_id=0x10de" and d < cmd.index("-i")
+    first_input = cmd.index("-i")
+    assert [cmd[j + 1] for j in range(first_input) if cmd[j] == "-init_hw_device"] == ["cuda=enc", "d3d11va=dec"]
+    assert cmd.count("-init_hw_device") == 2
     assert "-hwaccel" not in cmd[: cmd.index("take-s1.mov")]               # the SDR take: unchanged
     for take in ("take-s2.mov", "take-s3.mov"):
         i = cmd.index(take)
@@ -137,7 +137,7 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
     pdir = _project(tmp_path / "proj", take)
     # the software path, which every machine falls back to (the hardware one is checked by the harness)
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
-    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: [])
+    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ([], []))
     draft = render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False)
     final = render.run(pdir, draft=False, root=tmp_path, verify=False)
     d = _picture(Path(draft["file"]), tmp_path / "d.png", (540, 960))
@@ -156,7 +156,7 @@ def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monke
     monkeypatch.setitem(tools.HW_ENCODER_OPTS, gpu, ["-q:v", "5"])
     monkeypatch.setattr(tools, "draft_encoder", lambda: gpu)
     monkeypatch.setattr(tools, "hwaccel", lambda: None)
-    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ["-hwaccel", "d3d11va"])
+    monkeypatch.setattr(tools, "hwaccel_to_memory", lambda encoder: ([], ["-hwaccel", "d3d11va"]))
     marked, hw_decode_per_attempt = [], []
     monkeypatch.setattr(tools, "mark_encoder_failed", marked.append)
     real = tools.ffmpeg_progress
