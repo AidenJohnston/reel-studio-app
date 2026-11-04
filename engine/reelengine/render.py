@@ -695,11 +695,14 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
             if hdr:
-                dec = tools.hwaccel_to_memory() if fast else None
+                dec = tools.hwaccel_to_memory(encoder) if fast else []
             else:
-                dec = hw if hw != "cuda" else None
-            if dec:
-                cmd += ["-hwaccel", dec]
+                dec = ["-hwaccel", hw] if hw and hw != "cuda" else []
+            if dec[:1] == ["-init_hw_device"]:
+                if dec[1] not in cmd:          # one named device for every input; a second is refused
+                    cmd += dec[:2]
+                dec = dec[2:]
+            cmd += dec
             pre = None
             reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
             if hdr and "zscale" in tools.filters():
