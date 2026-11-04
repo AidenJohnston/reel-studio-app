@@ -405,7 +405,7 @@ export function createAI(opts: CreateAIOptions) {
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: SMALL_CLAUDE_MODEL, maxTokens: 2000, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
         const bin = (await localClaude()).bin;
-        return new ClaudeCliProvider({ model: 'haiku', ...(bin ? { bin } : {}) });
+        return new ClaudeCliProvider({ model: 'haiku', env: env(), ...(bin ? { bin } : {}) });
       }
       default: return null;
     }
