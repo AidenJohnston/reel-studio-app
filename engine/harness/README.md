@@ -43,12 +43,16 @@ The reference is the engine at `reference.engineCommit`, written out of git's ob
 final render of each state is the truth for that state. The harness refuses to run if FFmpeg or
 ffprobe do not match the hashes pinned for this platform, or if the reference copy was edited.
 
-- **Final:** frame count and timestamps exact, audio packets identical, per-frame PSNR above
+Every distinct output of every run is checked (outputs are compared by hash, so a deterministic
+engine is checked once per output).
+
+- **Final:** frame count and timestamps exact, audio packets identical in bytes and timing, per-frame PSNR above
   `final.psnrMinDb` and above `final.captionPsnrMinDb` inside the caption band.
 - **Draft, window, still:** the reference scaled to the preview's size (area averaging), then per
   frame: PSNR inside the caption band (strict), PSNR elsewhere (loose), and the largest per-channel
-  difference of the frame means. Drafts and windows also check the audio offset against the same
-  stretch of the reference and the level difference per 100 ms.
+  difference of the frame means. The frame count comes from the requested range, not the output.
+  Drafts and windows also check the audio length, its offset against the same stretch of the
+  reference, and the level difference per 100 ms.
 
 The caption band is the union of every caption box in the reference render, grown by 15% of the box
 height, applied to every frame. A caption drawn where the reference has none at that moment then

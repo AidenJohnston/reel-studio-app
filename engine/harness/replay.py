@@ -16,7 +16,7 @@ import shutil
 import statistics
 from pathlib import Path
 
-from . import checks, corpus, media
+from . import checks, media
 from .engines import Engine, sha256_file
 
 STEPS = ("draft", "still", "window")
@@ -30,10 +30,31 @@ def _link_or_copy(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+# What renders write: never part of a take's inputs, so a cold copy leaves them out.
+GENERATED = ("versions", "work/render", "work/captions.json")
+
+
+def project_inputs(project: Path) -> list:
+    """Every file of a take's project a render may read, as paths relative to it."""
+    out = []
+    for f in sorted(project.rglob("*")):
+        rel = f.relative_to(project).as_posix()
+        if f.is_file() and not any(rel == g or rel.startswith(g + "/") for g in GENERATED):
+            out.append(rel)
+    return out
+
+
 def copy_project(src: Path, dst: Path) -> None:
-    """project.json, work/transcript.json and the media (hard-linked: no extra disk)."""
+    """A cold copy: the take's inputs only. Media is hard-linked (no extra disk; the engine only
+    reads it); everything else is copied, so nothing the engine rewrites can reach the corpus."""
     shutil.rmtree(dst, ignore_errors=True)
-    shutil.copytree(src, dst, copy_function=lambda a, b: _link_or_copy(Path(a), Path(b)))
+    for rel in project_inputs(src):
+        if rel.startswith("media/"):
+            _link_or_copy(src / rel, dst / rel)
+        else:
+            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src / rel, dst / rel)
+    (dst / "versions").mkdir(parents=True, exist_ok=True)
 
 
 def write_state(proj_dir: Path, state: dict) -> None:
@@ -91,28 +112,34 @@ class Take:
         tr = json.loads((self.project / "work" / "transcript.json").read_text(encoding="utf-8"))
         return {w["id"]: w for w in tr["words"]}
 
-    def media_hashes(self) -> dict:
-        return {f.name: sha256_file(f) for f in sorted((self.project / "media").iterdir()) if f.is_file()}
+    def input_hashes(self) -> dict:
+        """sha256 of every project input except project.json (each state replaces it)."""
+        return {rel: sha256_file(self.project / rel) for rel in project_inputs(self.project) if rel != "project.json"}
 
 
-def reference_key(take: Take, state: dict, pins: dict, song_sha: str) -> str:
-    """Everything the reference final of one state depends on."""
-    transcript = (take.project / "work" / "transcript.json").read_bytes()
+def library_hashes(root: Path) -> dict:
+    lib = root / "Library"
+    return {f.relative_to(lib).as_posix(): sha256_file(f) for f in sorted(lib.rglob("*")) if f.is_file()} if lib.exists() else {}
+
+
+def reference_key(state: dict, inputs: dict, library: dict, pins: dict) -> str:
+    """Everything the reference final of one state depends on: engine, FFmpeg, the state, every
+    project input (media, transcript, face track, assets) and the Library (songs, b-roll)."""
     blob = json.dumps({"commit": pins["engineCommit"], "ffmpeg": pins["ffmpeg"]["sha256"],
-                       "state": state, "transcript": hashlib.sha256(transcript).hexdigest(),
-                       "media": take.media_hashes(), "song": song_sha}, sort_keys=True)
+                       "state": state, "inputs": inputs, "library": library}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
 
 def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: Path, pins: dict,
-                     song_sha: str, ffprobe: str) -> list:
+                     root: Path) -> list:
     """The reference final of every state (cached by reference_key), and the preview plan each
     state's moment gives. -> [{"dir", "window", "stills", "moment"}] in session order."""
     words = take.words()
+    inputs, library = take.input_hashes(), library_hashes(root)
     out = []
     for step in take.session:
         state = take.state(step)
-        d = refs_root / reference_key(take, state, pins, song_sha)
+        d = refs_root / reference_key(state, inputs, library, pins)
         if not (d / "done.json").exists():
             proj = scratch / f"ref-{take.id}"
             copy_project(take.project, proj)
@@ -200,26 +227,56 @@ def _keep(paths: dict, dest) -> dict:
 
 # --- checks and summary -------------------------------------------------------------------------
 
-def check_take(take: Take, refs: list, kept: dict, ffmpeg: str, ffprobe: str, th: dict) -> dict:
-    out = []
+def _merge(results: list) -> dict:
+    """One verdict for an output the runs made in several distinct versions: the first failing
+    version, else the first one, with how many distinct versions were checked."""
+    pick = next((r for r in results if r["status"] == "fail"), results[0])
+    return dict(pick, distinctChecked=len(results))
+
+
+def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th: dict) -> dict:
+    """Check every distinct output of every run (outputs are compared by hash, so a deterministic
+    engine is checked once per output and a run that rendered something different is not trusted
+    on the strength of another run's check)."""
+    def distinct(get) -> list:
+        seen, out = set(), []
+        for run in runs:
+            rec = get(run)
+            if rec["sha256"] not in seen:
+                seen.add(rec["sha256"])
+                out.append(Path(rec["file"]))
+        return out
+
+    steps = []
     for k, (step, ref) in enumerate(zip(take.session, refs)):
-        d = ref["dir"]
-        export = d / "export.mp4"
-        caps = json.loads((d / "captions.json").read_text(encoding="utf-8"))["cues"]
-        a = ref["window"][0]
-        files = kept["files"][k]
-        row = {"draft": checks.check_preview_video(ffmpeg, ffprobe, export, Path(files["draft"]["file"]), caps,
-                                                   th["preview"], ref["fps"]),
-               "window": checks.check_preview_video(ffmpeg, ffprobe, export, Path(files["window"]["file"]), caps,
-                                                    th["preview"], ref["fps"], start=a)}
-        row["still"] = [checks.check_still(ffmpeg, ffprobe, export, Path(files[f"still{j}"]["file"]), t, caps,
-                                           th["preview"])
-                        for j, t in enumerate(ref["stills"])]
-        out.append(row)
+        export = ref["dir"] / "export.mp4"
+        caps = json.loads((ref["dir"] / "captions.json").read_text(encoding="utf-8"))["cues"]
+        a, b = ref["window"]
+        pv = th["preview"]
+        steps.append({
+            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"])
+                             for f in distinct(lambda r: r["files"][k]["draft"])]),
+            "window": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], start=a, end=b)
+                              for f in distinct(lambda r: r["files"][k]["window"])]),
+            "still": [_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv)
+                              for f in distinct(lambda r, j=j: r["files"][k][f"still{j}"])])
+                      for j, t in enumerate(ref["stills"])]})
     last = refs[-1]["dir"]
-    final = checks.check_final(ffmpeg, ffprobe, last / "export.mp4", Path(kept["finalFile"]["final"]["file"]),
-                               json.loads((last / "captions.json").read_text(encoding="utf-8"))["cues"], th["final"])
-    return {"steps": out, "final": final}
+    caps = json.loads((last / "captions.json").read_text(encoding="utf-8"))["cues"]
+    final = _merge([checks.check_final(ffmpeg, ffprobe, last / "export.mp4", f, caps, th["final"])
+                    for f in distinct(lambda r: r["finalFile"]["final"])])
+    return {"steps": steps, "final": final}
+
+
+def prune_duplicates(runs: list) -> None:
+    """After checking: keep one file per distinct output, delete later runs' identical copies."""
+    seen = set()
+    for run in runs:
+        recs = [rec for f in run["files"] for rec in f.values()] + list(run["finalFile"].values())
+        for rec in recs:
+            if rec["sha256"] in seen:
+                Path(rec["file"]).unlink(missing_ok=True)
+            seen.add(rec["sha256"])
 
 
 def stats(xs: list) -> dict:
