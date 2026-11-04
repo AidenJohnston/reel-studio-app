@@ -77,6 +77,7 @@ describe('state machine', () => {
     }, {
       download: async () => {
         if (broken) throw new Error('sha512 checksum mismatch')
+        if (offline) throw new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')
       }
     })
     await u.check('test')
