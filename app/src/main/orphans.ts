@@ -214,9 +214,19 @@ async function leftRunning(pid: number): Promise<'ours' | 'unsure' | 'gone'> {
   return (await Promise.all(members.map(isOursByProgram))).every(Boolean) ? 'ours' : 'unsure'
 }
 
-/** Our engine is always started as `python ... -m reelengine <command>` (engine.ts). */
+/** Our engine is always started as `python [interpreter options] -m reelengine <command>` (engine.ts).
+ * Only interpreter options may stand between python and `-m reelengine`: `python3 worker.py -m reelengine`
+ * runs worker.py, which merely gets those words as arguments. */
 export function isOurEngine(cmdline: string | null): boolean {
-  return !!cmdline && /python/i.test(cmdline) && /(^|\s)-m\s+reelengine(\s|$)/.test(cmdline)
+  const m = cmdline ? /\s-m\s+reelengine(\s|$)/.exec(cmdline) : null
+  if (!cmdline || !m) return false
+  let head = cmdline.slice(0, m.index).trimEnd()
+  // engine.ts passes -s -E -B -X utf8 -u; -X and -W take a value
+  for (let prev = ''; prev !== head; ) {
+    prev = head
+    head = head.replace(/\s+-[XW]\s+\S+$/, '').replace(/\s+-[A-Za-z]+$/, '')
+  }
+  return /(^|[\\/"'\s])python[\d.]*(\.exe)?["']?$/i.test(head)
 }
 
 /** Full command line of a running process, or null if it is gone (or cannot be read). */
