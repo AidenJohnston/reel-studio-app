@@ -16,7 +16,7 @@ export function UpdateSettingsRow() {
   const text = s.status === 'idle' ? `You have Reel Studio ${s.currentVersion}.` : updateSummary(s).replace(/ Click to .*$/, '')
   const button = action !== 'none' ? (action === 'open-page' ? 'Open download page' : s.status === 'error' ? 'Try again' : action === 'install' ? 'Restart to update' : 'Download')
     : s.status === 'checking' ? 'Checking…' : s.status === 'downloading' ? 'Downloading…' : s.status === 'installing' ? 'Restarting…'
-    : s.status === 'up-to-date' ? 'Check again' : s.status === 'error' ? 'Try again' : 'Check for updates'
+    : s.status === 'up-to-date' ? 'Check again' : s.status === 'error' ? 'Try again' : 'Check now'
   return (
     <div className="update-row" data-testid="update-settings">
       <div className="update-row-line">
