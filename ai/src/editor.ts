@@ -13,6 +13,7 @@ import {
   snapshotVersion, LIBRARY_FOLDERS, anchorText, writeFileAtomic, keptWords,
 } from './project';
 import { extractJson } from './providers/cli';
+import { writeAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 
 export interface EditorDeps {
@@ -260,6 +261,8 @@ export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null
       // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
       // and say plainly why. No other paid service is used.
       const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
+      // the calls the AI answered before it stopped were still spent
+      await writeAiRun(projectDir, simple.version, ctx.state.aiCalls);
       return { ...simple, notice: e.toJSON() };
     }
     if (e instanceof AIError) {
@@ -273,6 +276,7 @@ First edit (stopped early).
 
 ${summary}
 `);
+      await writeAiRun(projectDir, version, ctx.state.aiCalls);
       return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
     }
     throw e;
@@ -284,6 +288,7 @@ ${summary}
   const summary = withStyleEcho(honestSummary(run, ctx.state, 'first')
     ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
   await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
+  await writeAiRun(projectDir, version, ctx.state.aiCalls);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
   return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
 }
@@ -373,6 +378,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString(), ...(recorded.length ? { attachments: recorded } : {}) }];
     await saveProject(projectDir, p);
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
+    await writeAiRun(projectDir, version, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
