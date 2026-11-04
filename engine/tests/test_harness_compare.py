@@ -175,6 +175,12 @@ def test_hlg_take_the_engine_reads_as_sdr_is_refused(tmp_path):
         corpus.validate(HLG, fake_take(tmp_path / "s", hdr=True, spec=HLG, state_hdr=False))
     with pytest.raises(RuntimeError, match="rotation"):
         corpus.validate({"rotation": 90}, fake_take(tmp_path / "c", hdr=False, rotation=0))
+    # a state whose first source looks right but whose sources differ (the real one listed second)
+    d = fake_take(tmp_path / "d", hdr=True, spec=HLG)
+    (d / "states" / "00.json").write_text(json.dumps({"sources": [{"id": "s2", "hdr": True},
+                                                                  {"id": "s1", "hdr": False}]}))
+    with pytest.raises(RuntimeError, match="sources differ"):
+        corpus.validate(HLG, d)
 
 
 PINS = {"engineCommit": "c0ffee", "ffmpeg": {"sha256": "ff"}}
@@ -204,6 +210,18 @@ def test_reference_cache_whose_files_changed_is_refused(tmp_path):
     legacy.mkdir()
     (legacy / "done.json").write_text("{}")                         # from before manifests: rebuild
     assert replay.reference_ready(legacy, "k3", PINS) is False
+
+
+def test_checking_refuses_a_reference_that_lost_its_manifest_after_setup(tmp_path):
+    from types import SimpleNamespace
+    d = fake_reference(tmp_path / "k1")
+    (d / replay.REF_MANIFEST).unlink()
+    take = SimpleNamespace(session=[{"state": "states/00.json"}])
+    refs = [{"dir": d, "key": "k1", "format": {"width": 1080, "height": 1920}, "window": [0.0, 2.0],
+             "stills": [1.0], "fps": 30.0}]
+    with pytest.raises(Refusal, match="lost its manifest"):
+        replay.check_take(take, refs, [], "ffmpeg", "ffprobe", {"preview": {}, "final": {}}, PINS,
+                          {"previewScale": 0.5, "stillWidth": 540})
 
 
 def test_preview_sizes_follow_the_output_format():

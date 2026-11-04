@@ -297,8 +297,14 @@ def validate(spec, take_dir: Path) -> None:
     files = ["project/project.json"] + [st["state"] for st in
                                         json.loads((take_dir / "session.json").read_text(encoding="utf-8"))["steps"]]
     problems = []
+    base = json.loads((take_dir / files[0]).read_text(encoding="utf-8"))["sources"]
+    if len(base) != 1:
+        problems.append(f"{files[0]}: a generated take has one source, found {len(base)}")
     for rel in files:
-        src = json.loads((take_dir / rel).read_text(encoding="utf-8"))["sources"][0]
+        sources = json.loads((take_dir / rel).read_text(encoding="utf-8"))["sources"]
+        if sources != base:            # renders pick metadata by source id: every state must agree
+            problems.append(f"{rel}: its sources differ from project/project.json")
+        src = sources[0]
         if bool(src.get("hdr")) != (spec.get("transfer") == "hlg"):
             problems.append(f"{rel}: hdr={bool(src.get('hdr'))}, the spec says transfer={spec.get('transfer', 'sdr')}")
         # rotated or not: the display matrix's sign convention can turn a spec of 90 into a probed 270
