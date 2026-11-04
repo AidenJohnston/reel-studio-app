@@ -81,7 +81,7 @@ describe('media protocol path checks', () => {
   }
 
   it.skipIf(process.platform !== 'win32')('allows an existing file in the allowed root when its path uses different letter case on Windows', async () => {
-    const root = join(tempDir(), 'Reel Studio')
+    const { root } = setupPaths(tempDir())
     const file = join(root, 'Projects', 'clip.mp4')
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, 'clip')
