@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROOT, launch, makeMedia, passFirstRun } from './helpers'
+import { launch, makeMedia, passFirstRun, root } from './helpers'
 
 test('Stop while a preview is made full quality for a platform export ends quietly, and a caption warning does not block Export', async () => {
   const media = makeMedia()
   // A project whose only version is a preview: exporting it makes the full-quality version first.
-  const project = join(ROOT, 'Projects', 'my-reel')
+  const project = join(root(), 'Projects', 'my-reel')
   mkdirSync(join(project, 'media'), { recursive: true })
   mkdirSync(join(project, 'versions', 'preview'), { recursive: true })
   copyFileSync(media.video, join(project, 'media', 'take.mp4'))
