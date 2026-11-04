@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
+import { createPidRegistry, isOurEngine, processCommandLine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
 import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
@@ -202,36 +202,56 @@ describe('orphaned engine reaper', () => {
 
   // The list outlives a reboot, and a recorded number can then lead some daemon's group whose leader exited
   // (a double fork). Only a group that holds nothing but our engine and ffmpeg is ours to stop.
-  it.skipIf(process.platform === 'win32')('a dead engine\'s group is stopped only while it holds just our engine, never someone else\'s group with that number', async () => {
+  it.skipIf(process.platform === 'win32')('a dead engine\'s group is stopped only while it holds just our engine and ffmpeg, never someone else\'s group with that number', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
-    const sleeper = join(APP_DIR, 'test', 'fixtures', 'sleeper')
     const [bread, cake] = ['bread', 'cake'].map((slug) => join(projectsDir(), slug))
     for (const p of [bread, cake]) mkdirSync(join(p, 'work'), { recursive: true })
-    // a group leader that starts one process and exits, leaving the group with no leader
-    const orphanGroup = async (cmd: string): Promise<{ leader: number; member: number }> => {
-      const sh = spawn('sh', ['-c', `${cmd} >/dev/null 2>&1 & echo $!`], { cwd: sleeper, stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+    // an engine that starts nothing itself, so its group holds only what this test puts there
+    const pkg = join(settings, 'engine', 'reelengine')
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(pkg, '__init__.py'), '')
+    writeFileSync(join(pkg, '__main__.py'), 'import time\ntime.sleep(60)\n')
+    // a group leader that starts these and exits, leaving the group with no leader
+    const groups: number[] = []
+    const orphanGroup = async (cmds: { run: string; shows: string }[]): Promise<number[]> => {
+      const sh = spawn('sh', ['-c', cmds.map((c) => `${c.run} >/dev/null 2>&1 & echo $!`).join('; ')], { cwd: join(settings, 'engine'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+      groups.push(sh.pid!)
       let out = ''
       sh.stdout.on('data', (d) => (out += d))
       await once(sh, 'exit')
-      return { leader: sh.pid!, member: Number(out.trim()) }
+      const members = out.trim().split(/\s+/).map(Number)
+      // each runs its own program by now, not a copy of sh forked to start it
+      for (const [k, pid] of members.entries()) {
+        for (let i = 0; i < 100 && !(await processCommandLine(pid))?.includes(cmds[k].shows); i++) await new Promise((r) => setTimeout(r, 50))
+      }
+      return members
     }
-    const theirs = await orphanGroup('sleep 60')
-    const ours = await orphanGroup(`'${PYTHON}' -s -E -m reelengine sleep --project '${cake}'`)
+    // someone else's: a worker whose arguments happen to name ffmpeg
+    const theirs = await orphanGroup([{ run: `'${PYTHON}' -c 'import time; time.sleep(60)' --encoder ffmpeg`, shows: 'time.sleep' }])
+    const ours = await orphanGroup([
+      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, shows: 'reelengine' },
+      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', shows: 'anullsrc' }
+    ])
     try {
-      await new Promise((r) => setTimeout(r, 300))
       const last = createPidRegistry(settings)
-      last.add(theirs.leader, bread)
-      last.add(ours.leader, cake)
+      last.add(groups[0], bread)
+      last.add(groups[1], cake)
       const { stopped, stillRunning } = await createPidRegistry(settings).reap()
       expect(stopped).toBe(1)
-      expect(isAlive(ours.member)).toBe(false)
-      expect(isAlive(theirs.member)).toBe(true)
+      expect(ours.some(isAlive)).toBe(false)
+      expect(theirs.every(isAlive)).toBe(true)
       // nothing of ours works in bread, so it opens; the entry stays for the next start to look at again
       expect(stillRunning).toEqual([])
-      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: theirs.leader, project: bread }])
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: groups[0], project: bread }])
     } finally {
-      for (const pid of [theirs.member, ours.member]) if (isAlive(pid)) process.kill(pid, 'SIGKILL')
+      for (const g of groups) {
+        try {
+          process.kill(-g, 'SIGKILL')
+        } catch {
+          /* gone */
+        }
+      }
     }
   }, 60000)
 
