@@ -68,7 +68,8 @@ Why Reel Studio:
 3. **Parallel and autonomous A/B testing,** because testing short form means getting real content out, and that's
    hard. Agents make several versions of one video in parallel, with a different hook, first line or pace. You pick
    one, or approve them all and post them as Instagram trial reels, which go to people who don't follow you first,
-   and see how each did. One post against another is noisy, so it tells you when the result isn't clear yet.
+   and see how each did, judged by how many people keep watching rather than by views. One post against another is
+   noisy, so it tells you when the result isn't clear yet.
 4. **Unparalleled rendering speed, and a QC UI and experience where you see your changes immediately.** We're going
    to push the performance of this app to a ridiculous point. For our use case that means a system that is FFmpeg,
    but faster:
@@ -92,10 +93,11 @@ We want to study the cognitive mechanisms of human attention for short form: not
 people keep watching, and why. Then distill it into a methodology models can use to analyze why something would work,
 and apply the same approach to your drafts, in the form of subjective reviewers.
 
-Reel Studio knows every edit decision in a video, down to the word. If you opt in, we line that up with how the
-video actually did: YouTube's retention curve, and Instagram's average watch time and how many people skip in the
-first three seconds. Human panels compare two hooks side by side. Nothing leaves your computer unless you turn this
-on.
+Reel Studio knows every edit decision in a video, down to the word. It reads back how each video did, YouTube's
+retention curve and Instagram's average watch time and how many people skip in the first three seconds, and lines that
+up with those decisions on your computer. Your results stay in your project folder, and your own agents use them to
+choose what to test next. You can also choose to share what you've learned with us, as numbers and never your videos
+or transcripts, so everyone starts from better defaults. Human panels compare two hooks side by side.
 
 We don't think adversarial review, one model arguing with another, is the way to go. A reviewer only counts for what
 it can predict on videos it hasn't seen, against a simple baseline we set in advance, the same way we check the
