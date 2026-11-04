@@ -140,8 +140,9 @@ describe('agent loop with a scripted model', () => {
     expect(host.calls.filter((c) => c.command === 'render')).toHaveLength(1);
   });
 
-  it('part of a note\'s preview render would not stop: the note ends with that error at once, nothing else runs, and nothing is rolled back under it', async () => {
+  it('part of a note\'s preview render would not stop: the note ends with that error at once, and nothing else runs or is saved', async () => {
     const { dir, host, settingsDir } = await setup();
+    const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     host.afterRenderFiles = ({ draft }) => {
       if (draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
     };
@@ -152,8 +153,7 @@ describe('agent loop with a scripted model', () => {
     await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower', () => undefined)).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
     expect(m.requests).toHaveLength(1);
     expect(host.calls.map((c) => c.command)).toEqual(['render']);
-    // the engine may still be writing: the note's change stays where it was, and the app keeps the video closed
-    expect(JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).cut.gapCap).toBe(0.4);
+    expect(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
   });
 
   it('cancel stops the loop', async () => {

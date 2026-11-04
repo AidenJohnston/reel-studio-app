@@ -1,5 +1,5 @@
-"""A saved version folder is never rewritten (docs/versions.md). Real renders of a 3-second clip
-through the CLI the app calls."""
+"""A note renders its private project document; a saved version folder is never rewritten
+(docs/versions.md). Real renders of a 3-second clip through the CLI the app calls."""
 import json
 import os
 import shutil
@@ -86,10 +86,44 @@ def test_changed_words_make_a_new_version_with_their_subtitles(project):
     assert "loaves" in shown("v2") and "loaves" not in shown("v1")
 
 
-def test_a_leftover_attempt_above_the_saved_version_is_replaced(project):
+def test_a_note_renders_its_own_document_and_a_leftover_attempt_is_replaced(project):
+    root_before = (project / "project.json").read_bytes()
+    (project / "versions" / "preview").mkdir(parents=True)
+    (project / "versions" / "preview" / "draft.mp4").write_bytes(b"the creator's preview")
     stale = project / "versions" / "v1"           # a note that crashed before it was saved
-    stale.mkdir(parents=True)
+    stale.mkdir()
     (stale / "notes.md").write_text("# v1\n\nNote: the crashed note\n")
+    note = project / "work" / "notes" / "n1"
+    note.mkdir(parents=True)
+    p = json.loads(root_before)
+    p["cut"]["gapCap"] = 0.4
+    (note / "edit.json").write_text(json.dumps(p))
 
-    assert engine(project, "render")["version"] == 1
+    draft = engine(project, "render", "--draft", "--project-file", "work/notes/n1/edit.json", "--out", "work/notes/n1")
+    assert Path(draft["file"]) == note / "draft.mp4"
+    final = engine(project, "render", "--project-file", "work/notes/n1/edit.json")
+
+    assert final["version"] == 1
     assert not (stale / "notes.md").exists()
+    assert json.loads((stale / "project.json").read_text())["cut"]["gapCap"] == 0.4
+    assert json.loads((note / "edit.json").read_text())["version"] == 1
+    assert (project / "project.json").read_bytes() == root_before
+    assert (project / "versions" / "preview" / "draft.mp4").read_bytes() == b"the creator's preview"
+
+
+def test_a_note_never_replaces_a_version_saved_while_it_ran(project):
+    engine(project, "render")
+    note = project / "work" / "notes" / "n1"     # the note's copy, made at Version 1
+    note.mkdir(parents=True)
+    p = json.loads((project / "project.json").read_text())
+    (note / "edit.json").write_text(json.dumps({**p, "cut": {**p["cut"], "gapCap": 0.4}}))
+    live = json.loads((project / "project.json").read_text())   # meanwhile another edit saves Version 2
+    live["cut"]["gapCap"] = 0.3
+    (project / "project.json").write_text(json.dumps(live))
+    assert engine(project, "render")["version"] == 2
+    v2 = project / "versions" / "v2"
+    saved = {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()}
+
+    refused = last_event(project, "render", "--project-file", "work/notes/n1/edit.json")
+    assert refused["event"] == "error" and refused["code"] == "PROJECT_CHANGED"
+    assert {f.name: f.read_bytes() for f in v2.iterdir() if f.is_file()} == saved
