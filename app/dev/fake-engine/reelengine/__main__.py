@@ -259,6 +259,8 @@ def write_captions(proj: Path, vdir: Path, data: dict) -> None:
     subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
     cap = data.get("captions") or {}
     if cap.get("enabled") is False:
+        # no captions: an empty report, as the real engine writes, never an older render's lines
+        (vdir / "captions.json").write_text(json.dumps({"cues": []}), "utf-8")
         return
     words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
