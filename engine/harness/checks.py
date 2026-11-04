@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import compare, media
+from .engines import sha256_file
 
 # Caption boxes are the engine's estimate of the drawn text (captions.render_ass); outlines and
 # antialiasing spill past them, so the band is grown by this fraction of each box's height.
@@ -32,15 +33,16 @@ class Tally:
     """Running min/max of per-frame metrics and where the worst frame was."""
 
     def __init__(self):
-        self.mins: dict = {}
-        self.maxs: dict = {}
+        # identical frames never lower these, so an all-identical render reports inf and 0
+        self.mins: dict = {"captionPsnr": math.inf, "otherPsnr": math.inf, "framePsnr": math.inf}
+        self.maxs: dict = {"meanColorDelta": 0.0}
         self.where: dict = {}
 
     def add(self, t: float, m: dict) -> None:
-        for k in ("captionPsnr", "otherPsnr", "framePsnr"):
-            if m[k] < self.mins.get(k, math.inf):
+        for k in self.mins:
+            if m[k] < self.mins[k]:
                 self.mins[k], self.where[k] = m[k], t
-        if m["meanColorDelta"] >= self.maxs.get("meanColorDelta", -1.0):
+        if m["meanColorDelta"] > self.maxs["meanColorDelta"]:
             self.maxs["meanColorDelta"], self.where["meanColorDelta"] = m["meanColorDelta"], t
 
 
@@ -61,6 +63,11 @@ def _band(captions: list, w: int, h: int, scale: float):
 
 
 def check_final(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list, th: dict) -> dict:
+    if sha256_file(ref) == sha256_file(cand):
+        # the same bytes: every frame, timestamp and audio packet is the reference's
+        rows = [(m, math.inf, compare.verdict(math.inf, th.get(k)), None)
+                for m, k in (("framePsnr", "psnrMinDb"), ("captionPsnr", "captionPsnrMinDb"))]
+        return _result(rows, [], {"identical": True})
     failures = []
     rp, cp = media.video_pts(ffprobe, ref), media.video_pts(ffprobe, cand)
     why = compare.timestamps_match(rp, cp, tol=1e-6)
@@ -78,18 +85,16 @@ def check_final(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list
     tally = Tally()
     for i, (a, b) in enumerate(zip(media.iter_frames(ffmpeg, ref, w, h), media.iter_frames(ffmpeg, cand, w, h))):
         tally.add(rp[i] if i < len(rp) else i, compare.frame_metrics(a, b, band))
-    rows = [("framePsnr", tally.mins.get("framePsnr"), compare.verdict(tally.mins.get("framePsnr", math.inf), th.get("psnrMinDb")), tally.where.get("framePsnr")),
-            ("captionPsnr", tally.mins.get("captionPsnr"), compare.verdict(tally.mins.get("captionPsnr", math.inf), th.get("captionPsnrMinDb")), tally.where.get("captionPsnr"))]
+    rows = [(m, tally.mins[m], compare.verdict(tally.mins[m], th.get(k)), tally.where.get(m))
+            for m, k in (("framePsnr", "psnrMinDb"), ("captionPsnr", "captionPsnrMinDb"))]
     return _result(rows, failures, {})
 
 
 def _preview_rows(tally: Tally, th: dict) -> list:
-    g = tally.mins.get
-    return [("captionPsnr", g("captionPsnr"), compare.verdict(g("captionPsnr", math.inf), th.get("captionPsnrMinDb")), tally.where.get("captionPsnr")),
-            ("otherPsnr", g("otherPsnr"), compare.verdict(g("otherPsnr", math.inf), th.get("otherPsnrMinDb")), tally.where.get("otherPsnr")),
-            ("meanColorDelta", tally.maxs.get("meanColorDelta"),
-             compare.verdict(tally.maxs.get("meanColorDelta", 0.0), maximum=th.get("meanColorMaxDelta")),
-             tally.where.get("meanColorDelta"))]
+    mn, mx = tally.mins, tally.maxs["meanColorDelta"]
+    return [("captionPsnr", mn["captionPsnr"], compare.verdict(mn["captionPsnr"], th.get("captionPsnrMinDb")), tally.where.get("captionPsnr")),
+            ("otherPsnr", mn["otherPsnr"], compare.verdict(mn["otherPsnr"], th.get("otherPsnrMinDb")), tally.where.get("otherPsnr")),
+            ("meanColorDelta", mx, compare.verdict(mx, maximum=th.get("meanColorMaxDelta")), tally.where.get("meanColorDelta"))]
 
 
 def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captions: list, th: dict,
@@ -110,7 +115,10 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
     tally = Tally()
     want = set(picked)
     cand_frames = media.iter_frames(ffmpeg, cand, w, h)
+    last = max(picked, default=-1)
     for i, a in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
+        if i > last:
+            break
         if i not in want:
             continue
         b = next(cand_frames, None)
