@@ -76,6 +76,17 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
     v.currentTime = 4
     await v.play()
   })
+  // At the smallest window, "Full screen" and "Tap for sound" share the top of a narrow screen without overlapping.
+  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize())
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 700))
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1024)
+  await page.getByTestId('phone').hover()
+  const chip = page.getByTestId('tap-for-sound')
+  await expect(chip).toBeVisible()
+  const [a, b] = [(await page.getByTestId('open-fullscreen').boundingBox())!, (await chip.boundingBox())!]
+  expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true)
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), size)
+
   // At rest the button is hidden, and a tap there reaches the video, not a button nobody saw (a touch
   // screen has no hover to show it first).
   await page.mouse.move(0, 0)
@@ -98,6 +109,13 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
   expect(inView.at).toBeGreaterThanOrEqual(4)
   expect(inView).toMatchObject({ paused: false, muted: true })
   expect((await media(page, 'player')).paused).toBe(true)
+  // While it plays, the hidden scrub bar takes no taps either: a tap there reaches the video.
+  await page.mouse.move(0, 0)
+  const scrubHit = await page.getByTestId('fullscreen').locator('.scrub input[type=range]').evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return el.closest('.scrub')!.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+  })
+  expect(scrubHit).toBe(false)
   // the page behind is out of reach for Tab and screen readers
   expect(await page.evaluate(() => document.getElementById('root')!.inert)).toBe(true)
   // Windows draws its window buttons over the top right of the page (the title bar overlay). Exit sits below them.
