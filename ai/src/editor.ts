@@ -387,7 +387,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     return await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false);
   } catch (e) {
     // an engine that would not stop may still be writing there: the app keeps the video closed instead
-    if ((e as { code?: unknown } | null)?.code !== 'ENGINE_STUCK') await dropDownloads(projectDir, creditsBefore, assetsBefore);
+    if (!engineStuck(e)) await dropDownloads(projectDir, creditsBefore, assetsBefore);
     throw e;
   } finally {
     // only what this note made under its own id; a final it started stays above project.json's
@@ -395,6 +395,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
+
+/** Part of the engine would not stop and may still be writing to the project (index.ts editHost). */
+const engineStuck = (e: unknown): boolean => (e as { code?: unknown } | null)?.code === 'ENGINE_STUCK';
 
 const changedElsewhere = (): AIError =>
   new AIError('project_changed', 'Your video was changed somewhere else while I worked on your note, so I left it as it was. Send your note again.');
