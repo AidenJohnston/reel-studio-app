@@ -122,7 +122,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             const r = e
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
             // a job that succeeds waits for these before `done`; one that fails or is stopped drops the ones still on their way
-            pending.push(video.then((v) => void (failed || send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }))))
+            pending.push(
+              video.then((v) => {
+                if (!failed) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v })
+              })
+            )
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else send({ jobId: id, slug, type: 'heard', words: e.words })
         }, abort.signal)
