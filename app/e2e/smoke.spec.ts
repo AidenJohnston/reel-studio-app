@@ -120,6 +120,11 @@ test('make a reel end to end', async () => {
     await expect(page.getByTestId('sidebar-connect')).toHaveCount(0)
   }
   await shot(page, '12-reel-no-ai')
+  if (aiSource === 'mock') {
+    // The banner can be put away, for this video.
+    await page.getByTestId('banner-close').click()
+    await expect(page.getByTestId('ai-banner')).toHaveCount(0)
+  }
 
   // ---- export ----
   await page.getByTestId('export').click()

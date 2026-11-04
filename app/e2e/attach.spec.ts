@@ -2,7 +2,8 @@
 // whose `attach` takes JPG/PNG only) and the stand-in AI editor connected: in the change pop-up under the
 // player, a plain text paste stays text, a pasted screenshot (bytes, no file), a file dropped on the pop-up
 // (and a video dropped there does NOT start a new reel), the paperclip, at most four, remove, send, the
-// "you" bubble with its thumbnails and the note's mark on the scrub bar.
+// "you" bubble with its thumbnails and the note's mark on the scrub bar. Then the same paste, drop and
+// paperclip on the note box in the Notes panel, and a send from there.
 //
 // Run: npm run build && npx playwright test e2e/attach.spec.ts
 import { test, expect } from '@playwright/test'
@@ -56,14 +57,18 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
 
   // ---- a pasted screenshot: bytes with no file behind them ----
   const png = readFileSync(pics[0]).toString('base64')
-  const handledPic = await page.evaluate((b64) => {
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-    const dt = new DataTransfer()
-    dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }))
-    const box = document.querySelector('[data-testid="change-input"]') as HTMLTextAreaElement
-    return !box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
-  }, png)
-  expect(handledPic).toBe(true)
+  const pasteScreenshot = (testid: string): Promise<boolean> =>
+    page.evaluate(
+      ([b64, id]) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+        const dt = new DataTransfer()
+        dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }))
+        const box = document.querySelector(`[data-testid="${id}"]`) as HTMLTextAreaElement
+        return !box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+      },
+      [png, testid]
+    )
+  expect(await pasteScreenshot('change-input')).toBe(true)
   await expect(page.getByTestId('note-attachment')).toHaveCount(1)
   await expect(page.getByTestId('note-attachment').first()).toContainText('image.png')
   await expect(page.getByTestId('note-attachment').first().locator('img')).toBeVisible()
@@ -126,5 +131,25 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await page.getByTestId('change-at').click()
   await expect(page.getByTestId('note-attachment')).toHaveCount(0)
   await shot(page, 'attach-02-sent')
+
+  // ---- the note box in the Notes panel takes files the same ways: paste, drop, paperclip, send ----
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('change-pop')).toHaveCount(0)
+  expect(await pasteScreenshot('note-input')).toBe(true)
+  await expect(page.getByTestId('note-attachment')).toHaveCount(1)
+  await dropFiles(page, 'note-drop', [pics[1]])
+  await expect(page.getByTestId('note-attachment')).toHaveCount(2)
+  await expect(page.getByTestId('drop-overlay')).toHaveCount(0)
+  // a video dropped on the note box is not a new reel either
+  await dropFiles(page, 'note-drop', [media.video])
+  await expect(page.getByTestId('toast')).toContainText("That file type isn't supported")
+  expect(projects()).toEqual([slug])
+  await page.getByTestId('toast').getByRole('button', { name: 'Close' }).click()
+  await page.getByTestId('note-attach').click() // the dialog stub above picks two more
+  await expect(page.getByTestId('note-attachment')).toHaveCount(4)
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('note-attachment')).toHaveCount(0)
+  await expect(page.getByTestId('bubble-you').last().getByTestId('bubble-attachments').locator('img')).toHaveCount(4)
+  await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 60_000 })
   await app.close()
 })
