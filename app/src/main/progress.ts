@@ -28,6 +28,8 @@ export function parseHistory(value: unknown): SpeedHistory {
 
 /** Seconds = base + perMin x minutes of raw video. Original defaults: status/speed.md, Windows RTX 4070. */
 export const DEFAULTS: Record<string, Omit<PhaseModel, 'n'>> = {
+  // only when the engine re-encodes a variable frame rate clip at import (engine init.py); no measurement yet
+  'first-edit:prepare': { base: 2, perMin: 15 },
   'first-edit:listen': { base: 6, perMin: 8 },
   'first-edit:analyze': { base: 2, perMin: 4 },
   // First-run fallback from one observation: Claude Sonnet took 128 s on a 39 s
@@ -141,7 +143,11 @@ export class ProgressTracker {
     }
     if (!phase || phase === 'firstLook') return
     let i = this.phases.indexOf(phase)
-    if (i < 0) {
+    if (i < 0 && this.cur < 0) {
+      // a step only some jobs have, before every planned one (preparing a clip at import, #146)
+      this.phases.unshift(phase)
+      i = 0
+    } else if (i < 0) {
       this.phases.push(phase)
       i = this.phases.length - 1
     }

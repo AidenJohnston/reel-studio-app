@@ -7,6 +7,9 @@ from . import probe as probemod, project as projmod, tools
 from .proto import EngineError, progress
 
 
+PREPARING = "Preparing your video"      # the app shows this step's own progress (main/index.ts)
+
+
 def _media_name(i: int, src: Path) -> str:
     ext = src.suffix.lower() or ".mp4"
     return f"take{i:02d}{ext}"
@@ -22,7 +25,7 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
     infos = []
     for f in files:
         f = Path(f)
-        info = probemod.probe(f, quick=True)
+        info = probemod.probe(f, quick=True, cadence=True)
         if not info["hasVideo"] or info["kind"] == "image":
             raise EngineError("NOT_VIDEO", f"{f} has no video stream",
                               f"\"{f.name}\" isn't a video. Drop in the video of you talking.")
@@ -36,36 +39,42 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
         infos.sort(key=lambda entry: entry[1]["capturedAt"])
 
     proj = projmod.new_project(title, slug=slug or projmod.slugify(project_dir.name, projmod.slugify(title)))
-    normalize = any(info["variableFrameRate"] for _, info in infos) or len({info["fps"] for _, info in infos}) > 1
-    if not faster_exports and not normalize and 0 < infos[0][1]["fps"] <= 60:
-        proj["format"]["fps"] = infos[0][1]["fps"]
     media = project_dir / "media"
     (project_dir / "work").mkdir(parents=True, exist_ok=True)
     (project_dir / "versions").mkdir(parents=True, exist_ok=True)
+    steady = []
     for i, (f, info) in enumerate(infos, start=1):
-        progress("init", 100 * (i - 1) / len(infos), "Copying your video", force=True)
         dst = media / _media_name(i, f)
-        if normalize:
-            progress("init", 100 * (i - 1) / len(infos), "Preparing your video", force=True)
+        # Only a clip whose frame timing varies is re-encoded, to a steady 30 fps. Steady clips are copied
+        # whatever their rates, and the renderer turns each into the project rate. An HDR clip is copied
+        # too: this 8-bit encode would flatten its colour, and the renderer already reads it as it is.
+        if info["variableFrameRate"] and not info["hdr"]:
+            progress("init", 100 * (i - 1) / len(infos), PREPARING, force=True)
             dst = dst.with_suffix(".mp4")
             dst.parent.mkdir(parents=True, exist_ok=True)
             part = dst.with_suffix(".part.mp4")
             try:
                 tools.ffmpeg_progress(
                     [tools.ffmpeg(), "-y", "-nostdin", "-hide_banner", "-i", str(f),
-                     "-map", "0:v:0", "-map", "0:a:0", "-vf", "fps=30",
+                     "-map", "0:v:0", "-map", "0:a:0",
+                     # 4:2:0 needs even sides: screen and browser recordings can be 1365x767
+                     "-vf", "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p",
                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                      "-progress", "pipe:1", "-nostats", str(part)],
                     info["duration"],
-                    lambda pct: progress("init", (100 * (i - 1) + pct) / len(infos), "Preparing your video"),
+                    lambda pct: progress("init", (100 * (i - 1) + pct) / len(infos), PREPARING),
                     max(300, info["duration"] * 10), "prepare constant frame rate video")
                 part.replace(dst)
             finally:
                 part.unlink(missing_ok=True)
             info = probemod.probe(dst, quick=True)
+            steady.append(30.0)
         else:
+            progress("init", 100 * (i - 1) / len(infos), "Copying your video", force=True)
             tools.safe_copy(f, dst)
+            if not info["variableFrameRate"]:
+                steady.append(info["fps"])
         proj["sources"].append({
             "id": f"s{i}", "path": f"media/{dst.name}", "originalName": f.name,
             "duration": info["duration"], "fps": info["fps"] or 30.0,
@@ -73,6 +82,11 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
             "hdr": bool(info.get("hdr")), "hasAudio": info["hasAudio"],
             **({"capturedAt": info["capturedAt"]} if info.get("capturedAt") else {}),
         })
+    # The final export keeps the smoothest steady rate up to 60; drafts and previews render at 30 or under
+    # (render.preview_fps). Faster exports keeps the final at the default 30 too.
+    smooth = [r for r in steady if 0 < r <= 60]
+    if not faster_exports and smooth:
+        proj["format"]["fps"] = max(smooth)
     proj["cover"]["source"] = "s1"
     projmod.save(project_dir, proj)
     progress("init", 100, "Your video is in", force=True)

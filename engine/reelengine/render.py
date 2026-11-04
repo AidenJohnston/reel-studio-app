@@ -127,6 +127,15 @@ def pick_version(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
 PREVIEW_DIR = "preview"
 
 
+def preview_fps(fps: float) -> float:
+    """The rate a draft or window preview renders at. Editing previews stay at 30 fps or under so they are
+    as fast as before projects kept their source rate; only the final export keeps it, up to 60. From 48
+    fps up a preview takes every other frame (60 -> 30, 59.94 -> 29.97, 50 -> 25), so motion stays even."""
+    if fps <= 30:
+        return fps
+    return fps / 2 if fps >= 48 else 30.0
+
+
 def preview_dir(project_dir: Path) -> Path:
     """versions/preview/: the ONE scratch folder every draft and window preview overwrites.
     Only a final render makes a user-visible version folder (docs/versions.md)."""
@@ -1129,6 +1138,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     faces = source_faces(project_dir, proj)
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
+    if preview:
+        ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))
     ctx.out_dir = vdir
     ctx.window = win
     from .lint_edit import prepare
@@ -1159,7 +1170,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     # 3. captions
     fmt = proj["format"]
-    W, H, fps = int(fmt["width"]), int(fmt["height"]), float(fmt["fps"])
+    # a draft or window renders at preview_fps (set on ctx.fmt above); the final keeps the project rate
+    W, H, fps = int(fmt["width"]), int(fmt["height"]), float(ctx.fmt["fps"])
     ass_name, cap_report, font_path = burn_captions(ctx, proj, tl, broll_report, rwork, warnings)
     # a window keeps the full track's cues that overlap it; a full render's go beside the video (#87)
     if win:
@@ -1535,6 +1547,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     src_meta, src_paths = source_files(project_dir, proj, root)
     faces = source_faces(project_dir, proj)
     ctx = make_ctx(project_dir, proj, tl, True, root, rwork)
+    ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))     # a still is the draft's frame (#146)
     times = [*times, *word_times(tl.words_out, words)]
     if not times:
         raise EngineError("BAD_ARGS", "no times given", "Reel Studio didn't say which moments to show.")
@@ -1545,7 +1558,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     times, moved = settle_on_animations(layer_items, times)
     timings = {"setup": round(time.time() - t_start, 2), "stills": []}
 
-    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(proj["format"]["fps"])
+    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(ctx.fmt["fps"])
     # drawn at the draft's own size, then scaled as frames.from_video scales a draft frame
     out_w = int(round(W * DRAFT_SCALE / 2)) * 2
     out_h = int(round(H * DRAFT_SCALE / 2)) * 2
