@@ -219,4 +219,9 @@ export function macBundleCheck(running: string): InstallStep {
 // latest.json named. A signed build carries publisherName in app-update.yml (packaging/make-config.js writes it
 // from RS_AZURE_PUBLISHER), and electron-updater then refuses an installer signed by anyone else before install()
 // runs. Unsigned builds carry none, so electron-updater skips that check.
-export const windowsInstaller: InstallStep = { showInstaller: true, verify: async () => {} }
+export const windowsInstaller: InstallStep = {
+  // the NSIS installer people download (packaging/electron-builder.yml nsis.artifactName); latest.yml names it
+  fileName: (version) => `Reel-Studio-Setup-${version}-x64.exe`,
+  showInstaller: true,
+  verify: async () => {}
+}

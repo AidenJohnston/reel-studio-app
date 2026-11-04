@@ -237,7 +237,7 @@ it('fails if Windows installs without its progress window or the Mac hands Squir
   const checked: string[] = []
   const mac = { ...macBundleCheck('0.1.2'), verify: async (file: string) => void checked.push(file) }
   for (const [platform, install] of [['win32', windowsInstaller], ['darwin', mac]] as const) {
-    const updater = new FakeUpdater(info('0.1.3'), `${platform}-download`)
+    const updater = new FakeUpdater(info('0.1.3', install.fileName('0.1.3')), `${platform}-download`)
     updater.quitAndInstall = (...args: unknown[]) => void calls.push({ platform, args })
     const { backend } = wire(updater, { install })
     await backend.download('0.1.3', () => {})
