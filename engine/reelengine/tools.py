@@ -363,9 +363,10 @@ def hwaccels() -> set:
 HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
 
 # The adapter vendor of each Windows GPU encoder. ffmpeg gives an encoder any device it opened for
-# decoding whose type the encoder accepts, and NVENC, AMF and Quick Sync all accept D3D11. So the
-# decode device has to sit on the GPU that encodes: NVENC handed the default adapter's device (the
-# laptop's AMD iGPU) failed with "CreateInputBuffer failed" (Windows 11, RTX 4060 Laptop, 2026-11-04).
+# decoding whose type the encoder accepts, and NVENC and AMF accept D3D11. So the decode device has
+# to sit on the GPU that encodes: NVENC handed the default adapter's device (the laptop's AMD iGPU)
+# failed with "CreateInputBuffer failed" (Windows 11, RTX 4060 Laptop, 2026-11-04). Quick Sync opens
+# its own device; decoding on the Intel GPU keeps the frames on the GPU that will encode them.
 D3D11_VENDOR = {"h264_nvenc": "0x10de", "h264_amf": "0x1002", "h264_qsv": "0x8086"}
 
 
