@@ -124,6 +124,7 @@ test('on a Mac, first run asks about notifications in a step of its own, and All
     await page.getByTestId('perm-notify-allow').click()
     await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'unverified')
     await expect(page.getByTestId('perm-notify')).toContainText('Turned on')
+    await expect(page.getByTestId('perm-notify-settings')).toBeVisible() // macOS never confirms, so System Settings stays near
     await expect(page.getByTestId('mac-continue')).toBeFocused()
     await shot(page, 'first-run-mac-on')
     await page.getByTestId('mac-continue').click()

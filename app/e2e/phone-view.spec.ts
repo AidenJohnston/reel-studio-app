@@ -103,6 +103,7 @@ test('the Instagram preview shows the connected account, a plain placeholder wit
       await expect(ig.locator('.igc-tick span').first()).toHaveText(c.audio)
       await expect(ig.locator('.igc-rail')).not.toHaveText(/\d/)
       await expect(ig.locator('.igc-who img.igc-avatar')).toHaveCount(c.picture)
+      await expect(page.locator('.fr-welcome')).toHaveCount(0) // the welcome's reel has landed on the phone
       await shot(page, `instagram-preview-${c.name}`)
     } finally {
       await app.close()

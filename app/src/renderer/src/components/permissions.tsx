@@ -65,7 +65,8 @@ export function usePermissionStatus() {
 /**
  * The first run's notification row (FirstRun.tsx Your Mac), as T3 Code's permission rows: the bell bare, what it is,
  * one status line, one pill. Allow shows a notification, which is when macOS asks; macOS never says yes to an app, so
- * after Allow the row says Turned on and keeps System Settings one press away. `onOn` runs when it is on.
+ * after Allow the row says Turned on and keeps System Settings one press away, for a Mac that hides them anyway.
+ * `onOn` runs when it is on.
  */
 export function NotifyRow({ onOn }: { onOn: () => void }) {
   const notify = useNotify()
@@ -122,7 +123,7 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
       ? [
           <span key="on">
             <Icon name="check" size={13} stroke={2.4} />
-            Turned on. Your Mac decides whether they show.
+            Turned on
           </span>,
           'ok',
           settings('tertiary')
