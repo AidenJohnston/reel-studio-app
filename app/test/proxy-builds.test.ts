@@ -64,8 +64,12 @@ describe('preview copy builds', () => {
     const { makeRunner, calls } = controlledEngine()
     const builds = createProxyBuilds(makeRunner, () => undefined)
     builds.start('a', '/p/a')
-    await builds.stop('a')
+    const first = builds.stop('a')
+    builds.start('a', '/p/a') // still shutting down: no second engine
+    await builds.stop('a') // a second remove waits for the same exit
     expect(calls[0].exited).toBe(true)
+    await first
+    expect(calls).toHaveLength(1)
     await builds.stop('never-started')
   })
 })

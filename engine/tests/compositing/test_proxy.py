@@ -62,7 +62,7 @@ def _counting_take(path: Path, offset: float) -> Path:
 # The cut decides how the take is opened (render.plan_lanes, 3 s preroll), which is checked first.
 @pytest.mark.parametrize("offset,keep,opened", [
     (0.5, ((1.0, 3.0), (4.0, 6.0)), "from its start"),
-    (0.5, ((3.45, 5.0), (5.5, 6.5)), "seeked to a time before its picture starts"),
+    (1.0, ((3.45, 5.0), (5.5, 6.5)), "seeked to a time before its picture starts"),
     (0.5, ((3.85, 6.5),), "seeked past its picture's start"),
     (4.0, ((8.05, 10.0),), "seeked past a picture start later than the preroll"),
 ])
@@ -121,6 +121,17 @@ def test_a_preview_reads_the_take_unless_its_copy_is_finished_and_current(tmp_pa
     assert rebuilt["status"] == "built" and rebuilt["file"] != built["file"]
     assert not copy.exists() and not sidecar.exists()                    # the old copy is gone
     assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
+
+
+def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))
+    lock = pdir / "work" / "proxy" / "s1.lock"
+    lock.parent.mkdir(parents=True)
+    other = proxy._take_lock(lock)                        # another build of this take is running
+    assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "busy"
+    proxy._release_lock(other)                            # it finished or was killed
+    assert proxy.run(pdir, short_side=540)["sources"]["s1"]["status"] == "built"
 
 
 @pytest.mark.parametrize("rotation", [0, 90])
