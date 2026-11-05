@@ -163,7 +163,7 @@ describe('Learn from my past edits: finding them', () => {
     writeFileSync(twice, text.replace('</xmeml>', `<project><name>Cuts</name><children>${sequence}</children></project></xmeml>`))
     const files = [...['cut.fcpxmld', 'ntsc-lanes.fcpxml', 'talking-head.xml'].map((f) => join(fixtures, f)), twice]
     const scan = (pythonPath: string) => {
-      const out = execFileSync(PYTHON, ['-I', '-c', 'import sys; sys.path.insert(0, sys.argv.pop(1)); from reelengine.__main__ import main; sys.argv[0] = "reelengine"; sys.exit(main())', pythonPath, 'reference-scan', ...files], { encoding: 'utf8' })
+      const out = execFileSync(PYTHON, ['-I', '-c', 'import sys; sys.path.insert(0, sys.argv.pop(1)); from reelengine.cli import run; sys.argv[0] = "reelengine"; sys.exit(run())', pythonPath, 'reference-scan', ...files], { encoding: 'utf8' })
       const done = JSON.parse(out.trim().split('\n').pop()!)
       return done.result.files.map((f: { timelines?: number }) => f.timelines)
     }
