@@ -113,7 +113,9 @@ export function CoverTab({
           className="slider"
           min={0}
           max={Math.max(1, Math.floor(duration))}
-          step={0.5}
+          // a tenth of a second (#17), so a picked frame (3.067 s) puts the thumb where it is, not at 3.0;
+          // Page Up/Down still move a tenth of the range
+          step={0.1}
           value={at}
           onChange={(e) => setCover({ atSourceTime: Number(e.target.value), source, exact: null, manual: null }, 'cover-moment')}
           onPointerUp={settle}
