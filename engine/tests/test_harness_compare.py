@@ -269,3 +269,18 @@ def test_a_proxy_run_refuses_a_preview_that_read_the_original():
     fell_back = Call(1.0, {"videoFrom": {"s1": "original", "s2": "original"}}, "")
     with pytest.raises(RuntimeError, match="copies exist for \\['s1'\\]"):
         replay._check_copy_read(fell_back, copies, "draft")
+
+
+def test_a_proxy_run_refuses_a_take_whose_copy_was_not_made(tmp_path):
+    from harness.engines import Call
+
+    class Cand:
+        def run(self, command, args):
+            assert command == "proxy"
+            return Call(1.0, {"sources": {"s1": {"status": "failed", "reason": "ffmpeg"}}}, "")
+    take = tmp_path / "take"
+    (take / "project" / "media").mkdir(parents=True)
+    (take / "project" / "project.json").write_text("{}", encoding="utf-8")
+    (take / "session.json").write_text('{"steps": []}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="preview copies not made"):
+        replay.replay(replay.Take("t", take), Cand(), [], tmp_path / "scratch", None, "ffprobe", proxy=True)

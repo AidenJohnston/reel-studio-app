@@ -1414,7 +1414,9 @@ function registerIpc(): void {
       await proxies.stop(slug)
       await noteQueue.remove(slug, async () => {
         await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
-        await fs.rm(projectDir(slug), { recursive: true, force: true })
+        // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+        // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+        await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
       })
     } finally {
       removing.delete(slug)

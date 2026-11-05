@@ -178,12 +178,21 @@ def build_cmd(ffmpeg: str, src: dict, path: Path, out: Path, size: tuple, tonema
             "-pix_fmt", "yuv420p", *tags, "-progress", "pipe:1", "-nostats", "-f", "mp4", str(out)]
 
 
+# A build in progress rewrites its .part file every few seconds; one untouched this long was left by a
+# build that was killed (the app quitting, a crash).
+STALE_PART_SECONDS = 3600
+
+
 def _prune(d: Path, sid: str, keep: Path) -> None:
-    """Copies and sidecars of this source under other keys, and leftovers of crashed builds."""
+    """Copies and sidecars of this source under other keys, and leftovers of killed builds."""
+    import time
     for f in d.glob(f"{sid}-*"):
-        if f.name.startswith(keep.stem + ".") and not f.name.endswith(".part.mp4"):
-            continue
         try:
+            if f.name.endswith(".part.mp4"):
+                if time.time() - f.stat().st_mtime < STALE_PART_SECONDS:
+                    continue                # another build may be writing it
+            elif f.name.startswith(keep.stem + "."):
+                continue
             f.unlink()
         except OSError:
             pass            # a render may still have it open (Windows); the next build retries
@@ -221,6 +230,8 @@ def build_one(project_dir: Path, src: dict, path: Path, short_side: int = SHORT_
                                              f"or their times differ", "The preview copy came out wrong.")
         if source_key(path, src) != key:
             return {"status": "stale", "reason": "the take changed while its copy was made"}
+        if lookup(project_dir, src, path) is not None:       # another build finished it meanwhile
+            return {"status": "ready", "file": str(mp4)}
         side.unlink(missing_ok=True)     # a sidecar never describes a file other than the one beside it
         try:
             os.replace(part, mp4)

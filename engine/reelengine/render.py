@@ -774,10 +774,15 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             else:
                 per_seg = reframe + ",format=yuv420p"
         cmd += no_rotate_args(src)
-        if lane["seek"] > 0:
-            cmd += ["-ss", _f(lane["seek"])]
-        if src.get("inputOffset"):        # a preview copy: its frames at the original's times (proxy.py)
-            cmd += ["-itsoffset", _f(src["inputOffset"])]
+        # A preview copy's clock runs `inputOffset` behind the original's (proxy.py: it has no
+        # sound that starts before the picture). Seek on its own clock and shift what is left, so its
+        # frames reach the trims below at the original's times; for an original both are as before.
+        off = float(src.get("inputOffset") or 0.0)
+        seek_in = max(0.0, lane["seek"] - off)
+        if seek_in > 0:
+            cmd += ["-ss", _f(seek_in)]
+        if seek_in + off - lane["seek"] > 1e-9:
+            cmd += ["-itsoffset", _f(seek_in + off - lane["seek"])]
         cmd += ["-i", str(src_paths[lane["source"]])]
         n = len(lane["segs"])
         head = f"[{li}:v]" + (pre + "," if pre else "")

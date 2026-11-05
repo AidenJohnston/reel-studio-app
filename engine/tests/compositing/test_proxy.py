@@ -45,24 +45,28 @@ def _lumas(video: str) -> np.ndarray:
 
 def _counting_take(path: Path) -> Path:
     """A frame's brightness counts its index (step 7), its times are off the 30 fps grid (VFR), and
-    the video starts 0.2 s after the sound, as in phone files whose audio leads the picture."""
+    the video starts 0.5 s after the sound, as in phone files whose audio leads the picture."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name("video-only.mp4")
     vf = ("color=c=black:s=64x36:r=30:d=7,format=yuv420p,geq=lum='16+mod(N*7\\,200)':cb=128:cr=128,"
-          "scale=1280:720:flags=neighbor,setpts='(N+0.4*mod(N\\,3))/30/TB'")
+          "scale=1280:720:flags=neighbor,settb=1/600,setpts='(N+0.4*mod(N\\,3))/30/TB'")
     subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", vf, "-fps_mode", "passthrough",
                     "-enc_time_base", "1:600", "-c:v", "libx264", "-preset", "ultrafast", "-qp", "4",
                     str(tmp)], check=True)
-    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-itsoffset", "0.2", "-i", str(tmp), "-f", "lavfi",
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-itsoffset", "0.5", "-i", str(tmp), "-f", "lavfi",
                     "-i", "sine=f=220:d=7.5:sample_rate=48000", "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                     "-c:a", "aac", str(path)], check=True)
     return path
 
 
-def test_a_draft_from_the_copy_shows_the_frames_a_draft_from_the_take_shows(tmp_path):
+# The cut decides how the take is opened (render.plan_lanes, 3 s preroll): from its start; seeked to
+# 0.4 s, inside the copy's 0.5 s offset; seeked to 0.8 s, past it.
+@pytest.mark.parametrize("keep", [((1.0, 3.0), (4.0, 6.0)), ((3.45, 5.0), (5.5, 6.5)), ((3.85, 6.5),)])
+def test_a_draft_from_the_copy_shows_the_frames_a_draft_from_the_take_shows(tmp_path, keep):
     take = _counting_take(tmp_path / "media-src" / "take.mp4")
     offset, times = proxy.frame_times(fx.FFPROBE, take)
-    assert 0.15 < offset < 0.25 and len({round(b - a, 4) for a, b in zip(times, times[1:])}) > 1  # the take is what it says
-    pdir = _project(tmp_path, take, 1280, 720, keep=((1.0, 3.0), (4.0, 6.0)))
+    assert 0.45 < offset < 0.55 and len({round(b - a, 4) for a, b in zip(times, times[1:])}) > 1  # the take is what it says
+    pdir = _project(tmp_path, take, 1280, 720, keep=keep)
     from_take = _draft(pdir)
     assert from_take["videoFrom"] == {"s1": "original"}
     want = _lumas(from_take["file"])
