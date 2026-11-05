@@ -42,10 +42,12 @@ SEEK_PREROLL = 3.0
 # staying on the lane decodes the gap. Split only gaps clearly longer than that preroll plus a GOP.
 # The 2 s margin is a judgment, not a measurement.
 MIN_SEEK_GAP = SEEK_PREROLL + 2.0
-# FFmpeg keeps every input's decoder, with its frame pool, until it exits (fftools/ffmpeg_dec.c frees
-# the codec context only at cleanup), so a cut into many pieces must not open one input per piece.
-# The count is a judgment, not a measurement.
-MAX_VIDEO_LANES = 6
+# Every input holds its own decoder until ffmpeg exits (fftools/ffmpeg_dec.c frees the codec context
+# only at cleanup), so memory grows with the input count. On Windows 11 (16 threads, FFmpeg 7.1.1-rs2)
+# the final of a 4K HEVC take cut to five far-apart stretches peaked at 1.50 GiB with one input and
+# 3.86 GiB with five, about 0.6 GiB per extra input. Three bounds the extra near 1.2 GiB for 8-bit 4K;
+# 10-bit footage and Macs are unmeasured. Raising it trades memory for decode time.
+MAX_VIDEO_LANES = 3
 
 
 BROLL_FAILED = "Some b-roll couldn't be added to this version. Try again, or pick a different picture."

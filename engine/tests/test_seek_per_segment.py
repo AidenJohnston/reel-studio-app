@@ -69,15 +69,15 @@ def test_far_segments_are_reached_by_their_own_input_seek(tmp_path):
 
 
 def test_heavy_cut_opens_at_most_max_lanes_inputs_skipping_the_largest_gaps():
-    gaps = [6, 30, 7, 50, 8, 40, 9, 20]           # all longer than MIN_SEEK_GAP; room for 5 splits
+    gaps = [6, 30, 7, 50, 8, 40, 9, 20]           # all longer than MIN_SEEK_GAP; room for 2 splits
     segs, t = [Segment("s1", 10.0, 11.0, 0.0)], 11.0
     for g in gaps:
         segs.append(Segment("s1", t + g, t + g + 1.0, float(len(segs))))
         t += g + 1.0
     lanes = render.video_lanes(segs)
-    # MAX_VIDEO_LANES (6) inputs: the five largest gaps (50, 40, 30, 20, 9 s) start new ones
-    assert [l["segs"] for l in lanes] == [[0, 1], [2, 3], [4, 5], [6], [7], [8]]
-    assert [l["seek"] for l in lanes] == [7.0, 45.0, 104.0, 154.0, 164.0, 185.0]
+    # MAX_VIDEO_LANES (3) inputs: the two largest gaps (50 and 40 s) start new ones
+    assert [l["segs"] for l in lanes] == [[0, 1, 2, 3], [4, 5], [6, 7, 8]]
+    assert [l["seek"] for l in lanes] == [7.0, 104.0, 154.0]
 
 
 def _numbered_source(path: Path, seconds: float, vfr: bool = False) -> None:
