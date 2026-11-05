@@ -5,10 +5,16 @@ import { delimiter } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { groupAlive, killTree } from './proctree'
 
+/** Something finished that the app can show now, carried on a progress line (engine `moments`). */
+export type EngineReady =
+  | { kind: 'still'; t: number; file: string }
+  | { kind: 'window'; from: number; to: number; file: string }
+
 export interface EngineProgress {
   stage: string
   pct: number
   message: string
+  ready?: EngineReady
 }
 
 export interface EngineError {
@@ -18,7 +24,7 @@ export interface EngineError {
 }
 
 export type EngineEvent =
-  | { event: 'progress'; stage: string; pct: number; message: string }
+  | { event: 'progress'; stage: string; pct: number; message: string; ready?: EngineReady }
   | { event: 'done'; result: unknown }
   | { event: 'error'; code: string; message?: string; userMessage: string }
 
@@ -57,11 +63,13 @@ export function parseEngineLine(line: string): EngineEvent | null {
   switch (o.event) {
     case 'progress': {
       const pct = typeof o.pct === 'number' && isFinite(o.pct) ? Math.max(0, Math.min(100, o.pct)) : 0
+      const ready = parseReady(o.ready)
       return {
         event: 'progress',
         stage: String(o.stage ?? ''),
         pct,
-        message: typeof o.message === 'string' ? o.message : ''
+        message: typeof o.message === 'string' ? o.message : '',
+        ...(ready ? { ready } : {})
       }
     }
     case 'done':
@@ -79,6 +87,18 @@ export function parseEngineLine(line: string): EngineEvent | null {
     default:
       return null
   }
+}
+
+const num = (v: unknown): v is number => typeof v === 'number' && isFinite(v)
+
+/** A `ready` payload, or null when it is missing or not one of the two shapes the engine writes. */
+function parseReady(r: unknown): EngineReady | null {
+  if (!r || typeof r !== 'object') return null
+  const o = r as Record<string, unknown>
+  if (typeof o.file !== 'string' || !o.file) return null
+  if (o.kind === 'still' && num(o.t)) return { kind: 'still', t: o.t, file: o.file }
+  if (o.kind === 'window' && num(o.from) && num(o.to)) return { kind: 'window', from: o.from, to: o.to, file: o.file }
+  return null
 }
 
 export const GENERIC_ERROR =
@@ -207,7 +227,7 @@ export function createEngineRunner(cfg: RunnerConfig) {
           log(`[engine ${command} stdout] ${line}`)
           return
         }
-        if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message })
+        if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message, ...(ev.ready ? { ready: ev.ready } : {}) })
         else if (ev.event === 'done') result = { ok: true, value: ev.result }
         else result = { ok: false, err: { code: ev.code, userMessage: ev.userMessage, message: ev.message } }
       })

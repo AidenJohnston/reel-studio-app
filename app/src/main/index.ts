@@ -86,7 +86,7 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
-import { createLiveVideos } from './live-video'
+import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
@@ -333,7 +333,9 @@ const jobs = createJobManager(
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
   () => updates.assertCanStartWork(),
-  footageIndex
+  footageIndex,
+  // and so do the pictures of each change made before its draft
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
@@ -1911,7 +1913,8 @@ app.whenReady().then(async () => {
       dev: DEV_PROVIDERS,
       secretStore: safeStorage,
       roleModels: async () => (await loadSettings()).models,
-      cliEnv: cliBaseEnv
+      cliEnv: cliBaseEnv,
+      moments: true
     },
     log
   )

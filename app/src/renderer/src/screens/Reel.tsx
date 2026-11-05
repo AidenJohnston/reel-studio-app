@@ -38,6 +38,7 @@ import { TitleBarSlot } from '../components/titlebar'
 import { ConnectAI, ModelDownload } from '../components/connect'
 import { PlanCard, PlanChip, PlanEmpty, PlannedStage, PlanWho, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
 import { ReelsFound } from '../components/ReelsFound'
+import { ChangePicture, ChangeTag, useChangeMoment } from '../components/ChangeMoments'
 import { byKeyboard, reducedMotion } from '../components/motion'
 import '../components/reel.css'
 
@@ -286,7 +287,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
         nowStep.current = -1
         void load()
       }
-      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
+      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool' || e.type === 'moment') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
       if (e.type === 'status' && e.steps) {
         setFirstSteps(e.steps)
         // a new step: the copy, then the transcript, are on disk now
@@ -342,6 +343,27 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
 
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   const changePreview = job?.preview && d?.versions.length ? job.preview.video : null
+  // A running job's pictures of the change it is making, before its draft (none while comparing or in Edit it
+  // myself, where a preview waits too).
+  const change = useChangeMoment(job && !compare && !drawer ? job.moments : null, job?.jobId ?? null)
+  // a job's runs count from 1, so a run is named by its job too
+  const changeRun = change.index >= 0 && job ? `${job.jobId}:${change.list[0].run}` : null
+  // the run the person played the reel over: its pictures step aside for the reel until a newer run's arrive
+  const [playedOver, setPlayedOver] = useState<string | null>(null)
+  const runNow = useRef(changeRun)
+  runNow.current = changeRun
+  useEffect(() => {
+    let was = transport.get().playing
+    return transport.subscribe(() => {
+      const now = transport.get().playing
+      if (now && !was && runNow.current !== null) setPlayedOver(runNow.current)
+      was = now
+    })
+  }, [transport])
+  // a new run's pictures take the phone: a playing reel stops under them, so its sound does not go on behind a still
+  useEffect(() => {
+    if (changeRun !== null && transport.get().playing) transport.toggle()
+  }, [changeRun, transport])
   const [timeline, setTimeline] = useState<{ video: string; words: PlacedWord[]; segments: RenderSegment[] | null; version: VersionTimeline | null } | null>(null)
   const onScreen = d ? versionOnScreen(d.versions, shownSrc) : null
   const shownN = onScreen?.n
@@ -688,7 +710,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   // comparing and Edit it myself stay on the versions they show; a running job's preview waits (B section 5, step 3)
   const jobPreview = compare || drawer ? null : changePreview
   const src = planned ? null : hasVersions ? (jobPreview ?? version?.video ?? null) : (firstLook ?? d.sourceVideo)
-  const tag = jobPreview ? 'Quick preview' : !hasVersions && !planned && src ? (firstLook ? 'First look' : 'Original') : null
+  // before its draft, the pictures of the change take the phone (ChangeMoments.tsx), until the person plays the reel
+  const changing = changeRun !== null && playedOver !== changeRun
+  const tag = changing ? null : jobPreview ? 'Quick preview' : !hasVersions && !planned && src ? (firstLook ? 'First look' : 'Original') : null
   // the strip counts only notes still waiting: one that stopped or failed is its own line in the log, with Send again
   const held = d.queueHeld ? waitingRows(d.queue, entries).length : 0
   const nextSpot = Math.max(0, ...pins.map((p) => p.n)) + 1
@@ -825,6 +849,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const over = (
     <div className="reel-over">
       {drawer && <div className="edit-stage" ref={setStage} />}
+      {changing && <ChangeTag {...change} />}
       {tag && (
         <span className="reel-tag" data-testid={jobPreview ? 'change-preview' : 'first-tag'}>
           {tag}
@@ -922,6 +947,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                     notify('That version could not be found. It may have been moved or deleted.', 'error')
                     if (onScreen) setSelected(onScreen.n)
                   }}
+                  change={changing ? <ChangePicture list={change.list} index={change.index} /> : null}
                   over={over}
                 >
                   {first?.kind === 'failed' ? (

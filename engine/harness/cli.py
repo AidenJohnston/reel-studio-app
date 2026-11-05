@@ -150,8 +150,10 @@ def cmd_run(a) -> int:
     out_dir = c.work / "runs" / stamp
     cand = Engine(ENGINE_DIR, c.python, c.env(c.scratch / "cache-warmup"))
     cand.check_import()
+    moments = a.flow == "moments"
+    names = replay.MOMENT_STEPS if moments else replay.STEPS
     report = {"startedAt": stamp, "candidate": git_head(), "pins": c.pins, "ffmpegVersion": ffmpeg_version(c.ffmpeg),
-              "python": c.python, "platform": sys.platform, "split": a.split, "runs": runs,
+              "python": c.python, "platform": sys.platform, "split": a.split, "runs": runs, "flow": a.flow,
               "thresholds": c.cfg["thresholds"], "mediaBytes": s["mediaBytes"], "load": [load_sample()], "takes": {}}
     if not a.no_warmup:        # reads every source once and probes the GPU encoder, untimed
         for tid in ids:
@@ -169,7 +171,8 @@ def cmd_run(a) -> int:
             shutil.rmtree(cache, ignore_errors=True)
             cand.env = c.env(cache)
             keep = out_dir / "outputs" / tid / f"run{r + 1}"
-            results[tid].append(replay.replay(take, cand, refs, c.scratch, keep, str(c.ffprobe)))
+            play = replay.replay_moments if moments else replay.replay
+            results[tid].append(play(take, cand, refs, c.scratch, keep, str(c.ffprobe)))
         report["load"].append(load_sample())
     th = c.cfg["thresholds"]
     for tid in ids:
@@ -179,9 +182,10 @@ def cmd_run(a) -> int:
         replay.prune_duplicates(rs)
         steps = []
         for k, step in enumerate(take.session):
-            steps.append({"note": step["note"], "moment": refs[k]["moment"], "window": refs[k]["window"],
-                          "stills": refs[k]["stills"],
-                          "seconds": {n: replay.stats([run["seconds"][n][k] for run in rs]) for n in replay.STEPS},
+            plan = rs[0]["plans"][k] if moments else refs[k]
+            steps.append({"note": step["note"], "moment": refs[k]["moment"], "window": plan["window"],
+                          "stills": plan["stills"], **({"intervals": plan["intervals"]} if moments else {}),
+                          "seconds": {n: replay.stats([run["seconds"][n][k] for run in rs]) for n in names},
                           # runs may differ in which stills they made; check_take fails that
                           "distinctOutputs": {n: len({run["files"][k][n]["sha256"] for run in rs if n in run["files"][k]})
                                               for n in sorted({n for run in rs for n in run["files"][k]})},
@@ -207,22 +211,32 @@ def _status(chk) -> str:
     return chk["status"]
 
 
-def _sec(s: dict) -> str:
-    return f"{s['median']:.2f} ({s['spreadPct']:.0f}%)"
+def _sec(s) -> str:
+    return f"{s['median']:.2f} ({s['spreadPct']:.0f}%)" if s else "-"
 
 
 def render_markdown(r: dict) -> str:
+    moments = r.get("flow") == "moments"
     lines = [f"Candidate {r['candidate']['commit'][:10]}{' (engine changed)' if r['candidate']['engineDirty'] else ''}, "
-             f"reference {r['pins']['engineCommit'][:10]}, {r['ffmpegVersion']}, {r['runs']} runs, split {r['split']}.",
+             f"reference {r['pins']['engineCommit'][:10]}, {r['ffmpegVersion']}, {r['runs']} runs, split {r['split']}, "
+             f"flow {r.get('flow', 'drafts')}.",
              "Seconds are the median of the runs, with (max - min) / median in brackets. "
-             "Checks are against the reference final of the same state; unset = no threshold configured.", "",
-             "| Take | Note | Draft s | Still s | Window s | Draft | Still | Window |",
-             "|---|---|---|---|---|---|---|---|"]
+             "Checks are against the reference final of the same state; unset = no threshold configured.", ""]
+    if moments:
+        lines += ["Moments flow: seconds from the start of each note's `moments` command until its first still and "
+                  "its window were read, and until it ended with the draft; - = nothing on screen changed.", "",
+                  "| Take | Note | First still s | Window s | Draft s | Draft | Still | Window | Coverage |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+    else:
+        lines += ["| Take | Note | Draft s | Still s | Window s | Draft | Still | Window |",
+                  "|---|---|---|---|---|---|---|---|"]
     for tid, t in r["takes"].items():
         for s in t["steps"]:
             sec, ch = s["seconds"], s["checks"]
-            lines.append(f"| {tid} | {s['note']} | {_sec(sec['draft'])} | {_sec(sec['still'])} | {_sec(sec['window'])} | "
-                         f"{_status(ch['draft'])} | {_status(ch['still'])} | {_status(ch['window'])} |")
+            cols = (sec["first"], sec["window"], sec["draft"]) if moments else (sec["draft"], sec["still"], sec["window"])
+            lines.append(f"| {tid} | {s['note']} | {' | '.join(_sec(x) for x in cols)} | "
+                         f"{_status(ch['draft'])} | {_status(ch['still'])} | {_status(ch['window'])} |"
+                         + (f" {_status(ch['coverage'])} |" if moments else ""))
         lines.append(f"| {tid} | final export | {_sec(t['final']['seconds'])} | | | {_status(t['final']['check'])} | | |")
     lines += ["", f"Session wait (all takes): {_sec(r['wait'])} s. Per take: "
               + ", ".join(f"{tid} {_sec(t['wait'])}" for tid, t in r["takes"].items()) + "."]
@@ -273,6 +287,9 @@ def main(argv=None) -> int:
     run.add_argument("--runs", type=int)
     run.add_argument("--split", choices=["loop", "held-out", "all"], default="loop")
     run.add_argument("--no-warmup", action="store_true")
+    run.add_argument("--flow", choices=["drafts", "moments"], default="drafts",
+                     help="drafts: draft, then stills and a window per note (what the app does without moments); "
+                          "moments: one `moments` command per note, timed to its first still")
     ag = sub.add_parser("agree")
     ag.add_argument("a")
     ag.add_argument("b")

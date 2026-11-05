@@ -14,6 +14,11 @@ export type AgentEvent =
   | { type: 'reply'; text: string }
   /** one line for the host's log: how a model turn spent its time (agent.ts) */
   | { type: 'trace'; text: string }
+  /** a picture of what the AI just changed, drawn before the draft (moments.ts): a still at output second
+   * `t`, or the 2 s window [from, to] around it. `file` is the engine's file, overwritten by later runs.
+   * `run` counts the task's moments runs from 1: a newer run's pictures show a newer edit and replace an older one's. */
+  | { type: 'moment'; kind: 'still'; t: number; file: string; run: number }
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string; run: number }
 
 export interface AgentResult {
   summary: string;
@@ -49,7 +54,11 @@ export type PlanTurnResult = (
   raw?: unknown;
 };
 
-export interface EngineProgress { stage: string; pct: number; message: string }
+/** Something finished that the app can show now, carried on an engine progress line (`moments` command). */
+export type MomentReady =
+  | { kind: 'still'; t: number; file: string }
+  | { kind: 'window'; from: number; to: number; file: string };
+export interface EngineProgress { stage: string; pct: number; message: string; ready?: MomentReady }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>;

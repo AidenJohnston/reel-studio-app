@@ -51,4 +51,26 @@ describe('render slot', () => {
     await settle()
     expect(started).toEqual(['a', 'c'])
   })
+
+  it('fails if a moments run, which encodes its window and draft, runs beside another reel\'s render', async () => {
+    const started: string[] = []
+    const finish = new Map<string, () => void>()
+    const runner: RunEngine = (command, args) => {
+      started.push(`${command} ${args[1]}`)
+      return new Promise((resolve) => finish.set(args[1], () => resolve({})))
+    }
+    const slot = withRenderSlot(runner, () => undefined)
+    const settle = () => new Promise((r) => setImmediate(r))
+    const a = slot.run('render', ['--project', 'a'])
+    const b = slot.run('moments', ['--project', 'b'])
+    void slot.run('moments', ['--project', 'c', '--mark'])   // only writes a file: never waits
+    await settle()
+    expect(started.sort()).toEqual(['moments c', 'render a'])
+    finish.get('a')!()
+    await a
+    await settle()
+    expect(started.at(-1)).toBe('moments b')
+    finish.get('b')!()
+    await b
+  })
 })

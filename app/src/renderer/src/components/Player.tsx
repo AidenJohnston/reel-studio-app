@@ -292,6 +292,7 @@ export function PhonePlayer({
   transport,
   onHold,
   className,
+  change,
   over,
   testid = 'player',
   shape,
@@ -346,6 +347,8 @@ export function PhonePlayer({
   /** Pressing and holding the picture (a click still plays and pauses): show the original while it is held. */
   onHold?: (holding: boolean) => void
   className?: string
+  /** Drawn on the reel under Instagram's screen, as the video is (a change's pictures before its draft, ChangeMoments). */
+  change?: ReactNode
   /** Drawn on the screen over the reel and Instagram's screen (the compare switch). */
   over?: ReactNode
   /** The video's test id. The Working screen's first look uses its own, so "player" means the Reel screen. */
@@ -749,6 +752,7 @@ export function PhonePlayer({
               {holdTag}
             </div>
             {subtitle && !holdingOriginal && <SubtitleSample look={subtitle.look} text={subtitle.text} width={reelWidth} testid="sub-preview" />}
+            {!holdingOriginal && change}
             <InstagramChrome on={view === 'instagram' && !holdingOriginal} caption={caption} playing={playing} />
             {subtitle && !holdingOriginal && <SafeBand shape={shape} />}
             {over}

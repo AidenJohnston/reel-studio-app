@@ -5,6 +5,10 @@ cache), then for each note: write the state as project.json, `render --draft` (w
 render_draft runs), `frames --times` on that draft (look_at_frames), and `render --window a:b`
 around the changed moment; after the last note, `render` (the final export). Each command is timed
 from spawn to exit; the output is checked to be complete after the clock stops.
+
+The `moments` flow replays the same notes the way the app shows them with changed moments first: one
+`moments` command per note (stills of what changed, the window around them, the draft), timed from
+spawn to each still and window as its line is read, and to exit.
 """
 from __future__ import annotations
 
@@ -20,6 +24,8 @@ from . import checks, media
 from .engines import Engine, Refusal, sha256_file
 
 STEPS = ("draft", "still", "window")
+# moments flow: first still on screen, the window, and the whole command (which ends with the draft)
+MOMENT_STEPS = ("first", "window", "draft")
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -256,6 +262,47 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
     return {"seconds": seconds, "final": round(final.seconds, 3), "files": files, "finalFile": final_file}
 
 
+def replay_moments(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprobe: str) -> dict:
+    """One cold, timed replay of the take's session with changed moments first: the base is the take's
+    own project (`moments --mark`, untimed), then per note one `moments` run. A note that changes nothing
+    on screen draws nothing; its seconds are the command's own (`first` and `window` are None)."""
+    proj = scratch / f"run-{take.id}"
+    copy_project(take.project, proj)
+    cand.run("moments", ["--project", proj, "--mark"])
+    seconds = {k: [] for k in MOMENT_STEPS}
+    files, plans = [], []
+    for k, (step, ref) in enumerate(zip(take.session, refs)):
+        write_state(proj, take.state(step))
+        call = cand.stream("moments", ["--project", proj])
+        r = call.result
+        stills = [at for at, m in call.ready if m.get("kind") == "still"]
+        windows = [at for at, m in call.ready if m.get("kind") == "window"]
+        kept = {}
+        for j, f in enumerate(r["stills"]):
+            media.read_image(Path(f["file"]))           # decodes = complete
+            kept[f"still{j}"] = Path(f["file"])
+        if r["window"]:
+            w = r["window"]
+            _complete_video(ffprobe, w["file"], round(w["to"] - w["from"], 6), ref["fps"])
+            kept["window"] = Path(w["file"])
+        if r["draft"]:
+            _complete_video(ffprobe, r["draft"]["file"], r["draft"]["duration"], ref["fps"])
+            kept["draft"] = Path(r["draft"]["file"])
+        seconds["first"].append(stills[0] if stills else None)
+        seconds["window"].append(windows[0] if windows else None)
+        seconds["draft"].append(round(call.seconds, 3))
+        # the engine prints a still's time to the millisecond; the check needs its exact frame
+        plans.append({"intervals": r["intervals"], "stills": [round(f["t"] * ref["fps"]) / ref["fps"] for f in r["stills"]],
+                      "window": [r["window"]["from"], r["window"]["to"]] if r["window"] else None})
+        files.append(_keep(kept, keep_dir / f"{k:02d}" if keep_dir else None))
+    final = cand.run("render", ["--project", proj])
+    _complete_video(ffprobe, final.result["file"], final.result["duration"], refs[-1]["fps"])
+    final_file = _keep({"final": Path(final.result["file"])}, keep_dir)
+    shutil.rmtree(proj, ignore_errors=True)
+    return {"flow": "moments", "seconds": seconds, "plans": plans, "final": round(final.seconds, 3),
+            "files": files, "finalFile": final_file}
+
+
 def _keep(paths: dict, dest) -> dict:
     out = {}
     for name, p in paths.items():
@@ -313,7 +360,8 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
                sizes: dict) -> dict:
     """Check every distinct output of every run (outputs are compared by hash, so a deterministic
     engine is checked once per output and a run that rendered something different is not trusted
-    on the strength of another run's check)."""
+    on the strength of another run's check). In the moments flow the stills and the window are at the
+    times the engine chose, which every run must agree on; a note that drew nothing has no draft."""
     def distinct(get) -> list:
         seen, out = set(), []
         for run in runs:
@@ -328,13 +376,16 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
         reference_ready(ref["dir"], ref["key"], pins, require=True)     # unchanged since setup, or refuse
         export = ref["dir"] / "export.mp4"
         caps = json.loads((ref["dir"] / "captions.json").read_text(encoding="utf-8"))["cues"]
-        a, b = ref["window"]
+        moments = bool(runs) and runs[0].get("flow") == "moments"
+        plan = runs[0]["plans"][k] if moments else ref
+        agree = not moments or all(run["plans"][k] == plan for run in runs)
+        times, win = plan["stills"], plan["window"]
         pv = th["preview"]
         want = preview_size(ref["format"], sizes["previewScale"])
         still_want = still_size(want, sizes["stillWidth"])
         names = sorted({n for run in runs for n in run["files"][k] if n.startswith("still")})
         stills = []
-        for j, (t, name) in enumerate(pair_stills(ref["stills"], names)):
+        for j, (t, name) in enumerate(pair_stills(times, names)):
             if t is None:
                 stills.append(_missing(f"{name}: a still nobody asked for"))
             elif name is None or any(name not in run["files"][k] for run in runs):
@@ -342,18 +393,56 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
             else:
                 stills.append(_merge([checks.check_still(ffmpeg, ffprobe, export, f, t, caps, pv, still_want)
                                       for f in distinct(lambda r, name=name: r["files"][k][name])]))
-        steps.append({
-            "draft": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want)
-                             for f in distinct(lambda r: r["files"][k]["draft"])]),
-            "window": _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want,
-                                                         start=a, end=b)
-                              for f in distinct(lambda r: r["files"][k]["window"])]),
-            "still": stills})
+        if not agree:
+            stills.append(_missing("runs chose different moments for this note"))
+
+        def video(name: str, **span) -> dict:
+            if not all(name in run["files"][k] for run in runs):
+                return (_missing(f"no {name} in every run") if any(name in run["files"][k] for run in runs)
+                        else {"status": "none", "failures": [], "metrics": {}, "distinctChecked": 0})
+            return _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want, **span)
+                           for f in distinct(lambda r: r["files"][k][name])])
+        step_checks = {"draft": video("draft"),
+                       "window": video("window", start=win[0], end=win[1]) if win else video("window"),
+                       "still": stills}
+        if moments:
+            step_checks["coverage"] = check_coverage(ffmpeg, refs, k, plan)
+        steps.append(step_checks)
     last = refs[-1]["dir"]
     caps = json.loads((last / "captions.json").read_text(encoding="utf-8"))["cues"]
     final = _merge([checks.check_final(ffmpeg, ffprobe, last / "export.mp4", f, caps, th["final"])
                     for f in distinct(lambda r: r["finalFile"]["final"])])
     return {"steps": steps, "final": final}
+
+
+def _duration(ref: dict) -> float:
+    return float(json.loads((ref["dir"] / "done.json").read_text(encoding="utf-8"))["result"]["duration"])
+
+
+def check_coverage(ffmpeg: str, refs: list, k: int, plan: dict) -> dict:
+    """Whether the moments of note k agree with the reference finals, which the candidate cannot touch:
+    when this note's final shows a different picture from the last note's (note 0: from nothing), the
+    candidate must draw a still and its intervals must hold the note's changed moment; when the picture
+    is the same (only the sound changed), it must draw nothing."""
+    changed = k == 0 or media.video_packets_md5(ffmpeg, refs[k]["dir"] / "export.mp4") != \
+        media.video_packets_md5(ffmpeg, refs[k - 1]["dir"] / "export.mp4")
+    t = refs[k]["moment"]
+    inside = any(a - 1e-6 <= t <= b + 1e-6 for a, b in plan["intervals"])
+    failures = []
+    shorter = k > 0 and _duration(refs[k]) < _duration(refs[k - 1]) - 1e-6
+    if changed and shorter and not plan["intervals"]:
+        # every frame left may be unchanged (the end was cut off): packets cannot tell, frames would
+        return {"status": "unset", "failures": [], "distinctChecked": 1,
+                "metrics": {"pictureChanged": {"value": "shorter, no intervals", "status": "unset"}}}
+    if changed and not plan["stills"]:
+        failures.append("the reference picture changed but no still was drawn")
+    if changed and not inside:
+        failures.append(f"the changed moment at {t}s is outside the intervals {plan['intervals']}")
+    if not changed and plan["intervals"]:
+        failures.append(f"the reference picture is unchanged but intervals {plan['intervals']} were drawn")
+    return {"status": "fail" if failures else "pass", "failures": failures, "distinctChecked": 1,
+            "metrics": {"pictureChanged": {"value": changed, "status": "pass"},
+                        "momentInside": {"value": inside, "status": "pass" if inside or not changed else "fail"}}}
 
 
 def prune_duplicates(runs: list) -> None:
@@ -367,13 +456,31 @@ def prune_duplicates(runs: list) -> None:
             seen.add(rec["sha256"])
 
 
-def stats(xs: list) -> dict:
+def stats(xs: list):
+    """Median, range and spread of the values that exist; None when none does (a note that drew nothing)."""
+    xs = [x for x in xs if x is not None]
+    if not xs:
+        return None
     m = statistics.median(xs)
     return {"median": round(m, 3), "min": min(xs), "max": max(xs),
             "spreadPct": round(100.0 * (max(xs) - min(xs)) / m, 1) if m else 0.0, "n": len(xs)}
 
 
 def session_wait(run: dict) -> float:
+    if run.get("flow") == "moments":
+        return session_wait_moments(run)
+    return session_wait_drafts(run)
+
+
+def session_wait_moments(run: dict) -> float:
+    """The goal number with changed moments first. Per note: the time until the changed moment is on
+    screen (the first still's line) plus the time until the full draft is ready (the command's exit);
+    a note that changes nothing on screen costs only its command. Then the final export."""
+    sec = run["seconds"]
+    return sum((f or 0.0) + d for f, d in zip(sec["first"], sec["draft"])) + run["final"]
+
+
+def session_wait_drafts(run: dict) -> float:
     """The goal number for one replay of one take. Per note: the time until the changed moment is
     on screen (today a still exists only after the draft, so draft + still) plus the time until the
     full draft is ready; then the final export. Windows are timed but left out: the app does not
