@@ -19,6 +19,7 @@ import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSc
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
+import type { Moments } from './moments';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -50,6 +51,9 @@ export interface ToolState {
   animationsMade?: Set<string>;
   /** what each answered model call ran on, in order (written to versions/vN/ai-run.json) */
   aiCalls: CallProvenance[];
+  /** project saves so far in this task, and the number of the last one that changed what the video shows */
+  edits: number;
+  pictureEdit: number;
 }
 
 export interface ToolContext {
@@ -79,6 +83,8 @@ export interface ToolContext {
   /** A render already running for this project (the first look). Every engine render waits for it:
    * two renders would share work/render/ and versions/preview/. */
   renderGate?: Promise<unknown>;
+  /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
+  moments?: Moments;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -92,7 +98,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [] };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [], edits: 0, pictureEdit: 0 };
 }
 
 /** A snapshot's version counter can lag its folder. Keep allocation and history from the live
@@ -146,9 +152,12 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
+  await ctx.moments?.beforeSave();     // the base is written, and no run reads the edit mid-save
   await saveProject(ctx.projectDir, p, ctx.note?.file);
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);
+  ctx.state.edits++;
+  if (!NOT_VISIBLE.has(field)) ctx.state.pictureEdit = ctx.state.edits;
 }
 
 /** Stage a merge inside the caller's existing note transaction; never publish from a tool. */
@@ -386,10 +395,22 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 
 /** Engine commands that read the edit: during a note they read its private copy (`frames` without a
  * render id shows the edit). */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames']);
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments']);
 
-function projectArgs(ctx: ToolContext, command: string): string[] {
+export function projectArgs(ctx: { projectDir: string; note?: { file: string } }, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
+}
+
+/** Where a preview goes: a note's own folder, so the video the app shows is never touched. */
+export function previewArgs(ctx: { note?: { dir: string } }): string[] {
+  return ctx.note ? ['--out', ctx.note.dir] : [];
+}
+
+/** What a render records about the version it makes: the app job, and the saved version(s) it changes. */
+export function versionArgs(ctx: { note?: { parent?: number; mergeParent?: number }; jobId?: string }): string[] {
+  const parent = ctx.note?.parent ? ['--parent', String(ctx.note.parent)] : [];
+  if (ctx.note?.mergeParent !== undefined) parent.push('--merge-parent', String(ctx.note.mergeParent));
+  return [...(ctx.jobId ? ['--job-id', ctx.jobId] : []), ...parent];
 }
 
 async function engine(ctx: ToolContext, command: string, extra: string[] = [], stageMessage?: string): Promise<any> {
@@ -562,12 +583,12 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 
 /** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
 export async function doRender(ctx: ToolContext, draft: boolean, announce = true): Promise<RenderInfo> {
+  // a draft of this very edit may already be made, or being made, by moments; a final stops it
+  const drawn = await ctx.moments?.before(draft ? ctx.state.edits : null);
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
-  const out = draft && ctx.note ? ['--out', ctx.note.dir] : [];
-  const parent = ctx.note?.parent ? ['--parent', String(ctx.note.parent)] : [];
-  if (ctx.note?.mergeParent !== undefined) parent.push('--merge-parent', String(ctx.note.mergeParent));
-  const args = [...(draft ? ['--draft', ...out] : []), ...(ctx.jobId ? ['--job-id', ctx.jobId] : []), ...parent];
-  const result = await engine(ctx, 'render', args, draft ? 'Making a preview' : 'Making the final video');
+  const made = draft && drawn?.draft?.file ? drawn.draft : null;
+  const args = [...(draft ? ['--draft', ...previewArgs(ctx)] : []), ...versionArgs(ctx)];
+  const result = made ?? await engine(ctx, 'render', args, draft ? 'Making a preview' : 'Making the final video');
   // only a render that finished shows the changes: after a failed one they are still unseen (checkAndRepair)
   ctx.state.dirty = new Set();
   const p = await loadProject(ctx.projectDir, ctx.note?.file);
@@ -575,7 +596,7 @@ export async function doRender(ctx: ToolContext, draft: boolean, announce = true
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
   ctx.state.renders.push(info);
-  if (announce) ctx.emit(renderEvent(info));
+  if (announce && !made) ctx.emit(renderEvent(info));     // moments sent its own
   return info;
 }
 
@@ -2171,6 +2192,8 @@ async function lookAtEdit(ctx: ToolContext, args: { times?: number[] | null; wor
   const times = (args.times ?? []).slice(0, 6);
   const words = (args.words ?? []).slice(0, 6 - times.length);
   if (!times.length && !words.length) throw new ToolInputError('give times or words');
+  // A moments run of this edit ends in a draft the stills are then cut from; one of an older edit is stopped.
+  await ctx.moments?.before(ctx.state.edits);
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   const r = await engine(ctx, 'frames', [...(times.length ? ['--times', times.join(',')] : []), ...(words.length ? ['--words', words.join(',')] : [])]);
   return framesSeen(ctx, r, times, Array.isArray(r?.animationsSampledAtEnd) ? r.animationsSampledAtEnd : []);

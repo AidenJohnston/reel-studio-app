@@ -65,6 +65,7 @@ const log = (e: AgentEvent) => {
   else if (e.type === 'tool') process.stderr.write(`[tool] ${e.name}: ${e.summary}\n`);
   else if (e.type === 'reply') process.stderr.write(`[reply] ${e.text}\n`);
   else if (e.type === 'trace') process.stderr.write(`[trace] ${e.text}\n`);
+  else if (e.type === 'moment') process.stderr.write(`[moment] ${e.kind} ${e.file}\n`);
   else process.stderr.write(`[render] v${e.version}${e.draft ? ' draft' : ''}\n`);
 };
 

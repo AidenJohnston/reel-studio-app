@@ -103,6 +103,13 @@ def audio_lead(ffprobe: str, path: Path) -> float:
     return start.get("audio", 0.0) - start.get("video", 0.0)
 
 
+def video_packets_md5(ffmpeg: str, path: Path) -> str:
+    """md5 of the encoded video packets. Two finals of the same picture (libx264 is deterministic) match."""
+    out = _run([ffmpeg, "-nostdin", "-v", "error", "-i", path, "-map", "0:v:0", "-c", "copy",
+                "-f", "md5", "-"]).stdout.decode().strip()
+    return out.split("=", 1)[-1]
+
+
 def audio_packets_md5(ffmpeg: str, path: Path) -> str:
     """md5 of the encoded audio packets: "audio bytes identical" means this matches."""
     out = _run([ffmpeg, "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c", "copy",

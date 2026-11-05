@@ -13,9 +13,15 @@ never a pile of preview-only folders an AI run left behind.
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
-                 render_draft.json, project.json
-<project>/work/notes/<id>/   a running note: edit.json (its private copy of project.json) and its drafts
+                 render_draft.json, project.json,
+                 moments/still_<frame>.png (the latest `moments` run's stills, replaced by the next run)
+<project>/work/notes/<id>/   a running note: edit.json (its private copy of project.json), its drafts, and its
+                 `moments` run's moments-base.json and moments/ stills
 ```
+
+`work/moments/base.json` is the project (and its animation files' sizes and times) as the screen last
+showed it: `moments` compares the project with it to find what an edit changed, and replaces it when a
+run finishes.
 
 Rules:
 

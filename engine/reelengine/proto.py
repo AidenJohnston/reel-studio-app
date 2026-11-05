@@ -1,6 +1,7 @@
 """The engine's stdout protocol (docs/architecture.md section 4): JSON lines only, one object per line.
 
     {"event":"progress","stage":"transcribe","pct":42,"message":"Listening to your video"}
+    {"event":"progress","stage":"moments","pct":30,"message":"...","ready":{"kind":"still","t":2.4,"file":"..."}}
     {"event":"done","result":{...}}
     {"event":"error","code":"NO_AUDIO","message":"<dev detail>","userMessage":"..."}
 
@@ -68,6 +69,14 @@ def progress(stage: str, pct: float, message: str, force: bool = False) -> None:
         return
     _LAST.update(t=now, pct=pct, stage=stage)
     emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message})
+
+
+def ready(stage: str, pct: float, message: str, what: dict) -> None:
+    """A progress line that also hands over something finished the app can show now (`ready`, a
+    still or a window from moments.py). Never throttled: each one is a file the app would miss."""
+    pct = max(0.0, min(100.0, float(pct)))
+    _LAST.update(t=time.monotonic(), pct=pct, stage=stage)
+    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message, "ready": what})
 
 
 def done(result) -> None:

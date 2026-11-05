@@ -1528,12 +1528,16 @@ def settle_on_animations(items: list, times: list) -> tuple:
 
 
 def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = None,
-           project_file: Optional[Path] = None, words: Optional[list] = None) -> dict:
+           project_file: Optional[Path] = None, words: Optional[list] = None,
+           out_dir: Optional[Path] = None, on_still=None, settle_within: Optional[list] = None) -> dict:
     """PNG stills of the edit as it is now (a note's private copy when `project_file` is given), with no
     render to take them from. Each is the draft's frame at that time (frame_at), drawn by the draft's own
     graph (build_video_cmd) over a one-frame window: the same layers, zooms and full-length caption
     track, with no sound and no encode. `words` adds the middle of each word on the edit's timeline. It
-    writes work/render/ and work/layers/ as a render does, so it must never run beside one."""
+    writes work/render/ and work/layers/ as a render does, so it must never run beside one.
+    The PNGs go to `out_dir` (default work/frames); `on_still({t, file})` is called as each one is written.
+    `settle_within` ([[a, b], ...]): a time moves to an animation's settled end only when that end is still
+    inside one of these spans (moments.py asks for frames of what changed, not of what is beside it)."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir, file=project_file)
@@ -1541,7 +1545,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     tl = edit_timeline(project_dir, proj)
     rwork = project_dir / "work" / "render"
     rwork.mkdir(parents=True, exist_ok=True)
-    out_dir = project_dir / "work" / "frames"      # with a render's frames (frames.py), never in a version
+    out_dir = Path(out_dir) if out_dir else project_dir / "work" / "frames"   # with a render's frames (frames.py), never in a version
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list = []
     src_meta, src_paths = source_files(project_dir, proj, root)
@@ -1555,14 +1559,21 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     prepare(ctx, tl)                                # the zooms a draft draws, with lint's ramp fixes
     layers, zooms, layer_items, _, broll_report = overlays(ctx, proj, tl, warnings)
     ass_name, _, font_path = burn_captions(ctx, proj, tl, broll_report, rwork, warnings)
+    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(ctx.fmt["fps"])
+    n_frames = max(1, int(round(tl.duration * fps)))
+    asked = list(times)
     times, moved = settle_on_animations(layer_items, times)
+    if settle_within is not None:
+        def inside(t: float) -> bool:           # the frame that time draws, not the time itself
+            f = frame_at(t, fps, n_frames) / fps
+            return any(a - 1e-6 <= f < b for a, b in settle_within)
+        times = [t if inside(t) else a for t, a in zip(times, asked)]
+        moved = [m for m in moved if inside(m["sampled"])]
     timings = {"setup": round(time.time() - t_start, 2), "stills": []}
 
-    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(ctx.fmt["fps"])
     # drawn at the draft's own size, then scaled as frames.from_video scales a draft frame
     out_w = int(round(W * DRAFT_SCALE / 2)) * 2
     out_h = int(round(H * DRAFT_SCALE / 2)) * 2
-    n_frames = max(1, int(round(tl.duration * fps)))
     one = 1.0 / fps
     out = []
     for n, t in enumerate(times):
@@ -1596,6 +1607,8 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
                             "-vf", f"scale={width}:-2", str(png)], 60, "still scale")
         out.append({"t": round(a, 3), "file": str(png)})
         timings["stills"].append(round(time.time() - t_still, 2))
+        if on_still is not None:
+            on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
             "timings": timings}

@@ -286,7 +286,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
         nowStep.current = -1
         void load()
       }
-      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
+      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool' || e.type === 'moment') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
       if (e.type === 'status' && e.steps) {
         setFirstSteps(e.steps)
         // a new step: the copy, then the transcript, are on disk now

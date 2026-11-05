@@ -3,6 +3,7 @@
 import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { TryVariable } from '../shared/platforms'
+import type { EngineProgress } from './engine'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -71,7 +72,7 @@ export interface EngineHost {
   runEngine(
     command: string,
     args: string[],
-    onProgress?: (p: { stage: string; pct: number; message: string }) => void,
+    onProgress?: (p: EngineProgress) => void,
     signal?: AbortSignal
   ): Promise<any>
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>
@@ -239,6 +240,8 @@ export interface CreateAIOptions {
   roleModels?: () => Promise<Partial<Record<'editor' | 'checker' | 'writer', string>>>
   /** the environment the person's own CLIs get (main's test switch can swap in a throwaway home) */
   cliEnv?: () => NodeJS.ProcessEnv
+  /** draw what each reply of the AI changed before its draft (`moment` events) */
+  moments?: boolean
 }
 
 export type CreateAI = (opts: CreateAIOptions) => AI
