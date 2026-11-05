@@ -99,3 +99,12 @@ def test_a_line_with_a_word_that_is_only_punctuation_is_drawn_without_the_highli
     ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
     events = [l.split(",", 9)[9] for l in ass.splitlines() if l.startswith("Dialogue:")]
     assert len(events) == 1 and "\\1c" not in events[0] and events[0].endswith("SO — YEAH")
+
+
+def test_a_word_taken_off_the_subtitles_keeps_the_highlight_on_the_words_still_drawn():
+    words = mkwords([(0.0, 0.3, "Um"), (0.35, 0.6, "so"), (0.65, 1.0, "yeah")])
+    cap = {"style": {"highlight": "#FFD60A"}, "corrections": [{"from": "Um", "to": "", "at": "w0"}]}
+    ass, _, _, _ = captions.render_ass(captions.build_cues(words, cap), cap, 1080, 1920)
+    events = [l.split(",", 9) for l in ass.splitlines() if l.startswith("Dialogue:")]
+    assert [re.findall(r"\{\\1c&H0AD6FF&\}(\w+)", e[9]) for e in events] == [["SO"], ["YEAH"]]
+    assert [(e[1], e[2]) for e in events] == [("0:00:00.00", "0:00:00.65"), ("0:00:00.65", "0:00:01.00")]

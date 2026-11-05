@@ -554,8 +554,10 @@ def word_spans(c: dict, text_lines: list):
     """[(start, end)] of each spoken word of a cue, for the word-by-word highlight: a word is lit from
     its start until the next one starts, the last one until the cue ends. None when the cue's text no
     longer has one spoken word per token (a word that was only punctuation was stripped from the
-    line, or is still in it)."""
-    starts = c.get("starts") or []
+    line, or is still in it). A word taken off the subtitles has no token, so it lights nothing and the
+    word before it stays lit through its time."""
+    gone = c.get("gone") or []
+    starts = [s for k, s in enumerate(c.get("starts") or []) if not (k < len(gone) and gone[k])]
     tokens = [tok for t in text_lines for tok in t.split(" ")]
     if len(tokens) != len(starts) or not all(re.search(r"\w", tok) for tok in tokens):
         return None
