@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -219,6 +219,25 @@ const api: ReelApi = {
     paste: () => call('updateKey:paste'),
     clear: () => call('updateKey:clear'),
     onChange: (cb) => on<UpdateKeyStatus>('updateKey:change', cb)
+  },
+  posting: {
+    status: () => call('posting:status'),
+    signIn: () => call('posting:signIn'),
+    signOut: () => call('posting:signOut'),
+    signOutEverywhere: () => call('posting:signOutEverywhere'),
+    connect: (platform) => call('posting:connect', platform),
+    reopenConnect: () => call('posting:reopenConnect'),
+    cancelConnect: () => call('posting:cancelConnect'),
+    disconnect: (platform) => call('posting:disconnect', platform),
+    post: (req) => call('posting:post', req),
+    cancel: () => call('posting:cancel'),
+    current: () => call('posting:current'),
+    pending: (slug, version) => call('posting:pending', slug, version),
+    resume: (uploadId) => call('posting:resume', uploadId),
+    discard: (uploadId) => call('posting:discard', uploadId),
+    openLink: (url) => call('posting:openLink', url),
+    onChange: (cb) => on<PostingStatus>('posting:change', cb),
+    onProgress: (cb) => on<PostProgress>('posting:progress', cb)
   }
 }
 

@@ -1117,6 +1117,104 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
+  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  posting: {
+    status(): Promise<PostingStatus>
+    /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
+    signIn(): Promise<PostingStatus>
+    signOut(): Promise<PostingStatus>
+    signOutEverywhere(): Promise<PostingStatus>
+    /** Signs in first if needed, opens Google's page in the browser, resolves when it ends. */
+    connect(platform: 'youtube'): Promise<{ outcome: ConnectOutcome; status: PostingStatus }>
+    /** "Open the page again": a fresh attempt (the old link is single-use). */
+    reopenConnect(): Promise<void>
+    cancelConnect(): Promise<void>
+    disconnect(platform: 'youtube'): Promise<PostingStatus>
+    /** Resolves when the post ends (done, failed or cancelled); every step also arrives on onProgress. One at a time. */
+    post(req: PostRequest): Promise<PostProgress>
+    cancel(): Promise<void>
+    /** The post running now (its last step), or null: the Post sheet opened again mid-post picks it up. */
+    current(): Promise<PostProgress | null>
+    pending(slug: string, version: number): Promise<PendingPost | null>
+    /** "Finish posting" */
+    resume(uploadId: string): Promise<PostProgress>
+    /** "Start over": forget the stopped post (and cancel it on the server) */
+    discard(uploadId: string): Promise<void>
+    /** Opens a link from a PostResult. Main opens only https www.youtube.com, studio.youtube.com and youtu.be. */
+    openLink(url: string): Promise<void>
+    onChange(cb: (s: PostingStatus) => void): () => void
+    onProgress(cb: (p: PostProgress) => void): () => void
+  }
+}
+
+export type PostPrivacy = 'private' | 'unlisted' | 'public'
+
+/** What Settings and the Post sheet show. Never the key, the session or any Google token. */
+export interface PostingStatus {
+  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  enabled: boolean
+  /** A download key is saved (automatic updates on) */
+  hasKey: boolean
+  signedIn: boolean
+  /** The server ended this computer's sign-in (Sign out everywhere on another computer). Cleared by signing in. */
+  signedOutByServer: boolean
+  /** Other computers signed in with the same key */
+  otherComputers: number
+  youtube: { state: 'connected' | 'reconnect'; channelName: string | null; channelUrl: string | null } | null
+  /** The server said the subscription behind the key has ended */
+  ended: boolean
+  /** A Connect YouTube is waiting for the browser */
+  connecting: boolean
+}
+
+export type ConnectOutcome = 'connected' | 'denied' | 'missing_permission' | 'no_channel' | 'expired' | 'failed' | 'cancelled'
+
+export interface PostRequest {
+  /** An exported file in Library › Finished videos (main refuses anything else) */
+  video: string
+  slug: string
+  version: number
+  title: string
+  description: string
+  privacy: PostPrivacy
+  madeForKids: boolean
+}
+
+export interface PostResult {
+  videoId: string
+  videoUrl: string
+  studioUrl: string
+  /** What YouTube set, which can differ from what was asked */
+  privacy: PostPrivacy
+  channelName: string | null
+}
+
+export type PostStep = 'starting' | 'sending' | 'retrying' | 'done' | 'failed' | 'cancelled'
+
+export interface PostProgress {
+  uploadId: string | null
+  slug: string
+  version: number
+  step: PostStep
+  sent: number
+  total: number
+  /** step 'retrying': seconds until the next try */
+  retryInSec?: number
+  /** step 'retrying': whose trouble it was (this computer's connection, YouTube, or the posting server) */
+  retryReason?: 'offline' | 'youtube' | 'server'
+  result?: PostResult
+  error?: UserError
+  /** step 'failed': Finish posting can pick up where it stopped */
+  canResume?: boolean
+}
+
+/** A post of this version that stopped part way (kept across restarts). */
+export interface PendingPost {
+  uploadId: string
+  slug: string
+  version: number
+  sent: number
+  total: number
 }
 
 /** Automatic updates on or off, and the plan the key names. */

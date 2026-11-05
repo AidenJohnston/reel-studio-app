@@ -15,3 +15,5 @@ export const VENDOR_INSTALL_PAGES = {
 } as const
 /** Where a Claude plan is upgraded (the free plan does not include the Claude Code app). */
 export const CLAUDE_PLANS_URL = 'https://claude.ai/upgrade'
+/** The posting server (main/posting.ts). Not live yet; REELSTUDIO_POSTING_URL points the app at staging or a local run. */
+export const POSTING_URL = 'https://post.getreelstudio.com'
