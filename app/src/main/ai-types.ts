@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { JobUpdate, StyleProposal, StyleRule } from '../shared/api'
+import type { JobUpdate, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 
 /** What @reelstudio/ai emits: the job contract minus `heard` (main adds that one itself). */
 export type AgentEvent = Exclude<JobUpdate, { type: 'heard' }>
@@ -20,6 +20,8 @@ export interface AgentResult {
   styleSuggestions?: string[]
   /** A typed rule to ask about; Yes = approveStyleProposal(it). */
   styleProposal?: StyleProposal
+  /** Rules the app would measure on every render; Yes = addStyleRule(text, check). */
+  styleChecks?: { text: string; check: RuleCheck }[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
 }
@@ -108,7 +110,7 @@ export interface AI {
   styleRules(): Promise<StyleRule[]>
   removeStyleRule(id: string): Promise<void>
   /** Saves one My style rule (after the user said Yes). Optional: older packages lack it. */
-  addStyleRule?(text: string): Promise<{ id: string; text: string; createdAt: string }>
+  addStyleRule?(text: string, check?: RuleCheck): Promise<{ id: string; text: string; createdAt: string }>
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
   styleWasDamaged?(): Promise<boolean>
   /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */

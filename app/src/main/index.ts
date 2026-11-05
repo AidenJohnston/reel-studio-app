@@ -330,6 +330,9 @@ async function replyAskingAboutStyle(slug: string, r: AgentResult, summary: stri
   }
   await addChat(slug, 'editor', c.summary, r.version)
   for (const rule of c.suggestions) await addChat(slug, 'editor', rememberQuestion(rule), undefined, ['remember-yes', 'remember-no'], rule)
+  for (const { text, check } of r.styleChecks ?? []) {
+    await addChat(slug, 'editor', rememberQuestion(text), undefined, ['remember-yes', 'remember-no'], text, undefined, undefined, check)
+  }
   if (r.styleProposal) {
     await addChat(slug, 'editor', rememberQuestion(r.styleProposal.text), undefined, ['remember-yes', 'remember-no'], undefined, undefined, r.styleProposal)
   }

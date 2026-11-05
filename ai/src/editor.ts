@@ -4,8 +4,9 @@ import { AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Phase, Scr
 import { runAgent, RunAgentResult } from './agent';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
-import { StyleProposal, StyleStore, captionCaseProposal } from './style';
-import { ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary } from './tools';
+import { StyleProposal, StyleRule, StyleStore, captionCaseProposal } from './style';
+import { NoteRules, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, unmetRules } from './tools';
+import { Lint, LintFailure, Measured, StyleCheckProposal, checkFromMeasured, failureText, ruleText } from './rules';
 import { planFastNote } from './fastnote';
 import { AttachmentInfo, attachmentStills, attachmentsSection, earlierUnplaced, placedAssets, validateAttachments } from './attachments';
 import {
@@ -166,7 +167,9 @@ async function wrapUpPost(deps: EditorDeps, provider: ModelProvider, ctx: ToolCo
   const p = await loadProject(ctx.projectDir);
   if (p.post?.caption?.trim()) return;
   const finished = ctx.state.finished;
+  const refused = ctx.state.finishRefused;
   ctx.state.finished = null;
+  ctx.state.finishRefused = true;    // a short side run: the final render measures whatever it changes
   const needCover = !ctx.state.changed.has('cover');
   const task = `The edit of this video is saved. Only the post kit is missing. ${needCover ? 'Call set_cover (a raw-take second where the face is clear and expressive, from a word start time) and write_post' : 'Call write_post'} in ONE reply, following the post-kit rules below, then call finish.\n\n${deps.prompts.render('firstEdit').split(/^## /m).filter((s) => /^\d+\. (Post kit|Cover)/.test(s)).map((s) => `## ${s}`).join('\n')}`;
   try {
@@ -176,6 +179,7 @@ async function wrapUpPost(deps: EditorDeps, provider: ModelProvider, ctx: ToolCo
     if (signal?.aborted) throw e;
   } finally {
     ctx.state.finished = finished;
+    ctx.state.finishRefused = refused;
   }
 }
 
@@ -189,7 +193,9 @@ async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx:
   const kept = new Set(keptWords(t, p.cut.keep).map((w) => w.id));
   if (!unsureWords(t, 400).some((u) => kept.has(u.id))) return;
   const finished = ctx.state.finished;
+  const refused = ctx.state.finishRefused;
   ctx.state.finished = null;
+  ctx.state.finishRefused = true;    // a short side run: the final render measures whatever it changes
   onEvent({ type: 'status', message: 'Checking your captions', phase: 'edit' });
   try {
     await runAgent({ provider, system: await systemPrompt(deps), task: deps.prompts.render('proofread', { captions: captionsForProofread(t, p) }),
@@ -199,22 +205,103 @@ async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx:
     if (signal?.aborted) throw e;
   } finally {
     ctx.state.finished = finished;
+    ctx.state.finishRefused = refused;
   }
 }
 
-async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void): Promise<number> {
-  await refreshCredits(ctx).catch(() => undefined);
-  const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
-  // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
-  if (deps.finalRender !== false) {
-    try { return (await doRender(ctx, false)).version; } catch (e) {
-      if (ctx.signal?.aborted) throw e;
-      if (ctx.state.renders.length) return ctx.state.renders.at(-1)!.version;
-      throw e;
+/** `fixRules`: called once when the finished edit breaks a checked My style rule this note has to meet. The final
+ * render stops before its encode in that case, so the fix costs no extra video; after the fix the video is made
+ * whatever the rules say, and the reply names what still fails (rulesReply). */
+async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void, fixRules?: (unmet: LintFailure[]) => Promise<void>): Promise<number> {
+  const render = async (stopOnRules: boolean): Promise<number | null> => {
+    await refreshCredits(ctx).catch(() => undefined);
+    const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
+    // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
+    if (deps.finalRender !== false) {
+      try {
+        const info = await doRender(ctx, false, { stopOnRules });
+        return info.result?.encoded === false ? null : info.version;
+      } catch (e) {
+        if (ctx.signal?.aborted) throw e;
+        if (ctx.state.renders.length) return ctx.state.renders.at(-1)!.version;
+        throw e;
+      }
     }
+    if (changedSinceRender) return (await doRender(ctx, true)).version;
+    return ctx.state.renders.at(-1)!.version;
+  };
+  const version = await render(!!fixRules);
+  if (!fixRules || !unmetRules(ctx).length) return version!;
+  await fixRules(unmetRules(ctx));
+  return (await render(false))!;
+}
+
+/** The checked My style rules an AI edit measures, and what the version it starts from measured. */
+async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
+  const { active, unreadable } = await deps.style.checks();
+  let before: Lint | null = null;
+  if (version > 0) {
+    try { before = JSON.parse(await fsp.readFile(path.join(projectDir, 'versions', `v${version}`, 'render.json'), 'utf8'))?.lint ?? null; } catch { /* rendered before rules existed */ }
   }
-  if (changedSinceRender) return (await doRender(ctx, true)).version;
-  return ctx.state.renders.at(-1)!.version;
+  return { rules: { active, before: new Set((before?.failures ?? []).map((f) => f.id)) }, unreadable, measured: before?.measured ?? null };
+}
+
+/** One short run with the failures in hand: no previews left, the final video is measured again. Fails soft:
+ * the AI stopping (limit, sign-in) makes the video as it is, and the reply says which rule still fails. */
+function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, onEvent: (e: AgentEvent) => void, signal: AbortSignal | undefined, note?: string) {
+  return async (unmet: LintFailure[]): Promise<void> => {
+    const byId = new Map(ctx.rules!.active.map((r) => [r.id, r]));
+    const finished = ctx.state.finished;
+    const cap = ctx.maxDraftRenders;
+    ctx.state.finished = null;
+    ctx.state.finishRefused = false;
+    ctx.maxDraftRenders = 0;
+    onEvent({ type: 'status', message: 'Fixing it to match your My style', phase: 'edit' });
+    const task = [
+      "The edit is done, but the finished video breaks the user's My style rules, which the app measures on every render:",
+      ...unmet.map((f) => `- "${byId.get(f.id)?.text ?? f.id}": ${failureText(f, byId.get(f.id)?.check)}`),
+      ...(note ? [`The user's note was: ${JSON.stringify(note)}. Keep what it asked for.`] : []),
+      'Change the project so each rule holds, then call finish. There are no more previews: the final video is measured again.',
+      'If the note asked for exactly the opposite of a rule, change nothing and call finish.',
+    ].join('\n');
+    try {
+      await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: 8, maxMisses: 3, tokenBudget: deps.tokenBudget, preload: ['get_project'] });
+    } catch (e) {
+      if (signal?.aborted || !(e instanceof AIError)) throw e;
+    } finally {
+      ctx.state.finished = finished;
+      ctx.maxDraftRenders = cap;
+    }
+  };
+}
+
+/** What the reply says about checked rules, in the app's words: each one the video still breaks, and each one
+ * this version could not check. Nothing when every rule holds. */
+function rulesReply(ctx: ToolContext, unreadable: StyleRule[]): string {
+  const byId = new Map((ctx.rules?.active ?? []).map((r) => [r.id, r]));
+  const quote = (t: string) => `"${t.replace(/\.$/, '')}"`;
+  const failed = (ctx.state.lint?.failures ?? []).filter((f) => byId.has(f.id))
+    .map((f) => `I couldn't meet your My style rule ${quote(byId.get(f.id)!.text)}: ${failureText(f, byId.get(f.id)!.check)}.`);
+  if (failed.length) failed.push('Tell me what to change, or pause the rule in My style.');
+  const unchecked = unreadable.map((r) => `I couldn't check your My style rule ${quote(r.text)}: it needs a newer version of Reel Studio.`);
+  return [...failed, ...unchecked].join(' ');
+}
+
+const withRulesReply = (summary: string, ctx: ToolContext, unreadable: StyleRule[]) => [summary, rulesReply(ctx, unreadable)].filter(Boolean).join(' ');
+
+/** Rules the AI proposed with a check, as checked rules measured on the finished video (so the version the person
+ * approves meets them), minus ones already in My style. A kind this video can't measure is asked as plain words. */
+async function checkedProposals(deps: EditorDeps, ctx: ToolContext, measuredBefore: Measured | null): Promise<{ styleChecks?: StyleCheckProposal[]; styleSuggestions: string[] }> {
+  const measured = ctx.state.lint?.measured ?? measuredBefore;
+  const saved = new Set((await deps.style.checks()).active.map((r) => r.text));
+  const styleChecks: StyleCheckProposal[] = [];
+  const styleSuggestions = [...ctx.state.styleSuggestions];
+  for (const { text, choice } of ctx.state.styleChecks ?? []) {
+    const check = checkFromMeasured(choice, measured);
+    if (!check) { if (!styleSuggestions.includes(text)) styleSuggestions.push(text); continue; }
+    if (!saved.has(ruleText(check)) && !styleChecks.some((c) => c.text === ruleText(check))) styleChecks.push({ text: ruleText(check), check });
+  }
+  return { styleSuggestions, ...(styleChecks.length ? { styleChecks } : {}) };
 }
 
 // ---------------------------------------------------------------- first edit
@@ -260,6 +347,8 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
   const { p } = await load(ctx);
+  const { rules, unreadable, measured } = await noteRules(deps, projectDir, 0);
+  ctx.rules = rules;
   if (deps.firstLook !== false) {
     ctx.renderGate = firstLook(deps, ctx, onEvent);
   }
@@ -281,29 +370,32 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
       // Stopped after a preview existed: keep what was done and say so.
       onEvent({ type: 'status', message: 'Finishing your video', pct: 94, phase: 'final' });
       const version = await finalize(deps, ctx, onEvent);
-      const summary = withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state);
+      const summary = withRulesReply(withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state), ctx, unreadable);
       await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
 
 First edit (stopped early).
 
 ${summary}
 `);
-      return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
+      return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], notice: e.toJSON() };
     }
     throw e;
   }
   await proofreadCaptions(deps, provider, ctx, onEvent, signal);
   await wrapUpPost(deps, provider, ctx, onEvent, signal);
   onEvent({ type: 'status', message: 'Finishing your video', pct: 94, phase: 'final' });
-  const version = await finalize(deps, ctx, onEvent);
-  const summary = withStyleEcho(honestSummary(run, ctx.state, 'first')
-    ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
+  const version = await finalize(deps, ctx, onEvent, rulesFixer(deps, provider, ctx, onEvent, signal));
+  const summary = withRulesReply(withStyleEcho(honestSummary(run, ctx.state, 'first')
+    ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable);
   await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
-  return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+  return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
 }
 
 // ---------------------------------------------------------------- apply a note
+
+/** Thrown by a fast note's rule fixer: the note goes to the AI instead. */
+const BREAKS_A_RULE = Symbol('a fast note breaks a checked My style rule');
 
 export interface ApplyNoteOptions {
   /** files attached to this note: `work/assets/attach-*` refs (re-checked against the project's sidecars) */
@@ -321,7 +413,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const attached = await validateAttachments(projectDir, opts.attachments);
   if (!note.trim() && !attached.length) throw new AIError('empty_note', 'Type what you would like me to change.');
   const refs = attached.map((a) => a.asset);
-  let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
+  const { rules, unreadable, measured } = await noteRules(deps, projectDir, (await loadProject(projectDir)).version);
+  let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note, rules };
   const { p: p0 } = await load(ctx);
   // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
   // project.json, My style and work/assets back as they were.
@@ -344,21 +437,25 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       // the change is made: say so now, the render that shows it follows
       onEvent({ type: 'reply', text: fast.summary });
       try {
-        const version = await finalize(deps, ctx, onEvent);
+        // a fast note that breaks a checked rule goes to the AI instead, which can meet both
+        const version = await finalize(deps, ctx, onEvent, async () => { throw BREAKS_A_RULE; });
         const p = await loadProject(projectDir);
         p.notes = [...(p.notes ?? []), { version, text: note.trim(), applied: [...ctx.state.changed], at: new Date().toISOString() }];
         await saveProject(projectDir, p);
-        await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${fast.summary}\n`);
+        const summary = withRulesReply(fast.summary, ctx, unreadable);
+        await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${note.trim()}\n\n${summary}\n`);
         onEvent({ type: 'status', message: 'Done', pct: 100 });
-        return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
+        return { summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-        throw e;
+        if (e !== BREAKS_A_RULE) {
+          await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
+          throw e;
+        }
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
     await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-    ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
+    ctx = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note, rules };
     await load(ctx);
   }
   onEvent({ type: 'status', message: 'Reading your note', pct: 5, phase: 'edit' });
@@ -374,15 +471,15 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   try {
     const r = await runAgent({ provider, system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     if (!ctx.state.changed.size && !ctx.state.styleRulesAdded.length) {
-      // nothing to render: a proposed rule still goes back to the app to ask about
+      // nothing to render: a proposed rule still goes back to the app to ask about, measured on this version
       return {
         summary: r.finished || 'I looked, but I was not sure what to change. Could you say it another way?',
-        version: (await loadProject(projectDir)).version, styleRulesAdded: [], styleSuggestions: ctx.state.styleSuggestions, changed: [],
+        version: (await loadProject(projectDir)).version, styleRulesAdded: [], ...(await checkedProposals(deps, ctx, measured)), changed: [],
       };
     }
     onEvent({ type: 'status', message: 'Making the new version', pct: 90, phase: 'final' });
-    const version = await finalize(deps, ctx, onEvent);
-    const summary = withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state);
+    const version = await finalize(deps, ctx, onEvent, rulesFixer(deps, provider, ctx, onEvent, signal, note.trim() || undefined));
+    const summary = withRulesReply(withStyleEcho(honestSummary(r, ctx.state, 'note') ?? 'I saved your preference.', ctx.state), ctx, unreadable);
     const p = await loadProject(projectDir);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
     const placedNow = placedAssets(p);
@@ -392,7 +489,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     await snapshotVersion(projectDir, p, version, `# v${version}\n\nNote: ${label}\n\n${summary}\n`);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     saved = p;
-    committed = { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+    committed = { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
   } catch (e) {
     await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
     throw e;

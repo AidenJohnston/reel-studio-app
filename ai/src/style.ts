@@ -4,6 +4,7 @@ import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { styleFile, writeFileAtomic } from './project';
+import { CheckedRule, RuleCheck, parseCheck, ruleText } from './rules';
 
 /** A rule the app applies itself, through the caption tool, when a new video is made. Only lowercase for now:
  * the caption tool and the engine schema agree on `lower`, but not on sentence case. */
@@ -18,10 +19,15 @@ export interface StyleRule {
   /** listed in My style, but left out of what the AI reads and of new videos */
   paused?: boolean;
   payload?: CaptionCaseRule;
+  /** the engine measures this on every render (rules.ts); the rule's words are ruleText(check) */
+  check?: RuleCheck;
   source?: StyleSource;
   /** the question the person said Yes to */
   consent?: { proposal: string; at: string };
 }
+/** The active checked rules, and rules whose check this version can't read (saved by a newer Reel Studio):
+ * those are named in every note's reply rather than skipped without a word. */
+export interface StyleChecks { active: CheckedRule[]; unreadable: StyleRule[] }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over.
  * `forgotten`: questions whose rule was removed, so answering one again cannot bring it back. IDs only. */
 export interface StyleFile { version: 1; rules: StyleRule[]; damaged?: string; forgotten?: string[] }
@@ -29,6 +35,9 @@ export type Approval = { status: 'saved' | 'exists'; rule: StyleRule } | { statu
 
 export const LOWERCASE_CAPTIONS = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
+
+/** A stored check's words, or null when this version can't read the check. */
+const checkedText = (c: unknown): string | null => { try { return ruleText(parseCheck(c)); } catch { return null; } };
 
 const CAPTION_CASE_PROMPT = 'New videos start with lowercase captions (the app sets this). Use another case only when the note asks for it.';
 
@@ -124,9 +133,22 @@ export class StyleStore {
   }
 
   /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
-   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A). */
-  async add(text: string): Promise<{ added: boolean; rule: StyleRule }> {
-    return this.serial(() => this.addNow(text));
+   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A).
+   * A checked rule's words must be its check's (the question showed them), and it replaces any rule checking
+   * the same kind: two "at most N words" rules can't both hold. */
+  async add(text: string, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> {
+    if (check === undefined) return this.serial(() => this.addNow(text));
+    const c = parseCheck(check);
+    if (cleanRuleText(text) !== ruleText(c)) throw new Error('the question does not match the rule it would save');
+    return this.serial(async () => {
+      const data = await this.read();
+      const same = data.rules.find((r) => normalize(r.text) === normalize(ruleText(c)));
+      if (same && same.check?.kind === c.kind && !same.paused) return { added: false, rule: same };
+      const rule: StyleRule = { id: randomUUID(), text: ruleText(c), createdAt: new Date().toISOString(), check: c };
+      const rest = data.rules.filter((r) => r.check?.kind !== c.kind && normalize(r.text) !== normalize(rule.text));
+      await this.write({ ...data, rules: [...rest, rule] });
+      return { added: true, rule };
+    });
   }
 
   /** The saved rule equivalent to `text`, if any. */
@@ -199,6 +221,8 @@ export class StyleStore {
       if (patch.text !== undefined) {
         rule.text = cleanRuleText(patch.text);
         if (rule.payload && rule.text !== LOWERCASE_CAPTIONS) delete rule.payload;
+        // the same reasoning for a checked rule: "at most 2 words, except in tutorials" is not what is measured
+        if (rule.check && rule.text !== checkedText(rule.check)) delete rule.check;
       }
       if (patch.paused === true) rule.paused = true;
       if (patch.paused === false) delete rule.paused;
@@ -225,8 +249,20 @@ export class StyleStore {
     return (await this.list()).some((r) => isCaptionCase(r.payload));
   }
 
+  /** The checked rules every render in a note measures. A paused rule is not checked. */
+  async checks(): Promise<StyleChecks> {
+    const out: StyleChecks = { active: [], unreadable: [] };
+    for (const r of await this.list()) {
+      if (r.paused || r.check === undefined) continue;
+      try { out.active.push({ id: r.id, text: r.text, check: parseCheck(r.check) }); } catch { out.unreadable.push(r); }
+    }
+    return out;
+  }
+
   async asPromptText(): Promise<string> {
     const rules = (await this.list()).filter((r) => !r.paused);
-    return rules.length ? rules.map((r) => `- ${isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT : r.text}`).join('\n') : '(none yet)';
+    const line = (r: StyleRule) => isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT
+      : checkedText(r.check) !== null ? `${r.text} (the app measures this on every render; a note can't finish while it fails)` : r.text;
+    return rules.length ? rules.map((r) => `- ${line(r)}`).join('\n') : '(none yet)';
   }
 }

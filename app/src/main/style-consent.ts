@@ -42,7 +42,7 @@ export const rememberQuestion = (rule: string): string => `Remember this for nex
 
 export interface AnswerDeps {
   chat(slug: string): Promise<ChatMessage[]>
-  addStyleRule?(text: string): Promise<unknown>
+  addStyleRule?(text: string, check?: ChatMessage['check']): Promise<unknown>
   approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
   declineStyleProposal?(p: StyleProposal): Promise<void>
   /** Take the buttons off the question and add the editor's reply. */
@@ -74,7 +74,12 @@ export function answerStyleQuestion(d: AnswerDeps, slug: string, messageId: stri
       reply = TYPED_REPLY[r.status]
     } else if (yes) {
       if (!d.addStyleRule) throw NOT_READY
-      await d.addStyleRule(m.suggestion!)
+      if (m.check) {
+        await d.addStyleRule(m.suggestion!, m.check).catch(() => {
+          throw NOT_SAVED
+        })
+        reply = "Saved. I'll check this on every video from now on. You can pause or remove it in My style."
+      } else await d.addStyleRule(m.suggestion!)
     } else if (m.proposal && d.declineStyleProposal) {
       // a Yes saved just before a crash, then No: the No wins
       await d.declineStyleProposal(m.proposal).catch(() => {

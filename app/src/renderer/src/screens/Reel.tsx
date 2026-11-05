@@ -546,11 +546,15 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                     </div>
                   ) : null}
                   {m.text}
-                  {m.proposal && (
+                  {m.proposal ? (
                     <span className="bubble-meta" data-testid="remember-scope">
                       For new videos. From version {m.proposal.source.version} of this video.
                     </span>
-                  )}
+                  ) : m.suggestion && m.actions?.includes('remember-yes') ? (
+                    <span className="bubble-meta" data-testid="remember-kind">
+                      {m.check ? "I'll check this every time." : "I'll keep it in mind."}
+                    </span>
+                  ) : null}
                   {answerError?.id === m.id && m.actions?.length ? (
                     <span className="bubble-meta error" role="alert" data-testid="remember-error">
                       {answerError.text}

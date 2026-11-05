@@ -343,8 +343,14 @@ export const createMockAI: CreateAI = ({ host }) => {
     async styleWasDamaged() {
       return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
-    async addStyleRule(text) {
-      return (await addRule(text)).rule
+    async addStyleRule(text, check) {
+      if (!check) return (await addRule(text)).rule
+      // as the real store: a checked rule replaces any other rule checking the same kind
+      return withStyle(async (s) => {
+        const rule = { id: randomUUID(), text, createdAt: new Date().toISOString(), check }
+        await saveRules(s, [...s.rules.filter((r) => r.check?.kind !== check.kind && sameRule(r.text) !== sameRule(text)), rule])
+        return rule
+      })
     },
     // The same answers as the real store (ai/src/style.ts): a removed rule's question cannot bring it back, and the
     // same question answered again returns the rule it saved.
@@ -372,8 +378,10 @@ export const createMockAI: CreateAI = ({ host }) => {
         const rule = s.rules.find((r) => r.id === id)
         if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That rule is not in My style any more.' }
         if (patch.text !== undefined) {
+          const was = rule.text
           rule.text = cleanRule(patch.text)
           if (rule.text !== LOWERCASE_CAPTIONS) delete rule.payload
+          if (rule.text !== was) delete rule.check
         }
         if (patch.paused === true) rule.paused = true
         if (patch.paused === false) delete rule.paused

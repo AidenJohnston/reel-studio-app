@@ -110,3 +110,28 @@ describe('answering a typed My style question (lowercase captions)', () => {
     expect(chat.at(-1)?.text).toBe('OK, only for this video.')
   })
 })
+
+describe('answering a checked My style question', () => {
+  it('Yes saves the rule with its check, and the reply says it will be checked on every video', async () => {
+    const check = { kind: 'captions.maxWords', value: 2 } as const
+    const text = 'Show at most 2 words in a caption.'
+    const chat: ChatMessage[] = [
+      { id: 'm1', from: 'editor', text: rememberQuestion(text), at: '', actions: ['remember-yes', 'remember-no'], suggestion: text, check }
+    ]
+    const saved: unknown[][] = []
+    const deps: AnswerDeps = {
+      chat: async () => structuredClone(chat),
+      addStyleRule: async (...args) => {
+        saved.push(args)
+      },
+      settle: async (_slug, id, reply) => {
+        delete chat.find((m) => m.id === id)!.actions
+        chat.push({ id: 'r', from: 'editor', text: reply, at: '' })
+      },
+      serialized
+    }
+    await answerStyleQuestion(deps, 'bread', 'm1', true)
+    expect(saved).toEqual([[text, check]])
+    expect(chat.at(-1)?.text).toBe("Saved. I'll check this on every video from now on. You can pause or remove it in My style.")
+  })
+})

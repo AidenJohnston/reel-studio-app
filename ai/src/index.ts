@@ -8,6 +8,7 @@ import {
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleProposal, StyleStore } from './style';
+import type { RuleCheck } from './rules';
 import { writeFileAtomic } from './project';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 import { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
@@ -25,6 +26,7 @@ export type { ToolContext, ToolDef } from './tools';
 export { runAgent } from './agent';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
+export type { RuleCheck, StyleCheckProposal } from './rules';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
 export { ClaudeCliProvider, CodexCliProvider } from './providers/cli';
 export { ReplayProvider, RecordingProvider } from './providers/replay';
@@ -512,8 +514,9 @@ export function createAI(opts: CreateAIOptions) {
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },
-    /** The user said Yes to a proposed rule (AgentResult.styleSuggestions). Returns the saved rule. */
-    async addStyleRule(text: string) { return (await style.add(text)).rule; },
+    /** The user said Yes to a proposed rule (AgentResult.styleSuggestions, or a styleChecks entry with its check).
+     * Returns the saved rule. */
+    async addStyleRule(text: string, check?: RuleCheck) { return (await style.add(text, check)).rule; },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */
     async styleWasDamaged() { return style.wasDamaged(); },
     /** The user said Yes to AgentResult.styleProposal. */
