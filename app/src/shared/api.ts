@@ -1098,16 +1098,15 @@ export interface ReelApi {
   }
   /** Updates (main/updater.ts). Downloads and installs only when the person clicks. */
   update: {
-    state(): Promise<UpdateState>
-    onState(cb: (s: UpdateState) => void): () => void
-    check(): Promise<{ checked: boolean; state: UpdateState }>
-    download(): Promise<UpdateActionResult>
-    install(): Promise<UpdateActionResult>
-    /** The offered release's page, or a listed release's page when `version` is given. */
-    openRelease(version?: string): Promise<void>
-    busy(): Promise<UpdateBusy>
-    dismiss(version: string): Promise<UpdateState>
-    setEnabled(on: boolean): Promise<void>
+    status(): Promise<UpdateStatus>
+    /** Settings > "Check for updates". Turning it on checks at once (still at most once a day). */
+    setEnabled(on: boolean): Promise<UpdateStatus>
+    /** Open the download page in the browser. Main opens only getreelstudio.com and our GitHub releases pages. */
+    open(url: string): Promise<void>
+    /** "Not now": hide it until a newer version comes out, or until tomorrow. */
+    dismiss(version: string): Promise<void>
+    /** A notice to show, or null to hide it (checks switched off). */
+    onChange(cb: (n: UpdateNotice | null) => void): () => void
   }
 }
 

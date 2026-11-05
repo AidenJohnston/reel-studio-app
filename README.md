@@ -105,11 +105,12 @@ renderer.
 
 ## Download and install
 
-Get the latest installer from the [Releases page](https://github.com/AidenJohnston/reel-studio-app/releases/latest).
+[Buy Reel Studio at getreelstudio.com](https://getreelstudio.com/): $99 once (perpetual license plus all 1.x
+updates) or $20 a month, cancel anytime. The download link for the installers is on the page right after
+payment, and the app tells you when a newer version is out. Buying funds development and gets you the signed
+builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
 
-The installers are free and the code is MIT. If Reel Studio saves you time, [buy it at getreelstudio.com](https://getreelstudio.com/):
-$99 once (perpetual license plus all 1.x updates) or $20 a month, cancel anytime. Buying funds development and
-gets you the signed builds, updates and help. You still need your own Claude or ChatGPT plan for the AI editor.
+The code is MIT, so anyone can [build it themselves](#build-from-source) for free.
 
 | System | File | Guide |
 |---|---|---|
@@ -176,24 +177,11 @@ speech model download from Hugging Face, image search (Openverse and Wikimedia C
 (Simple Icons) with the words the AI chose, a screenshot of a website or app page the AI names in your reel, and downloads of pictures, videos or songs from links you paste. There is no analytics and no
 crash reporting.
 
-Update checks run once a day (an hour later if the request failed), when you click "Check for updates", and when
-you click **Download update** for an update found before the app last started or after a failed download, to
-confirm it is still the newest.
-Turn the daily check off in Settings with "Check for updates automatically". A check makes these requests, with no cookies,
-account or ID:
-
-1. GitHub's public releases list (`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only
-   `User-Agent: ReelStudio/<version>` and `Accept: application/vnd.github+json`.
-2. On a Mac copy in Applications or an installed Windows copy, when that list has a newer version: the release's
-   `latest-mac.yml` (Mac) or `latest.yml` (Windows) from
-   `github.com/AidenJohnston/reel-studio-app/releases/download/v<version>/`, fetched by electron-updater in its own
-   session. It sends electron-updater's `User-Agent: electron-builder` and the header
-   `x-user-staging-id: 00000000-0000-0000-0000-000000000000`, the same for every copy.
-
-Nothing is downloaded or installed without a click. When you click **Download update**, the app downloads the
-file the feed names from the same release, with the same headers: the update zip on a Mac, the installer on
-Windows. It installs only after you click **Restart to update** and confirm; on Windows that runs the downloaded
-installer. Other copies open the release page in your browser instead.
+One request happens without you asking: at most once a day it asks `dl.getreelstudio.com/latest.json` whether a
+newer version is out and, only if that fails, GitHub's public releases list
+(`api.github.com/repos/AidenJohnston/reel-studio-app/releases`), sending only a generic
+`User-Agent: ReelStudio/<version>` and no cookies, account or ID. If there is one, a small note says so; nothing
+is downloaded or installed. Turn it off in Settings with "Check for updates".
 
 ## Build from source
 
