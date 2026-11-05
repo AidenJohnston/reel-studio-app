@@ -10,6 +10,7 @@ interface Build {
   abort: AbortController
   done: Promise<void>
   exited: Promise<void>
+  stopping?: Promise<void>
 }
 
 // How long `stop` waits for a cancelled build's engine to exit before letting the caller go on.
@@ -45,21 +46,31 @@ export function createProxyBuilds(makeRunner: (hooks: ExitHooks) => RunEngine, l
         })
         .finally(() => {
           if (!spawned) markExited() // never started: nothing to wait for
-          if (running.get(slug) === build) running.delete(slug)
         })
     }
     running.set(slug, build)
+    // The project counts as building until its engine has exited, not merely until the call settled.
+    void exited.then(() => forget(slug, build))
   }
 
-  /** Cancels the project's build and resolves once its engine has exited (or after STOP_WAIT_MS). */
-  async function stop(slug: string): Promise<void> {
+  function forget(slug: string, build: Build): void {
+    if (running.get(slug) === build) running.delete(slug)
+  }
+
+  /** Cancels the project's build and resolves once its engine has exited (or after STOP_WAIT_MS).
+   * Every caller during that wait gets the same promise. */
+  function stop(slug: string): Promise<void> {
     const b = running.get(slug)
-    if (!b) return
-    b.abort.abort()
-    await b.done
-    let timer: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([b.exited, new Promise<void>((resolve) => (timer = setTimeout(resolve, STOP_WAIT_MS)))])
-    clearTimeout(timer)
+    if (!b) return Promise.resolve()
+    b.stopping ??= (async () => {
+      b.abort.abort()
+      await b.done
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([b.exited, new Promise<void>((resolve) => (timer = setTimeout(resolve, STOP_WAIT_MS)))])
+      clearTimeout(timer)
+      forget(slug, b)
+    })()
+    return b.stopping
   }
 
   return { start, stop }

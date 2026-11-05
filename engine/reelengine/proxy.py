@@ -35,7 +35,6 @@ import hashlib
 import json
 import os
 import re
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -179,28 +178,34 @@ def build_cmd(ffmpeg: str, src: dict, path: Path, out: Path, size: tuple, tonema
             "-pix_fmt", "yuv420p", *tags, "-progress", "pipe:1", "-nostats", "-f", "mp4", str(out)]
 
 
-# A build touches its source's lock file with every progress report; a lock untouched this long was
-# left by a build that was killed (the app quitting, a crash).
-LOCK_STALE_SECONDS = 600
+def _take_lock(lock: Path):
+    """One build per source at a time (two app windows, or the app and a script, may both start
+    one). An OS lock on the file, held until the handle closes, so a killed build never leaves it
+    held. -> the open handle, or None when another build holds it."""
+    fh = open(lock, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
 
 
-def _take_lock(lock: Path) -> bool:
-    """One build per source at a time (two app windows, or the app and a script, may both start one)."""
-    for _ in range(2):
+def _release_lock(fh) -> None:
+    if os.name == "nt":             # Windows frees a lock at close only eventually; unlock first
+        import msvcrt
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime < LOCK_STALE_SECONDS:
-                    return False
-                lock.unlink()
-            except OSError:
-                return False
-            continue
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return True
-    return False
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    fh.close()
 
 
 def _prune(d: Path, sid: str, keep: Path) -> None:
@@ -223,37 +228,30 @@ def build_one(project_dir: Path, src: dict, path: Path, short_side: int = SHORT_
         raise EngineError("PROXY_SOURCE", f"source {sid} at {path} is unreadable", "I couldn't read this video.")
     mp4, side = _files(project_dir, sid, key)
     mp4.parent.mkdir(parents=True, exist_ok=True)
-    lock = mp4.parent / f"{sid}.lock"
-    if not _take_lock(lock):
+    held = _take_lock(mp4.parent / f"{sid}.lock")
+    if held is None:
         return {"status": "busy", "reason": "another build of this take is running"}
     try:
         if lookup(project_dir, src, path) is not None:        # that other build has just finished it
             return {"status": "ready", "file": str(mp4)}
-        return _build(project_dir, src, path, key, mp4, side, short_side, lock, on_pct)
+        return _build(project_dir, src, path, key, mp4, side, short_side, on_pct)
     finally:
-        lock.unlink(missing_ok=True)
+        _release_lock(held)
 
 
 def _build(project_dir: Path, src: dict, path: Path, key: str, mp4: Path, side: Path, short_side: int,
-           lock: Path, on_pct) -> dict:
+           on_pct) -> dict:
     sid = str(src["id"])
     part = mp4.with_name(f"{mp4.stem}.{os.getpid()}.part.mp4")
     ffmpeg, ffprobe = tools.ffmpeg(), tools.ffprobe()
     offset, want = frame_times(ffprobe, path)
     size = copy_size(src, short_side)
     dur = float(src.get("duration") or 0.0) or (want[-1] if want else 1.0)
-
-    def report(p):
-        try:
-            os.utime(lock)
-        except OSError:
-            pass
-        on_pct(p)
     try:
         err = None
         for tonemap_first in ((False, True) if src.get("hdr") else (False,)):
             try:
-                tools.ffmpeg_progress(build_cmd(ffmpeg, src, path, part, size, tonemap_first), dur, report,
+                tools.ffmpeg_progress(build_cmd(ffmpeg, src, path, part, size, tonemap_first), dur, on_pct,
                                       timeout=max(900.0, dur * 60), what="preview copy")
                 err = None
                 break
