@@ -6,7 +6,9 @@
 //
 // Run: npx playwright test e2e/phone-view.spec.ts (after npm run build).
 import { test, expect, type Page } from '@playwright/test'
-import { launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
+import { BASE, launch, makeMedia, makeReel, passFirstRun, shot } from './helpers'
 
 const SIZES = [
   { width: 1100, height: 720 },
@@ -78,5 +80,32 @@ test('fails if the phone stops filling its column as an iPhone 17, the view is n
     await page.keyboard.press('Escape')
   } finally {
     await app.close()
+  }
+})
+
+// The first run's sample is drawn under the same Instagram screen as every reel (Phone.tsx InstagramChrome), so it
+// shows the preview without making a reel. Test builds keep Instagram off; REELSTUDIO_TEST_INSTAGRAM stands in for a
+// connected account (main/instagram-ipc.ts).
+// fails if the preview shows a made-up handle or counts again, or not the connected account's handle and picture
+test('the Instagram preview shows the connected account, a plain placeholder without one, and no counts', async () => {
+  const cases = [
+    { name: 'none', env: {}, handle: 'Your account', picture: 0 },
+    { name: 'connected', env: { REELSTUDIO_TEST_INSTAGRAM: 'fixture.creator' }, handle: 'fixture.creator', picture: 1 }
+  ]
+  for (const c of cases) {
+    const dir = mkdtempSync(join(BASE, `ig-${c.name}-`))
+    const { app, page } = await launch({ REELSTUDIO_ROOT: join(dir, 'Reel Studio'), REELSTUDIO_USER_DATA: join(dir, 'user data'), ...c.env })
+    try {
+      await page.getByTestId('get-started').click()
+      const ig = page.getByTestId('sample-phone').getByTestId('ig-overlay')
+      await expect(ig).toBeVisible()
+      await expect(ig.getByTestId('ig-handle')).toHaveText(c.handle)
+      await expect(ig.locator('.igc-audio')).toContainText(`${c.handle} · Original audio`)
+      await expect(ig.locator('.igc-rail')).not.toHaveText(/\d/)
+      await expect(ig.locator('.igc-who img.igc-avatar')).toHaveCount(c.picture)
+      await shot(page, `instagram-preview-${c.name}`)
+    } finally {
+      await app.close()
+    }
   }
 })

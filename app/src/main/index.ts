@@ -98,7 +98,7 @@ import { createWorkGate } from './work-gate'
 import { TikTokService } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
-import { registerInstagramIpc } from './instagram-ipc'
+import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
@@ -810,7 +810,13 @@ function registerIpc(): void {
       return image.toJPEG(90)
     }
   })
-  registerInstagramIpc({ handle, service: instagram, dev: DEV_PROVIDERS && !TEST, saveSettings })
+  registerInstagramIpc({
+    handle,
+    service: instagram,
+    dev: DEV_PROVIDERS && !TEST,
+    saveSettings,
+    testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
+  })
   app.on('before-quit', () => { instagram.stop() })
   handle('app:info', () => appInfo())
   handle('app:setModels', async (_e, m: unknown) => {

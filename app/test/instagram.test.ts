@@ -163,7 +163,7 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
       expect(body.state).toBe(state)
       expect(createHash('sha256').update(body.code_verifier).digest('base64url')).toBe(challenge)
     } })
-    if (SCOPES.every((s) => permissions.includes(s))) profile(account)
+    if (SCOPES.every((s) => permissions.includes(s))) steps.push({ url: `${GRAPH}/me?fields=user_id,username,account_type,profile_picture_url`, body: account })
   }
   return { dir, project, version, store, service, steps, calls, seed, profile, stage, finished, publish, published, oauth,
     cancelAtEncryption: () => { cancelDuringEncryption = true },
@@ -209,6 +209,25 @@ describe('Instagram fixture HTTP', () => {
     expect(await w.service.session()).toMatchObject({ connected: true, accountId: '123' })
     w.done()
   })
+  // fails if the picture link gets the account's token, or the picture is not kept for the preview
+  it('keeps the profile picture as a data URL, fetched without the token', async () => {
+    const w = await world(); w.oauth(SCOPES, { ...PROFILE, profile_picture_url: 'https://cdn.example/p/123.jpg' })
+    w.steps.push({ url: 'https://cdn.example/p/123.jpg', inspect: (init) => expect(new Headers(init.headers).has('authorization')).toBe(false),
+      respond: async () => new Response(Buffer.from('jpeg bytes'), { headers: { 'content-type': 'image/jpeg' } }) })
+    const picture = `data:image/jpeg;base64,${Buffer.from('jpeg bytes').toString('base64')}`
+    expect(await w.service.connect()).toMatchObject({ connected: true, username: 'fixture_creator', picture })
+    expect(await w.service.session()).toMatchObject({ connected: true, picture })
+    w.done()
+  })
+  // fails if a picture that can't be read stops the connection
+  it('connects without a picture when the picture is not an image', async () => {
+    const w = await world(); w.oauth(SCOPES, { ...PROFILE, profile_picture_url: 'https://cdn.example/p/123.jpg' })
+    w.steps.push({ url: 'https://cdn.example/p/123.jpg', respond: async () => new Response('<html>', { headers: { 'content-type': 'text/html' } }) })
+    const session = await w.service.connect()
+    expect(session).toMatchObject({ connected: true, username: 'fixture_creator' })
+    expect(session).not.toHaveProperty('picture')
+    w.done()
+  })
   it('refuses a connection missing insights permission', async () => {
     const w = await world(); w.oauth(SCOPES.slice(0, 2))
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_PERMISSION' })
@@ -226,6 +245,8 @@ describe('Instagram fixture HTTP', () => {
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_DISABLED' })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'IG_DISABLED' })
     await expect(w.service.insights('fixture', 1, '789')).rejects.toMatchObject({ code: 'IG_DISABLED' })
+    // the preview asks on every reel: off reads as not connected, not as an error
+    expect(await w.service.session()).toEqual({ connected: false })
     expect(w.calls).toEqual([])
   })
   it('blocks a disabled setting and insecure keychain before OAuth', async () => {

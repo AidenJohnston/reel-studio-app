@@ -97,9 +97,9 @@
 .igc-cam { margin-left: auto; display: flex; }
 .igc-top .igc-cam .icon { width: calc(27 * var(--pt)); height: calc(27 * var(--pt)); margin: 0; }
 
-/* The rail: like, comment, repost and share with their counts, then more and the audio's square. */
+/* The rail: like, comment, repost and share, then more and the audio's square. No counts before it is posted. */
 .igc-rail { right: calc(8 * var(--pt)); bottom: calc(var(--foot) + 14 * var(--pt)); width: calc(48 * var(--pt)); display: flex; flex-direction: column; align-items: center; gap: calc(16 * var(--pt)); }
-.igc-rail > span { display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--pt)); font-size: calc(12.5 * var(--pt)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.igc-rail > span { display: flex; }
 .igc-rail .icon { width: calc(27 * var(--pt)); height: calc(27 * var(--pt)); }
 .igc-rail > span:last-of-type .icon { width: calc(24 * var(--pt)); height: calc(24 * var(--pt)); }
 .igc-disc { width: calc(28 * var(--pt)); height: calc(28 * var(--pt)); border-radius: calc(7 * var(--pt)); background: #5a615c; box-shadow: 0 0 0 calc(2 * var(--pt)) #fff; }
@@ -107,7 +107,7 @@
 /* Bottom left: who posted it, one line of the caption, the audio. */
 .igc-meta { left: calc(14 * var(--pt)); right: calc(72 * var(--pt)); bottom: calc(var(--foot) + 14 * var(--pt)); display: flex; flex-direction: column; gap: calc(10 * var(--pt)); }
 .igc-who { display: flex; align-items: center; gap: calc(9 * var(--pt)); }
-.igc-avatar { width: calc(32 * var(--pt)); height: calc(32 * var(--pt)); border-radius: 50%; flex: none; background: #cfd8cf; }
+.igc-avatar { width: calc(32 * var(--pt)); height: calc(32 * var(--pt)); border-radius: 50%; flex: none; background: #cfd8cf; object-fit: cover; }
 .igc-who b { font-size: calc(14 * var(--pt)); font-weight: 600; }
 .igc-follow { height: calc(28 * var(--pt)); padding: 0 calc(11 * var(--pt)); display: flex; align-items: center; border-radius: calc(8 * var(--pt)); box-shadow: inset 0 0 0 calc(1 * var(--pt)) rgba(255, 255, 255, .8); font-size: calc(13 * var(--pt)); font-weight: 600; }
 /* a word's space between the cut caption and "more", never under 4 px on the smallest phone */

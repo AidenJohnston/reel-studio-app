@@ -2,8 +2,9 @@
 // ("Instagram") or alone ("Clean"). The person's choice is an app setting (main/settings.ts).
 // The phone takes a real phone's shape (shared/phone-shapes.ts), remembered per person; the whole reel's own frame is
 // one of the shapes.
-import { memo, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import type { PhoneView } from '../../../shared/api'
+import type { InstagramSession } from '../../../shared/instagram'
 import { DEFAULT_SHAPE, clearBand, place, shapeById, type Shape } from '../../../shared/phone-shapes'
 import { reel } from '../api'
 import { Icon } from './icons'
@@ -328,16 +329,43 @@ function CaptionLine({ text }: { text: string }) {
   )
 }
 
-const HANDLE = 'yourname'
-const COUNTS = ['1,204', '86', '31', '142']
+/** Who posted the reel, on the preview: the connected Instagram account, else a label that is plainly not a handle. */
+export interface PreviewAccount {
+  handle: string
+  picture?: string
+}
+export const NO_ACCOUNT: PreviewAccount = { handle: 'Your account' }
+
+export function previewAccount(s: InstagramSession | null): PreviewAccount {
+  return s?.connected ? { handle: s.username, ...(s.picture ? { picture: s.picture } : {}) } : NO_ACCOUNT
+}
+
+/** The connected account as this computer saved it: a local read, no request to Instagram. */
+function usePreviewAccount(): PreviewAccount {
+  const [account, setAccount] = useState(NO_ACCOUNT)
+  useEffect(() => {
+    let live = true
+    reel.instagram
+      .session()
+      .then((s) => live && setAccount(previewAccount(s)))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+  return account
+}
 
 /**
  * Instagram's Reels screen over the reel, in iOS points (Phone.css), with the phone's status bar and Home indicator
  * that show over it. Always on the page so switching views fades it rather than popping it; hidden from screen
  * readers, it is a picture of another app. `playing` runs the audio ticker, as Instagram does only while the reel plays.
+ * It is the reel as the people who see it get it: posted by the connected account (or a placeholder), with Follow, and
+ * the viewer's own profile in the tab bar. No counts: a reel has none before it is posted.
  */
 export const InstagramChrome = memo(function InstagramChrome({ on, caption, playing }: { on: boolean; caption?: string; playing?: boolean }) {
   const text = caption?.trim()
+  const account = usePreviewAccount()
   return (
     <div className={`igc${on ? '' : ' off'}`} data-playing={playing || undefined} data-testid="ig-overlay" aria-hidden>
       <StatusBar />
@@ -351,19 +379,15 @@ export const InstagramChrome = memo(function InstagramChrome({ on, caption, play
       <div className="igc-rail">
         <span>
           <Icon name="heart" size={27} stroke={2} />
-          {COUNTS[0]}
         </span>
         <span>
           <Icon name="comment" size={27} stroke={2} />
-          {COUNTS[1]}
         </span>
         <span>
           <G size={27}>{repost}</G>
-          {COUNTS[2]}
         </span>
         <span>
           <Icon name="send" size={27} stroke={2} />
-          {COUNTS[3]}
         </span>
         <span>
           <Icon name="more" size={24} stroke={2.5} />
@@ -372,8 +396,8 @@ export const InstagramChrome = memo(function InstagramChrome({ on, caption, play
       </div>
       <div className="igc-meta">
         <div className="igc-who">
-          <i className="igc-avatar" />
-          <b>{HANDLE}</b>
+          {account.picture ? <img className="igc-avatar" src={account.picture} alt="" /> : <i className="igc-avatar" />}
+          <b data-testid="ig-handle">{account.handle}</b>
           <span className="igc-follow">Follow</span>
         </div>
         {text && <CaptionLine text={text} />}
@@ -381,8 +405,8 @@ export const InstagramChrome = memo(function InstagramChrome({ on, caption, play
           <Icon name="music" size={12} stroke={2.5} />
           <div className="igc-tick">
             <div>
-              <span>{HANDLE} · Original audio</span>
-              <span>{HANDLE} · Original audio</span>
+              <span>{account.handle} · Original audio</span>
+              <span>{account.handle} · Original audio</span>
             </div>
           </div>
         </div>
