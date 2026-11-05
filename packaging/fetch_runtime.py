@@ -56,12 +56,12 @@ PBS_TAG = "20261013"
 PBS_PY = "3.11.17"
 PBS_BASE = "https://github.com/astral-sh/python-build-standalone/releases/download/%s/" % PBS_TAG
 
-# FFmpeg is OUR build (packaging/ffmpeg/build.sh, recipe + pinned sources public; see THIRD_PARTY.md). Each release
-# attaches the two zips to the GitHub release tagged FFMPEG_TAG; whoever builds them uploads exactly the files whose
-# SHA-256 is pinned below. REELSTUDIO_RELEASE_REPO is "<owner>/<repo>" (set it, or replace the placeholder here).
+# FFmpeg is OUR build (packaging/ffmpeg/build.sh, recipe + pinned sources; see THIRD_PARTY.md). The two zips, and the
+# GPL source offer next to them, are served from dl.getreelstudio.com/source/FFMPEG_TAG/; whoever builds them uploads
+# exactly the files whose SHA-256 is pinned below. REELSTUDIO_FFMPEG_BASE overrides the base URL (a mirror; must end in /).
 # A file with the right SHA-256 in release/ffmpeg/ (build.sh's output folder) is used before any download happens.
 FFMPEG_TAG = "ffmpeg-7.1.1-rs2"
-FFMPEG_BASE = "https://github.com/%s/releases/download/%s/" % (os.environ.get("REELSTUDIO_RELEASE_REPO", "AidenJohnston/reel-studio-app"), FFMPEG_TAG)
+FFMPEG_BASE = os.environ.get("REELSTUDIO_FFMPEG_BASE") or "https://dl.getreelstudio.com/source/%s/" % FFMPEG_TAG
 FFMPEG_LOCAL = REPO / "release" / "ffmpeg"
 
 # Every artifact: url, sha256, filename in cache. Keep in sync with THIRD_PARTY.md.
@@ -151,9 +151,6 @@ def download(spec: dict) -> Path:
         log("local build output %s" % local)
         shutil.copyfile(str(local), str(dest))
         return dest
-    if "<owner>" in spec["url"]:
-        raise SystemExit("FFmpeg zip %s is not in %s and its URL still has the <owner>/<repo> placeholder: build it "
-                         "(packaging/ffmpeg/build.sh) or set REELSTUDIO_RELEASE_REPO=owner/repo" % (spec["file"], FFMPEG_LOCAL))
     part = dest.with_suffix(dest.suffix + ".part")
     log("download %s" % spec["url"])
     req = urllib.request.Request(spec["url"], headers={"User-Agent": "reel-studio-packaging/1.0"})

@@ -50,7 +50,7 @@ from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, Reque
 
 from .compose_util import EngineError, ffmpeg_bin, log
 
-API_UA = "ReelStudio/0.1 (+https://github.com/AidenJohnston/reel-studio-app)"
+API_UA = "ReelStudio/0.1 (+https://getreelstudio.com)"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 OPENVERSE = "https://api.openverse.org/v1/images/"

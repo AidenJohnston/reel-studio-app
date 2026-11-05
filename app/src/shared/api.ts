@@ -456,7 +456,7 @@ export interface DropResult {
 }
 
 export interface ProviderInfo {
-  id: 'chatgpt' | 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
+  id: 'claude' | 'codex-cli' | 'claude-cli' | 'custom' | 'replay' | 'none'
   connected: boolean
   label: string
   detail?: string
@@ -1101,13 +1101,25 @@ export interface ReelApi {
     status(): Promise<UpdateStatus>
     /** Settings > "Check for updates". Turning it on checks at once (still at most once a day). */
     setEnabled(on: boolean): Promise<UpdateStatus>
-    /** Open the download page in the browser. Main opens only getreelstudio.com and our GitHub releases pages. */
+    /** Open the download page in the browser. Main opens only pages on getreelstudio.com. */
     open(url: string): Promise<void>
     /** "Not now": hide it until a newer version comes out, or until tomorrow. */
     dismiss(version: string): Promise<void>
     /** A notice to show, or null to hide it (checks switched off). */
     onChange(cb: (n: UpdateNotice | null) => void): () => void
   }
+}
+
+/** A newer Reel Studio is out. `url` is its download page on getreelstudio.com. */
+export interface UpdateNotice {
+  version: string
+  url: string
+}
+
+export interface UpdateStatus {
+  enabled: boolean
+  /** What to show now; null = nothing (up to date, not checked yet, off, or "Not now"). */
+  notice: UpdateNotice | null
 }
 
 /**

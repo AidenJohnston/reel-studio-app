@@ -46,12 +46,15 @@ download anything.
 ## Releasing a new build
 
 1. Build on both platforms with the commands above.
-2. Upload the two zips to the GitHub release tagged `ffmpeg-7.1.1-rs2` (`FFMPEG_TAG` in `fetch_runtime.py`).
+2. Upload the two zips to `https://dl.getreelstudio.com/source/ffmpeg-7.1.1-rs2/` (`FFMPEG_TAG` and `FFMPEG_BASE` in
+   `fetch_runtime.py`), the folder listed on https://getreelstudio.com/source.html.
 3. Copy the SHA-256 that `pack.py` printed into `PLATFORMS[...]["ffmpeg_zip"]["sha256"]` in `fetch_runtime.py` and
    into the table in `THIRD_PARTY.md`.
 4. If you changed a version in `sources.txt` or a flag in `build.sh`, bump `REV` in `build.sh` and `mirror_gpl_sources.py`
    and the tag/file names in `fetch_runtime.py`.
-5. `python packaging/mirror_gpl_sources.py` and attach everything in `release/gpl-sources/` to the same release.
+5. `python packaging/mirror_gpl_sources.py` and upload everything in `release/gpl-sources/` to the same folder, then
+   list each file on the source page. A new build (a new tag) gets its own folder; the old one stays online as long as
+   any installer that bundles it is downloadable.
 
 The zips are bit-for-bit what was built, but two independent builds are not guaranteed to hash equal (compiler
 timestamps, MSYS2 package updates); the pinned hash is the one of the files you upload.

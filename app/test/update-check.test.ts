@@ -1,24 +1,19 @@
-// "Update available" notice: version order, which releases count, the 24 h throttle, silent failure,
-// the privacy of the request, the site-first / GitHub-fallback order and the download-page allowlist
-// (main/update-check.ts).
+// "Update available" notice: version order, the site's answer, the 24 h throttle, silent failure, the
+// privacy of the request (one server, never GitHub) and the download-page allowlist (main/update-check.ts).
 import { describe, expect, it, vi } from 'vitest'
 import {
   CHECK_INTERVAL_MS,
   LATEST_URL,
-  RELEASES_API,
   SITE_ORIGIN,
   UPDATE_DEFAULTS,
   UPDATE_PAGE,
   allowedReleaseUrl,
-  askGitHub,
   askSite,
   checkForUpdate,
   createUpdateService,
   isDue,
   isNewer,
-  newestRelease,
   noticeToShow,
-  parseTag,
   siteLatest,
   type FetchLike,
   type UpdateState
@@ -26,18 +21,19 @@ import {
 import { loadSettings, saveSettings } from '../src/main/settings'
 import { setupPaths } from './helpers'
 
-const PAGE = (tag: string) => `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`
-const rel = (tag: string, extra: Record<string, unknown> = {}) => ({ tag_name: tag, draft: false, prerelease: true, html_url: PAGE(tag), ...extra })
+/** A GitHub release page, as an older version's fallback stored it. Never opened any more. */
+const GITHUB_PAGE = 'https://github.com/owner/reel-studio-app/releases/tag/v0.1.1'
+/** What GitHub's releases API answered. The site must never be mistaken for it. */
+const githubList = [{ tag_name: 'v0.9.0', draft: false, prerelease: true, html_url: GITHUB_PAGE }]
 /** What dl.getreelstudio.com/latest.json answers. */
 const latestJson = (version: string, extra: Record<string, unknown> = {}) => ({ version, url: UPDATE_PAGE, files: { win: 'x.exe', mac: 'x.dmg' }, ...extra })
 const DAY = CHECK_INTERVAL_MS
 const T0 = Date.UTC(2026, 9, 18, 12)
 
-function reply(status: number, body: unknown, headers: Record<string, string> = {}) {
+function reply(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: (n: string) => headers[n.toLowerCase()] ?? null },
     json: async () => (typeof body === 'string' ? JSON.parse(body) : body)
   }
 }
@@ -47,18 +43,16 @@ type Answer = () => Promise<Reply>
 const siteDown: Answer = async () => reply(500, 'oops')
 const offline: Answer = async () => Promise.reject(new TypeError('fetch failed'))
 
-/** A settings store in memory, plus a fake site and a fake GitHub that record every request. By default
- * the site answers with the running version (nothing new) and GitHub lists only v0.1.0. */
-function world(initial: Partial<UpdateState> = {}, answers: { site?: Answer; github?: Answer } = {}) {
+/** A settings store in memory, plus a fake site that records every request (any other URL is recorded too,
+ * then refused). By default the site answers with the running version (nothing new). */
+function world(initial: Partial<UpdateState> = {}, answers: { site?: Answer } = {}) {
   const site = answers.site ?? (async () => reply(200, latestJson('0.1.0')))
-  const github = answers.github ?? (async () => reply(200, [rel('v0.1.0')]))
   let state: UpdateState = { ...UPDATE_DEFAULTS, ...initial }
   let now = T0
   const calls: { url: string; headers: Record<string, string> }[] = []
   const fetch: FetchLike = async (url, init) => {
     calls.push({ url, headers: init.headers })
     if (url === LATEST_URL) return site()
-    if (url === RELEASES_API) return github()
     throw new Error(`unexpected request to ${url}`)
   }
   const logs: string[] = []
@@ -114,61 +108,24 @@ describe('version order', () => {
   })
 })
 
-describe('which GitHub releases count', () => {
-  it('only vX.Y.Z tags', () => {
-    expect(parseTag('v0.1.1')).toEqual([0, 1, 1])
-    for (const t of ['ffmpeg-7.1.1-rs2', '0.1.1', 'v0.1', 'v0.1.1-beta', 'v0.1.1 ', ' v0.1.1', 'V0.1.1', 'v1.2.3.4', 'vx.y.z', '', null, 5])
-      expect(parseTag(t)).toBeNull()
-  })
-  it('ignores the ffmpeg tag even though its numbers are bigger', () => {
-    expect(newestRelease([rel('ffmpeg-7.1.1-rs2'), rel('v0.1.0')])).toEqual({ version: '0.1.0', url: PAGE('v0.1.0') })
-  })
-  it('ignores drafts, and anything that does not say it is not a draft', () => {
-    expect(newestRelease([rel('v0.1.0'), rel('v0.2.0', { draft: true }), rel('v0.3.0', { draft: undefined }), rel('v0.4.0', { draft: 'false' })])).toEqual({
-      version: '0.1.0',
-      url: PAGE('v0.1.0')
-    })
-  })
-  it('counts pre-releases (every release is one for now) and picks the highest, in any order', () => {
-    expect(newestRelease([rel('v0.1.0'), rel('v0.1.10'), rel('v0.1.9')])?.version).toBe('0.1.10')
-  })
-  it('survives malformed data', () => {
-    for (const bad of [null, undefined, 'x', 42, {}, { message: 'Not Found' }, [null, 1, 'v0.2.0', [], { tag_name: 7 }]]) expect(newestRelease(bad)).toBeNull()
-    expect(newestRelease([null, rel('v0.1.1'), { draft: false }])?.version).toBe('0.1.1')
-  })
-  it('never passes on a link that is not our release page', () => {
-    expect(newestRelease([rel('v0.1.1', { html_url: 'https://evil.example/AidenJohnston/reel-studio-app/releases/tag/v0.1.1' })])).toEqual({
-      version: '0.1.1',
-      url: PAGE('v0.1.1')
-    })
-    expect(newestRelease([rel('v0.1.1', { html_url: undefined })])?.url).toBe(PAGE('v0.1.1'))
-  })
-})
-
 describe("the site's latest.json", () => {
   it('reads the version and the page, and ignores the rest', () => {
     expect(siteLatest(latestJson('0.1.3'))).toEqual({ version: '0.1.3', url: UPDATE_PAGE })
     expect(siteLatest({ version: '0.1.3', url: `${SITE_ORIGIN}/download?v=0.1.3` })).toEqual({ version: '0.1.3', url: `${SITE_ORIGIN}/download?v=0.1.3` })
-    expect(siteLatest({ version: '0.1.3', url: PAGE('v0.1.3') })).toEqual({ version: '0.1.3', url: PAGE('v0.1.3') })
   })
   it('a page that is not ours becomes the update page', () => {
-    for (const url of ['https://evil.example/update.html', 'http://getreelstudio.com/update.html', 'javascript:alert(1)', undefined, 7, ''])
+    for (const url of [GITHUB_PAGE, 'https://evil.example/update.html', 'http://getreelstudio.com/update.html', 'javascript:alert(1)', undefined, 7, ''])
       expect(siteLatest({ version: '0.1.3', url })).toEqual({ version: '0.1.3', url: UPDATE_PAGE })
   })
   it('only a plain X.Y.Z version counts', () => {
     for (const version of ['v0.1.3', '0.1', '0.1.3-beta.1', '0.1.3 ', 'latest', 13, null, undefined]) expect(siteLatest({ version, url: UPDATE_PAGE })).toBeNull()
   })
   it('survives malformed data', () => {
-    for (const bad of [null, undefined, 'x', 42, {}, [], [latestJson('0.1.3')], { message: 'Not Found' }, [rel('v0.1.3')]]) expect(siteLatest(bad)).toBeNull()
+    for (const bad of [null, undefined, 'x', 42, {}, [], [latestJson('0.1.3')], { message: 'Not Found' }, githubList]) expect(siteLatest(bad)).toBeNull()
   })
 })
 
 describe('download page allowlist', () => {
-  it('allows our GitHub release pages', () => {
-    expect(allowedReleaseUrl(PAGE('v0.1.1'))).toBe(PAGE('v0.1.1'))
-    expect(allowedReleaseUrl('https://github.com/AidenJohnston/reel-studio-app/releases/latest')).toBeTruthy()
-    expect(allowedReleaseUrl('https://github.com:443/AidenJohnston/reel-studio-app/releases/tag/v1.0.0')).toBe(PAGE('v1.0.0'))
-  })
   it('allows any page on getreelstudio.com', () => {
     expect(allowedReleaseUrl(UPDATE_PAGE)).toBe(UPDATE_PAGE)
     expect(allowedReleaseUrl('https://getreelstudio.com')).toBe('https://getreelstudio.com/')
@@ -177,21 +134,9 @@ describe('download page allowlist', () => {
     expect(allowedReleaseUrl('https://getreelstudio.com:443/update.html')).toBe(UPDATE_PAGE)
   })
   it.each([
-    'http://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.1',
-    'https://github.com.evil.example/AidenJohnston/reel-studio-app/releases/tag/v0.1.1',
-    'https://evil.example/https://github.com/AidenJohnston/reel-studio-app/releases/',
-    'https://api.github.com/repos/AidenJohnston/reel-studio-app/releases',
-    'https://gist.github.com/AidenJohnston/reel-studio-app/releases/x',
-    'https://github.com:8443/AidenJohnston/reel-studio-app/releases/tag/v0.1.1',
-    withUserInfo(PAGE('v0.1.1'), 'user', 'pw'), // https://user:pw at github.com/... (built so the export leak gate sees no e-mail address)
-    withUserInfo(PAGE('v0.1.1'), 'evil'),
-    'https://github.com/AidenJohnston/reel-studio-app/releases',
-    'https://github.com/AidenJohnston/reel-studio-app/releases/../../evil/repo/releases/x',
-    'https://github.com/AidenJohnston/reel-studio-app/releases/%2e%2e/%2e%2e/evil',
-    'https://github.com/AidenJohnston/reel-studio-app/releases\\..\\..\\evil',
-    'https://github.com/AidenJohnston/reel-studio-app-evil/releases/tag/v0.1.1',
-    'https://github.com/someoneelse/reel-studio-app/releases/tag/v0.1.1',
-    'https://github.com/AidenJohnston/reel-studio-app/archive/main.zip',
+    GITHUB_PAGE, // GitHub release pages were allowed before the site; no longer
+    'https://github.com/owner/reel-studio-app/releases/latest',
+    'https://api.github.com/repos/owner/reel-studio-app/releases',
     'http://getreelstudio.com/update.html',
     'https://getreelstudio.com.evil.example/update.html',
     'https://evil.example/getreelstudio.com/update.html',
@@ -206,7 +151,6 @@ describe('download page allowlist', () => {
     'ftp://getreelstudio.com/update.html',
     'javascript:alert(1)',
     'file:///C:/Windows/System32/calc.exe',
-    'github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.1',
     'getreelstudio.com/update.html',
     '//getreelstudio.com/update.html',
     ''
@@ -214,19 +158,18 @@ describe('download page allowlist', () => {
     expect(allowedReleaseUrl(url)).toBeNull()
   })
   it('refuses non-strings and absurdly long links', () => {
-    for (const v of [null, undefined, 1, {}, ['https://github.com/AidenJohnston/reel-studio-app/releases/x'], [UPDATE_PAGE]]) expect(allowedReleaseUrl(v)).toBeNull()
-    expect(allowedReleaseUrl(PAGE('v0.1.1') + '?' + 'a'.repeat(3000))).toBeNull()
+    for (const v of [null, undefined, 1, {}, [UPDATE_PAGE]]) expect(allowedReleaseUrl(v)).toBeNull()
     expect(allowedReleaseUrl(UPDATE_PAGE + '?' + 'a'.repeat(3000))).toBeNull()
   })
 })
 
-describe('the site first, GitHub only as a fallback', () => {
-  it('a newer version on the site: a notice with the site page, GitHub never asked', async () => {
+describe('the site is the only server', () => {
+  it('a newer version on the site: a notice with the site page', async () => {
     const w = world({}, { site: async () => reply(200, latestJson('0.1.1')) })
     expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
     expect(w.urls()).toEqual([LATEST_URL])
     expect(w.state()).toMatchObject({ updateCheckedAt: T0, updateLatest: { version: '0.1.1', url: UPDATE_PAGE } })
-    expect(w.logs).toEqual(['[update] checked (getreelstudio.com): newest 0.1.1, running 0.1.0'])
+    expect(w.logs).toEqual(['[update] checked: newest 0.1.1, running 0.1.0'])
   })
   it("the site's own download page is passed on", async () => {
     const w = world({}, { site: async () => reply(200, latestJson('0.1.1', { url: `${SITE_ORIGIN}/download` })) })
@@ -238,8 +181,8 @@ describe('the site first, GitHub only as a fallback', () => {
     const w2 = world({}, { site: async () => reply(200, { version: '0.1.1' }) })
     expect(await checkForUpdate(w2.deps)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
   })
-  it('the site says the running version: no notice, a finished check, GitHub not asked', async () => {
-    const w = world({}, { site: async () => reply(200, latestJson('0.1.0')), github: async () => reply(200, [rel('v0.9.0')]) })
+  it('the site says the running version: no notice, a finished check', async () => {
+    const w = world({}, { site: async () => reply(200, latestJson('0.1.0')) })
     expect(await checkForUpdate(w.deps)).toBeNull()
     expect(w.urls()).toEqual([LATEST_URL])
     expect(w.state().updateCheckedAt).toBe(T0)
@@ -250,28 +193,26 @@ describe('the site first, GitHub only as a fallback', () => {
   const siteFailures: [string, Answer][] = [
     ['server error', siteDown],
     ['not found', async () => reply(404, 'nope')],
+    ['rate limited', async () => reply(429, {})],
     ['offline', offline],
     ['timeout', async () => Promise.reject(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))],
     ['bad JSON', async () => reply(200, '{not json')],
     ['odd JSON', async () => reply(200, { message: 'hi' })],
-    ['a GitHub-shaped answer', async () => reply(200, [rel('v0.9.0')])],
+    ['a GitHub-shaped answer', async () => reply(200, githubList)],
     ['a v-prefixed version', async () => reply(200, latestJson('v0.1.1'))]
   ]
-  it.each(siteFailures)("site %s: GitHub is asked and GitHub's answer is used", async (_name, site) => {
-    const w = world({}, { site, github: async () => reply(200, [rel('v0.1.1'), rel('v0.1.0')]) })
-    expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: PAGE('v0.1.1') })
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API])
-    expect(w.logs[0]).toMatch(/^\[update\] site unreachable \(.+\): asking GitHub$/)
-    expect(w.logs[1]).toBe('[update] checked (GitHub): newest 0.1.1, running 0.1.0')
+  it.each(siteFailures)('site %s: no update offered, and GitHub (or anyone else) is never asked', async (_name, site) => {
+    const w = world({}, { site })
+    expect(await checkForUpdate(w.deps)).toBeNull()
+    expect(w.urls()).toEqual([LATEST_URL])
+    expect(w.urls().some((u) => u.includes('github'))).toBe(false)
+    expect(w.state()).toMatchObject({ updateCheckedAt: null, updateLatest: null })
+    expect(w.logs).toEqual([expect.stringMatching(/^\[update\] check failed \(.+\): trying again next launch$/)])
   })
-  it('the site is asked again, first, on the next check', async () => {
-    let siteUp = false
-    const w = world({}, { site: async () => (siteUp ? reply(200, latestJson('0.1.2')) : siteDown()), github: async () => reply(200, [rel('v0.1.1')]) })
-    expect((await checkForUpdate(w.deps))?.version).toBe('0.1.1')
-    siteUp = true
-    w.tick(DAY)
-    expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.2', url: UPDATE_PAGE })
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API, LATEST_URL])
+  it('a failing site keeps showing what an earlier check found (and still asks no one else)', async () => {
+    const w = world({ updateCheckedAt: T0 - DAY, updateLatest: { version: '0.1.1', url: UPDATE_PAGE } }, { site: siteDown })
+    expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
+    expect(w.urls()).toEqual([LATEST_URL])
   })
 })
 
@@ -293,13 +234,6 @@ describe('the 24 hour throttle', () => {
     w.tick(60_000)
     expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
     expect(w.calls).toHaveLength(1)
-  })
-  it('the same, when GitHub answered', async () => {
-    const w = world({}, { site: siteDown, github: async () => reply(200, [rel('v0.1.1'), rel('v0.1.0')]) })
-    expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: PAGE('v0.1.1') })
-    w.tick(60_000)
-    expect(await checkForUpdate(w.deps)).toEqual({ version: '0.1.1', url: PAGE('v0.1.1') })
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API])
   })
   it('after updating, the remembered version is no longer news', async () => {
     const w = world({ updateCheckedAt: T0, updateLatest: { version: '0.1.1', url: UPDATE_PAGE } })
@@ -326,21 +260,21 @@ describe('fails silently', () => {
     ['bad JSON', async () => reply(200, '{not json')],
     ['odd JSON', async () => reply(200, { message: 'hi' })]
   ]
-  it.each(failures)('%s (both servers): no notice, no throw', async (_name, answer) => {
-    const w = world({}, { site: answer, github: answer })
+  it.each(failures)('%s: no notice, no throw', async (_name, answer) => {
+    const w = world({}, { site: answer })
     await expect(checkForUpdate(w.deps)).resolves.toBeNull()
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API])
+    expect(w.urls()).toEqual([LATEST_URL])
   })
   it('a failed ask is not counted as a check, so the next launch tries again', async () => {
     let online = false
-    const w = world({}, { site: async () => (online ? reply(200, latestJson('0.1.1')) : offline()), github: offline })
+    const w = world({}, { site: async () => (online ? reply(200, latestJson('0.1.1')) : offline()) })
     await checkForUpdate(w.deps)
     expect(w.state().updateCheckedAt).toBeNull()
     expect(w.logs.at(-1)).toBe('[update] check failed (fetch failed): trying again next launch')
     online = true
     w.tick(1000)
     expect((await checkForUpdate(w.deps))?.version).toBe('0.1.1')
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API, LATEST_URL])
+    expect(w.urls()).toEqual([LATEST_URL, LATEST_URL])
   })
   it('a broken settings store does not throw either', async () => {
     const w = world()
@@ -350,7 +284,6 @@ describe('fails silently', () => {
     const slow: FetchLike = (_u, init) =>
       new Promise((_res, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'TimeoutError' }))))
     expect(await askSite(slow, '0.1.0', 30)).toEqual({ kind: 'failed', why: 'timeout' })
-    expect(await askGitHub(slow, '0.1.0', 30)).toEqual({ kind: 'failed', why: 'timeout' })
   })
   it('askSite never throws and names the reason', async () => {
     expect(await askSite(async () => reply(503, ''), '0.1.0')).toEqual({ kind: 'failed', why: 'HTTP 503' })
@@ -361,40 +294,16 @@ describe('fails silently', () => {
   })
 })
 
-describe('GitHub rate limit (reached only when the site is down)', () => {
-  it.each([
-    ['403 with remaining 0', reply(403, { message: 'API rate limit exceeded' }, { 'x-ratelimit-remaining': '0' })],
-    ['403 with retry-after', reply(403, {}, { 'retry-after': '60' })],
-    ['429', reply(429, {})]
-  ])('%s: quiet, and no more asking today', async (_n, r) => {
-    const w = world({}, { site: siteDown, github: async () => r })
-    expect(await checkForUpdate(w.deps)).toBeNull()
-    expect(w.state().updateCheckedAt).toBe(T0)
-    expect(w.logs.at(-1)).toBe('[update] GitHub rate limit: trying again tomorrow')
-    w.tick(DAY / 2)
-    await checkForUpdate(w.deps)
-    expect(w.urls()).toEqual([LATEST_URL, RELEASES_API])
-  })
-  it('keeps showing what an earlier check found', async () => {
-    const w = world({ updateCheckedAt: T0 - DAY, updateLatest: { version: '0.1.1', url: UPDATE_PAGE } }, { site: siteDown, github: async () => reply(429, {}) })
-    expect((await checkForUpdate(w.deps))?.version).toBe('0.1.1')
-  })
-})
-
 describe('the request carries nothing about the person', () => {
-  it('one GET to latest.json, two generic headers; GitHub is not asked when the site answers', async () => {
+  it('one GET to latest.json, two generic headers', async () => {
     const w = world()
     await checkForUpdate(w.deps)
     expect(w.calls).toEqual([{ url: 'https://dl.getreelstudio.com/latest.json', headers: { 'User-Agent': 'ReelStudio/0.1.0', Accept: 'application/json' } }])
   })
-  it('the fallback: one GET to the releases list (not /latest, which skips pre-releases), two generic headers', async () => {
+  it('the same single request when the site is down: nothing goes to GitHub', async () => {
     const w = world({}, { site: siteDown })
     await checkForUpdate(w.deps)
-    expect(w.calls).toEqual([
-      { url: 'https://dl.getreelstudio.com/latest.json', headers: { 'User-Agent': 'ReelStudio/0.1.0', Accept: 'application/json' } },
-      { url: 'https://api.github.com/repos/AidenJohnston/reel-studio-app/releases', headers: { 'User-Agent': 'ReelStudio/0.1.0', Accept: 'application/vnd.github+json' } }
-    ])
-    expect(RELEASES_API.endsWith('/releases')).toBe(true)
+    expect(w.calls).toEqual([{ url: 'https://dl.getreelstudio.com/latest.json', headers: { 'User-Agent': 'ReelStudio/0.1.0', Accept: 'application/json' } }])
   })
 })
 
@@ -410,17 +319,17 @@ describe('"Not now"', () => {
   it('shows a newer version at once', () => {
     expect(noticeToShow(s({ version: '0.1.0', at: T0 }), '0.1.0', T0 + 1000)).toEqual(latest)
   })
-  it('a stored link that is not ours is never shown', () => {
-    expect(noticeToShow({ ...s(null), updateLatest: { version: '0.1.1', url: 'https://evil.example/x' } }, '0.1.0', T0)).toBeNull()
-    expect(noticeToShow({ ...s(null), updateLatest: { version: '0.1.1', url: 'https://getreelstudio.com.evil.example/update.html' } }, '0.1.0', T0)).toBeNull()
+  it('a stored link that is not ours is never opened: the update page instead', () => {
+    for (const url of ['https://evil.example/x', 'https://getreelstudio.com.evil.example/update.html'])
+      expect(noticeToShow({ ...s(null), updateLatest: { version: '0.1.1', url } }, '0.1.0', T0)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
   })
-  it('a stored GitHub link from before the site still works', () => {
-    expect(noticeToShow({ ...s(null), updateLatest: { version: '0.1.1', url: PAGE('v0.1.1') } }, '0.1.0', T0)).toEqual({ version: '0.1.1', url: PAGE('v0.1.1') })
+  it('a stored GitHub link from an older version opens the update page instead', () => {
+    expect(noticeToShow({ ...s(null), updateLatest: { version: '0.1.1', url: GITHUB_PAGE } }, '0.1.0', T0)).toEqual({ version: '0.1.1', url: UPDATE_PAGE })
   })
 })
 
 describe('the service behind the buttons', () => {
-  function service(initial: Partial<UpdateState> = {}, answers?: { site?: Answer; github?: Answer }, active = true) {
+  function service(initial: Partial<UpdateState> = {}, answers?: { site?: Answer }, active = true) {
     const w = world(initial, answers)
     const opened: string[] = []
     const sent: unknown[] = []
@@ -428,17 +337,17 @@ describe('the service behind the buttons', () => {
     return { w, svc, opened, sent }
   }
 
-  it('Download opens only the site and our release pages, whatever the page asks', async () => {
+  it('Download opens only pages on the site, whatever the page asks', async () => {
     const { svc, opened } = service()
     await svc.open(UPDATE_PAGE)
     await svc.open(`${SITE_ORIGIN}/download?v=0.1.3`)
-    await svc.open(PAGE('v0.1.1'))
+    await expect(svc.open(GITHUB_PAGE)).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
     await expect(svc.open('https://evil.example/')).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
     await expect(svc.open('https://getreelstudio.com.evil.example/update.html')).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
     await expect(svc.open('http://getreelstudio.com/update.html')).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
     await expect(svc.open('file:///etc/passwd')).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
     await expect(svc.open({ toString: () => UPDATE_PAGE })).rejects.toMatchObject({ code: 'NOT_ALLOWED' })
-    expect(opened).toEqual([UPDATE_PAGE, `${SITE_ORIGIN}/download?v=0.1.3`, PAGE('v0.1.1')])
+    expect(opened).toEqual([UPDATE_PAGE, `${SITE_ORIGIN}/download?v=0.1.3`])
   })
   it('pushes a newer version to the window once', async () => {
     const { svc, sent } = service({}, { site: async () => reply(200, latestJson('0.1.1')) })
