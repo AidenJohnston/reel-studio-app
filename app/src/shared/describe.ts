@@ -3,7 +3,7 @@
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
 import { CAPTION_PRESETS, presetOf } from './caption-presets'
-import { kindOf, PACE_LABELS, ZOOM_KIND_LABELS, zoomKey, type CutStyle } from './cut-style'
+import { kindsByWords, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
 
@@ -162,9 +162,10 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
     else if (now.seed !== was?.seed) acts.push('picked other moments for the accents')
   }
   if (patch.zooms) {
-    const was = new Map((before.zooms ?? []).map((z) => [zoomKey(z), kindOf(z)]))
-    const changed = patch.zooms.filter((z) => was.has(zoomKey(z)) && was.get(zoomKey(z)) !== kindOf(z))
-    if (changed.length === 1) acts.push(`made a zoom-in ${ZOOM_KIND_LABELS[kindOf(changed[0])].toLowerCase()}`)
+    // one per stretch of words, as the drawer shows them
+    const was = kindsByWords(before.zooms)
+    const changed = [...kindsByWords(patch.zooms)].filter(([k, kinds]) => was.has(k) && JSON.stringify(was.get(k)) !== JSON.stringify(kinds))
+    if (changed.length === 1) acts.push(`made a zoom-in ${ZOOM_KIND_LABELS[changed[0][1][changed[0][1].length - 1]].toLowerCase()}`)
     else if (changed.length) acts.push(`changed ${changed.length} zoom-ins`)
   }
   if (patch.cover) {

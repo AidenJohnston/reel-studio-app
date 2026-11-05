@@ -74,6 +74,13 @@ export const zoomKey = (z: unknown): string => {
   return `${a?.from}>${a?.to}`
 }
 
+/** Each stretch of words' zoom-ins' kinds, in list order: the drawer's unit of change (one row per stretch). */
+export function kindsByWords(zooms: Zoom[] | undefined): Map<string, ZoomKind[]> {
+  const out = new Map<string, ZoomKind[]>()
+  for (const z of zooms ?? []) out.set(zoomKey(z), [...(out.get(zoomKey(z)) ?? []), kindOf(z)])
+  return out
+}
+
 /** A new seed in the engine's range (variation.py seed trials), never `old`: "Try other moments". */
 export function nextSeed(old: number | undefined, random: () => number = Math.random): number {
   for (;;) {

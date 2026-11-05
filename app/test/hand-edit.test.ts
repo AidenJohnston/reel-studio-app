@@ -126,6 +126,11 @@ describe('hand edits', () => {
     const once = applyHandEdit(v2, edit, words)
     expect(once.zooms).toEqual([{ ...z1, scale: 1.3, kind: 'drift' }, { anchor: { from: 'w2', to: 'w3' }, scale: 1.12, kind: 'drift' }])
     expect(applyHandEdit(once, edit, words)).toEqual(once)
+    // two zoom-ins on the same words with different kinds, both set to the kind the last one already had: still a change
+    const pair = project({ zooms: [{ anchor: { from: 'w2', to: 'w3' }, kind: 'punch' }, { anchor: { from: 'w2', to: 'w3' }, kind: 'snap' }] })
+    const quick = diffProject(pair, { ...pair, zooms: pair.zooms!.map((z) => ({ ...z, kind: 'snap' as const })) }, kept(pair), kept(pair))
+    expect(applyHandEdit(pair, parseHandEdit(quick), words).zooms?.map((z) => z.kind)).toEqual(['snap', 'snap'])
+    expect(countChanges(quick, words)).toBe(1)
     // the drawer never adds or removes a zoom-in, so main refuses an edit that would
     const empty = { set: [], words: { cut: [], keep: [] }, mirror: [] }
     expect(() => parseHandEdit({ ...empty, items: [{ list: 'zooms', key: 'w2>w3', item: null }] })).toThrow()

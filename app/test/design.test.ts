@@ -204,6 +204,9 @@ describe('version messages', () => {
     expect(describeChange(p, { cutStyle: undefined })).toBe('turned the set pace off')
     expect(describeChange(p, { zooms: [{ ...z, kind: 'drift' }, { anchor: { from: 'w4', to: 'w5' } }] })).toBe('made a zoom-in slow')
     expect(describeChange(p, { zooms: [{ ...z, kind: 'snap' }, { anchor: { from: 'w4', to: 'w5' }, kind: 'snap' }] })).toBe('changed 2 zoom-ins')
+    // two zoom-ins on the same words are one row in the drawer, so one change
+    const twice = base({ zooms: [z, { ...z, kind: 'snap' }] })
+    expect(describeChange(twice, { zooms: [{ ...z, kind: 'drift' }, { ...z, kind: 'drift' }] })).toBe('made a zoom-in slow')
   })
 })
 

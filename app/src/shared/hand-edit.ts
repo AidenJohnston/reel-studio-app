@@ -3,7 +3,7 @@
 // changes stay, and only what the person touched is changed on top. No Node or DOM imports.
 import type { ProjectJson, Word } from './api'
 import { keptIds, rangesKeepingOrder } from './cut'
-import { cutStyleProblem, withKind, zoomKey, zoomKindProblem, type Zoom } from './cut-style'
+import { cutStyleProblem, kindsByWords, withKind, zoomKey, zoomKindProblem, type Zoom } from './cut-style'
 
 /** A list whose items are told apart by a key, so an item is added, replaced or removed on its own. */
 export type ListName = 'broll' | 'sfx' | 'zooms' | 'captions.corrections' | 'captions.split' | 'captions.join'
@@ -68,7 +68,15 @@ export function diffProject(base: ProjectJson, edited: ProjectJson, keptBefore: 
     if (same(base[root], edited[root])) continue
     out.set.push(edited[root] === undefined ? { path: [root], unset: true } : { path: [root], value: edited[root] })
   }
-  for (const list of ['broll', 'sfx', 'zooms']) walk(base[list], edited[list], [list], out)
+  for (const list of ['broll', 'sfx']) walk(base[list], edited[list], [list], out)
+  // a zoom-in change is a kind for a stretch of words: compared over every zoom-in on them, since two on the same words
+  // with different kinds can both end on the kind that was last
+  const before = kindsByWords(base.zooms)
+  for (const [key, kinds] of kindsByWords(edited.zooms)) {
+    if (same(before.get(key), kinds)) continue
+    const { anchor } = edited.zooms!.find((z) => zoomKey(z) === key)!
+    out.items.push({ list: 'zooms', key, item: { anchor, kind: kinds[kinds.length - 1] } })
+  }
   for (const id of keptBefore) if (!keptAfter.has(id)) out.words.cut.push(id)
   for (const id of keptAfter) if (!keptBefore.has(id)) out.words.keep.push(id)
   const was = new Map((base.sources ?? []).map((s) => [s.id, s.mirror === true]))
