@@ -177,6 +177,16 @@ def cmd_inspect_render(args):
     return render_identity.inspect(_project(args), args.render_id)
 
 
+def cmd_moments(args):
+    from . import moments
+    project_file = _in_work(args, "project_file")
+    if args.mark:
+        return moments.mark(_project(args), project_file)
+    return moments.run(_project(args), root=Path(args.root) if args.root else None, draft=not args.no_draft,
+                       project_file=project_file, out=_in_work(args, "out"), job_id=args.job_id,
+                       parent=args.parent, merge_parent=args.merge_parent)
+
+
 def cmd_captions(args):
     from . import captions
     return captions.write_for_project(_project(args))
@@ -516,6 +526,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file")
     sp = add("inspect-render", cmd_inspect_render, "one render's own reports")
     sp.add_argument("--render-id", required=True)
+    sp = add("moments", cmd_moments, "stills of what the last edit changed, then the window around them, then the draft")
+    sp.add_argument("--mark", action="store_true", help="only record the project as it is as the state shown")
+    sp.add_argument("--no-draft", action="store_true", help="stop after the stills and the window")
+    sp.add_argument("--root")
+    sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to show")
+    sp.add_argument("--out", help="folder for the stills, window and draft (default versions/preview)")
+    sp.add_argument("--parent", type=int, help="as render's: the saved version this edit is based on")
+    sp.add_argument("--merge-parent", type=int, help="as render's: a second saved parent")
+    sp.add_argument("--job-id", help="as render's: the app job the draft belongs to")
     add("captions", cmd_captions, "write the caption file only (debug)")
     add("doctor", cmd_doctor, "check the install")
     sp = add("import-reference", cmd_import_reference, "import FCPXML or Premiere FCP7 XML")

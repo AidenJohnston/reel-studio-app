@@ -84,8 +84,12 @@ export function Outs({
   // Post to YouTube (main/posting.ts): a destination only while posting is on (REELSTUDIO_POSTING=1)
   const [posting] = usePostingStatus()
   const [postSheet, setPostSheet] = useState<{ video: string; version: number; durationSec: number | null } | null>(null)
-  // a post is being sent: Stop is the way out, not Esc or a click outside
-  const [postBusy, setPostBusy] = useState(false)
+  // a post is being sent: Stop is the way out, not Esc or a click outside. A ref read when Esc comes, set in the
+  // sheet's layout effect: state passed up through a passive effect let an Esc pressed just as Sending showed close it
+  const postBusy = useRef(false)
+  const setPostBusy = useCallback((busy: boolean) => {
+    postBusy.current = busy
+  }, [])
 
   const [caption, setCaption] = useState(() => posted(post))
   const savedCaption = useRef(posted(post))
@@ -506,7 +510,7 @@ export function Outs({
         </div>
       )}
       {postSheet && (
-        <Modal onClose={postBusy ? undefined : () => setPostSheet(null)} wide testid="post-dialog">
+        <Modal onClose={() => !postBusy.current && setPostSheet(null)} wide testid="post-dialog">
           <PostSheet
             video={postSheet.video}
             slug={slug}

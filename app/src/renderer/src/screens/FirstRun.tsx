@@ -1,6 +1,7 @@
 // The first run, staged in the Reel screen's own layout (ux-foundation-b.md section 4): a welcome; then the sample
 // is made in the player and the notes column the way an editor makes Version 1, so it shows everything the product
-// does; then the editor is chosen beside it; then the app opens on a new reel with no video yet.
+// does; on a Mac, then, the one thing it asks about (notifications); then the editor is chosen beside it; then the app
+// opens on a new reel with no video yet.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ProviderInfo } from '../../../shared/api'
 import { place, type Shape } from '../../../shared/phone-shapes'
@@ -16,6 +17,7 @@ import { createPlayhead, followVideo, usePlayhead, type Playhead } from '../comp
 import { useNotify } from '../App'
 import { Demo, freshSteps, type View } from '../components/first-run/demo'
 import { ModelLine } from '../components/first-run/ModelLine'
+import { NotifyRow, markNotifyAsked } from '../components/permissions'
 import { EDIT, RAW_LEN, TRANSCRIPT, tokens } from '../components/first-run/sample'
 import { sound } from '../components/first-run/sound'
 import { byKeyboard, reducedMotion } from '../components/motion'
@@ -37,6 +39,13 @@ const CAPTION = 'Good bread needs four things and a little time.'
 const EASE_IN_OUT = 'cubic-bezier(.77,0,.175,1)'
 const canFly = () => !reducedMotion() && !byKeyboard() && window.innerWidth > 860
 const LEAVE_MS = 200
+
+const HEADINGS: Record<Pane, string> = { sample: 'How a reel gets made', mac: 'Know when a video is ready', editor: 'Choose your editor' }
+const LEADS: Record<Pane, string> = {
+  sample: 'A raw take of someone talking, made into Version 1 the way your editor makes yours.',
+  mac: 'Your own videos take a few minutes. Your Mac can tell you when each one is ready, so you can leave it running.',
+  editor: 'Your editor picks your best takes, adds pictures and makes the changes you ask for, on your own Claude or ChatGPT plan.'
+}
 
 export function FirstRun({ onDone, platform }: { onDone: () => Promise<void>; platform: string }) {
   const computer = platform === 'darwin' ? 'Mac' : 'PC'
@@ -130,13 +139,17 @@ async function fly(src: string, { from, to, clip }: Flight): Promise<void> {
   )
 }
 
-/** The first run's three parts, named at the top of the notes column. */
-const WHERE = ['The sample', 'Your editor', 'Your reel']
+/**
+ * The first run's parts, named at the top of the notes column. Your Mac comes only where something needs asking: a Mac
+ * that has not chosen about notifications. The folder is never asked: a new install keeps its videos in Movies,
+ * which macOS does not guard, and an install that kept Documents already has access (main/paths.ts defaultRoot).
+ */
+const PANES = { sample: 'The sample', mac: 'Your Mac', editor: 'Your editor' } as const
 
 type Flight = { from: DOMRect; to: DOMRect; clip: string }
 /** Get started: where the welcome's middle reel and the player were, or no flight (reduced motion, keyboard, narrow). */
 type Start = { flight: Flight | null }
-type Pane = 'sample' | 'editor'
+type Pane = keyof typeof PANES
 
 function Stage({
   computer,
@@ -167,6 +180,21 @@ function Stage({
     [toks]
   )
   const [pane, setPane] = useState<Pane>('sample')
+  // Whether this computer asks about notifications (a Mac that has not chosen): read once, long before Continue.
+  const [askMac, setAskMac] = useState(false)
+  const [notifyOn, setNotifyOn] = useState(false)
+  useEffect(() => {
+    let live = true
+    reel.perm
+      .status()
+      .then((s) => live && setAskMac(s.notifications === 'off'))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+  const where: Pane[] = askMac ? ['sample', 'mac', 'editor'] : ['sample', 'editor']
+  const at = where.indexOf(pane)
   const [steps, setSteps] = useState<Step[]>(freshSteps)
   const [finished, setFinished] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -282,8 +310,12 @@ function Stage({
 
   // a step change moves a screen reader to its heading
   useEffect(() => {
-    if (pane === 'editor') heading.current?.focus({ preventScroll: true })
+    if (pane !== 'sample') heading.current?.focus({ preventScroll: true })
   }, [pane])
+  // Allow pressed and done: its pill is gone, so focus goes to Continue, in its place in the footer
+  useEffect(() => {
+    if (notifyOn && (document.activeElement === document.body || document.activeElement === null)) next.current?.focus({ preventScroll: true })
+  }, [notifyOn])
 
   const connected = (p: ProviderInfo) => setAi(p)
   // An editor already on from before counts as connected; one switched off while here does not.
@@ -419,19 +451,17 @@ function Stage({
               under the words; the step's button pinned at the foot */}
           <div className="notes-h fr-h">
             <ol className="fr-where" aria-label="Getting started" data-testid="first-run-where">
-              {WHERE.map((w, i) => (
-                <li key={w} aria-current={i === (pane === 'sample' ? 0 : 1) ? 'step' : undefined} className={i < (pane === 'sample' ? 0 : 1) ? 'done' : undefined}>
+              {[...where.map((p) => PANES[p]), 'Your reel'].map((w, i) => (
+                <li key={w} aria-current={i === at ? 'step' : undefined} className={i < at ? 'done' : undefined}>
                   {w}
                 </li>
               ))}
             </ol>
             <h2 ref={heading} tabIndex={-1} id="fr-h">
-              {pane === 'sample' ? 'How a reel gets made' : 'Choose your editor'}
+              {HEADINGS[pane]}
             </h2>
             <p className="fr-lead" data-testid="first-run-lead">
-              {pane === 'sample'
-                ? 'A raw take of someone talking, made into Version 1 the way your editor makes yours.'
-                : 'Your editor picks your best takes, adds pictures and makes the changes you ask for, on your own Claude or ChatGPT plan.'}
+              {LEADS[pane]}
             </p>
           </div>
           <div className={`fr-body${pane === 'sample' ? ' fr-log' : ''}`}>
@@ -553,6 +583,11 @@ function Stage({
                 </div>
               </div>
             </div>
+            {pane === 'mac' && (
+              <div className="fr-pick" data-testid="first-run-mac">
+                <NotifyRow onOn={() => setNotifyOn(true)} />
+              </div>
+            )}
             {pane === 'editor' && (
               <div className="fr-pick" data-testid="composer-connect">
                 <ConnectAI onConnected={connected} />
@@ -569,8 +604,22 @@ function Stage({
               </Button>
             )}
             {pane === 'sample' && finished && (
-              <Button ref={next} kind="primary" onClick={() => setPane('editor')} data-testid="demo-next">
+              <Button ref={next} kind="primary" onClick={() => setPane(where[1])} data-testid="demo-next">
                 Continue
+              </Button>
+            )}
+            {/* Not now is the skip: Settings keeps the switch, and the first Version 1 does not ask again */}
+            {pane === 'mac' && (
+              <Button
+                ref={next}
+                kind={notifyOn ? 'primary' : 'secondary'}
+                onClick={() => {
+                  markNotifyAsked()
+                  setPane('editor')
+                }}
+                data-testid={notifyOn ? 'mac-continue' : 'mac-skip'}
+              >
+                {notifyOn ? 'Continue' : 'Not now'}
               </Button>
             )}
             {pane === 'editor' && (

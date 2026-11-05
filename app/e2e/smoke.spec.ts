@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, SHOTS, dropFiles, launch, makeMedia, modelReady, passFirstRun, shot, openSettings, startReel } from './helpers'
+import { BASE, SHOTS, dropFiles, launch, makeMedia, modelReady, passFirstRun, shot, openSettings, startReel, toEditorStep } from './helpers'
 
 /** Each test starts on a fresh profile of its own, so neither depends on the order specs run in. */
 function freshProfile(name: string): { root: string; env: Record<string, string> } {
@@ -35,7 +35,7 @@ test('make a reel end to end', async () => {
   await expect(page.getByTestId('steps-list')).toBeVisible()
   await shot(page, '02-firstrun-sample')
   await page.getByTestId('demo-skip').click()
-  await page.getByTestId('demo-next').click()
+  await toEditorStep(page)
   await expect(page.getByRole('heading', { name: 'Choose your editor' })).toBeVisible()
   await modelReady(page)
   await shot(page, '03-firstrun-connect')

@@ -10,7 +10,8 @@ export interface InstagramSettings {
 
 export type InstagramSession =
   | { connected: false }
-  | { connected: true; accountId: string; username: string; expiresAt: number }
+  /** `picture`: the account's profile picture as a data URL, saved when it connected (absent if that failed). */
+  | { connected: true; accountId: string; username: string; expiresAt: number; picture?: string }
 
 export interface InstagramPublishInput {
   slug: string

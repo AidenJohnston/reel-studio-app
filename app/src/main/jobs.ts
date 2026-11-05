@@ -38,6 +38,8 @@ export type JobFn = (
   signal: AbortSignal,
   job: { id: string; owner: string | null }
 ) => Promise<{ summary: string; version?: number; chat?: ChatLine[]; outcome?: 'done' | 'failed'; made?: Pick<VersionMade, 'by' | 'summary'> }>
+/** Turns a moment's file into a playable URL of a copy the next moments run cannot overwrite (index.ts). */
+export type ToMoment = (slug: string, e: Extract<JobUpdate, { type: 'moment' }>) => Promise<string | null>
 
 interface Running {
   id: string
@@ -73,7 +75,9 @@ export function createJobManager(
   /** The updater refuses new work while it restarts to install (main/updater.ts). */
   assertCanStart: () => void = () => {},
   /** Background work that yields while any job runs (footage-index.ts: indexing Library footage). */
-  idleWork?: IdleWork
+  idleWork?: IdleWork,
+  /** Pictures of what the AI just changed, before its draft: a playable URL of each (live-video.ts). */
+  toMoment?: ToMoment
 ) {
   const jobs = new Map<string, Running>()
 
@@ -132,6 +136,8 @@ export function createJobManager(
     let open = true
     let tracker = new ProgressTracker(progressKind, 0, history)
     let owner: ProjectOwner | null = null
+    // moments are copied one after another, so they arrive in the order they were made
+    let moments: Promise<void> = Promise.resolve()
     let phase: Phase | undefined
     const rows = kind === 'first-edit' ? createFirstEditSteps() : null
     if (rows) job.steps = rows.steps()
@@ -226,9 +232,23 @@ export function createJobManager(
             const r = e
             if (!r.draft) finals.add(r.version)
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
+            // after the pictures made before it: a draft takes their place on screen, so none may land after it
+            const inOrder = moments.then(() => video)
+            pending.push(inOrder.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else if (e.type === 'trace') log(`[job ${kind}] ${e.text}`)
+          else if (e.type === 'moment') {
+            if (!slug || !toMoment) return
+            const m = e
+            moments = moments.then(() => toMoment(slug, m).catch(() => null)).then((url) => {
+              // Stop pressed: the engine may still write a line before it is gone, and the job has not ended yet
+              if (!url || !open || abort.signal.aborted) return
+              send(m.kind === 'still'
+                ? { jobId: id, slug, type: 'moment', kind: 'still', t: m.t, image: url, run: m.run }
+                : { jobId: id, slug, type: 'moment', kind: 'window', from: m.from, to: m.to, video: url, run: m.run })
+            })
+            pending.push(moments)
+          }
           else {
             if (rows) {
               rows.result('listen', `${e.words.length} words`)

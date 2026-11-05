@@ -5,6 +5,8 @@ import { launch } from './helpers'
 import { detectLayout } from './layout-audit/detect'
 
 const CELL = 'position:absolute;width:300px;height:140px;font:14px/18px system-ui'
+// a 1×1 GIF, so the picture button has a picture
+const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const at = (i: number): string => `left:${20 + (i % 4) * 310}px;top:${20 + Math.floor(i / 4) * 150}px`
 const cells = [
   // text-overflow: spills out of its box / truncated with an ellipsis and a title
@@ -38,9 +40,15 @@ const cells = [
   // text runs on under the button, but nothing is drawn past the line's own box
   `<div style="display:flex;align-items:center;gap:12px;width:300px"><div style="min-width:0;display:grid;grid-template-columns:minmax(0,1fr)"><span id="own-ellipsis" title="A few seconds left. It writes down what you say, on this Mac." style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A few seconds left. It writes down what you say, on this Mac.</span></div><span style="flex:1"></span><button id="beside" style="flex:none;height:30px;width:90px">Not now</button></div>`,
   // imbalance: the focal object sits at the left of its column
-  `<div id="column" style="width:300px;height:100px"><div id="focal" style="width:60px;height:40px;background:#ccc"></div></div>`
+  `<div id="column" style="width:300px;height:100px"><div id="focal" style="width:60px;height:40px;background:#ccc"></div></div>`,
+  // button-shape: an icon button with rounded-square corners, and half a pill with no other half / near misses: a
+  // circle beside it, an underlined tab and the two ends of a split pill
+  `<button id="square" style="width:32px;height:32px;padding:0;border:0;border-radius:8px;background:transparent">x</button><button id="circle" style="width:32px;height:32px;padding:0;margin-left:40px;border:0">x</button><div style="margin-top:12px"><button id="tab" style="height:34px;width:60px;border:0;border-radius:0;background:none;box-shadow:inset 0 -2px 0 #000">Cut</button><span style="display:inline-flex;margin-left:20px"><button id="split-a" style="height:26px;width:60px;border:0;border-radius:999px 0 0 999px;box-shadow:inset 0 0 0 1px #999">Here</button><button id="split-b" style="height:26px;width:24px;border:0;border-radius:0 999px 999px 0;box-shadow:inset 0 0 0 1px #999">v</button></span><button id="half" style="height:26px;width:60px;margin-left:20px;border:0;border-radius:999px 0 0 999px;box-shadow:inset 0 0 0 1px #999">Alone</button></div>`,
+  // a hairline text button with 8 px corners / near misses: a row as wide as its list, a picture, a card
+  `<button id="rect" style="height:30px;width:90px;border:0;border-radius:8px;box-shadow:inset 0 0 0 1px #999">Choose</button><div style="width:280px;margin-top:6px"><button id="row" style="display:block;width:100%;height:32px;border:0;border-radius:8px;background:#eee">A row</button></div><button id="tile" style="width:40px;height:40px;padding:0;border:0;border-radius:8px"><img src="${PIXEL}" width="40" height="40" alt=""></button><button id="card" style="width:120px;height:60px;border:0;border-radius:14px;background:#eee">Card</button>`
 ]
-const PAGE = `<!doctype html><html><body style="margin:0;overflow:hidden">${cells.map((c, i) => `<div style="${CELL};${at(i)}">${c}</div>`).join('')}</body></html>`
+// every other button on the page is a pill, as the app's are, so only the button-shape cells have square corners
+const PAGE = `<!doctype html><html><head><style>button { border-radius: 999px }</style></head><body style="margin:0;overflow:hidden">${cells.map((c, i) => `<div style="${CELL};${at(i)}">${c}</div>`).join('')}</body></html>`
 
 test('fails if a layout detector misses its case or flags the near miss beside it', async () => {
   const { app, page } = await launch()
@@ -61,7 +69,10 @@ test('fails if a layout detector misses its case or flags the near miss beside i
         'small-target #tiny',
         'popover-placement #far-menu',
         'popover-placement #far-menu / #trigger',
-        'imbalance #focal / #column'
+        'imbalance #focal / #column',
+        'button-shape #square',
+        'button-shape #rect',
+        'button-shape #half'
       ].sort()
     )
 

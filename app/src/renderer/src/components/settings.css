@@ -105,7 +105,7 @@ button.ext-link:disabled { cursor: default; opacity: .5; }
 .mnote.warn { color: var(--amber); }
 .mnote .icon { flex: none; margin-top: 1px; }
 .mpick {
-  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 11px; border: 0; border-radius: var(--r-sm);
+  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 13px; border: 0; border-radius: 999px;
   background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); font-weight: 600; color: var(--ink);
   white-space: nowrap; cursor: pointer;
 }

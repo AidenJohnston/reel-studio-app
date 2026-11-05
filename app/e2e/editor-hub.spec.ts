@@ -7,7 +7,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FakeHub } from '../../ai/test/fakeHub'
-import { BASE, launch, modelReady } from './helpers'
+import { BASE, launch, modelReady, toEditorStep } from './helpers'
 
 const SIZES: [number, number][] = [[1100, 720], [1280, 820], [1512, 982], [1920, 1080]]
 const SHOTS = process.env.REELSTUDIO_EDITOR_SHOTS
@@ -62,7 +62,7 @@ test('CLIProxyAPI is found from its config and is the recommended first row', as
   test.setTimeout(120_000)
   await page.getByTestId('get-started').click()
   await page.getByTestId('demo-skip').click()
-  await page.getByTestId('demo-next').click()
+  await toEditorStep(page)
   const row = page.getByTestId('hub-row')
   await expect(row).toHaveAttribute('data-state', 'ready')
   await expect(row).toContainText('CLIProxyAPI')

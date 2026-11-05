@@ -11,6 +11,7 @@ export type Detector =
   | 'small-target'
   | 'popover-placement'
   | 'imbalance'
+  | 'button-shape'
 
 export type Severity = 'P1' | 'P2' | 'P3'
 
@@ -751,6 +752,74 @@ export function detectLayout(opts: DetectOptions): { findings: RawFinding[]; all
         )
       }
     }
+  }
+
+  // ---- 10. button-shape ----------------------------------------------------------------------------
+  // spec.md section 1: a text button is a pill and an icon button a circle; no rounded squares. Checked on every
+  // button laid out, shown or not, so a control that appears on hover (the player's scrub row) is checked too.
+  // Left out: rows that fill their list (nav, menus, pickers), which the spec gives a soft wash; anything taller
+  // than 48 px (cards and tiles); a button that is mostly a picture, whose shape is the picture's; tabs, which draw
+  // an underline, not a box.
+  // A drawn box: a fill, a ring (a box-shadow with no offset and a spread, the app's hairline) or a border all round.
+  // A tab's underline (inset 0 -2px 0) is not one.
+  const clear = (c: string): boolean => /rgba\(\d+, \d+, \d+, 0\)|transparent/.test(c)
+  const ring = (shadow: string): boolean =>
+    shadow !== 'none' &&
+    shadow.split(/,(?![^(]*\))/).some((one) => {
+      const color = /rgba?\([^)]*\)/.exec(one)?.[0] ?? ''
+      const [x, y, , spread] = (one.replace(color, '').match(/-?[\d.]+px/g) ?? []).map(parseFloat)
+      return !clear(color) && x === 0 && y === 0 && (spread ?? 0) > 0
+    })
+  const painted = (s: CSSStyleDeclaration): boolean =>
+    !clear(s.backgroundColor) ||
+    s.backgroundImage !== 'none' ||
+    ring(s.boxShadow) ||
+    ['top', 'right', 'bottom', 'left'].every((e) => parseFloat(s.getPropertyValue(`border-${e}-width`)) > 0 && !clear(s.getPropertyValue(`border-${e}-color`)))
+  const cornerPx = (v: string, side: number): number => {
+    const first = v.split(' ')[0]
+    return first.endsWith('%') ? (parseFloat(first) / 100) * side : parseFloat(first) || 0
+  }
+  for (const el of Array.from(document.querySelectorAll('button, [role="button"], a.btn'))) {
+    if (!(el instanceof HTMLElement) || !el.checkVisibility({ visibilityProperty: true })) continue
+    if (el.parentElement?.closest('button, [role="button"]')) continue
+    const s = css(el)
+    if (s.display === 'inline' || s.display === 'contents') continue
+    const b = el.getBoundingClientRect()
+    if (b.width < 1 || b.height < 1 || b.height > 48) continue
+    const side = Math.min(b.width, b.height)
+    const [tl, tr, br, bl] = (['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'] as const).map((k) => cornerPx(s[k], side))
+    const round = (c: number): boolean => c >= side / 2 - 1
+    // a pill or a circle
+    if (round(tl) && round(bl) && round(tr) && round(br)) continue
+    // one end of a split pill (the moment chip and its menu): round at its own end, meeting its twin at the other
+    const meets = (n: Element | null, side: 'left' | 'right'): boolean => {
+      if (!n?.matches('button, [role="button"]')) return false
+      const nb = n.getBoundingClientRect()
+      return side === 'right' ? Math.abs(nb.left - b.right) <= 1.5 : Math.abs(nb.right - b.left) <= 1.5
+    }
+    if ((round(tl) && round(bl) && meets(el.nextElementSibling, 'right')) || (round(tr) && round(br) && meets(el.previousElementSibling, 'left'))) continue
+    const r = Math.min(tl, tr, br, bl)
+    const media = Array.from(el.querySelectorAll('img, video, canvas')).some((m) => {
+      const mb = m.getBoundingClientRect()
+      return mb.width * mb.height >= 0.7 * b.width * b.height
+    })
+    if (media) continue
+    const squareish = b.width / b.height < 1.5
+    if (squareish ? r <= 0 && !painted(s) : !painted(s)) continue
+    if (!squareish && el.parentElement) {
+      const ps = css(el.parentElement)
+      const inner = el.parentElement.clientWidth - (parseFloat(ps.paddingLeft) || 0) - (parseFloat(ps.paddingRight) || 0)
+      if (b.width >= 0.9 * inner) continue
+    }
+    report(
+      {
+        detector: 'button-shape',
+        severity: 'P2',
+        detail: `a ${Math.round(b.width)}×${Math.round(b.height)} button with ${Math.round(r)} px corners: make it a ${squareish ? 'circle' : 'pill'} (border-radius: 999px)`,
+        boxes: [toBox(b)]
+      },
+      el
+    )
   }
 
   return { findings, allowed }

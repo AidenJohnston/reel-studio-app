@@ -152,11 +152,14 @@ look on PATH / repo-relative.
 
 ```
 {"event":"progress","stage":"transcribe","pct":42,"message":"Listening to your video"}
+{"event":"progress","stage":"moments","pct":40,"message":"Here's your change","ready":{"kind":"still","t":2.4,"file":"..."}}
 {"event":"done","result":{...}}
 {"event":"error","code":"NO_AUDIO","message":"<developer detail>","userMessage":"This video has no sound. Try a different file."}
 ```
 
-Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain.
+Exit code 0 on done, 1 on error. The `message` in progress events is user-facing and plain. A progress
+event may carry `ready`, a file the app can show right away: `{"kind":"still","t":<output s>,"file"}` or
+`{"kind":"window","from","to","file"}` (only `moments` sends them).
 
 | command | does |
 |---|---|
@@ -169,6 +172,7 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
+| `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
 | `frames [--render-id <id>] --times t1,t2,... [--words w1,...]` | PNG stills for the AI to look at. With `--render-id`, from that render; it refuses a render a newer one replaced. Without, stills of the edit (a note's copy with `--project-file`): cut from the newest render that still shows it, or drawn straight from the project when none does |
 | `inspect-render --render-id <id>` | that render's own verify result, caption boxes, b-roll records, segments and word times (docs/versions.md) |
 | `search-images`, `fetch-image`, `download-media` | find a freely licensed image, fetch one by URL, download a video or song from a link |
@@ -346,7 +350,9 @@ transparent layer. No CDN is used at run time; any JS is vendored.
 export type AgentEvent =
   | { type: 'status'; message: string; pct?: number }        // plain words, shown in the Working screen / chat
   | { type: 'tool'; name: string; summary: string }           // e.g. "Added b-roll on 'twenty bucks'"
-  | { type: 'render'; version: number; draft: boolean };
+  | { type: 'render'; version: number; draft: boolean }
+  | { type: 'moment'; kind: 'still'; t: number; file: string }              // what an AI reply changed, before its draft
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string };
 export interface AgentResult { summary: string; version: number; styleRulesAdded: string[]; changed: string[] }
 export interface ScriptResult { hook: string; script: string; onScreenText: string[] }
 

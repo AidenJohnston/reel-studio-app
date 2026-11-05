@@ -86,7 +86,7 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
-import { createLiveVideos } from './live-video'
+import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
@@ -98,7 +98,7 @@ import { createWorkGate } from './work-gate'
 import { TikTokService } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
-import { registerInstagramIpc } from './instagram-ipc'
+import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
@@ -143,6 +143,10 @@ import { setupPosting } from './posting-ipc'
 import { createWindowHolder } from './window-holder'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
+// Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
+// run on Windows walks a Mac's first run. Notifications and folder access follow PERM_PLATFORM.
+const PERM_FAKES = TEST ? parseFakes(process.env.REELSTUDIO_TEST_PERMISSIONS) : undefined
+const PERM_PLATFORM: string = PERM_FAKES?.platform ?? process.platform
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
 const SELF_TEST = selfTestArgs(process.argv)
 // Stable or nightly, from the version alone (shared/channel.ts). The packaged name already differs per channel.
@@ -329,7 +333,9 @@ const jobs = createJobManager(
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
   () => updates.assertCanStartWork(),
-  footageIndex
+  footageIndex,
+  // and so do the pictures of each change made before its draft
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
@@ -810,7 +816,13 @@ function registerIpc(): void {
       return image.toJPEG(90)
     }
   })
-  registerInstagramIpc({ handle, service: instagram, dev: DEV_PROVIDERS && !TEST, saveSettings })
+  registerInstagramIpc({
+    handle,
+    service: instagram,
+    dev: DEV_PROVIDERS && !TEST,
+    saveSettings,
+    testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
+  })
   app.on('before-quit', () => { instagram.stop() })
   handle('app:info', () => appInfo())
   handle('app:setModels', async (_e, m: unknown) => {
@@ -875,10 +887,10 @@ function registerIpc(): void {
     perms.markTouched()
     const s = await loadSettings()
     // Notifications start off on a new Mac, so the first Version 1 asks for them (screens/Reel.tsx notifyAsk).
-    const patch = process.platform === 'darwin' && s.notifications === null ? { notifications: false } : {}
+    const patch = PERM_PLATFORM === 'darwin' && s.notifications === null ? { notifications: false } : {}
     const next = await saveSettings({ firstRunDone: true, firstRunAgain: false, ...patch })
     firstRunAgainAtLaunch = false // a reset pressed later in this launch waits for the next one
-    notificationsOn = notificationsWanted(next, process.platform)
+    notificationsOn = notificationsWanted(next, PERM_PLATFORM)
   })
   handle('app:openFolder', async (_e, p: string) => {
     if (TEST) return
@@ -942,7 +954,7 @@ function registerIpc(): void {
   handle('perm:openSettings', (_e, pane: unknown) => perms.openSettings(pane))
   handle('perm:setNotifications', async (_e, on: unknown) => {
     const st = await perms.setNotifications(on === true)
-    notificationsOn = notificationsWanted(await loadSettings(), process.platform)
+    notificationsOn = notificationsWanted(await loadSettings(), PERM_PLATFORM)
     return st
   })
 
@@ -1872,9 +1884,9 @@ app.whenReady().then(async () => {
   const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log, (slug) => jobs.reopen(slug))
   // Settings › Advanced › Reset first run asks for the first run at the next launch (settings-sections)
   firstRunAgainAtLaunch = settings.firstRunAgain
-  notificationsOn = notificationsWanted(settings, process.platform)
+  notificationsOn = notificationsWanted(settings, PERM_PLATFORM)
   perms = createPermissions({
-    platform: process.platform,
+    platform: PERM_PLATFORM,
     root: reelStudioRoot,
     rootDisplay: () => rootDisplay(reelStudioRoot()),
     touched: settings.firstRunDone,
@@ -1884,7 +1896,7 @@ app.whenReady().then(async () => {
     notificationsSupported: () => Notification.isSupported(),
     showTestNotification,
     openPane,
-    fakes: TEST ? parseFakes(process.env.REELSTUDIO_TEST_PERMISSIONS) : undefined
+    fakes: PERM_FAKES
   })
   if (TEST) Object.assign(globalThis, { __reelPermFakes: perms.fakes, __reelPermLog: paneLog })
   // reading the queues and the exports folder reads the Reel Studio folder, which a first run has not made yet
@@ -1901,7 +1913,8 @@ app.whenReady().then(async () => {
       dev: DEV_PROVIDERS,
       secretStore: safeStorage,
       roleModels: async () => (await loadSettings()).models,
-      cliEnv: cliBaseEnv
+      cliEnv: cliBaseEnv,
+      moments: true
     },
     log
   )

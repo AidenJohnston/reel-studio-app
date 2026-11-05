@@ -14,7 +14,10 @@
 .rail .tb-side { width: 124px; }
 .platform-win32.rail .tb-side, .platform-linux.rail .tb-side { width: 64px; }
 .wordmark { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 600; letter-spacing: -.005em; white-space: nowrap; transition: opacity 150ms var(--ease-out); pointer-events: none; }
-.logo { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; }
+/* The mark sits bare beside the name, as icons do (spec section 1: no icon in a tile). The welcome keeps its large
+   tile (first-run.css .w-logo): there it stands for the app's icon, which the system draws as a rounded square. */
+.logo { width: 22px; height: 22px; color: var(--ink); display: grid; place-items: center; flex: none; }
+.logo .logo-svg { width: 20px; height: 20px; }
 .rail .wordmark { opacity: 0; }
 .tb-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 12px; padding: 0 var(--gutter); }
 .platform-win32 .tb-main { padding-right: 150px; }
@@ -59,7 +62,8 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .nav button.on { background: rgba(22, 30, 26, .07); color: var(--ink); }
 .nav button.on .icon { color: var(--ink); }
 @media (hover: hover) and (pointer: fine) { .nav button:not(.on):hover { background: rgba(22, 30, 26, .04); color: var(--ink); } }
-.rail .nav button { width: 40px; padding: 0 12px; }
+/* folded to the rail, a row is an icon button, so its wash is a capsule, not a rounded square */
+.rail .nav button { width: 40px; padding: 0 12px; border-radius: 999px; }
 /* New reel: a plain row with a plus at the top, like T3's New thread, so it never competes with Share */
 .nav .new-reel { margin-bottom: 8px; color: var(--ink); }
 .nav .new-reel .icon { color: var(--ink-2); }

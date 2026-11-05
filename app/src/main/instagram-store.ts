@@ -20,8 +20,17 @@ export interface InstagramCredentials {
   issuedAt: number
   accountId: string
   username: string
+  /** The profile picture as a data URL (instagram.ts picture). Connections made before it was saved have none. */
+  picture?: string
   appId: string
   brokerUrl: string
+}
+
+const PICTURE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/
+/** A saved profile picture: a data URL of a few hundred kilobytes at most (instagram.ts PICTURE_MAX_BYTES). */
+function picture(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 1_000_000 || !PICTURE.test(value)) return localDataError()
+  return value
 }
 
 export type PublishReceipt =
@@ -60,7 +69,8 @@ export class InstagramTokenStore {
       const c = object(JSON.parse(this.secrets.decryptString(bytes)))
       return {
         accessToken: text(c.accessToken), expiresAt: positive(c.expiresAt), issuedAt: positive(c.issuedAt),
-        accountId: id(c.accountId), username: text(c.username), appId: id(c.appId), brokerUrl: text(c.brokerUrl)
+        accountId: id(c.accountId), username: text(c.username), ...(c.picture === undefined ? {} : { picture: picture(c.picture) }),
+        appId: id(c.appId), brokerUrl: text(c.brokerUrl)
       }
     } catch { return localDataError() }
   }

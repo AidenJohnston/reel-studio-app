@@ -203,6 +203,9 @@ export interface CreateAIOptions {
   checkerHarnessOverride?: Harness;
   finalRender?: boolean;
   maxSteps?: number;
+  /** draw stills of what each reply of the AI changed, then the 2 s around them, then the draft, while it works
+   * (moments.ts); each arrives as a `moment` event. The app turns it on. */
+  moments?: boolean;
 }
 
 // claude-cli = the person's own Claude Code app, offered to everyone. It is never called "Claude Code" on its own:
@@ -271,7 +274,7 @@ export function createAI(opts: CreateAIOptions) {
     return run;
   }
   const stockSearch = new StockSearch({ settingsDir: opts.settingsDir, key: stockKey, fetchImpl: opts.fetch });
-  const deps = (host: EngineHost, owner?: string, stuck?: () => unknown): editor.EditorDeps => ({ host, owner, stuck, prompts, style, stockSearch, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup });
+  const deps = (host: EngineHost, owner?: string, stuck?: () => unknown): editor.EditorDeps => ({ host, owner, stuck, prompts, style, stockSearch, fetchImpl: opts.fetch, finalRender: opts.finalRender, maxSteps: opts.maxSteps, tokenBudget: opts.tokenBudget, lookup: opts.lookup, moments: opts.moments });
   function edit<T>(owner: string | undefined, run: (d: editor.EditorDeps) => Promise<T>): Promise<T> {
     const engine = editHost(opts.host, owner);
     return engine.settle(run(deps(engine.host, owner, engine.stuck)));

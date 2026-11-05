@@ -19,14 +19,13 @@ A1's render applies each span as a crop-and-scale of the cut video about (cx, cy
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from .compose_util import fmt_of, log, word_end, word_start
 
 try:
     from .render_ctx import ZoomSpan
 except ImportError:  # pragma: no cover
-    from dataclasses import dataclass
-
     @dataclass
     class ZoomSpan:  # type: ignore[no-redef]
         t0: float
@@ -99,10 +98,9 @@ def face_drift(scale: float, cx: float, cy: float, eyes: tuple, W: int, H: int) 
     return (scale - 1) * math.hypot(eyes[0] - fx, eyes[1] - fy)
 
 
-def build_zooms(ctx, with_broll: bool = True) -> list:
-    """project.zooms -> [ZoomSpan] on the output clock, sorted, non-overlapping."""
-    W, H, fps = fmt_of(ctx)
-    spans = []
+def _anchored(ctx, fps: float):
+    """(index, t0, t1, scale, kind, last word's end) for every zoom that draws, before the spans meet
+    each other: from its first word to the end of its last word plus TAIL, on the output clock, unrounded."""
     for i, z in enumerate((ctx.project or {}).get("zooms") or []):
         anc = z.get("anchor") or {}
         a, b = anc.get("from"), anc.get("to") or anc.get("from")
@@ -122,27 +120,39 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
         scale = min(MAX_SCALE, max(1.0, float(z.get("scale", default_scale) or default_scale)))
         if scale <= 1.001 or t1 - t0 < 1.0 / fps:
             continue
-        focus = z.get("focus")
-        snap = kind == "snap"
-        eyes = None
-        if snap or not focus:
-            from .broll import output_face_union
-            fx, fy, fw, fh = output_face_union(ctx, t0, t1)
-            eyes = (fx + fw / 2, fy + fh / 2 - EYE_BIAS * fh)
-        if focus:      # [fx, fy] as fractions of the frame
-            cx, cy = float(focus[0]) * W, float(focus[1]) * H
-        else:
-            cx, cy = eyes
-        cx, cy = clamp_centre(scale, cx, cy, W, H)
-        if snap and face_drift(scale, cx, cy, eyes, W, H) > MAX_FACE_DRIFT * W:
-            log(f"zoom {i}: its fixed point is too far from the face to snap; punching in hard")
-            snap = False
-        if kind == "drift":
-            ramps = (0, 0)  # resolved after overlap, b-roll and duration clipping
-        else:
-            ramps = (z.get("resolvedRampFrames", round(SNAP_IN * fps)), round(SNAP_OUT * fps)) if snap else ()
-        spans.append(ZoomSpan(round(t0 * fps) / fps, round(t1 * fps) / fps, scale, round(cx, 1), round(cy, 1),
-                              *ramps, last_word_end=last_word_end, kind=kind, blur=snap))
+        yield i, t0, t1, scale, kind, last_word_end
+
+
+def _centre(ctx, z: dict, kind: str, scale: float, t0: float, t1: float, W: int, H: int) -> tuple:
+    """(cx, cy, snaps): the zoom's centre, and whether it eases in and out. A snap whose fixed point
+    would sweep the face across the frame (MAX_FACE_DRIFT) punches in hard instead."""
+    focus = z.get("focus")
+    snap = kind == "snap"
+    eyes = None
+    if snap or not focus:
+        from .broll import output_face_union
+        fx, fy, fw, fh = output_face_union(ctx, t0, t1)
+        eyes = (fx + fw / 2, fy + fh / 2 - EYE_BIAS * fh)
+    if focus:      # [fx, fy] as fractions of the frame
+        cx, cy = float(focus[0]) * W, float(focus[1]) * H
+    else:
+        cx, cy = eyes
+    cx, cy = clamp_centre(scale, cx, cy, W, H)
+    if snap and face_drift(scale, cx, cy, eyes, W, H) > MAX_FACE_DRIFT * W:
+        snap = False
+    return cx, cy, snap
+
+
+def _ramps(z: dict, kind: str, snap: bool, fps: float) -> tuple:
+    if kind == "drift":
+        return (0, 0)  # resolved after overlap, b-roll and duration clipping
+    return (z.get("resolvedRampFrames", round(SNAP_IN * fps)), round(SNAP_OUT * fps)) if snap else ()
+
+
+def _settle(ctx, spans: list, with_broll: bool, W: int, H: int, fps: float) -> list:
+    """Sorts the spans and applies the rules between them: hold under a face-hiding b-roll, a later
+    zoom cuts an earlier one short, no motion across a cut, nothing past the end; then the variation's
+    static framing between them."""
     spans.sort(key=lambda s: s.t0)
     if with_broll and spans:
         try:
@@ -195,3 +205,41 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
                 resolved.append(ZoomSpan(a, b, base["scale"], cx, cy))
         return sorted(resolved, key=lambda z: z.t0)
     return out
+
+
+def build_zooms(ctx, with_broll: bool = True) -> list:
+    """project.zooms -> [ZoomSpan] on the output clock, sorted, non-overlapping."""
+    W, H, fps = fmt_of(ctx)
+    spans = []
+    for i, t0, t1, scale, kind, last_word_end in _anchored(ctx, fps):
+        z = ctx.project["zooms"][i]
+        cx, cy, snap = _centre(ctx, z, kind, scale, t0, t1, W, H)
+        if kind == "snap" and not snap:
+            log(f"zoom {i}: its fixed point is too far from the face to snap; punching in hard")
+        spans.append(ZoomSpan(round(t0 * fps) / fps, round(t1 * fps) / fps, scale, round(cx, 1), round(cy, 1),
+                              *_ramps(z, kind, snap, fps), last_word_end=last_word_end, kind=kind, blur=snap))
+    return _settle(ctx, spans, with_broll, W, H, fps)
+
+
+def framed_over(ctx) -> dict:
+    """{index into project.zooms: (t0, t1)}: the span each zoom's framing reads the face over (build_zooms
+    centres it on the face across its anchored span, before a later zoom cuts it short)."""
+    _W, _H, fps = fmt_of(ctx)
+    return {i: (t0, t1) for i, t0, t1, *_rest in _anchored(ctx, fps)}
+
+
+def windows(ctx, with_broll: bool = True) -> list:
+    """[(index into project.zooms, t0, t1)] for each zoom on screen, with build_zooms' timing: what
+    moments.py compares between two edits. Only a snap reads the face track here, since whether the
+    face lets it snap decides whether its release moves onto a cut; the variation's static framing
+    is left out (it belongs to no zoom of the project)."""
+    W, H, fps = fmt_of(ctx)
+    spans, index = [], {}
+    for i, t0, t1, scale, kind, last_word_end in _anchored(ctx, fps):
+        z = ctx.project["zooms"][i]
+        snap = kind == "snap" and _centre(ctx, z, kind, scale, t0, t1, W, H)[2]
+        s = ZoomSpan(round(t0 * fps) / fps, round(t1 * fps) / fps, scale, 0.0, 0.0,
+                     *_ramps(z, kind, snap, fps), last_word_end=last_word_end, kind=kind, blur=snap)
+        spans.append(s)
+        index[id(s)] = i
+    return [(index[id(s)], s.t0, s.t1) for s in _settle(ctx, spans, with_broll, W, H, fps) if id(s) in index]

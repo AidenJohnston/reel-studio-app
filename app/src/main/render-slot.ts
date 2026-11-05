@@ -6,6 +6,12 @@ import { isEngineError, type RunEngine } from './engine'
 /** How many renders may run at once across all reels. */
 export const RENDER_SLOTS = 1
 
+/** The commands that encode video: a render, and a `moments` run (its stills, its window, then a draft); `moments
+ * --mark` only writes a file. */
+function encodes(command: string, args: string[]): boolean {
+  return command === 'render' || (command === 'moments' && !args.includes('--mark'))
+}
+
 /** `onWait(owner, waiting)`: a job's render (by its `--owner` token) started or stopped waiting. */
 export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: boolean) => void): { run: RunEngine } {
   let busy = 0
@@ -40,7 +46,7 @@ export function withRenderSlot(run: RunEngine, onWait: (owner: string, waiting: 
   // every argument goes through as it came: later runner arguments (an exit callback) must reach the runner
   const slotted: RunEngine = async (...call) => {
     const [command, args, , signal] = call
-    if (command !== 'render') return run(...call)
+    if (!encodes(command, args)) return run(...call)
     const at = args.indexOf('--owner')
     const owner = at >= 0 ? args[at + 1] : null
     const queued = busy >= RENDER_SLOTS

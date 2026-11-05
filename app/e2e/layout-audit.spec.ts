@@ -1,7 +1,7 @@
 // Layout audit: visits every screen and state at the four window sizes and runs the detectors in
 // e2e/layout-audit/detect.ts (text overflow, clipping, sideways scrolling, nested scroll areas, overlap, text
-// collisions, small targets, popover placement, imbalance). One test per screen, so each screen passes or fails on
-// its own. P1 and P2 findings fail it; P3 is reported only.
+// collisions, small targets, popover placement, imbalance, button shape). One test per screen, so each screen passes
+// or fails on its own. P1 and P2 findings fail it; P3 is reported only.
 //
 //   REELSTUDIO_AUDIT_SCREENS=first-run,home   only these screens (names below)
 //   REELSTUDIO_AUDIT_SIZES=1100x720,1920x1080 only these sizes
@@ -14,7 +14,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Loc
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, makeMedia, makeReel, passFirstRun } from './helpers'
+import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
 import { makePastEditsHome } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
@@ -238,7 +238,7 @@ const SCREENS: Screen[] = [
         id: 'first-run-editor',
         enter: async ({ page }) => {
           if (await page.getByTestId('demo-skip').isVisible()) await page.getByTestId('demo-skip').click()
-          await page.getByTestId('demo-next').click()
+          await toEditorStep(page)
         },
         ready: byTestId('ai-picker')
       },
@@ -258,6 +258,24 @@ const SCREENS: Screen[] = [
         },
         ready: byTestId('planned-stage')
       }
+    ]
+  },
+  {
+    // a Mac's first run has a Your Mac step; test builds stand in for a Mac (main/permissions.ts parseFakes)
+    id: 'first-run-mac',
+    profile: 'fresh',
+    env: { REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin' },
+    states: [
+      {
+        id: 'first-run-mac-ask',
+        enter: async ({ page }) => {
+          await page.getByTestId('get-started').click()
+          await page.getByTestId('demo-skip').click()
+          await page.getByTestId('demo-next').click()
+        },
+        ready: byTestId('perm-notify-allow')
+      },
+      { id: 'first-run-mac-on', enter: click('perm-notify-allow'), ready: byTestId('mac-continue') }
     ]
   }
 ]
@@ -696,17 +714,17 @@ async function openPicker(page: Page): Promise<void> {
   if ((await page.getByTestId('stage-models-toggle').getAttribute('aria-expanded')) !== 'true') await page.getByTestId('stage-models-toggle').click()
   if (!(await page.getByTestId('model-picker').isVisible())) await page.getByTestId('model-checker').click()
 }
-const toEditorStep = async ({ page }: Ctx) => {
+const toEditor = async ({ page }: Ctx) => {
   if (await page.getByTestId('get-started').isVisible()) await page.getByTestId('get-started').click()
   if (await page.getByTestId('demo-skip').isVisible()) await page.getByTestId('demo-skip').click()
-  if (await page.getByTestId('demo-next').isVisible()) await page.getByTestId('demo-next').click()
+  if (await page.getByTestId('demo-next').isVisible()) await toEditorStep(page)
 }
 SCREENS.push({
   id: 'editor-hub',
   profile: 'fresh',
   before: hubEnv,
   states: [
-    { id: 'first-run-hub-found', enter: toEditorStep, ready: hubReady },
+    { id: 'first-run-hub-found', enter: toEditor, ready: hubReady },
     {
       id: 'first-run-hub-key-needed',
       enter: async ({ page }) => {

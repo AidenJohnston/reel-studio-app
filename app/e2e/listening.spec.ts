@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, modelReady, openSettings, passFirstRun } from './helpers'
+import { BASE, launch, modelReady, openSettings, passFirstRun, toEditorStep } from './helpers'
 
 function fresh(name: string) {
   const dir = mkdtempSync(join(BASE, `listening-${name}-`))
@@ -67,7 +67,7 @@ test('without one it downloads by itself with MB progress while setup goes on, a
     await expect(line(page)).toContainText(/[1-9]\d* of 486 MB/)
     // the download never holds a step up
     await page.getByTestId('demo-skip').click()
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
     await expect(line(page)).toHaveCount(0, { timeout: 20_000 })
     await modelReady(page)
     await expect.poll(savedCheck(d.userData), { timeout: 10_000 }).toMatchObject({ threads: 4 })

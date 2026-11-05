@@ -13,6 +13,11 @@ import { httpsUrl, id, INSTAGRAM_GRAPH, INSTAGRAM_SCOPES, INSTAGRAM_VERSION, Ins
 import { InstagramTokenStore, readObject, receipt, saveOutcome, saveReceipt, type InstagramCredentials, type InstagramSecretStore } from './instagram-store'
 
 const DAY = 24 * 60 * 60_000
+/** Connecting reads the profile picture too, so the Instagram preview can show the account as it is (Phone.tsx). */
+const CONNECT_FIELDS = 'user_id,username,account_type,profile_picture_url'
+const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+// Instagram serves profile pictures at 320 px or less, tens of kilobytes; anything far bigger is not one.
+const PICTURE_MAX_BYTES = 512 * 1024
 const METRICS = {
   plays: 'views', reach: 'reach', likes: 'likes', comments: 'comments', shares: 'shares', saves: 'saved',
   averageWatchTimeMs: 'ig_reels_avg_watch_time', totalWatchTimeMs: 'ig_reels_video_view_total_time', skipRatePercent: 'reels_skip_rate'
@@ -128,10 +133,15 @@ export class InstagramService {
   }
   async session(): Promise<InstagramSession> {
     return this.run(async () => {
-      const settings = await this.config()
+      // Instagram off or not set up is an answer, not an error: the preview asks on every reel (Phone.tsx).
+      const settings = await this.config().catch((e: unknown) => {
+        if (e instanceof InstagramError && (e.code === 'IG_DISABLED' || e.code === 'IG_SETUP')) return null
+        throw e
+      })
+      if (!settings) return { connected: false }
       const c = await this.tokens.load()
       if (!c || c.appId !== settings.instagramAppId || c.brokerUrl !== settings.instagramBrokerUrl || c.expiresAt <= this.now()) return { connected: false }
-      return { connected: true, accountId: c.accountId, username: c.username, expiresAt: c.expiresAt }
+      return { connected: true, accountId: c.accountId, username: c.username, expiresAt: c.expiresAt, ...(c.picture ? { picture: c.picture } : {}) }
     })
   }
   connect(): Promise<InstagramSession> {
@@ -189,9 +199,47 @@ export class InstagramService {
     this.queue = result.catch(() => undefined)
     return result
   }
-  private async profile(token: string, signal: AbortSignal): Promise<{ accountId: string; username: string }> {
-    const data = object(await request(this.o.fetch, `${INSTAGRAM_GRAPH}/me?fields=user_id,username,account_type`, { method: 'GET', headers: { authorization: `Bearer ${token}` } }, signal))
-    return this.parseProfile(data)
+  private async profile(token: string, signal: AbortSignal): Promise<{ accountId: string; username: string; picture?: string }> {
+    const data = object(await request(this.o.fetch, `${INSTAGRAM_GRAPH}/me?fields=${CONNECT_FIELDS}`, { method: 'GET', headers: { authorization: `Bearer ${token}` } }, signal))
+    const account = this.parseProfile(data)
+    const p = Array.isArray(data.data) ? object(data.data[0]) : data
+    const picture = await this.picture(p.profile_picture_url, signal)
+    return { ...account, ...(picture ? { picture } : {}) }
+  }
+  /**
+   * The profile picture, fetched once while connecting and kept as a data URL: Meta's picture links expire, and the
+   * renderer loads nothing remote (its img-src is local). Best effort: without it the preview shows a plain circle.
+   * The request carries no token; the link is a public CDN address.
+   */
+  private async picture(raw: unknown, signal: AbortSignal): Promise<string | undefined> {
+    if (raw === undefined || raw === null || raw === '') return undefined
+    try {
+      const url = httpsUrl(raw)
+      const res = await this.o.fetch(url.toString(), { method: 'GET', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) })
+      const type = res.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? ''
+      const length = Number(res.headers.get('content-length') ?? 0)
+      if (!res.ok || !PICTURE_TYPES.includes(type) || length > PICTURE_MAX_BYTES) {
+        await res.body?.cancel()
+        return undefined
+      }
+      // read with a running limit: a missing or wrong Content-Length must not let a big body into memory
+      const chunks: Uint8Array[] = []
+      let size = 0
+      const reader = res.body?.getReader()
+      for (let r = await reader?.read(); r && !r.done; r = await reader!.read()) {
+        size += r.value.byteLength
+        if (size > PICTURE_MAX_BYTES) {
+          await reader!.cancel()
+          return undefined
+        }
+        chunks.push(r.value)
+      }
+      if (!size) return undefined
+      return `data:${type};base64,${Buffer.concat(chunks).toString('base64')}`
+    } catch {
+      signal.throwIfAborted()
+      return undefined
+    }
   }
   private parseProfile(data: Record<string, unknown>): { accountId: string; username: string } {
     const p = Array.isArray(data.data) ? object(data.data[0]) : data
