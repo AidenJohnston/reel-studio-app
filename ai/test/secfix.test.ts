@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as http from 'node:http';
+import * as net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import {
@@ -186,6 +187,19 @@ describe('finding 5: downloads are http(s) to public hosts, capped, timed, and r
       expect(got.body.equals(tinyPng())).toBe(true);
       await expect(guardedFetch(`http://pics.example:${site.port}/999`, { lookup: PUBLIC, fetchImpl: f, maxBytes: 1e6 })).rejects.toThrow('download failed with HTTP 999');
     } finally { site.close(); }
+  });
+
+  it('rejects an HTTP status below 200 without throwing outside the download promise', async () => {
+    const srv = net.createServer((socket) => {
+      socket.once('data', () => socket.end('HTTP/1.1 099 Invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'));
+    });
+    await new Promise<void>((ok) => srv.listen(0, '127.0.0.1', ok));
+    try {
+      const port = (srv.address() as AddressInfo).port;
+      await expect(guardedFetch(`http://pics.example:${port}/`, {
+        lookup: PUBLIC, fetchImpl: pinnedFetch(async () => ['127.0.0.1']), maxBytes: 1e6,
+      })).rejects.toThrow('download failed with HTTP 99');
+    } finally { srv.close(); }
   });
 
   it.each(['2002::1', '2002:0808:0808::1', '2001::1', '2001:0:808:808:0:0:f7f7:f7f7'])(
