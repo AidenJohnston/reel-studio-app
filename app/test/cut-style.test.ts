@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { CUT_STYLES } from '../../ai/src/cut-style'
 import { validateProject, withDefaults } from '../../ai/src/project'
+import type { JSONSchema } from '../../ai/src/schema'
 import { TOOLS } from '../../ai/src/tools'
 import { CUT_PRESETS, cutStyleProblem, PACE_BANDS, withKind, ZOOM_KINDS } from '../src/shared/cut-style'
 
@@ -18,7 +19,7 @@ it('fails if a pace or a zoom-in kind differs from the AI tools and the engine s
     const { secondsPerVisualChange, beatAccents } = CUT_STYLES[preset]
     expect(PACE_BANDS[preset]).toEqual({ secondsPerVisualChange, beatAccents })
   }
-  const setZoom = TOOLS.find((t) => t.name === 'set_zoom')!.parameters.properties.zooms.items.properties.kind
+  const setZoom: JSONSchema = (TOOLS.find((t) => t.name === 'set_zoom')!.parameters as JSONSchema).properties.zooms.items.properties.kind
   expect([...ZOOM_KINDS].sort()).toEqual([...schema.properties.zooms.items.properties.kind.enum].sort())
   expect([...ZOOM_KINDS].sort()).toEqual([...setZoom.enum].filter((k: unknown) => k !== null).sort())
 })
