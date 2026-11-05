@@ -168,8 +168,6 @@ a { color: inherit; }
 .update-row-line { display: flex; align-items: center; gap: 14px; }
 .update-row-line p { flex: 1; }
 .update-row .progress > div { transition: none; }
-.update-releases-link { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); text-underline-offset: 3px; white-space: nowrap; min-height: 32px; }
-.update-releases-link:hover { color: var(--ink); }
 
 /* The page sits under the title-bar row, not behind it: nothing scrolls under the screen's title.
    scrollbar-gutter: a page tall enough to scroll (Settings) centres its column where a short one (My style) does. */
