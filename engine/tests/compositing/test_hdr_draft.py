@@ -1,6 +1,7 @@
-"""HDR (HLG/PQ) footage in drafts: the tonemap runs on the cropped, scaled frame, with hardware
-decode where the platform has one that hands frames back to system memory. Finals keep
-tonemap-then-scale and software decode, so their bytes don't change."""
+"""Drafts decode on the GPU where the platform has a decoder that hands frames back to system
+memory (D3D11VA on Windows, VideoToolbox on macOS), SDR and HDR alike, and HDR (HLG/PQ) drafts
+tonemap the cropped, scaled frame. Finals keep software decode, and HDR finals tonemap-then-scale,
+so their bytes don't change."""
 from __future__ import annotations
 
 import json
@@ -56,14 +57,14 @@ def test_draft_tonemaps_after_the_scale_with_hardware_decode(tmp_path, monkeypat
 def test_nvenc_never_gets_the_decoders_d3d11_device(tmp_path, monkeypatch):
     """ffmpeg hands NVENC a device it opened, CUDA before D3D11, and NVENC fails on the decoder's
     D3D11 device; so a CUDA device must be open too. Devices are global options: before the first
-    input even when that input is SDR, and once each, as ffmpeg refuses a second device with a name."""
+    input, and once each, as ffmpeg refuses a second device with a name. Every take decodes on the
+    decoder's device, SDR and HDR."""
     cmd, _ = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc",
                     hdr=(False, True, True))
     first_input = cmd.index("-i")
     assert sorted(cmd[j + 1] for j in range(first_input) if cmd[j] == "-init_hw_device") == ["cuda=enc", "d3d11va=dec"]
     assert cmd.count("-init_hw_device") == 2
-    assert "-hwaccel" not in cmd[: cmd.index("take-s1.mov")]               # the SDR take: unchanged
-    for take in ("take-s2.mov", "take-s3.mov"):
+    for take in ("take-s1.mov", "take-s2.mov", "take-s3.mov"):
         i = cmd.index(take)
         h = max(j for j in range(i) if cmd[j] == "-hwaccel")
         assert cmd[h:h + 4] == ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
@@ -77,6 +78,20 @@ def test_retry_is_the_draft_from_before(tmp_path, monkeypatch):
     assert "-hwaccel" not in cmd
     assert (f"setpts=PTS-STARTPTS,{render.HDR_CHAIN},scale=540:960:flags=fast_bilinear,format=yuv420p,setsar=1[v0]"
             in graph)
+
+
+@pytest.mark.parametrize("platform,decoder", [("win32", "d3d11va"), ("darwin", "videotoolbox")])
+def test_sdr_draft_decodes_on_the_gpu_with_the_retrys_graph(tmp_path, monkeypatch, platform, decoder):
+    """Hardware decode changes where frames are decoded, never the filters: the retry in software
+    must draw the same picture, and the final must keep decoding in software."""
+    cmd, graph = _graph(tmp_path, monkeypatch, draft=True, platform=platform, hdr=(False,))
+    assert cmd[cmd.index("-hwaccel") + 1] == decoder
+    assert cmd.index("-hwaccel") < cmd.index("take-s1.mov")
+    retry_cmd, retry_graph = _graph(tmp_path, monkeypatch, draft=True, platform=platform, hdr=(False,), fast=False)
+    assert "-hwaccel" not in retry_cmd
+    assert graph == retry_graph
+    final_cmd, _ = _graph(tmp_path, monkeypatch, draft=False, platform=platform, hdr=(False,))
+    assert "-hwaccel" not in final_cmd
 
 
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
@@ -148,11 +163,19 @@ def test_hlg_draft_has_the_final_colors(tmp_path, monkeypatch, take):
         assert np.abs(d[region].mean(axis=(0, 1)) - f[region].mean(axis=(0, 1))).max() < 3.0
 
 
+@pytest.fixture(scope="module")
+def sdr_take(tmp_path_factory):
+    return fx.synth_video(tmp_path_factory.mktemp("sdr media") / "sdr.mp4", dur=4.0)
+
+
+@pytest.mark.parametrize("hdr", [True, False], ids=["hlg", "sdr"])
 @pytest.mark.parametrize("broken", ["decoder", "encoder", "timeout"])
-def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monkeypatch, take, broken):
+def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monkeypatch, take, sdr_take,
+                                                                 broken, hdr):
     """A draft that fails with hardware decode and a GPU encoder retries with software decode and the
     same encoder; only if that fails too is the encoder marked as failed (for days, tools.py). After
-    a timeout it goes straight to libx264 and marks nothing, since nothing pointed at the encoder."""
+    a timeout it goes straight to libx264 and marks nothing, since nothing pointed at the encoder.
+    Either way the user gets a draft of the usual size."""
     gpu = "mpeg4"                       # stands in for h264_nvenc: present in every FFmpeg build
     monkeypatch.setitem(tools.HW_ENCODER_OPTS, gpu, ["-q:v", "5"])
     monkeypatch.setattr(tools, "draft_encoder", lambda: gpu)
@@ -173,8 +196,16 @@ def test_a_failed_hardware_decode_does_not_blame_the_gpu_encoder(tmp_path, monke
         return real(cmd, *a, **kw)
 
     monkeypatch.setattr(tools, "ffmpeg_progress", progress)
-    res = render.run(_project(tmp_path / "proj", take), draft=True, root=tmp_path, verify=False, cover=False)
+    if hdr:
+        pdir = _project(tmp_path / "proj", take)
+    else:
+        pdir = tmp_path / "proj"
+        fx.make_project(pdir, sdr_take, keep=((0.5, 3.5),))
+    res = render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False)
     assert hw_decode_per_attempt[0]                                  # the fast path used hardware decode
+    assert hw_decode_per_attempt[-1] is False                        # ...and the draft came from software
+    meta = probe.probe(Path(res["file"]))
+    assert (meta["width"], meta["height"]) == (540, 960)
     if broken == "decoder":
         assert res["encoder"] == gpu and marked == []
     elif broken == "timeout":
