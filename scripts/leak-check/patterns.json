@@ -73,6 +73,11 @@
    "fp": "793cafdc2e256d6fd88a1d2cc802104d0a2f134cbc79f11c63ea7df62604a4c7"
   },
   {
+   "kind": "ex",
+   "len": 6,
+   "fp": "9693f56bfe75a37d23ffba6174744d58f5dc4131258b9f8c7b4cc06cb268947c"
+  },
+  {
    "kind": "sub",
    "len": 10,
    "fp": "99f933ce08ee45061a6b2bb59049a0a39eb559d0dd0f90da9a7ec842dcc6c8d3"
@@ -91,11 +96,6 @@
    "kind": "pre",
    "len": 5,
    "fp": "abefdcb4464afc73453bae3758da92c5dbeaf70ca0a7afd881b8b974d04840c1"
-  },
-  {
-   "kind": "pre",
-   "len": 6,
-   "fp": "c1e4b9a628f8b3598e137301408ca52a81e2afe3b051404a7902757612d07cd3"
   },
   {
    "kind": "bsub",

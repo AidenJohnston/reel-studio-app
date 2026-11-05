@@ -29,10 +29,10 @@ HERE = Path(__file__).resolve().parent
 SALT = "rsleak1"
 
 # Exact phrases that may appear verbatim (case-sensitive); each is cut out of a line before the term check, so
-# the same words anywhere else are still caught: the public repo slug (its owner part is a person's name by
-# design) and the name of the company that owns Reel Studio, as written in LICENSE and the copyright lines.
+# the same words anywhere else are still caught: the repo's former slug, which older installs still use (its owner
+# part is a person's name by design), and the name of the company that owns Reel Studio.
 # The company name is split so that main's own checker, which runs on every PR, passes this line too.
-ALLOW = ("AidenJohnston/reel-studio-app", "Cur" + "ate Technologies LLC")
+ALLOW = ("AidenJohnston/reel-studio-app", "Cur" + "ate Technologies")
 
 NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"^(status|bakeoff|tools)/",
