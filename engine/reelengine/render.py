@@ -1079,20 +1079,21 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     ctx.out_dir = preview_dir(project_dir)
     layers, zooms, broll_report = overlays(ctx, proj, tl, warnings)
     ass_name, _, font_path = burn_captions(ctx, proj, tl, broll_report, rwork, warnings)
+    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(proj["format"]["fps"])
+    n_frames = max(1, int(round(tl.duration * fps)))
     asked = list(times)
     times, moved = settle_on_animations(project_dir, times)
     if settle_within is not None:
-        def inside(t: float) -> bool:
-            return any(a - 1e-6 <= t < b for a, b in settle_within)
+        def inside(t: float) -> bool:           # the frame that time draws, not the time itself
+            f = frame_at(t, fps, n_frames) / fps
+            return any(a - 1e-6 <= f < b for a, b in settle_within)
         times = [t if inside(t) else a for t, a in zip(times, asked)]
         moved = [m for m in moved if inside(m["sampled"])]
     timings = {"setup": round(time.time() - t_start, 2), "stills": []}
 
-    W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(proj["format"]["fps"])
     # drawn at the draft's own size, then scaled as frames.from_video scales a draft frame
     out_w = int(round(W * DRAFT_SCALE / 2)) * 2
     out_h = int(round(H * DRAFT_SCALE / 2)) * 2
-    n_frames = max(1, int(round(tl.duration * fps)))
     one = 1.0 / fps
     out = []
     for n, t in enumerate(times):

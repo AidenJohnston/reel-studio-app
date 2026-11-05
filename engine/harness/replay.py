@@ -414,6 +414,10 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
     return {"steps": steps, "final": final}
 
 
+def _duration(ref: dict) -> float:
+    return float(json.loads((ref["dir"] / "done.json").read_text(encoding="utf-8"))["result"]["duration"])
+
+
 def check_coverage(ffmpeg: str, refs: list, k: int, plan: dict) -> dict:
     """Whether the moments of note k agree with the reference finals, which the candidate cannot touch:
     when this note's final shows a different picture from the last note's (note 0: from nothing), the
@@ -424,6 +428,11 @@ def check_coverage(ffmpeg: str, refs: list, k: int, plan: dict) -> dict:
     t = refs[k]["moment"]
     inside = any(a - 1e-6 <= t <= b + 1e-6 for a, b in plan["intervals"])
     failures = []
+    shorter = k > 0 and _duration(refs[k]) < _duration(refs[k - 1]) - 1e-6
+    if changed and shorter and not plan["intervals"]:
+        # every frame left may be unchanged (the end was cut off): packets cannot tell, frames would
+        return {"status": "unset", "failures": [], "distinctChecked": 1,
+                "metrics": {"pictureChanged": {"value": "shorter, no intervals", "status": "unset"}}}
     if changed and not plan["stills"]:
         failures.append("the reference picture changed but no still was drawn")
     if changed and not inside:

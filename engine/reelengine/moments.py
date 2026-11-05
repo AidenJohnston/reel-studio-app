@@ -14,8 +14,11 @@ What changes the picture, on the new project's output clock:
   - a b-roll item or a zoom: where it was and where it is now, the whole of both spans even when only its
     timing changed (a fade, a clip's playback, an animation and a zoom's framing all follow the span);
   - a b-roll item whose span meets a changed zoom: its whole span, since cards are placed around the zoom;
-  - a caption line whose words or text changed (a correction, a hidden line): where it was and is. A line
-    that only moved in time is static text, so only the seconds it gained or lost.
+    a b-roll item or zoom that runs across the cut's first moved frame: its whole span, since cards and
+    zooms are framed on the face over their whole span;
+  - a caption line whose words, text or timing changed (a correction, a hidden line): where it was and
+    is (lines fade in and out, so a retimed line changes over its whole span); a line that meets a
+    changed b-roll item: its whole span, since a split view moves every line it mostly covers.
 Music, the post text, notes, the title and the cover are not in the picture and change nothing.
 
 Each span is taken from the renderer's own timing (cut.build_timeline, broll.plan_windows,
@@ -164,20 +167,6 @@ def _cuts(segs: list) -> list:
     return out
 
 
-def _symdiff(a: tuple, b: tuple) -> list:
-    """The parts of [a0, a1) and [b0, b1) covered by exactly one of them."""
-    lo, hi = sorted((a, b))
-    if lo[1] <= hi[0]:
-        return [list(lo), list(hi)]
-    out = []
-    if hi[0] - lo[0] > EPS:
-        out.append([lo[0], hi[0]])
-    end_lo, end_hi = sorted((lo[1], hi[1]))
-    if end_hi - end_lo > EPS:
-        out.append([end_lo, end_hi])
-    return out
-
-
 def _mid(span) -> float:
     return (span[0] + span[1]) / 2.0
 
@@ -196,19 +185,16 @@ def _match(old: list, new: list) -> list:
     return pairs
 
 
-def _diff_items(kind: str, old: list, new: list, moved_at: Optional[float], duration: float,
-                static: bool = False) -> list:
-    """Changes between two lists of (identity, content key, (t0, t1), label) on their own clocks.
-    `static`: an item's frames depend only on its content, not on its span (a caption line), so a
-    retimed one changed only in the seconds it gained or lost."""
+def _diff_items(kind: str, old: list, new: list, moved_at: Optional[float], duration: float) -> list:
+    """Changes between two lists of (identity, content key, (t0, t1), label) on their own clocks."""
     out = []
     for o, n in _match(old, new):
         if o and n and o[1] == n[1]:
             if abs(o[2][0] - n[2][0]) < EPS and abs(o[2][1] - n[2][1]) < EPS:
                 continue
-            # the same item, retimed by another edit: redrawn, but that edit's own stills show it
-            regions = _symdiff(o[2], n[2]) if static else [list(o[2]), list(n[2])]
-            out.append({"kind": kind, "id": n[3], "regions": regions, "at": [], "why": "retimed"})
+            # the same item, retimed by another edit: redrawn over both spans (fades, playback and framing
+            # follow the span), but that edit's own stills show it
+            out.append({"kind": kind, "id": n[3], "regions": [list(o[2]), list(n[2])], "at": [], "why": "retimed"})
             continue
         regions = [list(x[2]) for x in (o, n) if x]
         label = (n or o)[3]
@@ -318,7 +304,21 @@ def changed(old: Optional[dict], new: dict, words: list, project_dir: Path, root
                     brolls.append({"kind": "broll", "id": label, "regions": [list(span)], "at": [],
                                    "why": "placed around a changed zoom"})
         changes += brolls + zooms
-        changes += _diff_items("caption", _cues(old, old_tl), _cues(new, tl), x, dur, static=True)
+        if x is not None:
+            # framed on the face over its whole span, and the face after x comes from other footage now
+            for kind, side in (("broll", new_b), ("zoom", _zooms(new, tl, project_dir, root))):
+                for _ident, _content, span, label in side:
+                    if span[0] < x - EPS < span[1]:
+                        changes.append({"kind": kind, "id": label, "regions": [list(span)], "at": [],
+                                        "why": "framed across the cut's first moved frame"})
+        old_c, new_c = _cues(old, old_tl), _cues(new, tl)
+        changes += _diff_items("caption", old_c, new_c, x, dur)
+        # a split view moves each caption line it mostly covers (captions.cue_position), whole line
+        br = [r for c in brolls for r in c["regions"]]
+        for _ident, _content, span, label in old_c + new_c:
+            if _overlaps(span, br):
+                changes.append({"kind": "caption", "id": label, "regions": [list(span)], "at": [],
+                                "why": "a line a changed b-roll item may move"})
     return {"duration": dur, "fps": fps, "intervals": merge([r for c in changes for r in c["regions"]], dur),
             "changes": changes}
 

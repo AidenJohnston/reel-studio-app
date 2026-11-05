@@ -58,7 +58,7 @@ def approx(spans):
 # --- which seconds ------------------------------------------------------------------------------
 
 def test_an_added_card_is_its_drawn_span_and_nothing_else(tmp_path):
-    old = base_project()
+    old = base_project(captions_on=False)
     new = copy.deepcopy(old)
     new["broll"] = [card("b1", "w10", "w11")]
     found = diff(tmp_path, old, new)
@@ -71,7 +71,7 @@ def test_an_added_card_is_its_drawn_span_and_nothing_else(tmp_path):
 
 
 def test_a_moved_card_shows_where_it_was_and_where_it_is(tmp_path):
-    old = base_project()
+    old = base_project(captions_on=False)
     old["broll"] = [card("b1", "w2", "w3")]
     new = copy.deepcopy(old)
     new["broll"] = [card("b1", "w20", "w21")]
@@ -83,7 +83,7 @@ def test_a_moved_card_shows_where_it_was_and_where_it_is(tmp_path):
 
 
 def test_a_card_cut_short_by_a_new_neighbour_is_redrawn_over_its_whole_span(tmp_path):
-    old = base_project()
+    old = base_project(captions_on=False)
     old["broll"] = [card("b1", "w4", "w4", fade=0.3)]  # one word, held to the 2 s minimum; its fade-out moves
     new = copy.deepcopy(old)
     new["broll"].append(card("b2", "w7", "w8"))        # starts inside b1's hold: b1 hands over to it
@@ -97,7 +97,7 @@ def test_a_card_cut_short_by_a_new_neighbour_is_redrawn_over_its_whole_span(tmp_
 
 
 def test_a_zoom_under_a_card_redraws_the_whole_card(tmp_path):
-    old = base_project()
+    old = base_project(captions_on=False)
     old["broll"] = [card("b1", "w10", "w16")]
     new = copy.deepcopy(old)
     new["zooms"] = [{"anchor": {"from": "w12", "to": "w13"}, "scale": 1.2}]   # cards are placed around the zoom
@@ -117,6 +117,30 @@ def test_a_card_removed_past_the_new_end_is_still_drawn(tmp_path):
     assert found["intervals"] == approx([[span_of(tmp_path, old, "b1")[0], dur]])
     [still] = moments.pick_stills(found)
     assert span_of(tmp_path, old, "b1")[0] <= still < dur
+
+
+def test_a_card_redraws_every_caption_line_it_covers(tmp_path):
+    old = base_project()
+    new = copy.deepcopy(old)
+    new["broll"] = [card("b1", "w10", "w11")]          # a split view moves the lines it mostly covers
+    a, b = span_of(tmp_path, new, "b1")
+    tl = timeline(tmp_path, new)
+    lines = [(c["s"], c["e"]) for c in captions.build_cues(tl.words_out, new["captions"], set())
+             if c["s"] < b and a < c["e"]]
+    assert lines and min(s for s, _ in lines) < a       # a line starts before the card does
+    assert diff(tmp_path, old, new)["intervals"] == approx([[min(a, *(s for s, _ in lines)), max(b, *(e for _, e in lines))]])
+
+
+def test_a_card_running_across_the_cut_is_redrawn_whole(tmp_path):
+    old = base_project(keep=(("w0", "w9"), ("w12", "w31")), captions_on=False)
+    old["broll"] = [card("b1", "w8", "w8")]             # held 2 s, past the splice after w9
+    new = copy.deepcopy(old)
+    new["cut"]["keep"][1]["from"] = "w14"
+    a, b = span_of(tmp_path, new, "b1")
+    assert span_of(tmp_path, old, "b1") == [a, b]       # the card itself did not change
+    x = timeline(tmp_path, new).segments[1].out_start
+    assert a < x < b                                    # but its face is framed across new footage
+    assert diff(tmp_path, old, new)["intervals"] == approx([[a, timeline(tmp_path, new).duration]])
 
 
 def test_a_caption_style_change_is_the_whole_video(tmp_path):
@@ -177,7 +201,7 @@ def test_an_added_zoom_is_its_span_on_screen(tmp_path):
 
 
 def test_a_remade_animation_is_its_span_though_project_json_is_the_same(tmp_path):
-    proj = base_project()
+    proj = base_project(captions_on=False)
     proj["broll"] = [dict(card("b1", "w5", "w6"), treatment="animation", asset="anim-1")]
     found = diff(tmp_path, proj, copy.deepcopy(proj), old_anims={"anim-1.mov": [10, 1]},
                  new_anims={"anim-1.mov": [12, 2]})
