@@ -24,7 +24,7 @@ def encode(ctx, take, spans, name, t_shift=0, dur=4, full=False):
     cmd = render.build_video_cmd(ctx, ctx.out_timeline,
                                 {"s1": {"width": W, "height": H, "fps": FPS}}, {"s1": take}, {},
                                 W, H, [], spans, None, take, t_shift, dur, t_shift, "libx264", out, graph,
-                                use_hw=False)
+                                fast=False)
     subprocess.run(cmd, cwd=ctx.work, capture_output=True, check=True)
     raw = subprocess.run([fx.FFMPEG, "-v", "error", "-i", str(out), "-vf", "format=gray" if full else f"crop={W}:2:0:{H//2}",
                           "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout

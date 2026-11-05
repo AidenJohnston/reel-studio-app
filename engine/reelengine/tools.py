@@ -338,8 +338,7 @@ def hwaccel() -> Optional[str]:
     if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
         return None
     if "hwaccel" not in _CACHE:
-        out = text_run([ffmpeg(), "-hide_banner", "-hwaccels"], 30, "ffmpeg -hwaccels", check=False)
-        names = set((out.stdout or "").split())
+        names = hwaccels()
         pick = None
         if sys.platform == "darwin" and "videotoolbox" in names:
             pick = "videotoolbox"
@@ -347,6 +346,51 @@ def hwaccel() -> Optional[str]:
             pick = "cuda"
         _CACHE["hwaccel"] = pick
     return _CACHE["hwaccel"]
+
+
+def hwaccels() -> set:
+    """The hardware decode methods this ffmpeg was built with (`ffmpeg -hwaccels`)."""
+    if "hwaccels" not in _CACHE:
+        out = text_run([ffmpeg(), "-hide_banner", "-hwaccels"], 30, "ffmpeg -hwaccels", check=False)
+        _CACHE["hwaccels"] = set((out.stdout or "").split())
+    return _CACHE["hwaccels"]
+
+
+# Hardware decode whose frames come back to system memory, for HDR drafts: their tonemap runs in
+# software (zscale), so the frames have to end up there anyway. On Windows this is D3D11VA, which any
+# DirectX 11 GPU offers. Not CUDA: the product's FFmpeg is built without NVDEC, so `-hwaccel cuda`
+# decodes in software without saying so (pinned 7.1.1-rs2, Windows 11, 2026-11-04).
+HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
+
+# Devices to open before the inputs on Windows, per draft encoder. ffmpeg hands an encoder any
+# device it opened whose type the encoder accepts, and NVENC and AMF accept D3D11. NVENC failed with
+# the decoder's D3D11 device on either GPU of the test laptop (AMD iGPU or RTX 4060: "Unable to lock
+# D3D11VA surface", then "EncodeAPI Internal Error"). NVENC lists CUDA before D3D11 among its hardware
+# configurations, so with a CUDA device open ffmpeg hands it that one, and the draft works. AMF works
+# with a D3D11 device on its own GPU. The decoder always uses the device named dec.
+# (Windows 11, pinned FFmpeg 7.1.1-rs2, 2026-11-04.)
+D3D11_DEVICES = {
+    "h264_nvenc": ["cuda=enc", "d3d11va=dec"],
+    "h264_amf": ["d3d11va=dec:,vendor_id=0x1002"],
+}
+
+
+def hwaccel_to_memory(encoder: str) -> tuple:
+    """(global options, per-input options) for hardware decode into system memory, for a draft whose
+    filters run in software and that encodes with `encoder`; ([], []) when there is none (not built
+    in, another platform, or REELENGINE_HWACCEL=0). The global options go before the first input,
+    once. A GPU that can't decode the codec or profile leaves ffmpeg decoding in software; a render
+    that fails outright is retried in software by render.run."""
+    if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
+        return [], []
+    name = HWACCEL_TO_MEMORY.get(sys.platform)
+    if name not in hwaccels():
+        return [], []
+    if name == "d3d11va":
+        devices = D3D11_DEVICES.get(encoder, ["d3d11va=dec"])
+        return ([o for d in devices for o in ("-init_hw_device", d)],
+                ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"])
+    return [], ["-hwaccel", name]
 
 
 def machine() -> dict:

@@ -59,6 +59,8 @@ export function createFirstEditSteps() {
 
   const target = (e: { message: string; phase?: Phase }): StepId | null => {
     switch (e.phase) {
+      case 'prepare':          // a clip re-encoded at import (#146) is part of bringing the video in
+        return 'copy'
       case 'listen':
         return 'listen'
       case 'analyze':

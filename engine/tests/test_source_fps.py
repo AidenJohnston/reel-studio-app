@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -48,10 +49,10 @@ def test_fails_if_vfr_source_is_not_normalized(tmp_path, source):
     init.run(directory, "Variable phone reel", [vfr])
     saved = project.load(directory)
     video = directory / saved["sources"][0]["path"]
-    frames = subprocess.run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0",
-                             "-show_entries", "frame=best_effort_timestamp_time", "-of", "csv=p=0",
-                             str(video)], capture_output=True, text=True, check=True).stdout
-    times = [float(line.strip().strip(",")) for line in frames.splitlines() if line.strip().strip(",")]
+    frames = json.loads(subprocess.run([tools.ffprobe(), "-v", "error", "-select_streams", "v:0",
+                                        "-show_entries", "frame=best_effort_timestamp_time", "-of", "json",
+                                        str(video)], capture_output=True, text=True, check=True).stdout)["frames"]
+    times = [float(f["best_effort_timestamp_time"]) for f in frames]
     assert all(abs(b - a - 1 / 30) < 0.00001 for a, b in zip(times, times[1:]))
     assert saved["format"]["fps"] == 30
     assert probe.probe(video, quick=True)["fps"] == 30
@@ -86,12 +87,45 @@ def test_fails_if_exact_595_cfr_is_snapped_to_5994(tmp_path):
     assert project.load(directory)["format"]["fps"] == pytest.approx(59.5)
 
 
-def test_fails_if_mixed_sources_are_not_normalized(tmp_path, source):
+def test_steady_clips_at_different_rates_are_copied_and_the_project_keeps_the_smoothest(tmp_path, source):
     slow = tmp_path / "slow.mp4"
     subprocess.run([tools.ffmpeg(), "-v", "error", "-i", str(source), "-vf", "fps=30",
                     "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", str(slow)], check=True)
     directory = tmp_path / "reel"
     init.run(directory, "Mixed reel", [source, slow])
     saved = project.load(directory)
-    assert saved["format"]["fps"] == 30
-    assert [probe.probe(directory / s["path"], quick=True)["fps"] for s in saved["sources"]] == [30, 30]
+    assert saved["format"]["fps"] == pytest.approx(60000 / 1001)
+    # copied as they are, not re-encoded: the renderer turns each into the project rate
+    assert [(directory / s["path"]).stat().st_size for s in saved["sources"]] == [source.stat().st_size, slow.stat().st_size]
+
+
+def test_a_steady_mkv_without_a_frame_count_keeps_its_rate_and_is_copied(tmp_path, source):
+    mkv = tmp_path / "screen.mkv"
+    subprocess.run([tools.ffmpeg(), "-v", "error", "-i", str(source), "-c", "copy", str(mkv)], check=True)
+    directory = tmp_path / "reel"
+    init.run(directory, "Screen reel", [mkv])
+    saved = project.load(directory)
+    assert saved["format"]["fps"] == pytest.approx(60000 / 1001)
+    assert saved["sources"][0]["path"].endswith(".mkv")
+
+
+def test_a_variable_rate_clip_with_odd_sides_is_prepared(tmp_path):
+    odd = tmp_path / "odd.mp4"
+    # testsrc draws RGB, so the sides stay odd (testsrc2's 4:2:0 would round them to even first)
+    subprocess.run([tools.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", "testsrc=size=171x303:rate=60:duration=2",
+                    "-f", "lavfi", "-i", "sine=duration=2", "-vf", "select='if(lt(t,1),1,not(mod(n,2)))'",
+                    "-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv444p",
+                    "-c:a", "aac", "-shortest", str(odd)], check=True)
+    directory = tmp_path / "reel"
+    assert (probe.probe(odd)["width"], probe.probe(odd)["height"]) == (171, 303)
+    init.run(directory, "Odd reel", [odd])
+    s = project.load(directory)["sources"][0]
+    assert (s["width"], s["height"], s["fps"]) == (170, 302, 30)
+    assert probe.probe(directory / s["path"])["pixFmt"] == "yuv420p"
+
+
+def test_probe_samples_frame_timing_only_when_asked(monkeypatch, source):
+    def sampled(*_):
+        raise AssertionError("classify and the other callers must not pay for the frame timing")
+    monkeypatch.setattr(probe, "_sample_frame_cadence", sampled)
+    assert "variableFrameRate" not in probe.probe(source)

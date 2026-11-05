@@ -1,5 +1,6 @@
 // Live end-to-end follow-ups (2026-10-17): animations are not cards, animation text must
-// be readable, frames of an animation are sampled at its settled end.
+// be readable, frames of an animation are sampled at its settled end (on this task's own render here;
+// on stills of the edit the engine's `frames` does it, engine/tests/compositing/test_frames_without_draft.py).
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -110,5 +111,28 @@ describe('e2e: frames of an animation are sampled at its settled end', () => {
     const asked = host.calls.find((c) => c.command === 'frames')!.args;
     expect(asked[asked.indexOf('--times') + 1]).toBe('7.35,9');
     expect(r.animationsSampledAtEnd).toEqual([{ asked: 5, sampled: 7.35, id: 'b1' }]);
+  });
+});
+
+describe('look_at_frames needs no preview', () => {
+  it('asks the engine for stills without a render, only once the first look has finished', async () => {
+    const { ctx, dir, host } = await ctxFor();
+    // The first look is still rendering: it shares work/render/ with any still the engine draws.
+    let firstLookDone = false;
+    ctx.renderGate = (async () => {
+      for (let i = 0; i < 50; i++) await fsp.readFile(path.join(dir, 'project.json'));
+      firstLookDone = true;
+    })();
+    const run = host.runEngine.bind(host);
+    const seenAfterFirstLook: boolean[] = [];
+    host.runEngine = async (cmd: string, args: string[], ...rest: any[]) => {
+      if (cmd === 'frames') seenAfterFirstLook.push(firstLookDone);
+      return run(cmd, args, ...rest);
+    };
+    const r = await executeTool(ctx, 'look_at_frames', { times: [2], words: null });
+    expect(r.isError, r.content).toBe(false);
+    expect(r.images).toHaveLength(1);
+    expect(seenAfterFirstLook).toEqual([true]);
+    expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
   });
 });

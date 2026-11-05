@@ -435,7 +435,6 @@ describe('tool implementations', () => {
 
   it('render, frames (images attached), cover, zoom, captions, style, finish', async () => {
     const { ctx, root, dir, events } = await ctxFor();
-    expect((await executeTool(ctx, 'look_at_frames', { times: [1], words: null })).content).toMatch(/render_draft first/);
     await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
     const rd = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
     expect(rd.version).toBe(1);

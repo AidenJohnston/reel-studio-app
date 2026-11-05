@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { BASE, root, launch, passFirstRun, openSettings } from './helpers'
 
@@ -19,6 +19,7 @@ test('fails if the faster exports setting is not saved or applied to new project
     await toggle.focus()
     await running.page.keyboard.press('Space')
     await expect(toggle).toBeChecked()
+    await expect(toggle).toBeEnabled() // saved
     await running.app.close()
     running = await launch(env)
     await openSettings(running.page)
@@ -30,6 +31,7 @@ test('fails if the faster exports setting is not saved or applied to new project
     expect(JSON.parse(readFileSync(file, 'utf8')).format.fps).toBe(30)
     await running.page.getByTestId('faster-exports').uncheck()
     await expect(running.page.getByTestId('faster-exports')).not.toBeChecked()
+    await expect(running.page.getByTestId('faster-exports')).toBeEnabled() // saved before the next video starts
     const next = await running.page.evaluate((file) => window.reel.projects.create([file]), video)
     const nextFile = join(root(), 'Projects', next.slug, 'project.json')
     await expect.poll(() => existsSync(nextFile)).toBe(true)
@@ -38,6 +40,5 @@ test('fails if the faster exports setting is not saved or applied to new project
     expect(JSON.parse(readFileSync(file, 'utf8')).format.fps).toBe(30)
   } finally {
     await running.app.close().catch(() => {})
-    rmSync(BASE, { recursive: true, force: true })
   }
 })

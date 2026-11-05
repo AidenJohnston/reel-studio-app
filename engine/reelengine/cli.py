@@ -167,7 +167,9 @@ def cmd_verify(args):
 def cmd_frames(args):
     from . import frames
     times = [float(t) for t in args.times.split(",") if t.strip()]
-    return frames.run(_project(args), times, render_id=args.render_id, file=Path(args.file) if args.file else None)
+    words = [w.strip() for w in args.words.split(",") if w.strip()]
+    return frames.run(_project(args), times, render_id=args.render_id, file=Path(args.file) if args.file else None,
+                      project_file=_in_work(args, "project_file"), words=words)
 
 
 def cmd_inspect_render(args):
@@ -506,9 +508,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
-    sp = add("frames", cmd_frames, "extract frames from one render")
+    sp = add("frames", cmd_frames, "stills: of one render, or of the edit (from a render that is up to date, else drawn directly)")
     sp.add_argument("--render-id")
-    sp.add_argument("--times", required=True)
+    sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to show")
+    sp.add_argument("--words", default="", help="word ids: a still at the middle of each")
+    sp.add_argument("--times", default="")
     sp.add_argument("--file")
     sp = add("inspect-render", cmd_inspect_render, "one render's own reports")
     sp.add_argument("--render-id", required=True)
