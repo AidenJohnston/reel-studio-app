@@ -102,6 +102,16 @@ describe('honest progress', () => {
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
   })
 
+  it('keeps the final render overdue when aggregate progress outlives its estimate', () => {
+    let now = 0
+    const t = new ProgressTracker('rerender', 60, empty(), () => now)
+    t.update('final', 0)
+    now = 1000
+    t.update('final', 50, true)
+    now = 4000
+    expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+  })
+
   it('recalibrates remaining engine defaults from a slow first step', () => {
     let now = 0
     const onTime = new ProgressTracker('first-edit-basic', 60, empty(), () => now)
@@ -126,26 +136,29 @@ describe('honest progress', () => {
     expect(fast.snapshot().etaSec!).toBeLessThan(full.snapshot().etaSec!)
   })
 
-  it('retains the fixed base while learning the per-minute cost', () => {
+  it('fails if fresh timings discard the fixed base', () => {
     const legacy: SpeedHistory = { v: 1, phases: { 'note:final': { base: 6, perMin: 22, n: 3 } } }
     expect(new ProgressTracker('note', 120, legacy).estimate('final')).toBe(50)
     const h = learn(legacy, 'note', 120, { edit: 0, final: 6 + 2 * 60 })
-    const d = DEFAULTS['note:final']
-    expect(h.phases['note:final']!.base).toBe(6)
-    expect(new ProgressTracker('note', 120, h).estimate('final')).toBeCloseTo(72.8)
-    expect(h.phases['note:final']!.perMin).toBeGreaterThan(d.perMin)   // measured 60 s/min vs 22 default
+    expect(new ProgressTracker('note', 120, h).estimate('final')).toBeCloseTo(72.8)   // 70% of 50, 30% of 126
+    expect(new ProgressTracker('note', 1, h).estimate('final')).toBeGreaterThan(DEFAULTS['note:final'].base)
     expect(h.phases['note:edit']).toBeUndefined()                       // a skipped phase teaches nothing
-    const t = new ProgressTracker('note', 120, h)
-    const t0 = new ProgressTracker('note', 120, empty())
-    expect(t.estimate('final')).toBeGreaterThan(t0.estimate('final'))
   })
 
-  it('does not scale fixed AI latency from a short clip to a long clip', () => {
-    const history = learn(empty(), 'first-edit', 5, { edit: 128, final: 10 })
-    const long = new ProgressTracker('first-edit', 600, history)
-    expect(history.phases['first-edit:edit']!.base).toBe(128)
-    expect(long.estimate('edit')).toBe(128)
-    expect(long.estimate('final')).toBeCloseTo(248)
+  it('fails if a slow AI step on a short clip is learned as a cost per minute of video', () => {
+    const history = learn(empty(), 'first-edit', 5, { edit: 160 })
+    expect(new ProgressTracker('first-edit', 600, history).estimate('edit')).toBeCloseTo(160)
+  })
+
+  it('fails if a fast engine phase on a short clip makes a long video look free', () => {
+    const history = learn(empty(), 'first-edit', 10, { listen: 5 })
+    const long = new ProgressTracker('first-edit', 600, history).estimate('listen')
+    expect(long).toBeGreaterThan(30)
+    expect(long).toBeLessThan(new ProgressTracker('first-edit', 600, empty()).estimate('listen'))
+    const again = learn(history, 'first-edit', 10, { listen: 10 })
+    const blended = new ProgressTracker('first-edit', 10, again).estimate('listen')
+    expect(blended).toBeGreaterThan(5)
+    expect(blended).toBeLessThan(10)
   })
 
   it('does not say almost there during an AI overrun with a render ahead', () => {
@@ -191,7 +204,7 @@ describe('honest progress', () => {
   })
 
   it('fails if the recorded basic edit includes AI time or loses completed phase timings', async () => {
-    const fixture = (await import('./fixtures/aiden-progress.json')).default
+    const fixture = (await import('./fixtures/basic-progress.json')).default
     const replay = (history: SpeedHistory) => {
       let now = 0
       const tracker = new ProgressTracker('first-edit-basic', fixture.mediaSeconds, history, () => now)
