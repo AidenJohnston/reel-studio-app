@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -48,7 +49,7 @@ LICENSES = HERE / "licenses"
 REQUIRED_LICENSES = {
     "gpl-3.0.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",   # FFmpeg/x264/x265 builds
     "lgpl-3.0.txt": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",  # libheif, libde265 (pi-heif)
-    "lgpl-2.1.txt": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",  # FFmpeg libs inside opencv / PyAV wheels
+    "lgpl-2.1.txt": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",  # FFmpeg libs inside the opencv wheel
     "yunet-MIT.txt": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958", # YuNet face model
 }
 
@@ -345,11 +346,29 @@ def install_ffmpeg(plat: str, rt: Path) -> dict:
     return {"ffmpeg_version": ver}
 
 
+# GPL x264/x265 libraries must never be in the Python runtime: the only x264 we ship is our own ffmpeg, a separate GPL
+# program with its source offered. PyAV's wheels carry both, which is why engine/requirements.txt leaves PyAV out.
+GPL_CODEC_LIB = re.compile(r"^libx26[45]", re.IGNORECASE)
+
+
+def check_no_gpl_codec_libs(rt: Path) -> None:
+    found = sorted(str(f.relative_to(rt)) for f in (rt / "python").rglob("*") if GPL_CODEC_LIB.match(f.name))
+    if found:
+        raise SystemExit("GPL x264/x265 libraries in the Python runtime (PyAV? pillow-heif?): " + ", ".join(found))
+
+
 def smoke(plat: str, rt: Path) -> None:
+    check_no_gpl_codec_libs(rt)
     py = python_exe(rt, plat)
     model = REPO / "engine" / "reelengine" / "models" / "face_detection_yunet_2023mar.onnx"
     code = (
-        "import numpy, PIL, cv2, ctranslate2, faster_whisper, yt_dlp, jsonschema, pi_heif, sys, os\n"
+        "import importlib.util, sys, os\n"
+        "if importlib.util.find_spec('av') is not None:\n"
+        "    sys.exit('PyAV is installed: its wheels bundle GPL x264/x265. Keep it out of engine/requirements.txt.')\n"
+        # the engine (shipped as source next to the runtime) stands in for PyAV before faster-whisper imports it
+        "sys.path.insert(0, sys.argv[2])\n"
+        "import reelengine\n"
+        "import numpy, PIL, cv2, ctranslate2, faster_whisper, yt_dlp, jsonschema, pi_heif\n"
         "pi_heif.register_heif_opener()\n"
         # pillow-heif's wheel bundles x265 (GPL-2.0+); it must never be in the bundle
         "try:\n"
@@ -366,7 +385,7 @@ def smoke(plat: str, rt: Path) -> None:
         "else:\n"
         "    face = 'FaceDetectorYN skipped (model not found)'\n"
         "print('smoke ok numpy', numpy.__version__, 'cv2', cv2.__version__, 'ct2', ctranslate2.__version__, 'pi_heif', pi_heif.__version__, face)\n")
-    subprocess.run([str(py), "-I", "-c", code, str(model)], check=True)
+    subprocess.run([str(py), "-I", "-c", code, str(model), str(REPO / "engine")], check=True)
 
 
 def main() -> None:

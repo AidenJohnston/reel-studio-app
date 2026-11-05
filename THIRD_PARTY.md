@@ -127,10 +127,9 @@ turns them into `packaging/requirements-runtime.hashed.txt`, which `fetch_runtim
 | **otio-fcpx-xml-adapter** 1.0.0, **otio-fcp-adapter** 1.0.0 | Apache-2.0 | The OpenTimelineIO adapters for Final Cut Pro X XML and Final Cut 7 / Premiere XML. |
 | **psutil** 7.2.2 | BSD-3-Clause | Watches the import process's memory so a huge export can't exhaust the Mac. |
 | opencv-python-headless | Apache-2.0 | 5.0.0.93, the version the engine's tests ran against; wheel bundles FFmpeg libraries (LGPL-2.1, `texts/lgpl-2.1.txt`) |
-| faster-whisper | MIT | speech to text |
+| faster-whisper | MIT | speech to text. Installed without PyAV (`av`), which it only uses to decode audio files: the engine hands it decoded samples, and PyAV's wheels carry GPL x264/x265 libraries. `fetch_runtime.py` fails the build if PyAV or any `libx264`/`libx265` file is in the runtime. |
 | ctranslate2 | MIT | the inference engine under faster-whisper (CPU only, no torch) |
 | onnxruntime | MIT | voice activity detection used by faster-whisper |
-| av (PyAV) | BSD-3-Clause | wheel bundles FFmpeg libraries (LGPL-2.1, `texts/lgpl-2.1.txt`) |
 | tokenizers, huggingface_hub, hf-xet | Apache-2.0 | download and tokenise the speech model |
 | yt-dlp | The Unlicense | downloads videos from links the user pastes |
 | jsonschema, referencing, rpds-py, attrs | MIT | validates project files |

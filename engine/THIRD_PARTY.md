@@ -78,10 +78,9 @@ previews; all were trimmed, levelled and re-encoded as Opus. Licences checked on
 | numpy | BSD-3-Clause |
 | pillow | MIT-CMU (HPND) |
 | opencv-python-headless | Apache 2.0 (OpenCV >= 4.5); wheel bundles FFmpeg (LGPL) |
-| faster-whisper | MIT |
+| faster-whisper | MIT (installed without PyAV: see `reelengine/nopyav.py`) |
 | ctranslate2 | MIT |
 | onnxruntime | MIT |
-| av (PyAV) | BSD-3-Clause; wheel bundles FFmpeg libraries (LGPL 2.1+) |
 | tokenizers, huggingface-hub, hf-xet | Apache 2.0 |
 | jsonschema, jsonschema-specifications, referencing, attrs, rpds-py | MIT |
 | yt-dlp | Unlicense (public domain) |

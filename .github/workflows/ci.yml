@@ -70,6 +70,8 @@ jobs:
           uv venv --python 3.11 engine/.venv
           # CI encodes HEIC samples; the packaged app keeps decode-only pi-heif.
           uv pip install --python engine/.venv -c engine/requirements.txt -r packaging/requirements-extra.txt -e 'engine[dev,reference]' 'pytest<10' pillow-heif
+          # faster-whisper pulls in PyAV; the installers leave it out (engine/reelengine/nopyav.py), so test without it.
+          uv pip uninstall --python engine/.venv av
       - name: Verify FFmpeg capabilities
         shell: bash
         run: |
