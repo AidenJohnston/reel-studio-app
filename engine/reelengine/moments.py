@@ -11,9 +11,11 @@ What changes the picture, on the new project's output clock:
     `captions.enabled`) or any field this module does not know: the whole video;
   - the cut: everything from the first frame of the first segment that differs to the end, since every
     later frame moved;
-  - a b-roll item or a zoom: where it was and where it is now. When only its timing changed (a new
-    neighbour cut it short), only the seconds that changed;
-  - a caption line whose words, text or timing changed (a correction, a hidden line): the same way.
+  - a b-roll item or a zoom: where it was and where it is now, the whole of both spans even when only its
+    timing changed (a fade, a clip's playback, an animation and a zoom's framing all follow the span);
+  - a b-roll item whose span meets a changed zoom: its whole span, since cards are placed around the zoom;
+  - a caption line whose words or text changed (a correction, a hidden line): where it was and is. A line
+    that only moved in time is static text, so only the seconds it gained or lost.
 Music, the post text, notes, the title and the cover are not in the picture and change nothing.
 
 Each span is taken from the renderer's own timing (cut.build_timeline, broll.plan_windows,
@@ -23,7 +25,8 @@ it is already changed, so an old span is used as it is, cut to the new video's l
 
 The stills follow simple rules (no ranker): one inside a whole-video change (on a caption line, so a
 new caption look shows), the middle of each edited b-roll item and zoom, each new cut, the middle of
-each changed caption line, in that order, at most three.
+each changed caption line, in that order, at most three. Something that only moved because of another
+edit gets no still of its own.
 """
 from __future__ import annotations
 
@@ -193,29 +196,34 @@ def _match(old: list, new: list) -> list:
     return pairs
 
 
-def _diff_items(kind: str, old: list, new: list, moved_at: Optional[float]) -> list:
-    """Changes between two lists of (identity, content key, (t0, t1), label) on their own clocks."""
+def _diff_items(kind: str, old: list, new: list, moved_at: Optional[float], duration: float,
+                static: bool = False) -> list:
+    """Changes between two lists of (identity, content key, (t0, t1), label) on their own clocks.
+    `static`: an item's frames depend only on its content, not on its span (a caption line), so a
+    retimed one changed only in the seconds it gained or lost."""
     out = []
     for o, n in _match(old, new):
         if o and n and o[1] == n[1]:
             if abs(o[2][0] - n[2][0]) < EPS and abs(o[2][1] - n[2][1]) < EPS:
                 continue
-            # the same item, retimed: only the seconds it gained or lost changed. One that the cut
-            # moved shows nothing the cut's own stills don't.
-            regions = _symdiff(o[2], n[2])
-            before = [r for r in regions if moved_at is None or r[0] < moved_at - EPS]
-            at = [_mid([r[0], min(r[1], moved_at) if moved_at is not None else r[1]]) for r in before[:1]]
-            out.append({"kind": kind, "id": n[3], "regions": regions, "at": at, "why": "retimed"})
-        else:
-            regions = [list(x[2]) for x in (o, n) if x]
-            label = (n or o)[3]
-            why = "added" if not o else "removed" if not n else "edited"
-            # a removed item is seen where it was; past the cut's first moved frame that second of the
-            # old clock is not the same moment of the new video
-            seen = n is not None or moved_at is None or o[2][0] < moved_at - EPS
-            out.append({"kind": kind, "id": label, "regions": regions, "at": [_mid((n or o)[2])] if seen else [],
-                        "why": why})
+            # the same item, retimed by another edit: redrawn, but that edit's own stills show it
+            regions = _symdiff(o[2], n[2]) if static else [list(o[2]), list(n[2])]
+            out.append({"kind": kind, "id": n[3], "regions": regions, "at": [], "why": "retimed"})
+            continue
+        regions = [list(x[2]) for x in (o, n) if x]
+        label = (n or o)[3]
+        why = "added" if not o else "removed" if not n else "edited"
+        # a removed item is seen where it was, inside the new video; past the cut's first moved frame
+        # that second of the old clock is not the same moment of the new video
+        a, b = (n or o)[2]
+        b = min(b, duration) if n else min(b, duration, moved_at if moved_at is not None else b)
+        out.append({"kind": kind, "id": label, "regions": regions, "at": [_mid((a, b))] if b > a + EPS else [],
+                    "why": why})
     return out
+
+
+def _overlaps(span, regions: list) -> bool:
+    return any(span[0] < r[1] - EPS and r[0] < span[1] - EPS for r in regions)
 
 
 def _brolls(proj: dict, tl, project_dir: Path, root: Optional[Path], changed_anims: set) -> list:
@@ -297,10 +305,20 @@ def changed(old: Optional[dict], new: dict, words: list, project_dir: Path, root
         anims = {n for n in set(old_anims or {}) | set(new_anims or {})
                  if (old_anims or {}).get(n) != (new_anims or {}).get(n)}
         stems = {n.split(".")[0] for n in anims}
-        changes += _diff_items("broll", _brolls(old, old_tl, project_dir, root, set()),
-                               _brolls(new, tl, project_dir, root, stems), x)
-        changes += _diff_items("zoom", _zooms(old, old_tl, project_dir, root), _zooms(new, tl, project_dir, root), x)
-        changes += _diff_items("caption", _cues(old, old_tl), _cues(new, tl), x)
+        old_b, new_b = _brolls(old, old_tl, project_dir, root, set()), _brolls(new, tl, project_dir, root, stems)
+        zooms = _diff_items("zoom", _zooms(old, old_tl, project_dir, root), _zooms(new, tl, project_dir, root), x, dur)
+        brolls = _diff_items("broll", old_b, new_b, x, dur)
+        # cards are placed around the zoom under them (broll.zones_for): a changed zoom moves every card it meets
+        zr = [r for c in zooms for r in c["regions"]]
+        done = {c["id"] for c in brolls}
+        for side in (old_b, new_b):
+            for ident, _content, span, label in side:
+                if ident not in done and _overlaps(span, zr):
+                    done.add(ident)         # unchanged, so its span is the same on both clocks
+                    brolls.append({"kind": "broll", "id": label, "regions": [list(span)], "at": [],
+                                   "why": "placed around a changed zoom"})
+        changes += brolls + zooms
+        changes += _diff_items("caption", _cues(old, old_tl), _cues(new, tl), x, dur, static=True)
     return {"duration": dur, "fps": fps, "intervals": merge([r for c in changes for r in c["regions"]], dur),
             "changes": changes}
 
@@ -341,13 +359,13 @@ def pick_stills(found: dict, limit: int = MAX_STILLS) -> list:
     fps, dur, iv = found["fps"], found["duration"], found["intervals"]
     picked: list = []
     for kind in KIND_ORDER:
-        ats = sorted(t for c in found["changes"] if c["kind"] == kind for t in c["at"])
-        for t in ats:
+        for t in sorted(t for c in found["changes"] if c["kind"] == kind for t in c["at"]):
             k = frame_in(t, iv, fps, dur)
-            if k is not None and k not in picked:
+            if k is not None and k not in picked and len(picked) < limit:
                 picked.append(k)
-            if len(picked) == limit:
-                return [round(k / fps, 6) for k in picked]
+    if not picked and iv:       # something changed but no rule named a moment of it: its middle, never nothing
+        k = frame_in(_mid(iv[0]), iv, fps, dur)
+        picked += [] if k is None else [k]
     return [round(k / fps, 6) for k in picked]
 
 
@@ -357,9 +375,9 @@ def window_around(t: float, duration: float, fps: float, seconds: float = WINDOW
     if duration <= seconds + EPS:
         return None
     n = int(round(seconds * fps))                      # frames in a window
-    last = int(math.floor(duration * fps + EPS))       # the frame grid's end inside the video
+    frames = max(1, int(round(duration * fps)))        # the video's frames, as render.frame_at counts them
     k = int(math.floor((t - seconds / 2) * fps + EPS))
-    k = max(0, min(k, last - n))
+    k = max(0, min(k, frames - n))
     return [round(k / fps, 6), round(min(duration, (k + n) / fps), 6)]
 
 
@@ -388,7 +406,6 @@ def run(project_dir: Path, root: Optional[Path] = None, draft: bool = True) -> d
     found = changed(base and base["project"], now["project"], words, project_dir, root,
                     (base or {}).get("animations"), now["animations"])
     times = pick_stills(found)
-    win = window_around(times[0], found["duration"], found["fps"]) if times else None
     result = {"intervals": found["intervals"],
               "changes": [{k: v for k, v in c.items() if k != "at"} for c in found["changes"]],
               "stills": [], "window": None, "draft": None}
@@ -401,6 +418,7 @@ def run(project_dir: Path, root: Optional[Path] = None, draft: bool = True) -> d
     if out_dir.is_dir():                 # the last run's stills: their moments are drawn again below
         for old in out_dir.glob("still_*.png"):
             old.unlink(missing_ok=True)
+    win = window_around(times[0], found["duration"], found["fps"])     # its size; it is placed on the drawn still
     total = len(times) + (1 if win else 0) + (1 if draft else 0)
 
     def on_still(f: dict) -> None:
@@ -408,8 +426,10 @@ def run(project_dir: Path, root: Optional[Path] = None, draft: bool = True) -> d
         ready("moments", 100.0 * len(result["stills"]) / total, "Here's your change",
               {"kind": "still", "t": f["t"], "file": f["file"]})
 
-    drawn = render.stills(project_dir, times, STILL_WIDTH, root, out_dir=out_dir, on_still=on_still)
-    if win:
+    drawn = render.stills(project_dir, times, STILL_WIDTH, root, out_dir=out_dir, on_still=on_still,
+                          settle_within=found["intervals"])
+    if win and drawn["frames"]:
+        win = window_around(drawn["frames"][0]["t"], found["duration"], found["fps"])
         w = render.run(project_dir, window=f"{win[0]:.6f}:{win[1]:.6f}", root=root, verify=False)
         result["window"] = {"from": w["window"][0], "to": w["window"][1], "file": w["file"]}
         ready("moments", 100.0 * (len(times) + 1) / total, "Here's your change",

@@ -135,6 +135,32 @@ describe('live moments (main): a still or window plays from a copy the next run 
 })
 
 describe('job manager (main): the contract on the wire', () => {
+  it('sends moments in the order they were made, and none after the job was stopped', async () => {
+    setupPaths()
+    const slug = 'stopped'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const events: JobEvent[] = []
+    let releaseSlow = (): void => undefined
+    const slow = new Promise<void>((r) => (releaseSlow = r))
+    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, undefined, async (_s, e) => {
+      if (e.kind === 'still' && e.t === 1) await slow                   // the first copy is the slow one
+      if (e.kind === 'still' && e.t === 3) await new Promise((r) => setTimeout(r, 20))   // done only after the stop
+      return `reel-media://f/${e.kind}-${e.kind === 'still' ? e.t : e.from}`
+    })
+    jobs.start(slug, 'note', async (emit) => {
+      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png' })
+      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png' })
+      setTimeout(releaseSlow, 30)
+      await new Promise((r) => setTimeout(r, 60))
+      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png' })
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await jobs.forSlug(slug)?.done
+    await new Promise((r) => setTimeout(r, 30))
+    expect(events.filter((e) => e.type === 'moment').map((e) => e.type === 'moment' && e.kind === 'still' && e.t)).toEqual([1, 2])
+    expect(events.at(-1)).toMatchObject({ type: 'cancelled' })
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'

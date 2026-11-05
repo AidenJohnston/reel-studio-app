@@ -82,16 +82,41 @@ def test_a_moved_card_shows_where_it_was_and_where_it_is(tmp_path):
     assert span_of(tmp_path, new, "b1")[0] <= still < span_of(tmp_path, new, "b1")[1]
 
 
-def test_a_card_cut_short_by_a_new_neighbour_changes_only_the_seconds_it_lost(tmp_path):
+def test_a_card_cut_short_by_a_new_neighbour_is_redrawn_over_its_whole_span(tmp_path):
     old = base_project()
-    old["broll"] = [card("b1", "w4", "w4")]            # one word, held to the 2 s minimum
+    old["broll"] = [card("b1", "w4", "w4", fade=0.3)]  # one word, held to the 2 s minimum; its fade-out moves
     new = copy.deepcopy(old)
     new["broll"].append(card("b2", "w7", "w8"))        # starts inside b1's hold: b1 hands over to it
     a_old, a_new = span_of(tmp_path, old, "b1"), span_of(tmp_path, new, "b1")
     b2 = span_of(tmp_path, new, "b2")
     assert a_new[1] < a_old[1] and a_new[0] == a_old[0]
     found = diff(tmp_path, old, new)
-    assert found["intervals"] == approx([[a_new[1], max(a_old[1], b2[1])]])
+    assert found["intervals"] == approx([[a_old[0], max(a_old[1], b2[1])]])
+    # the still is of the new card, the cause, not of the one it cut short
+    assert b2[0] <= moments.pick_stills(found)[0] < b2[1]
+
+
+def test_a_zoom_under_a_card_redraws_the_whole_card(tmp_path):
+    old = base_project()
+    old["broll"] = [card("b1", "w10", "w16")]
+    new = copy.deepcopy(old)
+    new["zooms"] = [{"anchor": {"from": "w12", "to": "w13"}, "scale": 1.2}]   # cards are placed around the zoom
+    card_span = span_of(tmp_path, new, "b1")
+    (_, z0, z1), = zoom.windows(ctx(tmp_path, new))
+    assert card_span[0] < z0 and z1 < card_span[1]
+    assert diff(tmp_path, old, new)["intervals"] == approx([card_span])
+
+
+def test_a_card_removed_past_the_new_end_is_still_drawn(tmp_path):
+    old = base_project(keep=(("w0", "w31"),), captions_on=False)
+    old["broll"] = [card("b1", "w24", "w30")]
+    new = base_project(keep=(("w0", "w26"),), captions_on=False)   # the end cut off, the card removed
+    assert span_of(tmp_path, old, "b1")[1] > timeline(tmp_path, new).duration
+    found = diff(tmp_path, old, new)
+    dur = timeline(tmp_path, new).duration
+    assert found["intervals"] == approx([[span_of(tmp_path, old, "b1")[0], dur]])
+    [still] = moments.pick_stills(found)
+    assert span_of(tmp_path, old, "b1")[0] <= still < dur
 
 
 def test_a_caption_style_change_is_the_whole_video(tmp_path):
@@ -204,7 +229,7 @@ def test_stills_take_edited_cards_before_cuts_and_stop_at_three(tmp_path):
         a, b = span_of(tmp_path, new, bid)
         assert a <= s < b
     for s in stills:
-        assert abs(s * FPS - round(s * FPS)) < 1e-6                  # on the frame grid
+        assert abs(s * FPS - round(s * FPS)) < 1e-4                  # on the frame grid (times have 6 decimals)
         assert any(a <= s < b for a, b in found["intervals"])
 
 
@@ -215,6 +240,8 @@ def test_the_window_is_two_seconds_on_the_frame_grid_inside_the_video():
     assert b - a == pytest.approx(2.0) and a <= 5.017 < b
     assert abs(a * 30 - round(a * 30)) < 1e-6 and abs(b * 30 - round(b * 30)) < 1e-6
     assert moments.window_around(0.5, 1.8, 30) is None              # the draft is the window
+    a, b = moments.window_around(10.0, 10.02, 30)                     # 301 frames: the last starts at 10.0
+    assert a <= 10.0 < b
 
 
 # --- the command --------------------------------------------------------------------------------

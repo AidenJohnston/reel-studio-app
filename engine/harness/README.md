@@ -42,7 +42,10 @@ take's project (`moments --mark`, untimed); each note is one `moments` command, 
 line that reports its first still (the changed moment on screen), to its window's line, and to exit
 (the draft). Its stills and window sit at the times the engine chose; every run must choose the same
 ones, and each is checked like any other still and window. A note that changes nothing on screen (the
-music note) draws nothing and has no draft to check.
+music note) draws nothing and has no draft to check. Which notes change the picture is not taken from
+the candidate: a `coverage` check compares the video packets of the note's reference final with the
+last note's. A changed picture must get a still and intervals that hold the note's changed moment; an
+unchanged one must get no intervals.
 
 ## Checks
 

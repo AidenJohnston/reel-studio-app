@@ -14,7 +14,7 @@ import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
 class MomentsHost extends FakeHost {
   log: string[] = [];
   marks: any[] = [];
-  runs: { signal?: AbortSignal; captionSize: number }[] = [];
+  runs: { signal?: AbortSignal; captionSize: number; sizeWhenStopped?: number }[] = [];
   hang = 0;
 
   override async runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any> {
@@ -31,7 +31,8 @@ class MomentsHost extends FakeHost {
     this.log.push(`start moments ${n}`);
     const preview = path.join(dir, 'versions', 'preview');
     if (n < this.hang) {
-      return new Promise((_, reject) => signal!.addEventListener('abort', () => {
+      return new Promise((_, reject) => abortable(signal!, async () => {
+        this.runs[n].sizeWhenStopped = JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).captions.style.size;
         // a line the engine wrote just before it was killed must not reach the app
         onProgress?.({ stage: 'moments', pct: 30, message: 'x', ready: { kind: 'still', t: 9.9, file: path.join(preview, 'stale.png') } });
         const exited = new Promise<void>((r) => setTimeout(() => { this.log.push(`end moments ${n}`); r(); }, 20));
@@ -46,6 +47,12 @@ class MomentsHost extends FakeHost {
     return { intervals: [[0, 12.3]], stills: [], window: null,
       draft: { version: 1, preview: true, draft: true, file: path.join(preview, 'draft.mp4'), duration: 12.3, verify: { ok: true } } };
   }
+}
+
+/** Runs `fn` once `signal` aborts, at once if it already has (as the app's engine runner checks it). */
+function abortable(signal: AbortSignal, fn: () => void): void {
+  if (signal.aborted) fn();
+  else signal.addEventListener('abort', fn, { once: true });
 }
 
 async function setup(hang = 0) {
@@ -108,6 +115,7 @@ describe('changed moments first', () => {
 
     expect(host.runs.map((r) => r.captionSize)).toEqual([90, 120]);
     expect(host.runs[0].signal?.aborted).toBe(true);
+    expect(host.runs[0].sizeWhenStopped).toBe(90);        // stopped before the next save, not after the reply
     expect(serial(host.log)).toBe(true);
     expect(host.log.indexOf('end moments 0')).toBeLessThan(host.log.indexOf('start moments 1'));
     expect(events.some((e) => e.type === 'moment' && e.file.endsWith('stale.png'))).toBe(false);

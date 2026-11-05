@@ -290,7 +290,8 @@ def replay_moments(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir
         seconds["first"].append(stills[0] if stills else None)
         seconds["window"].append(windows[0] if windows else None)
         seconds["draft"].append(round(call.seconds, 3))
-        plans.append({"intervals": r["intervals"], "stills": [f["t"] for f in r["stills"]],
+        # the engine prints a still's time to the millisecond; the check needs its exact frame
+        plans.append({"intervals": r["intervals"], "stills": [round(f["t"] * ref["fps"]) / ref["fps"] for f in r["stills"]],
                       "window": [r["window"]["from"], r["window"]["to"]] if r["window"] else None})
         files.append(_keep(kept, keep_dir / f"{k:02d}" if keep_dir else None))
     final = cand.run("render", ["--project", proj])
@@ -400,14 +401,38 @@ def check_take(take: Take, refs: list, runs: list, ffmpeg: str, ffprobe: str, th
                         else {"status": "none", "failures": [], "metrics": {}, "distinctChecked": 0})
             return _merge([checks.check_preview_video(ffmpeg, ffprobe, export, f, caps, pv, ref["fps"], want, **span)
                            for f in distinct(lambda r: r["files"][k][name])])
-        steps.append({"draft": video("draft"),
-                      "window": video("window", start=win[0], end=win[1]) if win else video("window"),
-                      "still": stills})
+        step_checks = {"draft": video("draft"),
+                       "window": video("window", start=win[0], end=win[1]) if win else video("window"),
+                       "still": stills}
+        if moments:
+            step_checks["coverage"] = check_coverage(ffmpeg, refs, k, plan)
+        steps.append(step_checks)
     last = refs[-1]["dir"]
     caps = json.loads((last / "captions.json").read_text(encoding="utf-8"))["cues"]
     final = _merge([checks.check_final(ffmpeg, ffprobe, last / "export.mp4", f, caps, th["final"])
                     for f in distinct(lambda r: r["finalFile"]["final"])])
     return {"steps": steps, "final": final}
+
+
+def check_coverage(ffmpeg: str, refs: list, k: int, plan: dict) -> dict:
+    """Whether the moments of note k agree with the reference finals, which the candidate cannot touch:
+    when this note's final shows a different picture from the last note's (note 0: from nothing), the
+    candidate must draw a still and its intervals must hold the note's changed moment; when the picture
+    is the same (only the sound changed), it must draw nothing."""
+    changed = k == 0 or media.video_packets_md5(ffmpeg, refs[k]["dir"] / "export.mp4") != \
+        media.video_packets_md5(ffmpeg, refs[k - 1]["dir"] / "export.mp4")
+    t = refs[k]["moment"]
+    inside = any(a - 1e-6 <= t <= b + 1e-6 for a, b in plan["intervals"])
+    failures = []
+    if changed and not plan["stills"]:
+        failures.append("the reference picture changed but no still was drawn")
+    if changed and not inside:
+        failures.append(f"the changed moment at {t}s is outside the intervals {plan['intervals']}")
+    if not changed and plan["intervals"]:
+        failures.append(f"the reference picture is unchanged but intervals {plan['intervals']} were drawn")
+    return {"status": "fail" if failures else "pass", "failures": failures, "distinctChecked": 1,
+            "metrics": {"pictureChanged": {"value": changed, "status": "pass"},
+                        "momentInside": {"value": inside, "status": "pass" if inside or not changed else "fail"}}}
 
 
 def prune_duplicates(runs: list) -> None:

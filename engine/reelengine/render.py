@@ -1055,12 +1055,14 @@ def settle_on_animations(project_dir: Path, times: list) -> tuple:
 
 
 def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = None,
-           out_dir: Optional[Path] = None, on_still=None) -> dict:
+           out_dir: Optional[Path] = None, on_still=None, settle_within: Optional[list] = None) -> dict:
     """PNG stills of the project as it is now, with no render to take them from. Each is the draft's frame
     at that time (frame_at), drawn by the draft's own graph (build_video_cmd) over a one-frame window:
     the same layers, zooms and full-length caption track, with no sound and no encode. It writes
     work/render/ and work/layers/ as a render does, so it must never run beside one. The PNGs go to
-    `out_dir` (default versions/preview/frames); `on_still({t, file})` is called as each one is written."""
+    `out_dir` (default versions/preview/frames); `on_still({t, file})` is called as each one is written.
+    `settle_within` ([[a, b], ...]): a time moves to an animation's settled end only when that end is still
+    inside one of these spans (moments.py asks for frames of what changed, not of what is beside it)."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
@@ -1077,7 +1079,13 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     ctx.out_dir = preview_dir(project_dir)
     layers, zooms, broll_report = overlays(ctx, proj, tl, warnings)
     ass_name, _, font_path = burn_captions(ctx, proj, tl, broll_report, rwork, warnings)
+    asked = list(times)
     times, moved = settle_on_animations(project_dir, times)
+    if settle_within is not None:
+        def inside(t: float) -> bool:
+            return any(a - 1e-6 <= t < b for a, b in settle_within)
+        times = [t if inside(t) else a for t, a in zip(times, asked)]
+        moved = [m for m in moved if inside(m["sampled"])]
     timings = {"setup": round(time.time() - t_start, 2), "stills": []}
 
     W, H, fps = int(proj["format"]["width"]), int(proj["format"]["height"]), float(proj["format"]["fps"])

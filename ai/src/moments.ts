@@ -5,9 +5,9 @@
 // the edit instead of waiting for a whole draft.
 //
 // One run at a time, never beside another render of this project (they share work/render/ and
-// versions/preview/). An edit that lands while a run is going stops it: its pictures are of an older
-// edit. A render the AI asks for waits for a run of the current edit (render_draft then uses its draft)
-// and stops any other. The engine moves its base (what the screen shows) only when a run finishes, so
+// versions/preview/). A save stops a run still going before it writes: the run reads project.json at
+// each stage and would otherwise draw part of one edit and part of the next. A render the AI asks for
+// waits for a run of the current edit (render_draft then uses its draft) and stops any other. The engine moves its base (what the screen shows) only when a run finishes, so
 // the next run also draws what a stopped one did not.
 import type { AgentEvent, EngineHost, MomentReady } from './types';
 
@@ -20,7 +20,7 @@ export interface MomentsTask {
   renderGate?: Promise<unknown>;
 }
 
-interface Run { edit: number; abort: AbortController; done: Promise<unknown> }
+interface Run { edit: number; abort: AbortController; done: Promise<unknown>; settled: boolean }
 
 export class Moments {
   private run: Run | null = null;
@@ -37,8 +37,11 @@ export class Moments {
       .catch(() => undefined);  // no base: the first run draws stills of the whole video instead
   }
 
-  /** Resolves once mark() has written the base, so a save never lands before it. */
-  ready(): Promise<unknown> { return this.marked; }
+  /** Before a save: waits for mark() to have written the base, and stops a run still going. */
+  async beforeSave(): Promise<void> {
+    await this.marked;
+    if (this.run && !this.run.settled) await this.before(null);
+  }
 
   /** The project is now at `edit`, and `picture` is the last edit that changed what it shows. Stops a
    * run of an older edit and draws this one; does nothing when this picture is already being drawn. */
@@ -48,7 +51,9 @@ export class Moments {
     const prev = this.run;
     prev?.abort.abort();
     const abort = new AbortController();
-    this.run = { edit, abort, done: this.draw(edit, abort.signal, prev) };
+    const run: Run = { edit, abort, done: Promise.resolve(), settled: false };
+    run.done = this.draw(edit, abort.signal, prev).finally(() => { run.settled = true; });
+    this.run = run;
   }
 
   private async draw(edit: number, stop: AbortSignal, prev: Run | null): Promise<void> {

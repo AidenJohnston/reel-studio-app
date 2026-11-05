@@ -92,7 +92,7 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
-  await ctx.moments?.ready();          // the state before this save is what moments compares with
+  await ctx.moments?.beforeSave();     // the base is written, and no run reads project.json mid-save
   await saveProject(ctx.projectDir, p);
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);

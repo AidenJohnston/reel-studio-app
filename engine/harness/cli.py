@@ -225,8 +225,8 @@ def render_markdown(r: dict) -> str:
     if moments:
         lines += ["Moments flow: seconds from the start of each note's `moments` command until its first still and "
                   "its window were read, and until it ended with the draft; - = nothing on screen changed.", "",
-                  "| Take | Note | First still s | Window s | Draft s | Draft | Still | Window |",
-                  "|---|---|---|---|---|---|---|---|"]
+                  "| Take | Note | First still s | Window s | Draft s | Draft | Still | Window | Coverage |",
+                  "|---|---|---|---|---|---|---|---|---|"]
     else:
         lines += ["| Take | Note | Draft s | Still s | Window s | Draft | Still | Window |",
                   "|---|---|---|---|---|---|---|---|"]
@@ -235,7 +235,8 @@ def render_markdown(r: dict) -> str:
             sec, ch = s["seconds"], s["checks"]
             cols = (sec["first"], sec["window"], sec["draft"]) if moments else (sec["draft"], sec["still"], sec["window"])
             lines.append(f"| {tid} | {s['note']} | {' | '.join(_sec(x) for x in cols)} | "
-                         f"{_status(ch['draft'])} | {_status(ch['still'])} | {_status(ch['window'])} |")
+                         f"{_status(ch['draft'])} | {_status(ch['still'])} | {_status(ch['window'])} |"
+                         + (f" {_status(ch['coverage'])} |" if moments else ""))
         lines.append(f"| {tid} | final export | {_sec(t['final']['seconds'])} | | | {_status(t['final']['check'])} | | |")
     lines += ["", f"Session wait (all takes): {_sec(r['wait'])} s. Per take: "
               + ", ".join(f"{tid} {_sec(t['wait'])}" for tid, t in r["takes"].items()) + "."]
