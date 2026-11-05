@@ -88,7 +88,7 @@ test('fails if the phone stops filling its column as an iPhone 17, the view is n
 // connected account (main/instagram-ipc.ts).
 // fails if the preview shows a made-up handle or counts again, or not the connected account's handle and picture
 test('the Instagram preview shows the connected account, a plain placeholder without one, and no counts', async () => {
-  const cases = [
+  const cases: { name: string; env: Record<string, string>; handle: string; picture: number }[] = [
     { name: 'none', env: {}, handle: 'Your account', picture: 0 },
     { name: 'connected', env: { REELSTUDIO_TEST_INSTAGRAM: 'fixture.creator' }, handle: 'fixture.creator', picture: 1 }
   ]
