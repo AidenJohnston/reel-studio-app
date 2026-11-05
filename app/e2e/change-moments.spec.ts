@@ -115,7 +115,8 @@ test('fails if a picked picture does not hold, or Stop leaves the change on the 
     await expect(page.getByTestId('change-picture')).toHaveCount(0)
     await expect(page.getByTestId('change-tag')).toHaveCount(0)
     await expect(page.getByTestId('note-progress')).toHaveCount(0)
-    await expect(page.getByTestId('player')).toHaveAttribute('src', /v1.export\.mp4/)
+    // a reel-media URL: the path inside it is percent-encoded
+    await expect(page.getByTestId('player')).toHaveAttribute('src', /v1(%5C|%2F)export\.mp4/)
     const seen = await record(page)
     // the window would come next: the engine was stopped before it was let through
     g.go(3)
