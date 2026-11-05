@@ -223,6 +223,7 @@ export function PhonePlayer({
                 onDuration?.(e.currentTarget.duration || 0)
               }}
               data-testid={testid}
+              elementtiming={testid}
             />
             {original && (
               <video

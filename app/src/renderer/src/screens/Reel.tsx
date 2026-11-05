@@ -4,6 +4,7 @@ import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
+import { NOTE_STATUS } from '../../../shared/perf-marks'
 import type { Go } from '../nav'
 import { Check, Confirm, FOLDER_APP, Modal, MoreMenu, Progress, Spinner, Thinking } from '../components/ui'
 import { SendToPhone } from '../components/SendToPhone'
@@ -563,7 +564,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
               // Outside the scrolling chat, so the progress can never be scrolled or cut out of sight.
               <div className="job-progress" ref={progressRef} data-testid="note-progress">
                 <div className="row" style={{ marginBottom: 8 }}>
-                  {job.thinking ? <Thinking /> : <Spinner />} <span>{job.message}</span>
+                  {job.thinking ? <Thinking /> : <Spinner />} <span elementtiming={NOTE_STATUS}>{job.message}</span>
                   <span className="spacer" />
                   <span className="muted-sm" data-testid="note-time-left">{timeLeftWords(job) ?? ''}</span>
                   <button className="link" onClick={() => job.jobId && reel.jobs.cancel(job.jobId)} style={{ padding: 0, marginLeft: 12 }}>
