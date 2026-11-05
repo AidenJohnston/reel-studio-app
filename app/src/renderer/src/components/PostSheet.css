@@ -1,0 +1,13 @@
+/* "Post to YouTube" (components/PostSheet.tsx), in the redesign's tokens (styles.css :root). */
+.post-sheet p { margin: 0; }
+.post-privacy { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.post-privacy legend { padding: 0; margin-bottom: 8px; }
+.post-privacy .radio { padding: 8px 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line); background: var(--surface); }
+.post-privacy .radio.on { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.post-note { background: var(--amber-tint); color: var(--amber); border-radius: var(--r-sm); padding: 10px 12px; }
+.post-error { background: var(--pencil-tint); color: var(--pencil); border-radius: var(--r-sm); padding: 10px 12px; }
+.post-note a, .post-error a { color: inherit; }
+@media (forced-colors: active) {
+  .post-privacy .radio.on { outline: 2px solid Highlight; }
+  .post-note, .post-error { border: 1px solid CanvasText; }
+}

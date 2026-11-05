@@ -14,7 +14,9 @@ import { usePresence } from './motion'
 import { SendToPhone } from './SendToPhone'
 import { SharePlatforms } from './SharePlatforms'
 import { Strip, type Work } from './ShareStrip'
-import { FOLDER_APP } from './ui'
+import { FOLDER_APP, Modal } from './ui'
+import { usePostingStatus } from './posting'
+import { PostSheet } from './PostSheet'
 import './share.css'
 
 const LAST = 'rs.share.last'
@@ -33,6 +35,7 @@ const posted = (post: ProjectJson['post']): string =>
 
 export function Outs({
   slug,
+  title,
   version,
   post,
   disabled,
@@ -41,6 +44,8 @@ export function Outs({
   onSaveCaption
 }: {
   slug: string
+  /** The reel's name: Post to YouTube starts its title from it. */
+  title: string
   /** The version on screen: the one Share sends. */
   version: VersionInfo | undefined
   post: ProjectJson['post']
@@ -76,6 +81,11 @@ export function Outs({
   const openRef = useRef(open)
   openRef.current = open
   const { drives, label: driveName } = useCloudDrives()
+  // Post to YouTube (main/posting.ts): a destination only while posting is on (REELSTUDIO_POSTING=1)
+  const [posting] = usePostingStatus()
+  const [postSheet, setPostSheet] = useState<{ video: string; version: number; durationSec: number | null } | null>(null)
+  // a post is being sent: Stop is the way out, not Esc or a click outside
+  const [postBusy, setPostBusy] = useState(false)
 
   const [caption, setCaption] = useState(() => posted(post))
   const savedCaption = useRef(posted(post))
@@ -263,6 +273,24 @@ export function Outs({
           return { kind: 'done', line: 'Ready for Instagram, caption copied', path: files.video }
         })
     },
+    ...(posting?.enabled
+      ? [{
+          id: 'youtube',
+          icon: <BrandMark name="youtube" size={16} />,
+          label: 'Post to YouTube',
+          hint: posting.youtube?.state === 'connected' && posting.youtube.channelName ? `To ${posting.youtube.channelName}` : 'Connect your channel once',
+          testid: 'share-youtube',
+          go: () =>
+            void run('youtube', async (files) => {
+              const n = version!.n
+              const timeline = await reel.projects.timeline(slug, n).catch(() => null)
+              // the sheet takes the window's middle: Share steps aside for it, and Back returns to it
+              close(false)
+              setPostSheet({ video: files.video, version: n, durationSec: timeline?.duration ?? null })
+              return null
+            })
+        }]
+      : []),
     {
       id: 'phone',
       icon: <Icon name="phone" size={16} />,
@@ -475,6 +503,24 @@ export function Outs({
             {ask === 'answered' && <p className="muted-sm sp-help-done" role="status">Saved. Change it any time in Settings › Privacy.</p>}
           </div>
         </div>
+      )}
+      {postSheet && (
+        <Modal onClose={postBusy ? undefined : () => setPostSheet(null)} wide testid="post-dialog">
+          <PostSheet
+            video={postSheet.video}
+            slug={slug}
+            version={postSheet.version}
+            title={title}
+            caption={caption}
+            durationSec={postSheet.durationSec}
+            onBack={() => {
+              setPostSheet(null)
+              show()
+            }}
+            onClose={() => setPostSheet(null)}
+            onBusy={setPostBusy}
+          />
+        </Modal>
       )}
     </div>
   )

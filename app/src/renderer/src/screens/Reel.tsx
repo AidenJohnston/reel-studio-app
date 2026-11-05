@@ -779,6 +779,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
       {hasVersions && (
         <Outs
           slug={slug}
+          title={d.title}
           version={version}
           post={d.project.post}
           disabled={!version || (!!job && !shareWork)}

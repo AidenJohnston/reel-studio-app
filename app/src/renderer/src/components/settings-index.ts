@@ -23,6 +23,8 @@ export const SETTINGS = {
   'own-server': { section: 'editor', label: 'Your own AI server', synonyms: ['server', 'local', 'self-hosted', 'Ollama', 'LM Studio', 'OpenAI-compatible', 'Anthropic-compatible', 'endpoint', 'base URL', 'proxy', 'custom', 'advanced'] },
   'api-key': { section: 'editor', label: 'Anthropic API key', synonyms: ['key', 'API', 'token', 'console', 'billing', 'pay as you go', 'advanced'] },
   'stock-keys': { section: 'advanced', label: 'Stock photos and footage', synonyms: ['stock', 'Pexels', 'Pixabay', 'Openverse', 'photos', 'footage', 'b-roll', 'pictures', 'key', 'API', 'advanced'] },
+  youtube: { section: 'posting', label: 'YouTube', synonyms: ['post', 'posting', 'publish', 'upload', 'channel', 'Shorts', 'Google', 'connect'] },
+  'posting-sign-in': { section: 'posting', label: 'This computer', synonyms: ['sign in', 'sign out', 'sign out everywhere', 'posting server', 'download key', 'computers'] },
   instagram: { section: 'posting', label: 'Instagram', synonyms: ['post', 'posting', 'publish', 'upload', 'social', 'platforms', 'TikTok', 'YouTube', 'Shorts'] },
   'library-folder': { section: 'reels', label: 'Library folder', synonyms: ['folder', 'location', 'where', 'storage', 'save', 'saved', 'path', 'directory', 'Movies', 'Documents', 'Finder', 'Explorer', 'disk', 'files', 'move'] },
   'listening-model': { section: 'reels', label: 'Listening model', synonyms: ['subtitles', 'captions', 'transcript', 'transcription', 'speech', 'speech to text', 'Whisper', 'WhisperX', 'words', 'voice', 'download', 'offline'] },

@@ -12,7 +12,7 @@ export function Logo({ size = 15 }: { size?: number }) {
   )
 }
 
-export type BrandName = 'claude' | 'openai' | 'icloud' | 'gdrive'
+export type BrandName = 'claude' | 'openai' | 'icloud' | 'gdrive' | 'youtube'
 
 // Simple Icons (CC0) shapes, in each service's own colour.
 const MARKS: Record<BrandName, { fill: string; d: string }> = {
@@ -27,6 +27,10 @@ const MARKS: Record<BrandName, { fill: string; d: string }> = {
   icloud: {
     fill: '#3693F3',
     d: 'M13.762 4.29a6.51 6.51 0 0 0-5.669 3.332 3.571 3.571 0 0 0-1.558-.36 3.571 3.571 0 0 0-3.516 3A4.918 4.918 0 0 0 0 14.796a4.918 4.918 0 0 0 4.92 4.914 4.93 4.93 0 0 0 .617-.045h14.42c2.305-.272 4.041-2.258 4.043-4.589v-.009a4.594 4.594 0 0 0-3.727-4.508 6.51 6.51 0 0 0-6.511-6.27z'
+  },
+  youtube: {
+    fill: '#FF0000',
+    d: 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z'
   },
   gdrive: {
     fill: '#4285F4',

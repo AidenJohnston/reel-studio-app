@@ -17,6 +17,7 @@ import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type Set
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
 import '../components/settings.css'
 import { StockKeys } from '../components/stock-keys'
+import { PostingRows, useInstagramLine } from '../components/PostingSettings'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
 const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', about: 'about' }
@@ -84,6 +85,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
 
   const update = useUpdateState()
   const updateKey = useUpdateKey()
+  const instagramLine = useInstagramLine()
   const [legal, setLegal] = useState<LegalDoc | null>(null)
   const [savingExports, setSavingExports] = useState(false)
   // Double-check each edit (main/settings.ts checkEdits): off by default, read once like the other switches
@@ -301,7 +303,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
             </Section>
 
             <Section id="posting">
-              <SettingRow id="instagram" line="Posting from Reel Studio isn’t ready yet. Share saves your reel and sends it to your phone." control={<span className="sval">Not connected</span>} />
+              <PostingRows />
+              <SettingRow id="instagram" line={instagramLine} control={<span className="sval">Not connected</span>} />
             </Section>
 
             <Section id="about">
