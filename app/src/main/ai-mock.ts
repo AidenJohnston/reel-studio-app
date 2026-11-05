@@ -260,7 +260,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       // app/perf: a real model takes seconds, so its status line is painted; this mock would finish first
       const hold = Number(process.env.REELSTUDIO_MOCK_NOTE_MS || 0)
-      if (hold) await until(signal, hold)
+      if (hold) await until(signal ?? new AbortController().signal, hold)
       const p = await readProject(projectDir)
       const added: string[] = []
       if (/\b(always|never|every video|from now on|in general)\b/i.test(note)) {
