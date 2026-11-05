@@ -287,7 +287,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   releaseRead()
   await enabling
   expect(u.state().status).toBe('installing')
-  const jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
+  const jobs = createJobManager(() => {}, () => {}, undefined, undefined, undefined, () => u.assertCanStartWork())
   expect(() => jobs.start(null, 'rerender', async () => ({ summary: '' }))).toThrow(expect.objectContaining({ code: 'UPDATING' }))
   expect(jobs.runningCount()).toBe(0)
   fail(new Error('shutdown failed'))
@@ -388,7 +388,7 @@ it('fails if a download that does not pass its check stops a video or offers the
     verify: async () => { throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
     prepareToQuit: () => jobs.cancelAll()
   })
-  jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
+  jobs = createJobManager(() => {}, () => {}, undefined, undefined, undefined, () => u.assertCanStartWork())
   await u.check('button')
   await u.download()
   jobs.start(null, 'rerender', (_emit, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('stopped')))))

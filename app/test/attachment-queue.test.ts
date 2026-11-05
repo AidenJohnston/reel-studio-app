@@ -24,7 +24,7 @@ function fixture() {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'project.json'), JSON.stringify({ title: slug, version: 1, broll: [] }))
   const jobs = createJobManager(() => undefined, () => undefined)
-  const queue = createNoteQueue({ jobs, startNote: async () => 'note', changed: () => undefined, log: () => undefined })
+  const queue = createNoteQueue({ jobs, startNote: async () => 'note', startHand: async () => { throw new Error('this test sends no hand edits') }, changed: () => undefined, log: () => undefined })
   const handlers = new Map<string, Parameters<AttachIpcDeps['handle']>[1]>()
   const asset = 'work/assets/attach-12345678-picture.png'
   registerAttachmentIpc({

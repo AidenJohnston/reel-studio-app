@@ -38,7 +38,6 @@ export function planAnswerer(p: ProviderInfo | null, writer: string): Answerer |
     case 'claude':
       return make('claude', 'Claude', p.detail ?? null)
     case 'codex-cli':
-    case 'chatgpt':
       return make('openai', 'ChatGPT', null)
     case 'custom':
       return make('server', p.label, picked ?? p.detail ?? null)
