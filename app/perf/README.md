@@ -19,8 +19,13 @@ enters a number.
 | Open a reel | the click on its card on Home | the player's first paint: the version's cover, or its first frame if it has none |
 | Switch version | the click on a version not yet shown since launch | the new player's first paint |
 | Switch back | the click back to the version the reel opened on | the new player's first paint |
-| Scrub | the scrub bar's `input` event on a click | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`); the median of five clicks per run |
+| Scrub | the scrub bar's `input` event on a click | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the status line under the notes ("Reading your note") being painted |
+
+Scrub clicks five positions in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
+so its time depends on where it lands in the encode, and the first click after opening also loads data the player had
+not fetched yet. The fake engine encodes with x264's default keyframe spacing, so scrub numbers describe that encode,
+not the real engine's exports.
 
 Launch includes Playwright attaching to Electron, which holds Electron's `ready` event until it has. A person starting
 the app does not pay that, so treat launch as an upper bound. The report splits launch into the main process starting,

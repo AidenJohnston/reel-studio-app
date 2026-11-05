@@ -17,6 +17,8 @@ const RUNS = Number(process.env.REELSTUDIO_PERF_RUNS || 5)
 const PLAYER = 'video[data-testid="player"]'
 // The mock ChatGPT editor is connected for the note; it holds each note 1.5 s, as a real model takes seconds.
 const ENV = { REELSTUDIO_MOCK_CODEX: 'ready', REELSTUDIO_MOCK_NOTE_MS: '1500' }
+// Fractions of the scrub bar, clicked in this order. A seek's cost depends on where it lands (how far past a keyframe),
+// and the first one after opening also loads the data, so each position is reported on its own, never pooled.
 const SCRUB_AT = [0.2, 0.7, 0.4, 0.9, 0.55]
 
 interface Paint {
@@ -152,6 +154,7 @@ interface Run {
   switchMs: number
   /** back to the version shown when the reel opened */
   switchBackMs: number
+  /** one per SCRUB_AT position, in click order */
   scrubMs: number[]
   noteStatusMs: number
   /** what the player's first paint was: the version's cover (poster) or a video frame */
@@ -257,15 +260,15 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
     }
   }
 
-  const median = (xs: number[]): number => stats(xs).median
   const summary = {
     launchUsableMs: stats(runs.map((r) => r.launch.usableMs)),
+    launchMainStartMs: stats(runs.map((r) => r.launch.mainStartMs)),
     launchWindowShownMs: stats(runs.map((r) => r.launch.windowShownMs)),
     launchHomeReelMs: stats(runs.map((r) => r.launch.homeReelMs)),
     openReelMs: stats(runs.map((r) => r.openReelMs)),
     switchMs: stats(runs.map((r) => r.switchMs)),
     switchBackMs: stats(runs.map((r) => r.switchBackMs)),
-    scrubMs: stats(runs.map((r) => median(r.scrubMs))),
+    ...Object.fromEntries(SCRUB_AT.map((at, i) => [`scrub${i + 1}At${Math.round(at * 100)}PctMs`, stats(runs.map((r) => r.scrubMs[i]))])),
     noteStatusMs: stats(runs.map((r) => r.noteStatusMs))
   }
   const report = {
@@ -286,6 +289,6 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
   mkdirSync(dirname(out), { recursive: true })
   writeFileSync(out, JSON.stringify(report, null, 1))
   console.log(`app timings (${runs.length} runs) -> ${out}`)
-  for (const [k, s] of Object.entries(summary)) console.log(`  ${k.padEnd(20)} median ${String(s.median).padStart(8)} ms  [${s.min}, ${s.max}]  spread ${s.spreadPct}%`)
+  for (const [k, s] of Object.entries(summary)) console.log(`  ${k.padEnd(22)} median ${String(s.median).padStart(8)} ms  [${s.min}, ${s.max}]  spread ${s.spreadPct}%`)
   console.log(`  load before each run: ${runs.map((r) => r.load.before.busy ?? '?').join(', ')} (${runs[0]?.load.before.how})`)
 })
