@@ -227,6 +227,17 @@ function holdBackground(): void {
 
 const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex="-1"])'
 
+/** A radio group is one Tab stop, as the browser tabs it: its checked radio, or its first when none is checked.
+ * Counting every radio let Shift+Tab from a checked one leave the dialog (#118). */
+function oneStopPerRadioGroup(items: HTMLElement[]): HTMLElement[] {
+  const group = (name: string) => items.filter((r): r is HTMLInputElement => r instanceof HTMLInputElement && r.type === 'radio' && r.name === name)
+  return items.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || !el.name) return true
+    const radios = group(el.name)
+    return el.checked || (!radios.some((r) => r.checked) && radios[0] === el)
+  })
+}
+
 /** A dialog. Esc and a click outside close it (when it can be closed); focus moves into it and Tab stays in it. */
 export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -245,7 +256,7 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
     // aria-modal says the page behind is out of reach; without this, Tab walked into it.
     const trap = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || !ref.current) return
-      const items = Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null)
+      const items = oneStopPerRadioGroup(Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null))
       if (!items.length) {
         e.preventDefault()
         ref.current.focus()

@@ -86,6 +86,13 @@ test('post to YouTube from Share: connect, a dropped connection, done, Settings'
     expect(await page.getByTestId('post-title').inputValue()).not.toBe('')
     await page.getByTestId('post-title').fill('How I got my first job')
     await shot(page, 'posting-3-form')
+    // Who can see it is one Tab stop, the checked choice, both ways (components/ui.tsx Modal, #118)
+    const focusedName = () => page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name ?? null)
+    for (const key of ['Tab', 'Shift+Tab']) {
+      await page.getByTestId('post-privacy-private').focus()
+      await page.keyboard.press(key)
+      expect(await focusedName(), key).not.toBe('post-privacy')
+    }
 
     // Back returns to Share, and Share's row now names the channel.
     await page.getByTestId('post-back').click()
