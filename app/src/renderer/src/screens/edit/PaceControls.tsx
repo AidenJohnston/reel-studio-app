@@ -12,7 +12,7 @@ const QUOTE_WORDS = 6
 
 /**
  * Cut > Pace: the reel's pace (project.json cutStyle) and how each zoom-in moves, the choices the AI makes with
- * set_cut_style and set_zoom. Neither shows on the player until it is rendered, so the panel says when it will.
+ * set_cut_style and set_zoom. Neither shows on the player until it is rendered, so the panel says so first.
  */
 export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
   const style = now.p.cutStyle
@@ -55,10 +55,13 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
 
   const value = style?.preset ?? NONE
   const reseeded = !!style && style.preset === base.p.cutStyle?.preset && style.seed !== base.p.cutStyle?.seed
-  const changed = JSON.stringify(style) !== JSON.stringify(base.p.cutStyle) || JSON.stringify(zooms) !== JSON.stringify(base.p.zooms ?? [])
 
   return (
     <div className="edit-stack" data-testid="pace">
+      {/* first, where it is seen: on the 1100 x 720 window a note at the end was below the fold */}
+      <p className="edit-hint" data-testid="pace-later">
+        The player shows the pace and zoom-ins as made. What you pick here plays in Version {next}.
+      </p>
       <div className="edit-field">
         <h3 className="edit-label" id="pace-h">
           Pace
@@ -139,11 +142,6 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
         {rows.length > 0 && <p className="edit-hint">Instant cuts in, Quick pushes in fast, Slow drifts in over the whole line.</p>}
       </div>
 
-      {changed && (
-        <p className="edit-hint" data-testid="pace-later">
-          The player shows the pace and zoom-ins as they are now. Make Version {next} to see your changes.
-        </p>
-      )}
     </div>
   )
 }

@@ -60,7 +60,9 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await rows.nth(0).getByRole('radio', { name: 'Slow' }).click()
     await expect(rows.nth(0).getByRole('radio', { name: 'Slow' })).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByTestId('change-count')).toHaveText('2 changes')
-    await expect(page.getByTestId('pace-later')).toContainText('Make Version 2 to see your changes.')
+    // nothing here plays on the player until it is made, and the panel says so where it is seen
+    await expect(page.getByTestId('pace-later')).toHaveText('The player shows the pace and zoom-ins as made. What you pick here plays in Version 2.')
+    await expect(page.getByTestId('pace-later')).toBeInViewport()
     // Undo steps back one choice at a time
     await page.getByTestId('drawer-undo').click()
     await expect(rows.nth(0).getByRole('radio', { name: 'Instant' })).toHaveAttribute('aria-checked', 'true')
