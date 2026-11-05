@@ -16,8 +16,9 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -134,6 +135,8 @@ class Call:
     seconds: float          # wall clock of the child process, spawn to exit
     result: dict            # the `done` event's result
     stderr_tail: str
+    # stream() only: (seconds from spawn, payload) for each progress line carrying `ready`, timed as read
+    ready: list = field(default_factory=list)
 
 
 class Engine:
@@ -174,6 +177,43 @@ class Engine:
             raise RuntimeError(f"engine {command} failed (exit {p.returncode}): "
                                f"{(err or {}).get('message') or tail[-800:]}")
         return Call(seconds, done, tail)
+
+    def stream(self, command: str, args: list, timeout: float = 1800) -> Call:
+        """run(), also noting when each `ready` line (a still or window the app can show) is read, in
+        seconds from spawn: the moment the app would have it on screen."""
+        cmd = [self.python, "-s", "-E", "-B", "-X", "utf8", "-u", "-m", "reelengine", command, *map(str, args)]
+        t0 = time.perf_counter()
+        p = subprocess.Popen(cmd, cwd=self.cwd, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             stdin=subprocess.DEVNULL)
+        errs: list = []
+        drain = threading.Thread(target=lambda: errs.append(p.stderr.read()), daemon=True)
+        drain.start()
+        timer = threading.Timer(timeout, p.kill)
+        timer.start()
+        ready, done, err = [], None, None
+        try:
+            for raw in p.stdout:
+                at = time.perf_counter() - t0
+                try:
+                    ev = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if ev.get("event") == "progress" and isinstance(ev.get("ready"), dict):
+                    ready.append((round(at, 3), ev["ready"]))
+                elif ev.get("event") == "done":
+                    done = ev.get("result")
+                elif ev.get("event") == "error":
+                    err = ev
+            p.wait()
+        finally:
+            timer.cancel()
+        seconds = time.perf_counter() - t0
+        drain.join()
+        tail = b"".join(errs).decode("utf-8", "replace")[-2000:]
+        if p.returncode != 0 or done is None:
+            raise RuntimeError(f"engine {command} failed (exit {p.returncode}): "
+                               f"{(err or {}).get('message') or tail[-800:]}")
+        return Call(seconds, done, tail, ready)
 
 
 def engine_env(ffmpeg: Path, ffprobe: Path, root: Path, machine_cache: Path, run_cache: Path,

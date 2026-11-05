@@ -11,6 +11,7 @@ python -m harness pin                          # hashes to put in config.json (a
 python -m harness run                          # setup + 5 timed replays of every loop take
 python -m harness run --split held-out         # the held-out fifth, before a kept change merges
 python -m harness agree runs/A/report.json runs/B/report.json
+python -m harness run --flow moments           # changed moments first: one `moments` command per note
 ```
 
 `--ffmpeg`/`--ffprobe` (or `REELENGINE_FFMPEG`/`REELENGINE_FFPROBE`) name the binaries. Everything
@@ -33,8 +34,15 @@ OS file cache and the GPU encoder probed (the OS cache is never cleared). The re
 median of the runs and their spread, (max - min) / median.
 
 The session wait, the number the speed loop lowers: for each note, the time until the changed
-moment is on screen (today draft + stills, since a still needs a finished draft) plus the time
+moment is on screen (draft + stills in this flow, since the stills are cut from the draft) plus the time
 until the full draft is ready; then the final export.
+
+`--flow moments` replays the notes as the app shows them with changed moments first. The base is the
+take's project (`moments --mark`, untimed); each note is one `moments` command, timed from spawn to the
+line that reports its first still (the changed moment on screen), to its window's line, and to exit
+(the draft). Its stills and window sit at the times the engine chose; every run must choose the same
+ones, and each is checked like any other still and window. A note that changes nothing on screen (the
+music note) draws nothing and has no draft to check.
 
 ## Checks
 

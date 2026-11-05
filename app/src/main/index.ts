@@ -35,7 +35,7 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
-import { createLiveVideos } from './live-video'
+import { createLiveMoments, createLiveVideos } from './live-video'
 import { rememberQuestion, styleConsent } from './style-consent'
 import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
@@ -168,7 +168,9 @@ const jobs = createJobManager(
       ((await readProject(slug)).sources ?? []).reduce((a: number, s: { duration?: number }) => a + (Number(s?.duration) || 0), 0)
   },
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
+  // and so do the pictures of each change made before its draft
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
 )
 const models = createModelManager(runEngine, (s) => broadcast('model:progress', s))
 // "Update available" notice (main/update-check.ts): one anonymous GET a day, never in test runs.
@@ -819,7 +821,8 @@ app.whenReady().then(async () => {
       settingsDir: join(settingsDir(), 'ai'),
       dev: DEV_PROVIDERS,
       secretStore: safeStorage,
-      cliEnv: cliBaseEnv
+      cliEnv: cliBaseEnv,
+      moments: true
     },
     log
   )

@@ -14,6 +14,7 @@ import { ShowMeHow, type Tab } from './ShowMeHow'
 import { AttachmentChips, AttachmentThumb, useNoteAttachments } from '../components/NoteAttachments'
 import { PostButton } from '../components/PostButton'
 import { PostSheet } from '../components/PostSheet'
+import { MomentStrip } from '../components/MomentStrip'
 
 const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-cut': 'cut',
@@ -88,7 +89,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     reel.ai.active().then(setProvider).catch(() => {})
     return reel.jobs.onEvent((e) => {
       if (e.slug !== slug) return
-      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
+      if (e.type === 'status' || e.type === 'reply' || e.type === 'tool' || e.type === 'moment') setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
       // a quick preview of the change: play it in the phone until the full-quality version is done
       else if (e.type === 'render' && e.draft) {
         setJob((cur) => reduceLive(cur ?? EMPTY_LIVE, e))
@@ -571,6 +572,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
                   </button>
                 </div>
                 <Progress pct={job.overall} label={job.message} />
+                {job.moments.length > 0 && <MomentStrip moments={job.moments} />}
               </div>
             )}
             <div className={`note-drop${noteDrop ? ' over' : ''}`} {...noteDropProps} data-testid="note-drop">

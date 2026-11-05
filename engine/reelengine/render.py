@@ -1054,11 +1054,13 @@ def settle_on_animations(project_dir: Path, times: list) -> tuple:
     return pick, moved
 
 
-def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = None) -> dict:
+def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = None,
+           out_dir: Optional[Path] = None, on_still=None) -> dict:
     """PNG stills of the project as it is now, with no render to take them from. Each is the draft's frame
     at that time (frame_at), drawn by the draft's own graph (build_video_cmd) over a one-frame window:
     the same layers, zooms and full-length caption track, with no sound and no encode. It writes
-    work/render/ and work/layers/ as a render does, so it must never run beside one."""
+    work/render/ and work/layers/ as a render does, so it must never run beside one. The PNGs go to
+    `out_dir` (default versions/preview/frames); `on_still({t, file})` is called as each one is written."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
@@ -1066,7 +1068,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     tl = edit_timeline(project_dir, proj)
     rwork = project_dir / "work" / "render"
     rwork.mkdir(parents=True, exist_ok=True)
-    out_dir = preview_dir(project_dir) / "frames"
+    out_dir = Path(out_dir) if out_dir else preview_dir(project_dir) / "frames"
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list = []
     src_meta, src_paths = source_files(project_dir, proj)
@@ -1118,6 +1120,8 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
                             "-vf", f"scale={width}:-2", str(png)], 60, "still scale")
         out.append({"t": round(a, 3), "file": str(png)})
         timings["stills"].append(round(time.time() - t_still, 2))
+        if on_still is not None:
+            on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
             "timings": timings}

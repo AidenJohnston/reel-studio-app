@@ -12,6 +12,7 @@ import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
+import type { Moments } from './moments';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -33,6 +34,9 @@ export interface ToolState {
   dirty?: Set<string>;
   /** raw-take times of the cover stills the model was shown (set_cover on one of them is exact) */
   coverCandidates?: number[];
+  /** project saves so far in this task, and the number of the last one that changed what the video shows */
+  edits: number;
+  pictureEdit: number;
 }
 
 export interface ToolContext {
@@ -55,6 +59,8 @@ export interface ToolContext {
   /** A render already running for this project (the first look). Every engine render waits for it:
    * two renders would share work/render/ and versions/preview/. */
   renderGate?: Promise<unknown>;
+  /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
+  moments?: Moments;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -68,7 +74,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, edits: 0, pictureEdit: 0 };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -86,9 +92,12 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
+  await ctx.moments?.ready();          // the state before this save is what moments compares with
   await saveProject(ctx.projectDir, p);
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);
+  ctx.state.edits++;
+  if (!NOT_VISIBLE.has(field)) ctx.state.pictureEdit = ctx.state.edits;
 }
 
 export class ToolInputError extends Error {
@@ -404,15 +413,18 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 }
 
 export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
+  // a draft of this very edit may already be made, or being made, by moments; a final stops it
+  const drawn = await ctx.moments?.before(draft ? ctx.state.edits : null);
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   ctx.state.dirty = new Set();
-  const result = await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
+  const made = draft && drawn?.draft?.file ? drawn.draft : null;
+  const result = made ?? await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
   const p = await loadProject(ctx.projectDir);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
   ctx.state.renders.push(info);
-  ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });
+  if (!made) ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });  // moments sent its own
   return info;
 }
 
@@ -1279,6 +1291,8 @@ const tools: ToolDef[] = [
       if (!times.length) throw new ToolInputError('give times or words');
       const pick = times.slice(0, 6);
       // With no up-to-date render the engine draws the stills, writing work/render/ as a render does.
+      // A moments run of this edit ends in a draft the stills are then cut from.
+      await ctx.moments?.before(ctx.state.edits);
       if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
       const r = await engine(ctx, 'frames', ['--times', pick.join(',')]);
       // the engine moves a time inside an animation to its settled end (render.settle_on_animations)
