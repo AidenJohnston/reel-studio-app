@@ -143,21 +143,17 @@ def test_a_card_running_across_the_cut_is_redrawn_whole(tmp_path):
     assert diff(tmp_path, old, new)["intervals"] == approx([[a, timeline(tmp_path, new).duration]])
 
 
-def test_a_zoom_running_across_the_cut_redraws_the_card_it_meets(tmp_path):
-    # the middle three words swapped for three others of the same length: nothing after them moves
-    old = base_project(keep=(("w0", "w9"), ("w12", "w14"), ("w18", "w31")), captions_on=False)
-    new = base_project(keep=(("w0", "w9"), ("w14", "w16"), ("w18", "w31")), captions_on=False)
-    for p in (old, new):
-        p["broll"] = [card("b1", "w4", "w5", hold=0.5)]                    # ends before the cut
-        p["zooms"] = [{"anchor": {"from": "w5", "to": "w20"}, "scale": 1.2}]
-    zold, znew = zoom.windows(ctx(tmp_path, old)), zoom.windows(ctx(tmp_path, new))
-    assert zold == znew                                  # the zoom is where it was...
-    x = timeline(tmp_path, new).segments[1].out_start
-    (_, z0, z1), = znew
-    assert z0 < x < z1                                   # ...but frames the face across new footage
-    a, b = span_of(tmp_path, new, "b1")
-    assert a < z0 < b < x                                # and the card is placed around it, before the cut
-    assert diff(tmp_path, old, new)["intervals"] == approx([[a, timeline(tmp_path, new).duration]])
+def test_a_card_running_across_the_cut_also_redraws_the_caption_line_it_covers(tmp_path):
+    old = base_project(keep=(("w0", "w9"), ("w12", "w31")))
+    old["broll"] = [card("b1", "w8", "w8")]             # held 2 s, past the splice after w9
+    new = copy.deepcopy(old)
+    new["cut"]["keep"][1]["from"] = "w14"
+    a, _b = span_of(tmp_path, new, "b1")
+    tl = timeline(tmp_path, new)
+    line = next(c for c in captions.build_cues(tl.words_out, new["captions"], set())
+                if "w8" in [i for ids in c["wids"] for i in ids])
+    assert line["s"] < a < line["e"]                    # the line under the card starts before it
+    assert diff(tmp_path, old, new)["intervals"] == approx([[line["s"], tl.duration]])
 
 
 def test_a_caption_style_change_is_the_whole_video(tmp_path):
