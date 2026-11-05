@@ -464,14 +464,15 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_caption_style', { highlight: '' })).isError).toBe(true);
     await executeTool(ctx, 'set_caption_style', { highlight: 'none' });
     expect(ctx.project!.captions.style).not.toHaveProperty('highlight');
-    // a per-word fix from the Subtitles list, on a word the transcript hears as "flour" (w34)
+    // a per-word fix from the Subtitles list, kept where the transcript no longer hears its word (w20): since #117's
+    // 6aad407c a live one at w34 would protect the only "flour", so the whole-reel correction would have nothing to fix
     const seeded = await loadProject(ctx.projectDir);
-    seeded.captions.corrections = [{ from: 'flour', to: 'Flour', at: 'w34' }];
+    seeded.captions.corrections = [{ from: 'flour', to: 'Flower', at: 'w20' }];
     await saveProject(ctx.projectDir, seeded);
     expect((await executeTool(ctx, 'add_caption_correction', { from: 'flour', to: 'flower' })).isError).toBe(false);
     await executeTool(ctx, 'remove_caption_correction', { from: 'flour' });
     // the person's fix of one word in the Subtitles list outlives the editor's whole-reel corrections
-    expect((await loadProject(ctx.projectDir)).captions.corrections).toEqual([{ from: 'flour', to: 'Flour', at: 'w34' }]);
+    expect((await loadProject(ctx.projectDir)).captions.corrections).toEqual([{ from: 'flour', to: 'Flower', at: 'w20' }]);
     // no note asking to remember: proposed once (deduped), nothing saved
     await executeTool(ctx, 'add_style_rule', { rule: 'keep music quieter under talking' });
     const again = await executeTool(ctx, 'add_style_rule', { rule: 'Keep music quieter under talking.' });
