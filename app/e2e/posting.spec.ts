@@ -65,7 +65,7 @@ test('post to YouTube from Share: connect, a dropped connection, done, Settings'
     // app can't tell whether it is there).
     const sheet = page.getByTestId('post-sheet')
     await expect(sheet).toHaveAttribute('data-state', 'signed_out', { timeout: 5 * 60_000 })
-    await expect(pop).toHaveCount(0) // Share stepped aside for the sheet
+    await expect(pop).toBeHidden() // Share stepped aside for the sheet
     await page.getByTestId('post-sign-in').click()
     // Not connected yet: Connect YouTube waits for the browser.
     await expect(sheet).toHaveAttribute('data-state', 'not_connected')

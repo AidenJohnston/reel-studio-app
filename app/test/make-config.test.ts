@@ -57,7 +57,8 @@ it('puts win.azureSignOptions into the existing win mapping with RS_WIN_SIGN=1',
     '    codeSigningAccountName: "example-account"\\n' +
     '    certificateProfileName: "example-profile"\\n' +
     '    publisherName: "CN=Example Publisher, O=Example Publisher, C=US"\\n' +
-    '  icon: C:/x/repo/packaging/icons/icon\\.ico\\n'))
+    // the channel's icon folder (RS_ICONS, the nightly's own icons) is the real repo's, not RS_REPO_ROOT
+    '  icon: .*/packaging/icons/icon\\.ico\\n'))
   expect(r.yaml).not.toContain('never-in-the-config')
 })
 

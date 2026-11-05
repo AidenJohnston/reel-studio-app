@@ -432,7 +432,7 @@ def test_build_audio_plays_the_frozen_copy_of_its_track(tmp_path, media, frozen,
     out = music.build_audio(ctx, fx.cut_voice(ctx, tmp_path / "voice.wav"))
     rep = json.loads(Path(out).with_suffix(".json").read_text())  # each mix's report sits beside it (#29)
     assert Path(rep["music"]["track"]).resolve() == media["song"].resolve()
-    assert song in render.asset_fingerprint(ctx.project_dir, ctx.project)
+    assert song in render.asset_fingerprint(ctx.project_dir, ctx.project)["assets"]  # #144: beside the engine version
 
 
 def test_analyze_track_tempo(media):

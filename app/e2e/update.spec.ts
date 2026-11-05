@@ -105,7 +105,7 @@ async function pasteKey(page: Page, app: ElectronApplication, text: string): Pro
   // Electron 44's clipboard.writeText returns a promise; returning it makes evaluate wait for it.
   await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text)
   await page.getByTestId('auto-updates-paste').click()
-  await expect(page.locator('[data-setting="auto-updates"]')).toContainText('On.')
+  await expect(page.locator('[data-setting="auto-updates"]')).toContainText(/\bOn\b/)
 }
 
 test('fails if the daily check carries the key, or a missing, refused or accepted key does the wrong thing', async () => {
@@ -173,7 +173,7 @@ test('fails if the daily check carries the key, or a missing, refused or accepte
     await button.click()
     await expect(button).toContainText('Open download page')
     await expect(row).toContainText('no longer includes new versions')
-    await expect(auto).toContainText('On.')
+    await expect(auto).toContainText(/\bOn\b/)
 
     // Accepted: it downloads (only now with the key), then waits for the person to restart.
     entitlement = 'ok'

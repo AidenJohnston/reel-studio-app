@@ -123,6 +123,7 @@ async function main() {
   apply-note   --project DIR --note TEXT --provider P [--harness claude-code|codex] [--check-edits] [...]
                --harness: runs the note in that CLI with tools over MCP; --check-edits checks it in the other CLI
   write-script --idea TEXT --provider P [...]
+  learn        --projects-root DIR    queue result-based suggestions without AI
 `);
 }
 
