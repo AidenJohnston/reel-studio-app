@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 import fixtures as fx
-from reelengine import proxy, render
+from reelengine import project as projmod, proxy, render
 
 
 def _project(tmp: Path, video: Path, w: int, h: int, keep) -> Path:
@@ -43,9 +43,9 @@ def _lumas(video: str) -> np.ndarray:
     return np.frombuffer(raw, np.uint8).reshape(-1, 256).mean(axis=1)
 
 
-def _counting_take(path: Path) -> Path:
+def _counting_take(path: Path, offset: float) -> Path:
     """A frame's brightness counts its index (step 7), its times are off the 30 fps grid (VFR), and
-    the video starts 0.5 s after the sound, as in phone files whose audio leads the picture."""
+    the video starts `offset` s after the sound, as in phone files whose audio leads the picture."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name("video-only.mp4")
     vf = ("color=c=black:s=64x36:r=30:d=7,format=yuv420p,geq=lum='16+mod(N*7\\,200)':cb=128:cr=128,"
@@ -53,20 +53,30 @@ def _counting_take(path: Path) -> Path:
     subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", vf, "-fps_mode", "passthrough",
                     "-enc_time_base", "1:600", "-c:v", "libx264", "-preset", "ultrafast", "-qp", "4",
                     str(tmp)], check=True)
-    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-itsoffset", "0.5", "-i", str(tmp), "-f", "lavfi",
-                    "-i", "sine=f=220:d=7.5:sample_rate=48000", "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-itsoffset", str(offset), "-i", str(tmp), "-f", "lavfi",
+                    "-i", f"sine=f=220:d={7.5 + offset}:sample_rate=48000", "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                     "-c:a", "aac", str(path)], check=True)
     return path
 
 
-# The cut decides how the take is opened (render.plan_lanes, 3 s preroll): from its start; seeked to
-# 0.4 s, inside the copy's 0.5 s offset; seeked to 0.8 s, past it.
-@pytest.mark.parametrize("keep", [((1.0, 3.0), (4.0, 6.0)), ((3.45, 5.0), (5.5, 6.5)), ((3.85, 6.5),)])
-def test_a_draft_from_the_copy_shows_the_frames_a_draft_from_the_take_shows(tmp_path, keep):
-    take = _counting_take(tmp_path / "media-src" / "take.mp4")
-    offset, times = proxy.frame_times(fx.FFPROBE, take)
-    assert 0.45 < offset < 0.55 and len({round(b - a, 4) for a, b in zip(times, times[1:])}) > 1  # the take is what it says
+# The cut decides how the take is opened (render.plan_lanes, 3 s preroll), which is checked first.
+@pytest.mark.parametrize("offset,keep,opened", [
+    (0.5, ((1.0, 3.0), (4.0, 6.0)), "from its start"),
+    (0.5, ((3.45, 5.0), (5.5, 6.5)), "seeked to a time before its picture starts"),
+    (0.5, ((3.85, 6.5),), "seeked past its picture's start"),
+    (4.0, ((8.05, 10.0),), "seeked past a picture start later than the preroll"),
+])
+def test_a_draft_from_the_copy_shows_the_frames_a_draft_from_the_take_shows(tmp_path, offset, keep, opened):
+    take = _counting_take(tmp_path / "media-src" / "take.mp4", offset)
+    got_offset, times = proxy.frame_times(fx.FFPROBE, take)
+    assert abs(got_offset - offset) < 0.05                               # the take is what it says
+    assert len({round(b - a, 4) for a, b in zip(times, times[1:])}) > 1
     pdir = _project(tmp_path, take, 1280, 720, keep=keep)
+    proj = projmod.load(pdir)
+    seek = render.plan_lanes(projmod.timeline(pdir, proj).segments)[0]["seek"]
+    assert {"from its start": seek == 0, "seeked to a time before its picture starts": 0 < seek < offset,
+            "seeked past its picture's start": offset < seek < offset + render.SEEK_PREROLL,
+            "seeked past a picture start later than the preroll": seek > offset > render.SEEK_PREROLL}[opened], seek
     from_take = _draft(pdir)
     assert from_take["videoFrom"] == {"s1": "original"}
     want = _lumas(from_take["file"])

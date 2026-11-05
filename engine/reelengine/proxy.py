@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -178,21 +179,37 @@ def build_cmd(ffmpeg: str, src: dict, path: Path, out: Path, size: tuple, tonema
             "-pix_fmt", "yuv420p", *tags, "-progress", "pipe:1", "-nostats", "-f", "mp4", str(out)]
 
 
-# A build in progress rewrites its .part file every few seconds; one untouched this long was left by a
-# build that was killed (the app quitting, a crash).
-STALE_PART_SECONDS = 3600
+# A build touches its source's lock file with every progress report; a lock untouched this long was
+# left by a build that was killed (the app quitting, a crash).
+LOCK_STALE_SECONDS = 600
+
+
+def _take_lock(lock: Path) -> bool:
+    """One build per source at a time (two app windows, or the app and a script, may both start one)."""
+    for _ in range(2):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime < LOCK_STALE_SECONDS:
+                    return False
+                lock.unlink()
+            except OSError:
+                return False
+            continue
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    return False
 
 
 def _prune(d: Path, sid: str, keep: Path) -> None:
-    """Copies and sidecars of this source under other keys, and leftovers of killed builds."""
-    import time
+    """Copies and sidecars of this source under other keys, and leftovers of killed builds. Runs
+    while holding the source's lock, so no other build of it is writing."""
     for f in d.glob(f"{sid}-*"):
+        if f.name.startswith(keep.stem + ".") and not f.name.endswith(".part.mp4"):
+            continue
         try:
-            if f.name.endswith(".part.mp4"):
-                if time.time() - f.stat().st_mtime < STALE_PART_SECONDS:
-                    continue                # another build may be writing it
-            elif f.name.startswith(keep.stem + "."):
-                continue
             f.unlink()
         except OSError:
             pass            # a render may still have it open (Windows); the next build retries
@@ -206,16 +223,37 @@ def build_one(project_dir: Path, src: dict, path: Path, short_side: int = SHORT_
         raise EngineError("PROXY_SOURCE", f"source {sid} at {path} is unreadable", "I couldn't read this video.")
     mp4, side = _files(project_dir, sid, key)
     mp4.parent.mkdir(parents=True, exist_ok=True)
+    lock = mp4.parent / f"{sid}.lock"
+    if not _take_lock(lock):
+        return {"status": "busy", "reason": "another build of this take is running"}
+    try:
+        if lookup(project_dir, src, path) is not None:        # that other build has just finished it
+            return {"status": "ready", "file": str(mp4)}
+        return _build(project_dir, src, path, key, mp4, side, short_side, lock, on_pct)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _build(project_dir: Path, src: dict, path: Path, key: str, mp4: Path, side: Path, short_side: int,
+           lock: Path, on_pct) -> dict:
+    sid = str(src["id"])
     part = mp4.with_name(f"{mp4.stem}.{os.getpid()}.part.mp4")
     ffmpeg, ffprobe = tools.ffmpeg(), tools.ffprobe()
     offset, want = frame_times(ffprobe, path)
     size = copy_size(src, short_side)
     dur = float(src.get("duration") or 0.0) or (want[-1] if want else 1.0)
+
+    def report(p):
+        try:
+            os.utime(lock)
+        except OSError:
+            pass
+        on_pct(p)
     try:
         err = None
         for tonemap_first in ((False, True) if src.get("hdr") else (False,)):
             try:
-                tools.ffmpeg_progress(build_cmd(ffmpeg, src, path, part, size, tonemap_first), dur, on_pct,
+                tools.ffmpeg_progress(build_cmd(ffmpeg, src, path, part, size, tonemap_first), dur, report,
                                       timeout=max(900.0, dur * 60), what="preview copy")
                 err = None
                 break
@@ -230,15 +268,8 @@ def build_one(project_dir: Path, src: dict, path: Path, short_side: int = SHORT_
                                              f"or their times differ", "The preview copy came out wrong.")
         if source_key(path, src) != key:
             return {"status": "stale", "reason": "the take changed while its copy was made"}
-        if lookup(project_dir, src, path) is not None:       # another build finished it meanwhile
-            return {"status": "ready", "file": str(mp4)}
         side.unlink(missing_ok=True)     # a sidecar never describes a file other than the one beside it
-        try:
-            os.replace(part, mp4)
-        except OSError:
-            if lookup(project_dir, src, path) is not None:   # another build finished the same copy
-                return {"status": "ready", "file": str(mp4)}
-            raise
+        os.replace(part, mp4)
         projmod.write_json(side, {"key": key, "recipe": RECIPE, "source": src.get("path"),
                                   "bytes": mp4.stat().st_size, "width": size[0], "height": size[1],
                                   "offset": round(offset, 6), "frames": len(got)})

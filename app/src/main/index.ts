@@ -121,7 +121,25 @@ const runEngine: RunEngine = createEngineRunner({
   onSpawn: (pid) => pidRegistry?.add(pid),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
-const proxies = createProxyBuilds(runEngine, log)
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid) => {
+        pidRegistry?.add(pid)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,

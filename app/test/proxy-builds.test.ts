@@ -1,43 +1,53 @@
 import { describe, expect, it } from 'vitest'
-import { createProxyBuilds } from '../src/main/proxy-builds'
+import { createProxyBuilds, type ExitHooks } from '../src/main/proxy-builds'
 import type { RunEngine } from '../src/main/engine'
 
-/** An engine runner whose `proxy` runs until it is told to finish or is aborted, like the real one. */
 interface Call {
   args: string[]
   exited: boolean
-  finish: (v: unknown) => void
   fail: (e: unknown) => void
 }
 
+/** Runners whose `proxy` behaves like engine.ts's: it runs until told to fail, and on abort the call
+ * rejects at once while the process exits (onExit) a little later. */
 function controlledEngine() {
   const calls: Call[] = []
-  const runEngine = ((command: string, args: string[], _p?: unknown, signal?: AbortSignal) =>
-    new Promise((resolve, reject) => {
-      expect(command).toBe('proxy')
-      const call: Call = {
-        args,
-        exited: false,
-        finish: (v: unknown) => {
-          call.exited = true
-          resolve(v)
-        },
-        fail: (e: unknown) => {
-          call.exited = true
-          reject(e)
+  const makeRunner = (hooks: ExitHooks): RunEngine =>
+    ((command: string, args: string[], _p?: unknown, signal?: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        expect(command).toBe('proxy')
+        const pid = 1000 + calls.length
+        hooks.onSpawn(pid)
+        const call: Call = {
+          args,
+          exited: false,
+          fail: (e: unknown) => {
+            reject(e)
+            exit()
+          }
         }
-      }
-      calls.push(call)
-      signal?.addEventListener('abort', () => setTimeout(() => call.fail({ code: 'CANCELLED' }), 20), { once: true })
-    })) as unknown as RunEngine
-  return { runEngine, calls }
+        function exit(): void {
+          call.exited = true
+          hooks.onExit(pid)
+        }
+        calls.push(call)
+        signal?.addEventListener(
+          'abort',
+          () => {
+            reject({ code: 'CANCELLED' })
+            setTimeout(exit, 50)
+          },
+          { once: true }
+        )
+      })) as unknown as RunEngine
+  return { makeRunner, calls }
 }
 
 describe('preview copy builds', () => {
-  it('runs one build per project at a time, and a finished or failed one can be started again', async () => {
-    const { runEngine, calls } = controlledEngine()
+  it('runs one build per project at a time, and a failed one can be started again', async () => {
+    const { makeRunner, calls } = controlledEngine()
     const logs: string[] = []
-    const builds = createProxyBuilds(runEngine, (l) => logs.push(l))
+    const builds = createProxyBuilds(makeRunner, (l) => logs.push(l))
     builds.start('a', '/p/a')
     builds.start('a', '/p/a')
     builds.start('b', '/p/b')
@@ -50,9 +60,9 @@ describe('preview copy builds', () => {
     expect(calls.map((c) => c.args[1])).toEqual(['/p/a', '/p/b', '/p/a'])
   })
 
-  it('stop cancels the running build', async () => {
-    const { runEngine, calls } = controlledEngine()
-    const builds = createProxyBuilds(runEngine, () => undefined)
+  it('stop returns only after the cancelled engine has exited, so the project can be deleted', async () => {
+    const { makeRunner, calls } = controlledEngine()
+    const builds = createProxyBuilds(makeRunner, () => undefined)
     builds.start('a', '/p/a')
     await builds.stop('a')
     expect(calls[0].exited).toBe(true)
