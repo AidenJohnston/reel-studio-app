@@ -119,7 +119,7 @@ a { color: inherit; }
 .update-pill-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .update-pill-label { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* folded to the rail: the icon alone, the size of a nav row (shell.css) */
-.rail .update-pill { width: 40px; padding: 5px; }
+.rail .update-pill { width: 40px; padding: 5px; border-radius: 999px; }
 .update-pill-sub { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .update-icon { position: relative; width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--ink); }
