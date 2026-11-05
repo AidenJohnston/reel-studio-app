@@ -85,7 +85,9 @@ test('fails if a word in Cut, the cover slider or a link in Settings is under 24
     const settingsPage = await box(page, '.settings-page')
     const mainBox = await box(page, 'main.main')
     expect(Math.abs((settingsPage.left + settingsPage.right) / 2 - (mainBox.left + mainBox.right) / 2)).toBeLessThan(8)
-    for (const id of ['licence-link', 'notices-link', 'update-releases-link']) {
+    // the GitHub releases link went with the getreelstudio.com updater; Automatic updates' "Get my link" is the same
+    // .ext-link, and it shows only where updates work (not in a test build)
+    for (const id of ['licence-link', 'notices-link']) {
       await page.getByTestId(id).scrollIntoViewIfNeeded()
       expect((await box(page, `[data-testid="${id}"]`)).height, id).toBeGreaterThanOrEqual(24)
     }
