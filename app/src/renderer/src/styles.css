@@ -159,6 +159,9 @@ a { color: inherit; }
   font: inherit; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; cursor: pointer;
 }
 .update-pop-link:hover { color: var(--ink); }
+.update-pop-notes p { margin: 8px 0 0; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); user-select: text; }
+.update-pop-key { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
+.update-pop-link.inline { display: inline; min-height: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .update-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 6px; }
 
 .update-row { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }

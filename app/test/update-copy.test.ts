@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { initialUpdateState, type UpdateMode, type UpdateState } from '../src/shared/update'
-import { aboutButton, shortVersion, updateButtonLabel, updateIcon, updateSubline, updateSummary } from '../src/renderer/src/components/update-copy'
+import { aboutButton, noteBlocks, noteDay, shortVersion, updateButtonLabel, updateIcon, updateSubline, updateSummary } from '../src/renderer/src/components/update-copy'
 
 const offered = (mode: UpdateMode, patch: Partial<UpdateState> = {}): UpdateState => ({
   ...initialUpdateState('0.1.2', mode, true, null),
@@ -36,4 +36,25 @@ it('fails if a nightly version is too long for the sidebar, or a stable one is c
   expect(updateSubline(offered('install'))).toBe('Reel Studio 0.1.3')
   // not a real date: shown as it is rather than guessed
   expect(shortVersion('0.1.3-nightly.20261328.9')).toBe('Reel Studio 0.1.3-nightly.20261328.9')
+})
+
+it("fails if a release note's bullets show as one paragraph, keep their markdown, or its date shifts a day", () => {
+  const text = "## What's new\n\n- **Updates install themselves.** Say yes.\n* Captions you can drag\n\nThanks for the reports.\n- One more"
+  expect(noteBlocks(text)).toEqual([
+    { kind: 'p', text: "What's new" },
+    { kind: 'list', items: ['Updates install themselves. Say yes.', 'Captions you can drag'] },
+    { kind: 'p', text: 'Thanks for the reports.' },
+    { kind: 'list', items: ['One more'] }
+  ])
+  // A calendar day, whatever the time zone: read as midnight UTC it would show November 3 west of UTC.
+  const tz = process.env.TZ
+  process.env.TZ = 'America/Chicago'
+  try {
+    expect(noteDay('2026-11-04')).toBe(new Date(2026, 10, 4).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+    expect(noteDay('2026-11-04')).not.toBe(new Date(2026, 10, 3).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
+  } finally {
+    if (tz === undefined) delete process.env.TZ
+    else process.env.TZ = tz
+  }
+  expect(noteDay('soon')).toBeNull()
 })

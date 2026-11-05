@@ -1,4 +1,4 @@
-import { updateAction, type UpdateState, type UpdateBusy, type ReleaseNotes } from '../../../shared/update'
+import { updateAction, type UpdateState, type UpdateBusy, type ReleaseNote } from '../../../shared/update'
 
 export type UpdateIcon = 'available' | 'downloading' | 'downloaded' | 'failed'
 
@@ -73,14 +73,41 @@ export function updateSubline(s: UpdateState): string {
   return v ? shortVersion(v) : updateSummary(s)
 }
 
-export function notesHeading(n: ReleaseNotes, count: number): string {
+export function notesHeading(n: Pick<ReleaseNote, 'version'>, count: number): string {
   return count === 1 ? "What's new" : `What's new in ${n.version}`
 }
 
-// Short enough to sit on one line beside "Not now" in the sidebar-wide popover (UpdateButton.tsx).
-export function releaseLinkLabel(n: ReleaseNotes | undefined): string {
-  const more = n ? Math.max(0, n.totalItems - n.items.length) : 0
-  return more === 0 ? 'Release notes' : `${more} more ${more === 1 ? 'change' : 'changes'}`
+export type NoteBlock = { kind: 'p'; text: string } | { kind: 'list'; items: string[] }
+
+const BULLET = /^\s*[-*•]\s+/
+/** `**bold**` and `__bold__` show as plain words: a note is text, never markup. */
+const plain = (line: string): string => line.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_m, a, b) => a ?? b).trim()
+
+/** A release note's lines (latest.json, main/update-check.ts) as paragraphs and bullet lists (consecutive "- " or
+ * "* " lines). A "#" heading line becomes a paragraph; blank lines only separate. */
+export function noteBlocks(text: string): NoteBlock[] {
+  const out: NoteBlock[] = []
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue
+    const last = out.at(-1)
+    if (BULLET.test(raw)) {
+      const item = plain(raw.replace(BULLET, ''))
+      if (!item) continue
+      if (last?.kind === 'list') last.items.push(item)
+      else out.push({ kind: 'list', items: [item] })
+    } else {
+      const line = plain(raw.replace(/^\s*#+\s*/, ''))
+      if (line) out.push({ kind: 'p', text: line })
+    }
+  }
+  return out
+}
+
+/** "November 4, 2026" for a note's YYYY-MM-DD, read as a calendar day (no time zone shift), or null. */
+export function noteDay(date: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 export function aboutStatus(s: UpdateState): string {

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { showsUpdateButton, type UpdateState } from '../../../shared/update'
-import { notesHeading, releaseLinkLabel, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary } from './update-copy'
+import { notesHeading, updateButtonLabel, updateHeadline, updateIcon, updateSubline, updateSummary } from './update-copy'
+import { NoteText } from './UpdateSettings'
 import { reel } from '../api'
 import { useNotify } from '../App'
 import { Icon } from './icons'
@@ -159,7 +160,8 @@ export function UpdateButton() {
     maybeClose()
   }
 
-  const notes = s.releaseNotes
+  // what the newer versions change, newest first (latest.json's notes, main/update-check.ts)
+  const notes = s.notes.filter((n) => n.newer)
   const busy = s.status === 'downloading' || pending
   const version = s.downloadedVersion ?? s.availableVersion
   const notNow = async (): Promise<void> => {
@@ -216,20 +218,24 @@ export function UpdateButton() {
           <div className="update-pop-title">{updateHeadline(s)}</div>
           <div className="update-pop-sub selectable">{s.status === 'error' ? updateSummary(s) : <>Reel Studio <span className="nowrap">{version}</span></>}</div>
         </div>
-        {/* every release newer than this copy, newest first (main/update-machine.ts) */}
         {notes.map((n) => (
           <section className="update-pop-notes" key={n.version}>
             <h3>{notesHeading(n, notes.length)}</h3>
-            <ul>
-              {n.items.map((t, i) => (
-                <li key={`${i}:${t}`}>{t}</li>
-              ))}
-            </ul>
+            <NoteText text={n.text} />
           </section>
         ))}
+        {/* page mode only for want of a download key: with it, the update installs itself */}
+        {s.keyNeeded && (
+          <p className="update-pop-key">
+            With the download link from your receipt, updates install themselves.{' '}
+            <button className="update-pop-link inline" tabIndex={open ? 0 : -1} onClick={() => void reel.update.openAutoUpdatesPage().catch(() => notify('Reel Studio could not open that page. Try again in a moment.', 'error'))} data-testid="update-auto-link">
+              Turn on automatic updates
+            </button>
+          </p>
+        )}
         <div className="update-pop-foot">
-          <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => openReleasePage(notify)} title="Opens on GitHub in your browser" data-testid="update-release-link">
-            {releaseLinkLabel(notes[0])}
+          <button className="update-pop-link" tabIndex={open ? 0 : -1} onClick={() => openReleasePage(notify)} title="Opens getreelstudio.com in your browser" data-testid="update-release-link">
+            Download page
             <Icon name="external" size={12} stroke={2} />
           </button>
           {s.status !== 'downloading' && (

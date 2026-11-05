@@ -1,67 +1,71 @@
+// Updates against a local server that plays dl.getreelstudio.com: latest.json (anonymous) and the /u/ feed, which
+// needs `Authorization: Bearer <download key>` like the real one (401 no key / bad key, 403 not entitled).
+//
+// REELSTUDIO_UPDATE_FEED points an unpackaged test run at the server (main/index.ts). Copies that install updates
+// themselves download for real here; the others open the download page.
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import { createServer, type Server } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import { createRequire } from 'node:module'
-import { APP_DIR, BASE, root, userData, passFirstRun, openSettings } from './helpers'
+import { APP_DIR, BASE, root, userData, passFirstRun, openSettings, shot } from './helpers'
 
-const { latestMacYml } = createRequire(__filename)('../../packaging/latest-mac.js') as { latestMacYml(zip: string, version: string): string }
-const ZIP_NAME = 'Reel-Studio-0.1.3-arm64-mac.zip'
-const NOTES = [
-  "## What's new",
-  '',
-  '* **Updates install themselves.** Reel Studio downloads a new version when you click, then restarts into it.',
-  '* **Fix:** the update note no longer covers the AI status.',
-  '',
-  '## Download',
-  '',
-  '* Mac: the disk image.'
-].join('\n')
+/** The copies that install updates themselves (main/update-machine.ts updateMode). */
+const INSTALLS = process.platform === 'darwin' || process.platform === 'win32'
+const WIN = process.platform === 'win32'
+const CURRENT = '0.1.4' // app/package.json
+const NEXT = '0.1.5'
+const PAYLOAD = WIN ? `Reel-Studio-Setup-${NEXT}-x64.exe` : `Reel-Studio-${NEXT}-arm64-mac.zip`
+const FEED = WIN ? 'latest.yml' : 'latest-mac.yml'
+const KEY = 'v1.eyJwIjoibW9udGhseSJ9.c2lnbmF0dXJl'
 
 let server: Server
 let feed = ''
-let zip: Buffer
-let latest: 'old' | 'new' | 'nightly' = 'old'
-const NIGHTLY = '0.1.3-nightly.20261028.9'
+let payload: Buffer
+let latest = CURRENT
+/** How the /u/ feed answers a request carrying the key. */
+let entitlement: 'ok' | 'bad key' | 'not entitled' = 'ok'
+const seen: { path: string; auth: string | null }[] = []
+/** latest.json's notes, newest first, as the update server writes them. */
+const notes = () => [
+  ...(latest === NEXT ? [{ version: NEXT, date: '2026-11-04', text: '- **Updates install themselves.** Say yes and restart.\n- Captions you can drag' }] : []),
+  { version: CURRENT, date: '2026-10-30', text: 'Send to my phone over a QR code.' }
+]
+
+function refuse(req: IncomingMessage): [number, object] | null {
+  const auth = req.headers.authorization ?? ''
+  if (!auth.startsWith('Bearer ')) return [401, { error: 'no key' }]
+  if (auth !== `Bearer ${KEY}` || entitlement === 'bad key') return [401, { error: 'bad key' }]
+  if (entitlement === 'not entitled') return [403, { error: 'not entitled', reason: 'subscription ended' }]
+  return null
+}
 
 test.beforeAll(async () => {
-  zip = randomBytes(3 * 1024 * 1024)
-  const zipFile = join(BASE, ZIP_NAME)
-  writeFileSync(zipFile, zip)
-  const yml = latestMacYml(zipFile, '0.1.3')
-  const release = (tag: string, extra: Record<string, unknown> = {}) => ({
-    tag_name: tag,
-    draft: false,
-    prerelease: false,
-    html_url: `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`,
-    body: '',
-    ...extra
-  })
+  payload = randomBytes(3 * 1024 * 1024)
+  const sha512 = createHash('sha512').update(payload).digest('base64')
+  // What the update server renders from its manifest (same fields for latest.yml and latest-mac.yml).
+  const yml = `version: ${NEXT}\nfiles:\n  - url: ${PAYLOAD}\n    sha512: ${sha512}\n    size: ${payload.length}\npath: ${PAYLOAD}\nsha512: ${sha512}\nreleaseDate: '2026-11-04T00:00:00.000Z'\n`
   server = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0]
-    if (path === '/releases') {
-      if (latest === 'nightly') {
-        const tag = (v: string) => release(`v${v}`, { prerelease: true, html_url: `https://github.com/SamGu-NRX/reel-studio-app/releases/tag/v${v}`, body: NOTES })
-        return void res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify([tag(NIGHTLY), tag('0.1.3-nightly.20261028.8')]))
-      }
-      const list = [release('v0.1.2')]
-      if (latest === 'new') list.unshift(release('ffmpeg-7.1.1-rs3'), release('v0.1.3', { prerelease: true, body: NOTES }))
-      return void res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(list))
-    }
-    if (path === '/download/v0.1.3/latest-mac.yml') return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
-    if (path === `/download/v0.1.3/${ZIP_NAME}`) {
-      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': zip.length })
+    seen.push({ path, auth: req.headers.authorization ?? null })
+    const json = (status: number, body: object) => void res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body))
+    if (path === '/latest.json') return json(200, { version: latest, url: 'https://getreelstudio.com/update.html', files: {}, notes: notes() })
+    if (!path.startsWith('/u/')) return void res.writeHead(404).end()
+    const no = refuse(req)
+    if (no) return json(...no)
+    if (path === `/u/${FEED}`) return void res.writeHead(200, { 'Content-Type': 'text/yaml' }).end(yml)
+    if (path === `/u/${PAYLOAD}`) {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': payload.length })
       let at = 0
       const step = () => {
-        if (at >= zip.length || res.destroyed) return void res.end()
-        res.write(zip.subarray(at, (at += 48 * 1024)))
+        if (at >= payload.length || res.destroyed) return void res.end()
+        res.write(payload.subarray(at, (at += 48 * 1024)))
         setTimeout(step, 90)
       }
       return step()
     }
-    res.writeHead(404).end()
+    json(404, { error: 'no such file in the current release' })
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const a = server.address()
@@ -69,8 +73,10 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-  rmSync(join(homedir(), 'Library', 'Caches', `reel-studio-e2e-updater-${basename(BASE)}`), { recursive: true, force: true })
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  const caches = WIN ? (process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')) : join(homedir(), 'Library', 'Caches')
+  // main/index.ts names electron-updater's cache after the run's profile folder
+  for (const dir of [userData(), join(BASE, 'nightly-user-data')]) rmSync(join(caches, `reel-studio-e2e-updater-${basename(join(dir, '..'))}`), { recursive: true, force: true })
 })
 
 async function launch(extra: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
@@ -94,164 +100,160 @@ async function launch(extra: Record<string, string> = {}): Promise<{ app: Electr
   return { app, page }
 }
 
-test('fails if a prerelease update cannot be downloaded, declined or snoozed', async () => {
-  test.skip(process.platform !== 'darwin', 'the in-app download backend is macOS-only')
+/** Settings › Automatic updates › "Paste link" with `text` on the clipboard. */
+async function pasteKey(page: Page, app: ElectronApplication, text: string): Promise<void> {
+  // Electron 44's clipboard.writeText returns a promise; returning it makes evaluate wait for it.
+  await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text)
+  await page.getByTestId('auto-updates-paste').click()
+  await expect(page.locator('[data-setting="auto-updates"]')).toContainText('On.')
+}
+
+test('fails if the daily check carries the key, or a missing, refused or accepted key does the wrong thing', async () => {
+  test.skip(!INSTALLS, 'updates exist on Mac and Windows only')
+  test.setTimeout(5 * 60_000)
   const { app, page } = await launch()
   try {
     await passFirstRun(page)
     await openSettings(page)
     const row = page.getByTestId('update-settings')
-    await expect(row).toContainText('You have Reel Studio 0.1.2')
-    await expect(page.getByTestId('update-releases-link')).toHaveAttribute('href', 'https://github.com/AidenJohnston/reel-studio-app/releases')
+    const auto = page.locator('[data-setting="auto-updates"]')
     await row.scrollIntoViewIfNeeded()
-    latest = 'new'
+    await expect(page.getByTestId('update-settings-text')).toHaveText(`You have Reel Studio ${CURRENT}.`)
+    await expect(page.locator('[data-setting="whats-new"]')).toContainText('Release notes show here after Reel Studio checks for updates.')
+    await expect(auto).toContainText('Off.')
+
+    latest = NEXT
     await page.getByTestId('update-settings-button').click()
-    await expect(row).toContainText('Reel Studio 0.1.3 is ready to download.')
-    await row.scrollIntoViewIfNeeded()
     const button = page.getByTestId('update-button')
-    await expect(button).toContainText('Download update')
-    await expect(button).toContainText('Reel Studio 0.1.3') // #76's words: "Version N" is a reel's version
-    await page.getByTestId('nav-home').click()
-    await page.getByTestId('nav-insights').focus() // the last nav row (always there since polish-home): Tab goes on to the update button
-    await page.keyboard.press('Tab')
     const pop = page.getByTestId('update-popover')
+    await expect(button).toContainText('Open download page')
+    await expect(page.getByTestId('update-settings-button')).toHaveText('Open download page')
+    // What's new: the release on offer, marked new, then the installed one.
+    await expect(page.getByTestId(`release-${NEXT}`).locator('.whats-new-tag')).toHaveText('New')
+    await expect(page.getByTestId(`release-${NEXT}`).locator('li')).toHaveText(['Updates install themselves. Say yes and restart.', 'Captions you can drag'])
+    await expect(page.getByTestId(`release-${CURRENT}`).locator('.whats-new-tag')).toHaveText('Installed')
+    await page.getByTestId('licence-link').click()
+    await expect(page.getByTestId('legal')).toContainText('GNU AFFERO GENERAL PUBLIC LICENSE')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('legal')).toHaveCount(0)
+
+    // No key yet: the page, and the way to turn automatic updates on. Keyboard focus opens the popover.
+    await page.getByTestId('nav-home').click()
+    await page.getByTestId('nav-insights').focus() // the last nav row: Tab goes on to the update button
+    await page.keyboard.press('Tab')
     await expect(pop).toHaveAttribute('data-open', 'true')
-    await expect(pop).toContainText('Update ready to download')
+    await expect(pop).toContainText('Update available')
     await expect(pop).toContainText('Updates install themselves.')
-    await expect(pop).toContainText('Fix: the update note no longer covers the AI status.')
-    await expect(pop).not.toContainText('the disk image')
+    await expect(pop).not.toContainText('QR code') // the installed version's notes stay in Settings
+    await expect(page.getByTestId('update-auto-link')).toBeVisible()
+    await shot(page, 'update-no-key')
     await page.mouse.move(900, 300)
     await page.keyboard.press('Escape')
     await expect(pop).not.toHaveAttribute('data-open', 'true')
+
+    // The anonymous check never reaches the feed and never carries a key.
+    expect(seen.filter((r) => r.path === '/latest.json').length).toBeGreaterThan(0)
+    expect(seen.every((r) => r.path === '/latest.json' && r.auth === null)).toBe(true)
+
+    // 401: the key is cleared and the person is sent to the page, with the way to turn updates on again.
+    await openSettings(page)
+    entitlement = 'bad key'
+    await pasteKey(page, app, KEY)
+    await expect(button).toContainText('Download update')
+    await expect(page.getByTestId('update-auto-link')).toHaveCount(0)
+    await button.click()
+    await expect(button).toContainText('Open download page')
+    await expect(auto).toContainText('Off.')
+    await expect(row).toContainText('did not accept the download key')
+
+    // 403: the key stays; the page, with no request for a new key.
+    entitlement = 'not entitled'
+    await pasteKey(page, app, KEY)
+    await expect(button).toContainText('Download update')
+    await button.click()
+    await expect(button).toContainText('Open download page')
+    await expect(row).toContainText('no longer includes new versions')
+    await expect(auto).toContainText('On.')
+
+    // Accepted: it downloads (only now with the key), then waits for the person to restart.
+    entitlement = 'ok'
+    await page.getByTestId('auto-updates-off').click()
+    await expect(auto).toContainText('Off.')
+    await pasteKey(page, app, KEY) // another key may belong to another purchase, so the download is offered again
+    await expect(button).toContainText('Download update')
     await button.click()
     await expect(button).toContainText(/Downloading \d+%/)
-    await expect.poll(async () => Number((/Downloading (\d+)%/.exec((await button.textContent()) ?? '') ?? [])[1] ?? 0)).toBeGreaterThan(25)
     await expect(button).toContainText('Restart to update', { timeout: 60_000 })
-    const toast = page.getByTestId('toast')
-    await expect(toast).toContainText('Update downloaded')
-    await expect(toast).toContainText('Restart from the update button in the sidebar to install it.')
+    await expect(page.getByTestId('toast')).toContainText('Restart from the update button in the sidebar to install it.')
+    await shot(page, 'update-downloaded')
+    expect(seen.filter((r) => r.path.startsWith('/u/')).every((r) => r.auth === `Bearer ${KEY}`)).toBe(true)
+    expect(seen.filter((r) => r.path === '/latest.json').every((r) => r.auth === null)).toBe(true)
+    // Confirming would run the downloaded installer (Windows) or the bundle check (Mac) and quit; the random-byte
+    // payload can't be either, so the test stops at the question.
     await button.click()
     const confirm = page.getByTestId('confirm')
-    await expect(confirm).toContainText('Install update 0.1.3 and restart Reel Studio?')
+    await expect(confirm).toContainText(`Install update ${NEXT} and restart Reel Studio?`)
     await expect(confirm).toContainText('Your reels and settings stay.')
-    await expect(page.getByTestId('confirm-no')).toBeFocused()
-    await page.keyboard.press('Shift+Tab')
-    await expect(page.getByTestId('confirm-yes')).toBeFocused()
-    await page.keyboard.press('Tab')
     await expect(page.getByTestId('confirm-no')).toBeFocused()
     await page.getByTestId('confirm-no').click()
     await expect(confirm).toBeHidden()
 
-    await openSettings(page)
-    await expect(row).toContainText('Reel Studio 0.1.3 is downloaded.')
-    await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
-    await row.scrollIntoViewIfNeeded()
-    await page.getByTestId('nav-insights').focus() // the last nav row (always there since polish-home): Tab goes on to the update button
-    await page.keyboard.press('Tab') // keyboard focus opens the popover
+    // Not now: the sidebar item goes for a day, and Settings still offers the restart.
+    await page.getByTestId('nav-insights').focus()
+    await page.keyboard.press('Tab')
     await expect(pop).toHaveAttribute('data-open', 'true')
     await page.getByTestId('update-not-now').click()
     await expect(button).toBeHidden()
     await expect(page.getByTestId('toast')).toContainText('Hidden until tomorrow. You can still update from Settings.')
+    await openSettings(page)
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
-    const project = join(root(), 'Projects', 'update-export')
-    mkdirSync(join(project, 'versions', 'v1'), { recursive: true })
-    // version 1: a vN above project.json's version is a render no note saved, not a version (#87)
-    writeFileSync(join(project, 'project.json'), JSON.stringify({ title: 'Update export', version: 1, sources: [] }))
-    writeFileSync(join(project, 'versions', 'v1', 'export.mp4'), 'completed export fixture')
-    await page.evaluate(() => window.reel.projects.exportVersion('update-export', 1))
-    const exportError = await page.evaluate(async () => {
-      const attempt = new Promise<unknown>((resolve) => {
-        const off = window.reel.update.onState((s) => {
-          if (s.status !== 'installing') return
-          off()
-          resolve(window.reel.projects.exportVersion('update-export', 1).then(() => null, (error) => error))
+
+    if (process.platform === 'darwin') {
+      // No new work while the app restarts to install (main/updater.ts assertCanStartWork); the Mac's random-byte
+      // bundle fails its check, so work is allowed again after that.
+      const project = join(root(), 'Projects', 'update-export')
+      mkdirSync(join(project, 'versions', 'v1'), { recursive: true })
+      writeFileSync(join(project, 'project.json'), JSON.stringify({ title: 'Update export', version: 1, sources: [] }))
+      writeFileSync(join(project, 'versions', 'v1', 'export.mp4'), 'completed export fixture')
+      const exportError = await page.evaluate(async () => {
+        const attempt = new Promise<unknown>((resolve) => {
+          const off = window.reel.update.onState((s) => {
+            if (s.status !== 'installing') return
+            off()
+            resolve(window.reel.projects.exportVersion('update-export', 1).then(() => null, (error) => error))
+          })
         })
+        const installation = window.reel.update.install()
+        const error = await attempt
+        await installation
+        return error
       })
-      const installation = window.reel.update.install()
-      const error = await attempt
-      await installation
-      return error
-    })
-    expect(exportError).toMatchObject({ code: 'UPDATING', userMessage: expect.stringContaining('restarting') })
-    // The random-byte download cannot install; work becomes available again after that failure.
-    await page.evaluate(() => window.reel.projects.exportVersion('update-export', 1))
+      expect(exportError).toMatchObject({ code: 'UPDATING', userMessage: expect.stringContaining('restarting') })
+      await page.evaluate(() => window.reel.projects.exportVersion('update-export', 1))
+    }
   } finally {
+    entitlement = 'ok'
+    latest = CURRENT
     await app.close()
   }
 })
 
-type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
-const boxOf = (page: Page, sel: string): Promise<Box> =>
-  page.locator(sel).first().evaluate((el) => {
-    const r = el.getBoundingClientRect()
-    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
-  })
-const meets = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-
-// Sam's Mac nightly (notes/design/r12/sam-1028/4-update-popover-sidebar-overflow.png): the item's text ran out of the
-// sidebar across the page, and its popover opened in the middle of the window over Choose video.
-test('fails if the nightly update item leaves the sidebar, or its popover leaves the window or covers the page', async () => {
-  test.skip(process.platform !== 'darwin', 'page mode for a nightly is the Mac nightly')
-  latest = 'nightly'
-  // its own settings: the first test's Not now hides the offer for a day
-  const { app, page } = await launch({ REELSTUDIO_UPDATE_AS: '0.1.3-nightly.20261028.8', REELSTUDIO_USER_DATA: join(BASE, 'nightly-user-data') })
+// The site's feed has only stable releases: a nightly that checked it would be offered the stable installer.
+test('fails if a nightly build checks the site for updates, or hides why it does not', async () => {
+  test.skip(!INSTALLS, 'updates exist on Mac and Windows only')
+  latest = NEXT
+  const before = seen.length
+  const { app, page } = await launch({ REELSTUDIO_UPDATE_AS: '0.1.4-nightly.20261104.9', REELSTUDIO_USER_DATA: join(BASE, 'nightly-user-data') })
   try {
     await passFirstRun(page)
     await openSettings(page)
-    await page.getByTestId('update-settings-button').click()
-    const button = page.getByTestId('update-button')
-    await expect(button).toContainText('Open download page')
-    await expect(button).toContainText('Nightly Oct 28, build 9')
-    await expect(button).toHaveAttribute('aria-label', `Open download page: Reel Studio ${NIGHTLY}`)
-    await expect(button).toHaveAttribute('title', new RegExp(`Reel Studio ${NIGHTLY.replace(/\./g, '\\.')} is out`))
-    await page.getByTestId('nav-home').click()
-    const pop = page.getByTestId('update-popover')
-    for (const [width, height] of [[1100, 720], [1280, 820], [1512, 982], [1920, 1080]]) {
-      await page.setViewportSize({ width, height })
-      const side = await boxOf(page, '.side')
-      // nothing of the item reaches past the sidebar's edge
-      const parts = await page.getByTestId('update-button-wrap').evaluate((wrap) =>
-        Array.from(wrap.querySelectorAll('*'))
-          .filter((el) => !el.closest('[data-testid="update-popover"]') && !el.closest('.sr-only'))
-          .map((el) => el.getBoundingClientRect().right)
-      )
-      expect(Math.max(...parts), `${width}x${height}`).toBeLessThanOrEqual(side.right)
-      await button.hover()
-      await expect(pop).toHaveAttribute('data-open', 'true')
-      await expect(pop).toContainText(`Reel Studio ${NIGHTLY}`)
-      const item = await boxOf(page, '[data-testid="update-button"]')
-      const p = await boxOf(page, '[data-testid="update-popover"]')
-      // above its item, inside the sidebar's column and the window
-      expect(p.bottom, `${width}x${height}`).toBeLessThanOrEqual(item.top)
-      expect(p.left).toBeGreaterThanOrEqual(side.left)
-      expect(p.right).toBeLessThanOrEqual(side.right)
-      expect(p.top).toBeGreaterThanOrEqual(0)
-      expect(meets(p, await boxOf(page, 'role=button[name="Choose video"]'))).toBe(false)
-      // its two actions sit on one line each, side by side
-      const link = await boxOf(page, '[data-testid="update-release-link"]')
-      const notNow = await boxOf(page, '[data-testid="update-not-now"]')
-      expect(link.height).toBeLessThanOrEqual(32)
-      expect(notNow.height).toBeLessThanOrEqual(32)
-      expect(Math.abs(link.top - notNow.top)).toBeLessThan(2)
-      await page.mouse.move(width / 2, 10)
-      await expect(pop).not.toHaveAttribute('data-open', 'true')
-    }
-    // folded to the rail: still there, as its icon, and its popover stays in the window
-    await page.setViewportSize({ width: 1100, height: 720 })
-    await page.keyboard.press('Meta+Backslash')
-    await expect.poll(async () => (await boxOf(page, '.side')).width).toBe(64)
-    const rail = await boxOf(page, '.side')
-    const item = await boxOf(page, '[data-testid="update-button"]')
-    expect(item.width).toBeGreaterThanOrEqual(24)
-    expect(item.right).toBeLessThanOrEqual(rail.right)
-    await button.hover()
-    await expect(pop).toHaveAttribute('data-open', 'true')
-    const p = await boxOf(page, '[data-testid="update-popover"]')
-    expect(p.bottom).toBeLessThanOrEqual(item.top)
-    expect(p.right).toBeLessThanOrEqual(1100)
-    expect(p.top).toBeGreaterThanOrEqual(0)
+    await expect(page.getByTestId('update-settings-text')).toHaveText("Nightly builds don't update themselves yet. Install the newest nightly from its releases page.")
+    await expect(page.getByTestId('update-settings-button')).toHaveCount(0)
+    await expect(page.locator('[data-setting="auto-updates"]')).toHaveCount(0)
+    await expect(page.getByTestId('update-button')).toHaveCount(0)
+    expect(seen.length).toBe(before)
   } finally {
-    latest = 'old'
+    latest = CURRENT
     await app.close()
   }
 })

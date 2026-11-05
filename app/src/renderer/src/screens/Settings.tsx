@@ -1,7 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AppInfo, EngineCache, PermissionStatus } from '../../../shared/api'
+import type { AppInfo, EngineCache, LegalDoc, PermissionStatus } from '../../../shared/api'
 import { sizeLine } from '../../../shared/size'
-import { RELEASES_REPO } from '../../../shared/config'
 import { channelOf, productName } from '../../../shared/channel'
 import { reel, userMessage } from '../api'
 import type { Go, SettingsSection } from '../nav'
@@ -10,7 +9,7 @@ import { usePermissionStatus } from '../components/permissions'
 import { Button, Confirm, FOLDER_APP, IS_MAC, Progress, Spinner } from '../components/ui'
 import { Icon } from '../components/icons'
 import { useUpdateState } from '../components/update'
-import { UpdateSettingsRow, WhatsNew } from '../components/UpdateSettings'
+import { AutoUpdatesControl, autoUpdatesLine, LegalText, UpdateSettingsRow, useUpdateKey, WhatsNew } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 import { CHECKS_NOTE, Privacy } from '../components/ModelsAndPrivacy'
 import { TitleBarSlot } from '../components/titlebar'
@@ -22,7 +21,6 @@ import { StockKeys } from '../components/stock-keys'
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
 const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', about: 'about' }
 const sectionOf = (t: SectionId | SettingId): SectionId => (t in SECTIONS ? (t as SectionId) : SETTINGS[t as SettingId].section)
-const REPO_FILE = (f: string): string => `https://github.com/${RELEASES_REPO}/blob/main/${f}`
 
 export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go; section?: SettingsSection }) {
   const notify = useNotify()
@@ -85,6 +83,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   const sections = (Object.keys(SECTIONS) as SectionId[]).filter((k) => !hits || SETTING_IDS.some((id) => SETTINGS[id].section === k && hits.has(id)))
 
   const update = useUpdateState()
+  const updateKey = useUpdateKey()
+  const [legal, setLegal] = useState<LegalDoc | null>(null)
   const [savingExports, setSavingExports] = useState(false)
   // Double-check each edit (main/settings.ts checkEdits): off by default, read once like the other switches
   const [checkEdits, setCheckEdits] = useState<boolean | null>(null)
@@ -308,28 +308,32 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <SettingRow id="version" line={`${productName(info.version)} ${info.version}. No account needed.${info.engine.mode === 'fake' ? ' Test engine in use.' : ''}`} />
               <SettingRow
                 id="licence"
-                line="Free and open source under the MIT licence. The parts it's built on keep their own licences."
+                line="Open source under the GNU AGPL v3, with no warranty. The parts it's built on keep their own licences."
                 control={
                   <span className="sctl">
-                    <a className="ext-link" href={REPO_FILE('LICENSE')} target="_blank" rel="noreferrer" data-testid="licence-link">
-                      Licence <Icon name="external" size={12} stroke={2} />
-                    </a>
-                    <a className="ext-link" href={REPO_FILE('THIRD_PARTY.md')} target="_blank" rel="noreferrer" data-testid="notices-link">
-                      Notices <Icon name="external" size={12} stroke={2} />
-                    </a>
+                    <button className="ext-link" onClick={() => setLegal('license')} data-testid="licence-link">
+                      Licence
+                    </button>
+                    <button className="ext-link" onClick={() => setLegal('notices')} data-testid="notices-link">
+                      Notices
+                    </button>
                   </span>
                 }
               />
               <SettingRow
                 id="updates"
-                line="Once a day, Reel Studio asks GitHub for a newer version. Nothing about you or your reels is sent."
+                line="Once a day, Reel Studio asks getreelstudio.com for a newer version. Nothing about you or your reels is sent."
                 control={update !== null && <Switch on={update.autoCheck} labelledBy="set-updates" onToggle={() => void toggleUpdates(!update.autoCheck)} testid="check-updates" />}
               >
                 <UpdateSettingsRow />
               </SettingRow>
+              {updateKey && update?.status !== 'disabled' && (
+                <SettingRow id="auto-updates" line={autoUpdatesLine(updateKey)} control={<AutoUpdatesControl status={updateKey} />} />
+              )}
               <SettingRow id="whats-new">
                 <WhatsNew />
               </SettingRow>
+              {legal && <LegalText doc={legal} onClose={() => setLegal(null)} />}
             </Section>
 
             <Section id="advanced">

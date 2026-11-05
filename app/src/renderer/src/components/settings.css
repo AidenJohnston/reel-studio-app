@@ -75,10 +75,26 @@ html.kb .ssearch input:focus-visible { outline: 0; }
 .update-row-line { display: flex; align-items: center; gap: 12px; }
 .update-row-line > p { flex: 1; min-width: 0; }
 .whats-new {
-  max-height: 168px; overflow-y: auto; margin: 0; padding: 8px 12px 8px 28px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
+  max-height: 220px; overflow-y: auto; margin: 0; padding: 10px 12px; list-style: none; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
   font-size: var(--fs-sm); line-height: 18px; color: var(--ink-2); overscroll-behavior: contain;
 }
-.whats-new li + li { margin-top: 4px; }
+.whats-new > li + li { margin-top: 10px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--line); }
+.whats-new p { margin: 0; }
+.whats-new p + p, .whats-new ul { margin-top: 2px; }
+.whats-new ul { padding-left: 16px; }
+.whats-new-head { display: flex; align-items: baseline; gap: 8px; }
+.whats-new-head b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.whats-new-head time { margin-left: auto; color: var(--ink-3); white-space: nowrap; }
+.whats-new-tag { padding: 0 6px; border-radius: 999px; background: var(--green-tint); color: var(--green-ink); font-size: var(--fs-xs); line-height: 16px; font-weight: 600; }
+.whats-new-tag.quiet { background: var(--sunk); color: var(--ink-2); }
+/* "Get my link": a link that opens the site's page, drawn as the other links in Settings */
+button.ext-link { padding: 0; border: 0; background: none; font-family: inherit; cursor: pointer; }
+button.ext-link:disabled { cursor: default; opacity: .5; }
+.legal-text {
+  max-height: min(60vh, 520px); overflow: auto; margin: 12px 0 16px; padding: 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
+  white-space: pre-wrap; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); overscroll-behavior: contain;
+}
+@media (forced-colors: active) { .whats-new-tag { border: 1px solid CanvasText; } }
 
 /* Settings › Editor: the picker's rows sit in the setting rows' rhythm */
 .srow.picker-row { padding: 0; }
