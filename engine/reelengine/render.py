@@ -53,6 +53,8 @@ MIN_SEEK_GAP = SEEK_PREROLL + 2.0
 # the final of a 4K HEVC take cut to five far-apart stretches peaked at 1.50 GiB with one input and
 # 3.86 GiB with five, about 0.6 GiB per extra input. Three bounds the extra near 1.2 GiB for 8-bit 4K;
 # 10-bit footage and Macs are unmeasured. Raising it trades memory for decode time.
+# It caps only the seeks video_lanes adds. A reordered cut keeps every input plan_lanes gives it, as
+# on main, even past this: a forward-only input cannot serve an earlier segment without buffering.
 MAX_VIDEO_LANES = 3
 
 
@@ -287,8 +289,9 @@ def video_lanes(segments: list) -> list:
     """plan_lanes, but a lane that would decode through more than MIN_SEEK_GAP of cut-away footage
     starts again as a new input seeked to just before its next segment. A 5-minute take cut to
     45 s otherwise decodes the whole span between its first and last kept second. The largest gaps
-    are split first, and only while the total stays within MAX_VIDEO_LANES; the lanes plan_lanes
-    needs are all kept, even past it. Each piece is opened and trimmed the same way a reordered
+    are split first, and only while the total stays within MAX_VIDEO_LANES. The lanes plan_lanes
+    needs are all kept, so a reordered cut with more of them than the cap gets no added seeks and
+    opens as many inputs as it does on main. Each piece is opened and trimmed the same way a reordered
     cut's lanes already are, so the frames it yields are the same."""
     lanes = plan_lanes(segments)
     gaps = []

@@ -5,6 +5,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from reelengine import render, tools
 from reelengine.render_ctx import RenderCtx, Segment
@@ -31,7 +32,10 @@ def _segments(frame_spans):
     return out, t
 
 
-def _cmd(work: Path, src: Path, segs, dur):
+SDR = {"width": W, "height": H, "fps": FPS, "rotation": 0}
+
+
+def _cmd(work: Path, src: Path, segs, dur, meta=SDR):
     work.mkdir(parents=True, exist_ok=True)
     ctx = RenderCtx(project={}, project_dir=work, root=work, out_timeline=segs,
                     word_out_time=lambda _w: 0.0, is_kept=lambda _w: True,   # is_kept: required on beta (multi-source)
@@ -44,8 +48,7 @@ def _cmd(work: Path, src: Path, segs, dur):
         wf.setsampwidth(2)
         wf.setframerate(48000)
         wf.writeframes(bytes(4 * int(48000 * (dur + 1))))
-    meta = {"s1": {"width": W, "height": H, "fps": FPS, "rotation": 0}}
-    return render.build_video_cmd(ctx, segs, meta, {"s1": src}, {}, W, H, [], [], None, audio, 0.0, dur, 0.0,
+    return render.build_video_cmd(ctx, segs, {"s1": meta}, {"s1": src}, {}, W, H, [], [], None, audio, 0.0, dur, 0.0,
                                   "libx264", work / "out.mp4", work / "graph.txt")
 
 
@@ -69,7 +72,7 @@ def test_far_segments_are_reached_by_their_own_input_seek(tmp_path):
     assert _source_seeks(_cmd(tmp_path, src, segs, dur), src) == [None, "17.4", "37.4"]
 
 
-def test_heavy_cut_opens_at_most_max_lanes_inputs_skipping_the_largest_gaps():
+def test_forward_cut_adds_seeks_only_at_its_largest_gaps_up_to_the_cap():
     gaps = [6, 30, 7, 50, 8, 40, 9, 20]           # all longer than MIN_SEEK_GAP; room for 2 splits
     segs, t = [Segment("s1", 10.0, 11.0, 0.0)], 11.0
     for g in gaps:
@@ -79,6 +82,55 @@ def test_heavy_cut_opens_at_most_max_lanes_inputs_skipping_the_largest_gaps():
     # MAX_VIDEO_LANES (3) inputs: the two largest gaps (50 and 40 s) start new ones
     assert [l["segs"] for l in lanes] == [[0, 1, 2, 3], [4, 5], [6, 7, 8]]
     assert [l["seek"] for l in lanes] == [7.0, 104.0, 154.0]
+
+
+def test_reordered_cut_keeps_the_inputs_it_needs_and_adds_no_seek_past_the_cap():
+    # Four descending segments need four forward-only inputs, as on main; the 19 s gap on the first
+    # lane (41 s -> 60 s) would earn a seek, but the cut is already past MAX_VIDEO_LANES (3).
+    segs = [Segment("s1", a, a + 1.0, float(k)) for k, a in enumerate([40.0, 30.0, 20.0, 10.0, 60.0])]
+    lanes = render.video_lanes(segs)
+    assert [l["segs"] for l in lanes] == [[0, 4], [1], [2], [3]]
+    assert [l["seek"] for l in lanes] == [37.0, 27.0, 17.0, 7.0]
+
+
+def _input_args(cmd, src: Path):
+    """For every ffmpeg input that opens `src`, the options given before its -i, minus -ss."""
+    out, cur, i = [], [], 4               # past: ffmpeg -y -nostdin -hide_banner
+    while i < len(cmd):
+        if cmd[i] == "-i":
+            if cmd[i + 1] == str(src):
+                out.append(cur)
+            cur, i = [], i + 2
+        elif cmd[i] == "-ss":
+            i += 2
+        else:
+            cur.append(cmd[i])
+            i += 1
+    return out
+
+
+def _segment_chains(graph: Path) -> list:
+    """The per-segment picture chain (after the trim, before setsar) of every video segment."""
+    chains = []
+    for line in graph.read_text(encoding="utf-8").split(";\n"):
+        if "]trim=start=" in line:
+            chains.append(line.split("setpts=PTS-STARTPTS,", 1)[1].rsplit(",setsar=1[", 1)[0])
+    return chains
+
+
+@pytest.mark.parametrize("meta, opts, marker", [
+    ({"width": H, "height": W, "fps": FPS, "rotation": 90},                       # stored sideways
+     ["-display_rotation", "0", "-noautorotate"], "transpose=clock"),
+    ({"width": W, "height": H, "fps": FPS, "rotation": 0, "hdr": True}, ["-noautorotate"], "tonemap=tonemap=hable"),
+], ids=["rotated", "hlg"])
+def test_every_seeked_input_of_a_rotated_or_hlg_take_gets_the_same_processing(tmp_path, meta, opts, marker):
+    src = tmp_path / "take.mp4"
+    segs, dur = _segments(SPANS)
+    cmd = _cmd(tmp_path, src, segs, dur, meta)
+    args = _input_args(cmd, src)
+    assert args == [opts] * 3
+    chains = _segment_chains(tmp_path / "graph.txt")
+    assert len(chains) == len(SPANS) and len(set(chains)) == 1 and marker in chains[0]
 
 
 def _numbered_source(path: Path, seconds: float, vfr: bool = False) -> None:
