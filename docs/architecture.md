@@ -70,7 +70,7 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 <slug>/
   project.json            the edit (schema below), the only file the AI changes
   media/                  copies (or hard links) of the user's raw takes for this project
-  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxies; safe to delete
+  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxy/ (preview copies); safe to delete
   versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md
   versions/v2/ ...
   versions/preview/       the one scratch folder for drafts, overwritten each time (see versions.md)
@@ -155,6 +155,7 @@ Exit code 0 on done, 1 on error. The `message` in progress events is user-facing
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
 | `frames --times t1,t2,...` | extracts PNG frames from the latest render (for the AI to look at) |

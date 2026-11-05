@@ -259,3 +259,13 @@ def test_every_still_is_paired_with_a_requested_time():
     # an extra still, or a requested time with none, comes back half empty (check_take fails it)
     assert replay.pair_stills([1.0], ["still0", "still1"])[1] == (None, "still1")
     assert replay.pair_stills([1.0, 1.5], ["still0"])[1] == (1.5, None)
+
+
+def test_a_proxy_run_refuses_a_preview_that_read_the_original():
+    from harness.engines import Call
+    copies = {"sources": {"s1": {"status": "built"}, "s2": {"status": "not-needed"}}}
+    read = Call(1.0, {"videoFrom": {"s1": "proxy", "s2": "original"}}, "")
+    replay._check_copy_read(read, copies, "draft")
+    fell_back = Call(1.0, {"videoFrom": {"s1": "original", "s2": "original"}}, "")
+    with pytest.raises(RuntimeError, match="copies exist for \\['s1'\\]"):
+        replay._check_copy_read(fell_back, copies, "draft")

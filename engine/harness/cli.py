@@ -151,7 +151,7 @@ def cmd_run(a) -> int:
     cand = Engine(ENGINE_DIR, c.python, c.env(c.scratch / "cache-warmup"))
     cand.check_import()
     report = {"startedAt": stamp, "candidate": git_head(), "pins": c.pins, "ffmpegVersion": ffmpeg_version(c.ffmpeg),
-              "python": c.python, "platform": sys.platform, "split": a.split, "runs": runs,
+              "python": c.python, "platform": sys.platform, "split": a.split, "runs": runs, "proxy": a.proxy,
               "thresholds": c.cfg["thresholds"], "mediaBytes": s["mediaBytes"], "load": [load_sample()], "takes": {}}
     if not a.no_warmup:        # reads every source once and probes the GPU encoder, untimed
         for tid in ids:
@@ -169,7 +169,7 @@ def cmd_run(a) -> int:
             shutil.rmtree(cache, ignore_errors=True)
             cand.env = c.env(cache)
             keep = out_dir / "outputs" / tid / f"run{r + 1}"
-            results[tid].append(replay.replay(take, cand, refs, c.scratch, keep, str(c.ffprobe)))
+            results[tid].append(replay.replay(take, cand, refs, c.scratch, keep, str(c.ffprobe), proxy=a.proxy))
         report["load"].append(load_sample())
     th = c.cfg["thresholds"]
     for tid in ids:
@@ -190,6 +190,9 @@ def cmd_run(a) -> int:
                                                           "distinctOutputs": len({run["finalFile"]["final"]["sha256"] for run in rs}),
                                                           "check": checked["final"]},
                                 "wait": replay.stats([replay.session_wait(run) for run in rs])}
+        if a.proxy:
+            report["takes"][tid]["copies"] = {"seconds": replay.stats([run["copies"]["seconds"] for run in rs]),
+                                              "sources": rs[0]["copies"]["sources"]}
     report["wait"] = replay.stats([sum(replay.session_wait(results[tid][r]) for tid in ids) for r in range(runs)])
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
@@ -226,6 +229,13 @@ def render_markdown(r: dict) -> str:
         lines.append(f"| {tid} | final export | {_sec(t['final']['seconds'])} | | | {_status(t['final']['check'])} | | |")
     lines += ["", f"Session wait (all takes): {_sec(r['wait'])} s. Per take: "
               + ", ".join(f"{tid} {_sec(t['wait'])}" for tid, t in r["takes"].items()) + "."]
+    copies = {tid: t["copies"] for tid, t in r["takes"].items() if "copies" in t}
+    if copies:
+        lines.append("Preview copies (built before each session, not in the wait): " + "; ".join(
+            f"{tid} {_sec(c['seconds'])} s, " + ", ".join(
+                f"{sid} {v['status']}" + (f" {v['bytes'] / 1e6:.1f} MB" if v.get("bytes") else "")
+                for sid, v in c["sources"].items())
+            for tid, c in copies.items()) + ".")
     lines.append("Load samples: " + json.dumps(r["load"]))
     fails = []
     for tid, t in r["takes"].items():
@@ -273,6 +283,8 @@ def main(argv=None) -> int:
     run.add_argument("--runs", type=int)
     run.add_argument("--split", choices=["loop", "held-out", "all"], default="loop")
     run.add_argument("--no-warmup", action="store_true")
+    run.add_argument("--proxy", action="store_true",
+                     help="build each take's preview copy before its session; drafts and windows must read it")
     ag = sub.add_parser("agree")
     ag.add_argument("a")
     ag.add_argument("b")

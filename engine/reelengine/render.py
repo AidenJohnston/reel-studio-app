@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from . import captions as capmod, cut as cutmod, project as projmod, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -471,6 +471,8 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         cmd += no_rotate_args(src)
         if lane["seek"] > 0:
             cmd += ["-ss", _f(lane["seek"])]
+        if src.get("inputOffset"):        # a preview copy: its frames at the original's times (proxy.py)
+            cmd += ["-itsoffset", _f(src["inputOffset"])]
         cmd += ["-i", str(src_paths[lane["source"]])]
         n = len(lane["segs"])
         head = f"[{li}:v]" + (pre + "," if pre else "")
@@ -761,6 +763,12 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
                               "I can't find the original video for this project. It may have been "
                               "moved or deleted.")
     faces = source_faces(project_dir, proj)
+    # The picture of a draft or window comes from each take's preview copy when it is finished
+    # (proxy.py); sound, the cover and every final read the originals.
+    if draft:
+        vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
+    else:
+        vmeta, vpaths, vfaces, video_from = src_meta, src_paths, faces, {sid: "original" for sid in src_meta}
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
     ctx.out_dir = vdir
@@ -851,7 +859,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     out = vdir / name
     out_part = rwork / (name + ".part")
     graph = rwork / ("graph_" + name.replace(".mp4", ".txt"))
-    cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+    cmd = build_video_cmd(ctx, segments, vmeta, vpaths, vfaces, out_w, out_h, layers, zooms,
                           ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
     # The cover reads only the source and the project, never the encode's output: make it on a
     # thread while ffmpeg encodes (it used to add 3-9 s after the encode), and reuse it when nothing
@@ -874,6 +882,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
             warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
             failed_encoder, encoder = encoder, "libx264"
+            # the originals too: a damaged copy must cost speed, never the preview
+            video_from = {sid: "original" for sid in src_meta}
             cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
                                   ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
                                   use_hw=False)
@@ -898,7 +908,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
-              "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
+              "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
 

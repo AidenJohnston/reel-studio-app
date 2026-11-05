@@ -76,6 +76,11 @@ def cmd_render(args):
                       first_look=args.first_look, music=args.music, cover=not args.no_cover)
 
 
+def cmd_proxy(args):
+    from . import proxy
+    return proxy.run(_project(args))
+
+
 def cmd_cover(args):
     from . import render
     return render.cover_only(_project(args), root=Path(args.root) if args.root else None)
@@ -333,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--first-look", action="store_true",
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
+    add("proxy", cmd_proxy, "make the 1080p copy of each 4K or HDR take that previews read")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
