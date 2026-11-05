@@ -36,9 +36,6 @@ compression: normal
 directories:
   output: release
 
-# A prerelease version (the nightly's x.y.z-nightly.YYYYMMDD.N) must still write latest.yml: installed copies read
-# that name from the release folder (main/updater-electron.ts), and a nightly.yml would never be found.
-detectUpdateChannel: false
 # reelstudio://updates?key=… from the "Turn on automatic updates" page hands the app the buyer's download key
 # (app/src/main/update-key.ts). macOS reads this from Info.plist; on Windows the app also registers it at start.
 protocols:
@@ -103,11 +100,14 @@ extraResources:
   - from: ${env.RS_REPO_ROOT}/packaging/licenses/yunet-MIT.txt
     to: engine/reelengine/models/LICENSE-YuNet-MIT.txt
 
-# Where the installed app looks for updates (main/updater.ts): make-config.js appends the publish block from
-# RELEASES_REPO in app/src/shared/config.ts. electron-builder writes it into the app as resources/app-update.yml even
-# with --publish never; nothing is uploaded by the build. The Mac update zip and latest-mac.yml come from
-# packaging/sign-mac.sh, after signing (docs/signing-mac.md, "Release"). On Windows electron-builder writes
-# release/latest.yml next to the installer; build-win.ps1 checks it (packaging/README.md, "Release files").
+# Written into the app as resources/app-update.yml, even with --publish never (nothing is uploaded by the build).
+# electron-updater reads it only to switch itself on: main/updater-electron.ts sets the same feed at runtime and
+# sends the buyer's download key with each request to it. The update server renders latest.yml / latest-mac.yml
+# itself from its release manifest, so electron-builder's own latest*.yml files are not uploaded. On Windows,
+# publisherName comes from RS_AZURE_PUBLISHER when the build is signed (make-config.js).
+publish:
+  provider: generic
+  url: https://dl.getreelstudio.com/u/
 
 # afterPack (packaging/after-pack.js: compiles .pyc for python/ and engine/ BEFORE signing, so the bundle is
 # never written to at runtime and engine start-up stays fast) is appended by make-config.js.

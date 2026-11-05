@@ -866,8 +866,9 @@ export interface ReelApi {
     onCommand(cb: (c: AppCommand) => void): () => void
     /** Drag a finished file out of the app (desktop, folder, browser upload box). Call from dragstart. */
     startDrag(file: string): void
-    /** The MIT license or THIRD_PARTY.md, as shipped with this copy. */
+    /** Settings › About: the license (GNU AGPL v3) or THIRD_PARTY.md, as shipped with this copy. */
     legal(doc: LegalDoc): Promise<string>
+    /** Show that file in Finder / File Explorer. */
     showLegal(doc: LegalDoc): Promise<void>
   }
   model: {
@@ -1096,17 +1097,25 @@ export interface ReelApi {
     /** macOS: the System Settings page for this, with the helper on it. */
     openSettings(pane: SettingsPane): Promise<void>
   }
-  /** Updates (main/updater.ts). Downloads and installs only when the person clicks. */
+  /** Updates (main/updater.ts): the daily check, and downloading and installing when the person says yes. */
   update: {
-    status(): Promise<UpdateStatus>
-    /** Settings > "Check for updates". Turning it on checks at once (still at most once a day). */
-    setEnabled(on: boolean): Promise<UpdateStatus>
-    /** Open the download page in the browser. Main opens only pages on getreelstudio.com. */
-    open(url: string): Promise<void>
-    /** "Not now": hide it until a newer version comes out, or until tomorrow. */
-    dismiss(version: string): Promise<void>
-    /** A notice to show, or null to hide it (checks switched off). */
-    onChange(cb: (n: UpdateNotice | null) => void): () => void
+    state(): Promise<UpdateState>
+    /** "Check now" in Settings. `checked` is false when a check could not start (busy or off). */
+    check(): Promise<{ checked: boolean; state: UpdateState }>
+    download(): Promise<UpdateActionResult>
+    /** Restart and install the downloaded update. Refused while an export is still writing its file. */
+    install(): Promise<UpdateActionResult>
+    /** The download page latest.json named. Main opens only pages on getreelstudio.com. */
+    openRelease(): Promise<void>
+    /** "Turn on automatic updates": the site page that emails a link carrying the person's download key. */
+    openAutoUpdatesPage(): Promise<void>
+    /** What restarting would stop: an export still writing, videos being made. */
+    busy(): Promise<UpdateBusy>
+    /** "Not now": hide the sidebar button until tomorrow, or until a newer version comes out. */
+    dismiss(version: string): Promise<UpdateState>
+    /** Settings > "Check for updates". Turning it on checks when the day is up. */
+    setEnabled(on: boolean): Promise<void>
+    onState(cb: (s: UpdateState) => void): () => void
   }
   /** Automatic updates: the buyer's download key (main/update-key.ts). The page never sees the key itself. */
   updateKey: {
@@ -1227,12 +1236,6 @@ export interface UpdateKeyStatus {
 export interface UpdateNotice {
   version: string
   url: string
-}
-
-export interface UpdateStatus {
-  enabled: boolean
-  /** What to show now; null = nothing (up to date, not checked yet, off, or "Not now"). */
-  notice: UpdateNotice | null
 }
 
 /**

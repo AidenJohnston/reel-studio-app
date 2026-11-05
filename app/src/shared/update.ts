@@ -1,37 +1,34 @@
+// What main/updater.ts tells the window about updates, and the one rule both sides use to pick the action.
 export type UpdateStatus = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'up-to-date' | 'error'
 
 export type UpdateErrorContext = 'check' | 'download' | 'install'
 
+/** One release's notes from latest.json: newest first, at most five (the update server keeps that many). */
+export interface ReleaseNote {
+  version: string
+  /** YYYY-MM-DD, the day it was published. */
+  date: string
+  /** A few short lines; a line starting with "- " or "* " is a bullet. */
+  text: string
+}
+
+/** install: this copy can download and install the update itself. page: it opens the download page instead. */
 export type UpdateMode = 'install' | 'page'
-
-export interface ReleaseNotes {
-  version: string
-  items: string[]
-  totalItems: number
-}
-
-export interface ReleaseEntry {
-  version: string
-  date: string | null
-  summary: string | null
-  url: string
-}
-
-export const validDate = (d: unknown): string | null => (typeof d === 'string' && Number.isFinite(Date.parse(d)) ? d : null)
 
 export interface UpdateState {
   status: UpdateStatus
   mode: UpdateMode
+  /** Page mode only because no download key is saved (or the server refused the saved one): the window also
+   * offers "Turn on automatic updates". */
+  keyNeeded: boolean
   autoCheck: boolean
   currentVersion: string
   availableVersion: string | null
   downloadedVersion: string | null
-  /** Only releases newer than the running one, newest first. */
-  releaseNotes: ReleaseNotes[]
-  /** Newer releases left out of releaseNotes. */
-  olderNotes: number
-  releases: ReleaseEntry[]
+  /** The download page on getreelstudio.com that latest.json names. */
   releaseUrl: string | null
+  /** What's new: the notes latest.json carries, newest first. `newer`: a version after the running one. */
+  notes: (ReleaseNote & { newer: boolean })[]
   downloadPercent: number | null
   message: string | null
   errorContext: UpdateErrorContext | null
@@ -53,14 +50,13 @@ export function initialUpdateState(currentVersion: string, mode: UpdateMode, aut
   return {
     status: disabledReason ? 'disabled' : 'idle',
     mode,
+    keyNeeded: false,
     autoCheck,
     currentVersion,
     availableVersion: null,
     downloadedVersion: null,
-    releaseNotes: [],
-    olderNotes: 0,
-    releases: [],
     releaseUrl: null,
+    notes: [],
     downloadPercent: null,
     message: disabledReason,
     errorContext: null,

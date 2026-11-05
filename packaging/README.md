@@ -37,14 +37,14 @@ packaging/build-mac.sh            # or --spike
 packaging/sign-mac.sh             # run in a GUI session: sign + notarize + staple
 ```
 
-### Release files
+### Update files
 
-Installed copies update from the GitHub release tagged `v<version>`. Attach, next to the GPL sources:
+Installed copies update from `https://dl.getreelstudio.com/u/` (app `main/updater-electron.ts`). The server renders
+`latest.yml` and `latest-mac.yml` itself from its release manifest, so only these files are published with a release:
 
-* Windows: `Reel-Studio-Setup-<version>-x64.exe` **and** `latest.yml` from `app\release\`. `build-win.ps1` checks that
-  `latest.yml` names that installer, its version and its SHA-512. Without `latest.yml`, Windows copies cannot update.
-  The `.blockmap` is not needed.
-* Mac: the three files from `app/release/signed/` (`docs/signing-mac.md`, "Release").
+* Windows: `Reel-Studio-Setup-<version>-x64.exe`. electron-updater runs the same installer people download. The
+  `latest.yml` and `.blockmap` electron-builder writes next to it are not used.
+* Mac: `Reel-Studio-<version>-arm64-mac.zip` from `sign-mac.sh` (`docs/signing-mac.md`), next to the dmg.
 
 ### Nightly builds
 
@@ -57,8 +57,8 @@ fork's nightly workflow sets it before building and never commits it. A nightly 
 * `Reel-Studio-Nightly-<version>-arm64.dmg` and `Reel-Studio-Nightly-Setup-<version>-x64.exe`.
 * It shares one thing with the stable app: the downloaded speech models (`app/src/main/paths.ts` `modelsDir`). Its
   library, settings, caches and logs are its own, and it refuses a library folder that overlaps the stable app's.
-* It updates only from the fork's `v*-nightly.*` prereleases. The Mac nightly is ad-hoc signed, so it opens the release
-  page instead of installing (`sign-mac.sh` makes no update zip for it); Windows installs from `latest.yml`.
+* It doesn't update itself: the update feed has only stable releases (`app/src/main/update-machine.ts`
+  `disabledReason`), so `sign-mac.sh` makes no update zip for it. A new nightly is installed from its releases page.
 
 First run downloads about 250 MB of Python wheels + ffmpeg into `packaging/cache` and `packaging/runtime`
 (both gitignored); later runs reuse them.

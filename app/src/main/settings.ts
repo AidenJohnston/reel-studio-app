@@ -7,20 +7,14 @@ import { PRODUCT_NAME } from '../shared/channel'
 import { channel, defaultRoot, legacyRoot, settingsFile, stableLibraryRoots } from './paths'
 import { writeJson } from './store'
 import type { SpeechCheckResult } from './models'
-import type { ReleaseEntry } from '../shared/update'
-import type { Dismissal, RememberedRelease } from './update-machine'
+import { UPDATE_MEMORY_DEFAULTS, type UpdateMemory } from './update-machine'
 import { MODEL_ROLES, type DataSharing, type ModelChoice, type PhoneView } from '../shared/api'
 import type { TikTokSettings } from '../shared/tiktok'
 import type { InstagramSettings } from '../shared/instagram'
 import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
 
 // Instagram and TikTok (insights-data): off until a developer configures them, with no UI yet
-export interface Settings extends InstagramSettings, TikTokSettings, UpdateKeyState {
-  checkUpdates: boolean
-  updateCheckedAt: number | null
-  updateLatest: RememberedRelease | null
-  updateDismissed: Dismissal | null
-  updateHistory: ReleaseEntry[] | null
+export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemory, UpdateKeyState {
   firstRunDone: boolean
   /**
    * Settings › Advanced › Reset first run: the next launch shows the first run again. firstRunDone stays true, so
@@ -57,11 +51,6 @@ const DEFAULTS: Settings = {
   aiCarriedOver: false,
   notifications: null,
   speechCheck: null,
-  checkUpdates: true,
-  updateCheckedAt: null,
-  updateLatest: null,
-  updateDismissed: null,
-  updateHistory: null,
   checkEdits: false,
   models: Object.fromEntries(MODEL_ROLES.map((r) => [r, 'auto'])) as ModelChoice,
   sharing: { asked: false, on: false, usage: true, quality: true, posts: true },
@@ -73,6 +62,7 @@ const DEFAULTS: Settings = {
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],
   // Posting requires explicit developer configuration and approval of the requested scopes.
   tiktokEnabled: false, tiktokClientKey: null, tiktokBrokerUrl: null, tiktokAudited: false, tiktokDirectPost: false,
+  ...UPDATE_MEMORY_DEFAULTS,
   ...UPDATE_KEY_DEFAULTS
 }
 

@@ -205,14 +205,15 @@ const api: ReelApi = {
   },
   update: {
     state: () => call('update:state'),
-    onState: (cb) => on<UpdateState>('update:state', cb),
     check: () => call('update:check'),
     download: () => call('update:download'),
     install: () => call('update:install'),
-    openRelease: (version) => call('update:openRelease', version),
+    openRelease: () => call('update:openRelease'),
+    openAutoUpdatesPage: () => call('update:openAutoUpdatesPage'),
     busy: () => call('update:busy'),
     dismiss: (version) => call('update:dismiss', version),
-    setEnabled: (on) => call('update:setEnabled', on)
+    setEnabled: (on) => call('update:setEnabled', on),
+    onState: (cb) => on<UpdateState>('update:state', cb)
   },
   updateKey: {
     status: () => call('updateKey:status'),

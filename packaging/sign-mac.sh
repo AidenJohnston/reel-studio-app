@@ -29,8 +29,8 @@
 #   4. zip -> xcrun notarytool submit --wait -> xcrun stapler staple (the .app)
 #   5. build the .dmg from the signed+stapled app (packaging/dmg/make-dmg.sh: the designed Finder window, laid out by
 #      Finder itself; without a GUI session or Finder control it builds the plain window and says why), sign it,
-#      notarize it, staple it; zip the same app as Reel-Studio-<v>-arm64-mac.zip and write latest-mac.yml for it
-#      (what the installed app updates from)
+#      notarize it, staple it; zip the same app as Reel-Studio-<v>-arm64-mac.zip (what installed copies download to
+#      update themselves)
 #   6. final checks: codesign --verify, spctl -a -vv (app and dmg), stapler validate, and the zip unpacks to
 #      the same valid, stapled app
 set -euo pipefail
@@ -186,9 +186,8 @@ notarize() { # notarize <file-to-submit> <what>
 ARTIFACT="$(printf '%s' "$PRODUCT" | tr -d '()' | tr ' ' '-')"
 DMG="$OUT/$ARTIFACT-$DMG_VER-arm64.dmg"
 UPDATE_ZIP="$OUT/$ARTIFACT-$DMG_VER-arm64-mac.zip"
-LATEST_YML="$OUT/latest-mac.yml"
-# The Mac nightly is ad-hoc signed, so Squirrel.Mac could not install an update zip: it opens its release page
-# instead (app/src/main/update-machine.ts updateMode), and gets no zip or latest-mac.yml.
+# Nightlies don't update themselves (app/src/main/update-machine.ts disabledReason), and the Mac nightly is ad-hoc
+# signed, which Squirrel.Mac would refuse anyway: it gets no update zip.
 NIGHTLY=0; ! printf '%s' "$DMG_VER" | grep -Eq -- '-nightly\.[0-9]{8}\.[0-9]+$' || NIGHTLY=1
 if [ "$SKIP_NOTARIZE" = 1 ]; then
   say "4/6 Notarize: SKIPPED"
@@ -213,11 +212,10 @@ if [ "$ADHOC" = 0 ]; then
 fi
 # The update zip is the stapled app itself. ditto keeps the bundle exactly (symlinks inside the frameworks,
 # permissions, extended attributes), which Squirrel.Mac needs to accept the update; `zip` would break it.
-# Its checksum is taken only now, after signing and stapling, so latest-mac.yml matches the uploaded bytes.
-rm -f "$UPDATE_ZIP" "$LATEST_YML"
+# The update zip is made only now, after signing and stapling, so it holds the app as notarized.
+rm -f "$UPDATE_ZIP"
 if [ "$NIGHTLY" = 0 ]; then
   ditto -c -k --sequesterRsrc --keepParent "$SIGNED" "$UPDATE_ZIP"
-  node "$HERE/latest-mac.js" "$UPDATE_ZIP" "$DMG_VER" "$LATEST_YML"
 fi
 
 # ---------- 6. final checks ----------
@@ -249,6 +247,5 @@ echo "  Signed app : $SIGNED"
 echo "  Installer  : $DMG   ($(du -h "$DMG" | cut -f1))"
 if [ "$NIGHTLY" = 0 ]; then
   echo "  Update zip : $UPDATE_ZIP   ($(du -h "$UPDATE_ZIP" | cut -f1))"
-  echo "  Update feed: $LATEST_YML"
 fi
-if [ "$SKIP_NOTARIZE" = 1 ]; then echo "  (not notarized: do not upload these to a release)"; fi
+if [ "$SKIP_NOTARIZE" = 1 ]; then echo "  (not notarized: do not publish these)"; fi

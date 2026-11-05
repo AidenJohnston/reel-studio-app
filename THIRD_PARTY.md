@@ -84,9 +84,6 @@ requirements". Our offer:
    FFmpeg is not patched. `README.txt` and `SHA256SUMS.txt` sit beside them. **They stay online as long as any installer
    that bundles these binaries is downloadable; a new FFmpeg build gets its own source folder first.** The download
    pages link to it.
-   Nightly prereleases, which come out several times a day from the same pins, link from their notes to one release
-   in the fork that builds them, tagged `sources-ffmpeg-<version>-<recipe>-<pins>` (`<pins>` is a hash of
-   `packaging/ffmpeg/` and `mirror_gpl_sources.py`), and that release stays up as long as any nightly linking it does.
 2. **Anyone can rebuild the binaries**: unpack `reel-studio-ffmpeg-recipe-rs2.tar.gz` and run one command on each
    platform (`bash build.sh <workdir>`, in an MSYS2 UCRT64 shell on Windows or a normal terminal on Apple silicon; the
    setup is in the archive's `README.md`).
@@ -114,7 +111,7 @@ their license texts are inside the Python folder under `python/` (`licenses` / `
 ### Python packages (installed by pip from PyPI)
 
 The single source of truth is `engine/requirements.txt` (the engine's own exact pins, including transitive
-dependencies) plus `packaging/requirements-extra.txt` (bundle-only extras: pi-heif and the reference-import packages). `packaging/hash_requirements.py`
+dependencies) plus `packaging/requirements-extra.txt` (bundle-only extras: pi-heif). `packaging/hash_requirements.py`
 turns them into `packaging/requirements-runtime.hashed.txt`, which `fetch_runtime.py` installs with
 `pip install --require-hashes --no-deps`; a stale copy stops the build. Versions: see `engine/requirements.txt`.
 
@@ -123,9 +120,6 @@ turns them into `packaging/requirements-runtime.hashed.txt`, which `fetch_runtim
 | numpy | BSD-3-Clause | wheel bundles OpenBLAS (BSD-3-Clause) and, on Windows, GCC runtime libs (GPL with runtime exception) |
 | pillow | HPND | |
 | **pi-heif** | BSD-3-Clause (wrapper); wheel libraries LGPL-3.0 | HEIC/HEIF stills (iPhone photos), decode only. The wheels contain exactly two libraries, **libheif 1.23.0 (LGPL-3.0) and libde265 1.1.0 (LGPL-3.0)**, as separate `.dll` / `.dylib` files that can be replaced (LGPL). **It replaces pillow-heif, whose wheels also bundle x265 (GPL-2.0+) and load it in-process: pillow-heif must never be installed** (`fetch_runtime.py`'s smoke test fails the build if it is). Verified 2026-10-17: no x265, aom, dav1d or other encoder strings in the win_amd64 or macOS arm64 libheif. LGPL source: `pillow_heif-1.4.0.tar.gz` (carries `libheif/build_libs.py`, the build recipe), `libheif-1.23.0.tar.gz`, `libde265-1.1.0.tar.gz`, all in the source mirror above. HEVC is a patent-encumbered codec; decoding HEIC is what iPhones' own photos need, so this is the same exposure every photo app with HEIC import has. |
-| **OpenTimelineIO** 0.18.1 | Apache-2.0 | Reads the timelines in Final Cut Pro and Premiere exports for My style's "Learn from my past edits" (`reelengine import-reference`). |
-| **otio-fcpx-xml-adapter** 1.0.0, **otio-fcp-adapter** 1.0.0 | Apache-2.0 | The OpenTimelineIO adapters for Final Cut Pro X XML and Final Cut 7 / Premiere XML. |
-| **psutil** 7.2.2 | BSD-3-Clause | Watches the import process's memory so a huge export can't exhaust the Mac. |
 | opencv-python-headless | Apache-2.0 | 5.0.0.93, the version the engine's tests ran against; wheel bundles FFmpeg libraries (LGPL-2.1, `texts/lgpl-2.1.txt`) |
 | faster-whisper | MIT | speech to text. Installed without PyAV (`av`), which it only uses to decode audio files: the engine hands it decoded samples, and PyAV's wheels carry GPL x264/x265 libraries. `fetch_runtime.py` fails the build if PyAV or any `libx264`/`libx265` file is in the runtime. |
 | ctranslate2 | MIT | the inference engine under faster-whisper (CPU only, no torch) |
@@ -156,7 +150,7 @@ Production dependency tree of the app plus the front-end libraries vite bundles 
 | standardwebhooks 1.1.1 | MIT (package.json; its repository root file is Apache-2.0, both texts shipped) | Standard Webhooks |
 | @stablelib/base64 1.0.1 | MIT | Dmitry Chestnykh |
 | fast-sha256 1.3.0 | Unlicense | Dmitry Chestnykh |
-| electron-updater 6.8.9, builder-util-runtime 9.7.0, lazy-val 1.0.5 (the app's updater) | MIT | Vladimir Krivosheev |
+| electron-updater 6.8.11, builder-util-runtime 9.7.0, lazy-val 1.0.5 (the app's updater) | MIT | Vladimir Krivosheev |
 | fs-extra 10.1.0, jsonfile 6.2.1 | MIT | JP Richardson |
 | universalify 2.0.1 | MIT | Ryan Zimmerman |
 | graceful-fs 4.2.11 | ISC | Isaac Z. Schlueter, Ben Noordhuis, and Contributors |
@@ -209,29 +203,7 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet . The
 ### Speech model (downloaded on first run, not bundled)
 
 Whisper in the CTranslate2 conversion from Hugging Face (`Systran/faster-whisper-*`; the app offers `small.en` by
-default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en .
-`small.en` is pinned to revision `d1d751a5f8271d482d14ca55d9e2deeebbae577f`, every file with its SHA-256
-(`engine/reelengine/models/speech-models.json`). If the same files are already in the computer's Hugging Face
-cache, setup copies them instead of downloading.
-
-### Speech check recording (bundled, public domain)
-
-`engine/reelengine/models/speech-check.wav`: 11 seconds of John F. Kennedy's inaugural address (1961), a work of
-the US federal government and in the public domain. The same recording as faster-whisper's `tests/data/jfk.flac`,
-converted to 16 kHz mono WAV. The app transcribes it in the background to time the speech model on the computer.
-
-### First-run sample (bundled, CC0 1.0 and CC BY)
-
-The first run edits a short sample in front of you (`app/src/renderer/src/assets/sample/`). The person in it and
-her script are made up: the clips are a silent slideshow of the photos below with zooms and cuts, and the speech,
-pauses and subtitles are simulated from a written script. The photos are cropped and recompressed.
-
-| File | Source (Wikimedia Commons) | Author | License |
-|---|---|---|---|
-| `raw.mp4`, `ai.mp4`, `raw-poster.jpg`, `cover.jpg`, `cand-*.jpg` | Mary Mammoliti in her kitchen studio.jpg | Anooch11 | CC0 1.0 |
-| `v_loaf.jpg` and the loaf in `ai.mp4` | Sourdough Bread Loaf.jpg | Agelaia | CC BY 4.0 |
-| `v_knead.jpg` and the hands in `ai.mp4` | Baker woman’s hands kneading bread dough.jpg | Shixart1985 | CC BY 2.0 |
-| `cut.mp3`, `ready.mp3` | Interface Sounds by Kenney (`drop_002`, `glass_004`), re-encoded to mono MP3 | Kenney | CC0 1.0 |
+default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en
 
 ### Fonts (bundled, SIL OFL 1.1 or Apache-2.0)
 
@@ -242,16 +214,9 @@ font's own `name` table.
 |---|---|---|
 | `resources/fonts/` (`packaging/fonts/`, `SOURCES.md` lists upstream URLs and checksums) | Montserrat v7.222, Inter 4.1, Fraunces 1.000, Roboto 3.016 (static TTFs, unmodified) | SIL OFL 1.1 (`*-OFL.txt` beside the files) |
 | `resources/engine/reelengine/fonts/` | Montserrat (SemiBold, variable), Inter, Fraunces; **Roboto 2.001047** | SIL OFL 1.1 (`OFL-*.txt`); Roboto 2.001047 is **Apache-2.0** (`LICENSE-Roboto-Apache-2.0.txt`) |
-| the app window (`app/src/renderer/src/assets/fonts/`, bundled into the renderer) | **Mona Sans** 2.000 by GitHub, variable (weight 200–900, width 75–125%), the interface face: "Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona""; Montserrat SemiBold, the subtitle preview | SIL OFL 1.1 (`OFL-MonaSans.txt`, `OFL-Montserrat.txt`) |
 | `resources/templates/fonts/` (animation and b-roll templates) | Inter (Medium, SemiBold, Bold), Fraunces (SemiBold, Bold), Montserrat variable, **JetBrains Mono** (Medium, Bold) | SIL OFL 1.1, one `OFL.txt` listing each file's copyright: "Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)" and the same for the others |
 
 OFL fonts may be bundled with software; they may not be sold on their own and keep their names.
-
-### Sound effects (bundled, CC0 1.0)
-
-37 short sounds ship in `resources/engine/reelengine/sfx/` (`engine/reelengine/sfx/`). Each is dedicated to the
-public domain under CC0 1.0, from Freesound and Kenney, so none needs a credit. `engine/THIRD_PARTY.md` lists every
-file with its source, author and page.
 
 ## Not bundled, not used
 

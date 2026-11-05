@@ -582,7 +582,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-electron-updater 6.8.9  (MIT)
+electron-updater 6.8.11  (MIT)
 https://github.com/electron-userland/electron-builder
 ==============================================================================
 The MIT License (MIT)

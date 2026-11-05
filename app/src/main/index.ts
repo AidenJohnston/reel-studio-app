@@ -125,16 +125,16 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { assertWordCutEditable } from '../shared/cut'
 import { displayPath } from '../shared/display-path'
-import { channelOf, RELEASES_REPOS } from '../shared/channel'
+import { channelOf } from '../shared/channel'
 import { registerPhoneIpc, stopPhoneShare, cloudSavesRunning, cloudSavesSettled } from './phone-ipc'
 import { forChat, pickClipboardType, registerAttachmentIpc, unstage, checkNoteAttachments } from './attachments'
-import { releasesApi, releasePageBackend, type FetchLike } from './update-check'
+import { LATEST_URL, type FetchLike } from './update-check'
 import { createPermissions, notificationsWanted, parseFakes, type NotifyResult, type Permissions } from './permissions'
 import { helperInstruction, MAC_PANES } from './mac-permission'
 import { MacPermissionHelper } from './mac-permission-helper'
 import { createUpdater, menuCheckForUpdates } from './updater'
 import { autoUpdater } from 'electron-updater'
-import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
+import { UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, showTimelineInMenu, startDragOut, windowStateFile, type AppCommand, titleBarOverlay } from './window'
 import { takeNote } from './note-intake'
@@ -146,7 +146,6 @@ const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
 const SELF_TEST = selfTestArgs(process.argv)
 // Stable or nightly, from the version alone (shared/channel.ts). The packaged name already differs per channel.
 const CHANNEL = channelOf(app.getVersion())
-const RELEASES_REPO = RELEASES_REPOS[CHANNEL]
 const rendererUrl = !app.isPackaged && process.env.ELECTRON_RENDERER_URL
   ? process.env.ELECTRON_RENDERER_URL
   : pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -392,75 +391,6 @@ const models = createModelManager({
   log
 })
 const coverScans = createCoverScans(runEngine)
-// ---- updates (main/updater.ts) -------------------------------------------------------------------
-// Test runs never touch the network, except the update e2e, which points a dev build at a local server
-// (REELSTUDIO_UPDATE_FEED, honoured only in an unpackaged test run: app/e2e/update.spec.ts).
-const TEST_FEED = TEST && !app.isPackaged ? process.env.REELSTUDIO_UPDATE_FEED : undefined
-// The update e2e can run the updater as another build (REELSTUDIO_UPDATE_AS, e.g. a Mac nightly), so the nightly's
-// page mode and its long version strings are reachable from a dev build. Ignored outside that run.
-const UPDATE_VERSION = (TEST_FEED && process.env.REELSTUDIO_UPDATE_AS) || app.getVersion()
-let exportsWriting = 0
-const updateBusy = () => ({ exporting: exportsWriting > 0, working: jobs.runningCount() })
-
-function readUpdateFeed(): string | null {
-  if (TEST_FEED) {
-    // electron-updater's dev config: same format as the packaged app-update.yml, generic provider
-    const file = join(app.getPath('userData'), 'dev-app-update.yml')
-    const text = `provider: generic\nurl: ${TEST_FEED}\nupdaterCacheDirName: reel-studio-e2e-updater-${basename(dirname(app.getPath('userData')))}\n`
-    mkdirSync(dirname(file), { recursive: true })
-    writeFileSync(file, text)
-    return file
-  }
-  const file = join(process.resourcesPath, 'app-update.yml')
-  return existsSync(file) ? file : null
-}
-
-const updateFeed = app.isPackaged || TEST_FEED ? readUpdateFeed() : null
-const updateEnv = {
-  platform: process.platform,
-  channel: channelOf(UPDATE_VERSION),
-  isPackaged: app.isPackaged || !!TEST_FEED,
-  test: (TEST && !TEST_FEED) || SELF_TEST.selfTest,
-  hasFeed: updateFeed !== null,
-  inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
-}
-// Node's fetch: no Electron session, so no cookies ride along
-const githubFetch: FetchLike = (url, init) => fetch(url, init)
-const updateOff = disabledReason(updateEnv)
-const updateHow = updateMode(updateEnv)
-const updates = createUpdater({
-  version: UPDATE_VERSION,
-  mode: updateHow,
-  disabledReason: updateOff,
-  backend: updateOff
-    ? null
-    : updateHow === 'install'
-      ? electronUpdaterBackend({
-          updater: autoUpdater,
-          version: app.getVersion(),
-          fetch: githubFetch,
-          releasesApi: TEST_FEED ? `${TEST_FEED}/releases` : releasesApi(CHANNEL),
-          releaseFolder: (tag) => (TEST_FEED ? `${TEST_FEED}/download/${tag}` : `https://github.com/${RELEASES_REPO}/releases/download/${tag}`),
-          log,
-          devFeedFile: TEST_FEED ? updateFeed ?? undefined : undefined,
-          onError: (e) => updates.installFailed(e),
-          install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
-        })
-      : releasePageBackend(githubFetch, UPDATE_VERSION, TEST_FEED ? `${TEST_FEED}/releases` : undefined),
-  load: loadSettings,
-  save: saveSettings,
-  busy: updateBusy,
-  prepareToQuit: async () => {
-    await stopPhoneShare()
-    await jobs.cancelAll()
-    await killAllEngines()
-  },
-  openExternal: (url) => shell.openExternal(url),
-  send: (st) => broadcast('update:state', st),
-  log,
-  now: () => Date.now()
-})
-log(`[update] ${updateOff ?? `on (${updateHow})`}`)
 // The buyer's download key for automatic updates (main/update-key.ts). It arrives as a reelstudio://updates?key=…
 // link (open-url on macOS, the command line on Windows) or pasted in Settings. Links that come before the app
 // is ready wait for it.
@@ -474,7 +404,10 @@ const updateKey = createUpdateKeyService({
   load: loadSettings,
   save: saveSettings,
   log,
-  send: (s) => broadcast('updateKey:change', s),
+  send: (s) => {
+    broadcast('updateKey:change', s)
+    updates.keyChanged(s.on)
+  },
   // Any web page can open a reelstudio:// link, so a key from one is saved only after a yes.
   confirmLink: async ({ replacing }) => {
     showWindow()
@@ -489,6 +422,74 @@ const updateKey = createUpdateKeyService({
     return (await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))).response === 0
   }
 })
+
+// ---- updates (main/updater.ts) -------------------------------------------------------------------
+// Test runs never touch the network, except the update e2e, which points a dev build at a local server
+// (REELSTUDIO_UPDATE_FEED, honoured only in an unpackaged test run: app/e2e/update.spec.ts).
+const TEST_FEED = TEST && !app.isPackaged ? process.env.REELSTUDIO_UPDATE_FEED : undefined
+let exportsWriting = 0
+const updateBusy = () => ({ exporting: exportsWriting > 0, working: jobs.runningCount() })
+
+/** electron-updater reads app-update.yml (packaging/electron-builder.yml `publish`) only to switch itself on;
+ * the backend sets the feed at runtime. The e2e writes the same file for a dev build. */
+function readUpdateConfig(): string | null {
+  if (TEST_FEED) {
+    const file = join(app.getPath('userData'), 'dev-app-update.yml')
+    const text = `provider: generic\nurl: ${TEST_FEED}/u/\nupdaterCacheDirName: reel-studio-e2e-updater-${basename(dirname(app.getPath('userData')))}\n`
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, text)
+    return file
+  }
+  const file = join(process.resourcesPath, 'app-update.yml')
+  return existsSync(file) ? file : null
+}
+
+const updateConfig = app.isPackaged || TEST_FEED ? readUpdateConfig() : null
+const updateEnv = {
+  platform: process.platform,
+  // a nightly build doesn't update itself (update-machine.ts disabledReason); REELSTUDIO_UPDATE_AS lets the update
+  // e2e run a dev build as one
+  channel: channelOf((TEST_FEED && process.env.REELSTUDIO_UPDATE_AS) || app.getVersion()),
+  isPackaged: app.isPackaged || !!TEST_FEED,
+  test: TEST && !TEST_FEED,
+  hasFeed: updateConfig !== null,
+  inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
+}
+const siteFetch: FetchLike = (url, init) => fetch(url, init) // Node's fetch: no Electron session, so no cookies
+const updateOff = disabledReason(updateEnv)
+const updateHow = updateMode(updateEnv)
+const updates = createUpdater({
+  version: app.getVersion(),
+  mode: updateHow,
+  disabledReason: updateOff,
+  backend: updateOff
+    ? null
+    : electronUpdaterBackend({
+        updater: autoUpdater,
+        version: app.getVersion(),
+        fetch: siteFetch,
+        latestUrl: TEST_FEED ? `${TEST_FEED}/latest.json` : LATEST_URL,
+        feedUrl: TEST_FEED ? `${TEST_FEED}/u/` : UPDATE_FEED_URL,
+        keys: updateKey,
+        log,
+        devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
+        onError: (e) => updates.installFailed(e),
+        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+      }),
+  load: loadSettings,
+  save: saveSettings,
+  busy: updateBusy,
+  prepareToQuit: async () => {
+    await stopPhoneShare()
+    await jobs.cancelAll()
+    await killAllEngines()
+  },
+  openExternal: (url) => shell.openExternal(url),
+  send: (st) => broadcast('update:state', st),
+  log,
+  now: () => Date.now()
+})
+log(`[update] ${updateOff ?? `on (${updateHow})`}`)
 let ready = false
 const waitingKeyLinks: string[] = []
 function acceptKeyLink(url: string): void {
@@ -1575,7 +1576,8 @@ function registerIpc(): void {
   handle('update:check', () => updates.check('button'))
   handle('update:download', () => updates.download())
   handle('update:install', () => updates.install())
-  handle('update:openRelease', (_e, version?: unknown) => updates.openRelease(version))
+  handle('update:openRelease', () => updates.openRelease())
+  handle('update:openAutoUpdatesPage', () => updates.openAutoUpdatesPage())
   handle('update:busy', updateBusy)
   handle('update:dismiss', (_e, version: unknown) => updates.dismiss(version))
   handle('update:setEnabled', (_e, on: unknown) => updates.setEnabled(on))

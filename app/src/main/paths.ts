@@ -165,7 +165,8 @@ function resource(...p: string[]): string {
 
 const LEGAL_FILES = { license: 'LICENSE', notices: 'THIRD_PARTY.md' } as const
 
-/** packaging/electron-builder.yml copies both files from the repo root to resources/licenses. */
+/** Settings › About › License / Third-party notices. packaging/electron-builder.yml copies both files from the repo
+ * root to resources/licenses. Anything but those two names throws. */
 export function legalFile(doc: unknown): string {
   if (doc !== 'license' && doc !== 'notices') throw new Error(`Unknown legal document: ${String(doc)}`)
   return join(need().isPackaged ? resource('licenses') : repoRoot(), LEGAL_FILES[doc])

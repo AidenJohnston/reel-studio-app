@@ -19,8 +19,8 @@
 // The release channel comes from app/package.json's version alone (app/src/shared/channel.ts NIGHTLY_VERSION). A
 // nightly (`x.y.z-nightly.YYYYMMDD.N`) is its own app beside the stable one: its own name (so its own userData folder),
 // appId (on Windows the NSIS uninstall GUID is derived from it, so a shared ID would let the nightly replace the
-// stable install), package name (the Windows install folder and electron-updater's cache folder), icons, artifact
-// names and releases repo.
+// stable install), package name (the Windows install folder and electron-updater's cache folder), icons and
+// artifact names.
 const fs = require('fs')
 const path = require('path')
 
@@ -33,16 +33,10 @@ function nightlyPattern() {
   return new RegExp(m[1])
 }
 
-function configRepo(name) {
-  const m = fs.readFileSync(path.join(SHARED, 'config.ts'), 'utf8').match(new RegExp(`${name} = '([^/']+)\\/([^']+)'`))
-  if (!m) throw new Error(`make-config: ${name} not found in app/src/shared/config.ts`)
-  return { owner: m[1], repo: m[2] }
-}
-
 /** Everything that differs between the stable app and the nightly, for one version string. */
 function channelConfig(version) {
   if (!nightlyPattern().test(version)) {
-    return { channel: 'stable', overrides: [], icons: 'packaging/icons', releases: configRepo('RELEASES_REPO') }
+    return { channel: 'stable', overrides: [], icons: 'packaging/icons' }
   }
   const overrides = [
     'appId: dev.reelstudio.app.nightly',
@@ -54,7 +48,7 @@ function channelConfig(version) {
     'dmg.background: ${env.RS_REPO_ROOT}/packaging/.build/dmg-nightly/background.tiff',
     'nsis.artifactName: Reel-Studio-Nightly-Setup-${version}-${arch}.${ext}'
   ]
-  return { channel: 'nightly', overrides, icons: 'packaging/icons/nightly', releases: configRepo('NIGHTLY_RELEASES_REPO') }
+  return { channel: 'nightly', overrides, icons: 'packaging/icons/nightly' }
 }
 
 /** Applies `key: value` and `a.b: value` overrides to the YAML template's top-level keys and their direct children. */
@@ -101,8 +95,6 @@ if (missing.length) {
   console.error('make-config: these environment variables must be set: ' + [...new Set(missing)].join(', '))
   process.exit(1)
 }
-// The nightly's own releases are prereleases on the fork; the app picks them by tag (main/update-check.ts).
-out += `\npublish:\n  provider: github\n  owner: ${ch.releases.owner}\n  repo: ${ch.releases.repo}\n  releaseType: ${ch.channel === 'nightly' ? 'prerelease' : 'release'}\n`
 if (process.env.RS_WIN_SIGN === '1') {
   // Option names: app-builder-lib 26.15.3, out/options/winOptions.d.ts (WindowsAzureSigningConfiguration).
   const fields = {

@@ -1,6 +1,6 @@
 // The nightly is its own app beside the stable one (shared/channel.ts): the version alone picks the channel, the
 // build gives it its own identity, its data stays apart except the shared speech models, its library never touches
-// the stable app's reels, and its updater follows only the fork's nightly releases.
+// the stable app's reels, and it never takes the stable app's updates from the site's feed.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -10,12 +10,11 @@ import { channelOf } from '../src/shared/channel'
 import { clearEngineCache } from '../src/main/engine-cache'
 import { chosenRoot, engineCacheDir, engineEnv, initPaths, modelsDir, reelStudioRoot, setRootOverride, settingsFile } from '../src/main/paths'
 import { settleLibraryRoot } from '../src/main/settings'
-import { allowedReleaseUrl, newerRelease, pageFor, type FetchLike } from '../src/main/update-check'
-import { updateMode } from '../src/main/update-machine'
+import { disabledReason } from '../src/main/update-machine'
 import { APP_DIR } from './helpers'
 
 const { channelConfig, applyOverrides } = createRequire(import.meta.url)('../../packaging/make-config.js') as {
-  channelConfig(version: string): { channel: string; overrides: string[]; icons: string; releases: { owner: string; repo: string } }
+  channelConfig(version: string): { channel: string; overrides: string[]; icons: string }
   applyOverrides(yaml: string, overrides: string[]): string
 }
 const TEMPLATE = readFileSync(join(APP_DIR, '..', 'packaging', 'electron-builder.yml'), 'utf8')
@@ -39,7 +38,7 @@ describe('channel', () => {
     }
   })
 
-  it('fails if a nightly build shares the stable app\'s identity, install folder or releases', () => {
+  it('fails if a nightly build shares the stable app\'s identity or install folder', () => {
     const yml = applyOverrides(TEMPLATE, channelConfig(NIGHTLY).overrides)
     expect(yml).toMatch(/^appId: dev\.reelstudio\.app\.nightly$/m)
     expect(yml).toMatch(/^productName: Reel Studio \(Nightly\)$/m)
@@ -48,10 +47,8 @@ describe('channel', () => {
     expect(yml).toMatch(/^dmg:\n(?: {2}.*\n)*? {2}artifactName: Reel-Studio-Nightly-\$\{version\}-\$\{arch\}\.\$\{ext\}$/m)
     expect(yml).toMatch(/^nsis:\n(?: {2}.*\n|\s*\n)*? {2}artifactName: Reel-Studio-Nightly-Setup-\$\{version\}-\$\{arch\}\.\$\{ext\}/m)
     expect(channelConfig(NIGHTLY).icons).toBe('packaging/icons/nightly')
-    expect(channelConfig(NIGHTLY).releases).toEqual({ owner: 'SamGu-NRX', repo: 'reel-studio-app' })
 
     expect(applyOverrides(TEMPLATE, channelConfig('0.1.2').overrides)).toBe(TEMPLATE)
-    expect(channelConfig('0.1.2').releases).toEqual({ owner: 'AidenJohnston', repo: 'reel-studio-app' })
   })
 })
 
@@ -160,52 +157,13 @@ describe('nightly library', () => {
 })
 
 describe('nightly updates', () => {
-  const FORK = 'https://github.com/SamGu-NRX/reel-studio-app/releases/tag/'
-  const list = [
-    { tag_name: 'v0.2.0', draft: false, html_url: 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.2.0' },
-    { tag_name: 'sources-ffmpeg-7.1.1-rs2', draft: false },
-    { tag_name: 'v0.1.3-nightly.20261028.17', draft: false, html_url: `${FORK}v0.1.3-nightly.20261028.17` },
-    { tag_name: 'v0.1.3-nightly.20261028.19', draft: false, html_url: `${FORK}v0.1.3-nightly.20261028.19` },
-    { tag_name: 'v0.1.3-nightly.20261028.18', draft: false, html_url: `${FORK}v0.1.3-nightly.20261028.18` },
-    { tag_name: 'v0.1.3-nightly.20261029.20', draft: true },
-    { tag_name: 'nightly-2026-10-28-d488f5e', draft: false }
-  ]
-  const github = () => {
-    const urls: string[] = []
-    const fetch: FetchLike = vi.fn(async (url: string) => {
-      urls.push(url)
-      return { ok: true, status: 200, headers: { get: () => null }, json: async () => list }
-    })
-    return { fetch, urls }
-  }
-
-  it('fails if a nightly reads the main repo, misses a later run on the same day, or offers a stable release', async () => {
-    const g = github()
-    const r = await newerRelease(g.fetch, NIGHTLY)
-    expect(g.urls).toEqual(['https://api.github.com/repos/SamGu-NRX/reel-studio-app/releases'])
-    expect(r.update?.version).toBe('0.1.3-nightly.20261028.19')
-    expect(r.update?.releaseUrl).toBe(`${FORK}v0.1.3-nightly.20261028.19`)
-    expect(r.releases.map((x) => x.version)).toEqual(['0.1.3-nightly.20261028.19', '0.1.3-nightly.20261028.18', '0.1.3-nightly.20261028.17'])
-    expect((await newerRelease(github().fetch, '0.1.3-nightly.20261028.19')).update).toBeNull()
-    // a later date wins over a higher run number from an earlier day
-    expect((await newerRelease(github().fetch, '0.1.3-nightly.20261027.99')).update?.version).toBe('0.1.3-nightly.20261028.19')
-  })
-
-  it('fails if the stable app sees a nightly, or a release page off its own repo opens', async () => {
-    const g = github()
-    const r = await newerRelease(g.fetch, '0.1.2')
-    expect(g.urls).toEqual(['https://api.github.com/repos/AidenJohnston/reel-studio-app/releases'])
-    expect(r.update?.version).toBe('0.2.0')
-    expect(r.releases.map((x) => x.version)).toEqual(['0.2.0'])
-    expect(allowedReleaseUrl(`${FORK}v0.1.3-nightly.20261028.19`)).toBeNull()
-    expect(allowedReleaseUrl(`${FORK}v0.1.3-nightly.20261028.19`, 'nightly')).toBe(`${FORK}v0.1.3-nightly.20261028.19`)
-    expect(allowedReleaseUrl('https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.2.0', 'nightly')).toBeNull()
-    expect(pageFor('v0.1.3-nightly.20261028.19')).toBe(`${FORK}v0.1.3-nightly.20261028.19`)
-  })
-
-  it('fails if the ad-hoc signed Mac nightly tries to install an update itself instead of opening its page', () => {
-    expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true, channel: 'nightly' })).toBe('page')
-    expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true, channel: 'nightly' })).toBe('install')
-    expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true, channel: 'stable' })).toBe('install')
+  // The site's feed (main/updater-electron.ts) has only stable releases: a nightly that checked it would offer the
+  // stable installer, which installs Reel Studio itself rather than a newer nightly.
+  it('fails if a nightly build turns its updater on', () => {
+    const installed = { platform: 'win32' as const, isPackaged: true, test: false, hasFeed: true, inApplications: false }
+    expect(disabledReason({ ...installed, channel: 'nightly' })).toMatch(/Nightly builds don't update themselves/)
+    expect(disabledReason({ ...installed, platform: 'darwin', inApplications: true, channel: 'nightly' })).toMatch(/Nightly builds/)
+    expect(disabledReason({ ...installed, channel: 'stable' })).toBeNull()
+    expect(disabledReason(installed)).toBeNull()
   })
 })

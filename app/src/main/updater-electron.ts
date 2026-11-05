@@ -4,10 +4,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { AppUpdater, ProgressInfo } from 'electron-updater'
-import { isNewer, newerRelease, type FetchLike } from './update-check'
-import type { UpdateBackend } from './updater'
+import { isNewer, newerOnSite, type FetchLike } from './update-check'
+import type { PageReason, UpdateBackend } from './updater'
 
-// A shared staging ID preserves the promise that update requests identify no individual install.
+/** The update feed (site worker): /u/latest.yml, /u/latest-mac.yml and the files they name. Every request needs
+ * `Authorization: Bearer <download key>`. */
+export const UPDATE_FEED_URL = 'https://dl.getreelstudio.com/u/'
+
+// A shared staging ID preserves the promise that update requests identify no individual install: electron-updater
+// would otherwise send a random ID it keeps per install.
 export const SAME_FOR_EVERYONE = { 'x-user-staging-id': '00000000-0000-0000-0000-000000000000' }
 
 export type UpdaterLike = Pick<
@@ -32,25 +37,49 @@ export type UpdaterLike = Pick<
 }
 
 export interface InstallStep {
+  /** The one file the feed may name for `version`. The download key goes with that request, so a yml naming any
+   * other file (or another host) is refused before anything is downloaded. */
+  fileName(version: string): string
   /** Throws if the downloaded file must not be installed as `version`. */
   verify(file: string, version: string): Promise<void>
   /** Windows: show the NSIS progress window while it installs. Squirrel.Mac ignores it. */
   showInstaller: boolean
 }
 
+/** The download key store (main/update-key.ts). */
+export interface KeyStore {
+  get(): Promise<string | null>
+  isCurrent(key: string): Promise<boolean>
+  clearIfCurrent(key: string): Promise<boolean>
+}
+
+/** The HTTP status of an electron-updater failure, or null. Reading the yml fails with an HttpError carrying
+ * `statusCode`, except a 404, which electron-updater rewraps as ERR_UPDATER_CHANNEL_FILE_NOT_FOUND; downloading
+ * a file fails with a plain Error whose message says `status 403: Forbidden` (builder-util-runtime 9.7.0). */
+export function httpStatus(e: unknown): number | null {
+  if (e && typeof e === 'object') {
+    if ('statusCode' in e && typeof e.statusCode === 'number') return e.statusCode
+    if ('code' in e && e.code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND') return 404
+  }
+  const m = /\bstatus (\d{3})\b/.exec(String(e instanceof Error ? e.message : e))
+  return m ? Number(m[1]) : null
+}
+
 export function electronUpdaterBackend(opts: {
   updater: UpdaterLike
   version: string
   fetch: FetchLike
-  releasesApi: string
-  releaseFolder(tag: string): string
+  /** latest.json (a local server in the update e2e). */
+  latestUrl: string
+  /** UPDATE_FEED_URL (a local server in the update e2e). */
+  feedUrl: string
+  keys: KeyStore
   log(line: string): void
   devFeedFile?: string
   onError(e: unknown): void
   install: InstallStep
 }): UpdateBackend {
   const u = opts.updater
-  let selected: string | null = null
   let downloaded: { file: string; version: string } | null = null
   u.logger = {
     info: (m: unknown) => opts.log(`[updater] ${String(m)}`),
@@ -60,9 +89,8 @@ export function electronUpdaterBackend(opts: {
   u.autoDownload = false
   u.autoInstallOnAppQuit = false
   u.allowDowngrade = false
-  // Releases carry no .blockmap files (packaging/sign-mac.sh zips the signed app itself; the Windows release
-  // uploads only the installer and latest.yml), so a differential download could only fail first and then
-  // fetch the whole file.
+  // The feed serves no .blockmap files, so a differential download could only fail first and then fetch the
+  // whole file.
   u.disableDifferentialDownload = true
   u.disableWebInstaller = true
   u.requestHeaders = { ...SAME_FOR_EVERYONE }
@@ -71,53 +99,82 @@ export function electronUpdaterBackend(opts: {
     u.updateConfigPath = opts.devFeedFile
   }
   // Without a listener an 'error' event would throw. Check and download errors also reject their promise,
-  // which main/updater.ts handles; this one matters for the install.
+  // which download() below handles; this one matters for the install.
   u.on('error', (e) => opts.onError(e))
 
+  /** A refusal from the update server for `key`, as the updater handles it, or null for any other failure. */
+  async function refusal(e: unknown, key: string): Promise<PageReason | null> {
+    const status = httpStatus(e)
+    if (status === 404) return 'feed' // no update for this platform in the current release
+    if (status !== 401 && status !== 403) return null
+    // A key saved while this request was out is not the one the server refused: offer the download again.
+    const changed = new Error('The download key changed while the update was downloading. Try again.')
+    if (status === 403) {
+      if (!(await opts.keys.isCurrent(key))) throw changed
+      return 'not-entitled'
+    }
+    // No key or not ours: it can never work, so automatic updates are off until a new key arrives.
+    if (!(await opts.keys.clearIfCurrent(key))) throw changed
+    return 'key-rejected'
+  }
+
   return {
-    async check() {
-      // Main accepts published vX.Y.Z prereleases and ignores ffmpeg tags; the GitHub provider does neither.
-      const result = await newerRelease(opts.fetch, opts.version, opts.releasesApi)
-      const found = result.update
-      selected = null
-      if (!found) return result
-      // Already downloaded: re-reading its feed would only risk the download the person is about to install.
-      if (downloaded?.version === found.version) {
-        selected = found.version
-        return result
-      }
-      let problem: string
-      try {
-        u.setFeedURL({ provider: 'generic', url: opts.releaseFolder(`v${found.version}`) })
-        const r = await u.checkForUpdates()
-        if (!r) throw new Error('the updater is not active in this build')
-        // The checksum only proves the download matches latest-mac.yml or latest.yml, not that the yml belongs to
-        // this release: a yml naming another version (a stale or mixed-up upload) would install that version instead.
-        if (r.updateInfo.version === found.version) {
-          if (!r.isUpdateAvailable) return { ...result, update: null }
-          selected = found.version
-          return result
-        }
-        problem = `its update feed is for version ${r.updateInfo.version}`
-      } catch (e) {
-        problem = `its update feed could not be read (${String(e instanceof Error ? e.message : e).slice(0, 200)})`
-      }
-      // A release uploaded without this platform's feed, or with it late, must not hide the update.
-      opts.log(`[update] v${found.version}: ${problem}; offering its release page instead`)
-      return { ...result, pageOnly: true }
-    },
-    async download(onProgress) {
+    // latest.json only. The key never goes with it.
+    check: () => newerOnSite(opts.fetch, opts.version, opts.latestUrl),
+
+    hasKey: async () => (await opts.keys.get()) !== null,
+
+    async download(version, onProgress) {
+      const key = await opts.keys.get()
+      if (!key) return 'no-key'
+      u.setFeedURL({ provider: 'generic', url: opts.feedUrl })
+      // electron-updater copies these headers into the feed reader when checkForUpdates() runs, and the download
+      // reuses that reader, so the key is set only for this one check and download.
+      u.requestHeaders = { ...SAME_FOR_EVERYONE, Authorization: `Bearer ${key}` }
       const progress = (p: ProgressInfo): void => onProgress(p.percent)
-      u.on('download-progress', progress)
       try {
-        if (!selected) throw new Error('No update is selected.')
-        const version = selected
-        const files = await u.downloadUpdate()
-        downloaded = { file: files[0], version }
+        let r: Awaited<ReturnType<UpdaterLike['checkForUpdates']>>
+        try {
+          r = await u.checkForUpdates()
+        } catch (e) {
+          const refused = await refusal(e, key)
+          if (!refused) throw e
+          opts.log(`[update] the update feed refused ${version}: HTTP ${httpStatus(e)}`)
+          return refused
+        }
+        if (!r) throw new Error('the updater is not active in this build')
+        // The checksum only proves the download matches the yml, not that the yml is the release latest.json named:
+        // a yml naming another version (mid-release, or stale) would install that version instead.
+        if (r.updateInfo.version !== version || !r.isUpdateAvailable) {
+          opts.log(`[update] ${version}: the update feed offers ${r.updateInfo.version}${r.isUpdateAvailable ? '' : ', which is not newer than this copy'}`)
+          return 'feed'
+        }
+        // electron-updater resolves each file against the feed URL and sends the key with it, so only the expected
+        // plain file name may pass (a full URL would take the key to another host). Redirects to another origin
+        // drop the Authorization header (builder-util-runtime 9.7.0, prepareRedirectUrlOptions).
+        const expected = opts.install.fileName(version)
+        const named = r.updateInfo.files?.length ? r.updateInfo.files.map((f) => f.url) : [r.updateInfo.path]
+        if (!named.every((url) => url === expected)) {
+          opts.log(`[update] ${version}: the update feed names ${named.map((u) => String(u).slice(0, 120)).join(', ')}, not ${expected}`)
+          return 'feed'
+        }
+        u.on('download-progress', progress)
+        try {
+          const files = await u.downloadUpdate()
+          downloaded = { file: files[0], version }
+          return null
+        } catch (e) {
+          const refused = await refusal(e, key)
+          if (!refused) throw e
+          opts.log(`[update] the update server refused the download of ${version}: HTTP ${httpStatus(e)}`)
+          return refused
+        }
       } finally {
         u.removeListener('download-progress', progress)
+        u.requestHeaders = { ...SAME_FOR_EVERYONE }
       }
     },
+
     async verify() {
       if (!downloaded) throw new Error('No update is downloaded.')
       try {
@@ -127,6 +184,7 @@ export function electronUpdaterBackend(opts: {
         throw e
       }
     },
+
     install() {
       u.quitAndInstall(!opts.install.showInstaller, true)
     }
@@ -136,6 +194,8 @@ export function electronUpdaterBackend(opts: {
 /** Squirrel.Mac installs whatever app the ZIP holds, so read its version before handing it over. */
 export function macBundleCheck(running: string): InstallStep {
   return {
+    // packaging/sign-mac.sh writes it; the update server's latest-mac.yml names it
+    fileName: (version) => `Reel-Studio-${version}-arm64-mac.zip`,
     showInstaller: false,
     async verify(zip, selected) {
       const exec = promisify(execFile)
@@ -158,9 +218,14 @@ export function macBundleCheck(running: string): InstallStep {
   }
 }
 
-// The NSIS installer is checked by electron-updater itself: its SHA-512 must match latest.yml, which electron-builder
-// writes from the same build, and check() above requires that yml's version to equal the release tag. Unsigned
-// builds carry no publisherName in app-update.yml, so electron-updater skips the Authenticode check.
-// Signing turns that check on through win.signtoolOptions.publisherName in packaging/electron-builder.yml; verify
-// stays empty because electron-updater then refuses an installer signed by anyone else before install() runs.
-export const windowsInstaller: InstallStep = { showInstaller: true, verify: async () => {} }
+// The NSIS installer is checked by electron-updater itself: its SHA-512 must match latest.yml, which the update
+// server renders from the same release manifest, and download() above requires that yml's version to equal the one
+// latest.json named. A signed build carries publisherName in app-update.yml (packaging/make-config.js writes it
+// from RS_AZURE_PUBLISHER), and electron-updater then refuses an installer signed by anyone else before install()
+// runs. Unsigned builds carry none, so electron-updater skips that check.
+export const windowsInstaller: InstallStep = {
+  // the NSIS installer people download (packaging/electron-builder.yml nsis.artifactName); latest.yml names it
+  fileName: (version) => `Reel-Studio-Setup-${version}-x64.exe`,
+  showInstaller: true,
+  verify: async () => {}
+}

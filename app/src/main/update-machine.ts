@@ -1,6 +1,8 @@
-import { validDate, type ReleaseEntry, type ReleaseNotes, type UpdateMode, type UpdateState } from '../shared/update'
-import { channelOf, type Channel } from '../shared/channel'
-import { allowedReleaseUrl, isNewer, isReleaseVersion } from './update-check'
+// The pure rules behind main/updater.ts: when to check, what a remembered answer still means, when the
+// strip is snoozed, which copies can install, and the plain words for each failure.
+import type { ReleaseNote, UpdateMode, UpdateState } from '../shared/update'
+import { UPDATE_PAGE, allowedReleaseUrl, isNewer } from './update-check'
+import type { Channel } from '../shared/channel'
 
 export const FIRST_CHECK_DELAY_MS = 15_000
 // Keep the once-a-day promise in Settings, including across launches.
@@ -17,17 +19,9 @@ export function nextCheckIn(outcome: CheckOutcome, lastAnswered: number | null, 
   return Math.max(0, lastAnswered + CHECK_INTERVAL_MS - now)
 }
 
-export function isRateLimited(e: unknown): boolean {
-  const status = e && typeof e === 'object' && 'statusCode' in e ? e.statusCode : null
-  if (status === 429 || status === 403) return true
-  return /\b(429|403)\b|rate limit/i.test(String(e instanceof Error ? e.message : e))
-}
-
 export interface RememberedRelease {
   version: string
   url: string
-  notes?: ReleaseNotes[]
-  older?: number
 }
 
 export interface Dismissal {
@@ -40,37 +34,19 @@ export interface UpdateMemory {
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
   updateDismissed: Dismissal | null
-  updateHistory: ReleaseEntry[] | null
+  /** The notes the last answered check carried, for What's new while offline. */
+  updateNotes: ReleaseNote[]
 }
 
+export const UPDATE_MEMORY_DEFAULTS: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [] }
+
+/** The release an earlier check found, if it is still newer than the running app. A link that is not on the site
+ * (a GitHub release page saved by an older version) becomes the update page. */
 export function stillNewer(remembered: unknown, current: string): RememberedRelease | null {
-  if (!remembered || typeof remembered !== 'object' || !('version' in remembered) || !('url' in remembered)) return null
-  const { version, url } = remembered
-  const notes = 'notes' in remembered && Array.isArray(remembered.notes) ? remembered.notes : []
-  const older = 'older' in remembered && Number.isInteger(remembered.older) ? Math.max(0, remembered.older as number) : 0
-  const page = allowedReleaseUrl(url, channelOf(current))
-  if (typeof version !== 'string' || !isNewer(version, current) || !page) return null
-  return { version, url: page, notes: notes.flatMap((n) => rememberedNotes(n, current) ?? []), older }
-}
-
-const strings = (a: unknown): a is string[] => Array.isArray(a) && a.every((i) => typeof i === 'string')
-
-function rememberedNotes(notes: unknown, current: string): ReleaseNotes | null {
-  if (!notes || typeof notes !== 'object' || !('version' in notes) || !('items' in notes) || !('totalItems' in notes)) return null
-  const { version, items, totalItems } = notes
-  if (typeof version !== 'string' || !isNewer(version, current) || !strings(items) || typeof totalItems !== 'number') return null
-  return { version, items, totalItems }
-}
-
-export function validHistory(h: unknown, channel: Channel = 'stable'): ReleaseEntry[] {
-  if (!Array.isArray(h)) return []
-  return h.flatMap((e): ReleaseEntry[] => {
-    if (!e || typeof e !== 'object') return []
-    const { version, date, summary, url } = e as Record<string, unknown>
-    const page = allowedReleaseUrl(url, channel)
-    if (!isReleaseVersion(version, channel) || !page) return []
-    return [{ version, date: validDate(date), summary: typeof summary === 'string' ? summary : null, url: page }]
-  })
+  if (!remembered || typeof remembered !== 'object' || !('version' in remembered)) return null
+  const { version } = remembered
+  if (typeof version !== 'string' || !isNewer(version, current)) return null
+  return { version, url: allowedReleaseUrl('url' in remembered ? remembered.url : null) ?? UPDATE_PAGE }
 }
 
 export function validDismissal(d: unknown): Dismissal | null {
@@ -101,15 +77,16 @@ export function disabledReason(env: UpdateEnv): string | null {
   if (env.test) return 'Updates are off in test runs.'
   if (!env.isPackaged) return 'Updates only work in the installed app, not in a development build.'
   if (env.platform !== 'darwin' && env.platform !== 'win32') return 'Update checks are available only on Mac and Windows.'
+  // The site's feed has no nightlies; a nightly comes from the fork's own releases, and that check isn't built on
+  // this updater yet.
+  if (env.channel === 'nightly') return "Nightly builds don't update themselves yet. Install the newest nightly from its releases page."
   return null
 }
 
-// A Mac app outside Applications may run translocated or read-only. The Windows install is per-user, so its
-// installer runs without an admin prompt. The Mac nightly is ad-hoc signed, and Squirrel.Mac refuses an update
-// without a real signature, so it opens the release page instead.
-export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications' | 'hasFeed' | 'channel'>): UpdateMode {
+// A Mac app outside Applications may run translocated or read-only, so it opens the download page. The Windows
+// install is per user, so its installer runs without an admin prompt.
+export function updateMode(env: Pick<UpdateEnv, 'platform' | 'inApplications' | 'hasFeed'>): UpdateMode {
   if (!env.hasFeed) return 'page'
-  if (env.platform === 'darwin' && env.channel === 'nightly') return 'page'
   return (env.platform === 'darwin' && env.inApplications) || env.platform === 'win32' ? 'install' : 'page'
 }
 
@@ -119,9 +96,8 @@ export function plainError(context: 'check' | 'download' | 'install', e: unknown
     /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|net::ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|NETWORK_CHANGED|CONNECTION_\w+|TIMED_OUT|ADDRESS_UNREACHABLE)|fetch failed/.test(text) ||
     text === 'timeout'
   if (context === 'check') {
-    if (offline) return 'Reel Studio could not reach GitHub to check for updates. Check your internet connection, then try again.'
-    if (isRateLimited(e)) return 'GitHub asked Reel Studio to wait before checking again. It will try again tomorrow.'
-    return 'Reel Studio could not check for updates. Try again later.'
+    if (offline) return 'I could not reach getreelstudio.com to check for updates. Check your internet connection, then try again.'
+    return 'I could not check for updates. Try again later.'
   }
   if (context === 'download') {
     if (offline) return 'The download stopped because the internet connection dropped. Try again when you are back online.'
@@ -129,5 +105,5 @@ export function plainError(context: 'check' | 'download' | 'install', e: unknown
     if (/sha512|checksum/i.test(text)) return 'The download was damaged on the way. Try again.'
     return 'The download did not finish. Try again.'
   }
-  return 'The update could not be installed. Try again, or download it from GitHub and install it over this version.'
+  return 'The update could not be installed. Try again, or get it from the download page and install it over this version.'
 }

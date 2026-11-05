@@ -5,7 +5,7 @@ export const RELEASES_URL = `https://github.com/${RELEASES_REPO}/releases`
 export const NIGHTLY_RELEASES_REPO = 'SamGu-NRX/reel-studio-app'
 /** Reel Studio's website: where the installers are sold, the update check's only server, the Help menu link. */
 export const SITE_URL = 'https://getreelstudio.com'
-/** Settings > "Check for a newer version": the site's download page (installers are no longer on GitHub). */
+/** Settings › About › "Download page": the site's download page (installers are no longer on GitHub). */
 export const UPDATE_PAGE_URL = 'https://getreelstudio.com/update.html'
 
 /** "Install it myself": each vendor's own install page for the person's own AI app (Connect Claude / Connect ChatGPT). */

@@ -1,25 +1,42 @@
+// The update state machine (main/updater.ts) on a fake backend: what each answer offers, the once-a-day schedule,
+// "Not now", restarting safely, and what a missing or refused download key does.
 import { createJobManager } from '../src/main/jobs'
-import { releasePageBackend, type FoundUpdate, type FetchLike } from '../src/main/update-check'
+import { AUTO_UPDATES_PAGE, UPDATE_PAGE, newerOnSite, type FetchLike } from '../src/main/update-check'
+import type { ReleaseNote } from '../src/shared/update'
 import { describe, expect, it, vi } from 'vitest'
-import { createUpdater, type UpdateBackend } from '../src/main/updater'
+import { createUpdater, type PageReason, type UpdateBackend } from '../src/main/updater'
 import { disabledReason, updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction } from '../src/shared/update'
+import type { UpdateNotice } from '../src/shared/api'
 import { updateButtonLabel } from '../src/renderer/src/components/update-copy'
 
 function setup(
-  found: () => Promise<FoundUpdate | null>,
-  opts: { download?: (p: (n: number) => void) => Promise<void>; verify?: () => Promise<void>; exporting?: boolean; prepareToQuit?: () => Promise<void>; load?: () => Promise<UpdateMemory>; memory?: Partial<UpdateMemory>; backend?: UpdateBackend; disabledReason?: string; mode?: 'install' | 'page' } = {}
+  found: () => Promise<UpdateNotice | null>,
+  opts: {
+    download?: (version: string, p: (n: number) => void) => Promise<PageReason | null | void>
+    verify?: () => Promise<void>
+    exporting?: boolean
+    prepareToQuit?: () => Promise<void>
+    load?: () => Promise<UpdateMemory>
+    memory?: Partial<UpdateMemory>
+    backend?: UpdateBackend
+    disabledReason?: string
+    mode?: 'install' | 'page'
+    /** A download key is saved. Default yes. */
+    keyed?: boolean
+    /** The notes every answered check carries. */
+    notes?: () => ReleaseNote[]
+  } = {}
 ) {
   const installs: number[] = []
   const opened: string[] = []
-  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null, ...opts.memory }
+  let memory: UpdateMemory = { checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [], ...opts.memory }
   let now = 1000
+  const key = { saved: opts.keyed ?? true }
   const backend: UpdateBackend = {
-    check: async () => {
-      const update = await found()
-      return { update, releases: update ? [update] : [] }
-    },
-    download: opts.download ?? (async (p) => [0, 40, 100].forEach(p)),
+    check: async () => ({ update: await found(), notes: opts.notes?.() ?? [] }),
+    hasKey: async () => key.saved,
+    download: async (version, p) => (await (opts.download ?? (async (_v, pr) => [0, 40, 100].forEach(pr)))(version, p)) ?? null,
     verify: opts.verify ?? (async () => undefined),
     install: () => void installs.push(1)
   }
@@ -37,14 +54,15 @@ function setup(
     log: () => {},
     now: () => now
   })
-  return { u, installs, opened, memory: () => memory, tick: (ms: number) => void (now += ms) }
+  return { u, installs, opened, key, memory: () => memory, tick: (ms: number) => void (now += ms) }
 }
 
-const v013: FoundUpdate = { version: '0.1.3', notes: '## What\'s new\n\n* **Updates install themselves.** More text.\n', releaseUrl: 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3' }
+const PAGE = `${UPDATE_PAGE}?v=0.1.3`
+const v013: UpdateNotice = { version: '0.1.3', url: PAGE }
 
 describe('state machine', () => {
   it('fails if a later check hides an already downloaded update', async () => {
-    let latest: FoundUpdate | null = v013
+    let latest: UpdateNotice | null = v013
     const { u } = setup(async () => latest)
     await u.check('test')
     await u.download()
@@ -57,11 +75,12 @@ describe('state machine', () => {
     let broken = true
     let offline = false
     const { u } = setup(async () => {
-      if (offline) throw new Error('getaddrinfo ENOTFOUND github.com')
+      if (offline) throw new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')
       return v013
     }, {
       download: async () => {
         if (broken) throw new Error('sha512 checksum mismatch')
+        if (offline) throw new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')
       }
     })
     await u.check('test')
@@ -118,16 +137,15 @@ describe('a check that falls while a download runs', () => {
     try {
       let asks = 0
       let finish!: () => void
-      const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
       const { u } = setup(async () => (asks++, v013), {
-        memory: { updateLatest: { version: '0.1.3', url: page } },
+        memory: { updateLatest: { version: '0.1.3', url: PAGE } },
         download: () => new Promise<void>((r) => (finish = r))
       })
       await u.init()
       // Busy retries do not call the backend, so their delay must be observed to catch a CPU-spinning loop.
       const timers = vi.spyOn(globalThis, 'setTimeout')
       u.start()
-      void u.download() // reads the release (one ask), then downloads until finish()
+      void u.download() // confirms the remembered release (one ask), then downloads until finish()
       await vi.advanceTimersByTimeAsync(20_000)
       expect(asks).toBe(1)
       expect(timers.mock.calls.some(([, ms]) => ms === 0)).toBe(false)
@@ -143,27 +161,44 @@ describe('a check that falls while a download runs', () => {
 })
 
 describe('remembered across launches', () => {
-  it('fails if an offline start loses its notice or keeps an installed version', async () => {
-    const offline = async (): Promise<FoundUpdate | null> => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com'))
-    const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
-    const notes = { version: '0.1.3', items: ['Updates install themselves.'], totalItems: 1 }
-    const a = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: page, notes: [notes] } } })
+  it('fails if an offline start loses its notice, keeps an installed version, or drops one an older build saved', async () => {
+    const offline = async (): Promise<UpdateNotice | null> => Promise.reject(new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com'))
+    const a = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: PAGE } } })
     await a.u.init()
-    expect(a.u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: page, releaseNotes: [notes] })
+    expect(a.u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.3', releaseUrl: PAGE })
     await a.u.download()
     expect(a.u.state()).toMatchObject({ status: 'error', errorContext: 'download', availableVersion: '0.1.3' })
 
-    const b = setup(offline, { memory: { updateLatest: { version: '0.1.2', url: page } } })
+    const b = setup(offline, { memory: { updateLatest: { version: '0.1.2', url: PAGE } } })
     await b.u.init()
     expect(b.u.state().status).toBe('idle')
     expect(b.memory().updateLatest).toBeNull()
+
+    // A GitHub release page saved before downloads moved to getreelstudio.com: the update page instead.
+    const c = setup(offline, { memory: { updateLatest: { version: '0.1.3', url: 'https://github.com/owner/reel-studio-app/releases/tag/v0.1.3' } } })
+    await c.u.init()
+    expect(c.u.state()).toMatchObject({ status: 'available', releaseUrl: UPDATE_PAGE })
+  })
+
+  it('fails if a remembered release downloads without asking latest.json again, or downloads one it no longer names', async () => {
+    const downloaded: string[] = []
+    const { u } = setup(async () => ({ version: '0.1.4', url: UPDATE_PAGE }), {
+      memory: { updateLatest: { version: '0.1.3', url: PAGE } },
+      download: async (v) => void downloaded.push(v)
+    })
+    await u.init()
+    await u.download()
+    expect(downloaded).toEqual([])
+    expect(u.state()).toMatchObject({ status: 'available', availableVersion: '0.1.4' })
+    await u.download()
+    expect(downloaded).toEqual(['0.1.4'])
   })
 })
 
 describe('turning "Check for updates" back on', () => {
   it('fails if enabling checks loses a remembered, snoozed update', async () => {
-    const page = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
-    const { u, tick } = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com')), {
+    const page = PAGE
+    const { u, tick } = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')), {
       memory: { checkUpdates: false, updateLatest: { version: '0.1.3', url: page }, updateDismissed: { version: '0.1.3', at: 1000 } }
     })
     await u.init()
@@ -206,7 +241,7 @@ describe('"Not now"', () => {
   })
 })
 
-it('fails if Windows cannot install in-app, or a copy without an update feed tries to', () => {
+it('fails if Windows cannot install in-app, or a copy that cannot replace itself tries to', () => {
   expect(updateMode({ platform: 'win32', inApplications: false, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: true, hasFeed: true })).toBe('install')
   expect(updateMode({ platform: 'darwin', inApplications: false, hasFeed: true })).toBe('page')
@@ -214,7 +249,7 @@ it('fails if Windows cannot install in-app, or a copy without an update feed tri
 })
 
 it('fails if Download or Restart is dropped during a background check', async () => {
-  let finish: ((value: FoundUpdate | null) => void) | undefined
+  let finish: ((value: UpdateNotice | null) => void) | undefined
   let slow = false
   const { u, installs } = setup(() => slow ? new Promise((resolve) => { finish = resolve }) : Promise.resolve(v013))
   await u.check('first')
@@ -240,7 +275,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   const { u } = setup(async () => v013, {
     prepareToQuit: () => new Promise((_resolve, reject) => { fail = reject }),
     load: () => new Promise((resolve) => {
-      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateHistory: null })
+      releaseRead = () => resolve({ checkUpdates: true, updateCheckedAt: null, updateLatest: null, updateDismissed: null, updateNotes: [] })
       reading()
     })
   })
@@ -252,7 +287,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
   releaseRead()
   await enabling
   expect(u.state().status).toBe('installing')
-  const jobs = createJobManager(() => {}, () => {}, undefined, undefined, undefined, () => u.assertCanStartWork())
+  const jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
   expect(() => jobs.start(null, 'rerender', async () => ({ summary: '' }))).toThrow(expect.objectContaining({ code: 'UPDATING' }))
   expect(jobs.runningCount()).toBe(0)
   fail(new Error('shutdown failed'))
@@ -261,7 +296,7 @@ it('fails if new work is allowed during restart preparation or remains blocked a
 })
 
 it.each(['auto', 'auto reenabled', 'manual', 'joined manual'])('fails if opt-out publishes an automatic result or drops an explicit check: %s', async (reason) => {
-  let finish!: (value: FoundUpdate | null) => void
+  let finish!: (value: UpdateNotice | null) => void
   const { u, memory } = setup(() => new Promise((resolve) => { finish = resolve }))
   await u.init()
   const checking = u.check(reason === 'manual' ? 'button' : 'auto')
@@ -277,51 +312,17 @@ it.each(['auto', 'auto reenabled', 'manual', 'joined manual'])('fails if opt-out
   expect(memory().updateCheckedAt).toBe(explicit ? 1000 : null)
 })
 
-it.each([
-  [429, {}],
-  [403, { 'x-ratelimit-remaining': '0' }],
-  [403, { 'retry-after': '60' }]
-] satisfies [number, Record<string, string>][])('fails if GitHub rate limit %s loses the notice or checks again within 24 hours', async (status, headers) => {
-  vi.useFakeTimers()
-  const responseHeaders = new Map(Object.entries(headers))
-  const fetch: FetchLike = vi.fn(async () => ({ ok: false, status, headers: { get: (name: string) => responseHeaders.get(name) ?? null }, json: async () => ({}) }))
-  const notice = { version: v013.version, url: v013.releaseUrl }
-  const backend = releasePageBackend(fetch, '0.1.2')
-  const { u, memory } = setup(async () => null, { backend, memory: { updateLatest: notice } })
-  let reopened: ReturnType<typeof setup> | undefined
-  try {
-    await u.init()
-    await u.check('auto')
-    expect(memory().updateCheckedAt).toBe(1000)
-    expect(memory().updateLatest).toEqual(notice)
-    expect(u.state().availableVersion).toBe('0.1.3')
-    reopened = setup(async () => null, { backend, memory: memory() })
-    await reopened.u.init()
-    reopened.u.start()
-    reopened.tick(86_399_999)
-    await vi.advanceTimersByTimeAsync(86_399_999)
-    expect(fetch).toHaveBeenCalledTimes(1)
-    reopened.tick(1)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(fetch).toHaveBeenCalledTimes(2)
-  } finally {
-    reopened?.u.stop()
-    u.stop()
-    vi.useRealTimers()
-  }
-})
-
 it.each(['HTTP failure', 'malformed JSON', 'timeout'])('fails if a failed request is remembered and suppresses a reopened app: %s', async (failure) => {
   const fetch: FetchLike = vi.fn(async () => {
     if (failure === 'timeout') throw new DOMException('The operation timed out', 'TimeoutError')
-    return { ok: failure !== 'HTTP failure', status: failure === 'HTTP failure' ? 500 : 200, headers: { get: () => null }, json: async () => JSON.parse('{broken') }
+    return { ok: failure !== 'HTTP failure', status: failure === 'HTTP failure' ? 500 : 200, json: async () => JSON.parse('{broken') }
   })
-  const backend = releasePageBackend(fetch, '0.1.2')
-  const first = setup(async () => null, { backend, memory: { updateCheckedAt: -86_400_000 } })
+  const check = async () => (await newerOnSite(fetch, '0.1.2')).update
+  const first = setup(check, { memory: { updateCheckedAt: -86_400_000 } })
   await first.u.init()
   await first.u.check('auto')
   expect(first.memory().updateCheckedAt).toBe(-86_400_000)
-  const reopened = setup(async () => null, { backend, memory: first.memory() })
+  const reopened = setup(check, { memory: first.memory() })
   vi.useFakeTimers()
   try {
     await reopened.u.init()
@@ -350,24 +351,13 @@ it.each([86_400_000 * 5, NaN])('fails if a future or invalid persisted check tim
   }
 })
 
-it('fails if Windows cannot find an eligible release or opens an untrusted release URL', async () => {
-  const fetch: FetchLike = async () => ({
-    ok: true, status: 200, headers: { get: () => null }, json: async () => [
-      { tag_name: 'ffmpeg-7.1.1-rs3', draft: false },
-      { tag_name: 'v0.1.4', draft: true },
-      { tag_name: 'v0.1.3', draft: false, prerelease: true, html_url: 'https://evil.example/release' }
-    ]
-  })
-  const { u, opened } = setup(async () => null, { mode: 'page', backend: releasePageBackend(fetch, '0.1.2') })
-  await u.init()
+it('fails if a download page opens anything but a page on the site', async () => {
+  const { u, opened } = setup(async () => ({ version: '0.1.3', url: 'file:///tmp/update' }), { mode: 'page' })
   await u.check('button')
   expect(updateAction(u.state())).toBe('open-page')
   await u.openRelease()
-  expect(opened).toEqual([v013.releaseUrl])
-  const malicious = setup(async () => ({ ...v013, releaseUrl: 'file:///tmp/update' }), { mode: 'page' })
-  await malicious.u.check('button')
-  await malicious.u.openRelease()
-  expect(malicious.opened).toEqual([v013.releaseUrl])
+  await u.openAutoUpdatesPage()
+  expect(opened).toEqual([UPDATE_PAGE, AUTO_UPDATES_PAGE])
 })
 
 it.each(['opted out', 'test run', 'development build'])('fails if automatic network requests run when disabled: %s', async (configuration) => {
@@ -390,53 +380,6 @@ it.each(['opted out', 'test run', 'development build'])('fails if automatic netw
   }
 })
 
-describe('release notes from the GitHub list', () => {
-  const page = (tag: string) => `https://github.com/AidenJohnston/reel-studio-app/releases/tag/${tag}`
-  const whatsNew = (...items: string[]) => ["## What's new", '', ...items.map((i) => `* ${i}`), '', '## Download', '', '* Windows: the installer.'].join('\n')
-  const installOnly = '# Reel Studio 0.1.3 (preview)\n\nTurn a raw talking-head video into a finished, postable Reel. Drop in your takes.\n\n## First open\n\n* **Windows:** SmartScreen says "Windows protected your PC".'
-  const list = [
-    { tag_name: 'ffmpeg-7.1.1-rs3', draft: false, body: 'Source.', published_at: '2026-11-20T10:00:00Z' },
-    { tag_name: 'v0.1.6', draft: true, body: whatsNew('Draft.') },
-    { tag_name: 'v0.1.4', draft: false, html_url: page('v0.1.4'), body: whatsNew('**Send to my phone over a QR code.** Scan it once.'), published_at: '2026-11-09T18:00:00Z' },
-    { tag_name: 'v0.1.5', draft: false, html_url: page('v0.1.5'), body: whatsNew('**Captions you can drag.** Grab one.', 'Music ducks under your voice'), published_at: '2026-11-18T18:00:00Z' },
-    { tag_name: 'v0.1.3', draft: false, html_url: page('v0.1.3'), body: installOnly, published_at: '2026-10-30T18:00:00Z' },
-    { tag_name: 'v0.1.2', draft: false, html_url: page('v0.1.2'), body: whatsNew('**Use your own Claude.** Every installer offers it.'), published_at: '2026-10-21T00:47:16Z' }
-  ]
-  const github = (body: unknown): FetchLike => async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body })
-
-  it("fails if the update popover drops a skipped release's notes or shows install steps as changes", async () => {
-    const { u } = setup(async () => null, { backend: releasePageBackend(github(list), '0.1.2'), mode: 'page' })
-    await u.check('button')
-    expect(u.state().releaseNotes).toEqual([
-      { version: '0.1.5', items: ['Captions you can drag.', 'Music ducks under your voice'], totalItems: 2 },
-      { version: '0.1.4', items: ['Send to my phone over a QR code.'], totalItems: 1 }
-    ])
-    expect(JSON.stringify(u.state())).not.toContain('SmartScreen')
-  })
-
-  it("fails if What's new lists drafts or source tags, loses a release's date or headline, or is empty after an offline launch", async () => {
-    const first = setup(async () => null, { backend: releasePageBackend(github(list), '0.1.2'), mode: 'page' })
-    await first.u.check('button')
-    const releases = [
-      { version: '0.1.5', date: '2026-11-18T18:00:00Z', summary: 'Captions you can drag. Music ducks under your voice.', url: page('v0.1.5') },
-      { version: '0.1.4', date: '2026-11-09T18:00:00Z', summary: 'Send to my phone over a QR code.', url: page('v0.1.4') },
-      { version: '0.1.3', date: '2026-10-30T18:00:00Z', summary: 'Turn a raw talking-head video into a finished, postable Reel.', url: page('v0.1.3') },
-      { version: '0.1.2', date: '2026-10-21T00:47:16Z', summary: 'Use your own Claude.', url: page('v0.1.2') }
-    ]
-    expect(first.u.state().releases).toEqual(releases)
-    const offline = setup(async () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com')), { memory: first.memory(), mode: 'page' })
-    await offline.u.init()
-    expect(offline.u.state().releases).toEqual(releases)
-  })
-})
-
-it('fails if a saved What\'s new date that is not a date reaches Settings', async () => {
-  const url = 'https://github.com/AidenJohnston/reel-studio-app/releases/tag/v0.1.3'
-  const { u } = setup(async () => null, { memory: { updateHistory: [{ version: '0.1.3', date: 'not-a-date', summary: 'Captions you can drag.', url }] } })
-  await u.init()
-  expect(u.state().releases).toEqual([{ version: '0.1.3', date: null, summary: 'Captions you can drag.', url }])
-})
-
 it('fails if a download that does not pass its check stops a video or offers the same cached file again', async () => {
   let jobs!: ReturnType<typeof createJobManager>
   let downloads = 0
@@ -445,7 +388,7 @@ it('fails if a download that does not pass its check stops a video or offers the
     verify: async () => { throw new Error('Update bundle version 0.1.4 does not match the newer release 0.1.3.') },
     prepareToQuit: () => jobs.cancelAll()
   })
-  jobs = createJobManager(() => {}, () => {}, undefined, undefined, undefined, () => u.assertCanStartWork())
+  jobs = createJobManager(() => {}, () => {}, undefined, undefined, () => u.assertCanStartWork())
   await u.check('button')
   await u.download()
   jobs.start(null, 'rerender', (_emit, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('stopped')))))
@@ -461,7 +404,7 @@ it('fails if a download that does not pass its check stops a video or offers the
   await u.check('later')
   expect(updateAction(u.state())).toBe('open-page')
   await u.openRelease()
-  expect(opened).toEqual([v013.releaseUrl])
+  expect(opened).toEqual([PAGE])
   expect(downloads).toBe(1)
 })
 
@@ -475,4 +418,91 @@ it('fails if a download started with automatic checks off, or after Not now, lea
   expect(u.state().status).toBe('downloaded')
   expect(showsUpdateButton(u.state())).toBe(true)
   expect(memory().updateDismissed).toBeNull()
+})
+
+describe('the download key', () => {
+  it('fails if a copy with no key offers a download instead of the page and "Turn on automatic updates", or misses a key saved later', async () => {
+    const downloaded: string[] = []
+    const { u, key } = setup(async () => v013, { keyed: false, download: async (v) => void downloaded.push(v) })
+    await u.init()
+    await u.check('button')
+    expect(u.state()).toMatchObject({ status: 'available', mode: 'page', keyNeeded: true })
+    expect(updateButtonLabel(u.state())).toBe('Open download page')
+    expect((await u.download()).accepted).toBe(false)
+    expect(downloaded).toEqual([])
+    key.saved = true
+    u.keyChanged(true)
+    expect(u.state()).toMatchObject({ status: 'available', mode: 'install', keyNeeded: false })
+    await u.download()
+    expect(downloaded).toEqual(['0.1.3'])
+  })
+
+  it('fails if a key the server refuses (401) keeps offering downloads, or a refused purchase (403) asks for a key', async () => {
+    let answer: PageReason = 'key-rejected'
+    const { u } = setup(async () => v013, { download: async () => answer })
+    await u.check('button')
+    await u.download()
+    // The backend has cleared the key (test/updater-electron.test.ts): the page, and the way to turn updates on again.
+    expect(u.state()).toMatchObject({ status: 'error', errorContext: 'download', mode: 'page', keyNeeded: true, downloadedVersion: null })
+    expect(u.state().message).toMatch(/did not accept the download key/)
+    expect(updateAction(u.state())).toBe('open-page')
+
+    u.keyChanged(true) // a new key from the receipt email
+    expect(u.state()).toMatchObject({ status: 'available', mode: 'install' })
+    answer = 'not-entitled'
+    await u.download()
+    expect(u.state()).toMatchObject({ status: 'error', mode: 'page', keyNeeded: false })
+    expect(u.state().message).toMatch(/no longer includes new versions/)
+    await u.check('later') // the same release stays on the page until another key arrives
+    expect(u.state()).toMatchObject({ mode: 'page', keyNeeded: false })
+    u.keyChanged(true)
+    expect(u.state()).toMatchObject({ status: 'available', mode: 'install' })
+  })
+
+  it('fails if a feed that names another version, or none for this platform, hides the update', async () => {
+    const { u } = setup(async () => v013, { download: async () => 'feed' })
+    await u.check('button')
+    await u.download()
+    expect(u.state()).toMatchObject({ status: 'error', mode: 'page', keyNeeded: false, availableVersion: '0.1.3' })
+    expect(showsUpdateButton(u.state())).toBe(true)
+    expect(updateAction(u.state())).toBe('open-page')
+  })
+})
+
+describe("What's new", () => {
+  const note = (version: string): ReleaseNote => ({ version, date: '2026-11-04', text: `- ${version}` })
+  it('fails if the notes are lost when up to date or offline, mark the wrong versions new, or survive a test run', async () => {
+    let online = true
+    const a = setup(async () => {
+      if (!online) throw new Error('getaddrinfo ENOTFOUND dl.getreelstudio.com')
+      return null
+    }, { notes: () => [note('0.1.2'), note('0.1.1')] })
+    await a.u.init()
+    await a.u.check('button')
+    expect(a.u.state().status).toBe('up-to-date')
+    expect(a.u.state().notes.map((n) => [n.version, n.newer])).toEqual([['0.1.2', false], ['0.1.1', false]])
+
+    online = false
+    const reopened = setup(async () => Promise.reject(new Error('offline')), { memory: a.memory() })
+    await reopened.u.init()
+    await reopened.u.check('button')
+    expect(reopened.u.state().notes.map((n) => n.version)).toEqual(['0.1.2', '0.1.1'])
+
+    const b = setup(async () => v013, { notes: () => [note('0.1.3'), note('0.1.2')] })
+    await b.u.check('button')
+    expect(b.u.state().notes.map((n) => [n.version, n.newer])).toEqual([['0.1.3', true], ['0.1.2', false]])
+
+    // Downloading a release remembered from an earlier run asks latest.json again; its notes replace the saved ones.
+    const c = setup(async () => v013, { memory: { updateLatest: { version: '0.1.3', url: PAGE }, updateNotes: [note('0.1.2')] }, notes: () => [note('0.1.3'), note('0.1.2')] })
+    await c.u.init()
+    expect(c.u.state().notes.map((n) => n.version)).toEqual(['0.1.2'])
+    await c.u.download()
+    expect(c.u.state()).toMatchObject({ status: 'downloaded', downloadedVersion: '0.1.3' })
+    expect(c.u.state().notes.map((n) => n.version)).toEqual(['0.1.3', '0.1.2'])
+    expect(c.memory().updateNotes.map((n) => n.version)).toEqual(['0.1.3', '0.1.2'])
+
+    const off = setup(async () => null, { memory: a.memory(), disabledReason: 'Updates are off in test runs.' })
+    await off.u.init()
+    expect(off.u.state().notes).toEqual([])
+  })
 })

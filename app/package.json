@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@reelstudio/ai": "*",
-    "electron-updater": "6.8.9",
+    "electron-updater": "6.8.11",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
