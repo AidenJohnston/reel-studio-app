@@ -73,7 +73,7 @@ export class Moments {
       const r = await this.task.host.runEngine('moments', args, (p) => {
         if (p.ready && !signal.aborted) this.task.emit(momentEvent(p.ready, n));
       }, signal);
-      if (stop.aborted) return;
+      if (signal.aborted) return;     // stopped once the engine was done: its draft shows an edit no longer wanted
       if (r?.draft?.file) this.task.emit({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) });
       this.finished = { edit, result: r };
     } catch {
