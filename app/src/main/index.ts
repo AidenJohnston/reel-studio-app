@@ -1936,6 +1936,9 @@ app.whenReady().then(async () => {
   // which would point the scheme at a bare Electron.
   if (app.isPackaged && !TEST && !app.isDefaultProtocolClient(PROTOCOL) && !app.setAsDefaultProtocolClient(PROTOCOL)) log('[updates] could not register reelstudio:// links')
   ready = true
+  // Beta's start waits for the updater (updates.init) after the window opens: files opened meanwhile only queued, so the
+  // window is told once more that they are there.
+  if (pendingOpenFiles.length && win && !win.isDestroyed()) win.webContents.send('app:filesAvailable')
   const firstLink = process.argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`))
   for (const url of [...waitingKeyLinks.splice(0), ...(firstLink ? [firstLink] : [])]) acceptKeyLink(url)
   app.on('activate', () => {
