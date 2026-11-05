@@ -7,7 +7,7 @@ import { expect, it } from 'vitest'
 import { CUT_STYLES } from '../../ai/src/cut-style'
 import { validateProject, withDefaults } from '../../ai/src/project'
 import { TOOLS } from '../../ai/src/tools'
-import { CUT_PRESETS, cutStyleProblem, PACE_BANDS, withKind, ZOOM_KINDS, zoomProblem } from '../src/shared/cut-style'
+import { CUT_PRESETS, cutStyleProblem, PACE_BANDS, withKind, ZOOM_KINDS } from '../src/shared/cut-style'
 
 const schema = JSON.parse(readFileSync(join(__dirname, '../../engine/reelengine/schema/project.schema.json'), 'utf8'))
 
@@ -35,10 +35,7 @@ it("fails if the drawer accepts a pace the AI's project validation refuses, or r
   }
 })
 
-it('fails if a zoom-in kind the engine refuses passes, or giving a zoom-in a kind changes how far it zooms', () => {
-  expect(zoomProblem({ anchor: { from: 'w1', to: 'w2' }, kind: 'whip' })).not.toBeNull()
-  expect(zoomProblem({ anchor: { from: 'w1' }, kind: 'snap' })).not.toBeNull()
-  expect(zoomProblem({ anchor: { from: 'w1', to: 'w2' } })).toBeNull()
+it('fails if giving a zoom-in a kind changes how far it zooms', () => {
   // zoom.py: with no kind and no scale it zooms 1.12; a named kind would take the style's scale instead
   expect(withKind({ anchor: { from: 'w1', to: 'w2' }, style: 'snap' }, 'drift')).toEqual({ anchor: { from: 'w1', to: 'w2' }, scale: 1.12, kind: 'drift' })
   expect(withKind({ anchor: { from: 'w1', to: 'w2' }, kind: 'snap' }, 'punch')).toEqual({ anchor: { from: 'w1', to: 'w2' }, kind: 'punch' })

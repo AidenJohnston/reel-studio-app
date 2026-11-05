@@ -25,10 +25,11 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
     const said = d.words.slice(Math.min(a, b), Math.max(a, b) + 1).map((w) => w.w)
     return `“${said.slice(0, QUOTE_WORDS).join(' ')}${said.length > QUOTE_WORDS ? '…' : ''}”`
   }
-  // in the order they play; zoom-ins on cut words last, since they don't play
+  // in the order they play, zoom-ins on cut words last since they don't play; one row per stretch of words, since a
+  // kind picked here goes to every zoom-in on them (shared/hand-edit.ts)
   const rows = useMemo(
     () =>
-      zooms
+      [...new Map(zooms.map((z) => [zoomKey(z), z])).values()]
         .map((z) => ({ z, at: now.kept.has(z.anchor.from) ? placed.get(z.anchor.from)?.s : undefined }))
         .sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity)),
     [zooms, now.kept, placed]
@@ -65,10 +66,15 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
         <div className="edit-list" role="radiogroup" aria-labelledby="pace-h" data-testid="pace-list">
           {([NONE, ...CUT_PRESETS] as const).map((key) => (
             <label key={key} className={`edit-row radio${value === key ? ' on' : ''}`} data-testid={`pace-${key}`}>
-              <input type="radio" name="pace" checked={value === key} onChange={() => pick(key)} />
+              {/* named by the pace alone; what it does is its description, so arrowing through reads "Fast" first */}
+              <input type="radio" name="pace" checked={value === key} onChange={() => pick(key)} aria-labelledby={`pace-${key}-name`} aria-describedby={`pace-${key}-what`} />
               <span className="edit-row-main">
-                <span className="edit-row-title">{key === NONE ? 'No set pace' : PACE_LABELS[key]}</span>
-                <span className="edit-row-sub">{key === NONE ? 'The picture changes only at cuts, pictures and zoom-ins.' : paceLine(key)}</span>
+                <span className="edit-row-title" id={`pace-${key}-name`}>
+                  {key === NONE ? 'No set pace' : PACE_LABELS[key]}
+                </span>
+                <span className="edit-row-sub" id={`pace-${key}-what`}>
+                  {key === NONE ? 'The picture changes only at cuts, pictures and zoom-ins.' : paceLine(key)}
+                </span>
               </span>
             </label>
           ))}

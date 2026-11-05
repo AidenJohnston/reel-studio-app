@@ -3,7 +3,7 @@
 // changes stay, and only what the person touched is changed on top. No Node or DOM imports.
 import type { ProjectJson, Word } from './api'
 import { keptIds, rangesKeepingOrder } from './cut'
-import { cutStyleProblem, zoomKey, zoomProblem } from './cut-style'
+import { cutStyleProblem, withKind, zoomKey, zoomKindProblem, type Zoom } from './cut-style'
 
 /** A list whose items are told apart by a key, so an item is added, replaced or removed on its own. */
 export type ListName = 'broll' | 'sfx' | 'zooms' | 'captions.corrections' | 'captions.split' | 'captions.join'
@@ -90,6 +90,13 @@ export function applyHandEdit(project: ProjectJson, e: HandEdit, words: Word[]):
     else o[last] = structuredClone(s.value)
   }
   for (const it of e.items) {
+    if (it.list === 'zooms') {
+      // The drawer only changes how a zoom-in moves. Every zoom-in on those words takes the kind, keeping what a note
+      // changed in it meanwhile (scale, set); one a note removed stays removed.
+      const { kind } = it.item as Required<Pick<Zoom, 'kind'>>
+      if (p.zooms) p.zooms = p.zooms.map((z: Zoom) => (zoomKey(z) === it.key ? withKind(z, kind) : z))
+      continue
+    }
     const path = it.list.split('.')
     const key = LISTS[it.list]
     const parent = path.length === 1 ? p : (p[path[0]] ??= {})
@@ -153,7 +160,7 @@ export function parseHandEdit(v: unknown): HandEdit {
       const item = json(it.item)
       if (item !== null && LISTS[it.list as ListName](item) !== it.key) bad(`item key ${it.key}`)
       // the AI's set_zoom takes only these kinds; the engine would refuse the version after the queue's wait
-      const problem = item !== null && it.list === 'zooms' ? zoomProblem(item) : null
+      const problem = it.list === 'zooms' ? zoomKindProblem(item) : null
       if (problem) bad(problem)
       return { list: it.list as ListName, key: it.key, item }
     }),

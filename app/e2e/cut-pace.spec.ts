@@ -46,7 +46,7 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     // ---- Version 2: a pace and a zoom-in's kind ----
     await openPace(page)
     const paces = page.getByRole('radiogroup', { name: 'Pace' })
-    await expect(paces.getByRole('radio', { name: /^No set pace/ })).toBeChecked()
+    await expect(paces.getByRole('radio', { name: 'No set pace' })).toBeChecked()
     // fails if Try other moments is offered with no pace to keep
     await expect(page.getByTestId('pace-reshuffle')).toHaveCount(0)
     const rows = page.getByTestId('zoom-row')
@@ -56,7 +56,7 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await expect(rows.nth(1).getByRole('radio', { name: 'Quick' })).toHaveAttribute('aria-checked', 'true')
     await shot(page, 'pace-01-as-made')
 
-    await paces.getByRole('radio', { name: /^Fast/ }).check()
+    await paces.getByRole('radio', { name: 'Fast' }).check()
     await rows.nth(0).getByRole('radio', { name: 'Slow' }).click()
     await expect(rows.nth(0).getByRole('radio', { name: 'Slow' })).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByTestId('change-count')).toHaveText('2 changes')
@@ -91,7 +91,7 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
 
     // ---- Version 3: other moments in the same pace ----
     await openPace(page)
-    await expect(paces.getByRole('radio', { name: /^Fast/ })).toBeChecked()
+    await expect(paces.getByRole('radio', { name: 'Fast' })).toBeChecked()
     await page.getByTestId('pace-reshuffle').click()
     await expect(page.getByTestId('pace-moments')).toHaveText('Version 3 keeps the fast pace with other moments.')
     await expect(page.getByTestId('change-count')).toHaveText('1 change')

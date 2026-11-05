@@ -48,13 +48,14 @@ export function cutStyleProblem(v: unknown): string | null {
   return null
 }
 
-/** Why `z` is not a zoom whose kind the engine plays (project.schema.json zooms.items); null when it is. */
-export function zoomProblem(z: unknown): string | null {
-  if (!z || typeof z !== 'object' || Array.isArray(z)) return 'a zoom must be an object'
+/** Why `z` is not a zoom-in change "Edit it myself" can send: the drawer only changes how a zoom-in moves, so the
+ * item names its words and a kind the AI's set_zoom takes (hand-edit.ts applies nothing else from it). */
+export function zoomKindProblem(z: unknown): string | null {
+  if (!z || typeof z !== 'object' || Array.isArray(z)) return 'a zoom-in can only change its kind'
   const { anchor, kind } = z as Record<string, unknown>
   const a = anchor as Record<string, unknown> | null
-  if (!a || typeof a !== 'object' || typeof a.from !== 'string' || typeof a.to !== 'string') return 'a zoom needs an anchor with from and to'
-  if (kind !== undefined && !(ZOOM_KINDS as readonly unknown[]).includes(kind)) return 'zoom kind must be punch, snap or drift'
+  if (!a || typeof a !== 'object' || typeof a.from !== 'string' || typeof a.to !== 'string') return 'a zoom-in needs its words'
+  if (!(ZOOM_KINDS as readonly unknown[]).includes(kind)) return 'zoom kind must be punch, snap or drift'
   return null
 }
 

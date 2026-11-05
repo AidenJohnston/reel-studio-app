@@ -30,11 +30,11 @@ export function CutTab(props: TabProps & {
   /** Shows a subtitle line on the phone, at the moment its first word is said (seconds into the original). */
   onLine: (line: { text: string; at: number } | null) => void
 }) {
-  if (props.mode !== 'pace') return <Words {...props} />
+  // one selector above both, so the arrow keys keep focus on it when the content under it changes
   return (
     <div className="edit-stack">
       <Segmented testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
-      <PaceControls {...props} />
+      {props.mode === 'pace' ? <PaceControls {...props} /> : <Words {...props} />}
     </div>
   )
 }
@@ -50,11 +50,9 @@ function Words({
   placed,
   next,
   mode,
-  onMode,
   onLine
 }: TabProps & {
   mode: CutMode
-  onMode: (m: CutMode) => void
   /** Shows a subtitle line on the phone, at the moment its first word is said (seconds into the original). */
   onLine: (line: { text: string; at: number } | null) => void
 }) {
@@ -104,8 +102,7 @@ function Words({
   }
 
   return (
-    <div className="edit-stack">
-      <Segmented testid="cut-mode" label="What to change in the cut" value={mode} options={MODES} onPick={onMode} />
+    <>
       {mode === 'cut' ? (
         <>
           <p className="edit-hint">Click a word to cut it, or a crossed-out word to bring it back.</p>
@@ -232,6 +229,6 @@ function Words({
           </div>
         </>
       )}
-    </div>
+    </>
   )
 }

@@ -117,13 +117,18 @@ describe('hand edits', () => {
     expect(() => parseHandEdit({ ...empty, set: [], items: [{ list: 'zooms', key: 'w2>w3', item: zoom }] })).toThrow()
   })
 
-  it('fails if a zoom-in given a new kind plays twice, or a zoom-in a note added meanwhile is lost', () => {
+  it('fails if a zoom-in given a new kind plays twice or keeps its old kind, or undoes what a note changed meanwhile', () => {
     const z1 = { anchor: { from: 'w2', to: 'w3' }, kind: 'punch' as const }
-    const v1 = project({ zooms: [z1] })
-    const edit = parseHandEdit(diffProject(v1, { ...v1, zooms: [{ ...z1, kind: 'drift' }] }, kept(v1), kept(v1)))
-    const v2 = project({ version: 2, zooms: [z1, { anchor: { from: 'w6', to: 'w7' } }] })
+    const v1 = project({ zooms: [z1, { anchor: { from: 'w6', to: 'w7' } }] })
+    const edit = parseHandEdit(diffProject(v1, { ...v1, zooms: [{ ...z1, kind: 'drift' }, { anchor: { from: 'w6', to: 'w7' } }] }, kept(v1), kept(v1)))
+    // meanwhile a note made that zoom-in closer, gave it a second on the same words, and removed the other one
+    const v2 = project({ version: 2, zooms: [{ ...z1, scale: 1.3 }, { anchor: { from: 'w2', to: 'w3' } }] })
     const once = applyHandEdit(v2, edit, words)
-    expect(once.zooms).toEqual([{ ...z1, kind: 'drift' }, { anchor: { from: 'w6', to: 'w7' } }])
+    expect(once.zooms).toEqual([{ ...z1, scale: 1.3, kind: 'drift' }, { anchor: { from: 'w2', to: 'w3' }, scale: 1.12, kind: 'drift' }])
     expect(applyHandEdit(once, edit, words)).toEqual(once)
+    // the drawer never adds or removes a zoom-in, so main refuses an edit that would
+    const empty = { set: [], words: { cut: [], keep: [] }, mirror: [] }
+    expect(() => parseHandEdit({ ...empty, items: [{ list: 'zooms', key: 'w2>w3', item: null }] })).toThrow()
+    expect(() => parseHandEdit({ ...empty, items: [{ list: 'zooms', key: 'w2>w3', item: { anchor: { from: 'w2', to: 'w3' } } }] })).toThrow()
   })
 })
