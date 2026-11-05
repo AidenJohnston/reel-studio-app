@@ -191,7 +191,8 @@ def build_references(take: Take, ref_engine: Engine, refs_root: Path, scratch: P
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
             shutil.copy2(call.result["file"], tmp / "export.mp4")
-            cap_file = proj / "work" / "captions.json"
+            # beta writes a render's caption report beside its video (#87), not to work/captions.json
+            cap_file = Path(call.result["versionDir"]) / "captions.json"
             if cap_file.exists():
                 shutil.copy2(cap_file, tmp / "captions.json")
             elif (state.get("captions") or {}).get("enabled", True):
