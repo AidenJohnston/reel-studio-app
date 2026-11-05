@@ -52,7 +52,7 @@ def parse_check(check, where: str = "check") -> dict:
     if not isinstance(check, dict):
         raise _bad(f"{where}: expected an object")
     kind = check.get("kind")
-    if kind not in KINDS:
+    if not isinstance(kind, str) or kind not in KINDS:
         raise _bad(f"{where}.kind: unknown kind {kind!r}; known kinds: {', '.join(sorted(KINDS))}")
     fields = KINDS[kind]
     extra = set(check) - {"kind"} - set(fields)
@@ -99,7 +99,8 @@ def parse_rules(raw) -> tuple:
             raise _bad(f"rules[{i}]: expected {{id, text, check}}")
         out.append({"id": r["id"], "text": r["text"], "check": parse_check(r["check"], f"rules[{i}].check")})
     stop = raw.get("stopOn", [])
-    if not isinstance(stop, list) or not set(stop) <= {r["id"] for r in out}:
+    ids = {r["id"] for r in out}
+    if not isinstance(stop, list) or not all(isinstance(s, str) and s in ids for s in stop):
         raise _bad("rules.stopOn: expected ids of the rules listed")
     return out, set(stop)
 

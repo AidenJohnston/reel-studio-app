@@ -259,10 +259,13 @@ export class StyleStore {
     return out;
   }
 
-  async asPromptText(): Promise<string> {
+  /** `brokenBefore`: checked rules the version being edited already broke. A note leaves those alone (editor.ts). */
+  async asPromptText(brokenBefore?: Set<string>): Promise<string> {
     const rules = (await this.list()).filter((r) => !r.paused);
     const line = (r: StyleRule) => isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT
-      : checkedText(r.check) !== null ? `${r.text} (the app measures this on every render; a note can't finish while it fails)` : r.text;
+      : checkedText(r.check) === null ? r.text
+      : brokenBefore?.has(r.id) ? `${r.text} (this video already broke it before this note: leave that alone unless the note is about it)`
+      : `${r.text} (the app measures this on every render; a note can't finish while it fails)`;
     return rules.length ? rules.map((r) => `- ${line(r)}`).join('\n') : '(none yet)';
   }
 }

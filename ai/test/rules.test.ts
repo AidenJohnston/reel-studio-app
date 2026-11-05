@@ -74,16 +74,18 @@ describe('a note and the checked rules', () => {
     expect((await loadProject(dir)).captions.style.maxWords).toBe(2);
     expect(r.version).toBe(1);
     expect(fs.readdirSync(path.join(dir, 'versions'))).toEqual(['v1']);
-    expect(r.summary).toBe('Three words at a time now.');
+    // the fix undid part of the note: the reply is the fix's own account of the video, not the first summary
+    expect(r.summary).toBe('Back to two.');
   });
 
   it('a rule the fix could not meet: the note still commits, and the reply names the rule in the app\'s words', async () => {
     const { dir, ai } = await setup();
     await ai().addStyleRule(ruleText(TWO_WORDS), TWO_WORDS);
-    const r = await ai(new ScriptedModel([{ toolCalls: [words(3)] }, finish('Three words now.'), finish('The note asked for three.')]))
+    // the fix run's first finish is refused once (nothing changed), the second stands
+    const r = await ai(new ScriptedModel([{ toolCalls: [words(3)] }, finish('Three words now.'), finish('Kept.'), finish('You asked for three words, so I kept them.')]))
       .applyNote(dir, 'put three words in each caption', () => undefined);
     expect((await loadProject(dir)).captions.style.maxWords).toBe(3);
-    expect(r.summary).toBe('Three words now. I couldn\'t meet your My style rule "Show at most 2 words in a caption": 1 caption shows too many words ("one two three" at 0:01). Tell me what to change, or pause the rule in My style.');
+    expect(r.summary).toBe('You asked for three words, so I kept them. I couldn\'t meet your My style rule "Show at most 2 words in a caption": 1 caption shows too many words ("one two three" at 0:01). Tell me what to change, or pause the rule in My style.');
   });
 
   it('a rule already failing in the version the note starts from is named, never chased', async () => {
@@ -97,6 +99,7 @@ describe('a note and the checked rules', () => {
     const model = new ScriptedModel([{ toolCalls: [call('set_caption_style', { color: '#3366FF' })] }, finish('The captions are blue.')]);
     const r = await ai(model).applyNote(dir, 'make the captions blue', () => undefined);
     expect(model.requests).toHaveLength(2);
+    expect(model.requests[0].system).toContain('Show at most 2 words in a caption. (this video already broke it before this note');
     expect(host.rulesFiles.at(-1).stopOn).toEqual([]);
     expect(r.summary).toMatch(/^The captions are blue\. I couldn't meet your My style rule "Show at most 2 words in a caption"/);
   });
@@ -132,6 +135,9 @@ describe('a note and the checked rules', () => {
     const r = await ai(new ScriptedModel([{ toolCalls: [words(2)] }, finish('Done.')])).applyNote(dir, 'two words per caption', () => undefined);
     expect(r.summary).toBe('Done. I couldn\'t check your My style rule "Keep captions in the top third": it needs a newer version of Reel Studio.');
     expect(host.rulesFiles.every((f) => f.rules.length === 0)).toBe(true);
+    // a note that changes nothing says so too
+    const idle = await ai(new ScriptedModel([finish('Nothing to change.')])).applyNote(dir, 'looks good, thanks', () => undefined);
+    expect(idle.summary).toMatch(/^Nothing to change\. I couldn't check your My style rule/);
   });
 });
 

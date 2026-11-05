@@ -55,6 +55,7 @@ def test_a_refused_check_is_named_in_the_error(check, problem):
     {"version": 1, "rules": [{"id": "r1", "check": {"kind": "captions.maxWords", "value": 2}}]},
     {**rules_file({"kind": "captions.maxWords", "value": 2}), "extra": 1},
     {**rules_file({"kind": "captions.maxWords", "value": 2}), "stopOn": ["not-a-rule"]},
+    {**rules_file({"kind": "captions.maxWords", "value": 2}), "stopOn": [{}]},
 ])
 def test_a_rules_file_of_the_wrong_shape_is_refused(raw):
     with pytest.raises(EngineError) as e:

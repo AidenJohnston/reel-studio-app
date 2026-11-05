@@ -22,6 +22,7 @@
   {"kind": "broll.keepOut", "zone": "hands"},
   {"kind": "broll.keepOut"},
   {"kind": "toString"},
+  {"kind": ["captions.maxWords"], "value": 2},
   {"value": 2},
   "captions.maxWords",
   null
