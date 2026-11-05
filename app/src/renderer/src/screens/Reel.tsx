@@ -11,6 +11,7 @@ import type { Step } from '../../../shared/steps'
 import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Button, Confirm, IS_MAC, IconButton, PickFiles, Spinner } from '../components/ui'
+import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
 import type { SubtitleLook } from '../../../shared/caption-presets'
@@ -49,7 +50,6 @@ const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
   'open-editor': 'cut'
 }
 
-const NOTIFY_ASKED = 'rs.notify-asked'
 const pinsKey = (slug: string): string => `rs.pins.${slug}`
 /** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the button that
  * shows it when it is hidden. */
@@ -1130,7 +1130,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                           This takes a few minutes.{' '}
                           <button
                             onClick={() => {
-                              localStorage.setItem(NOTIFY_ASKED, '1')
+                              markNotifyAsked()
                               setNotifyAsk(false)
                               void reel.perm.setNotifications(true).catch((e) => notify(userMessage(e), 'error'))
                             }}

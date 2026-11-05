@@ -3,7 +3,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, openSettings, painted } from './helpers'
+import { BASE, launch, openSettings, painted, shot, toEditorStep } from './helpers'
 
 const MAC = process.platform === 'darwin'
 
@@ -75,7 +75,7 @@ test('a fresh first run goes welcome, sample, editor, and ends on a new reel wit
     await expect(page.getByTestId('sample-v1')).toContainText(/Version 1.*0:24 down to 0:09/)
     await expect(page.getByTestId('steps-list')).toHaveCount(0)
     await expect(page.getByTestId('time')).toContainText('/ 0:09')
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
 
     await expect(page.getByRole('heading', { name: 'Choose your editor' })).toBeFocused() // a screen reader starts at the new step
     await expect(page.getByTestId('without-ai')).toContainText('Without an editor, Reel Studio makes a basic version')
@@ -106,6 +106,59 @@ test('a fresh first run goes welcome, sample, editor, and ends on a new reel wit
   }
 })
 
+// A test build stands in for a Mac here (main/permissions.ts parseFakes platform=darwin), so this runs on any computer.
+// fails if a Mac's first run has no notification step, Allow does not turn them on and hand focus to Continue, or
+// the first Version 1 would ask again
+test('on a Mac, first run asks about notifications in a step of its own, and Allow turns them on', async () => {
+  const d = fresh('mac-allow')
+  const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin' })
+  try {
+    await page.getByTestId('get-started').click()
+    await page.getByTestId('demo-skip').click()
+    await expect(page.getByTestId('first-run-where').locator('li')).toHaveText(['The sample', 'Your Mac', 'Your editor', 'Your reel'])
+    await page.getByTestId('demo-next').click()
+    await expect(page.getByRole('heading', { name: 'Know when a video is ready' })).toBeFocused()
+    await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'off')
+    await expect(page.getByTestId('mac-skip')).toHaveText('Not now')
+    await shot(page, 'first-run-mac-ask')
+    await page.getByTestId('perm-notify-allow').click()
+    await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'unverified')
+    await expect(page.getByTestId('perm-notify')).toContainText('Turned on')
+    await expect(page.getByTestId('mac-continue')).toBeFocused()
+    await shot(page, 'first-run-mac-on')
+    await page.getByTestId('mac-continue').click()
+    await expect(page.getByRole('heading', { name: 'Choose your editor' })).toBeFocused()
+    await page.getByTestId('not-now').click()
+    await expect(page.getByTestId('planned-stage')).toBeVisible()
+    expect(JSON.parse(readFileSync(join(d.userData, 'settings.json'), 'utf8')).notifications).toBe(true)
+    expect(await page.evaluate(() => localStorage.getItem('rs.notify-asked'))).toBe('1')
+  } finally {
+    await app.close()
+  }
+})
+
+// fails if a no from macOS leaves the row saying nothing, System Settings does not open, or Not now does not pass
+test('on a Mac, a no from macOS opens System Settings, and Not now goes on to the editor', async () => {
+  const d = fresh('mac-no')
+  const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin,notifications=failed' })
+  try {
+    await page.getByTestId('get-started').click()
+    await page.getByTestId('demo-skip').click()
+    await page.getByTestId('demo-next').click()
+    await page.getByTestId('perm-notify-allow').click()
+    await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'blocked')
+    await expect(page.getByTestId('perm-notify')).toContainText('Your Mac said no')
+    await expect.poll(() => opened(app)).toEqual(['x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=dev.reelstudio.app'])
+    await expect(page.getByTestId('mac-skip')).toHaveText('Not now')
+    await shot(page, 'first-run-mac-blocked')
+    await page.getByTestId('mac-skip').click()
+    await expect(page.getByRole('heading', { name: 'Choose your editor' })).toBeFocused()
+    expect(await page.evaluate(() => localStorage.getItem('rs.notify-asked'))).toBe('1')
+  } finally {
+    await app.close()
+  }
+})
+
 test('fails if "Checking Claude…" has no Cancel, Cancel leaves Claude connected, or the sound switch is not remembered', async () => {
   const d = fresh('claude')
   const { app, page } = await launch({ ...d.env, REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_CLAUDE_CHECK: '20000' })
@@ -117,7 +170,7 @@ test('fails if "Checking Claude…" has no Cancel, Cancel leaves Claude connecte
     await expect.poll(() => page.evaluate(() => window.reel.app.info().then((i) => i.soundEffects))).toBe(false)
 
     await page.getByTestId('demo-skip').click()
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
     // a signed-in Claude Code leads, with the one filled button; nothing is connected until the check answers
     await expect(page.getByTestId('use-claude-code')).toHaveClass(/primary/)
     await page.getByTestId('use-claude-code').click()
@@ -230,7 +283,7 @@ test('the first-run column: where you are and what it shows at the top, the thre
     await check({ width: 1100, height: 720 }, false)
     await page.setViewportSize({ width: 1280, height: 820 })
     await page.getByTestId('demo-skip').click()
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
     await expect(page.getByTestId('first-run-where').locator('[aria-current="step"]')).toHaveText('Your editor')
     // the editor's picker takes the thread's place under the heading
     const gap = await page.evaluate(() => document.querySelector('.fr-pick')!.getBoundingClientRect().top - document.querySelector('.fr-h')!.getBoundingClientRect().bottom)

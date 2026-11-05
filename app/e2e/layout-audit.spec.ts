@@ -14,7 +14,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Loc
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, makeMedia, makeReel, passFirstRun } from './helpers'
+import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
 import { makePastEditsHome } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
@@ -238,7 +238,7 @@ const SCREENS: Screen[] = [
         id: 'first-run-editor',
         enter: async ({ page }) => {
           if (await page.getByTestId('demo-skip').isVisible()) await page.getByTestId('demo-skip').click()
-          await page.getByTestId('demo-next').click()
+          await toEditorStep(page)
         },
         ready: byTestId('ai-picker')
       },
@@ -258,6 +258,24 @@ const SCREENS: Screen[] = [
         },
         ready: byTestId('planned-stage')
       }
+    ]
+  },
+  {
+    // a Mac's first run has a Your Mac step; test builds stand in for a Mac (main/permissions.ts parseFakes)
+    id: 'first-run-mac',
+    profile: 'fresh',
+    env: { REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin' },
+    states: [
+      {
+        id: 'first-run-mac-ask',
+        enter: async ({ page }) => {
+          await page.getByTestId('get-started').click()
+          await page.getByTestId('demo-skip').click()
+          await page.getByTestId('demo-next').click()
+        },
+        ready: byTestId('perm-notify-allow')
+      },
+      { id: 'first-run-mac-on', enter: click('perm-notify-allow'), ready: byTestId('mac-continue') }
     ]
   }
 ]
@@ -699,7 +717,7 @@ async function openPicker(page: Page): Promise<void> {
 const toEditorStep = async ({ page }: Ctx) => {
   if (await page.getByTestId('get-started').isVisible()) await page.getByTestId('get-started').click()
   if (await page.getByTestId('demo-skip').isVisible()) await page.getByTestId('demo-skip').click()
-  if (await page.getByTestId('demo-next').isVisible()) await page.getByTestId('demo-next').click()
+  if (await page.getByTestId('demo-next').isVisible()) await toEditorStep(page)
 }
 SCREENS.push({
   id: 'editor-hub',

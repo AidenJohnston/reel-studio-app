@@ -143,6 +143,10 @@ import { setupPosting } from './posting-ipc'
 import { createWindowHolder } from './window-holder'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
+// Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
+// run on Windows walks a Mac's first run. Notifications and folder access follow PERM_PLATFORM.
+const PERM_FAKES = TEST ? parseFakes(process.env.REELSTUDIO_TEST_PERMISSIONS) : undefined
+const PERM_PLATFORM: string = PERM_FAKES?.platform ?? process.platform
 const DEV_PROVIDERS = process.env.REELSTUDIO_DEV === '1'
 const SELF_TEST = selfTestArgs(process.argv)
 // Stable or nightly, from the version alone (shared/channel.ts). The packaged name already differs per channel.
@@ -881,10 +885,10 @@ function registerIpc(): void {
     perms.markTouched()
     const s = await loadSettings()
     // Notifications start off on a new Mac, so the first Version 1 asks for them (screens/Reel.tsx notifyAsk).
-    const patch = process.platform === 'darwin' && s.notifications === null ? { notifications: false } : {}
+    const patch = PERM_PLATFORM === 'darwin' && s.notifications === null ? { notifications: false } : {}
     const next = await saveSettings({ firstRunDone: true, firstRunAgain: false, ...patch })
     firstRunAgainAtLaunch = false // a reset pressed later in this launch waits for the next one
-    notificationsOn = notificationsWanted(next, process.platform)
+    notificationsOn = notificationsWanted(next, PERM_PLATFORM)
   })
   handle('app:openFolder', async (_e, p: string) => {
     if (TEST) return
@@ -948,7 +952,7 @@ function registerIpc(): void {
   handle('perm:openSettings', (_e, pane: unknown) => perms.openSettings(pane))
   handle('perm:setNotifications', async (_e, on: unknown) => {
     const st = await perms.setNotifications(on === true)
-    notificationsOn = notificationsWanted(await loadSettings(), process.platform)
+    notificationsOn = notificationsWanted(await loadSettings(), PERM_PLATFORM)
     return st
   })
 
@@ -1878,9 +1882,9 @@ app.whenReady().then(async () => {
   const settings = await settleLastRun(pidRegistry, (slug) => jobs.keepClosed(slug), log, (slug) => jobs.reopen(slug))
   // Settings › Advanced › Reset first run asks for the first run at the next launch (settings-sections)
   firstRunAgainAtLaunch = settings.firstRunAgain
-  notificationsOn = notificationsWanted(settings, process.platform)
+  notificationsOn = notificationsWanted(settings, PERM_PLATFORM)
   perms = createPermissions({
-    platform: process.platform,
+    platform: PERM_PLATFORM,
     root: reelStudioRoot,
     rootDisplay: () => rootDisplay(reelStudioRoot()),
     touched: settings.firstRunDone,
@@ -1890,7 +1894,7 @@ app.whenReady().then(async () => {
     notificationsSupported: () => Notification.isSupported(),
     showTestNotification,
     openPane,
-    fakes: TEST ? parseFakes(process.env.REELSTUDIO_TEST_PERMISSIONS) : undefined
+    fakes: PERM_FAKES
   })
   if (TEST) Object.assign(globalThis, { __reelPermFakes: perms.fakes, __reelPermLog: paneLog })
   // reading the queues and the exports folder reads the Reel Studio folder, which a first run has not made yet

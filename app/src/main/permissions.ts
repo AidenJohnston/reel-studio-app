@@ -56,10 +56,14 @@ export function notifyAccess(o: { supported: boolean; wanted: boolean; result: N
   return 'unverified'
 }
 
-/** Test builds pretend macOS said no: REELSTUDIO_TEST_PERMISSIONS="folder=denied,notifications=failed". */
+/**
+ * Test builds pretend macOS said no: REELSTUDIO_TEST_PERMISSIONS="folder=denied,notifications=failed". `platform=darwin`
+ * makes the service a Mac's on any computer, so the first run's Mac step runs on Windows too (index.ts PERM_PLATFORM).
+ */
 export interface PermissionFakes {
   folder?: 'denied' | 'unusable'
   notifications?: NotifyResult
+  platform?: 'darwin'
 }
 
 export function parseFakes(spec: string | undefined): PermissionFakes {
@@ -68,6 +72,7 @@ export function parseFakes(spec: string | undefined): PermissionFakes {
     const [k, v] = part.split('=')
     if (k === 'folder' && (v === 'denied' || v === 'unusable')) out.folder = v
     else if (k === 'notifications' && (v === 'shown' || v === 'failed' || v === 'pending')) out.notifications = v
+    else if (k === 'platform' && v === 'darwin') out.platform = v
     else throw new Error(`REELSTUDIO_TEST_PERMISSIONS: cannot read "${part}"`)
   }
   return out

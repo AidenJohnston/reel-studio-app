@@ -9,7 +9,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, dropFiles, launch, makeMedia, modelReady } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, modelReady, toEditorStep } from './helpers'
 
 const OUT = process.env.REELSTUDIO_SHOTS_OUT
 
@@ -57,7 +57,7 @@ test('first run and phone pictures at four sizes', async () => {
     await expect(page.getByTestId('sample-v1')).toBeVisible()
     await atEverySize(page, '03-sample-done')
 
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
     await expect(page.getByTestId('ai-picker')).toBeVisible()
     await modelReady(page)
     await atEverySize(page, '04-editor')

@@ -6,7 +6,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, openSettings, passFirstRun } from './helpers'
+import { BASE, launch, makeMedia, makeReel, openSettings, passFirstRun, toEditorStep } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'a11y-'))
 
@@ -137,7 +137,7 @@ test('the first run has no target under 24 px', async () => {
     await page.getByTestId('demo-skip').click()
     await page.waitForTimeout(400)
     small.sample = await smallTargets(page)
-    await page.getByTestId('demo-next').click()
+    await toEditorStep(page)
     await page.getByTestId('use-claude-code').waitFor()
     small.editor = await smallTargets(page)
     expect(Object.entries(small).filter(([, v]) => v.length)).toEqual([])

@@ -123,7 +123,15 @@ export async function openSettings(page: Page): Promise<void> {
 export async function passSample(page: Page): Promise<void> {
   await page.getByTestId('get-started').click()
   await page.getByTestId('demo-skip').click()
+  await toEditorStep(page)
+}
+
+/** The sample's Continue. A Mac's first run asks about notifications next; Not now passes it (FirstRun.tsx Your Mac). */
+export async function toEditorStep(page: Page): Promise<void> {
   await page.getByTestId('demo-next').click()
+  const skip = page.getByTestId('mac-skip')
+  await expect(skip.or(page.getByTestId('composer-connect'))).toBeVisible()
+  if (await skip.isVisible()) await skip.click()
 }
 
 /** New reel from the sidebar, then its video from the stage's file picker: Version 1 is made on the Reel screen. */
