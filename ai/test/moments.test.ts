@@ -143,6 +143,7 @@ describe('changed moments first', () => {
     expect(host.log).toEqual(['start moments 0', 'end moments 0', 'start final', 'end final']);
   });
 
+  // a first edit: in a note, make-variant writes project.json rather than the note's copy (no --project-file)
   it('fails if an edit the engine writes (a trial) is not drawn, so render_draft hands back the draft before it', async () => {
     const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([
@@ -151,7 +152,7 @@ describe('changed moments first', () => {
       { toolCalls: [call('render_draft')] },
       { toolCalls: [call('finish', { summary_for_user: 'Brighter.' })] },
     ]);
-    await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
+    await createAI({ host, settingsDir, providerOverride: model, moments: true }).firstEdit(dir, () => undefined);
     expect(host.runs.length).toBe(2);
   });
 

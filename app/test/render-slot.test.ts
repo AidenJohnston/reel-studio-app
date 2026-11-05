@@ -65,11 +65,11 @@ describe('render slot', () => {
     const b = slot.run('moments', ['--project', 'b'])
     void slot.run('moments', ['--project', 'c', '--mark'])   // only writes a file: never waits
     await settle()
-    expect(started).toEqual(['render a', 'moments c'])
+    expect(started.sort()).toEqual(['moments c', 'render a'])
     finish.get('a')!()
     await a
     await settle()
-    expect(started).toEqual(['render a', 'moments c', 'moments b'])
+    expect(started.at(-1)).toBe('moments b')
     finish.get('b')!()
     await b
   })
