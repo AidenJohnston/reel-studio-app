@@ -186,3 +186,37 @@ def test_seeked_render_of_a_vfr_take_matches_the_single_lane_render(tmp_path, mo
     single, one = _render(tmp_path / "single", src)
     assert (inputs, one) == (3, 1)
     assert seeked == single
+
+
+def test_seeks_with_a_clip_from_another_source_and_jl_joins_trim_each_picture_on_its_own_span(tmp_path):
+    """Beta's cuts mix sources (multi-source clips) and carry J/L joins, whose audio handles reach
+    past a segment's span. Fails if the picture's seeks or trims follow the audio handles or put a
+    clip on another source's input: each lane opens its own source, seeks from its first picture
+    span, and every segment is trimmed at its own src_start on its lane's input."""
+    segs = [Segment("s1", 10.0, 12.0, 0.0),
+            Segment("s2", 5.0, 7.0, 2.0),                                       # a clip from another source
+            Segment("s1", 40.0, 42.0, 4.0, audio_lead=0.25, join_transition="j"),
+            Segment("s1", 80.0, 82.0, 6.0, audio_tail=0.25, join_transition="l")]
+    lanes = render.video_lanes(segs)
+    # one seek fits under MAX_VIDEO_LANES with two sources: the larger s1 gap (42 s -> 80 s)
+    assert [(l["source"], l["segs"]) for l in lanes] == [("s1", [0, 2]), ("s1", [3]), ("s2", [1])]
+    assert [l["seek"] for l in lanes] == [7.0, 77.0, 2.0]          # from 80.0, not the L handle
+
+    ctx = RenderCtx(project={}, project_dir=tmp_path, root=tmp_path, out_timeline=segs,
+                    word_out_time=lambda _w: 0.0, is_kept=lambda _w: True, duration=8.0,
+                    fmt={"width": W, "height": H, "fps": FPS}, draft=False, work=tmp_path,
+                    ffmpeg="ffmpeg", ffprobe="ffprobe", progress=lambda *a: None)
+    paths = {"s1": tmp_path / "a.mp4", "s2": tmp_path / "b.mp4"}
+    cmd = render.build_video_cmd(ctx, segs, {"s1": SDR, "s2": SDR}, paths, {}, W, H, [], [], None,
+                                 tmp_path / "voice.wav", 0.0, 8.0, 0.0, "libx264", tmp_path / "out.mp4",
+                                 tmp_path / "graph.txt")
+    assert _source_seeks(cmd, paths["s1"]) == [None if l["seek"] == 0 else render._f(l["seek"])
+                                              for l in lanes if l["source"] == "s1"]
+    assert _source_seeks(cmd, paths["s2"]) == ["2"]
+    half = 0.5 / FPS
+    lane_of = {si: (li, l["seek"]) for li, l in enumerate(lanes) for si in l["segs"]}
+    trims = [line for line in (tmp_path / "graph.txt").read_text(encoding="utf-8").split(";\n") if "]trim=start=" in line]
+    for i, (seg, line) in enumerate(zip(segs, trims)):
+        li, seek = lane_of[i]
+        assert line.startswith(f"[L{li}s{i}]" if len(lanes[li]["segs"]) > 1 else f"[{li}:v]"), line
+        assert f"trim=start={render._f(max(0.0, seg.src_start - seek - half))}:" in line, line
