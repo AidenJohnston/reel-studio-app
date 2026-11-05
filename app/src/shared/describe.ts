@@ -3,6 +3,7 @@
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
 import { CAPTION_PRESETS, presetOf } from './caption-presets'
+import { kindOf, PACE_LABELS, ZOOM_KIND_LABELS, zoomKey, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
 
@@ -153,6 +154,19 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
       acts.push(`made the ${sfxName(b.sound).kind.toLowerCase()} ${gainOf(b) < gainOf(a) ? 'quieter' : 'louder'}`)
     } else if (levelled.length) acts.push(`changed the level of ${levelled.length} sound effects`)
   }
+  if ('cutStyle' in patch) {
+    const [was, now] = [before.cutStyle, patch.cutStyle]
+    if (!now) {
+      if (was) acts.push('turned the set pace off')
+    } else if (now.preset !== was?.preset) acts.push(`gave the reel a ${PACE_LABELS[now.preset].toLowerCase()} pace`)
+    else if (now.seed !== was?.seed) acts.push('picked other moments for the accents')
+  }
+  if (patch.zooms) {
+    const was = new Map((before.zooms ?? []).map((z) => [zoomKey(z), kindOf(z)]))
+    const changed = patch.zooms.filter((z) => was.has(zoomKey(z)) && was.get(zoomKey(z)) !== kindOf(z))
+    if (changed.length === 1) acts.push(`made a zoom-in ${ZOOM_KIND_LABELS[kindOf(changed[0])].toLowerCase()}`)
+    else if (changed.length) acts.push(`changed ${changed.length} zoom-ins`)
+  }
   if (patch.cover) {
     const [was, now] = [before.cover?.text ?? null, patch.cover.text ?? null]
     if (now !== was) acts.push(!now ? 'removed the words from the cover' : was ? 'changed the words on the cover' : 'added words to the cover')
@@ -162,7 +176,7 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
 }
 
 /** What a receipt's facts changed, by kind: the few words a version title uses, and the summary's words. */
-type Group = 'flip' | 'cut' | 'pauses' | 'subtitles' | 'music' | 'pictures' | 'zooms' | 'cover' | 'post'
+type Group = 'flip' | 'cut' | 'pauses' | 'subtitles' | 'music' | 'pictures' | 'zooms' | 'pace' | 'cover' | 'post'
 interface Change { group: Group; title: string; said: string }
 
 
@@ -234,6 +248,12 @@ function changes(facts: EditFact[], words: Word[]): Change[] {
     const z = n > 0 ? 'more zoom-ins' : n < 0 ? ((zooms.after as unknown[]).length ? 'fewer zoom-ins' : 'no zoom-ins') : 'new zoom-ins'
     out.push({ group: 'zooms', title: z, said: z })
   }
+  const pace = at('cutStyle')
+  if (pace) {
+    const [a, b] = [pace.before as CutStyle | null, pace.after as CutStyle | null]
+    const w = !b ? 'no set pace' : b.preset !== a?.preset ? `${PACE_LABELS[b.preset].toLowerCase()} pace` : 'other moments'
+    out.push({ group: 'pace', title: w, said: w })
+  }
   if (facts.some((f) => f.kind.startsWith('cover.'))) {
     const text = at('cover.text')
     if (text) out.push(text.after ? { group: 'cover', title: 'new cover words', said: 'new words on the cover' } : { group: 'cover', title: 'no cover words', said: 'no words on the cover' })
@@ -299,6 +319,12 @@ const LEXICON: [Group, Lexicon][] = [
     markers: ['zoom', 'zoom-in'],
     nouns: ['zoom', 'zoom-in'],
     dirs: { more: 'more', added: 'more', fewer: 'fewer', no: 'none', new: 'changed', changed: 'changed' }
+  }],
+  // the paces' own names (cut-style.ts PACE_LABELS); "other moments" is a new seed in the same pace
+  ['pace', {
+    markers: ['pace'],
+    nouns: ['pace', 'set', 'moment', 'accent', 'for'],
+    dirs: { calm: 'calm', steady: 'steady', fast: 'fast', punchline: 'punchline', no: 'none', off: 'none', other: 'moments', new: 'moments' }
   }],
   ['cut', {
     markers: ['cut', 'trim', 'trimmed', 'take', 'retake'],

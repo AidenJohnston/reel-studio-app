@@ -3,12 +3,13 @@
 // changes stay, and only what the person touched is changed on top. No Node or DOM imports.
 import type { ProjectJson, Word } from './api'
 import { keptIds, rangesKeepingOrder } from './cut'
+import { cutStyleProblem, zoomKey, zoomProblem } from './cut-style'
 
 /** A list whose items are told apart by a key, so an item is added, replaced or removed on its own. */
-export type ListName = 'broll' | 'sfx' | 'captions.corrections' | 'captions.split' | 'captions.join'
+export type ListName = 'broll' | 'sfx' | 'zooms' | 'captions.corrections' | 'captions.split' | 'captions.join'
 
 export interface HandEdit {
-  /** Values set inside `captions`, `music` or `cover`; `unset` removes the key. */
+  /** Values set inside `captions`, `music` or `cover`, or the whole `cutStyle`; `unset` removes the key. */
   set: { path: string[]; value?: unknown; unset?: true }[]
   /** List items put (`item`) or removed (`item: null`) by key. */
   items: { list: ListName; key: string; item: unknown }[]
@@ -19,10 +20,14 @@ export interface HandEdit {
 }
 
 const SET_ROOTS = ['captions', 'music', 'cover']
+// Set or removed whole: a pace is its preset and seed together, and a seed kept from one pace onto another the
+// person never picked would be a choice nobody made.
+const WHOLE = ['cutStyle']
 const LISTS: Record<ListName, (x: any) => string> = {
   broll: (b) => String(b?.id),
   // the engine plays one effect per moment, so the moment names the effect
   sfx: (s) => JSON.stringify(s?.at),
+  zooms: zoomKey,
   'captions.corrections': (c) => (c?.at ? `at:${c.at}` : `from:${c?.from}`),
   'captions.split': (id) => String(id),
   'captions.join': (j) => `${j?.from}>${j?.to}`
@@ -59,7 +64,11 @@ function walk(a: unknown, b: unknown, path: string[], out: HandEdit): void {
 export function diffProject(base: ProjectJson, edited: ProjectJson, keptBefore: Set<string>, keptAfter: Set<string>): HandEdit {
   const out: HandEdit = { set: [], items: [], words: { cut: [], keep: [] }, mirror: [] }
   for (const root of SET_ROOTS) walk(base[root], edited[root], [root], out)
-  for (const list of ['broll', 'sfx']) walk(base[list], edited[list], [list], out)
+  for (const root of WHOLE) {
+    if (same(base[root], edited[root])) continue
+    out.set.push(edited[root] === undefined ? { path: [root], unset: true } : { path: [root], value: edited[root] })
+  }
+  for (const list of ['broll', 'sfx', 'zooms']) walk(base[list], edited[list], [list], out)
   for (const id of keptBefore) if (!keptAfter.has(id)) out.words.cut.push(id)
   for (const id of keptAfter) if (!keptBefore.has(id)) out.words.keep.push(id)
   const was = new Map((base.sources ?? []).map((s) => [s.id, s.mirror === true]))
@@ -129,6 +138,12 @@ export function parseHandEdit(v: unknown): HandEdit {
     set: set.map((s) => {
       if (!isObject(s)) return bad('set entry')
       const path = strings(s.path)
+      if (path.length === 1 && WHOLE.includes(path[0])) {
+        if (s.unset === true) return { path, unset: true as const }
+        const value = json(s.value)
+        const problem = cutStyleProblem(value)
+        return problem ? bad(problem) : { path, value }
+      }
       if (path.length < 2 || !SET_ROOTS.includes(path[0]) || path.some((k) => !k || k === '__proto__' || k === 'constructor' || k === 'prototype')) bad(`path ${path.join('.')}`)
       if (LIST_NAMES.some((l) => `${path.join('.')}.`.startsWith(`${l}.`))) bad(`list path ${path.join('.')}`)
       return s.unset === true ? { path, unset: true as const } : { path, value: json(s.value) }
@@ -137,6 +152,9 @@ export function parseHandEdit(v: unknown): HandEdit {
       if (!isObject(it) || !LIST_NAMES.includes(it.list as ListName) || typeof it.key !== 'string') return bad('item')
       const item = json(it.item)
       if (item !== null && LISTS[it.list as ListName](item) !== it.key) bad(`item key ${it.key}`)
+      // the AI's set_zoom takes only these kinds; the engine would refuse the version after the queue's wait
+      const problem = item !== null && it.list === 'zooms' ? zoomProblem(item) : null
+      if (problem) bad(problem)
       return { list: it.list as ListName, key: it.key, item }
     }),
     words: { cut: strings(words.cut), keep: strings(words.keep) },
@@ -159,7 +177,8 @@ function runs(ids: Set<string>, words: Word[]): number {
 const STYLE_ON_ITS_OWN = ['size', 'position', 'case']
 
 /** How many things the person changed, counted the way they would count them: each stretch of words cut
- * or brought back, each subtitle setting, each sound, picture and word fix, the cover frame and its words. */
+ * or brought back, each subtitle setting, each sound, picture, zoom-in and word fix, the cover frame and its words,
+ * the pace. */
 export function countChanges(e: HandEdit, words: Word[]): number {
   const keys = new Set<string>()
   for (const s of e.set) {
@@ -167,6 +186,8 @@ export function countChanges(e: HandEdit, words: Word[]): number {
     if (root === 'captions' && k === 'style') keys.add(STYLE_ON_ITS_OWN.includes(sub) ? `style.${sub}` : 'style.look')
     else if (root === 'cover') keys.add(k === 'text' ? 'cover.text' : 'cover.frame')
     else if (root === 'music') keys.add(k === 'level' || k === 'fadeIn' || k === 'fadeOut' ? `music.${k}` : 'music.track')
+    // the whole cutStyle is one key: a pace and its moments are one choice, so "Try other moments" after picking Fast
+    // is still one change
     else keys.add(s.path.join('.'))
   }
   for (const it of e.items) keys.add(`${it.list}:${it.key}`)

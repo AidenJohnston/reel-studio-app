@@ -573,6 +573,11 @@ export function approxDuration(t: Transcript, keep: CutItem[], gapCap: number): 
 
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
+// A match cut joins two shots that show the same shape or movement. The engine tracks where the face is in each take
+// (work/face-<source>.json) but never compares what two shots show, and most reels are one take, where both sides of
+// every join are the same shot. Saying "match" would label a plain jump cut. engine/reelengine/cut.py refuses it too.
+export const MATCH_CUT_REFUSAL = "match cuts are not available: the engine can't tell whether two shots match, so use hard, j, l or smash";
+
 /** `before`: the cut.keep item just before this range, when the caller has the whole cut. */
 function joinProblem(join: unknown, index: number, before?: unknown): string | null {
   if (join === undefined) return null;
@@ -581,6 +586,7 @@ function joinProblem(join: unknown, index: number, before?: unknown): string | n
   if (before && typeof before === 'object' && 'clip' in before) return 'not allowed right after a clip';
   if (!join || typeof join !== 'object') return 'needs transition and frames';
   const j = join as Partial<Join>;
+  if ((j.transition as string) === 'match') return MATCH_CUT_REFUSAL;
   if (!['hard', 'j', 'l', 'smash'].includes(j.transition ?? '')) return 'transition must be hard, j, l or smash';
   if (!Number.isSafeInteger(j.frames) || j.frames! < 0) return 'frames must be a non-negative integer';
   return null;

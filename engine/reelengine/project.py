@@ -297,6 +297,7 @@ def net_changes(before: dict, after: dict) -> list:
     for k in sorted(a.keys() | b.keys()):
         add("captions.style", a.get(k), b.get(k), field=k)
     add("zooms", before.get("zooms") or [], after.get("zooms") or [])
+    add("cutStyle", before.get("cutStyle"), after.get("cutStyle"))
     for kind, key in (("broll", "broll"), ("source", "sources")):
         a = {x["id"]: x for x in before.get(key) or []}
         b = {x["id"]: x for x in after.get(key) or []}

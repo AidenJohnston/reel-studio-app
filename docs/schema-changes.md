@@ -2,6 +2,16 @@
 
 Existing project shapes remain valid. New shapes can require a newer engine, as noted below. Schema: `engine/reelengine/schema/project.schema.json`.
 
+## 2026-11-05 (pace by hand, receipts name it)
+
+- No new field. "Edit it myself" now sets `cutStyle` (Cut > Pace) and each zoom's `kind`, through the same
+  `handEdits` queue as its other changes; `cutStyle` is set or removed whole. A project saved before this opens
+  as it did.
+- `notes[].receipt.facts` gains a `cutStyle` fact (before and after are the whole object, or null) when the
+  pace or its seed changed. Receipts written before this never list one.
+- A `cut.keep[].join` with `transition: "match"` is still refused, now with its own reason: the engine has no
+  measure of what two shots show, so it can't find or check a match.
+
 ## 2026-10-23 (beat accents)
 
 - `beatAccents` (boolean, optional): `true` snaps SFX hits and b-roll starts to the nearest detected

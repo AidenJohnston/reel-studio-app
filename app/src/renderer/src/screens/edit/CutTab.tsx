@@ -6,13 +6,15 @@ import { useNotify } from '../../App'
 import { SubtitleLines } from '../../components/SubtitleLines'
 import { Button, Segmented } from '../../components/ui'
 import { pressKeys, setP, takes, wordKeys, type TabProps } from './controls'
+import { PaceControls } from './PaceControls'
 
 type Captions = NonNullable<ProjectJson['captions']>
-export type CutMode = 'cut' | 'fix'
+export type CutMode = 'cut' | 'fix' | 'pace'
 
 const MODES = [
   { key: 'cut', label: 'Cut words' },
-  { key: 'fix', label: 'Fix words' }
+  { key: 'fix', label: 'Fix words' },
+  { key: 'pace', label: 'Pace' }
 ] as const
 const CASES = [
   { key: 'upper', label: 'CAPITALS' },
@@ -22,7 +24,23 @@ const CASES = [
 
 const caseOf = (c: Captions | undefined): string => String((c?.style as Record<string, unknown> | undefined)?.case ?? 'upper')
 
-export function CutTab({
+export function CutTab(props: TabProps & {
+  mode: CutMode
+  onMode: (m: CutMode) => void
+  /** Shows a subtitle line on the phone, at the moment its first word is said (seconds into the original). */
+  onLine: (line: { text: string; at: number } | null) => void
+}) {
+  if (props.mode !== 'pace') return <Words {...props} />
+  return (
+    <div className="edit-stack">
+      <Segmented testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
+      <PaceControls {...props} />
+    </div>
+  )
+}
+
+/** Cut words and Fix words. */
+function Words({
   d,
   base,
   now,
@@ -87,7 +105,7 @@ export function CutTab({
 
   return (
     <div className="edit-stack">
-      <Segmented testid="cut-mode" label="What to do with the words" value={mode} options={MODES} onPick={onMode} />
+      <Segmented testid="cut-mode" label="What to change in the cut" value={mode} options={MODES} onPick={onMode} />
       {mode === 'cut' ? (
         <>
           <p className="edit-hint">Click a word to cut it, or a crossed-out word to bring it back.</p>

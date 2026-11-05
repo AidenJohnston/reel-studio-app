@@ -93,4 +93,37 @@ describe('hand edits', () => {
     const v2 = project({ version: 2, captions: { enabled: true, style: { position: 0.66, color: '#FFD60A' } } })
     expect(applyHandEdit(v2, edit, words).captions?.style).toEqual({ position: 0.66, color: '#FFD60A', size: 126 })
   })
+
+  it('fails if a pace lands as half of what was picked on a pace a note changed meanwhile, or taking it off is refused', () => {
+    const v1 = project({ cutStyle: { preset: 'clean', seed: 1 } })
+    const fast = diffProject(v1, { ...v1, cutStyle: { preset: 'hyper', seed: 1 } }, kept(v1), kept(v1))
+    // a note made it punchline with a new seed while the edit waited: the edit's preset alone would pair hyper with
+    // the note's seed, moments nobody picked
+    const v2 = project({ version: 2, cutStyle: { preset: 'punchline', seed: 9 } })
+    expect(applyHandEdit(v2, parseHandEdit(fast), words).cutStyle).toEqual({ preset: 'hyper', seed: 1 })
+    const off = parseHandEdit(diffProject(v1, { ...v1, cutStyle: undefined }, kept(v1), kept(v1)))
+    expect('cutStyle' in applyHandEdit(v2, off, words)).toBe(false)
+    // picking a pace and then other moments for it is one change
+    expect(countChanges(diffProject(v1, { ...v1, cutStyle: { preset: 'hyper', seed: 2 } }, kept(v1), kept(v1)), words)).toBe(1)
+  })
+
+  it('fails if main queues a pace or zoom-in kind the engine would refuse after the wait', () => {
+    const empty = { items: [], words: { cut: [], keep: [] }, mirror: [] }
+    for (const value of [{ preset: 'calm', seed: 1 }, { preset: 'hyper', seed: 1.5 }, { preset: 'hyper' }]) {
+      expect(() => parseHandEdit({ ...empty, set: [{ path: ['cutStyle'], value }] })).toThrow()
+    }
+    expect(() => parseHandEdit({ ...empty, set: [{ path: ['cutStyle', 'seed'], value: 3 }] })).toThrow()
+    const zoom = { anchor: { from: 'w2', to: 'w3' }, kind: 'whip' }
+    expect(() => parseHandEdit({ ...empty, set: [], items: [{ list: 'zooms', key: 'w2>w3', item: zoom }] })).toThrow()
+  })
+
+  it('fails if a zoom-in given a new kind plays twice, or a zoom-in a note added meanwhile is lost', () => {
+    const z1 = { anchor: { from: 'w2', to: 'w3' }, kind: 'punch' as const }
+    const v1 = project({ zooms: [z1] })
+    const edit = parseHandEdit(diffProject(v1, { ...v1, zooms: [{ ...z1, kind: 'drift' }] }, kept(v1), kept(v1)))
+    const v2 = project({ version: 2, zooms: [z1, { anchor: { from: 'w6', to: 'w7' } }] })
+    const once = applyHandEdit(v2, edit, words)
+    expect(once.zooms).toEqual([{ ...z1, kind: 'drift' }, { anchor: { from: 'w6', to: 'w7' } }])
+    expect(applyHandEdit(once, edit, words)).toEqual(once)
+  })
 })

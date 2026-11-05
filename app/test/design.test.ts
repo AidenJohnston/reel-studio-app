@@ -194,6 +194,17 @@ describe('version messages', () => {
     expect(describeChange(p, { cover: { atSourceTime: 5, source: 's1', text: null } })).toBe('picked a new cover')
     expect(versionMessage(2, '')).toBe('Version 2 is ready.')
   })
+
+  // fails if a pace or zoom-in change made by hand is logged as "You made a change"
+  it('describes the pace and zoom-in kinds', () => {
+    const z = { anchor: { from: 'w1', to: 'w2' }, kind: 'punch' as const }
+    const p = base({ cutStyle: { preset: 'clean', seed: 1 }, zooms: [z, { anchor: { from: 'w4', to: 'w5' } }] })
+    expect(describeChange(p, { cutStyle: { preset: 'hyper', seed: 1 } })).toBe('gave the reel a fast pace')
+    expect(describeChange(p, { cutStyle: { preset: 'clean', seed: 7 } })).toBe('picked other moments for the accents')
+    expect(describeChange(p, { cutStyle: undefined })).toBe('turned the set pace off')
+    expect(describeChange(p, { zooms: [{ ...z, kind: 'drift' }, { anchor: { from: 'w4', to: 'w5' } }] })).toBe('made a zoom-in slow')
+    expect(describeChange(p, { zooms: [{ ...z, kind: 'snap' }, { anchor: { from: 'w4', to: 'w5' }, kind: 'snap' }] })).toBe('changed 2 zoom-ins')
+  })
 })
 
 describe('folder names', () => {

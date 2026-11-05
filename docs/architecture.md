@@ -251,6 +251,10 @@ cadence phase, tied accent choices, and existing J/L frame offsets. `set_zoom` a
 `variation` and stores them in its render report. Projects without `cutStyle` retain their
 existing framing and timing. Preset values define the cadence band and two nominal framings;
 the seed changes neither the preset nor its budgets, transition options, or audio levels.
+People choose the preset, a new seed ("Try other moments") and each zoom's kind in "Edit it myself" > Cut >
+Pace. Those changes go through the hand-edit queue like the drawer's others, and main refuses a preset, seed or
+kind the AI's tools would refuse (`app/src/shared/cut-style.ts`, kept equal to the AI's and the engine's by
+`app/test/cut-style.test.ts`).
 
 Agent tasks:
 

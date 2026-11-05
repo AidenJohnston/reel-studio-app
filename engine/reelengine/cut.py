@@ -164,6 +164,11 @@ def join_runs(words: list, keep: list, first: int = 0) -> list:
     for k, rng in enumerate(keep or []):
         join = rng.get("join")
         if join is not None:
+            if isinstance(join, dict) and join.get("transition") == "match":
+                # The face track says where a face is, not what a shot shows, so no match between two shots can be
+                # found or checked; on one take both sides are the same shot (ai/src/project.ts MATCH_CUT_REFUSAL).
+                raise EngineError("BAD_JOIN", f"cut.keep[{first + k}].join: match cuts are not available, the engine can't tell whether two shots match",
+                                  "Choose a hard, J, L or smash join. Match cuts aren't available.")
             if (first + k == 0 or not isinstance(join, dict)
                     or join.get("transition") not in ("hard", "j", "l", "smash")
                     or type(join.get("frames")) is not int or join["frames"] < 0):

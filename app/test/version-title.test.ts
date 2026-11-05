@@ -41,6 +41,18 @@ it.each([
   expect(acceptRewrite(reply, cutAndMusic, cutWords)).toBeNull()
 })
 
+it('fails if a version that changed only its pace has no title, or a rewording of it throws instead of being checked', () => {
+  const pace = [{ kind: 'cutStyle', before: { preset: 'clean', seed: 3 }, after: { preset: 'standard', seed: 3 } }]
+  expect(versionTitle(pace, cutWords)).toBe('Steady pace')
+  expect(acceptRewrite({ title: 'Steady pace', summary: 'steady pace' }, pace, cutWords)).toEqual({ title: 'Steady pace', summary: 'steady pace' })
+  expect(acceptRewrite({ title: 'Fast pace', summary: 'fast pace' }, pace, cutWords)).toBeNull()
+  const reseed = [{ kind: 'cutStyle', before: { preset: 'hyper', seed: 3 }, after: { preset: 'hyper', seed: 4 } }]
+  expect(describeFacts(reseed, cutWords)).toBe('other moments')
+  // a rewording must still name the pace change
+  expect(acceptRewrite({ title: 'Shorter cut, no music', summary: 'cut 20 words, no music' }, [...cutAndMusic, ...reseed], cutWords)).toBeNull()
+  expect(acceptRewrite({ title: 'Shorter cut, no music, other moments', summary: 'cut 20 words, no music, other moments' }, [...cutAndMusic, ...reseed], cutWords)).not.toBeNull()
+})
+
 it('keeps a complete rewording or a title ending in the app\'s own "and more" form', () => {
   const facts = [...cutAndMusic, { kind: 'post.caption', before: '', after: 'Bread' }]
   const summary = 'cut 20 words, no music, new post caption'

@@ -41,5 +41,8 @@ it('project loading validates persisted joins without requiring a transcript', a
     cut: { ...p.cut, keep: [p.cut.keep[0], { ...p.cut.keep[1], join: { transition: 'j', frames: 1.5 } }] },
   };
   expect(validateProject(malformed).join()).toMatch(/frames.*integer/);
+  // fails if a saved match cut is refused without saying why
+  const match = { ...p, cut: { ...p.cut, keep: [p.cut.keep[0], { ...p.cut.keep[1], join: { transition: 'match', frames: 6 } }] } };
+  expect(validateProject(match).join()).toMatch(/match cuts are not available: the engine can't tell whether two shots match/);
   expect(validateProject(p)).toEqual([]);
 });

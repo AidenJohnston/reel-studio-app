@@ -33,3 +33,13 @@ def test_schema_rejects_invalid_cut_style(style):
     p = project.new_project("t")
     p["cutStyle"] = style
     assert any("cutStyle" in problem for problem in project.validate(p))
+
+
+def test_receipt_names_a_pace_change():
+    """Fails if a version whose only change is its pace or seed has no receipt fact, so it gets no title."""
+    before = project.new_project("t")
+    after = dict(before, cutStyle={"preset": "hyper", "seed": 4})
+    assert project.net_changes(before, after) == [{"kind": "cutStyle", "before": None, "after": {"preset": "hyper", "seed": 4}}]
+    reseeded = dict(after, cutStyle={"preset": "hyper", "seed": 5})
+    assert [f["kind"] for f in project.net_changes(after, reseeded)] == ["cutStyle"]
+    assert project.net_changes(after, dict(after)) == []

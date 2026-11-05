@@ -15,6 +15,7 @@ import type { Step } from './steps'
 import type { HandEdit } from './hand-edit'
 import type { SoundEffect } from './sfx'
 import type { LayerItem } from './lanes'
+import type { CutStyle, Zoom } from './cut-style'
 export type { VersionRow } from './version-diff'
 export type { ChatAction } from './notes'
 export type { CoverCandidate } from './cover'
@@ -355,7 +356,9 @@ export interface ProjectJson {
     asset: string | null
     params?: Record<string, unknown>
   }[]
-  zooms?: unknown[]
+  zooms?: Zoom[]
+  /** The reel's pace (cut-style.ts): a preset and the seed that picks its moments. Absent: no set pace. */
+  cutStyle?: CutStyle
   /** Built-in sound effects (docs/schema-changes.md, 2026-10-22): `sound` is a pack id, `at` one moment. */
   sfx?: { at: { word?: string; broll?: string; cut?: string }; sound: string; gainDb?: number }[]
   /** manual: the person picked this exact frame in the app (rendered as is). exact: the AI looked at this frame
