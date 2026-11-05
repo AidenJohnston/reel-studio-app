@@ -387,7 +387,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .strip span.time { color: rgba(255, 255, 255, .78); white-space: nowrap; }
 .strip .m { color: rgba(255, 255, 255, .78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .strip .sp { flex: 1; }
-.strip .sbtn { height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: rgba(255, 255, 255, .92); font: inherit; font-size: var(--fs-base); font-weight: 600; display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 4px; cursor: pointer; }
+.strip .sbtn { height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, .92); font: inherit; font-size: var(--fs-base); font-weight: 600; display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 4px; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .strip .sbtn:hover { background: rgba(255, 255, 255, .14); color: #fff; } }
 .strip :focus-visible, .steps :focus-visible { outline-color: #fff !important; }
 .strip.wait { background: var(--sunk); color: var(--ink); }
@@ -423,7 +423,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .notify-ask button { border: 0; background: none; padding: 0; font: inherit; font-weight: 650; color: #fff; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
 .cin { display: flex; align-items: flex-end; gap: 4px; padding: 7px; }
-.cin .att { width: 34px; height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-3); display: grid; place-items: center; flex: none; cursor: pointer; }
+.cin .att { width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); display: grid; place-items: center; flex: none; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .cin .att:not(:disabled):hover { background: var(--sunk); color: var(--ink); } }
 .cfield { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px; }
 .cfield textarea {

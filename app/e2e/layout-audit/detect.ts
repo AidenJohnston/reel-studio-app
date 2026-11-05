@@ -11,6 +11,7 @@ export type Detector =
   | 'small-target'
   | 'popover-placement'
   | 'imbalance'
+  | 'button-shape'
 
 export type Severity = 'P1' | 'P2' | 'P3'
 
@@ -751,6 +752,53 @@ export function detectLayout(opts: DetectOptions): { findings: RawFinding[]; all
         )
       }
     }
+  }
+
+  // ---- 10. button-shape ----------------------------------------------------------------------------
+  // spec.md section 1: a text button is a pill and an icon button a circle; no rounded squares. Checked on every
+  // button laid out, shown or not, so a control that appears on hover (the player's scrub row) is checked too.
+  // Left out: rows that fill their list (nav, menus, pickers), which the spec gives a soft wash; anything taller
+  // than 48 px (cards and tiles); a button that is mostly a picture, whose shape is the picture's.
+  const painted = (s: CSSStyleDeclaration): boolean =>
+    !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(s.backgroundColor) ||
+    s.backgroundImage !== 'none' ||
+    s.boxShadow !== 'none' ||
+    ['top', 'right', 'bottom', 'left'].some((e) => parseFloat(s.getPropertyValue(`border-${e}-width`)) > 0 && !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(s.getPropertyValue(`border-${e}-color`)))
+  const cornerPx = (v: string, side: number): number => {
+    const first = v.split(' ')[0]
+    return first.endsWith('%') ? (parseFloat(first) / 100) * side : parseFloat(first) || 0
+  }
+  for (const el of Array.from(document.querySelectorAll('button, [role="button"], a.btn'))) {
+    if (!(el instanceof HTMLElement) || !el.checkVisibility({ visibilityProperty: true })) continue
+    if (el.parentElement?.closest('button, [role="button"]')) continue
+    const s = css(el)
+    if (s.display === 'inline' || s.display === 'contents') continue
+    const b = el.getBoundingClientRect()
+    if (b.width < 1 || b.height < 1 || b.height > 48) continue
+    const side = Math.min(b.width, b.height)
+    const r = Math.min(...['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'].map((k) => cornerPx(s[k as 'borderTopLeftRadius'], side)))
+    if (r >= side / 2 - 1) continue
+    const media = Array.from(el.querySelectorAll('img, video, canvas')).some((m) => {
+      const mb = m.getBoundingClientRect()
+      return mb.width * mb.height >= 0.7 * b.width * b.height
+    })
+    if (media) continue
+    const squareish = b.width / b.height < 1.5
+    if (squareish ? r <= 0 && !painted(s) : !painted(s)) continue
+    if (!squareish && el.parentElement) {
+      const ps = css(el.parentElement)
+      const inner = el.parentElement.clientWidth - (parseFloat(ps.paddingLeft) || 0) - (parseFloat(ps.paddingRight) || 0)
+      if (b.width >= 0.9 * inner) continue
+    }
+    report(
+      {
+        detector: 'button-shape',
+        severity: 'P2',
+        detail: `a ${Math.round(b.width)}×${Math.round(b.height)} button with ${Math.round(r)} px corners: make it a ${squareish ? 'circle' : 'pill'} (border-radius: 999px)`,
+        boxes: [toBox(b)]
+      },
+      el
+    )
   }
 
   return { findings, allowed }

@@ -1,7 +1,7 @@
 // Layout audit: visits every screen and state at the four window sizes and runs the detectors in
 // e2e/layout-audit/detect.ts (text overflow, clipping, sideways scrolling, nested scroll areas, overlap, text
-// collisions, small targets, popover placement, imbalance). One test per screen, so each screen passes or fails on
-// its own. P1 and P2 findings fail it; P3 is reported only.
+// collisions, small targets, popover placement, imbalance, button shape). One test per screen, so each screen passes
+// or fails on its own. P1 and P2 findings fail it; P3 is reported only.
 //
 //   REELSTUDIO_AUDIT_SCREENS=first-run,home   only these screens (names below)
 //   REELSTUDIO_AUDIT_SIZES=1100x720,1920x1080 only these sizes
