@@ -17,7 +17,7 @@ import { S, JSONSchema, validate, fillNulls } from './schema';
 import { SFX_SOUNDS } from './sfx.generated';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
-import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
+import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
@@ -50,6 +50,8 @@ export interface ToolState {
   coverCandidates?: number[];
   assetCandidates?: Map<string, PendingAsset>;
   animationsMade?: Set<string>;
+  /** what each answered model call ran on, in order (written to versions/vN/ai-run.json) */
+  aiCalls: CallProvenance[];
 }
 
 export interface ToolContext {
@@ -92,7 +94,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0, aiCalls: [] };
 }
 
 /** A snapshot's version counter can lag its folder. Keep allocation and history from the live

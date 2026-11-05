@@ -1,9 +1,10 @@
 // The person's own OpenAI-compatible server on Chat Completions. Most compatible servers (local runners, proxies)
 // implement it; few implement the Responses API that openai.ts uses for ChatGPT sign-in. No streaming: the agent
 // loop only needs the finished answer.
-import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvider, ToolCall, ToolSchema } from '../types';
+import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvider, NOT_REPORTED, ToolCall, ToolSchema } from '../types';
 import { randomUUID } from 'node:crypto';
 import { mapConnectionError, mapFetchFailure, noRedirectFetch, readBody, tookTooLong, withoutSecret, wrongAddress } from './connection';
+import { apiProvenance, reportedTokens, uncachedInput } from '../provenance';
 
 export interface OpenAICompatibleOptions {
   baseURL: string;
@@ -13,6 +14,8 @@ export interface OpenAICompatibleOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   supportsImages: boolean;
+  /** the reasoning level `model` carries for the hub (`gpt-6.1-sol(high)`); only recorded (CallProvenance) */
+  effort?: string;
 }
 
 const imageUrl = (mime: string, base64: string) => ({ type: 'image_url', image_url: { url: `data:${mime};base64,${base64}` } });
@@ -134,6 +137,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (choice.finish_reason === 'length' && !out.toolCalls.length) {
       throw new AIError('connection_truncated', 'The AI ran out of room on that step. Try again.', { retryable: true });
     }
-    return out;
+    const u = json?.usage ?? {};
+    const cacheRead = reportedTokens(u.prompt_tokens_details?.cached_tokens);
+    // Chat Completions has no cache-write count
+    const usage = { input: uncachedInput(reportedTokens(u.prompt_tokens), cacheRead, NOT_REPORTED), output: reportedTokens(u.completion_tokens), cacheRead, cacheWrite: NOT_REPORTED };
+    return { ...out, provenance: apiProvenance({ provider: this.id, requestedModel: this.model, reportedModel: json?.model, effort: this.o.effort, usage }) };
   }
 }

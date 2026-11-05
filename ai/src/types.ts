@@ -151,8 +151,32 @@ export type WaitSignal =
   | { kind: 'thinking' }
   | { kind: 'answering' };
 export interface TokenUsage { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+
+/** A value the provider's answer did not carry. Kept apart from 0 so a missing count never reads as "none used". */
+export const NOT_REPORTED = 'not reported' as const;
+export type Reported<T> = T | typeof NOT_REPORTED;
+
+/** What one model call ran on and used, as the provider's own answer reported it (providers/cli.ts for the CLIs,
+ * anthropic.ts and openaiCompatible.ts for an API key, the person's own server and the hub). Measurement only: the
+ * token budget still reads `usage`. */
+export interface CallProvenance {
+  provider: ProviderId;
+  /** the model the app passed to the CLI; null = none passed, so the CLI used its own default */
+  requestedModel: string | null;
+  /** model ids from the provider's answer for this call, never copied from the request */
+  reportedModels: Reported<string[]>;
+  /** "not reported" over an HTTP API, where no CLI runs */
+  cliVersion: Reported<string>;
+  /** the effort the app passed (Claude Code's --effort, Codex's model_reasoning_effort, a hub model's level); null =
+   * none passed, so the provider's default. No provider reports the effort it used. */
+  effort: string | null;
+  /** input = input tokens neither read from nor written to the prompt cache, as Anthropic counts it */
+  usage: { input: Reported<number>; output: Reported<number>; cacheRead: Reported<number>; cacheWrite: Reported<number> };
+}
+
 export interface CompletionResponse {
   text: string; toolCalls: ToolCall[]; raw?: unknown; usage?: TokenUsage;
+  provenance?: CallProvenance;
   /** the reply meant to call tools but could not be read (the loop re-asks with a format correction) */
   malformed?: boolean;
   /** the calls were read from a non-protocol format (XML-style) */

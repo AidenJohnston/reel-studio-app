@@ -2,6 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AIError, ChatMessage, CompletionRequest, CompletionResponse, ModelProvider, ToolSchema } from '../types';
 import { mapConnectionError, tookTooLong, unreachable, withoutSecret, wrongAddress } from './connection';
+import { apiProvenance, reportedTokens } from '../provenance';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 /** The same key's small model, for short text (version titles). */
@@ -54,6 +55,8 @@ export interface AnthropicOptions {
   maxRetries?: number;
   timeoutMs?: number;
   supportsImages?: boolean;
+  /** the reasoning level `model` carries for the hub (`claude-opus-5-5(high)`); only recorded (CallProvenance) */
+  effort?: string;
 }
 
 /** Converts provider-neutral messages to Anthropic content blocks (tool results carry images). */
@@ -178,6 +181,7 @@ export class AnthropicProvider implements ModelProvider {
   private client: Anthropic;
   private maxTokens: number;
   private apiKey: string;
+  private effort?: string;
   /** Thinking settings and their beta header go only to Anthropic's own API, for a model that takes adaptive
    * thinking. A person's own server may not know the dated beta, so it keeps the request it had before
    * thinking was replayed (and complete() records no blocks for it). */
@@ -189,6 +193,7 @@ export class AnthropicProvider implements ModelProvider {
     this.model = opts.model || DEFAULT_CLAUDE_MODEL;
     this.maxTokens = opts.maxTokens ?? 16000;
     this.apiKey = opts.apiKey;
+    this.effort = opts.effort;
     this.sendsThinking = this.id === 'claude' && supportsAdaptiveThinking(this.model);
     // Everything explicit, because the SDK reads the environment: ANTHROPIC_BASE_URL (could send the key to another
     // host), ANTHROPIC_AUTH_TOKEN (sent next to the key), ANTHROPIC_CUSTOM_HEADERS (any header, on every request),
@@ -246,7 +251,10 @@ export class AnthropicProvider implements ModelProvider {
       const raw: AnthropicRaw = { stop_reason: msg.stop_reason, ...(this.id === 'claude' ? { anthropicContent: msg.content } : {}) };
       return { text, toolCalls, raw, usage: {
         input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens ?? undefined, cacheWrite: u.cache_creation_input_tokens ?? undefined,
-      } };
+      }, provenance: apiProvenance({
+        provider: this.id, requestedModel: this.model, reportedModel: msg.model, effort: this.effort,
+        usage: { input: reportedTokens(u.input_tokens), output: reportedTokens(u.output_tokens), cacheRead: reportedTokens(u.cache_read_input_tokens), cacheWrite: reportedTokens(u.cache_creation_input_tokens) },
+      }) };
     } catch (err: any) {
       if (err instanceof AIError) throw err;
       if (req.signal?.aborted || err?.name === 'APIUserAbortError') throw new AIError('cancelled', 'Stopped.');

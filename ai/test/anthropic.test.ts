@@ -73,6 +73,11 @@ describe('Anthropic Messages adapter (mock HTTP)', () => {
     const r = await p.complete({ system: 'SYS', tools, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] });
     expect(r.text).toBe('Picking takes.');
     expect(r.toolCalls).toEqual([{ id: 'toolu_1', name: 'set_cut', args: { keep: [{ from: 'w1', to: 'w9' }] } }]);
+    // the model the API answered with; counts it left out are "not reported", never 0
+    expect(r.provenance).toEqual({
+      provider: 'claude', requestedModel: 'claude-sonnet-5-5', reportedModels: ['claude-sonnet-5-5'], cliVersion: 'not reported', effort: null,
+      usage: { input: 12, output: 30, cacheRead: 'not reported', cacheWrite: 'not reported' },
+    });
     const { body, headers } = m.bodies[0];
     expect(headers['x-api-key']).toBe('sk-ant-test');
     expect(body.stream).toBe(true);

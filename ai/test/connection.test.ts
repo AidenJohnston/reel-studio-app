@@ -53,6 +53,11 @@ describe('OpenAI-compatible provider (Chat Completions)', () => {
       { id: 'call_2', name: 'set_cut', args: { __unparseable: '{not json' } },
     ]);
     expect(r.usage).toEqual({ input: 120, output: 30, cacheRead: 100 });
+    // cached tokens come out of input, as Claude counts it; Chat Completions has no cache-write count, and this answer named no model
+    expect(r.provenance).toEqual({
+      provider: 'custom', requestedModel: 'mock-small', reportedModels: 'not reported', cliVersion: 'not reported', effort: null,
+      usage: { input: 20, output: 30, cacheRead: 100, cacheWrite: 'not reported' },
+    });
     const req = mock.requests.at(-1)!;
     expect(req.path).toBe('/v1/chat/completions');
     expect(req.headers.authorization).toBe(`Bearer ${KEY}`);

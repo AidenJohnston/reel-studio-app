@@ -116,6 +116,20 @@ describe('agent loop with a scripted model', () => {
     expect(await ai.styleRules()).toEqual([]);
   });
 
+  it('applyNote records what the run ran on in versions/vN/ai-run.json; a count one call did not report is not summed', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const ran = { provider: 'claude-cli' as const, requestedModel: 'sonnet', cliVersion: '2.1.296', effort: null };
+    const first = { ...ran, reportedModels: ['claude-sonnet-5-5-20261001'], usage: { input: 10, output: 200, cacheRead: 9000, cacheWrite: 5000 } };
+    const second = { ...ran, reportedModels: 'not reported' as const, usage: { input: 10, output: 200, cacheRead: 9000, cacheWrite: 'not reported' as const } };
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_gap_cap', { seconds: 0.3 })], provenance: first },
+      { toolCalls: [call('finish', { summary_for_user: 'I tightened the gaps between your sentences.' })], provenance: second },
+    ]);
+    const r = await createAI({ host, settingsDir, providerOverride: model, finalRender: false }).applyNote(dir, 'make the hook punchier', () => undefined);
+    const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', `v${r.version}`, 'ai-run.json'), 'utf8'));
+    expect(record).toEqual({ calls: [first, second], usage: { input: 20, output: 400, cacheRead: 18000, cacheWrite: 'not reported' } });
+  });
+
   it('model mistakes are fed back, not fatal; nudges when the model stops calling tools', async () => {
     const { dir, host } = await setup();
     const model = new ScriptedModel([
