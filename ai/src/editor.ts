@@ -260,7 +260,8 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
   // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
   if (deps.finalRender !== false) {
     try { return (await doRender(ctx, false)).version; } catch (e) {
-      if (ctx.signal?.aborted) throw e;
+      // a draft in its place would be saved and written into a version folder that engine may still write to
+      if (ctx.signal?.aborted || engineStuck(e)) throw e;
       if (ctx.state.renders.length && !ctx.state.previewReplaced) return ctx.state.renders.at(-1)!.version;
       throw e;
     }

@@ -3,7 +3,7 @@
 // the root this run uses.
 import { rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import type { createPidRegistry } from './orphans'
+import { projectFolders, type createPidRegistry } from './orphans'
 import { clearStaleLocks, OWNER_LOCK } from './owner'
 import { setRootOverride } from './paths'
 import { loadSettings, settleLibraryRoot, type Settings } from './settings'
@@ -24,9 +24,13 @@ export async function settleLastRun(
   // and a first run has no videos to recover.
   const touchRoot = settings.firstRunDone
   if (touchRoot) await ensureRoot().catch((e) => log(`[root] ${String(e)}`))
-  const { stopped, stillRunning, unknown } = await registry.reap()
+  const { stopped, stillRunning, unknown } = await registry.reap().catch((e) => {
+    // nothing then says which videos are safe: none opens at this start, as when processes can't be listed
+    log(`[start] could not settle the engines the last run left, so every video stays closed: ${String(e)}`)
+    return { stopped: 0, stillRunning: projectFolders(), unknown: false }
+  })
   if (stopped) log(`[start] stopped ${stopped} engine process(es) left over from a crash`)
-  if (unknown) log('[start] the engine list from the last run could not be read, or names an engine with no video; looked for engines and ffmpeg still working in a video')
+  if (unknown) log('[start] the engine list from the last run could not be read, names an engine with no video, or holds a process that could not be shown to be ours; looked for engines and ffmpeg still working in a video')
   // something there would not stop, or is still running, and may still be writing: the project stays closed
   const closed = stillRunning.map((dir) => basename(dir))
   for (const slug of closed) {

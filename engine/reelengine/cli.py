@@ -585,9 +585,6 @@ def main(argv=None) -> int:
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
                               "Reel Studio didn't tell the engine what to do. Please try again.")
-        if sys.platform == "win32":
-            from .contain import contain_children
-            contain_children()
         # commands without a project (footage search, Library indexing) have nothing to own
         if getattr(args, "project", None) and args.command not in NOT_PROJECT_WRITES:
             from . import owner
@@ -616,5 +613,15 @@ def main(argv=None) -> int:
         return 1
 
 
+def run() -> int:
+    """The engine as a process (`python -m reelengine`, the `reelengine` command): on Windows it first
+    joins the Job Object that ends its ffmpeg with it. main() alone does not, because tests call it
+    inside their own process."""
+    if sys.platform == "win32":
+        from .contain import contain_children
+        contain_children()
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

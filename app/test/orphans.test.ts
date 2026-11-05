@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createPidRegistry, isOurEngine, processName } from '../src/main/orphans'
+import { basename, join } from 'node:path'
+import { createPidRegistry, isOurEngine, processCommandLine, processName } from '../src/main/orphans'
 import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
 import { clearStaleLocks, OWNER_LOCK } from '../src/main/owner'
@@ -92,7 +92,7 @@ describe('orphaned engine reaper', () => {
     expect(stillRunning).toEqual([project])
     expect(existsSync(join(project, OWNER_LOCK))).toBe(true)
     expect(existsSync(join(other, OWNER_LOCK))).toBe(false)
-    expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project }])
+    expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: left.pid, project, startedAt: expect.any(Number) }])
     await killTree(left.pid!)
   }, 60000)
 
@@ -200,11 +200,123 @@ describe('orphaned engine reaper', () => {
     await killTree(left.pid!)
   }, 60000)
 
+  // With the leader dead nothing shows who holds the number now: after a crash it can be reused, even
+  // within one boot, by someone else's group that runs ffmpeg. So such a group is never signalled; a
+  // leftover ffmpeg of ours finishes on its own, and the video it works in stays closed meanwhile.
+  it.skipIf(process.platform === 'win32')('a process group whose leader died is never signalled, and the video it works in stays closed', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const cake = join(projectsDir(), 'cake')
+    mkdirSync(join(cake, 'work'), { recursive: true })
+    // an engine that starts nothing itself, so its group holds only what this test puts there
+    const pkg = join(settings, 'engine', 'reelengine')
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(pkg, '__init__.py'), '')
+    writeFileSync(join(pkg, '__main__.py'), 'import time\ntime.sleep(60)\n')
+    const cmds = [
+      { run: `'${PYTHON}' -s -E -m reelengine render --project '${cake}'`, program: 'python', shows: 'reelengine' },
+      { run: 'ffmpeg -nostdin -v error -re -f lavfi -i anullsrc=r=8000 -t 60 -f null -', program: 'ffmpeg', shows: 'anullsrc' }
+    ]
+    // a group leader that starts these and exits, leaving the group with no leader
+    const sh = spawn('sh', ['-c', cmds.map((c) => `${c.run} >/dev/null 2>&1 & echo $!`).join('; ')], { cwd: join(settings, 'engine'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
+    let out = ''
+    sh.stdout.on('data', (d) => (out += d))
+    await once(sh, 'close')
+    const members = out.trim().split(/\s+/).map(Number)
+    try {
+      // each runs its own program by now, not the copy of sh forked to start it (whose command line
+      // already holds the same words)
+      for (const [k, pid] of members.entries()) {
+        const ready = async (): Promise<boolean> =>
+          basename((await processName(pid)) ?? '').toLowerCase().startsWith(cmds[k].program) && !!(await processCommandLine(pid))?.includes(cmds[k].shows)
+        let ok = await ready()
+        for (let i = 0; i < 100 && !ok; i++) {
+          await new Promise((r) => setTimeout(r, 50))
+          ok = await ready()
+        }
+        if (!ok) throw new Error(`${cmds[k].run} never started`)
+      }
+      createPidRegistry(settings).add(sh.pid!, cake)
+      const { stopped, stillRunning } = await createPidRegistry(settings).reap()
+      expect(stopped).toBe(0)
+      expect(members.every(isAlive)).toBe(true)
+      expect(stillRunning).toEqual([cake])
+      // kept, so the next start looks again
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([{ pid: sh.pid, project: cake, startedAt: expect.any(Number) }])
+    } finally {
+      try {
+        process.kill(-sh.pid!, 'SIGKILL')
+      } catch {
+        /* gone */
+      }
+    }
+  }, 60000)
+
+  // Windows hands a dead engine's number to the next process routinely, and that may be another engine:
+  // left alone, kept on the list, and the scan decides which video stays closed
+  it('a number now held by an engine that started after ours was recorded is not stopped, and the video stays closed', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const bread = join(projectsDir(), 'bread')
+    mkdirSync(join(bread, 'work'), { recursive: true })
+    const later = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep'], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    try {
+      await once(later, 'spawn')
+      const recorded = { pid: later.pid, project: bread, startedAt: Date.now() - 30_000 }
+      writeFileSync(join(settings, 'engines.json'), JSON.stringify([recorded]))
+      const { stopped, stillRunning, unknown } = await createPidRegistry(settings).reap()
+      expect(stopped).toBe(0)
+      expect(isAlive(later.pid!)).toBe(true)
+      expect(stillRunning).toEqual([bread])
+      expect(unknown).toBe(true)
+      // kept, so the next start looks again
+      expect(JSON.parse(readFileSync(join(settings, 'engines.json'), 'utf8'))).toEqual([recorded])
+    } finally {
+      await killTree(later.pid!)
+    }
+  }, 60000)
+
+  it('a start goes on when the list set aside last time cannot be deleted (on Windows another program may hold it)', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const unreadable = join(settings, 'engines.unreadable.json')
+    writeFileSync(unreadable, '[{"pid":4242,"proj')
+    let release: () => Promise<void>
+    if (process.platform === 'win32') {
+      // open without sharing delete, as a virus scanner or an indexer may
+      const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+        `$f = [IO.File]::Open('${unreadable.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'held'; [Console]::In.ReadLine(); $f.Close()`], { stdio: ['pipe', 'pipe', 'inherit'] })
+      await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve()))
+      release = async () => {
+        holder.stdin.end('\n')
+        await once(holder, 'exit')
+      }
+    } else {
+      chmodSync(settings, 0o555)
+      release = async () => chmodSync(settings, 0o755)
+    }
+    try {
+      const { stillRunning, unknown } = await createPidRegistry(settings).reap()
+      expect(unknown).toBe(true)
+      expect(stillRunning).toEqual([])
+    } finally {
+      await release()
+    }
+    // still there, so the next start looks once more
+    expect(existsSync(unreadable)).toBe(true)
+  }, 60000)
+
   it('recognises only our engine command line', () => {
     expect(isOurEngine('"C:/x/python.exe" -s -E -X utf8 -u -m reelengine render --project p')).toBe(true)
     expect(isOurEngine('/r/python/bin/python3 -s -E -m reelengine transcribe')).toBe(true)
     expect(isOurEngine('python -m jupyter notebook')).toBe(false)
     expect(isOurEngine('python -c "import reelengine"')).toBe(false)
+    // a script that is handed those words as arguments is not our engine
+    expect(isOurEngine('python3 /srv/worker.py -m reelengine render')).toBe(false)
+    expect(isOurEngine('python3 /srv/python -m reelengine render')).toBe(false)
+    expect(isOurEngine('/usr/bin/python3 -Xutf8 -Wignore::DeprecationWarning -m reelengine render')).toBe(true)
+    expect(isOurEngine('"C:\\Program Files\\Py\\python.exe" -W "ignore:a warning" -m reelengine render')).toBe(true)
+    expect(isOurEngine('/Applications/Reel Studio.app/Contents/Resources/python/bin/python3 -s -E -B -X utf8 -u -m reelengine render')).toBe(true)
     expect(isOurEngine(null)).toBe(false)
   })
 })

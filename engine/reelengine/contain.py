@@ -4,13 +4,17 @@ The engine puts itself in a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. 
 job when they start, and Windows ends every process in the job when the job's last handle closes,
 which is when the engine exits for any reason. macOS and Linux need none of this: there Reel Studio
 runs the engine as its own process group and stops the whole group (app/src/main/engine.ts).
+
+When Windows will not make or join the job, the engine logs why and runs anyway. Stop still ends its
+whole tree (taskkill /T), and only a crash of the engine itself can then leave an ffmpeg running.
+Refusing instead would leave Reel Studio unable to edit at all on such a machine.
 """
 from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
 
-from .proto import EngineError
+from . import proto
 
 KILL_ON_JOB_CLOSE = 0x2000
 EXTENDED_LIMIT_INFORMATION = 9
@@ -35,11 +39,15 @@ def contain_children(kernel32=None) -> None:
     k32.GetCurrentProcess.restype = wintypes.HANDLE
     k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
     k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
     info = _Extended()
     info.BasicLimitInformation.LimitFlags = KILL_ON_JOB_CLOSE
     job = k32.CreateJobObjectW(None, None)
-    if not (job and k32.SetInformationJobObject(job, EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info))
-            and k32.AssignProcessToJobObject(job, k32.GetCurrentProcess())):
-        raise EngineError("NO_JOB_OBJECT", f"Job Object setup failed: Windows error {ctypes.get_last_error()}",
-                          "Reel Studio couldn't start its video engine safely. Restart Reel Studio and try again.")
-    # the handle stays open for the engine's whole life on purpose: closing it ends the job
+    if job and k32.SetInformationJobObject(job, EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info)) \
+            and k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+        # the handle stays open for the engine's whole life on purpose: closing it ends the job
+        return
+    error = ctypes.get_last_error()
+    if job:
+        k32.CloseHandle(job)
+    proto.log(f"[contain] no Job Object (Windows error {error}), so ffmpeg may outlive a crash of this engine")

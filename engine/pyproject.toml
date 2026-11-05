@@ -30,7 +30,7 @@ heic = ["pi-heif>=1.4"]
 reference = ["opentimelineio==0.18.1", "otio-fcpx-xml-adapter==1.0.0", "otio-fcp-adapter==1.0.0", "psutil>=7"]
 
 [project.scripts]
-reelengine = "reelengine.cli:main"
+reelengine = "reelengine.cli:run"
 
 [tool.setuptools]
 include-package-data = true
