@@ -173,7 +173,7 @@ def _mid(span) -> float:
 
 def _match(old: list, new: list) -> list:
     """Pairs (old item or None, new item or None) by identity, the n-th of a repeated identity with
-    the n-th. Items are (identity, content key, (t0, t1), label)."""
+    the n-th. Items are (identity, content key, (t0, t1), label, framed over)."""
     left: dict = {}
     for it in old:
         left.setdefault(it[0], []).append(it)
@@ -186,7 +186,7 @@ def _match(old: list, new: list) -> list:
 
 
 def _diff_items(kind: str, old: list, new: list, moved_at: Optional[float], duration: float) -> list:
-    """Changes between two lists of (identity, content key, (t0, t1), label) on their own clocks."""
+    """Changes between two lists of (identity, content key, (t0, t1), label, framed over) on their own clocks."""
     out = []
     for o, n in _match(old, new):
         if o and n and o[1] == n[1]:
@@ -213,13 +213,14 @@ def _overlaps(span, regions: list) -> bool:
 
 
 def _brolls(proj: dict, tl, project_dir: Path, root: Optional[Path], changed_anims: set) -> list:
-    """(identity, content, span, label) for every b-roll item on screen, with the renderer's timing."""
+    """(identity, content, span, label, framed over) for every b-roll item on screen, with the renderer's
+    timing. A card is placed on the face over its own span."""
     out = []
     for p in brollmod.plan_windows(_plan_ctx(proj, tl, project_dir, root)):
         it = p["item"]
         stem = _anim_stem(it.get("asset"))
         content = _key(it) + ("|remade" if stem and stem in changed_anims else "")
-        out.append((str(p["id"]), content, (p["t0"], p["t1"]), str(p["id"])))
+        out.append((str(p["id"]), content, (p["t0"], p["t1"]), str(p["id"]), (p["t0"], p["t1"])))
     return out
 
 
@@ -236,11 +237,14 @@ def _anim_stem(asset) -> Optional[str]:
 
 
 def _zooms(proj: dict, tl, project_dir: Path, root: Optional[Path]) -> list:
+    """(identity, content, span on screen, label, framed over) for every zoom on screen."""
     zs = proj.get("zooms") or []
+    ctx = _plan_ctx(proj, tl, project_dir, root)
+    framed = zoommod.framed_over(ctx)
     out = []
-    for i, t0, t1 in zoommod.windows(_plan_ctx(proj, tl, project_dir, root)):
+    for i, t0, t1 in zoommod.windows(ctx):
         k = _key(zs[i])
-        out.append((k, k, (t0, t1), f"zoom {i + 1}"))
+        out.append((k, k, (t0, t1), f"zoom {i + 1}", framed[i]))
     return out
 
 
@@ -251,7 +255,7 @@ def _cues(proj: dict, tl) -> list:
     out = []
     for c in capmod.build_cues(tl.words_out, cap, capmod.hidden_set(tl, cap)):
         ident = _key([list(x) for x in c["wids"]])
-        out.append((ident, _key([ident, c["t"]]), (c["s"], c["e"]), c["t"]))
+        out.append((ident, _key([ident, c["t"]]), (c["s"], c["e"]), c["t"], (c["s"], c["e"])))
     return out
 
 
@@ -292,30 +296,33 @@ def changed(old: Optional[dict], new: dict, words: list, project_dir: Path, root
                  if (old_anims or {}).get(n) != (new_anims or {}).get(n)}
         stems = {n.split(".")[0] for n in anims}
         old_b, new_b = _brolls(old, old_tl, project_dir, root, set()), _brolls(new, tl, project_dir, root, stems)
-        zooms = _diff_items("zoom", _zooms(old, old_tl, project_dir, root), _zooms(new, tl, project_dir, root), x, dur)
+        old_z, new_z = _zooms(old, old_tl, project_dir, root), _zooms(new, tl, project_dir, root)
+        zooms = _diff_items("zoom", old_z, new_z, x, dur)
         brolls = _diff_items("broll", old_b, new_b, x, dur)
+        # Each rule below can redraw what a later one reads, so they run in this order.
+        if x is not None:
+            # framed on the face over a span that runs across x, and the face after x is other footage now
+            for side, out in ((new_z, zooms), (new_b, brolls)):
+                done = {c["id"] for c in out}
+                for _ident, _content, span, label, framed in side:
+                    if label not in done and framed[0] < x - EPS < framed[1]:
+                        out.append({"kind": "zoom" if out is zooms else "broll", "id": label, "regions": [list(span)],
+                                    "at": [], "why": "framed across the cut's first moved frame"})
         # cards are placed around the zoom under them (broll.zones_for): a changed zoom moves every card it meets
         zr = [r for c in zooms for r in c["regions"]]
         done = {c["id"] for c in brolls}
         for side in (old_b, new_b):
-            for ident, _content, span, label in side:
+            for ident, _content, span, label, _framed in side:
                 if ident not in done and _overlaps(span, zr):
                     done.add(ident)         # unchanged, so its span is the same on both clocks
                     brolls.append({"kind": "broll", "id": label, "regions": [list(span)], "at": [],
                                    "why": "placed around a changed zoom"})
         changes += brolls + zooms
-        if x is not None:
-            # framed on the face over its whole span, and the face after x comes from other footage now
-            for kind, side in (("broll", new_b), ("zoom", _zooms(new, tl, project_dir, root))):
-                for _ident, _content, span, label in side:
-                    if span[0] < x - EPS < span[1]:
-                        changes.append({"kind": kind, "id": label, "regions": [list(span)], "at": [],
-                                        "why": "framed across the cut's first moved frame"})
         old_c, new_c = _cues(old, old_tl), _cues(new, tl)
         changes += _diff_items("caption", old_c, new_c, x, dur)
         # a split view moves each caption line it mostly covers (captions.cue_position), whole line
         br = [r for c in brolls for r in c["regions"]]
-        for _ident, _content, span, label in old_c + new_c:
+        for _ident, _content, span, label, _framed in old_c + new_c:
             if _overlaps(span, br):
                 changes.append({"kind": "caption", "id": label, "regions": [list(span)], "at": [],
                                 "why": "a line a changed b-roll item may move"})

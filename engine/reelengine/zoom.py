@@ -103,6 +103,13 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
     return _settle(ctx, spans, with_broll, fps)
 
 
+def framed_over(ctx) -> dict:
+    """{index into project.zooms: (t0, t1)}: the span each zoom's framing reads the face over (build_zooms
+    centres it on the face across its anchored span, before a later zoom cuts it short)."""
+    _W, _H, fps = fmt_of(ctx)
+    return {i: (t0, t1) for i, t0, t1, _s in _anchored(ctx, fps)}
+
+
 @dataclass
 class _Window:
     t0: float
