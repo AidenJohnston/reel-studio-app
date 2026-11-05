@@ -162,8 +162,9 @@ describe('Learn from my past edits: finding them', () => {
     const twice = join(fresh(), 'same-id-twice.xml')
     writeFileSync(twice, text.replace('</xmeml>', `<project><name>Cuts</name><children>${sequence}</children></project></xmeml>`))
     const files = [...['cut.fcpxmld', 'ntsc-lanes.fcpxml', 'talking-head.xml'].map((f) => join(fixtures, f)), twice]
+    // each package as `python -m reelengine` runs it: the real one starts in cli.run, the stand-in in __main__.main
     const scan = (pythonPath: string) => {
-      const out = execFileSync(PYTHON, ['-I', '-c', 'import sys; sys.path.insert(0, sys.argv.pop(1)); from reelengine.cli import run; sys.argv[0] = "reelengine"; sys.exit(run())', pythonPath, 'reference-scan', ...files], { encoding: 'utf8' })
+      const out = execFileSync(PYTHON, ['-I', '-c', 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "reelengine"; runpy.run_module("reelengine", run_name="__main__")', pythonPath, 'reference-scan', ...files], { encoding: 'utf8' })
       const done = JSON.parse(out.trim().split('\n').pop()!)
       return done.result.files.map((f: { timelines?: number }) => f.timelines)
     }

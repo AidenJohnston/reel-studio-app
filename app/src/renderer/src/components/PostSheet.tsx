@@ -1,6 +1,6 @@
 // "Post to YouTube" from Share: connect the channel once, fill in the title and who can see it, then watch it go. The upload runs in main (main/posting.ts), so leaving the reel page doesn't stop it; opening this
 // sheet again for the same version picks the progress up. Which screen shows when is shared/posting.ts sheetState.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import type { PendingPost, PostPrivacy, PostProgress } from '../../../shared/api'
 import {
   CONNECT_NOTES,
@@ -108,7 +108,8 @@ export function PostSheet({
 
   const state = sheetState(status, { progress, pending, connecting, editing })
   const sending = state === 'sending' || state === 'retrying'
-  useEffect(() => onBusy?.(sending), [sending, onBusy])
+  // in the commit that shows Sending, so no key press lands between the screen and the caller knowing
+  useLayoutEffect(() => onBusy?.(sending), [sending, onBusy])
 
   // "Trying again in 8 seconds…" counts down between the steps main sends.
   useEffect(() => {
