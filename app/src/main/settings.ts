@@ -12,9 +12,10 @@ import type { Dismissal, RememberedRelease } from './update-machine'
 import { MODEL_ROLES, type DataSharing, type ModelChoice, type PhoneView } from '../shared/api'
 import type { TikTokSettings } from '../shared/tiktok'
 import type { InstagramSettings } from '../shared/instagram'
+import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
 
 // Instagram and TikTok (insights-data): off until a developer configures them, with no UI yet
-export interface Settings extends InstagramSettings, TikTokSettings {
+export interface Settings extends InstagramSettings, TikTokSettings, UpdateKeyState {
   checkUpdates: boolean
   updateCheckedAt: number | null
   updateLatest: RememberedRelease | null
@@ -71,7 +72,8 @@ const DEFAULTS: Settings = {
   // Connection and publishing stay opt-in until the broker and Meta app have been configured.
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],
   // Posting requires explicit developer configuration and approval of the requested scopes.
-  tiktokEnabled: false, tiktokClientKey: null, tiktokBrokerUrl: null, tiktokAudited: false, tiktokDirectPost: false
+  tiktokEnabled: false, tiktokClientKey: null, tiktokBrokerUrl: null, tiktokAudited: false, tiktokDirectPost: false,
+  ...UPDATE_KEY_DEFAULTS
 }
 
 /** Whether this launch shows the first run. `againAtLaunch`: firstRunAgain as it was when the app started, so a

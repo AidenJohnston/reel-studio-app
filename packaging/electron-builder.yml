@@ -39,6 +39,11 @@ directories:
 # A prerelease version (the nightly's x.y.z-nightly.YYYYMMDD.N) must still write latest.yml: installed copies read
 # that name from the release folder (main/updater-electron.ts), and a nightly.yml would never be found.
 detectUpdateChannel: false
+# reelstudio://updates?key=… from the "Turn on automatic updates" page hands the app the buyer's download key
+# (app/src/main/update-key.ts). macOS reads this from Info.plist; on Windows the app also registers it at start.
+protocols:
+  - name: Reel Studio
+    schemes: [reelstudio]
 
 # The per-user install folder is %LOCALAPPDATA%\Programs\<package.json "name">; the real app's name is the
 # scoped "@reelstudio/app", which would give an ugly folder. Only the packaged copy of package.json changes.

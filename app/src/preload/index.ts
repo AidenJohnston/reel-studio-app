@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, VendorInfo } from '../shared/api'
+import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -213,6 +213,12 @@ const api: ReelApi = {
     busy: () => call('update:busy'),
     dismiss: (version) => call('update:dismiss', version),
     setEnabled: (on) => call('update:setEnabled', on)
+  },
+  updateKey: {
+    status: () => call('updateKey:status'),
+    paste: () => call('updateKey:paste'),
+    clear: () => call('updateKey:clear'),
+    onChange: (cb) => on<UpdateKeyStatus>('updateKey:change', cb)
   }
 }
 
