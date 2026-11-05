@@ -52,7 +52,9 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
   Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
 * Never commit your own videos, songs or other media, and never commit API keys or tokens.
-* New dependencies need a license that fits the MIT app and, if they ship in the installer, an entry in
+* New dependencies need a permissive license (MIT, BSD, Apache-2.0, ISC or similar) and, if they ship in the installer, an entry in
   `THIRD_PARTY.md`.
 
-By contributing you agree your work is released under the [MIT License](LICENSE).
+Reel Studio is released under the [GNU AGPL v3 only](LICENSE); see [NOTICE.md](NOTICE.md). Before your first pull request
+can merge, you sign the [Contributor License Agreement](CLA.md) once. A check on the pull request walks you through it.
+Copyleft or non-commercial material needs written approval first (section 4 of the agreement).

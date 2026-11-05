@@ -19,13 +19,13 @@
 #   fonts/             packaging/fonts (OFL TTFs + licenses)  -> REELENGINE_FONTS
 #   templates/         HTML templates
 #   test-animation/    app/resources/test-animation
-#   licenses/          LICENSE + THIRD_PARTY.md + texts/ (GPL-3.0, LGPL-3.0, LGPL-2.1, YuNet MIT: packaging/licenses)
+#   licenses/          LICENSE + NOTICE.md + THIRD_PARTY.md + texts/ (GPL-3.0, LGPL-3.0, LGPL-2.1, YuNet MIT: packaging/licenses)
 # All of it is extraResources (a plain folder next to app.asar), NOT inside asar, so executables, dylibs and
 # .so/.pyd files stay real files that can be spawned, signed and notarized.
 
 appId: dev.reelstudio.app
 productName: Reel Studio
-copyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+copyright: "Copyright (c) 2026 Curate Technologies LLC and contributors (AGPL-3.0-only)"
 asar: true
 npmRebuild: false
 nodeGypRebuild: false
@@ -89,6 +89,7 @@ extraResources:
     to: licenses
     filter:
       - LICENSE
+      - NOTICE.md
       - THIRD_PARTY.md
   # GPL/LGPL texts the shipped binaries require (fetch_runtime.py refuses to build without them)
   - from: ${env.RS_REPO_ROOT}/packaging/licenses
@@ -129,7 +130,7 @@ mac:
   identity: null
   extendInfo:
     ElectronSquirrelPreventDowngrades: true
-    NSHumanReadableCopyright: "Copyright (c) 2026 Reel Studio contributors (MIT License)"
+    NSHumanReadableCopyright: "Copyright (c) 2026 Curate Technologies LLC and contributors (AGPL-3.0-only)"
     NSDocumentsFolderUsageDescription: "Reel Studio keeps your videos, music and pictures in a Reel Studio folder in Documents."
 
 # The same window as packaging/dmg/make-dmg.sh, which builds the dmg we hand out (sign-mac.sh). build-mac.sh renders
