@@ -190,10 +190,20 @@ describe('ChatGPT (your Codex app) as the AI editor', () => {
     const args = p.args(['-i', 'a.png'], 'out.txt');
     expect(args.slice(0, 8)).toEqual(['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '--ignore-user-config']);
     expect(args).toContain('-o');
+    // without --json stdout carries no usage events, and every run would record usage as "not reported"
+    expect(args).toContain('--json');
     expect(args.at(-1)).toBe('-');
     expect((p as any).resolveBin()).toBe('C:\\Users\\Pat Q\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe');
     // never Node + codex.js: inside Electron, process.execPath is Reel Studio itself
     expect((new CodexCliProvider({}) as any).resolveBin()).toBe('codex');
+  });
+
+  it('a chosen reasoning level goes to codex as a config override, and none goes without one', () => {
+    const p = new CodexCliProvider({ model: 'gpt-6.1-sol', effort: 'high' });
+    const args = p.args([], 'out.txt');
+    expect(args.slice(args.indexOf('-c'), args.indexOf('-c') + 2)).toEqual(['-c', 'model_reasoning_effort="high"']);
+    expect(args.at(-1)).toBe('-');
+    expect(new CodexCliProvider({}).args([], 'out.txt')).not.toContain('-c');
   });
 });
 

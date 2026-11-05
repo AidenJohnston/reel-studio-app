@@ -98,6 +98,16 @@ it('fails if the checker can change the project, sees the editor conversation, o
   expect((req.messages[0] as { content: { type: string }[] }).content.filter((c) => c.type === 'image')).toHaveLength(2);
 });
 
+it("fails if the checker's model calls are left out of the version's ai-run.json, or counted twice", async () => {
+  const { dir, host } = await noteProject();
+  const roles = new Roles([[CUT, call('render_draft')], [call('finish', { summary_for_user: 'I cut the flour part.' })]], [pass()]);
+  const ran = (requestedModel: string) => ({ provider: 'claude-cli' as const, requestedModel, reportedModels: 'not reported' as const, cliVersion: 'not reported' as const, effort: null, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
+  const model: ModelProvider = { id: 'fake', supportsImages: true, complete: async (req) => ({ ...await roles.complete(req), provenance: ran(req.jsonOnly ? 'checker' : 'editor') }) };
+  const r = await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, NOTE, () => {}, undefined, CHECK);
+  const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', `v${r.version}`, 'ai-run.json'), 'utf8'));
+  expect(record.calls.map((c: { requestedModel: string }) => c.requestedModel)).toEqual(['editor', 'editor', 'checker']);
+});
+
 it('fails if a cut that only moves where a take or the video ends, or a removed zoom, gets no frame', async () => {
   const before = [{ from: 'w0', to: 'w8' }, { from: 'w16', to: 'w56' }];
   const { dir, host, mid } = await noteProject({ cut: { keep: before, gapCap: 0.25, minSaving: 0.08 }, zooms: [{ anchor: { from: 'w35', to: 'w41' }, scale: 1.1 }] });

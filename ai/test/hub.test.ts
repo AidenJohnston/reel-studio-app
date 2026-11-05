@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { AIError, createAI, loadProject, saveProject, type SecretStore } from '../src';
 import { mapConnectionError } from '../src/providers/connection';
 import { ClaudeCliProvider } from '../src/providers/cli';
+import { hubProvider } from '../src/providers/hub';
 import { FakeHub } from './fakeHub';
 import { fakeCli } from './fake-cli';
 import { FakeHost, ScriptedModel, call, firstVersion, makeProject, tinyPng, tmpDir } from './helpers';
@@ -65,6 +66,15 @@ describe('CLIProxyAPI as the editor', () => {
     // a stage left on Auto uses the hub connection's own model
     await ai.testConnection(undefined, 'planner');
     expect(hub.requests.at(-1)).toMatchObject({ path: '/v1/messages', model: 'claude-sonnet-5-5' });
+  });
+
+  it('records what the hub answered with: the model it named and the reasoning level asked for, with no CLI version', async () => {
+    const p = hubProvider({ origin: hub.origin, key: hub.key, choice: 'gpt-6.1-sol(medium)', supportsImages: false });
+    const r = await p.complete({ system: '', messages: [{ role: 'user', content: [{ type: 'text', text: 'Say OK.' }] }], tools: [], jsonOnly: true });
+    expect(r.provenance).toEqual({
+      provider: 'custom', requestedModel: 'gpt-6.1-sol(medium)', reportedModels: ['gpt-6.1-sol(medium)'], cliVersion: 'not reported', effort: 'medium',
+      usage: { input: 9, output: 1, cacheRead: 'not reported', cacheWrite: 'not reported' },
+    });
   });
 
   it('lists models with the hub’s names, levels and order, without hidden ones; ids when it has no catalog', async () => {

@@ -556,9 +556,9 @@ export function createAI(opts: CreateAIOptions) {
     switch (st.id) {
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: s.claudeModel, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
-        const bin = (await localClaude()).bin;
+        const { bin, version } = await localClaude();
         // one live `claude` process per run (providers/cli.ts): ~2.5 s less per model turn
-        const make = (m: string | undefined) => new ClaudeCliProvider({ ...claudeCodeChoice(m), session: true, env: env(), ...(bin ? { bin } : {}) });
+        const make = (m: string | undefined) => new ClaudeCliProvider({ ...claudeCodeChoice(m), session: true, env: env(), ...(bin ? { bin } : {}), ...(version ? { cliVersion: version } : {}) });
         return chosen ? withStageFallback(make(chosen), () => make(s.cliModel), role, chosen, fell) : make(s.cliModel);
       }
       case 'custom':
@@ -580,8 +580,8 @@ export function createAI(opts: CreateAIOptions) {
           return offered && !models ? withStageFallback(p, () => connectionProvider(c, key, false, null), role, chosen!, fell) : p;
         });
       case 'codex-cli': {
-        const bin = (await localCodex()).bin;
-        const make = (m: string | undefined) => new CodexCliProvider({ ...codexChoice(m), env: env(), ...(bin ? { bin } : {}) });
+        const { bin, version } = await localCodex();
+        const make = (m: string | undefined) => new CodexCliProvider({ ...codexChoice(m), env: env(), ...(bin ? { bin } : {}), ...(version ? { cliVersion: version } : {}) });
         return chosen ? withStageFallback(make(chosen), () => make(s.codexModel), role, chosen, fell) : make(s.codexModel);
       }
       case 'replay': return new ReplayProvider((s.replayFixture ?? process.env.REELSTUDIO_REPLAY)!);
@@ -640,11 +640,11 @@ export function createAI(opts: CreateAIOptions) {
     const { model, effort } = splitModel(choice);
     return { model, ...(effort && (CLAUDE_CODE_EFFORTS as readonly string[]).includes(effort) ? { effort } : {}) };
   }
-  /** A stored choice for the Codex app: -m and its reasoning level as a config override. */
-  function codexChoice(choice: string | undefined): { model?: string; extraArgs?: string[] } {
+  /** A stored choice for the Codex app: -m and its reasoning level (a config override, providers/cli.ts). */
+  function codexChoice(choice: string | undefined): { model?: string; effort?: string } {
     if (!choice) return {};
     const { model, effort } = splitModel(choice);
-    return { model, ...(effort ? { extraArgs: ['-c', `model_reasoning_effort="${effort}"`] } : {}) };
+    return { model, ...(effort ? { effort } : {}) };
   }
 
   async function saveConnection(input: ConnectionInput): Promise<SaveConnectionResult> {
@@ -717,8 +717,8 @@ export function createAI(opts: CreateAIOptions) {
     switch (st.id) {
       case 'claude': return new AnthropicProvider({ apiKey: (await claudeKey())!, model: SMALL_CLAUDE_MODEL, maxTokens: 2000, baseURL: opts.anthropicBaseURL, fetch: opts.fetch });
       case 'claude-cli': {
-        const bin = (await localClaude()).bin;
-        return new ClaudeCliProvider({ model: 'haiku', env: env(), ...(bin ? { bin } : {}) });
+        const { bin, version } = await localClaude();
+        return new ClaudeCliProvider({ model: 'haiku', env: env(), ...(bin ? { bin } : {}), ...(version ? { cliVersion: version } : {}) });
       }
       default: return null;
     }

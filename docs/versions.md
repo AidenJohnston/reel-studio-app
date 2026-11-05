@@ -8,7 +8,7 @@ never a pile of preview-only folders an AI run left behind.
 ```
 <project>/versions/
   v1/            a VERSION: export.mp4 + cover.png + verify.json + render.json + project.json + version.json (+ notes.md,
-                 receipts.json, title.json, check.json), and the reports that describe this video: captions.json,
+                 receipts.json, title.json, check.json, ai-run.json), and the reports that describe this video: captions.json,
                  layers.json, mix.json
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
@@ -108,6 +108,11 @@ words for that change claim, so "Cut 2 words" for words brought back, or "Cut a 
   `versions/preview/draft.mp4` and offer to try the final render again. It is absent after a note
   that made no version (it changed nothing, or its edit ended where it started).
 - `versions/vN/notes.md` (written by the ai package) is the note text for that chip.
+- `versions/vN/ai-run.json` (written by the ai package when a model call was answered) records each call of the
+  run that made the version, the checker's included: provider, the model asked for, the model and CLI version the
+  provider reported, effort, and tokens including cache reads and writes. A value the provider did not report is the
+  string `"not reported"`, never 0. A note writes it into its new version folder before `project.json` points at
+  that version; a note that made no version writes none. It is measurement only; the app does not show it.
 - **A change asked at a moment** (the button under the player) names the words on screen. The app
   reads them from the version being watched: `duration` and `segmentsDetail` (source, src_start,
   src_end, out_start per kept span) in `versions/vN/render.json`, or `versions/preview/render_draft.json`

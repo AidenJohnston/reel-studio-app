@@ -136,13 +136,13 @@ export function loopbackOrigin(origin: string): boolean {
 /** The provider for one model on the hub. `choice` may carry a reasoning level (`claude-opus-5-5(high)`), which goes
  * to the hub as it is. */
 export function hubProvider(o: { origin: string; key: string; choice: string; supportsImages: boolean; fetch?: typeof fetch; check?: boolean }): ModelProvider {
-  const { model } = splitModel(o.choice);
+  const { model, effort } = splitModel(o.choice);
   const quick = o.check ? { timeoutMs: 30_000 } : {};
   if (familyOf(model) === 'claude') {
     // no SDK retries: the hub already moves to another account, and the agent loop retries what is worth retrying
-    return new AnthropicProvider({ id: 'custom', apiKey: o.key, model: o.choice, baseURL: o.origin, fetch: noRedirectFetch(o.fetch), supportsImages: o.supportsImages, maxRetries: 0, ...(o.check ? { maxTokens: 64, ...quick } : {}) });
+    return new AnthropicProvider({ id: 'custom', apiKey: o.key, model: o.choice, effort, baseURL: o.origin, fetch: noRedirectFetch(o.fetch), supportsImages: o.supportsImages, maxRetries: 0, ...(o.check ? { maxTokens: 64, ...quick } : {}) });
   }
-  return new OpenAICompatibleProvider({ baseURL: `${o.origin}/v1`, apiKey: o.key, model: o.choice, fetch: o.fetch, supportsImages: o.supportsImages, ...quick });
+  return new OpenAICompatibleProvider({ baseURL: `${o.origin}/v1`, apiKey: o.key, model: o.choice, effort, fetch: o.fetch, supportsImages: o.supportsImages, ...quick });
 }
 
 // ---- accounts and limits, through the management API (needs its management key)

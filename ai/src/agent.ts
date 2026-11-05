@@ -240,6 +240,7 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
         tokens += effectiveTokens(res.usage, o.system.length + JSON.stringify(sent).length);
         wait.end();
         if (res.timing) o.onEvent({ type: 'trace', text: turnTrace(res.timing) });
+        if (res.provenance) o.ctx.state.aiCalls.push(res.provenance);
         break;
       } catch (e: any) {
         wait.end();

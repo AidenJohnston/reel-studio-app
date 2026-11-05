@@ -17,6 +17,7 @@ import {
 } from './project';
 import { extractJson } from './providers/cli';
 import { CheckRecord, CheckRound, MAX_REPAIRS, askChecker, askHarnessChecker, checkerEvidence, repairTask, saveCheck, unresolvedLine } from './checker';
+import { writeAiRun } from './provenance';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { refuseIfOpen } from './owner';
@@ -330,6 +331,8 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
       // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
       // and say plainly why. No other paid service is used.
       const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
+      // the calls the AI answered before it stopped were still spent
+      if (simple.version !== undefined) await writeAiRun(projectDir, simple.version, ctx.state.aiCalls);
       return { ...simple, notice: e.toJSON() };
     }
     if (e instanceof AIError) {
@@ -343,6 +346,7 @@ First edit (stopped early).
 
 ${summary}
 `);
+      await writeAiRun(projectDir, version, ctx.state.aiCalls);
       return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
     }
     throw e;
@@ -354,6 +358,7 @@ ${summary}
   const summary = withStyleEcho(honestSummary(run, ctx.state)
     ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
   await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
+  await writeAiRun(projectDir, version, ctx.state.aiCalls);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
   return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
 }
@@ -395,18 +400,20 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
   const system = deps.prompts.render('checker');
   const rounds: CheckRound[] = [];
   let tokens = 0; let repairs = 0; let summary: string | null = null;
-  const count = (p: ModelProvider): ModelProvider => ({
+  // `record`: the checker's calls go into the version's ai-run.json here; a repair's go there through its agent run
+  const count = (p: ModelProvider, record = false): ModelProvider => ({
     id: p.id, model: p.model, supportsImages: p.supportsImages,
     dispose: () => p.dispose?.(),
     complete: async (req) => {
       const res = await p.complete(req);
       tokens += effectiveTokens(res.usage, req.system.length + JSON.stringify(req.messages).length);
+      if (record && res.provenance) ctx.state.aiCalls.push(res.provenance);
       return res;
     },
   });
   // the review asks the "Checks each edit" model (Settings › Editor › Models); a repair is an edit, so the editor's
   const counted = count(provider);
-  const checking = count(deps.checker ?? provider);
+  const checking = count(deps.checker ?? provider, true);
   const done = (verdict: CheckRecord['verdict'], error?: string) => ({
     record: { verdict, repairs, rounds, ...(error ? { error } : {}), cost: { tokens, seconds: Math.round((Date.now() - started) / 100) / 10 } },
     summary,
@@ -763,6 +770,8 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
       const vdir = versionDir(ctx.projectDir, version);
       await writeFileAtomic(path.join(vdir, PROJECT_FILE), bytes);
       await fsp.writeFile(path.join(vdir, 'notes.md'), `# v${version}\n\nNote: ${n.label}\n\n${n.summary}\n`);
+      // what the note's model calls ran on (none for the fast path or a merge); a failed write loses only the record
+      await writeAiRun(ctx.projectDir, version, ctx.state.aiCalls);
     }
     await writeFileAtomic(live, bytes, undefined, async () => {
       const stuck = deps.stuck?.();
