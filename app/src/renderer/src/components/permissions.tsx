@@ -87,6 +87,8 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
     if (n === 'unverified') onOn()
     // onOn is the step's setter; the answer is what changes
   }, [n])
+  // `asking` after Allow came back: macOS did not answer within 20 s (main/index.ts showTestNotification), so its
+  // question may have gone unseen; Ask again shows another
   const asking = busy || n === 'asking'
   const settings = (kind: 'secondary' | 'tertiary') => (
     <Button size="small" kind={kind} onClick={() => void reel.perm.openSettings('notifications')} data-testid="perm-notify-settings">
@@ -100,7 +102,11 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
           Your Mac is asking, in the top-right corner of the screen
         </span>,
         'busy',
-        null
+        busy ? null : (
+          <Button kind="tertiary" size="small" onClick={() => void allow()} data-testid="perm-notify-again">
+            Ask again
+          </Button>
+        )
       ]
     : n === 'unverified'
       ? [

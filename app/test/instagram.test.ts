@@ -228,6 +228,13 @@ describe('Instagram fixture HTTP', () => {
     expect(session).not.toHaveProperty('picture')
     w.done()
   })
+  // fails if a picture with no Content-Length is read into memory whole before its size is checked
+  it('drops a picture over the size limit while reading it', async () => {
+    const w = await world(); w.oauth(SCOPES, { ...PROFILE, profile_picture_url: 'https://cdn.example/p/123.jpg' })
+    w.steps.push({ url: 'https://cdn.example/p/123.jpg', respond: async () => new Response(new Uint8Array(600 * 1024), { headers: { 'content-type': 'image/jpeg' } }) })
+    expect(await w.service.connect()).not.toHaveProperty('picture')
+    w.done()
+  })
   it('refuses a connection missing insights permission', async () => {
     const w = await world(); w.oauth(SCOPES.slice(0, 2))
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_PERMISSION' })

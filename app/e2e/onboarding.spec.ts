@@ -159,6 +159,23 @@ test('on a Mac, a no from macOS opens System Settings, and Not now goes on to th
   }
 })
 
+// fails if a question macOS never answered leaves the row with nothing to press
+test('on a Mac, a question macOS has not answered can be asked again', async () => {
+  const d = fresh('mac-pending')
+  const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin,notifications=pending' })
+  try {
+    await page.getByTestId('get-started').click()
+    await page.getByTestId('demo-skip').click()
+    await page.getByTestId('demo-next').click()
+    await page.getByTestId('perm-notify-allow').click()
+    await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'asking')
+    await expect(page.getByTestId('perm-notify-again')).toBeVisible()
+    await expect(page.getByTestId('mac-skip')).toBeEnabled()
+  } finally {
+    await app.close()
+  }
+})
+
 test('fails if "Checking Claude…" has no Cancel, Cancel leaves Claude connected, or the sound switch is not remembered', async () => {
   const d = fresh('claude')
   const { app, page } = await launch({ ...d.env, REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_CLAUDE_CHECK: '20000' })

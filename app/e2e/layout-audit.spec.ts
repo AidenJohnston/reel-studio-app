@@ -714,7 +714,7 @@ async function openPicker(page: Page): Promise<void> {
   if ((await page.getByTestId('stage-models-toggle').getAttribute('aria-expanded')) !== 'true') await page.getByTestId('stage-models-toggle').click()
   if (!(await page.getByTestId('model-picker').isVisible())) await page.getByTestId('model-checker').click()
 }
-const toEditorStep = async ({ page }: Ctx) => {
+const toEditor = async ({ page }: Ctx) => {
   if (await page.getByTestId('get-started').isVisible()) await page.getByTestId('get-started').click()
   if (await page.getByTestId('demo-skip').isVisible()) await page.getByTestId('demo-skip').click()
   if (await page.getByTestId('demo-next').isVisible()) await toEditorStep(page)
@@ -724,7 +724,7 @@ SCREENS.push({
   profile: 'fresh',
   before: hubEnv,
   states: [
-    { id: 'first-run-hub-found', enter: toEditorStep, ready: hubReady },
+    { id: 'first-run-hub-found', enter: toEditor, ready: hubReady },
     {
       id: 'first-run-hub-key-needed',
       enter: async ({ page }) => {

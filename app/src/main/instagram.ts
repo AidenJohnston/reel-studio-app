@@ -222,9 +222,20 @@ export class InstagramService {
         await res.body?.cancel()
         return undefined
       }
-      const bytes = Buffer.from(await res.arrayBuffer())
-      if (!bytes.length || bytes.length > PICTURE_MAX_BYTES) return undefined
-      return `data:${type};base64,${bytes.toString('base64')}`
+      // read with a running limit: a missing or wrong Content-Length must not let a big body into memory
+      const chunks: Uint8Array[] = []
+      let size = 0
+      const reader = res.body?.getReader()
+      for (let r = await reader?.read(); r && !r.done; r = await reader!.read()) {
+        size += r.value.byteLength
+        if (size > PICTURE_MAX_BYTES) {
+          await reader!.cancel()
+          return undefined
+        }
+        chunks.push(r.value)
+      }
+      if (!size) return undefined
+      return `data:${type};base64,${Buffer.concat(chunks).toString('base64')}`
     } catch {
       signal.throwIfAborted()
       return undefined
