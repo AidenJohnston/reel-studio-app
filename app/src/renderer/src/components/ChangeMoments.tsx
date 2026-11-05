@@ -18,12 +18,12 @@ const NONE: Moment[] = []
 
 /**
  * Which of a run's pictures the phone shows. It follows the newest, one step per DWELL_MS; a dot the person picks
- * holds there until the next run (a newer edit) arrives.
+ * holds there until the next run (a newer edit) arrives. `job` names the job, whose runs count from 1.
  */
-export function useChangeMoment(moments: Moment[] | null): { list: Moment[]; index: number; pick: (i: number) => void } {
+export function useChangeMoment(moments: Moment[] | null, job: string | null): { list: Moment[]; index: number; pick: (i: number) => void } {
   const list = moments ?? NONE
-  const run = list[0]?.run ?? null
-  const [at, setAt] = useState<{ run: number | null; index: number; picked: boolean }>({ run, index: 0, picked: false })
+  const run = list.length ? `${job}:${list[0].run}` : null
+  const [at, setAt] = useState<{ run: string | null; index: number; picked: boolean }>({ run, index: 0, picked: false })
   const shownAt = useRef(0)
   const cur = at.run === run ? at : { run, index: 0, picked: false }
   useEffect(() => {

@@ -232,14 +232,17 @@ export function createJobManager(
             const r = e
             if (!r.draft) finals.add(r.version)
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
-            pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
+            // after the pictures made before it: a draft takes their place on screen, so none may land after it
+            const inOrder = moments.then(() => video)
+            pending.push(inOrder.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
           else if (e.type === 'trace') log(`[job ${kind}] ${e.text}`)
           else if (e.type === 'moment') {
             if (!slug || !toMoment) return
             const m = e
             moments = moments.then(() => toMoment(slug, m).catch(() => null)).then((url) => {
-              if (!url || !open) return
+              // Stop pressed: the engine may still write a line before it is gone, and the job has not ended yet
+              if (!url || !open || abort.signal.aborted) return
               send(m.kind === 'still'
                 ? { jobId: id, slug, type: 'moment', kind: 'still', t: m.t, image: url, run: m.run }
                 : { jobId: id, slug, type: 'moment', kind: 'window', from: m.from, to: m.to, video: url, run: m.run })

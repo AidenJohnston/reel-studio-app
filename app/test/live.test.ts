@@ -161,29 +161,46 @@ describe('job manager (main): the contract on the wire', () => {
     expect(await readAppState(slug)).toMatchObject({ chat: [], lastError: null })
   })
 
-  it('sends moments in the order they were made, and none after the job was stopped', async () => {
+  it('fails if pictures of a change arrive out of order, after their draft, or after Stop', async () => {
     setupPaths()
     const slug = 'stopped'
     mkdirSync(projectDir(slug), { recursive: true })
     const events: JobEvent[] = []
     let releaseSlow = (): void => undefined
     const slow = new Promise<void>((r) => (releaseSlow = r))
-    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, undefined, undefined, undefined, undefined, async (_s, e) => {
-      if (e.kind === 'still' && e.t === 1) await slow                   // the first copy is the slow one
-      if (e.kind === 'still' && e.t === 3) await new Promise((r) => setTimeout(r, 20))   // done only after the stop
-      return `reel-media://f/${e.kind}-${e.kind === 'still' ? e.t : e.from}`
-    })
-    jobs.start(slug, 'note', async (emit) => {
+    const jobs = createJobManager(
+      (e) => events.push(e),
+      () => undefined,
+      undefined,
+      async (_s, e) => `reel-media://f/draft-${e.version}`,
+      undefined,
+      undefined,
+      undefined,
+      async (_s, e) => {
+        if (e.kind === 'still' && e.t === 1) await slow // the first copy is the slow one
+        return `reel-media://f/${e.kind}-${e.kind === 'still' ? e.t : e.from}`
+      }
+    )
+    let stopped = (): void => undefined
+    const id = jobs.start(slug, 'note', async (emit, signal) => {
       emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png', run: 1 })
       emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png', run: 1 })
+      emit({ type: 'render', version: 0, draft: true, file: 'draft.mp4' })
       setTimeout(releaseSlow, 30)
-      await new Promise((r) => setTimeout(r, 60))
-      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png', run: 1 })
+      await new Promise<void>((r) => (stopped = r))
+      // Stop was pressed: the engine writes one more line before it is gone, then the job ends
+      await new Promise<void>((r) => signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true }))
+      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png', run: 2 })
+      await new Promise((r) => setTimeout(r, 20))
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     })
+    await new Promise((r) => setTimeout(r, 60))
+    jobs.cancel(id)
+    stopped()
     await jobs.forSlug(slug)?.done
     await new Promise((r) => setTimeout(r, 30))
-    expect(events.filter((e) => e.type === 'moment').map((e) => e.type === 'moment' && e.kind === 'still' && e.t)).toEqual([1, 2])
+    const shown = events.filter((e) => e.type === 'moment' || e.type === 'render')
+    expect(shown.map((e) => (e.type === 'moment' ? (e.kind === 'still' ? e.t : e.from) : 'draft'))).toEqual([1, 2, 'draft'])
     expect(events.at(-1)).toMatchObject({ type: 'cancelled' })
   })
 

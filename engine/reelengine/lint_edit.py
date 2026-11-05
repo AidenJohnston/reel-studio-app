@@ -113,14 +113,15 @@ def lint_edit(edit: dict, timeline: LintTimeline) -> dict:
     return {'fixed': fixed, 'issues': issues}
 
 
-def prepare(ctx, tl):
-    """Resolve media outside the pure checker; return the same plans the render uses."""
-    from . import broll, captions, music, sfx, zoom
-    ctx._lint_snap_requests = []
-    ctx._lint_events = [s.out_start for s in tl.segments[1:]]
+def events(ctx, tl) -> list:
+    """The edit's visible events (cuts, framing changes, b-roll and zoom starts, sound effects on words) that a
+    beat-snapped accent must not cross (music.accent_time). moments.py reads them too, so its plan of each card
+    snaps as the render's does."""
+    from . import broll
+    out = [s.out_start for s in tl.segments[1:]]
     # Seeded framing is visible even without an authored zoom.
     if ctx.variation:
-        ctx._lint_events.extend(row['t0'] for row in ctx.variation['framing'][1:])
+        out.extend(row['t0'] for row in ctx.variation['framing'][1:])
     for group in ('broll', 'zooms'):
         for item in ctx.project.get(group, []):
             anchor = item.get('anchor') or {}
@@ -128,11 +129,19 @@ def prepare(ctx, tl):
                 start = ctx.word_out_time(anchor['from'])
                 if group == 'broll':
                     start = max(0.0, start - float(item.get('leadIn', broll.LEAD)))
-                ctx._lint_events.append(start)
+                out.append(start)
     for item in ctx.project.get('sfx', []):
         at = item['at']
         if 'word' in at and ctx.is_kept(at['word']):
-            ctx._lint_events.append(round(ctx.word_out_time(at['word']) * ctx.fmt['fps']) / ctx.fmt['fps'])
+            out.append(round(ctx.word_out_time(at['word']) * ctx.fmt['fps']) / ctx.fmt['fps'])
+    return out
+
+
+def prepare(ctx, tl):
+    """Resolve media outside the pure checker; return the same plans the render uses."""
+    from . import broll, captions, music, sfx, zoom
+    ctx._lint_snap_requests = []
+    ctx._lint_events = events(ctx, tl)
     visuals = broll.plan_windows(ctx)
     zooms = zoom.build_zooms(ctx)
     sfx.plan(ctx)

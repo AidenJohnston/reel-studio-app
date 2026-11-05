@@ -13,8 +13,9 @@ Extra test hooks (env):
   FAKE_ENGINE_SLOW_RENDER=<seconds>   a full-quality render waits this long first, in small steps (Stop tests)
   FAKE_ENGINE_SLOW_COPY=<seconds>   init waits this long after copying a file, before project.json is written: a Stop
                                     then leaves a partial copy, as a real copy of a large video does (Stop tests)
-  FAKE_ENGINE_MOMENTS_GAP=<seconds>  `moments` waits this long before each still and the window (default 0.3), so a
-                                     test can see them arrive one by one and press Stop between them
+  FAKE_ENGINE_MOMENTS_GAP=<seconds>  `moments` waits this long before each still, the window and the draft (default 0.3)
+  FAKE_ENGINE_MOMENTS_GATE=<folder>  instead, `moments` draws its n-th thing (three stills, the window, the draft) only
+                                     once <folder>/go-<n> exists, so a test decides when each arrives
 """
 from __future__ import annotations
 
@@ -368,6 +369,15 @@ def cmd_moments(args: list[str]) -> dict:
     src = data["sources"][0]
     dur = min(float(src["duration"]), 20.0)
     gap = float(os.environ.get("FAKE_ENGINE_MOMENTS_GAP", "0.3") or 0)
+    gate = os.environ.get("FAKE_ENGINE_MOMENTS_GATE")
+
+    def wait(n: int) -> None:
+        if not gate:
+            time.sleep(gap)
+            return
+        while not (Path(gate) / f"go-{n}").exists():
+            time.sleep(0.05)
+
     vdir = proj / out if out else proj / "versions" / "preview"
     stills_dir = vdir / "moments"
     stills_dir.mkdir(parents=True, exist_ok=True)
@@ -376,14 +386,14 @@ def cmd_moments(args: list[str]) -> dict:
     times = [t for t in (0.8, 2.4, 4.0) if t < dur]
     stills = []
     for n, t in enumerate(times):
-        time.sleep(gap)
+        wait(n)
         png = stills_dir / f"still_{round(t * 30):06d}.png"
         subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(proj / src["path"]), "-frames:v", "1",
                         "-vf", vf, str(png)], check=True, capture_output=True)
         stills.append({"t": t, "file": str(png)})
         emit({"event": "progress", "stage": "moments", "pct": 100 * (n + 1) / (len(times) + 2), "message": "Here's your change",
               "ready": {"kind": "still", "t": t, "file": str(png)}})
-    time.sleep(gap)
+    wait(len(times))
     a, b = max(0.0, times[0] - 1.0), min(dur, max(0.0, times[0] - 1.0) + 2.0)
     win = vdir / f"window_{a:.1f}-{b:.1f}.mp4"
     subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", str(proj / src["path"]),
@@ -391,6 +401,7 @@ def cmd_moments(args: list[str]) -> dict:
                    check=True, capture_output=True)
     emit({"event": "progress", "stage": "moments", "pct": 100 * (len(times) + 1) / (len(times) + 2), "message": "Here's your change",
           "ready": {"kind": "window", "from": a, "to": b, "file": str(win)}})
+    wait(len(times) + 1)
     draft = cmd_render(["--project", str(proj), "--draft", *(["--project-file", file] if file else []), *(["--out", out] if out else [])])
     return {"intervals": [[0.0, dur]], "stills": stills, "window": {"from": a, "to": b, "file": str(win)}, "draft": draft}
 

@@ -279,6 +279,16 @@ def test_edits_nobody_sees_change_nothing_on_screen(tmp_path):
     assert found["intervals"] == [] and found["changes"] == []
 
 
+def test_with_beat_accents_the_music_redraws_the_whole_video(tmp_path):
+    # cards land on the song's beats (music.accent_time), so a new song or start moves them
+    old = base_project()
+    old["broll"] = [card("b1", "w10", "w11")]
+    old["beatAccents"] = True
+    new = copy.deepcopy(old)
+    new["music"].update(enabled=True, track="Library/Music/song.mp3", startAt=4.0)
+    assert [c["kind"] for c in diff(tmp_path, old, new)["changes"]] == ["all"]
+
+
 def test_a_field_it_does_not_know_redraws_the_whole_video(tmp_path):
     old = base_project()
     new = dict(copy.deepcopy(old), look={"grade": "warm"})

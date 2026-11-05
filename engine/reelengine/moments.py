@@ -21,7 +21,9 @@ What changes the picture, on the new project's output clock:
   - a caption line whose words, text or timing changed (a correction, a hidden line): where it was and
     is (lines fade in and out, so a retimed line changes over its whole span); a line that meets a
     changed b-roll item: its whole span, since a split view moves every line it mostly covers.
-Music, the post text, notes, the title and the cover are not in the picture and change nothing.
+Music, sound effects, the post text, notes, the title and the cover are not in the picture and change nothing,
+except that when cards land on the song's beats (a cut style with beat accents) the music and the sound effects
+can move them: then a change to either redraws the whole video.
 
 Both projects are compared as a preview draws them (Drawn): with a cut style's seeded choices applied
 and at the preview's frame rate. Each span is taken from the renderer's own timing (cut.build_timeline, broll.plan_windows,
@@ -129,18 +131,28 @@ class Drawn:
 
 
 def _plan_ctx(d: Drawn, project_dir: Path, root: Optional[Path]) -> RenderCtx:
-    """A RenderCtx carrying only what the timing functions read (no ffmpeg, no output)."""
+    """A RenderCtx carrying only what the timing functions read (no ffmpeg, no output), with the events a
+    beat-snapped card must not cross, as lint_edit.prepare gives the render."""
+    from .lint_edit import events
     tl = d.tl
-    return RenderCtx(project=d.project, variation=d.variation, project_dir=Path(project_dir), root=root,
+    ctx = RenderCtx(project=d.project, variation=d.variation, project_dir=Path(project_dir), root=root,
                      out_timeline=tl.segments, word_out_time=tl.word_out_time, is_kept=tl.is_kept,
                      duration=tl.duration, fmt={**d.project["format"], "fps": d.fps},
                      draft=True, work=Path(project_dir) / "work", ffmpeg="", ffprobe="",
                      progress=lambda *_: None, word_out_end=tl.word_out_end, words=tl.words,
                      src_to_out=tl.src_to_out)
+    ctx._lint_events = events(ctx, tl)
+    return ctx
 
 
 def _key(obj) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False)
+
+
+def _beats(proj: dict) -> bool:
+    """Whether cards land on the song's beats (music.accent_beats): then the music and the sound effects move them."""
+    style = proj.get("cutStyle")
+    return proj.get("beatAccents") is True or (isinstance(style, dict) and style.get("preset") == "hyper")
 
 
 def _whole_picture(old: dict, new: dict) -> Optional[str]:
@@ -148,6 +160,11 @@ def _whole_picture(old: dict, new: dict) -> Optional[str]:
     for k in WHOLE:
         if _key(old.get(k)) != _key(new.get(k)):
             return f"{k} changed"
+    if _beats(old) or _beats(new):
+        # the beats come from the song and its start, and a sound effect on a word is an event a snap may not cross
+        for k in ("music", "sfx"):
+            if _key(old.get(k)) != _key(new.get(k)):
+                return f"{k} changed, and cards land on the beat"
     oc, nc = old.get("captions") or {}, new.get("captions") or {}
     for k in CAPTION_LOOK:
         if _key(oc.get(k)) != _key(nc.get(k)):
@@ -449,7 +466,8 @@ def run(project_dir: Path, root: Optional[Path] = None, draft: bool = True, proj
     # taken first: a change saved after this is newer than the base it becomes, so it is drawn next time
     now = snapshot(project_dir, project_file)
     base = read_base(project_dir, project_file)
-    words = projmod.load_transcript(project_dir, now["project"])["words"]
+    # the words the render times the cut with: a cut made only of clips may have no transcript (project.timeline)
+    words = projmod.timeline(project_dir, now["project"]).words
     found = changed(base and base["project"], now["project"], words, project_dir, root,
                     (base or {}).get("animations"), now["animations"])
     times = pick_stills(found)

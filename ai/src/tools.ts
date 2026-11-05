@@ -152,12 +152,22 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   if (typeof problem === 'string') throw new ToolInputError(problem);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
-  await ctx.moments?.beforeSave();     // the base is written, and no run reads the edit mid-save
-  await saveProject(ctx.projectDir, p, ctx.note?.file);
+  await writeEdit(ctx, [field], () => saveProject(ctx.projectDir, p, ctx.note?.file));
   ctx.state.changed.add(field);
   (ctx.state.dirty ??= new Set()).add(field);
+}
+
+/**
+ * Every write of the edit goes through here. A moments run still drawing is stopped first, since it reads the edit at
+ * each stage and would draw part of one edit and part of the next; then the write is counted, as one that changes
+ * the picture unless every field it names is outside it. A draft is reused only for the count it was drawn at
+ * (doRender), so a write that skipped this would let render_draft hand back a draft of an older edit.
+ */
+export async function writeEdit(ctx: ToolContext, fields: string[], write: () => Promise<unknown>): Promise<void> {
+  await ctx.moments?.beforeSave();
+  await write();
   ctx.state.edits++;
-  if (!NOT_VISIBLE.has(field)) ctx.state.pictureEdit = ctx.state.edits;
+  if (fields.some((f) => !NOT_VISIBLE.has(f))) ctx.state.pictureEdit = ctx.state.edits;
 }
 
 /** Stage a merge inside the caller's existing note transaction; never publish from a tool. */
@@ -169,7 +179,7 @@ export async function stageMerge(ctx: ToolContext, live: Project, request: Merge
   const transcript = await loadTranscript(ctx.projectDir, live);
   const result = mergeVersions({ ours, theirs, take: request.take }, transcript);
   if (ctx.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
-  await saveProject(ctx.projectDir, result.edit, ctx.note.file);
+  await writeEdit(ctx, Object.keys(MERGE_FIELDS), () => saveProject(ctx.projectDir, result.edit, ctx.note!.file));
   ctx.note.parent = request.ours;
   ctx.note.mergeParent = request.theirs;
   ctx.note.mergeReport = result.report;
@@ -1449,9 +1459,10 @@ const tools: ToolDef[] = [
       }
       const extra = ['--variable', args.variable];
       if (choice != null) extra.push('--value', JSON.stringify(choice));
-      const result = await engine(ctx, 'make-variant', extra, 'Making a trial');
-      ctx.project = await loadProject(ctx.projectDir);
       const field = args.variable === 'caption' ? 'post' : args.variable;
+      let result: any;
+      await writeEdit(ctx, [field], async () => { result = await engine(ctx, 'make-variant', extra, 'Making a trial'); });
+      ctx.project = await loadProject(ctx.projectDir);
       ctx.state.changed.add(field);
       (ctx.state.dirty ??= new Set()).add(field);
       return { content: { ok: true, trial: result.trial }, summary: `Made a ${args.variable} trial` };

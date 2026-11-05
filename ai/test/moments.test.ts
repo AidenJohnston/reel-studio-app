@@ -22,6 +22,10 @@ class MomentsHost extends FakeHost {
     const dir = args[args.indexOf('--project') + 1];
     const edit = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
     const p = JSON.parse(await fsp.readFile(edit, 'utf8'));
+    if (command === 'make-variant') {           // the engine writes the edit itself (variation.py)
+      await fsp.writeFile(edit, JSON.stringify({ ...p, exposure: 1.08 }, null, 2));
+      return { trial: { variable: 'brightness' } };
+    }
     if (command !== 'moments') {
       const name = command === 'render' ? (args.includes('--draft') ? 'draft' : 'final') : command;
       this.log.push(`start ${name}`);
@@ -137,6 +141,18 @@ describe('changed moments first', () => {
     await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
     expect(host.runs[0].signal?.aborted).toBe(true);
     expect(host.log).toEqual(['start moments 0', 'end moments 0', 'start final', 'end final']);
+  });
+
+  it('fails if an edit the engine writes (a trial) is not drawn, so render_draft hands back the draft before it', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_caption_style', { size: 90 })] },
+      async () => { await until(() => host.log.includes('end moments 0')); return { toolCalls: [call('make_variant', { variable: 'brightness', brightness: 8 })] }; },
+      { toolCalls: [call('render_draft')] },
+      { toolCalls: [call('finish', { summary_for_user: 'Brighter.' })] },
+    ]);
+    await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
+    expect(host.runs.length).toBe(2);
   });
 
   it('a reply that only changes the music starts no run', async () => {

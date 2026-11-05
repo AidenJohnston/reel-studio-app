@@ -71,7 +71,7 @@ export class Moments {
       // the same preview folder and version record as the task's own drafts, so render_draft can use this one
       const args = [...projectArgs(this.task, 'moments'), ...previewArgs(this.task), ...versionArgs(this.task)];
       const r = await this.task.host.runEngine('moments', args, (p) => {
-        if (p.ready && !stop.aborted) this.task.emit(momentEvent(p.ready, n));
+        if (p.ready && !signal.aborted) this.task.emit(momentEvent(p.ready, n));
       }, signal);
       if (stop.aborted) return;
       if (r?.draft?.file) this.task.emit({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) });

@@ -345,10 +345,11 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const changePreview = job?.preview && d?.versions.length ? job.preview.video : null
   // A running job's pictures of the change it is making, before its draft (none while comparing or in Edit it
   // myself, where a preview waits too).
-  const change = useChangeMoment(job && !compare && !drawer ? job.moments : null)
-  const changeRun = change.index >= 0 ? change.list[0].run : null
+  const change = useChangeMoment(job && !compare && !drawer ? job.moments : null, job?.jobId ?? null)
+  // a job's runs count from 1, so a run is named by its job too
+  const changeRun = change.index >= 0 && job ? `${job.jobId}:${change.list[0].run}` : null
   // the run the person played the reel over: its pictures step aside for the reel until a newer run's arrive
-  const [playedOver, setPlayedOver] = useState<number | null>(null)
+  const [playedOver, setPlayedOver] = useState<string | null>(null)
   const runNow = useRef(changeRun)
   runNow.current = changeRun
   useEffect(() => {
@@ -710,7 +711,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const jobPreview = compare || drawer ? null : changePreview
   const src = planned ? null : hasVersions ? (jobPreview ?? version?.video ?? null) : (firstLook ?? d.sourceVideo)
   // before its draft, the pictures of the change take the phone (ChangeMoments.tsx), until the person plays the reel
-  const changing = change.index >= 0 && playedOver !== change.list[0].run
+  const changing = changeRun !== null && playedOver !== changeRun
   const tag = changing ? null : jobPreview ? 'Quick preview' : !hasVersions && !planned && src ? (firstLook ? 'First look' : 'Original') : null
   // the strip counts only notes still waiting: one that stopped or failed is its own line in the log, with Send again
   const held = d.queueHeld ? waitingRows(d.queue, entries).length : 0

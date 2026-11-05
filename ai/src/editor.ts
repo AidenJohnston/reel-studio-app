@@ -7,7 +7,7 @@ import { Harness, loopHarness } from './harness';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
 import { StyleStore, StyleProposal, captionCaseProposal } from './style';
-import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES } from './tools';
+import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, writeEdit } from './tools';
 import { planFastNote } from './fastnote';
 import { LEDGER } from './assets';
 import { Moments } from './moments';
@@ -219,7 +219,7 @@ async function refreshCredits(ctx: ToolContext): Promise<void> {
   const caption = await captionWithCredits(ctx.projectDir, p, p.post.caption);
   if (caption === p.post.caption) return;
   p.post = { ...p.post, caption };
-  await saveProject(ctx.projectDir, p, ctx.note?.file);
+  await writeEdit(ctx, ['post'], () => saveProject(ctx.projectDir, p, ctx.note?.file));
   ctx.project = p;
 }
 
@@ -329,50 +329,55 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
     ctx.renderGate = firstLook(deps, ctx, onEvent);
   }
   watchMoments(deps, ctx);
-  const task = `${deps.prompts.render(p.sources.length > 1 ? 'multiClipEdit' : 'firstEdit')}\n\nVideo title: ${p.title}${plannedScript(p)}${proposedReel(p)}`;
-  let run: Pick<RunAgentResult, 'finished' | 'stoppedBy'> = { finished: null, stoppedBy: null };
+  // a run still drawing writes the edit's preview files: it is gone before the task ends, however it ends
   try {
-    run = await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
-  } catch (e: any) {
-    await ctx.moments?.stop();
-    await ctx.renderGate?.catch(() => undefined);   // never two renders at once
-    if (signal?.aborted || e?.code === 'cancelled') { await removeStyleRules(deps, ctx.state); throw e; }
-    if (e instanceof AIError && !ctx.state.renders.length && deps.pauseOn?.(e)) { await removeStyleRules(deps, ctx.state); throw e; }
-    if (e instanceof AIError && !ctx.state.renders.length) {
-      await removeStyleRules(deps, ctx.state);
-      // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
-      // and say plainly why. No other paid service is used.
-      const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
-      // the calls the AI answered before it stopped were still spent
-      if (simple.version !== undefined) await writeAiRun(projectDir, simple.version, ctx.state.aiCalls);
-      return { ...simple, notice: e.toJSON() };
-    }
-    if (e instanceof AIError) {
-      // Stopped after a preview existed: keep what was done and say so.
-      onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
-      const version = await finalize(deps, ctx, onEvent);
-      const summary = withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state);
-      await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
+    const task = `${deps.prompts.render(p.sources.length > 1 ? 'multiClipEdit' : 'firstEdit')}\n\nVideo title: ${p.title}${plannedScript(p)}${proposedReel(p)}`;
+    let run: Pick<RunAgentResult, 'finished' | 'stoppedBy'> = { finished: null, stoppedBy: null };
+    try {
+      run = await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+    } catch (e: any) {
+      await ctx.moments?.stop();   // before the simple version or the final render below
+      await ctx.renderGate?.catch(() => undefined);   // never two renders at once
+      if (signal?.aborted || e?.code === 'cancelled') { await removeStyleRules(deps, ctx.state); throw e; }
+      if (e instanceof AIError && !ctx.state.renders.length && deps.pauseOn?.(e)) { await removeStyleRules(deps, ctx.state); throw e; }
+      if (e instanceof AIError && !ctx.state.renders.length) {
+        await removeStyleRules(deps, ctx.state);
+        // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
+        // and say plainly why. No other paid service is used.
+        const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);
+        // the calls the AI answered before it stopped were still spent
+        if (simple.version !== undefined) await writeAiRun(projectDir, simple.version, ctx.state.aiCalls);
+        return { ...simple, notice: e.toJSON() };
+      }
+      if (e instanceof AIError) {
+        // Stopped after a preview existed: keep what was done and say so.
+        onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
+        const version = await finalize(deps, ctx, onEvent);
+        const summary = withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state);
+        await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
 
 First edit (stopped early).
 
 ${summary}
 `);
-      await writeAiRun(projectDir, version, ctx.state.aiCalls);
-      return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
+        await writeAiRun(projectDir, version, ctx.state.aiCalls);
+        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
+      }
+      throw e;
     }
-    throw e;
+    await proofreadCaptions(deps, deps.checker ?? provider, ctx, onEvent, signal);
+    await wrapUpPost(deps, deps.writer ?? provider, ctx, onEvent, signal);
+    onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
+    const version = await finalize(deps, ctx, onEvent);
+    const summary = withStyleEcho(honestSummary(run, ctx.state)
+      ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
+    await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
+    await writeAiRun(projectDir, version, ctx.state.aiCalls);
+    onEvent({ type: 'status', message: 'Done', pct: 100 });
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+  } finally {
+    await ctx.moments?.stop();
   }
-  await proofreadCaptions(deps, deps.checker ?? provider, ctx, onEvent, signal);
-  await wrapUpPost(deps, deps.writer ?? provider, ctx, onEvent, signal);
-  onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
-  const version = await finalize(deps, ctx, onEvent);
-  const summary = withStyleEcho(honestSummary(run, ctx.state)
-    ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
-  await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
-  await writeAiRun(projectDir, version, ctx.state.aiCalls);
-  onEvent({ type: 'status', message: 'Done', pct: 100 });
-  return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
 }
 
 // ---------------------------------------------------------------- apply a note
