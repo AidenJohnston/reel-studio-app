@@ -23,15 +23,17 @@ HLG_SRC = {"id": "s1", "width": 2160, "height": 3840, "rotation": 0, "fps": 30, 
 
 
 def _graph(tmp_path, monkeypatch, *, draft: bool, platform: str, fast: bool = True, encoder: str = "libx264",
-           hdr: tuple = (True,)):
-    """build_video_cmd for a 2 s segment of each take, 4K, HLG where `hdr` says so: (command, graph text)."""
+           hdr: tuple = (True,), scale_cuda: bool = False):
+    """build_video_cmd for a 2 s segment of each take, 4K, HLG where `hdr` says so: (command, graph text).
+    `scale_cuda`: an FFmpeg built with it (the shipped one isn't)."""
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.delenv("REELENGINE_HWACCEL", raising=False)
     monkeypatch.setattr(tools, "_CACHE", {"hwaccels": {"cuda", "dxva2", "qsv", "d3d11va", "videotoolbox"},
                                           "version": (7, 1)})
     # what hwaccel() picks on a machine whose NVENC works / on a Mac
-    monkeypatch.setattr(tools, "hwaccel", lambda: "cuda" if platform == "win32" else "videotoolbox")
-    monkeypatch.setattr(tools, "filters", lambda: {"zscale", "tonemap", "subtitles"})   # no scale_cuda, as shipped
+    monkeypatch.setattr(tools, "hwaccel", lambda: "cuda" if platform == "win32" else None)
+    names = {"zscale", "tonemap", "subtitles"} | ({"scale_cuda"} if scale_cuda else set())
+    monkeypatch.setattr(tools, "filters", lambda: names)
     # project: beta's build_video_cmd reads its exposure (cut-vocab's brightness trial)
     ctx = SimpleNamespace(ffmpeg="ffmpeg", fmt={"width": 1080, "height": 1920, "fps": 30}, draft=draft, project={})
     w, h = (540, 960) if draft else (1080, 1920)
@@ -70,6 +72,19 @@ def test_nvenc_never_gets_the_decoders_d3d11_device(tmp_path, monkeypatch):
         h = max(j for j in range(i) if cmd[j] == "-hwaccel")
         assert cmd[h:h + 4] == ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
         assert cmd[i - 1] == "-i" and "-i" not in cmd[h:i - 1]           # ...as options of this input
+
+
+def test_an_ffmpeg_with_scale_cuda_keeps_sdr_on_cuda(tmp_path, monkeypatch):
+    """With NVDEC and scale_cuda, SDR takes decode and scale on the GPU and HDR takes, which
+    gpu_reframe can't tonemap, still decode with D3D11VA."""
+    cmd, graph = _graph(tmp_path, monkeypatch, draft=True, platform="win32", encoder="h264_nvenc",
+                        hdr=(False, True), scale_cuda=True)
+    sdr, hdr = cmd.index("take-s1.mov"), cmd.index("take-s2.mov")
+    assert cmd[cmd.index("-hwaccel") + 1:cmd.index("-hwaccel") + 4] == ["cuda", "-hwaccel_output_format", "cuda"]
+    assert cmd.index("-hwaccel") < sdr
+    h = max(j for j in range(hdr) if cmd[j] == "-hwaccel")
+    assert h > sdr and cmd[h:h + 4] == ["-hwaccel", "d3d11va", "-hwaccel_device", "dec"]
+    assert "scale_cuda" in graph
 
 
 def test_retry_is_the_draft_from_before(tmp_path, monkeypatch):
