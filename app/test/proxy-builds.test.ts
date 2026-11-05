@@ -65,6 +65,7 @@ describe('preview copy builds', () => {
     const builds = createProxyBuilds(makeRunner, () => undefined)
     builds.start('a', '/p/a')
     const first = builds.stop('a')
+    await new Promise((r) => setTimeout(r, 10)) // the cancelled call has settled; the engine exits at 50 ms
     builds.start('a', '/p/a') // still shutting down: no second engine
     await builds.stop('a') // a second remove waits for the same exit
     expect(calls[0].exited).toBe(true)
