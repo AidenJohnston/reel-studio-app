@@ -88,6 +88,10 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   const instagramLine = useInstagramLine()
   const [legal, setLegal] = useState<LegalDoc | null>(null)
   const [savingExports, setSavingExports] = useState(false)
+  // The switch moves when pressed (#146), goes back if saving fails, and stays disabled until the save is done:
+  // while a video job keeps main busy, its answer can take a while.
+  const [fasterExports, setFasterExports] = useState(info.fasterExports)
+  useEffect(() => setFasterExports(info.fasterExports), [info.fasterExports])
   // Double-check each edit (main/settings.ts checkEdits): off by default, read once like the other switches
   const [checkEdits, setCheckEdits] = useState<boolean | null>(null)
   const [savingChecks, setSavingChecks] = useState(false)
@@ -106,10 +110,13 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
     }
   }
   const toggleExports = async () => {
+    const on = !fasterExports
+    setFasterExports(on)
     setSavingExports(true)
     try {
-      onInfo(await reel.app.setFasterExports(!info.fasterExports))
+      onInfo(await reel.app.setFasterExports(on))
     } catch (e) {
+      setFasterExports(!on)
       notify(userMessage(e), 'error')
     } finally {
       setSavingExports(false)
@@ -256,8 +263,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <ListeningModel shared={sharedModel} />
               <SettingRow
                 id="faster-exports"
-                line="Makes new reels at 30 fps, which is quicker. Leave off to keep the smoother motion of 60 fps video."
-                control={<Switch on={info.fasterExports} disabled={savingExports} labelledBy="set-faster-exports" onToggle={() => void toggleExports()} testid="faster-exports" />}
+                line="New reels finish at 30 fps, which is quicker, with less smooth motion. Leave it off to keep smooth phone footage smooth. Previews while you edit are quick either way."
+                control={<Switch on={fasterExports} disabled={savingExports} labelledBy="set-faster-exports" onToggle={() => void toggleExports()} testid="faster-exports" />}
               />
               {alerts === undefined || alerts === 'unsupported' ? (
                 <SettingRow id="notifications" line="This computer doesn't show notifications from Reel Studio." />
