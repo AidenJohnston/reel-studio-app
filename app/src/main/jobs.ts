@@ -330,15 +330,19 @@ export function createJobManager(
 
   /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
    * on it, and no job can start on it until `fn` is done. */
-  async function hold<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+  async function hold<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
     refuseIfBusy(slug)
     held.add(slug)
     try {
       const owner = await enter(slug)
       try {
-        return await fn()
+        return await fn(owner.token)
+      } catch (e) {
+        const err = e as { code?: string; userMessage?: string }
+        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
+        throw e
       } finally {
-        await owner.release()
+        if (!stuck.has(slug)) await owner.release()
       }
     } finally {
       held.delete(slug)

@@ -5,8 +5,8 @@
 // converts it if needed and writes it into <project>/work/assets/attach-* with a sidecar. Nothing the page
 // says about an attachment is trusted later: a note's refs are re-read from this project's own sidecars.
 //
-// While a job runs on the reel it is the project's only writer (docs/versions.md). A file attached then
-// goes to the reel's staging folder (paths.ts noteStagingDir), laid out like the project, and is copied
+// New attachments go to the reel's staging folder (paths.ts noteStagingDir), even while idle, so a
+// job starting during attachment preparation cannot race a project write. Each file is copied
 // into the project by its own note's job (unstage).
 //
 // No `electron` import here (dialog and clipboard are passed in), so the logic is unit-tested in Node.
@@ -100,7 +100,10 @@ const filesOf = (a: NoteAttachment): string[] => [a.asset, ...(a.thumb ? [a.thum
 export async function unstage(dir: string, staging: string, list: NoteAttachment[]): Promise<void> {
   const moved: NoteAttachment[] = []
   for (const a of list) {
-    if (await readSidecar(dir, a.asset)) continue
+    if (await readSidecar(dir, a.asset)) {
+      moved.push(a)
+      continue
+    }
     if (!(await readSidecar(staging, a.asset))) throw MISSING
     for (const rel of filesOf(a)) {
       const to = join(dir, ...rel.split('/'))
@@ -180,6 +183,7 @@ export async function attachPaths(deps: AttachDeps, dir: string, files: { path: 
       out.attached.push(withThumbUrl(dir, a))
     } catch (e) {
       deps.log(`[attach] ${name}: ${(e as { code?: string })?.code ?? ''} ${(e as { message?: string })?.message ?? ''}`)
+      if ((e as { code?: string })?.code === 'ENGINE_STUCK') throw e
       out.errors.push(friendly(e))
     }
   }
@@ -226,9 +230,10 @@ export interface AttachIpcDeps extends AttachDeps {
   handle: Handle
   projectDir: (slug: string) => string
   readProject: (slug: string) => Promise<ProjectJson>
-  /** Nothing else may write to this video now (jobs.ts isClosed). After `refuse`, that means a job runs
-   * on it: files go to staging, and a file in the project stays. */
-  busy: (slug: string) => boolean
+  /** Serialize attachment admission and removal with note admission and unstage. */
+  queue: <T>(slug: string, fn: () => Promise<T>, removing?: unknown) => Promise<T>
+  /** Project-file removal uses the same reservation as jobs and manual edits. */
+  reserve: <T>(slug: string, fn: (owner: string) => Promise<T>) => Promise<T>
   /** Throws while the video is kept closed, in the job lane's words (jobs.ts refuseIfKeptClosed): part
    * of its engine may still be writing, so not even its staging folder takes a file. */
   refuse: (slug: string) => void
@@ -239,8 +244,6 @@ export interface AttachIpcDeps extends AttachDeps {
   choose: (filters: { name: string; extensions: string[] }[]) => Promise<string[] | null>
 }
 
-const BUSY = { code: 'BUSY', userMessage: 'This reel is still being worked on. Wait a moment, or press Stop.' }
-
 /** The video and its folder; refused while it is kept closed. */
 function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: string } {
   if (typeof slug !== 'string' || !slug) throw { code: 'NOT_FOUND', userMessage: 'That reel could not be found.' }
@@ -250,44 +253,55 @@ function projectOf(deps: AttachIpcDeps, slug: unknown): { slug: string; dir: str
   return { slug, dir }
 }
 
-/** Where a new attachment goes: the project, or its staging folder while a job runs on it. */
+/** New attachments always enter staging, so a job cannot start between admission and the attachment write. */
 async function attachDir(deps: AttachIpcDeps, name: unknown): Promise<string> {
   const { slug, dir } = projectOf(deps, name)
-  if (!deps.busy(slug)) return dir
   const staging = deps.stagingDir(slug)
   await fs.mkdir(join(staging, 'work', 'assets'), { recursive: true })
-  // engine attach refuses a folder without one; nothing reads it
-  if (!existsSync(join(staging, 'project.json'))) await fs.writeFile(join(staging, 'project.json'), '{}\n')
+  // The engine requires project.json; startup uses the source path to identify orphaned staging.
+  await fs.writeFile(join(staging, 'project.json'), JSON.stringify({ sourceProject: dir }) + '\n')
   return staging
 }
 
 export function registerAttachmentIpc(deps: AttachIpcDeps): void {
   deps.handle('notes:attachFiles', async (_e, slug: unknown, paths: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
-    return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && !!p) : []
+      return attachPaths(deps, dir, list.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:attachData', async (_e, slug: unknown, file: unknown) => {
-    const dir = await attachDir(deps, slug)
-    return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      return attachBytes(deps, dir, (file ?? {}) as { name?: unknown; mime?: unknown; bytes?: unknown })
+    })
   })
   deps.handle('notes:attachClipboard', async (_e, slug: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const img = await deps.clipboardImage().catch(() => null)
-    if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
-    return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const img = await deps.clipboardImage().catch(() => null)
+      if (!img?.bytes?.length) return { attached: [], errors: [MSG.noPicture] }
+      return attachBytes(deps, dir, { name: 'Pasted picture', mime: img.mime, bytes: img.bytes })
+    })
   })
   deps.handle('notes:chooseAttachment', async (_e, slug: unknown) => {
-    const dir = await attachDir(deps, slug)
-    const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
-    if (!picked?.length) return { attached: [], errors: [] }
-    return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    return deps.queue(slug as string, async () => {
+      const dir = await attachDir(deps, slug)
+      const picked = await deps.choose([{ name: 'Pictures and videos', extensions: ATTACH_EXTS }])
+      if (!picked?.length) return { attached: [], errors: [] }
+      return attachPaths(deps, dir, picked.map((p) => ({ path: p })))
+    })
   })
   deps.handle('notes:removeAttachment', async (_e, name: unknown, asset: unknown) => {
-    const { slug, dir } = projectOf(deps, name)
-    const staging = deps.stagingDir(slug)
-    if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
-    if (deps.busy(slug)) throw BUSY
-    await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+    const slug = typeof name === 'string' ? name : String(name)
+    return deps.queue(slug, async () => {
+      const { dir } = projectOf(deps, name)
+      const staging = deps.stagingDir(slug)
+      if (await readSidecar(staging, asset)) return removeAttachment(staging, asset, null)
+      await deps.reserve(slug, async () => {
+        await removeAttachment(dir, asset, await deps.readProject(slug).catch(() => null))
+      })
+    }, asset)
   })
 }

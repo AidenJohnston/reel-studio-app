@@ -336,12 +336,18 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
   const dir = projectDir(slug)
   const startedAt = Date.now()
   let editor: string | null = null
-  return jobs.start(
+  let prepared!: () => void
+  const preparing = new Promise<void>((resolve) => { prepared = resolve })
+  const jobId = jobs.start(
     slug,
     'note',
     async (emit, signal, { id: jobId, owner }) => {
-      editor = editorName(await ai.active().catch(() => null))
-      await unstage(dir, noteStagingDir(dir), attachments)
+      try {
+        editor = editorName(await ai.active().catch(() => null))
+        await unstage(dir, noteStagingDir(dir), attachments)
+      } finally {
+        prepared()
+      }
       const before = (await readProject(slug)).version ?? 0
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
@@ -364,6 +370,9 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
     },
     { note: text || attachments.map((f) => f.name).join(', '), record, pause: (e) => pauseFor(e, pauseCtx('note', startedAt, editor)) }
   )
+  // pump holds the queue lane until preparation ends, including jobs that fail before their callback.
+  await Promise.race([preparing, jobs.get(jobId)!.done])
+  return jobId
 }
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
@@ -946,7 +955,8 @@ function registerIpc(): void {
     log,
     projectDir,
     readProject,
-    busy: (slug) => jobs.isClosed(slug),
+    queue: (slug, fn, removing) => noteQueue.run(slug, fn, removing),
+    reserve: (slug, fn) => jobs.hold(slug, fn),
     refuse: (slug) => jobs.refuseIfKeptClosed(slug),
     stagingDir: (slug) => noteStagingDir(projectDir(slug)),
     clipboardImage: async () => {
@@ -1198,48 +1208,60 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) => {
-    const dir = projectDir(slug)
-    // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
-    // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
-    const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
-    // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
-    const typed = at !== undefined ? typedMoment(typedText) : null
-    let note = typed ? typed.rest : typedText
-    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-    if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
-    let moment: NoteMoment | undefined
-    if (at !== undefined) {
-      let asked: NoteMoment
-      try {
-        asked = parseMoment(at)
-      } catch (e) {
-        throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
+    // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
+    // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
+    const admit = async () => {
+      const dir = projectDir(slug)
+      // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
+      // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
+      const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
+      // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
+      const typed = at !== undefined ? typedMoment(typedText) : null
+      let note = typed ? typed.rest : typedText
+      if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+      if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
+      let moment: NoteMoment | undefined
+      if (at !== undefined) {
+        let asked: NoteMoment
+        try {
+          asked = parseMoment(at)
+        } catch (e) {
+          throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
+        }
+        if (typed) asked = { ...asked, at: typed.at }
+        // checked against the render it names, the one the pop-up read its words from; its words and
+        // quote come from that render, never from the page
+        const c = checkMoment(asked, await readTimeline(slug, asked.version))
+        if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
+        moment = c.moment
+        if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
+        // A setting global by nature ("smaller captions") goes without its moment, which would hide it
+        // from applyNote's no-model fast path; the chat shows the words as typed.
+        if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
       }
-      if (typed) asked = { ...asked, at: typed.at }
-      // checked against the render it names, the one the pop-up read its words from; its words and
-      // quote come from that render, never from the page
-      const c = checkMoment(asked, await readTimeline(slug, asked.version))
-      if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
-      moment = c.moment
-      if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
-      // A setting global by nature ("smaller captions") goes without its moment, which would hide it
-      // from applyNote's no-model fast path; the chat shows the words as typed.
-      if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
+      return { typedText, note, files, base, moment }
     }
     const active = await ai.active().catch(() => null)
     if (!active || !active.connected || active.id === 'none') {
       // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
       // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      // the chat keeps the words as typed, "At 0:05:" included
-      await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
-      const reply = noAiReply(note, files.length)
-      await addChat(slug, 'editor', reply.text, undefined, reply.actions)
-      return { jobId: null }
+      return noteQueue.run(slug, async () => {
+        const { typedText, note, files, moment } = await admit()
+        // the chat keeps the words as typed, "At 0:05:" included
+        await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
+        const reply = noAiReply(note, files.length)
+        await addChat(slug, 'editor', reply.text, undefined, reply.actions)
+        return { jobId: null }
+      })
     }
-    // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote)
-    const seen = Number.isInteger(onVersion) ? Number(onVersion) : (moment?.version ?? (await readProject(slug)).version ?? 0)
-    // a branched note (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
-    return noteQueue.send(slug, { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}) }, seen)
+    const given = Number.isInteger(onVersion) ? Number(onVersion) : undefined
+    return noteQueue.send(slug, async () => {
+      const { note, files, base, moment } = await admit()
+      // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote). A branched note
+      // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
+      const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
+      return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
+    }, given ?? 0)
   })
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
