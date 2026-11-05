@@ -69,7 +69,7 @@ test('fails if a change\'s stills, its moment and its draft do not reach the pho
     // the moment plays: its frames advance
     const moving = page.getByTestId('change-window')
     const t0 = await moving.evaluate((v: HTMLVideoElement) => v.currentTime)
-    await expect.poll(() => moving.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && !v.paused && v.currentTime !== t0)).toBe(true)
+    await expect.poll(() => moving.evaluate((v: HTMLVideoElement, at: number) => v.readyState >= 2 && !v.paused && v.currentTime !== at, t0)).toBe(true)
     await shot(page, 'change-3-moment-playing')
     g.go(4)
     await expect(page.getByTestId('change-preview')).toHaveText('Quick preview', { timeout: 60_000 })
@@ -99,7 +99,6 @@ test('fails if a picked picture does not hold, or Stop leaves the change on the 
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await passFirstRun(page)
     await makeReel(page, media.video)
-    const v1 = await page.getByTestId('player').getAttribute('src')
     await note(page, 'make the subtitles bigger')
     const label = page.getByTestId('change-tag').locator('.change-label')
     g.go(0)
@@ -116,7 +115,7 @@ test('fails if a picked picture does not hold, or Stop leaves the change on the 
     await expect(page.getByTestId('change-picture')).toHaveCount(0)
     await expect(page.getByTestId('change-tag')).toHaveCount(0)
     await expect(page.getByTestId('note-progress')).toHaveCount(0)
-    await expect(page.getByTestId('player')).toHaveAttribute('src', v1!)
+    await expect(page.getByTestId('player')).toHaveAttribute('src', /v1.export\.mp4/)
     const seen = await record(page)
     // the window would come next: the engine was stopped before it was let through
     g.go(3)

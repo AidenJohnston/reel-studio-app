@@ -360,7 +360,8 @@ def cmd_render(args: list[str]) -> dict:
 def cmd_moments(args: list[str]) -> dict:
     """The real `moments` (reelengine/moments.py) works out which seconds an edit changed. This one takes any run as a
     change at fixed moments: three stills cut from the take, the 2 s around the first, then the draft, each announced
-    with `ready` as its file is written, in the folder a note's drafts use (--out)."""
+    with `ready` as its file is written, in the folder a note's drafts use (--out). They are drawn in grey, so a
+    screenshot tells them from the reel."""
     proj = Path(take(args, "--project"))
     file, out = take(args, "--project-file"), take(args, "--out")
     if "--mark" in args:
@@ -382,7 +383,7 @@ def cmd_moments(args: list[str]) -> dict:
     stills_dir = vdir / "moments"
     stills_dir.mkdir(parents=True, exist_ok=True)
     progress("moments", 1, "Looking at what changed")
-    vf = "scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1"
+    vf = "scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1,hue=s=0"
     times = [t for t in (0.8, 2.4, 4.0) if t < dur]
     stills = []
     for n, t in enumerate(times):
