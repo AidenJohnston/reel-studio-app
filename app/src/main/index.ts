@@ -640,7 +640,9 @@ function registerIpc(): void {
       await running.done
     }
     await proxies.stop(slug)
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
+    // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+    // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+    await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   })
 
   handle('jobs:cancel', (_e, id: string) => jobs.cancel(id))

@@ -247,6 +247,9 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
     if proxy:
         built = cand.run("proxy", ["--project", proj])
         copies = {"seconds": round(built.seconds, 3), "sources": built.result["sources"]}
+        bad = {sid: r for sid, r in copies["sources"].items() if r.get("status") not in ("built", "ready", "not-needed")}
+        if bad:
+            raise RuntimeError(f"{take.id}: preview copies not made, so --proxy would measure the originals: {bad}")
     for k, (step, ref) in enumerate(zip(take.session, refs)):
         write_state(proj, take.state(step))
         fps = ref["fps"]

@@ -50,7 +50,7 @@ describe('preview copy builds', () => {
     expect(calls.map((c) => c.args[1])).toEqual(['/p/a', '/p/b', '/p/a'])
   })
 
-  it('stop cancels the build and returns only after the engine has exited', async () => {
+  it('stop cancels the running build', async () => {
     const { runEngine, calls } = controlledEngine()
     const builds = createProxyBuilds(runEngine, () => undefined)
     builds.start('a', '/p/a')
