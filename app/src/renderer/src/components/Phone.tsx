@@ -330,13 +330,13 @@ function CaptionLine({ text }: { text: string }) {
 }
 
 /** Who posted the reel, on the preview: the connected Instagram account, else a label that is plainly not a handle. */
-export interface PreviewAccount {
+interface PreviewAccount {
   handle: string
   picture?: string
 }
-export const NO_ACCOUNT: PreviewAccount = { handle: 'Your account' }
+const NO_ACCOUNT: PreviewAccount = { handle: 'Your account' }
 
-export function previewAccount(s: InstagramSession | null): PreviewAccount {
+function previewAccount(s: InstagramSession | null): PreviewAccount {
   return s?.connected ? { handle: s.username, ...(s.picture ? { picture: s.picture } : {}) } : NO_ACCOUNT
 }
 
@@ -366,6 +366,8 @@ function usePreviewAccount(): PreviewAccount {
 export const InstagramChrome = memo(function InstagramChrome({ on, caption, playing }: { on: boolean; caption?: string; playing?: boolean }) {
   const text = caption?.trim()
   const account = usePreviewAccount()
+  // Instagram names the sound after its account; with none connected it is just the reel's own sound
+  const audio = account === NO_ACCOUNT ? 'Original audio' : `${account.handle} · Original audio`
   return (
     <div className={`igc${on ? '' : ' off'}`} data-playing={playing || undefined} data-testid="ig-overlay" aria-hidden>
       <StatusBar />
@@ -405,8 +407,8 @@ export const InstagramChrome = memo(function InstagramChrome({ on, caption, play
           <Icon name="music" size={12} stroke={2.5} />
           <div className="igc-tick">
             <div>
-              <span>{account.handle} · Original audio</span>
-              <span>{account.handle} · Original audio</span>
+              <span>{audio}</span>
+              <span>{audio}</span>
             </div>
           </div>
         </div>

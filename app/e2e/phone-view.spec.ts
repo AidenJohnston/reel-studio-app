@@ -88,9 +88,9 @@ test('fails if the phone stops filling its column as an iPhone 17, the view is n
 // connected account (main/instagram-ipc.ts).
 // fails if the preview shows a made-up handle or counts again, or not the connected account's handle and picture
 test('the Instagram preview shows the connected account, a plain placeholder without one, and no counts', async () => {
-  const cases: { name: string; env: Record<string, string>; handle: string; picture: number }[] = [
-    { name: 'none', env: {}, handle: 'Your account', picture: 0 },
-    { name: 'connected', env: { REELSTUDIO_TEST_INSTAGRAM: 'fixture.creator' }, handle: 'fixture.creator', picture: 1 }
+  const cases: { name: string; env: Record<string, string>; handle: string; audio: string; picture: number }[] = [
+    { name: 'none', env: {}, handle: 'Your account', audio: 'Original audio', picture: 0 },
+    { name: 'connected', env: { REELSTUDIO_TEST_INSTAGRAM: 'fixture.creator' }, handle: 'fixture.creator', audio: 'fixture.creator · Original audio', picture: 1 }
   ]
   for (const c of cases) {
     const dir = mkdtempSync(join(BASE, `ig-${c.name}-`))
@@ -100,7 +100,7 @@ test('the Instagram preview shows the connected account, a plain placeholder wit
       const ig = page.getByTestId('sample-phone').getByTestId('ig-overlay')
       await expect(ig).toBeVisible()
       await expect(ig.getByTestId('ig-handle')).toHaveText(c.handle)
-      await expect(ig.locator('.igc-audio')).toContainText(`${c.handle} · Original audio`)
+      await expect(ig.locator('.igc-tick span').first()).toHaveText(c.audio)
       await expect(ig.locator('.igc-rail')).not.toHaveText(/\d/)
       await expect(ig.locator('.igc-who img.igc-avatar')).toHaveCount(c.picture)
       await shot(page, `instagram-preview-${c.name}`)
