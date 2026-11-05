@@ -100,6 +100,7 @@ export function PostingRows() {
   return (
     <>
       <SettingRow id="youtube" line={waiting ? POST_COPY.connecting : channel} control={control}>
+        <p className="srow-more muted-sm">{SETTINGS_COPY.intro}</p>
         {note && (
           <p className="srow-more muted-sm" role="status" data-testid="posting-note">
             {note}

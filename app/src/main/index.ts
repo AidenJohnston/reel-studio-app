@@ -745,7 +745,7 @@ async function exportVersion(slug: string, n: number): Promise<ExportResult> {
   const caption = [p.post?.caption ?? '', tags].filter(Boolean).join('\n\n')
   const captionFile = join(exportsDir, `${stem} caption.txt`)
   await fs.writeFile(captionFile, caption + '\n', 'utf8')
-  return { folder: exportsDir, video, cover, captionFile, caption }
+  return { folder: exportsDir, video, cover, captionFile, caption, version: v.n }
 }
 
 // ---- IPC ----------------------------------------------------------------------------------------

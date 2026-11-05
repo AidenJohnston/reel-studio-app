@@ -255,7 +255,9 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
     first.focus()
     // aria-modal says the page behind is out of reach; without this, Tab walked into it.
     const trap = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !ref.current) return
+      // only the newest dialog moves focus: a dialog under another (the Post sheet under its Stop question) would
+      // take the same Tab a second time
+      if (e.key !== 'Tab' || !ref.current || openDialogs.at(-1) !== ref.current) return
       const items = oneStopPerRadioGroup(Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null))
       if (!items.length) {
         e.preventDefault()

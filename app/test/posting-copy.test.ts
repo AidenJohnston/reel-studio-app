@@ -186,6 +186,7 @@ describe('copy', () => {
     const settings = src('PostingSettings.tsx')
     for (const k of ['intro', 'coming', 'privacy', 'everywhereBody']) expect(settings, k).toContain(`SETTINGS_COPY.${k}`)
     expect(settings).toContain('youtubeLine(s)')
-    expect(src('PostButton.tsx')).toContain('enabled')
+    // Share's destination (the redesign has no Post button) shows only while posting is on
+    expect(src('Outs.tsx')).toContain('posting?.enabled')
   })
 })

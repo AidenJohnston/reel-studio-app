@@ -102,13 +102,25 @@ test('post to YouTube from Share: connect, a dropped connection, done, Settings'
     await expect(sheet).toHaveAttribute('data-state', 'form')
     await page.getByTestId('post-title').fill('How I got my first job')
 
-    // The connection drops after the first chunk: it waits, asks how much arrived, and carries on.
-    fake.state.faults.push({ on: 'chunk', network: true, keepBytes: 256 * 1024, times: 1 })
+    // The connection drops after the first chunk, three times: it waits (2, 4, then 8 s), asks how much arrived, and
+    // carries on.
+    fake.state.faults.push({ on: 'chunk', network: true, keepBytes: 256 * 1024, times: 3 })
     await page.getByTestId('post-submit').click()
     await expect(sheet).toHaveAttribute('data-state', /sending|retrying/)
     // while it sends, Esc doesn't close the sheet: Stop is the way out
     await page.keyboard.press('Escape')
     await expect(sheet).toBeVisible()
+    // Stop asks first, in a dialog over the sheet's: Tab moves inside that one only (components/ui.tsx Modal), and
+    // Keep going carries on
+    await expect(page.getByTestId('post-retrying')).toBeVisible({ timeout: 30_000 })
+    await page.getByTestId('post-stop').click()
+    await expect(page.getByTestId('confirm-no')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(page.getByTestId('confirm-yes')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(page.getByTestId('confirm-no')).toBeFocused()
+    await page.getByTestId('confirm-no').click()
+    await expect(page.getByTestId('confirm')).toHaveCount(0)
     await expect(sheet).toHaveAttribute('data-state', 'done', { timeout: 60_000 })
     await expect(page.getByTestId('post-done')).toContainText('Only me')
     await shot(page, 'posting-4-done')

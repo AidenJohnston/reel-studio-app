@@ -749,7 +749,7 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
     }
     const version = final?.version ?? baseVersion;
     // A preference-only note must not replace the live edit with its selected historical base.
-    const p = ctx.state.changed.size ? await loadProject(ctx.projectDir, ctx.note!.file) : withDefaults(JSON.parse(base.toString('utf8')));
+    const p = ctx.state.changed.size ? await loadProject(ctx.projectDir, ctx.note!.file) : withDefaults(JSON.parse(base.toString('utf8').replace(/^\uFEFF/, '')));
     const { styleRulesAdded, styleSuggestions } = ctx.state;
     // A note that made no version saves no `version`, and its reply carries none, so it never becomes a version's
     // tooltip (docs/schema-changes.md). One that did stores its final render's receipt.

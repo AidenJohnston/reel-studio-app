@@ -749,6 +749,8 @@ export interface StyleProposal {
 }
 
 export interface ExportResult {
+  /** The version the files are of: a preview is made into the next version first (finishedExportVersion). */
+  version: number
   folder: string
   video: string
   cover: string | null

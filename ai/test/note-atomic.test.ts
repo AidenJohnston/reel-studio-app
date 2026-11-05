@@ -213,4 +213,14 @@ describe('a project.json some Windows editors saved with a byte-order mark', () 
     ]) }).applyNote(dir, 'tighter', () => undefined);
     expect(JSON.parse(await read()).cut.gapCap).toBe(0.3);
   });
+
+  // a note that changes no picture saves from the starting bytes, not the edited copy: those keep the mark too
+  it('saves a note that changes nothing', async () => {
+    const { dir, host, settingsDir, read } = await setup();
+    await fsp.writeFile(path.join(dir, 'project.json'), '\uFEFF' + (await read()));
+    const r = await createAI({ host, settingsDir, providerOverride: new ScriptedModel([finish('It already looks right to me.')]) })
+      .applyNote(dir, 'make it pop', () => undefined, undefined, { id: 'job-bom', saveStyleRules: false });
+    expect(r).toMatchObject({ changed: [], summary: 'It already looks right to me.' });
+    expect(JSON.parse((await read()).replace(/^\uFEFF/, '')).notes.at(-1)).toMatchObject({ id: 'job-bom', reply: 'It already looks right to me.' });
+  });
 });

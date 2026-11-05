@@ -282,7 +282,8 @@ export function Outs({
           testid: 'share-youtube',
           go: () =>
             void run('youtube', async (files) => {
-              const n = version!.n
+              // the exported version: sharing the preview made it the next version, and a post is kept under that one
+              const n = files.version
               const timeline = await reel.projects.timeline(slug, n).catch(() => null)
               // the sheet takes the window's middle: Share steps aside for it, and Back returns to it
               close(false)
