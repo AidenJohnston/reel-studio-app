@@ -137,7 +137,8 @@ test('on a Mac, first run asks about notifications in a step of its own, and All
   }
 })
 
-// fails if a no from macOS leaves the row saying nothing, System Settings does not open, or Not now does not pass
+// fails if a no from macOS leaves the row saying nothing or drops focus, System Settings does not open, or Not now
+// does not pass
 test('on a Mac, a no from macOS opens System Settings, and Not now goes on to the editor', async () => {
   const d = fresh('mac-no')
   const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin,notifications=failed' })
@@ -148,6 +149,7 @@ test('on a Mac, a no from macOS opens System Settings, and Not now goes on to th
     await page.getByTestId('perm-notify-allow').click()
     await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'blocked')
     await expect(page.getByTestId('perm-notify')).toContainText('Your Mac said no')
+    await expect(page.getByTestId('perm-notify-settings')).toBeFocused() // Allow went; focus goes to what took its place
     await expect.poll(() => opened(app)).toEqual(['x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=dev.reelstudio.app'])
     await expect(page.getByTestId('mac-skip')).toHaveText('Not now')
     await shot(page, 'first-run-mac-blocked')
@@ -159,7 +161,7 @@ test('on a Mac, a no from macOS opens System Settings, and Not now goes on to th
   }
 })
 
-// fails if a question macOS never answered leaves the row with nothing to press
+// fails if a question macOS never answered leaves the row with nothing to press, or nothing focused
 test('on a Mac, a question macOS has not answered can be asked again', async () => {
   const d = fresh('mac-pending')
   const { app, page } = await launch({ ...d.env, REELSTUDIO_TEST_PERMISSIONS: 'platform=darwin,notifications=pending' })
@@ -169,7 +171,7 @@ test('on a Mac, a question macOS has not answered can be asked again', async () 
     await page.getByTestId('demo-next').click()
     await page.getByTestId('perm-notify-allow').click()
     await expect(page.getByTestId('perm-notify')).toHaveAttribute('data-state', 'asking')
-    await expect(page.getByTestId('perm-notify-again')).toBeVisible()
+    await expect(page.getByTestId('perm-notify-again')).toBeFocused()
     await expect(page.getByTestId('mac-skip')).toBeEnabled()
   } finally {
     await app.close()

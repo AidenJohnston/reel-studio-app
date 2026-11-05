@@ -789,8 +789,15 @@ export function detectLayout(opts: DetectOptions): { findings: RawFinding[]; all
     const side = Math.min(b.width, b.height)
     const [tl, tr, br, bl] = (['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'] as const).map((k) => cornerPx(s[k], side))
     const round = (c: number): boolean => c >= side / 2 - 1
-    // a pill, a circle, or one end of a split pill (the moment chip and its menu), whose other end meets its twin
-    if ((round(tl) && round(bl)) || (round(tr) && round(br))) continue
+    // a pill or a circle
+    if (round(tl) && round(bl) && round(tr) && round(br)) continue
+    // one end of a split pill (the moment chip and its menu): round at its own end, meeting its twin at the other
+    const meets = (n: Element | null, side: 'left' | 'right'): boolean => {
+      if (!n?.matches('button, [role="button"]')) return false
+      const nb = n.getBoundingClientRect()
+      return side === 'right' ? Math.abs(nb.left - b.right) <= 1.5 : Math.abs(nb.right - b.left) <= 1.5
+    }
+    if ((round(tl) && round(bl) && meets(el.nextElementSibling, 'right')) || (round(tr) && round(br) && meets(el.previousElementSibling, 'left'))) continue
     const r = Math.min(tl, tr, br, bl)
     const media = Array.from(el.querySelectorAll('img, video, canvas')).some((m) => {
       const mb = m.getBoundingClientRect()

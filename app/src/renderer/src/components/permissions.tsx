@@ -71,7 +71,12 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
   const notify = useNotify()
   const { status, apply } = usePermissionStatus()
   const [busy, setBusy] = useState(false)
+  const row = useRef<HTMLDivElement>(null)
+  // Allow goes while macOS is asked, taking the focus with it; once there is an answer, focus goes to what the row
+  // offers then (Ask again, System Settings). A yes hands it to the step's Continue instead (FirstRun.tsx).
+  const refocus = useRef(false)
   const allow = async () => {
+    refocus.current = true
     setBusy(true)
     try {
       apply(await reel.perm.setNotifications(true))
@@ -87,6 +92,11 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
     if (n === 'unverified') onOn()
     // onOn is the step's setter; the answer is what changes
   }, [n])
+  useEffect(() => {
+    if (busy || !refocus.current || n === 'unverified') return
+    refocus.current = false
+    if (document.activeElement === document.body || document.activeElement === null) row.current?.querySelector<HTMLElement>('button')?.focus()
+  }, [busy, n])
   // `asking` after Allow came back: macOS did not answer within 20 s (main/index.ts showTestNotification), so its
   // question may have gone unseen; Ask again shows another
   const asking = busy || n === 'asking'
@@ -127,7 +137,7 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
             </Button>
           ]
   return (
-    <div data-testid="perm-notify" data-state={asking ? 'asking' : (n ?? 'loading')}>
+    <div ref={row} data-testid="perm-notify" data-state={asking ? 'asking' : (n ?? 'loading')}>
       <ProviderRow mark={<Icon name="bell" size={20} stroke={1.75} />} name="Notifications" status={line} tone={tone} action={action} />
     </div>
   )

@@ -228,11 +228,19 @@ describe('Instagram fixture HTTP', () => {
     expect(session).not.toHaveProperty('picture')
     w.done()
   })
-  // fails if a picture with no Content-Length is read into memory whole before its size is checked
-  it('drops a picture over the size limit while reading it', async () => {
+  // fails if a picture with no Content-Length is read to its end before its size is checked
+  it('stops reading a picture once it is over the size limit', async () => {
     const w = await world(); w.oauth(SCOPES, { ...PROFILE, profile_picture_url: 'https://cdn.example/p/123.jpg' })
-    w.steps.push({ url: 'https://cdn.example/p/123.jpg', respond: async () => new Response(new Uint8Array(600 * 1024), { headers: { 'content-type': 'image/jpeg' } }) })
+    let pulls = 0
+    let cancelled = false
+    // highWaterMark 0: a chunk is made only when the reader asks for one, so `pulls` counts what was read
+    const body = new ReadableStream<Uint8Array>({
+      pull: (c) => (++pulls === 1 ? c.enqueue(new Uint8Array(600 * 1024)) : c.close()),
+      cancel: () => { cancelled = true }
+    }, { highWaterMark: 0 })
+    w.steps.push({ url: 'https://cdn.example/p/123.jpg', respond: async () => new Response(body, { headers: { 'content-type': 'image/jpeg' } }) })
     expect(await w.service.connect()).not.toHaveProperty('picture')
+    expect({ pulls, cancelled }).toEqual({ pulls: 1, cancelled: true })
     w.done()
   })
   it('refuses a connection missing insights permission', async () => {
