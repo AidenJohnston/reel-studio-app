@@ -13,8 +13,8 @@ export type Preview =
 
 /** A picture of what the AI just changed, made before its draft (engine `moments`). */
 export type Moment =
-  | { kind: 'still'; image: string; t: number }
-  | { kind: 'window'; video: string; from: number; to: number }
+  | { kind: 'still'; image: string; t: number; run: number }
+  | { kind: 'window'; video: string; from: number; to: number; run: number }
 
 /** How many moments the screen keeps: one run's three stills and its window. */
 export const MOMENTS_KEPT = 4
@@ -40,7 +40,7 @@ export interface LiveState {
   tools: string[]
   /** A note's reply, known before its render is done (fast notes). */
   reply: string | null
-  /** The newest pictures of what changed, oldest first, at most MOMENTS_KEPT. */
+  /** The newest run's pictures of what changed, oldest first, at most MOMENTS_KEPT; none once a draft shows the change. */
   moments: Moment[]
   /** The job ended. */
   end: { kind: 'done'; version?: number } | { kind: 'error'; code: string; userMessage: string } | { kind: 'cancelled' } | null
@@ -84,12 +84,15 @@ export function reduceLive(s: LiveState, e: JobEvent): LiveState {
       if (!e.draft || !e.video) return base
       // the AI's draft replaces the first look, never the other way round (the first look can only come first)
       if (e.firstLook) return base.preview?.kind === 'ai-draft' ? base : { ...base, preview: { kind: 'first-look', video: e.video } }
-      return { ...base, preview: { kind: 'ai-draft', video: e.video, version: e.version } }
+      // the whole draft shows the change its pictures were of: it takes their place
+      return { ...base, preview: { kind: 'ai-draft', video: e.video, version: e.version }, moments: [] }
     case 'reply':
       return { ...base, reply: e.text }
     case 'moment': {
-      const m: Moment = e.kind === 'still' ? { kind: 'still', image: e.image, t: e.t } : { kind: 'window', video: e.video, from: e.from, to: e.to }
-      return { ...base, moments: [...base.moments, m].slice(-MOMENTS_KEPT) }
+      const m: Moment = e.kind === 'still' ? { kind: 'still', image: e.image, t: e.t, run: e.run } : { kind: 'window', video: e.video, from: e.from, to: e.to, run: e.run }
+      // a run of a newer edit replaces the older run's pictures; one run never makes more than MOMENTS_KEPT
+      const kept = base.moments.filter((x) => x.run === m.run)
+      return { ...base, moments: [...kept, m].slice(-MOMENTS_KEPT) }
     }
     case 'done':
       return { ...base, overall: 100, secondsLeft: 0, overdue: false, thinking: false, end: { kind: 'done', version: e.version } }

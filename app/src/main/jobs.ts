@@ -241,8 +241,8 @@ export function createJobManager(
             moments = moments.then(() => toMoment(slug, m).catch(() => null)).then((url) => {
               if (!url || !open) return
               send(m.kind === 'still'
-                ? { jobId: id, slug, type: 'moment', kind: 'still', t: m.t, image: url }
-                : { jobId: id, slug, type: 'moment', kind: 'window', from: m.from, to: m.to, video: url })
+                ? { jobId: id, slug, type: 'moment', kind: 'still', t: m.t, image: url, run: m.run }
+                : { jobId: id, slug, type: 'moment', kind: 'window', from: m.from, to: m.to, video: url, run: m.run })
             })
             pending.push(moments)
           }

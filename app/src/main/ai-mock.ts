@@ -160,6 +160,10 @@ export const createMockAI: CreateAI = ({ host }) => {
   // Like the real applyNote, it edits a private copy and publishes it in one project.json write that
   // carries the note's id.
   const noteMs = Number(process.env.REELSTUDIO_MOCK_NOTE || 0)
+  // With REELSTUDIO_MOCK_MOMENTS=1 too, a note that changes the picture shows it first, as the real package's
+  // moments.ts does: the engine's `moments` stills and window, then its draft, while the editor "thinks". A note about
+  // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
+  const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
   async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
@@ -169,6 +173,15 @@ export const createMockAI: CreateAI = ({ host }) => {
     await fs.mkdir(join(copy, '..'), { recursive: true })
     await writeJson(copy, p)
     onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
+    if (mockMoments && !/\b(music|song|quieter|louder)\b/i.test(note)) {
+      const owner = opts?.owner ? ['--owner', opts.owner] : []
+      const r = await host.runEngine('moments', ['--project', dir, '--project-file', copy, '--out', join(copy, '..'), ...owner], (pr) => {
+        if (!pr.ready) return onEvent({ type: 'status', message: pr.message || 'Looking at what changed', pct: pr.pct, phase: 'edit' })
+        const m = pr.ready
+        onEvent(m.kind === 'still' ? { type: 'moment', kind: 'still', t: m.t, file: m.file, run: 1 } : { type: 'moment', kind: 'window', from: m.from, to: m.to, file: m.file, run: 1 })
+      }, signal)
+      if (r?.draft?.file) onEvent({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) })
+    }
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(resolve, noteMs)
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })

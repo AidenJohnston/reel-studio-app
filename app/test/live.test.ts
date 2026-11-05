@@ -60,19 +60,24 @@ describe('reduceLive (the renderer side of the contract)', () => {
   })
 
   it('an event from a different job starts from scratch', () => {
-    const old = fold([status({ overall: 80 }), { ...J, type: 'reply', text: 'old' }, { ...J, type: 'moment', kind: 'still', t: 1, image: 'reel-media://f/m0' }])
+    const old = fold([status({ overall: 80 }), { ...J, type: 'reply', text: 'old' }, { ...J, type: 'moment', kind: 'still', t: 1, image: 'reel-media://f/m0', run: 1 }])
     const s = fold([status({ jobId: 'j2', overall: 5 })], old)
     expect(s).toMatchObject({ jobId: 'j2', overall: 5, reply: null, moments: [] })
   })
 
-  it('keeps the newest pictures of a change, in the order they were made', () => {
-    const still = (n: number): JobEvent => ({ ...J, type: 'moment', kind: 'still', t: n, image: `reel-media://f/m${n}` })
-    const win: JobEvent = { ...J, type: 'moment', kind: 'window', from: 3, to: 5, video: 'reel-media://f/w' }
-    const s = fold([still(1), still(2), still(3), win, still(4)])
-    expect(s.moments).toEqual([
-      { kind: 'still', image: 'reel-media://f/m2', t: 2 }, { kind: 'still', image: 'reel-media://f/m3', t: 3 },
-      { kind: 'window', video: 'reel-media://f/w', from: 3, to: 5 }, { kind: 'still', image: 'reel-media://f/m4', t: 4 }
+  it('fails if a newer edit\'s pictures mix with an older one\'s, or outlast the draft that shows the change', () => {
+    const still = (n: number, run = 1): JobEvent => ({ ...J, type: 'moment', kind: 'still', t: n, image: `reel-media://f/m${n}`, run })
+    const win: JobEvent = { ...J, type: 'moment', kind: 'window', from: 3, to: 5, video: 'reel-media://f/w', run: 1 }
+    const one = fold([still(1), still(2), still(3), win])
+    expect(one.moments).toEqual([
+      { kind: 'still', image: 'reel-media://f/m1', t: 1, run: 1 }, { kind: 'still', image: 'reel-media://f/m2', t: 2, run: 1 },
+      { kind: 'still', image: 'reel-media://f/m3', t: 3, run: 1 }, { kind: 'window', video: 'reel-media://f/w', from: 3, to: 5, run: 1 }
     ])
+    // the next reply's run: its pictures replace the last run's
+    expect(fold([still(4, 2)], one).moments).toEqual([{ kind: 'still', image: 'reel-media://f/m4', t: 4, run: 2 }])
+    // the draft of the change takes the pictures' place
+    const drafted = fold([{ ...J, type: 'render', version: 0, draft: true, firstLook: false, video: 'reel-media://f/d' }], one)
+    expect(drafted).toMatchObject({ moments: [], preview: { kind: 'ai-draft', video: 'reel-media://f/d' } })
   })
 
   it('a screen opened mid-job starts from projects:get', () => {
@@ -124,7 +129,7 @@ describe('live moments (main): a still or window plays from a copy the next run 
     const names: string[] = []
     for (const body of ['a', 'b', 'c', 'd', 'e']) {
       writeFileSync(still, body)            // the engine draws the same frame again on its next run
-      const f = pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'still', t: 2.4, file: still }))!)
+      const f = pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'still', t: 2.4, file: still, run: 1 }))!)
       expect(readFileSync(f, 'utf8')).toBe(body)
       names.push(f)
     }
@@ -132,16 +137,16 @@ describe('live moments (main): a still or window plays from a copy the next run 
     expect(names[4]).toBe(names[0])
     const win = join(dir, 'versions', 'preview', 'window_1.0-3.0.mp4')
     writeFileSync(win, 'w')
-    expect(pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'window', from: 1, to: 3, file: win }))!)).toMatch(/moment-window-[ab]\.mp4$/)
+    expect(pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'window', from: 1, to: 3, file: win, run: 1 }))!)).toMatch(/moment-window-[ab]\.mp4$/)
     // a note draws into its own folder (tools.ts previewArgs), which goes when the note ends
     const noteStill = join(dir, 'work', 'notes', 'n1', 'moments', 'still_000010.png')
     mkdirSync(join(dir, 'work', 'notes', 'n1', 'moments'), { recursive: true })
     writeFileSync(noteStill, 'n')
-    expect(readFileSync(pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'still', t: 0.3, file: noteStill }))!), 'utf8')).toBe('n')
+    expect(readFileSync(pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'still', t: 0.3, file: noteStill, run: 1 }))!), 'utf8')).toBe('n')
     const outside = join(home, 'elsewhere.png')
     writeFileSync(outside, 'x')
-    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: outside })).toBeNull()
-    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: join(dir, 'project.json') })).toBeNull()
+    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: outside, run: 1 })).toBeNull()
+    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: join(dir, 'project.json'), run: 1 })).toBeNull()
   })
 })
 
@@ -169,11 +174,11 @@ describe('job manager (main): the contract on the wire', () => {
       return `reel-media://f/${e.kind}-${e.kind === 'still' ? e.t : e.from}`
     })
     jobs.start(slug, 'note', async (emit) => {
-      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png' })
-      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png' })
+      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png', run: 1 })
+      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png', run: 1 })
       setTimeout(releaseSlow, 30)
       await new Promise((r) => setTimeout(r, 60))
-      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png' })
+      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png', run: 1 })
       throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     })
     await jobs.forSlug(slug)?.done
@@ -205,8 +210,8 @@ describe('job manager (main): the contract on the wire', () => {
       await new Promise((r) => setTimeout(r, 80))
       emit({ type: 'tool', name: 'set_cut', summary: 'Kept your best takes' })
       emit({ type: 'reply', text: 'Done soon.' })
-      emit({ type: 'moment', kind: 'still', t: 2.4, file: join(projectDir(slug), 'versions', 'preview', 'moments', 'still_000072.png') })
-      emit({ type: 'moment', kind: 'window', from: 1, to: 3, file: join(projectDir(slug), 'gone.mp4') })   // no copy: not sent
+      emit({ type: 'moment', kind: 'still', t: 2.4, file: join(projectDir(slug), 'versions', 'preview', 'moments', 'still_000072.png'), run: 1 })
+      emit({ type: 'moment', kind: 'window', from: 1, to: 3, file: join(projectDir(slug), 'gone.mp4'), run: 1 })   // no copy: not sent
       return { summary: 'ok', version: 1, chat: [] }
     })
     await jobs.forSlug(slug)?.done
@@ -221,7 +226,7 @@ describe('job manager (main): the contract on the wire', () => {
     expect(events.findIndex((e) => e.type === 'render')).toBeLessThan(events.findIndex((e) => e.type === 'done'))
     expect(events.find((e) => e.type === 'heard')).toMatchObject({ words: ['hello'] })
     expect(events.find((e) => e.type === 'reply')).toMatchObject({ text: 'Done soon.' })
-    expect(events.filter((e) => e.type === 'moment')).toEqual([{ jobId: expect.any(String), slug, type: 'moment', kind: 'still', t: 2.4, image: `reel-media://f/${slug}/still` }])
+    expect(events.filter((e) => e.type === 'moment')).toEqual([{ jobId: expect.any(String), slug, type: 'moment', kind: 'still', t: 2.4, image: `reel-media://f/${slug}/still`, run: 1 }])
     expect(events.findIndex((e) => e.type === 'moment')).toBeLessThan(events.findIndex((e) => e.type === 'done'))
     expect(events.filter((e) => e.type === 'status').every((e) => e.type === 'status' && typeof e.overall === 'number' && typeof e.pct === 'number')).toBe(true)
     // no time left before the video's length is known (it would only jump up later), then a number

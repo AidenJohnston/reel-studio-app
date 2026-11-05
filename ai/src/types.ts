@@ -15,9 +15,10 @@ export type AgentEvent =
   /** one line for the host's log: how a model turn spent its time (agent.ts) */
   | { type: 'trace'; text: string }
   /** a picture of what the AI just changed, drawn before the draft (moments.ts): a still at output second
-   * `t`, or the 2 s window [from, to] around it. `file` is the engine's file, overwritten by later runs. */
-  | { type: 'moment'; kind: 'still'; t: number; file: string }
-  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string }
+   * `t`, or the 2 s window [from, to] around it. `file` is the engine's file, overwritten by later runs.
+   * `run` counts the task's moments runs from 1: a newer run's pictures show a newer edit and replace an older one's. */
+  | { type: 'moment'; kind: 'still'; t: number; file: string; run: number }
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string; run: number }
 
 export interface AgentResult {
   summary: string;

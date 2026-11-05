@@ -99,8 +99,8 @@ describe('changed moments first', () => {
     expect(host.log.filter((l) => l.startsWith('start'))).toEqual(['start moments 0', 'start final']);   // no second draft
     const shown = events.filter((e) => e.type === 'moment' || e.type === 'render');
     expect(shown).toEqual([
-      { type: 'moment', kind: 'still', t: 1.2, file: expect.stringMatching(/still_000036\.png$/) },
-      { type: 'moment', kind: 'window', from: 0.2, to: 2.2, file: expect.stringMatching(/window_0\.2-2\.2\.mp4$/) },
+      { type: 'moment', kind: 'still', t: 1.2, file: expect.stringMatching(/still_000036\.png$/), run: 1 },
+      { type: 'moment', kind: 'window', from: 0.2, to: 2.2, file: expect.stringMatching(/window_0\.2-2\.2\.mp4$/), run: 1 },
       { type: 'render', version: 1, draft: true, file: expect.stringMatching(/draft\.mp4$/) },
       expect.objectContaining({ type: 'render', draft: false }),
     ]);

@@ -393,9 +393,10 @@ export type JobUpdate =
   /** The words heard, once listening is done (main reads them from the transcript). */
   | { type: 'heard'; words: string[] }
   /** A picture of what the AI just changed, made before its draft: a still at output second `t`, or the
-   * 2 s window [from, to] around it. file = the engine's output path; main turns it into `image` / `video`. */
-  | { type: 'moment'; kind: 'still'; t: number; file: string }
-  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string }
+   * 2 s window [from, to] around it. file = the engine's output path; main turns it into `image` / `video`.
+   * run = which of the job's moments runs drew it, from 1: a newer run shows a newer edit. */
+  | { type: 'moment'; kind: 'still'; t: number; file: string; run: number }
+  | { type: 'moment'; kind: 'window'; from: number; to: number; file: string; run: number }
 
 type Ids = { jobId: string; slug: string | null }
 
@@ -414,8 +415,8 @@ export type JobEvent = Ids &
     | { type: 'reply'; text: string }
     | { type: 'heard'; words: string[] }
     /** image / video = reel-media URLs of copies the next moments run never overwrites */
-    | { type: 'moment'; kind: 'still'; t: number; image: string }
-    | { type: 'moment'; kind: 'window'; from: number; to: number; video: string }
+    | { type: 'moment'; kind: 'still'; t: number; image: string; run: number }
+    | { type: 'moment'; kind: 'window'; from: number; to: number; video: string; run: number }
     | { type: 'done'; summary: string; version?: number }
     | { type: 'error'; code: string; userMessage: string }
     | { type: 'cancelled' }

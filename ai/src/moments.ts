@@ -24,7 +24,7 @@ export interface MomentsTask {
   renderGate?: Promise<unknown>;
 }
 
-interface Run { edit: number; abort: AbortController; done: Promise<unknown>; settled: boolean }
+interface Run { edit: number; n: number; abort: AbortController; done: Promise<unknown>; settled: boolean }
 
 export class Moments {
   private run: Run | null = null;
@@ -32,6 +32,7 @@ export class Moments {
   /** the run that last finished: the edit it drew and the engine's result */
   private finished: { edit: number; result: any } | null = null;
   private shownPicture = -1;
+  private runs = 0;
 
   constructor(private task: MomentsTask) {}
 
@@ -55,12 +56,12 @@ export class Moments {
     const prev = this.run;
     prev?.abort.abort();
     const abort = new AbortController();
-    const run: Run = { edit, abort, done: Promise.resolve(), settled: false };
-    run.done = this.draw(edit, abort.signal, prev).finally(() => { run.settled = true; });
+    const run: Run = { edit, n: ++this.runs, abort, done: Promise.resolve(), settled: false };
+    run.done = this.draw(run, prev).finally(() => { run.settled = true; });
     this.run = run;
   }
 
-  private async draw(edit: number, stop: AbortSignal, prev: Run | null): Promise<void> {
+  private async draw({ edit, n, abort: { signal: stop } }: Run, prev: Run | null): Promise<void> {
     await prev?.done;
     await this.task.renderGate?.catch(() => undefined);
     await this.marked;
@@ -70,7 +71,7 @@ export class Moments {
       // the same preview folder and version record as the task's own drafts, so render_draft can use this one
       const args = [...projectArgs(this.task, 'moments'), ...previewArgs(this.task), ...versionArgs(this.task)];
       const r = await this.task.host.runEngine('moments', args, (p) => {
-        if (p.ready && !stop.aborted) this.task.emit(momentEvent(p.ready));
+        if (p.ready && !stop.aborted) this.task.emit(momentEvent(p.ready, n));
       }, signal);
       if (stop.aborted) return;
       if (r?.draft?.file) this.task.emit({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) });
@@ -100,8 +101,8 @@ export class Moments {
   async stop(): Promise<void> { await this.before(null); }
 }
 
-export function momentEvent(m: MomentReady): AgentEvent {
+export function momentEvent(m: MomentReady, run: number): AgentEvent {
   return m.kind === 'still'
-    ? { type: 'moment', kind: 'still', t: m.t, file: m.file }
-    : { type: 'moment', kind: 'window', from: m.from, to: m.to, file: m.file };
+    ? { type: 'moment', kind: 'still', t: m.t, file: m.file, run }
+    : { type: 'moment', kind: 'window', from: m.from, to: m.to, file: m.file, run };
 }

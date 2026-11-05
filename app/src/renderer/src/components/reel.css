@@ -58,10 +58,32 @@
   position: absolute; left: var(--reel-l, 0); top: var(--reel-t, 0); width: var(--reel-w, 100%); height: var(--reel-h, 100%); z-index: 3; pointer-events: none;
 }
 .reel-over > :not(.edit-stage) { pointer-events: auto; }
-.reel-tag {
-  position: absolute; top: calc(100cqw * (58 + var(--ig-top, 0)) / var(--sw, 393) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; background: rgba(0, 0, 0, .6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm);
-  font-weight: 600; padding: 4px 10px; border-radius: 999px; pointer-events: none;
+.reel-tag, .change-tag { position: absolute; top: calc(100cqw * (58 + var(--ig-top, 0)) / var(--sw, 393) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; }
+.reel-tag, .change-label {
+  background: rgba(0, 0, 0, .6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm);
+  font-weight: 600; padding: 4px 10px; border-radius: 999px; pointer-events: none; white-space: nowrap;
 }
+
+/* A change before its draft (ChangeMoments.tsx): its pictures lie on the reel's box under Instagram's screen, as the
+   video does, and each new one comes in over the last the way a version lands (200 ms, a 2 px blur bridging the
+   two). The tag names the picture; a dot per picture sits under it, each a 24 px target around a 6 px dot. */
+.change-pic { position: absolute; left: var(--reel-l, 0); top: var(--reel-t, 0); width: var(--reel-w, 100%); height: var(--reel-h, 100%); clip-path: var(--reel-clip, none); pointer-events: none; }
+.change-pic > * {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; background: #000;
+  transition: opacity 200ms var(--ease-out), filter 200ms var(--ease-out);
+}
+@starting-style { .change-pic > * { opacity: 0; filter: blur(2px); } }
+.change-tag { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.reel-over > .change-tag { pointer-events: none; }
+.change-dots { display: flex; pointer-events: auto; }
+.change-dots button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; }
+.change-dots i { width: 6px; height: 6px; border-radius: 50%; background: #fff; opacity: .45; box-shadow: 0 0 2px rgba(0, 0, 0, .5); transition: opacity 120ms ease; }
+.change-dots button[aria-pressed="true"] i { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .change-dots button:hover i { opacity: .8; }
+  .change-dots button[aria-pressed="true"]:hover i { opacity: 1; }
+}
+.change-dots button:focus-visible { outline: 2px solid #fff; outline-offset: -4px; border-radius: 999px; }
 /* inside the screen's width (cqw is the screen's, Phone.css): on a narrow phone Done goes under the switch */
 .cmp {
   position: absolute; top: calc(14px + var(--safe-top, 0px) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; display: flex; flex-wrap: wrap; justify-content: center;
@@ -466,6 +488,7 @@ html.kb :is(.acc > div, .stripwrap > div, .steps > div, .tchip, .spot, .draghand
 @media (prefers-reduced-motion: reduce) {
   .acc > div, .stripwrap > div, .steps > div { transform: none; transition-property: opacity; }
   .phone.landing .phone-screen > video.layer.loading { filter: none; }
+  @starting-style { .change-pic > * { filter: none; } }
   .spot { transition-property: opacity; }
   .tl-sound > svg { transition: none; }
   .helper .hb i { animation: none; width: 100%; opacity: .5; }
