@@ -86,6 +86,7 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createProxyBuilds } from './proxy-builds'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -223,6 +224,7 @@ const renderSlot = withRenderSlot(
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
 const runEngine: RunEngine = renderSlot.run
+const proxies = createProxyBuilds(runEngine, log)
 
 const host: EngineHost = {
   runEngine,
@@ -356,6 +358,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
+      proxies.start(slug, dir) // a project from before preview copies existed gets them now
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
       const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
@@ -643,6 +646,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    proxies.start(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -1407,6 +1411,7 @@ function registerIpc(): void {
     pauser.cancel(slug)
     try {
       await coverScans.stop(slug)
+      await proxies.stop(slug)
       await noteQueue.remove(slug, async () => {
         await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
         await fs.rm(projectDir(slug), { recursive: true, force: true })

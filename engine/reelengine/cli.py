@@ -143,6 +143,11 @@ def cmd_render(args):
                       project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent)
 
 
+def cmd_proxy(args):
+    from . import proxy
+    return proxy.run(_project(args))
+
+
 def cmd_cover(args):
     from . import render
     return render.cover_only(_project(args), root=Path(args.root) if args.root else None)
@@ -507,6 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--merge-parent", type=int, help="second saved parent; always makes a new final version")
     sp.add_argument("--out", help="folder for a draft (default versions/preview)")
     sp.add_argument("--job-id", help="the app job this render belongs to (recorded in its receipt)")
+    add("proxy", cmd_proxy, "make the 1080p copy of each 4K or HDR take that previews read")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
