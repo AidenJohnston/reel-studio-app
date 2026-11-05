@@ -4,6 +4,7 @@ stop on, and a bad rules file stops the render before it does any work."""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -27,13 +28,18 @@ def _project(pdir: Path, media, captions: dict, level: str, broll: bool) -> Path
     fx.make_project(pdir, media["video"], keep=((0.5, 7.5),))
     p = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
     p["captions"]["style"].update(captions)
-    p["music"] = {"enabled": True, "track": str(media["song"]), "startAt": 1.0, "level": level,
+    # project.json refers to files by project-relative paths only
+    assets = pdir / "work" / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    for name in ("song", "portrait"):
+        shutil.copy2(media[name], assets / Path(media[name]).name)
+    p["music"] = {"enabled": True, "track": f"work/assets/{Path(media['song']).name}", "startAt": 1.0, "level": level,
                   "automation": [], "fadeOut": 1.0}
     if broll:
         words = json.loads((pdir / "work" / "transcript.json").read_text(encoding="utf-8"))["words"]
         near = lambda sec: min(words, key=lambda w: abs(w["s"] - sec))["id"]
         p["broll"] = [{"id": "b1", "anchor": {"from": near(2.5), "to": near(3.5)}, "leadIn": 0.13,
-                       "treatment": "full-frame", "asset": str(media["portrait"]), "params": {}}]
+                       "treatment": "full-frame", "asset": f"work/assets/{Path(media['portrait']).name}", "params": {}}]
     (pdir / "project.json").write_text(json.dumps(p, indent=1), encoding="utf-8")
     samples = [{"t": t / 2, "box": FACE, "core": [FACE[0] + 40, FACE[1] + 120, FACE[2] - 80, FACE[3] - 160]}
                for t in range(0, 19)]
