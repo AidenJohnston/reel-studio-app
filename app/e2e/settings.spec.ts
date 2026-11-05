@@ -3,7 +3,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { launch, openSettings, passFirstRun, shot, USER_DATA } from './helpers'
+import { launch, openSettings, passFirstRun, shot, userData } from './helpers'
 
 test('fails if a Settings search shows rows it did not find, hides a match, or Esc does not clear it', async () => {
   const { app, page } = await launch()
@@ -46,7 +46,7 @@ test('fails if a Settings search shows rows it did not find, hides a match, or E
 
 test('fails if Settings › Advanced cannot find, size and clear the cache, show the logs, or reset the first run', async () => {
   // the isolated engine cache (main/paths.ts engineCacheDir), as the engine leaves it, and a file that isn't its own
-  const cache = join(USER_DATA, 'engine cache')
+  const cache = join(userData(), 'engine cache')
   mkdirSync(join(cache, 'music-analysis'), { recursive: true })
   writeFileSync(join(cache, 'simple-icons.json'), Buffer.alloc(2_000_000))
   writeFileSync(join(cache, 'music-analysis', '0123456789abcdef0123456789abcdef.json'), Buffer.alloc(1_000_000))
@@ -87,7 +87,7 @@ test('fails if Settings › Advanced cannot find, size and clear the cache, show
       shell.openPath = async (p: string) => (opened.push(p), '')
     })
     await page.getByRole('button', { name: 'Show logs' }).click()
-    await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)).toEqual([join(USER_DATA, 'logs')])
+    await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)).toEqual([join(userData(), 'logs')])
 
     await page.getByRole('button', { name: 'Reset…' }).click()
     await page.getByRole('dialog', { name: 'Reset the first run?' }).getByRole('button', { name: 'Reset first run' }).click()

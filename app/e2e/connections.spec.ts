@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { launch, passFirstRun, USER_DATA, openSettings } from './helpers'
+import { launch, passFirstRun, userData, openSettings } from './helpers'
 
 const KEY = 'sk-e2e-mock-key-7f3a'
 const MODELS = ['mock-small', 'mock-large']
@@ -82,7 +82,7 @@ test('add your own AI server from Settings', async () => {
 
     const seen = await page.evaluate(async () => JSON.stringify([await window.reel.ai.connections(), await window.reel.ai.providers(), await window.reel.ai.active()]))
     expect(seen).not.toContain(KEY)
-    const aiDir = join(USER_DATA, 'ai')
+    const aiDir = join(userData(), 'ai')
     const files = readdirSync(aiDir)
     expect(files.some((f) => /^connection-c_[a-f0-9]{8}\.bin$/.test(f))).toBe(true)
     for (const f of files) expect(readFileSync(join(aiDir, f)).toString('utf8')).not.toContain(KEY)

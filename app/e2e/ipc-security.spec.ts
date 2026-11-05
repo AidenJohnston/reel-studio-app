@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { APP_DIR, BASE, ROOT, launch } from './helpers'
+import { APP_DIR, BASE, root, launch } from './helpers'
 
 test('fails if another window can delete a project or malformed arguments can change it', async () => {
   const { app, page } = await launch({ REELENGINE_CACHE: join(BASE, 'engine-cache') })
-  const dir = join(ROOT, 'Projects', 'protected')
+  const dir = join(root(), 'Projects', 'protected')
   mkdirSync(dir, { recursive: true })
   const project = { schemaVersion: 1, id: 'protected', slug: 'protected', title: 'Keep me', version: 1 }
   writeFileSync(join(dir, 'project.json'), JSON.stringify(project))

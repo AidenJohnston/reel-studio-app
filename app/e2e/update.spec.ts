@@ -5,7 +5,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createRequire } from 'node:module'
-import { APP_DIR, BASE, ROOT, USER_DATA, passFirstRun, openSettings } from './helpers'
+import { APP_DIR, BASE, root, userData, passFirstRun, openSettings } from './helpers'
 
 const { latestMacYml } = createRequire(__filename)('../../packaging/latest-mac.js') as { latestMacYml(zip: string, version: string): string }
 const ZIP_NAME = 'Reel-Studio-0.1.3-arm64-mac.zip'
@@ -79,8 +79,8 @@ async function launch(extra: Record<string, string> = {}): Promise<{ app: Electr
   delete env.ELECTRON_RUN_AS_NODE
   Object.assign(env, {
     REELSTUDIO_TEST: '1',
-    REELSTUDIO_USER_DATA: USER_DATA,
-    REELSTUDIO_ROOT: ROOT,
+    REELSTUDIO_USER_DATA: userData(),
+    REELSTUDIO_ROOT: root(),
     REELSTUDIO_MODELS_DIR: join(BASE, 'models'),
     REELSTUDIO_MOCK_AI: '1',
     REELSTUDIO_ENGINE_DIR: join(APP_DIR, 'dev', 'fake-engine'),
@@ -153,7 +153,7 @@ test('fails if a prerelease update cannot be downloaded, declined or snoozed', a
     await expect(button).toBeHidden()
     await expect(page.getByTestId('toast')).toContainText('Hidden until tomorrow. You can still update from Settings.')
     await expect(page.getByTestId('update-settings-button')).toHaveText('Restart to update')
-    const project = join(ROOT, 'Projects', 'update-export')
+    const project = join(root(), 'Projects', 'update-export')
     mkdirSync(join(project, 'versions', 'v1'), { recursive: true })
     // version 1: a vN above project.json's version is a render no note saved, not a version (#87)
     writeFileSync(join(project, 'project.json'), JSON.stringify({ title: 'Update export', version: 1, sources: [] }))

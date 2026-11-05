@@ -11,7 +11,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { APP_DIR, BASE, ROOT, SHOTS, chooseClaudeCode, dropFiles, launch, passFirstRun, shot, openSettings, newReel } from './helpers'
+import { APP_DIR, BASE, root, SHOTS, chooseClaudeCode, dropFiles, launch, passFirstRun, shot, openSettings, newReel } from './helpers'
 
 const TESTSET = process.env.REELSTUDIO_E2E_TAKES
 const takes: { file: string; path: string }[] = TESTSET ? JSON.parse(readFileSync(TESTSET, 'utf8')).takes : []
@@ -158,8 +158,8 @@ takes.forEach((take, i) => {
       await shot(page, `takes/${i}-04-exported`)
       await page.keyboard.press('Escape')
 
-      const exportFile = newest(join(ROOT, 'Library', 'Exports'), (f) => f.endsWith('.mp4'))
-      const project = newest(join(ROOT, 'Projects'), (f) => existsSync(join(ROOT, 'Projects', f, 'project.json')))
+      const exportFile = newest(join(root(), 'Library', 'Exports'), (f) => f.endsWith('.mp4'))
+      const project = newest(join(root(), 'Projects'), (f) => existsSync(join(root(), 'Projects', f, 'project.json')))
       expect(exportFile).toBeTruthy()
       result.exportFile = exportFile
       result.project = project

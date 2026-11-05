@@ -1,9 +1,9 @@
 // Shared helpers for the Electron end-to-end tests.
-import { expect, _electron as electron, type ElectronApplication, type Locator, type Page } from '@playwright/test'
+import { expect, test, _electron as electron, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { inflateSync } from 'node:zlib'
 
 export const APP_DIR = resolve(__dirname, '..')
@@ -12,10 +12,20 @@ export const BASE = mkdtempSync(join(process.env.REELSTUDIO_E2E_TMP ?? tmpdir(),
 // Each worker removes its own folder (about 500 MB of renders) as it exits, passed or failed, whichever reporter ran;
 // KEEP_E2E_TMP=1 keeps them for debugging.
 if (process.env.KEEP_E2E_TMP !== '1') process.once('exit', () => rmSync(BASE, { recursive: true, force: true }))
-// Spaces and non-ASCII on purpose: real users have them.
-export const HOME = join(BASE, 'Zoë Müller', 'Documents')
-export const ROOT = join(HOME, 'Reel Studio')
-export const USER_DATA = join(BASE, 'user data')
+
+/**
+ * The profile `launch()` uses by default: its own per spec file. One worker runs every file and loads this module
+ * once, so a profile shared by the whole worker would carry one file's first run, projects and settings into the next
+ * (smoke.spec then never sees the welcome screen, mirror.spec reads another file's project). The tests of one file
+ * share it. Call these inside a test or hook.
+ */
+function profile(): string {
+  return join(BASE, basename(test.info().file).replace(/\.spec\.ts$/, ''))
+}
+/** Spaces and non-ASCII on purpose: real users have them. */
+export const home = (): string => join(profile(), 'Zoë Müller', 'Documents')
+export const root = (): string => join(home(), 'Reel Studio')
+export const userData = (): string => join(profile(), 'user data')
 
 export function makeMedia(): { video: string; song: string; picture: string; doc: string } {
   const media = join(BASE, 'my files ü')
@@ -46,8 +56,8 @@ export async function launch(
   delete env.ELECTRON_RUN_AS_NODE
   Object.assign(env, {
     REELSTUDIO_TEST: '1',
-    REELSTUDIO_USER_DATA: USER_DATA,
-    REELSTUDIO_ROOT: ROOT,
+    REELSTUDIO_USER_DATA: userData(),
+    REELSTUDIO_ROOT: root(),
     REELSTUDIO_MODELS_DIR: process.env.REELSTUDIO_MODELS_DIR ?? join(BASE, 'models'),
     // An empty Hugging Face cache: a listening model on this computer must never be reused into a test profile.
     HF_HUB_CACHE: join(BASE, 'hf-cache'),

@@ -3,11 +3,11 @@
 import { test, expect, type Page } from '@playwright/test'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROOT, launch, makeMedia, passFirstRun } from './helpers'
+import { root, launch, makeMedia, passFirstRun } from './helpers'
 
 /** A reel whose only version is `kind`: a preview (exporting makes the full-quality version first) or Version 1. */
 function reelWith(kind: 'preview' | 'v1', video: string): void {
-  const project = join(ROOT, 'Projects', 'my-reel')
+  const project = join(root(), 'Projects', 'my-reel')
   const dir = join(project, 'versions', kind === 'preview' ? 'preview' : 'v1')
   mkdirSync(join(project, 'media'), { recursive: true })
   mkdirSync(dir, { recursive: true })
@@ -39,7 +39,7 @@ async function stopsQuietly(page: Page, platforms: ReturnType<Page['getByTestId'
   await expect(platforms.getByTestId('export-selected')).toBeEnabled()
   await expect(platforms.locator('.sp-fail')).toHaveCount(0)
   await expect(page.getByText(/Stopped/)).toHaveCount(0)
-  const exports = join(ROOT, 'Library', 'Exports')
+  const exports = join(root(), 'Library', 'Exports')
   expect(existsSync(exports) ? readdirSync(exports).filter((n) => !n.startsWith('.')) : []).toEqual([])
 }
 

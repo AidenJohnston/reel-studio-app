@@ -9,19 +9,19 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROOT, SHOTS, launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { root, SHOTS, launch, makeMedia, makeReel, passFirstRun } from './helpers'
 
 const OUT = process.env.REELSTUDIO_E2E_SHOTS ?? SHOTS
 
-const PROJECTS = join(ROOT, 'Projects')
-const projectDirs = (): string[] => (existsSync(PROJECTS) ? readdirSync(PROJECTS) : [])
-// The one this test makes. Earlier spec files in the same worker share ROOT (home-reopen leaves my-first-take), and
-// readdir order is the file system's: NTFS lists names sorted, so [0] was another test's project on Windows.
+const projectsDir = (): string => join(root(), 'Projects')
+const projectDirs = (): string[] => (existsSync(projectsDir()) ? readdirSync(projectsDir()) : [])
+// The one this test makes. The file's tests share its profile, and readdir order is the file system's (NTFS lists
+// names sorted), so the project is found by name rather than as [0].
 let mine: string | undefined
 
 function project(): any {
   if (!mine) throw new Error('the project this test made is not known yet')
-  return JSON.parse(readFileSync(join(PROJECTS, mine, 'project.json'), 'utf8'))
+  return JSON.parse(readFileSync(join(projectsDir(), mine, 'project.json'), 'utf8'))
 }
 
 test('flip a mirrored take from Edit it myself', async () => {
