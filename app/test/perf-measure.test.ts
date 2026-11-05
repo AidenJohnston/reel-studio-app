@@ -18,6 +18,7 @@ describe('app perf summary', () => {
       ''
     ].join('\r\n')
     expect(parseTypeperf(out)).toBeCloseTo(0.37512345, 6)
+    expect(parseTypeperf(out.replace('37.512345', '37,5'))).toBeCloseTo(0.375, 6)
     expect(parseTypeperf('Error: No valid counters.\r\n')).toBeNull()
   })
 })

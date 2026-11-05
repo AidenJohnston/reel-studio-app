@@ -25,8 +25,8 @@ export function stats(xs: number[]): Stats {
 
 /** The last sample in `typeperf "\Processor(_Total)\% Processor Time" -sc 1` output, as a fraction. */
 export function parseTypeperf(out: string): number | null {
-  const v = [...out.matchAll(/^"[^"]*","([0-9.]+)"\s*$/gm)].pop()?.[1]
-  return v === undefined ? null : Number(v) / 100
+  const v = [...out.matchAll(/^"[^"]*","([0-9]+(?:[.,][0-9]+)?)"\s*$/gm)].pop()?.[1]
+  return v === undefined ? null : Number(v.replace(',', '.')) / 100 // some locales write 37,5
 }
 
 export interface Load {
@@ -41,7 +41,8 @@ export function machineLoad(): Load {
   try {
     const out = execFileSync('typeperf', ['\\Processor(_Total)\\% Processor Time', '-sc', '1'], { encoding: 'utf8', timeout: 30_000 })
     const busy = parseTypeperf(out)
-    return { busy: busy === null ? null : Math.round(busy * 100) / 100, how: 'typeperf % Processor Time, one 1 s sample' }
+    // typeperf takes the counter's localized name, so on a Windows not in English this finds no counter and says so
+    return { busy: busy === null ? null : Math.round(busy * 100) / 100, how: busy === null ? 'typeperf gave no sample (counter names are English)' : 'typeperf % Processor Time, one 1 s sample' }
   } catch (e) {
     return { busy: null, how: `typeperf failed: ${(e as Error).message.split('\n')[0]}` }
   }

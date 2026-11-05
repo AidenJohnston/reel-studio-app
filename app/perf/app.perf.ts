@@ -15,8 +15,10 @@ import { machineLoad, stats, waitForQuiet, type Load } from './measure'
 
 const RUNS = Number(process.env.REELSTUDIO_PERF_RUNS || 5)
 const PLAYER = 'video[data-testid="player"]'
-// The mock ChatGPT editor is connected for the note; it holds each note 1.5 s, as a real model takes seconds.
-const ENV = { REELSTUDIO_MOCK_CODEX: 'ready', REELSTUDIO_MOCK_NOTE_MS: '1500' }
+// Always the mock AI, even when REELSTUDIO_E2E_AI asks e2e for the real package. Its ChatGPT editor is connected for
+// the note and holds each note 1.5 s, as a real model takes seconds.
+const MOCK = { REELSTUDIO_MOCK_AI: '1' }
+const ENV = { ...MOCK, REELSTUDIO_MOCK_CODEX: 'ready', REELSTUDIO_MOCK_NOTE_MS: '1500' }
 // Fractions of the scrub bar, clicked in this order. A seek's cost depends on where it lands (how far past a keyframe),
 // and the first one after opening also loads the data, so each position is reported on its own, never pooled.
 const SCRUB_AT = [0.2, 0.7, 0.4, 0.9, 0.55]
@@ -176,7 +178,7 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
 
   // Setup, untimed, and the warm-up: one reel with two versions in this spec's own profile.
   {
-    const { app, page } = await launch()
+    const { app, page } = await launch(MOCK)
     try {
       await passFirstRun(page)
       await page.getByTestId('new-video').click()
