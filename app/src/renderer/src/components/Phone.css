@@ -123,7 +123,9 @@
 .igc-tick { overflow: hidden; width: calc(176 * var(--pt)); margin-left: calc(-6 * var(--pt)); mask-image: linear-gradient(90deg, transparent, #000 calc(6 * var(--pt)), #000 85%, transparent); }
 /* moving, the words leave on the left as they come in on the right: both edges fade, so none is cut mid-letter */
 .igc-tick > div { display: flex; width: max-content; animation: igc-tick 9s linear infinite paused; }
-.igc-tick span { padding: 0 calc(22 * var(--pt)) 0 calc(6 * var(--pt)); white-space: nowrap; }
+/* each copy at least the ticker's width, so a short line ("Original audio") leaves its second copy wholly off to
+   the right at rest, not cut through by the ticker's edge */
+.igc-tick span { box-sizing: border-box; min-width: calc(176 * var(--pt)); padding: 0 calc(22 * var(--pt)) 0 calc(6 * var(--pt)); white-space: nowrap; }
 .igc[data-playing]:not(.off) .igc-tick > div { animation-play-state: running; }
 @keyframes igc-tick { to { transform: translateX(-50%); } }
 
