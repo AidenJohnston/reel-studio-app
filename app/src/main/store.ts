@@ -31,6 +31,9 @@ export interface AppState {
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
+   * is open): the next start removes them (recoverInterrupted). */
+  cleanupOwed?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -304,7 +307,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
- * to pick up where it left off.
+ * to pick up where it left off. One whose job could not remove its unfinished versions
+ * (cleanupOwed) only gets them removed.
  */
 export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
@@ -324,9 +328,19 @@ export async function recoverInterrupted(stillRunning: string[] = []): Promise<s
     if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
-    if (!s.job) continue
+    if (!s.job && !s.cleanupOwed) continue
+    if (!s.job) {
+      // the job ended and said so, and only its clean-up was left: refused again, it waits for the next start
+      if (!(await cleanPartialVersions(dir).then(() => true, () => false))) continue
+      await updateAppState(slug, (st) => {
+        delete st.cleanupOwed
+      })
+      recovered.push(slug)
+      continue
+    }
     await cleanPartialVersions(dir)
     await updateAppState(slug, (st) => {
+      delete st.cleanupOwed
       st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
       if (st.status === 'ready' && st.job?.kind !== 'export') {
         st.chat.push({

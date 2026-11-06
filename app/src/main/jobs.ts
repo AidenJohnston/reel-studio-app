@@ -169,9 +169,16 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // Without the project this job wrote nothing. With a stuck engine nothing is cleaned up or let
         // go: it may still be writing.
         if (slug && owner && !stuck.has(slug)) {
-          await cleanPartialVersions(projectDir(slug)).catch(() => [])
+          // a version it could not remove (Windows refuses while a file is open) is left for the next
+          // start, which tries again (store.ts recoverInterrupted)
+          const cleaned = await cleanPartialVersions(projectDir(slug)).then(() => true, (e) => {
+            log(`[job ${kind}] could not remove an unfinished version: ${(e as Error)?.message ?? e}`)
+            return false
+          })
           await updateAppState(slug, (s) => {
             s.job = null
+            if (cleaned) delete s.cleanupOwed
+            else s.cleanupOwed = true
             if (kind === 'first-edit') s.status = cancelled ? 'interrupted' : 'failed'
             if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
