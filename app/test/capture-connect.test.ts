@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { once } from 'node:events'
-import { connect, createServer, type TcpNetConnectOpts } from 'node:net'
+import { subscribe, unsubscribe } from 'node:diagnostics_channel'
+import { connect, createServer, type Socket, type TcpNetConnectOpts } from 'node:net'
 
 const network = vi.hoisted(() => ({
   address: '93.184.215.14', port: 0, destinations: [] as string[],
@@ -66,6 +67,11 @@ it('a CONNECT client that resets while its address is checked does not crash the
   const crashes: unknown[] = []
   const onCrash = (error: unknown) => { crashes.push(error) }
   process.on('uncaughtException', onCrash)
+  // The proxy's own end of the connection, as Node accepts it.
+  let accept: (socket: Socket) => void = () => {}
+  const accepted = new Promise<Socket>((resolve) => { accept = resolve })
+  const onSocket = (message: unknown) => accept((message as { socket: Socket }).socket)
+  subscribe('net.server.socket', onSocket)
   let release = () => {}
   network.gate = new Promise<void>((resolve) => { release = resolve })
   const asked = new Promise<void>((resolve) => { network.asked = resolve })
@@ -77,12 +83,18 @@ it('a CONNECT client that resets while its address is checked does not crash the
     await once(socket, 'connect')
     socket.write('CONNECT reset.example:443 HTTP/1.1\r\nHost: reset.example:443\r\n\r\n')
     await asked
+    const server = await accepted
+    // Node dropped its own listener before 'connect': without one of ours, the reset below is thrown.
+    expect(server.listenerCount('error')).toBeGreaterThan(0)
+    // Only a 'close' listener: events.once would add an error listener and hide the crash.
+    const closed = new Promise<void>((resolve) => server.once('close', () => resolve()))
     socket.resetAndDestroy()
-    await new Promise((resolve) => setTimeout(resolve, 200))
     release()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await closed
+    await new Promise((resolve) => setImmediate(resolve)) // the refusal after the lookup has run
     expect(crashes).toEqual([])
   } finally {
+    unsubscribe('net.server.socket', onSocket)
     process.off('uncaughtException', onCrash)
     network.gate = null
     network.asked = () => {}
