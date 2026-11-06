@@ -5,12 +5,17 @@ import { launch, passFirstRun } from './helpers'
 
 test('fails if a narrow window opens the full sidebar, the rail loses its names, or the person\'s own fold does not win', async () => {
   const { app, page } = await launch({}, { realViewport: true })
-  const size = (w: number, h: number) =>
-    app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
+  // the page reports the new size once the window has really taken it (a native resize lands a beat later)
+  const size = async (w: number, h: number): Promise<void> => {
+    await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
+    await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([w, h])
+  }
   try {
     await passFirstRun(page)
     const toggle = page.getByTestId('sidebar-toggle')
 
+    await size(1280, 820)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await size(1100, 720)
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     // the first run ends on a New reel, which Recent does not list (and the rail hides Recent): Reels is the row marked

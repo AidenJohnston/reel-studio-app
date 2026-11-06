@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ProjectSummary, ProviderInfo } from '../../../shared/api'
 import { reel } from '../api'
 import { onReelsChanged } from './reels-changed'
@@ -64,8 +64,10 @@ export function useRail(): [boolean, (byShortcut?: boolean) => void] {
     const follow = (): void => {
       if (chosenRail() !== null) return
       const narrow = window.innerWidth < RAIL_BELOW
-      // the rail hides the Recent list: focus there moves to the toggle first, as a fold by hand does
-      if (narrow && document.activeElement?.closest('.side-recent')) sidebarToggle()?.focus()
+      // the rail hides the Recent list and the resize edge: focus on either moves to the toggle first, as a fold by
+      // hand does
+      const focused = document.activeElement
+      if (narrow && (focused?.classList.contains('side-resize') || focused?.closest('.side-recent'))) sidebarToggle()?.focus()
       setRail(narrow)
     }
     window.addEventListener('resize', follow)
@@ -259,7 +261,8 @@ function SideRecent({ current, go, onListed }: { current: string | null; go: Go;
     }
   }, [current])
   const listed = !!current && !!list?.some((p) => p.slug === current)
-  useEffect(() => onListed(listed), [listed, onListed])
+  // before paint, so no frame shows neither Reels nor the reel's row marked while moving between reels
+  useLayoutEffect(() => onListed(listed), [listed, onListed])
   if (!list?.length) return null
   return (
     <nav className="side-recent" aria-label="Recent reels" data-testid="side-recent">
