@@ -187,6 +187,25 @@ def test_variant_cli_writes_trial(tmp_path):
     assert project.load(tmp_path)["post"]["caption"] == "New caption"
 
 
+def test_variant_cli_in_a_note_changes_only_the_notes_copy(tmp_path):
+    # A note edits work/notes/<id>/edit.json and replaces project.json only when it finishes, after
+    # checking project.json is byte for byte what it started from. A trial written to project.json
+    # failed that check, so the note was never saved.
+    from reelengine.cli import build_parser
+    reel(tmp_path)
+    live = (tmp_path / "project.json").read_bytes()
+    note = tmp_path / "work" / "notes" / "n1" / "edit.json"
+    note.parent.mkdir(parents=True)
+    note.write_bytes(live)
+    args = build_parser().parse_args(["make-variant", "--project", str(tmp_path), "--variable", "caption",
+                                      "--value", '"New caption"', "--project-file", "work/notes/n1/edit.json"])
+    result = args.fn(args)
+    assert (tmp_path / "project.json").read_bytes() == live
+    assert project.read_json(note) == result["project"]
+    assert result["project"]["post"]["caption"] == "New caption"
+    assert project.read_json(tmp_path / "trials.json") == [result["trial"]]
+
+
 def test_seeded_render_without_authored_zooms(tmp_path):
     import subprocess
     from reelengine import render, tools

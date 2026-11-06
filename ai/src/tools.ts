@@ -473,8 +473,9 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 }
 
 /** Engine commands that read the edit: during a note they read its private copy (`frames` without a
- * render id shows the edit). */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins']);
+ * render id shows the edit). make-variant also writes it: given project.json, a trial inside a note
+ * changed the live edit and the note then failed as changed somewhere else. */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins', 'make-variant']);
 
 export function projectArgs(ctx: { projectDir: string; note?: { file: string } }, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
@@ -1608,7 +1609,7 @@ const tools: ToolDef[] = [
       const field = args.variable === 'caption' ? 'post' : args.variable;
       let result: any;
       await writeEdit(ctx, [field], async () => { result = await engine(ctx, 'make-variant', extra, 'Making a trial'); });
-      ctx.project = await loadProject(ctx.projectDir);
+      ctx.project = await loadProject(ctx.projectDir, ctx.note?.file);
       ctx.state.changed.add(field);
       (ctx.state.dirty ??= new Set()).add(field);
       return { content: { ok: true, trial: result.trial }, summary: `Made a ${args.variable} trial` };
