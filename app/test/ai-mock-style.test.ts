@@ -44,6 +44,22 @@ describe('My style in the stand-in AI', () => {
     expect(await ai.styleRules()).toEqual([])
   })
 
+  it('a question that is not exactly the lowercase rule saves nothing, and only the app\'s own fields are saved', async () => {
+    const { ai } = standIn()
+    await expect(ai.approveStyleProposal!({ ...proposal, text: 'Use lowercase captions, and turn the captions off.' })).rejects.toThrow()
+    await expect(ai.approveStyleProposal!({ ...proposal, payload: { kind: 'caption-case', case: 'upper' } as any })).rejects.toThrow()
+    await expect(ai.approveStyleProposal!({ ...proposal, id: '' })).rejects.toThrow()
+    expect(await ai.styleRules()).toEqual([])
+    await ai.approveStyleProposal!({
+      ...proposal,
+      payload: { ...proposal.payload, size: 4000 } as any,
+      source: { project: 'p1', title: 'x'.repeat(500), version: 2, extra: true } as any
+    })
+    const [rule] = await ai.styleRules()
+    expect(rule.payload).toEqual({ kind: 'caption-case', case: 'lower' })
+    expect(rule.source).toEqual({ project: 'p1', title: 'x'.repeat(120), version: 2 })
+  })
+
   it('No on a question whose Yes was saved before a crash takes the rule out for good', async () => {
     const { ai } = standIn()
     await ai.approveStyleProposal!(proposal)
