@@ -66,17 +66,8 @@ def write_state(proj_dir: Path, state: dict) -> None:
 
 
 def grid(fps: float) -> float:
-    """The shortest multiple of the frame time that is a whole number of milliseconds, so times
-    passed on the command line (3 decimals) land exactly on frame starts."""
-    for k in range(1, 1001):
-        step = k / fps
-        if abs(step * 1000 - round(step * 1000)) < 1e-9:
-            return round(step, 6)
-    raise ValueError(f"no millisecond frame grid for {fps} fps")
-
-
-def snap(t: float, step: float) -> float:
-    return round(math.floor(t / step + 1e-9) * step, 3)
+    """Keep the millisecond grid for integer rates; fractional rates use individual frames."""
+    return 1.0 / math.gcd(int(fps), 1000) if float(fps).is_integer() else 1.0 / fps
 
 
 def moment_time(segments: list, words: dict, word_id: str) -> float:
@@ -90,12 +81,16 @@ def moment_time(segments: list, words: dict, word_id: str) -> float:
 
 def plan_previews(t: float, duration: float, fps: float) -> dict:
     """The 2 s window around a moment and two stills in it, on the frame grid."""
-    g = grid(fps)
-    a = snap(max(0.0, t - 1.0), g)
-    b = snap(min(duration, a + 2.0), g)
-    a = snap(max(0.0, b - 2.0), g)
-    stills = sorted({snap(min(t, duration - 0.05), g), snap(min(t + 0.5, duration - 0.05), g)})
-    return {"window": [a, b], "stills": stills}
+    stride = round(grid(float(fps)) * fps)
+
+    def frame(seconds: float) -> int:
+        return math.floor(max(0.0, seconds) * fps / stride + 1e-9) * stride
+
+    a = frame(t - 1.0)
+    b = frame(min(duration, a / fps + 2.0))
+    a = frame(max(0.0, b / fps - 2.0))
+    stills = sorted({frame(min(t, duration - 0.05)), frame(min(t + 0.5, duration - 0.05))})
+    return {"window": [a / fps, b / fps], "stills": [k / fps for k in stills]}
 
 
 # --- takes --------------------------------------------------------------------------------------
@@ -241,7 +236,7 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
         for f in still.result["frames"]:
             media.read_image(Path(f["file"]))          # decodes = complete
         a, b = ref["window"]
-        window = cand.run("render", ["--project", proj, "--window", f"{a:.3f}:{b:.3f}"])
+        window = cand.run("render", ["--project", proj, "--window", f"{a:.6f}:{b:.6f}"])
         _complete_video(ffprobe, window.result["file"], window.result["duration"], fps)
         for name, call in (("draft", draft), ("still", still), ("window", window)):
             seconds[name].append(round(call.seconds, 3))
