@@ -160,7 +160,17 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 }
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
-  try { return await agentLoop(o); } finally { await o.provider.dispose?.(); }
+  let result: RunAgentResult;
+  try {
+    result = await agentLoop(o);
+  } catch (e) {
+    // the run's own error decides what the editor does next (an engine that would not stop keeps the
+    // project as it is): a model process that would not stop either is only reported beside it
+    await (async () => o.provider.dispose?.())().catch((d) => o.onEvent({ type: 'status', message: d?.userMessage ?? String(d) }));
+    throw e;
+  }
+  await o.provider.dispose?.();
+  return result;
 }
 
 async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
