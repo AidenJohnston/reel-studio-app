@@ -131,7 +131,13 @@ async function settingsAt(page: Page, key: string): Promise<void> {
   await page.getByTestId(`settings-nav-${key}`).click()
 }
 async function note(page: Page, text: string): Promise<void> {
-  await page.evaluate(() => (document.querySelector('[data-testid=player]') as HTMLVideoElement | null)?.pause())
+  // at a moment in the reel, as a creator makes one: paused 4 s in, so its mark sits clear of the reel's start
+  await page.evaluate(() => {
+    const v = document.querySelector('[data-testid=player]') as HTMLVideoElement | null
+    v?.pause()
+    if (v) v.currentTime = 4
+  })
+  await page.waitForTimeout(300)
   await page.getByTestId('note-input').fill(text)
   await expect(page.getByTestId('send')).toBeEnabled({ timeout: 30_000 })
   await page.getByTestId('note-input').press('Enter')

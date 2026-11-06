@@ -157,8 +157,10 @@
 .ncol.planning .notes-h h2 { flex: none; }
 /* who answers: the editor's mark and name, then the model it plans with */
 .pl-who { margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
-/* in the title-bar row: its tooltip names the whole line when it is cut short, so it takes the pointer */
-.titlebar .pl-who { max-width: 280px; pointer-events: auto; -webkit-app-region: no-drag; }
+/* in the title-bar row, after the reel's name: a caption like the version on screen (reel.css .rt-ver), with its
+   tooltip naming the whole line when it is cut short, so it takes the pointer */
+.titlebar .pl-who { margin-left: 0; max-width: 320px; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 500; color: var(--ink-3); pointer-events: auto; -webkit-app-region: no-drag; }
+.titlebar .pl-who::before { content: '·\00a0' / ''; color: var(--ink-4); }
 .pl-who-mark { flex: none; display: grid; place-items: center; color: var(--ink-3); }
 .pl-who-mark:empty { display: none; }
 .pl-who-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

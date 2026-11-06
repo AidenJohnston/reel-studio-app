@@ -785,6 +785,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           {taggedName}
         </span>
       )}
+      {/* planning: who answers, a caption after the title as the version on screen is (the column has no title row) */}
+      {planned && !drawer && !aiOff && providerChecked && <PlanWho provider={provider} />}
       {older && !compare && (
         <Button kind="tertiary" size="small" onClick={() => watch(latestN!)} data-testid="version-latest">
           Back to latest
@@ -795,8 +797,6 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
 
   const actions = (
     <>
-      {/* planning: who answers, in the one header row (the column below has no title row of its own) */}
-      {planned && !drawer && !aiOff && providerChecked && <PlanWho provider={provider} />}
       {hasVersions && (
         <Button kind="tertiary" className={drawer ? 'on' : undefined} aria-pressed={!!drawer} onClick={() => (drawer ? (setDrawer(null), setHandId(null), setPreview(null), setSound(null), setPicture(null)) : openDrawer('cut'))} data-testid="edit-myself">
           <Icon name="sliders" size={16} /> Edit it myself

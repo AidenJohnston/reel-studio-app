@@ -27,7 +27,7 @@
 
 .sp-cap { display: flex; align-items: baseline; justify-content: space-between; margin-top: 0; }
 .sp-cap label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
-.sp-cap span { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
+.sp-cap span { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .sp-cap .sp-over { color: var(--pencil); font-weight: 600; }
 .textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-md); user-select: text; }
 
