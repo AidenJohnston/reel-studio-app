@@ -1386,7 +1386,8 @@ def flash_layers(ctx: RenderCtx, segments: list) -> list:
         png.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (16, 16), (255, 255, 255)).save(png)
     W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
-    fps = float(ctx.fmt["fps"])
+    # the project's frame rate, not a preview's, so a draft and a window flash for as long as the final does
+    fps = float(((ctx.project or {}).get("format") or {}).get("fps") or ctx.fmt["fps"])
     return [Layer(path=png, kind="image", t0=max(0.0, t - FLASH_IN / fps), t1=t + FLASH_OUT / fps, x=0, y=0, w=W, h=H,
                   z=FLASH_Z, fade_in=FLASH_IN / fps, fade_out=FLASH_OUT / fps) for t in cuts]
 
