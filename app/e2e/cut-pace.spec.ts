@@ -3,7 +3,7 @@
 // in Version 3. Each version's project.json and its line in the notes carry what was picked.
 //
 // Run: npx playwright test e2e/cut-pace.spec.ts after a build. Same env as smoke.spec.ts.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, launch, makeMedia, makeReel, passFirstRun, shot } from './helpers'
@@ -21,6 +21,13 @@ function seedZooms(slug: string): void {
   for (const file of [projectFile(slug), join(dir, 'versions', 'v1', 'project.json')]) {
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), zooms }, null, 2))
   }
+}
+
+/** The next native "choose a file" answers with `file` (edit-sounds.spec.ts does the same). */
+async function answerFilePicker(app: ElectronApplication, file: string): Promise<void> {
+  await app.evaluate(({ dialog }, f) => {
+    ;(dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [f] })
+  }, file)
 }
 
 async function openPace(page: Page): Promise<void> {
@@ -105,13 +112,26 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await expect(page.getByTestId('pace-moments')).toHaveText('Version 3 keeps the fast pace with other moments.')
     await expect(page.getByTestId('change-count')).toHaveText('1 change')
     await shot(page, 'pace-04-other-moments')
+    // with a song, the fast pace's beat landing can be turned off for this reel
+    await answerFilePicker(app, media.song)
+    await page.getByRole('tab', { name: 'Sound' }).click()
+    await page.getByRole('button', { name: /^Add a song from this/ }).click()
+    await page.getByRole('tab', { name: 'Cut' }).click()
+    await page.getByTestId('cut-mode-pace').click()
+    await expect(page.getByTestId('pace-beats')).toBeEnabled()
+    await expect(page.getByTestId('pace-beats-why')).toHaveText('The fast pace does this. Untick it to keep each one on its word.')
+    await page.getByTestId('pace-beats').uncheck()
+    await expect(page.getByTestId('pace-beats-why')).toHaveText('Off for this reel, even at the fast pace.')
+    await shot(page, 'pace-05-beats-off')
     await page.getByRole('button', { name: 'Make Version 3' }).click()
     await expect(page.getByTestId('log-play-3')).toBeVisible({ timeout: 5 * 60_000 })
     const v3 = projectJson(slug)
     expect(v3.cutStyle.preset).toBe('hyper')
     expect(v3.cutStyle.seed).not.toBe(v2.cutStyle.seed)
     expect(v3.zooms).toEqual(v2.zooms)
+    expect(v3.beatAccents).toBe(false)
     await expect(page.getByTestId('chat')).toContainText('picked other moments for the accents')
+    await expect(page.getByTestId('chat')).toContainText('turned off landing on the beat')
   } finally {
     await app.close()
   }
