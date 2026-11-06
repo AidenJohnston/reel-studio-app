@@ -35,15 +35,15 @@ test('fails if Side by side does not play both versions in step with one sound, 
     await expect(page.getByTestId('sbs-video-1')).toHaveAttribute('src', /v1/)
     await expect(page.getByTestId('sbs-video-2')).toHaveAttribute('src', /v2/)
     await page.getByTestId('sbs-play').click()
-    await expect.poll(() => page.evaluate(() => [...document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')].map((v) => !v.paused))).toEqual([true, true])
+    await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')).map((v) => !v.paused))).toEqual([true, true])
     // one sound at a time: Version 1's until Version 2's is picked
-    const muted = () => page.evaluate(() => [...document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')].map((v) => v.muted))
+    const muted = () => page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')).map((v) => v.muted))
     expect(await muted()).toEqual([false, true])
     await page.getByTestId('sbs-sound-b').click()
     expect(await muted()).toEqual([true, false])
     // in step: the two pictures stay within a fraction of a second of each other
     const gap = await page.evaluate(() => {
-      const [a, b] = [...document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')]
+      const [a, b] = Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]'))
       return Math.abs(a.currentTime - b.currentTime)
     })
     expect(gap).toBeLessThan(0.3)
