@@ -625,7 +625,8 @@ function Stage({
             )}
             {pane === 'editor' && (
               <Button kind={ai ? 'primary' : 'secondary'} onClick={() => void finish()} disabled={leaving} data-testid={ai ? 'editor-continue' : 'not-now'}>
-                {ai ? 'Continue' : 'Not now'}
+                {/* says where it goes: the line above says what a reel is without an editor (Sense, goal 3) */}
+                {ai ? 'Continue' : 'Continue without an editor'}
               </Button>
             )}
           </footer>

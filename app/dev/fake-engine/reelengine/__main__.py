@@ -18,6 +18,9 @@ Extra test hooks (env):
                                      once <folder>/go-<n> exists, so a test decides when each arrives
   FAKE_ENGINE_MOMENTS_AT=<seconds>  `moments` shows the change from there, in colour, as the real engine does;
                                     without it, three grey stills at fixed times, so a test tells them from the reel
+  FAKE_ENGINE_SUBTITLES=<folder>  render lays each subtitle line over the video at its words' times, from a picture
+                                  of it a test drew: <folder>/<size>/<sha1 of the line>.png at the 1080 px export width
+                                  (this stand-in draws no text itself: its ffmpeg may have no font filter)
   FAKE_ENGINE_TRANSCRIPT=<file>  transcribe writes these words instead of the placeholder ones: a JSON list of
                                  {"w", "s", "e"} in seconds of the first source, with "cut": true on the words autocut
                                  drops (a screenshot set shows a real take's words and cuts this way)
@@ -277,17 +280,15 @@ def run_ffmpeg(cmd: list[str], total: float, stage: str, message: str, lo: float
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.", err[-2000:])
 
 
-def write_captions(proj: Path, vdir: Path, data: dict) -> None:
-    """captions.json beside the render, as the real engine writes it, with simpler lines: the kept words three to a line
-    (one speech run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the
-    subtitle editor's split and join applied as the engine does (captions.edit_lines)."""
+def caption_cues(proj: Path, data: dict) -> list:
+    """A render's subtitle lines, as the real engine makes them but simpler: the kept words three to a line (one speech
+    run), the one-word fixes applied (a word fixed to nothing keeps its place as ""), then the subtitle editor's split
+    and join applied as the engine does (captions.edit_lines). [] with subtitles off, or before a transcript (tests
+    that render straight after init)."""
     cap = data.get("captions") or {}
     transcript = proj / "work" / "transcript.json"
-    # a project rendered before it was transcribed (tests that render straight after init) has no lines
     if cap.get("enabled") is False or not transcript.exists():
-        # no captions: an empty report, as the real engine writes, never an older render's lines
-        (vdir / "captions.json").write_text(json.dumps({"cues": []}), "utf-8")
-        return
+        return []
     words = json.loads(transcript.read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
     fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
@@ -312,8 +313,42 @@ def write_captions(proj: Path, vdir: Path, data: dict) -> None:
             if t["ids"][0] in split:
                 lines.append([])
             lines[-1].append(t)
-    cues = [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
-    (vdir / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
+    return [{"run": 0, "ids": [t["ids"][0] for t in line], "tokens": line} for line in lines if shown(line)]
+
+
+def write_captions(proj: Path, vdir: Path, data: dict) -> None:
+    """captions.json beside the render, as the real engine writes it; no captions is an empty report, never an older
+    render's lines."""
+    (vdir / "captions.json").write_text(json.dumps({"cues": caption_cues(proj, data)}), "utf-8")
+
+
+def subtitle_layers(proj: Path, data: dict, width: int) -> tuple[list[str], str] | None:
+    """FAKE_ENGINE_SUBTITLES: each line's picture as an ffmpeg input, and the filter that lays it over the video while
+    its words are spoken (the render plays the take straight, so a word's take time is its time in the render).
+    None when the switch is off or no line has a picture."""
+    folder = os.environ.get("FAKE_ENGINE_SUBTITLES")
+    cues = caption_cues(proj, data) if folder else []
+    if not cues:
+        return None
+    import hashlib
+    style = (data.get("captions") or {}).get("style") or {}
+    size, position = int(float(style.get("size", 105))), float(style.get("position", 0.75))
+    times = {w["id"]: (w["s"], w["e"]) for w in json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]}
+    inputs, chain, last = [], [], "base"
+    for cue in cues:
+        text = " ".join(t["w"] for t in cue["tokens"] if t["w"])
+        png = Path(folder) / str(size) / f"{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}.png"
+        if not png.exists():
+            continue
+        n = len(inputs) + 1
+        inputs.append(str(png))
+        a, b = times[cue["ids"][0]][0], times[cue["ids"][-1]][1]
+        chain.append(f"[{n}:v]scale=iw*{width / 1080:.4f}:-1[s{n}];"
+                     f"[{last}][s{n}]overlay=x=(W-w)/2:y=H*{position:.4f}-h/2:enable='between(t,{a:.3f},{b:.3f})'[o{n}]")
+        last = f"o{n}"
+    if not inputs:
+        return None
+    return inputs, ";".join(chain) + f";[{last}]null[vout]"
 
 
 def cmd_render(args: list[str]) -> dict:
@@ -341,7 +376,11 @@ def cmd_render(args: list[str]) -> dict:
     name = "draft.mp4" if draft else "export.mp4"
     tmp = vdir / f"{name}.partial.mp4"
     vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
-    run_ffmpeg([FFMPEG, "-y", "-v", "error", "-i", str(proj / src["path"]), "-t", f"{dur:.3f}", "-vf", vf,
+    layers = subtitle_layers(proj, data, w)
+    # the pictures are inputs after the take; -t after every input is the output's length
+    pictures = [arg for png in layers[0] for arg in ("-i", png)] if layers else []
+    video = ["-filter_complex", f"[0:v]{vf}[base];{layers[1]}", "-map", "[vout]", "-map", "0:a?"] if layers else ["-vf", vf]
+    run_ffmpeg([FFMPEG, "-y", "-v", "error", "-i", str(proj / src["path"]), *pictures, "-t", f"{dur:.3f}", *video,
                 "-c:v", "libx264", "-preset", "ultrafast" if draft else "veryfast", "-crf", "23",
                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(tmp)],
                dur, "render", "Putting it all together", 0, 90)

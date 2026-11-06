@@ -13,6 +13,8 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TRANSCRIPT } from '../src/renderer/src/components/first-run/sample'
+import { SIZE_PER_EM } from '../src/shared/caption-fit'
+import { createHash } from 'node:crypto'
 import { BASE, launch, makeMedia, modelReady, startReel, toEditorStep } from './helpers'
 import { auditConsistency, type ConsistencyFinding } from './layout-audit/consistency'
 import { CONSISTENCY_ALLOW, SCALE } from './layout-audit/consistency-allow'
@@ -149,6 +151,40 @@ async function note(page: Page, text: string): Promise<void> {
   await page.getByTestId('note-input').fill(text)
   await expect(page.getByTestId('send')).toBeEnabled({ timeout: 30_000 })
   await page.getByTestId('note-input').press('Enter')
+}
+/**
+ * The stand-in plays the take as it is and draws no text (its ffmpeg may have no font filter), so a reel would show no
+ * subtitles. Each line is drawn once here, in the app's own subtitle face and look (Player.tsx SubtitleSample, default
+ * style) at the 1080 px export width, for every size the climb's reels use; the stand-in lays them over its renders
+ * (FAKE_ENGINE_SUBTITLES) at their words' times. Lines: the kept words, three to a line, as it makes them.
+ */
+async function drawSubtitles(page: Page, dir: string, lines: string[], sizes: number[]): Promise<void> {
+  // only the line is drawn: the page under it hidden and see-through while the pictures are taken, then put back
+  await page.evaluate(() => {
+    for (const el of [document.documentElement, document.body]) el.style.setProperty('background', 'transparent', 'important')
+    document.body.style.visibility = 'hidden'
+  })
+  for (const size of sizes) {
+    mkdirSync(join(dir, String(size)), { recursive: true })
+    for (const text of lines) {
+      const line = await page.evaluateHandle(async ({ text, px, lh }) => {
+        await document.fonts.load("600 16px 'Reel Subtitles'")
+        const d = document.createElement('div')
+        d.textContent = text
+        d.style.cssText = `position:fixed;left:0;top:0;z-index:2147483647;white-space:pre;padding:8px;color:#FFFFFF;
+          visibility:visible;background:transparent;
+          font:600 ${px}px/${lh} 'Reel Subtitles',Montserrat,sans-serif;-webkit-text-stroke:16px #000000;paint-order:stroke fill`
+        document.body.append(d)
+        return d
+      }, { text, px: size / SIZE_PER_EM, lh: SIZE_PER_EM })
+      await line.screenshot({ path: join(dir, String(size), `${createHash('sha1').update(text).digest('hex').slice(0, 12)}.png`), omitBackground: true, scale: 'css' })
+      await line.evaluate((d) => d.remove())
+    }
+  }
+  await page.evaluate(() => {
+    for (const el of [document.documentElement, document.body]) el.style.removeProperty('background')
+    document.body.style.visibility = ''
+  })
 }
 /** The main process's environment reaches every engine run it starts (main/engine.ts cfg.env). */
 async function engineEnv(app: ElectronApplication, patch: Record<string, string>): Promise<void> {
@@ -329,6 +365,13 @@ test('climb scenes at two sizes', async () => {
     FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_MOMENTS_AT: String(MOMENT), FAKE_ENGINE_TRANSCRIPT: heard
   }, { realViewport: true })
   const ctx: Ctx = { app, page, gate: (n) => writeFileSync(join(gateDir, `go-${n}`), '') }
+  const kept = words.filter((w) => !w.cut).map((w) => w.w)
+  const lines = Array.from({ length: Math.ceil(kept.length / 3) }, (_, i) => kept.slice(i * 3, i * 3 + 3).join(' '))
+  await expect(page.getByTestId('get-started')).toBeVisible()
+  const subtitles = join(BASE, 'climb-subtitles')
+  // the default size, and the bigger one the climb's note asks for (ai-mock.ts slowNote)
+  await drawSubtitles(page, subtitles, lines, [105, 125])
+  await engineEnv(app, { FAKE_ENGINE_SUBTITLES: subtitles })
   const audit: Record<string, { findings: ConsistencyFinding[]; allowed: number; distinct: unknown }> = {}
   const metrics: Record<string, unknown> = {}
   const unreached: Record<string, string> = {}

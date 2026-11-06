@@ -781,7 +781,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
       )}
       {tagged && (
         <span className={`rt-ver${older ? ' older' : ''}`} data-testid="version-on-screen">
-          Version {tagged.n}
+          {/* comparing, the title says so: the switch on the phone was the only sign of it (Sense, goal 3) */}
+          {compare ? `Comparing Version ${compare.a} and ${compare.b}` : `Version ${tagged.n}`}
         </span>
       )}
       {taggedName && (
