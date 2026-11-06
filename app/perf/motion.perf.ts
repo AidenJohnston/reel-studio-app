@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { cpus, release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { APP_DIR, BASE, launch } from '../e2e/helpers'
-import { machineLoad, stats, waitForQuiet } from './measure'
+import { machineLoad, stats, waitForQuiet, type Load } from './measure'
 
 const RUNS = Number(process.env.REELSTUDIO_PERF_RUNS || 6)
 const WATCH_MS = 3000
@@ -53,7 +53,21 @@ function record(ms: number): void {
   setTimeout(() => obs.disconnect(), ms + 500)
 }
 
-async function measure(page: Page, act: () => Promise<void>): Promise<{ medianGapMs: number; maxGapMs: number; p95GapMs: number; framesOver50Ms: number; loafs: Loaf[] }> {
+interface Moment {
+  medianGapMs: number
+  maxGapMs: number
+  p95GapMs: number
+  framesOver50Ms: number
+  loafs: Loaf[]
+}
+interface Run {
+  run: number
+  load: { before: Load; after: Load }
+  flyIn: Moment
+  useClaude: Moment
+}
+
+async function measure(page: Page, act: () => Promise<void>): Promise<Moment> {
   await page.evaluate(record, WATCH_MS)
   await act()
   await page.waitForTimeout(WATCH_MS + 600)
@@ -73,7 +87,7 @@ async function measure(page: Page, act: () => Promise<void>): Promise<{ medianGa
 
 test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => {
   test.setTimeout(RUNS * 5 * 60_000)
-  const runs = []
+  const runs: Run[] = []
   for (let run = 1; run <= RUNS; run++) {
     await waitForQuiet()
     const before = machineLoad()
