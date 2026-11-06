@@ -80,15 +80,24 @@ export function ago(iso: string, now: number): string | null {
   return relative.format(-Math.floor(days / 365), 'year')
 }
 
-/** Final Cut Pro exports FCPXML; every other export the app reads is Premiere Pro's XML (learn-style.ts editorOf). */
-const editorOf = (file: string): string => (/\.fcpxmld?$/i.test(file) ? 'Final Cut Pro' : 'Premiere Pro')
+/** The editor, from the name a lesson kept (main style-learn.ts nameOf), for a rule kept before the editor was
+ * remembered with it, or one of several files. Such an FCPXML is taken as Final Cut Pro's, though Resolve writes
+ * them too. */
+function editorOf(file: string): string {
+  if (/\.fcpxmld?$/i.test(file)) return 'Final Cut Pro'
+  if (/(^|\/)draft_(content|info)\.json$/i.test(file)) return 'CapCut'
+  if (/\.edl$/i.test(file)) return 'EDL'
+  return 'Premiere Pro'
+}
 /** "Learn from my past edits" keeps several files as one comma-separated name (MyStyle.tsx keep). */
 const filesOf = (r: StyleRule): string[] => r.imported?.file.split(', ').filter(Boolean) ?? []
 
 function origin(r: StyleRule): string | null {
   if (r.imported) {
     const files = filesOf(r)
-    return files.length > 1 ? `from ${files.length} of your past edits` : `from your ${editorOf(r.imported.file)} edit ${r.imported.file}`
+    if (files.length > 1) return `from ${files.length} of your past edits`
+    const editor = r.imported.editor ?? editorOf(r.imported.file)
+    return editor === 'EDL' ? `from your edit list ${r.imported.file}` : `from your ${editor} edit ${r.imported.file}`
   }
   if (r.source?.note) return `from your note on “${r.source.title}”`
   if (r.source?.title) return `from “${r.source.title}”`
