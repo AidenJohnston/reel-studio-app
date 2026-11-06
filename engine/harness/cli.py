@@ -259,7 +259,8 @@ def cmd_agree(a) -> int:
         raise Refusal(f"report take sets differ: only in first {sorted(set(r1['takes']) - set(r2['takes']))}, "
                       f"only in second {sorted(set(r2['takes']) - set(r1['takes']))}")
     fields = [("split", r1.get("split"), r2.get("split")),
-              ("flow", r1.get("flow", "drafts"), r2.get("flow", "drafts"))]
+              ("flow", r1.get("flow", "drafts"), r2.get("flow", "drafts")),
+              ("proxy", r1.get("proxy", False), r2.get("proxy", False))]
     for key in ("engineCommit", "ffmpeg", "ffprobe"):
         v1, v2 = r1.get("pins", {}).get(key), r2.get("pins", {}).get(key)
         if key != "engineCommit":
