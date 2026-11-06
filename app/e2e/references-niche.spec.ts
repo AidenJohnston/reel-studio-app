@@ -11,8 +11,10 @@ import { join } from 'node:path'
 import { BASE, SHOTS, launch, makeMedia, passFirstRun, root } from './helpers'
 
 const DIR = process.env.SHOTS_DIR ?? join(SHOTS, 'learning-refs')
-async function snap(page: Page, name: string): Promise<void> {
+/** The sections sit under the rules, below the fold: `at` is scrolled into view first. */
+async function snap(page: Page, name: string, at?: string): Promise<void> {
   mkdirSync(DIR, { recursive: true })
+  if (at) await page.getByTestId(at).first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
   await page.screenshot({ path: join(DIR, `${name}.png`) })
 }
@@ -41,7 +43,7 @@ test('reference reels: files are measured, a TikTok link asks for its file, and 
     await page.getByTestId('nav-style').click()
     const section = page.getByTestId('references')
     await expect(page.getByTestId('references-empty')).toBeVisible()
-    await snap(page, '01-my-style-sections-empty')
+    await snap(page, '01-my-style-sections-empty', 'niche-section')
 
     await section.getByTestId('file-input').first().setInputFiles([first, second])
     const rows = section.getByTestId('reference')
@@ -51,7 +53,7 @@ test('reference reels: files are measured, a TikTok link asks for its file, and 
     const readout = page.getByTestId('references-readout')
     await expect(readout).toContainText('What these 2 reels have in common')
     await expect(page.getByTestId('readout-pace')).toContainText('2.8')
-    await snap(page, '02-references-measured')
+    await snap(page, '02-references-measured', 'references-readout')
 
     // the editor's tool reads references.json: its readout must be the one on screen
     const stored = JSON.parse(readFileSync(join(root(), 'References', 'references.json'), 'utf8'))
@@ -64,7 +66,7 @@ test('reference reels: files are measured, a TikTok link asks for its file, and 
     await expect(needs).toContainText('TikTok’s terms don’t let other apps download its videos')
     await expect(needs).toContainText('Save video')
     await expect(section.getByTestId('references-link')).toHaveValue('')
-    await snap(page, '03-reference-link-needs-file')
+    await snap(page, '03-reference-link-needs-file', 'reference-needs-file')
 
     // a link that is not one says so where it was typed
     await section.getByTestId('references-link').fill('my favourite reel')
@@ -121,13 +123,13 @@ test('niche: a short chat drafts it, Save keeps it for the editor, and Edit, Rem
     await expect(sheet).toBeHidden()
     await expect(page.getByTestId('niche-who')).toHaveText('People who want to bake bread at home but have never tried sourdough')
     expect(JSON.parse(readFileSync(file, 'utf8')).niche).toMatchObject({ from: 'chat', avoid: ['hack', 'game-changer', 'easy peasy'] })
-    await snap(page, '07-niche-saved')
+    await snap(page, '07-niche-saved', 'niche-section')
 
     // Edit: the person's own words, read by the editor next time
     await page.getByTestId('niche-edit').click()
     const form = page.getByTestId('niche-form')
     await form.getByLabel('Who your reels are for').fill('First-time bakers in small flats')
-    await snap(page, '08-niche-edit')
+    await snap(page, '08-niche-edit', 'niche-form')
     await page.getByTestId('niche-form-save').click()
     await expect(page.getByTestId('niche-who')).toHaveText('First-time bakers in small flats')
     expect(JSON.parse(readFileSync(file, 'utf8')).niche).toMatchObject({ who: 'First-time bakers in small flats', from: 'typed' })
@@ -137,7 +139,7 @@ test('niche: a short chat drafts it, Save keeps it for the editor, and Edit, Rem
     await expect(page.getByTestId('niche-removed')).toBeVisible()
     await expect(page.getByTestId('niche-undo')).toBeFocused()
     expect(existsSync(file)).toBe(false)
-    await snap(page, '09-niche-removed')
+    await snap(page, '09-niche-removed', 'niche-removed')
     await page.getByTestId('niche-undo').click()
     await expect(page.getByTestId('niche-who')).toHaveText('First-time bakers in small flats')
     expect(existsSync(file)).toBe(true)
@@ -170,7 +172,7 @@ test('niche with no editor connected: the chat says so and Write it myself saves
     await page.getByTestId('niche-form-save').click()
     await expect(page.getByTestId('niche-who')).toHaveText('Office workers with sore backs')
     expect(JSON.parse(readFileSync(join(own, 'My niche.json'), 'utf8')).niche).toMatchObject({ angles: ['One stretch, start to finish', 'The posture myth'], avoid: ['hack', 'biohacking'] })
-    await snap(page, '11-my-style-1100x720')
+    await snap(page, '11-my-style-1100x720', 'references')
     // at the smallest window, nothing in the two sections runs past its right edge
     const past = await page.evaluate(() =>
       Array.from(document.querySelectorAll('[data-testid=references] *, [data-testid=niche-section] *'))
