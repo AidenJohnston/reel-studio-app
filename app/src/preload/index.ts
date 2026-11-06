@@ -56,6 +56,7 @@ const api: ReelApi = {
     setFasterExports: (on) => call('app:setFasterExports', on),
     setModels: (models) => call('app:setModels', models),
     setSharing: (sharing) => call('app:setSharing', sharing),
+    usage: () => call('app:usage'),
     setPhoneView: (view) => call('app:setPhoneView', view),
     setSoundEffects: (on) => call('app:setSoundEffects', on),
     setTimeline: (shown) => call('app:setTimeline', shown),
