@@ -178,6 +178,23 @@ describe('orphaned engine reaper', () => {
     other.kill()
   })
 
+  // Reported as stopped, a leftover engine taskkill could not end would be dropped from the list at start
+  // and its video opened while it still writes there
+  it.runIf(process.platform === 'win32')('a process taskkill could not stop is reported as still running', async () => {
+    const other = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore', windowsHide: true })
+    await once(other, 'spawn')
+    const path = process.env.PATH
+    // taskkill cannot be found, so it stops nothing
+    process.env.PATH = mkdtempSync(join(tmpdir(), 'rs-no-taskkill-'))
+    try {
+      expect(await killTree(other.pid!)).toBe(false)
+      expect(isAlive(other.pid!)).toBe(true)
+    } finally {
+      if (path !== undefined) process.env.PATH = path
+      other.kill()
+    }
+  }, 20000)
+
   it.skipIf(process.platform === 'win32')('an engine from a 0.1.x list (no video named) that would not stop keeps the video it works in closed', async () => {
     setupPaths()
     const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
