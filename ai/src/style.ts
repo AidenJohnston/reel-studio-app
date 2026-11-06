@@ -231,10 +231,14 @@ export class StyleStore {
       if (!proposal) return null;
       const text = cleanRuleText(words ?? proposal.text);
       const proposals = data.proposals!.filter((p) => p.id !== id);
+      // kept in other words, its own words are neither a rule nor turned down: without this the next look
+      // suggests them again
+      const forgotten = normalize(text) === normalize(proposal.text) ? data.forgotten
+        : [...new Set([...(data.forgotten ?? []), id, normalize(proposal.text)])];
       const dup = data.rules.find((r) => normalize(r.text) === normalize(text));
       if (dup) {
         delete dup.paused;
-        await this.write({ ...data, proposals });
+        await this.write({ ...data, proposals, ...(forgotten ? { forgotten } : {}) });
         return dup;
       }
       const from = proposal.from;
@@ -244,7 +248,7 @@ export class StyleStore {
           ? { source: { project: from.project, title: from.title, version: from.version, ...(from.note ? { note: from.note } : {}) } }
           : { learned: { from: from.kind, evidence: from.evidence } }),
       };
-      await this.write({ ...data, rules: [...data.rules, rule], proposals });
+      await this.write({ ...data, rules: [...data.rules, rule], proposals, ...(forgotten ? { forgotten } : {}) });
       return rule;
     });
   }

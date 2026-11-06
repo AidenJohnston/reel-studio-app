@@ -581,7 +581,9 @@ export const createMockAI: CreateAI = ({ host }) => {
           id: randomUUID(), text, createdAt: new Date().toISOString(),
           ...(from.kind === 'note' ? { source: { project: from.project, title: from.title, version: from.version } } : { learned: { from: from.kind, evidence: from.evidence } })
         }
-        await writeJson(styleFile(), { ...s, rules: dup ? s.rules : [...s.rules, rule], proposals })
+        // kept in other words: its own words are never suggested again (as the real StyleStore.accept)
+        const forgotten = sameRule(text) === sameRule(x.text) ? s.forgotten : [...(s.forgotten ?? []), x.text]
+        await writeJson(styleFile(), { ...s, rules: dup ? s.rules : [...s.rules, rule], proposals, ...(forgotten ? { forgotten } : {}) })
         return rule
       })
     },

@@ -92,3 +92,18 @@ it('fails if an edits suggestion with no evidence or reels is stored', async () 
   const bad = { kind: 'captions', line: 'Bigger', text: 'Bigger.', from: { kind: 'edits', reels: 'a', n: 2, evidence: 'x' } } as unknown as ProposalDraft;
   await expect(style.propose(bad)).rejects.toThrow(/Invalid memory proposal/);
 });
+
+it('fails if a suggestion kept in other words is suggested again', async () => {
+  const { style } = await store();
+  const edits: ProposalDraft = { kind: 'captions', line: 'Use bigger subtitles', text: 'Use bigger subtitles.', from: { kind: 'edits', reels: ['a', 'b'], n: 2, evidence: 'By hand in 2 reels.' } };
+  await style.propose(edits);
+  const [p] = await style.proposals();
+  await style.accept(p.id, 'Use big subtitles, about 126 px');
+  // the next look drafts the same habit from the same hand edits
+  expect(await style.propose(edits)).toBe('forgotten');
+  // kept in its own words, it is a rule, so the same draft is a duplicate
+  await style.propose(draft());
+  const [q] = await style.proposals();
+  await style.accept(q.id);
+  expect(await style.propose(draft())).toBe('duplicate');
+});
