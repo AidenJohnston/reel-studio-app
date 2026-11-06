@@ -312,6 +312,9 @@ export interface StoredProposal {
 }
 
 // Loose mirror of project.json (docs/architecture.md section 3). The engine owns validation.
+/** Per pace: picture changes a minute, how many land in the first 5 seconds, and the most the opening may hold. */
+export interface PacePreview { paces: Record<string, { perMinute: number; opening: number; openingMax: number }> }
+
 /** One join of a cut, as the engine's match-joins answers for it. */
 export interface MatchVerdict { keep: number; matched: boolean; why?: string }
 
@@ -996,6 +999,8 @@ export interface ReelApi {
     stopCoverCandidates(slug: string): Promise<void>
     /** Whether each match join in `keep` lines up (engine match-joins): `why` says what stops one that doesn't. */
     matchJoins(slug: string, keep: unknown[]): Promise<MatchVerdict[]>
+    /** How often each pace ('none' or a preset) would change the picture of the saved project (engine pace-preview). */
+    pacePreview(slug: string): Promise<PacePreview>
     exportPlatforms(slug: string, version: number, request: PlatformExportRequest): Promise<PlatformExportResult>
     /** Try 2 for a trial post: the connected editor's one change from the version with this caption, or the app's
      * cover pick when no editor is connected. `notice`: why the editor's answer isn't used, in the app's words.

@@ -659,6 +659,13 @@ def cmd_match_joins(args: list[str]) -> dict:
     return {"joins": joins}
 
 
+def cmd_pace_preview(args: list[str]) -> dict:
+    """Fixed counts in the real engine's shape (reelengine pace-preview): the stand-in plans no framing."""
+    take(args, "--project")
+    rows = {"none": (6, 1, 3), "clean": (8, 1, 1), "standard": (14, 2, 2), "hyper": (26, 5, 4), "punchline": (9, 1, 2)}
+    return {"seconds": 5.0, "paces": {k: {"perMinute": a, "opening": b, "openingMax": c, "issues": []} for k, (a, b, c) in rows.items()}}
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -670,6 +677,7 @@ COMMANDS = {
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
     "reference-scan": cmd_reference_scan, "moments": cmd_moments, "match-joins": cmd_match_joins,
+    "pace-preview": cmd_pace_preview,
 }
 
 

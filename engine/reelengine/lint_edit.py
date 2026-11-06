@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .cut_style import CUT_STYLES
+from .cut_style import CUT_STYLES, OPENING, OPENING_MAX_UNSTYLED
 from .cut import MATCH_HOLD
 from .placement import SAFE_BOTTOM, SAFE_TOP
 
@@ -108,6 +108,16 @@ def lint_edit(edit: dict, timeline: LintTimeline) -> dict:
 
     style = edit.get('cutStyle')
     preset = CUT_STYLES.get(style['preset']) if style else None
+    # The opening decides whether someone stays: past a few changes it reads as noise before the hook lands.
+    # Changes inside one frame of each other are one, as in the cadence below.
+    opening = []
+    for t in sorted(t for t in changes if 0 < t < min(OPENING, timeline.duration)):
+        if not opening or t - opening[-1] > 1 / fps:
+            opening.append(t)
+    cap = preset['openingMax'] if preset else OPENING_MAX_UNSTYLED
+    if len(opening) > cap:
+        issue('opening-busy', opening[cap], f'The first {OPENING:g} seconds change {len(opening)} times; {"this pace" if preset else "an opening"} holds at most {cap}.',
+              'Let the opening breathe: move a zoom, picture or cut in the first 5 seconds later, or drop it.')
     if preset:
         counts = [('jl-budget', sum(s.join_transition in ('j', 'l') for s in timeline.segments), preset['jlBridges'], 'J/L bridges'),
                   ('smash-budget', sum(s.join_transition == 'smash' for s in timeline.segments), preset['smashes'], 'smash cuts'),
@@ -170,4 +180,5 @@ def prepare(ctx, tl):
             z = zooms[fix['target']]
             z.ramp_in, z.ramp_out = fix['ramp_in'], fix['ramp_out']
     ctx.lint_zooms = zooms
+    ctx.lint_visuals = visuals
     return result

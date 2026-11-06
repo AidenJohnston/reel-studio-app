@@ -47,6 +47,9 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await openPace(page)
     const paces = page.getByRole('radiogroup', { name: 'Pace' })
     await expect(paces.getByRole('radio', { name: 'No set pace' })).toBeChecked()
+    // fails if a pace is offered blind: each row says how often it changes this reel, from the engine's plan
+    await expect(page.getByTestId('pace-standard-measured')).toHaveText('About 14 changes a minute in this reel.')
+    await expect(page.getByTestId('pace-hyper-measured')).toHaveText('About 26 changes a minute in this reel, 5 in the first 5 seconds: a busy start.')
     // fails if Try other moments is offered with no pace to keep
     await expect(page.getByTestId('pace-reshuffle')).toHaveCount(0)
     const rows = page.getByTestId('zoom-row')

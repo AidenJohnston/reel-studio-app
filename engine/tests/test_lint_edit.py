@@ -257,3 +257,17 @@ def test_a_zoom_on_a_match_cut_is_flagged_and_one_clear_of_it_is_not():
     assert 'match-framing' in rules(lint_edit(p, tl))
     tl.zooms = [z(12.4, 14)]
     assert 'match-framing' not in rules(lint_edit(p, tl))
+
+
+def test_a_busy_opening_is_flagged_against_its_pace_and_one_change_per_frame_counts_once():
+    """Fails if the first 5 seconds can hold any number of changes, a cut and a zoom on the same frame
+    count as two, or a change after 5 s counts toward the opening."""
+    tl = plan()
+    tl.segments.append(Segment('s1', 6, 9, 2))
+    tl.zooms = [z(2, 3), z(4, 7)]        # changes at 2 (cut and zoom), 3, 4, then 7 outside the opening
+    assert 'opening-busy' not in rules(lint_edit(edit(), tl))        # 3 changes, 3 allowed without a pace
+    (issue,) = [r for r in lint_edit(edit('standard'), tl)['issues'] if r['rule'] == 'opening-busy']
+    assert issue['at_seconds'] == 4                                   # the first change past the 2 allowed
+    assert 'opening-busy' not in rules(lint_edit(edit('hyper'), tl))
+    tl.zooms.append(z(4.5, 4.9))
+    assert 'opening-busy' in rules(lint_edit(edit(), tl))
