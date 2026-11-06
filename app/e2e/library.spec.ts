@@ -93,7 +93,9 @@ test('Library, My style and Insights', async () => {
   // fails if the row draws in the app's own face: the sample's font is the file's
   await expect.poll(() => mine.locator('.lib-font-sample').evaluate((el) => {
     const family = getComputedStyle(el).fontFamily.split(',')[0].replace(/"/g, '').trim()
-    return [...document.fonts].find((f) => f.family.replace(/"/g, '') === family)?.status
+    let status: string | undefined
+    document.fonts.forEach((f) => { if (f.family.replace(/"/g, '') === family) status = f.status })
+    return status
   })).toBe('loaded')
   await shot(page, 'library-fonts')
 
