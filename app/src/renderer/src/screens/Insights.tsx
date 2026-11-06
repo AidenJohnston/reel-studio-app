@@ -4,6 +4,7 @@ import { TitleBarSlot } from '../components/titlebar'
 import { Button, Spinner } from '../components/ui'
 import { reel } from '../api'
 import type { Go } from '../nav'
+import { RecentReels } from '../components/RecentReels'
 import type { InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
 import { ago, audienceLines, bestReel, compact, percent, PLATFORM_NAMES, reelLine, seconds } from '../../../shared/insight-words'
 import '../components/library.css'
@@ -95,6 +96,8 @@ export function Insights({ go }: { go: Go }) {
           <p className="faint ins-foot">Read from your connected accounts. Your results stay on this computer.</p>
         </>
       ) : null}
+      {/* one edit to try, from these results and the reels' own timing; it also works before any results */}
+      {data && <RecentReels go={go} />}
     </div>
   )
 }
