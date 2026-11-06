@@ -189,7 +189,7 @@ function strength(reels: WrappedReel[]): WrappedStrength {
 interface Check {
   kind: WrappedEdit['kind']
   applies: (t: WrappedTiming) => boolean
-  edit: (r: WrappedReel, t: WrappedTiming) => Omit<WrappedEdit, 'kind' | 'project' | 'version' | 'measure'> & { shorter: boolean }
+  edit: (r: WrappedReel, t: WrappedTiming) => Omit<WrappedEdit, 'kind' | 'project' | 'version' | 'measure' | 'changes' | 'fixedIn'> & { shorter: boolean }
 }
 
 // Checked in this order on each reel, starting with the one people watched least of.
