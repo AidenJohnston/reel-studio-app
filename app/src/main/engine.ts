@@ -172,8 +172,9 @@ export function createEngineRunner(cfg: RunnerConfig) {
         // Windows kills by pid, and an engine that has already exited may have handed its pid on
         const exited = child.exitCode !== null || child.signalCode !== null
         const kill = child.pid && !(exited && process.platform === 'win32') ? killTree(child.pid) : true
-        void Promise.all([kill, gone]).then(([killed, clean]) =>
-          rejectPromise(killed && clean ? cancelled() : stuck(child.pid)))
+        // an engine that survived the kill may never close: it is reported now and stays registered
+        void Promise.resolve(kill).then(async (killed) =>
+          rejectPromise(killed && (await gone) ? cancelled() : stuck(child.pid)))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
 
