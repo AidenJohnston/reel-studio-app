@@ -33,6 +33,8 @@ h3.edit-label { margin: 0; }
 /* a hint that stays at the top of the panel while what it is about scrolls under it: it covers the panel's 16 px top
    padding (.edit-b) on the page's paper, so nothing shows through above it */
 .edit-hint-stay { position: sticky; top: 0; z-index: 1; margin-top: -16px; padding: 16px 0 8px; background: var(--paper); }
+/* a control reached by Tab scrolls into view below the hint, not under it (three lines of hint at 1100 x 720) */
+.edit-b:has(.edit-hint-stay) { scroll-padding-top: 72px; }
 .edit-rule { height: 1px; background: var(--line); }
 .edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .edit-inline { display: flex; align-items: center; gap: 8px; }

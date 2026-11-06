@@ -235,24 +235,42 @@ function SideRecent({ current, go, onListed }: { current: string | null; go: Go;
   const seenJobs = useRef(new Set<string>())
   useEffect(() => {
     let alive = true
-    const load = () =>
-      reel.projects.list().then(
-        (p) => {
-          if (!alive) return
-          setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX))
-        },
-        () => alive && setList([])
-      )
-    void load()
-    // a reel made, finished or stopped anywhere changes its line here too; of the status events, a job's first
+    // one read at a time: a burst of events asks once more after the read in flight, so answers arrive in order and a
+    // late one never puts back an older list
+    let reading = false
+    let again = false
+    const load = (): void => {
+      if (reading) return void (again = true)
+      reading = true
+      reel.projects
+        .list()
+        .then(
+          (p) => {
+            if (alive) setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX))
+          },
+          () => alive && setList([])
+        )
+        .finally(() => {
+          reading = false
+          if (alive && again) {
+            again = false
+            load()
+          }
+        })
+    }
+    load()
+    // a reel made, finished or stopped anywhere changes its line here too: a job's first status, a kept render, and how
+    // it ends or pauses (its words, tools and moments change nothing listed)
     const off = reel.jobs.onEvent((e) => {
-      if (e.type !== 'status') return void load()
-      if (seenJobs.current.has(e.jobId)) return
-      seenJobs.current.add(e.jobId)
-      void load()
+      if (e.type === 'status') {
+        if (seenJobs.current.has(e.jobId)) return
+        seenJobs.current.add(e.jobId)
+        return load()
+      }
+      if ((e.type === 'render' && !e.draft) || e.type === 'done' || e.type === 'error' || e.type === 'cancelled' || e.type === 'paused') load()
     })
-    const offQueue = reel.queue.onChange(() => void load())
-    const offRenamed = onReelsChanged(() => void load())
+    const offQueue = reel.queue.onChange(load)
+    const offRenamed = onReelsChanged(load)
     return () => {
       alive = false
       off()

@@ -42,7 +42,7 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
 .new-card .im {
   display: grid; place-content: center; justify-items: center; gap: 8px; padding: 0; border: 0; font: inherit; font-size: var(--fs-base);
   line-height: var(--lh-base); font-weight: 560; color: var(--ink-2); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, transform 180ms var(--ease-out);
+  transition: background-color 120ms ease, color 120ms ease, transform 140ms var(--ease-out);
 }
 /* no picture, so none of a picture's shading */
 .rcard.new-card .im::after { content: none; }
@@ -155,7 +155,7 @@ html.kb :is(.rcard:hover .im, .rcard .hit:active ~ .im, .rrow .hit:active ~ .rth
 @media (prefers-reduced-motion: reduce) {
   .rcard .im, .rrow .rthumb { transition: none; }
   .rcard .pb i, .rrow .pb i { transition: none; }
-  .rcard:hover .im, .rcard .hit:active ~ .im, .rrow .hit:active ~ .rthumb { transform: none; }
+  .rcard:hover .im, .rcard .hit:active ~ .im, .rrow .hit:active ~ .rthumb, .new-card .im:active { transform: none; }
 }
 
 /* No reels yet: the sample, and one invitation */

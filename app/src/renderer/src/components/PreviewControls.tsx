@@ -1,7 +1,7 @@
 // The two menus in the Reel screen's transport row, also in the full-screen stage: the playback speed and the
 // phone shape the preview takes. Each is a pill that opens a small menu of choices and gives focus back to its pill,
 // whose name then says the new choice. The shape also says aloud what Instagram may trim on that phone.
-import { useRef, useState, type CSSProperties } from 'react'
+import { useId, useRef, useState, type CSSProperties } from 'react'
 import { SHAPES, fitWords } from '../../../shared/phone-shapes'
 import { Icon } from './icons'
 import { PopMenu } from './PopMenu'
@@ -153,6 +153,8 @@ export function ViewMenu({
   const [shape, setShape] = usePhoneShape()
   const [open, setOpen] = useState(false)
   const [opensTo, setOpensTo] = useState<Side>(side)
+  /** the two sections' headings name their groups for a screen reader */
+  const heads = useId()
   const pill = useRef<HTMLButtonElement>(null)
   const done = (words?: string) => {
     setOpen(false)
@@ -179,51 +181,55 @@ export function ViewMenu({
         <Icon name="eye" size={18} />
       </button>
       <PopMenu open={open} onClose={() => setOpen(false)} anchor={pill} label="View" {...above(opensTo, VIEW_MENU_W)} testid="view-menu-list">
-        <p className="mi-head" aria-hidden>
-          On the phone
-        </p>
-        {VIEWS.map((v) => (
-          <button
-            key={v.key}
-            type="button"
-            className="mi shape-mi"
-            role="menuitemradio"
-            aria-checked={v.key === view}
-            disabled={held}
-            onClick={() => (onView(v.key), done())}
-            data-testid={v.testid}
-          >
-            {v.key === view ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
-            <span className="shape-mi-text">
-              <span>{v.label}</span>
-              <span className="shape-mi-fit">{held ? 'Comparing shows the reel without Instagram. Your view comes back when you keep a version.' : v.fit}</span>
-            </span>
-          </button>
-        ))}
-        <hr />
-        <p className="mi-head" aria-hidden>
-          Phone
-        </p>
-        {SHAPES.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className="mi shape-mi"
-            role="menuitemradio"
-            aria-checked={s.id === shape.id}
-            onClick={() => (setShape(s), done(fitWords(s)))}
-            data-testid={`shape-${s.id}`}
-          >
-            {s.id === shape.id ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
-            <span className="shape-mi-text">
-              <span>
-                {s.label}
-                <span className="r">{s.ratio}</span>
+        <div role="group" aria-labelledby={`${heads}-on`}>
+          <p className="mi-head" id={`${heads}-on`}>
+            On the phone
+          </p>
+          {VIEWS.map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              className="mi shape-mi"
+              role="menuitemradio"
+              aria-checked={v.key === view}
+              disabled={held}
+              onClick={() => (onView(v.key), done())}
+              data-testid={v.testid}
+            >
+              {v.key === view ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
+              <span className="shape-mi-text">
+                <span>{v.label}</span>
+                <span className="shape-mi-fit">{held ? 'Comparing shows the reel without Instagram. Your view comes back when you keep a version.' : v.fit}</span>
               </span>
-              <span className="shape-mi-fit">{fitWords(s)}</span>
-            </span>
-          </button>
-        ))}
+            </button>
+          ))}
+        </div>
+        <hr />
+        <div role="group" aria-labelledby={`${heads}-shape`}>
+          <p className="mi-head" id={`${heads}-shape`}>
+            Phone
+          </p>
+          {SHAPES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="mi shape-mi"
+              role="menuitemradio"
+              aria-checked={s.id === shape.id}
+              onClick={() => (setShape(s), done(fitWords(s)))}
+              data-testid={`shape-${s.id}`}
+            >
+              {s.id === shape.id ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
+              <span className="shape-mi-text">
+                <span>
+                  {s.label}
+                  <span className="r">{s.ratio}</span>
+                </span>
+                <span className="shape-mi-fit">{fitWords(s)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
         <hr />
         <button type="button" className="mi" role="menuitemcheckbox" aria-checked={timeline} onClick={() => (onTimeline(!timeline), done())} data-testid="timeline-toggle">
           {timeline ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
