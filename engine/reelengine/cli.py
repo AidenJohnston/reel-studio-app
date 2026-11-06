@@ -135,6 +135,58 @@ def cmd_lint_edit(args):
     return prepare(ctx, tl)
 
 
+def cmd_match_joins(args):
+    from . import project
+    pdir = _project(args)
+    # inside a note, the note's private copy of the edit (render does the same)
+    note = _in_work(args, "project_file")
+    edit = project.load(pdir, file=note) if note else project.load(pdir)
+    if args.keep is not None:
+        try:
+            edit["cut"]["keep"] = json.loads(args.keep)
+        except (ValueError, TypeError):
+            raise EngineError("BAD_ARGS", "--keep must be JSON", "Reel Studio sent a cut the engine couldn't read.")
+    keep = edit["cut"]["keep"]
+    if args.every and isinstance(keep, list):
+        # ask the question for every join that could hold one: after the first range, never next to a clip
+        for i, item in enumerate(keep):
+            if i and isinstance(item, dict) and "clip" not in item and isinstance(keep[i - 1], dict) and "clip" not in keep[i - 1]:
+                item["join"] = {"transition": "match", "frames": 0}
+    problems = project.validate(edit)
+    if problems:
+        raise EngineError("BAD_PROJECT", "; ".join(problems[:8]), "This cut can't be checked. Undo the last change and try again.")
+    tl = project.timeline(pdir, edit)
+    return {"joins": [{"keep": m["keep"], "matched": m["played"] == "match",
+                       "at": round(tl.segments[m["in"]].out_start, 3) if "in" in m else None,
+                       **{k: m[k] for k in ("why", "look", "move") if k in m}} for m in tl.match_joins]}
+
+
+def cmd_pace_preview(args):
+    """How often the picture would change under each pace, from the plan a render would make (no encode)."""
+    import copy
+    from . import project, render, tools
+    from .cut_style import CUT_STYLES, OPENING, OPENING_MAX_UNSTYLED, visual_change_meter
+    from .lint_edit import prepare
+    pdir = _project(args)
+    base = project.load(pdir)
+    seed = (base.get("cutStyle") or {}).get("seed", 1)
+    paces = {}
+    for preset in [None, *CUT_STYLES]:
+        edit = copy.deepcopy(base)
+        if preset:
+            edit["cutStyle"] = {"preset": preset, "seed": seed}
+        else:
+            edit.pop("cutStyle", None)
+        tl = project.timeline(pdir, edit)
+        ctx = render.make_ctx(pdir, edit, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
+        lint = prepare(ctx, tl)
+        meter = visual_change_meter(tl.duration, tl.segments, ctx.lint_visuals, ctx.lint_zooms, fps=float(edit["format"]["fps"]))
+        paces[preset or "none"] = {"perMinute": meter["overall"]["perMinute"], "opening": meter["first5"]["total"],
+                                   "openingMax": CUT_STYLES[preset]["openingMax"] if preset else OPENING_MAX_UNSTYLED,
+                                   "issues": sorted({i["rule"] for i in lint["issues"]})}
+    return {"seconds": OPENING, "paces": paces}
+
+
 def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
@@ -498,6 +550,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("autocut", cmd_autocut, "write the deterministic default cut")
     sp.add_argument("--gap-cap", type=float)
     sp = add("lint-edit", cmd_lint_edit, "check the edit without rendering")
+    sp.add_argument("--root")
+    sp = add("match-joins", cmd_match_joins, "say which joins of the cut can be match cuts")
+    sp.add_argument("--keep", help="cut.keep to check instead of the project's, as JSON")
+    sp.add_argument("--every", action="store_true", help="check every join that could hold a match, not only the ones that ask for it")
+    sp.add_argument("--project-file", help="the edit to read instead of project.json, inside work/ (a note's private copy)")
+    sp = add("pace-preview", cmd_pace_preview, "count the picture changes each pace would make, without rendering")
     sp.add_argument("--root")
     sp = add("render", cmd_render, "render project.json")
     sp.add_argument("--draft", action="store_true")
