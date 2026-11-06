@@ -198,7 +198,8 @@
 
 /* an empty plan chat: what planning does, in the middle of the chat area. It fills the column (no editor) or the log
    above the note box (connected), and centres itself in that space. */
-.pl-empty { flex: 1 0 auto; min-height: 0; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 24px 16px; text-align: center; }
+/* just above the box it describes, not in the middle of the column */
+.pl-empty { flex: 1 0 auto; min-height: 0; display: grid; align-content: end; justify-items: center; gap: 8px; padding: 24px 16px; text-align: center; }
 .pl-empty-marks { display: flex; gap: 8px; margin-bottom: 4px; color: var(--ink-3); }
 .pl-empty h3 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 650; text-wrap: balance; }
 .pl-empty p { max-width: 34ch; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); text-wrap: pretty; }

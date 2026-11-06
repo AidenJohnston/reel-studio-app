@@ -41,7 +41,7 @@ test('Library, My style and Insights', async () => {
   // fails if Insights hides until a post, which nothing in this version can make
   await page.getByTestId('nav-insights').click()
   await expect(page.getByTestId('titlebar-title')).toHaveText('Insights')
-  await expect(page.getByTestId('insights-empty')).toContainText('how long people watched')
+  await expect(page.getByTestId('insights-empty')).toContainText('How long people watched')
   await expect(page.getByTestId('insights-empty')).toContainText('It needs your Instagram account connected')
 
   // ---- Library: tabs, no Finished videos, an empty tab says what goes there ----

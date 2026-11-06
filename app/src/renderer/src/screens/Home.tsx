@@ -134,12 +134,17 @@ export function Home({ go }: { go: Go }) {
   const card = (p: ProjectSummary) => (
     <Card key={p.slug} p={p} live={live[p.slug]} now={now} onOpen={() => open(p)} onAct={() => resume(p)} onVideo={(files) => another(p, files)} />
   )
-  const grid = (items: ProjectSummary[]) => <div className="grid">{items.map(card)}</div>
-  const section = (title: string, items: ProjectSummary[]) =>
+  const grid = (items: ProjectSummary[], tail?: ReactNode) => (
+    <div className="grid">
+      {items.map(card)}
+      {tail}
+    </div>
+  )
+  const section = (title: string, items: ProjectSummary[], tail?: ReactNode) =>
     items.length > 0 && (
       <section key={title} aria-label={title}>
         <h2 className="sec-h">{title}</h2>
-        {grid(items)}
+        {grid(items, tail)}
       </section>
     )
 
@@ -170,7 +175,7 @@ export function Home({ go }: { go: Go }) {
             {rows('Making', making)}
           </div>
         )}
-        {section('Recent', recent)}
+        {section('Recent', recent, <NewCard onNew={() => void newReel(go, notify)} />)}
         {!needs.length && !making.length && !recent.length && (
           <p className="home-quiet">
             Nothing new in the last two weeks.{' '}
@@ -439,6 +444,21 @@ function Row({ p, live, now, onOpen, onAct, onVideo }: Props) {
 }
 
 /** No reels yet: the sample, and one invitation with its two ways in (spec.md section 4). */
+/**
+ * The last place in Recent: a reel's own shape, holding nothing yet, that starts a new one (as the sidebar's New reel
+ * does). A few reels then fill their row with something to do instead of trailing off into canvas.
+ */
+function NewCard({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="rcard new-card">
+      <button className="im" onClick={onNew} data-testid="recent-new-reel">
+        <Icon name="plus" size={20} />
+        <span>New reel</span>
+      </button>
+    </div>
+  )
+}
+
 function Empty({ go }: { go: Go }) {
   const notify = useNotify()
   const { s: model } = useModelStatus()

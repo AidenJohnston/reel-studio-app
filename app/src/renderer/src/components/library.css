@@ -66,7 +66,12 @@
 .lib-wave.pending { background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; }
 .lib-wave.none { display: flex; align-items: center; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
 
-.lib-empty { display: grid; justify-items: center; align-content: center; gap: 6px; min-height: 360px; text-align: center; }
+/* an empty tab is where its files will go: the room under the tabs, framed as the drop target it is (the window takes
+   the drop anywhere), as a new reel's stage is the phone's slot */
+.lib-empty {
+  display: grid; justify-items: center; align-content: center; gap: 8px; min-height: max(360px, calc(100vh - var(--titlebar) - 120px)); text-align: center;
+  border-radius: var(--r-lg); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
 .lib-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .lib-empty p { max-width: 40ch; color: var(--ink-2); }
 
@@ -89,6 +94,7 @@
   flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 320px;
   padding-bottom: 64px; text-align: center;
 }
+.insights-empty .style-example { margin-top: var(--space-s); }
 .insights-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .insights-empty p { max-width: 44ch; color: var(--ink-2); }
 /* Empty My style fills the column's height and sits a little above its middle, where the eye expects a centre */

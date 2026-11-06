@@ -38,6 +38,17 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
   box-shadow: var(--e1); transition: transform 180ms var(--ease-out);
 }
 .rcard .im img, .rcard .im video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* New reel, the last card: the picture's shape, empty, with a hairline instead of a shadow, and its words inside */
+.new-card .im {
+  display: grid; place-content: center; justify-items: center; gap: 8px; padding: 0; border: 0; font: inherit; font-size: var(--fs-base);
+  line-height: var(--lh-base); font-weight: 560; color: var(--ink-2); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, transform 180ms var(--ease-out);
+}
+/* no picture, so none of a picture's shading */
+.new-card .im::after { content: none; }
+@media (hover: hover) and (pointer: fine) { .new-card .im:hover { background: var(--surface); color: var(--ink); } }
+.new-card .im:active { transform: scale(.98); }
+html.kb .new-card .im:active { transform: none; }
 /* darker edges over the picture, so the corner mark and the bar read on any cover */
 .rcard .im::after {
   content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 40px rgba(0, 0, 0, .22);
@@ -102,9 +113,10 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
 /* Needs you and Making (Home.tsx Row): rows, not cards, side by side when both have reels. A column is never wider
    than about a third of a big window, so a row's pill stays near its words. No container: a hover wash marks the
    row you would open, as the sidebar's rows do. */
-/* auto-fit: a lone section (only Needs you) takes the row, so its why has room and its action sits on the content's
-   edge, as a Settings row's does */
+/* auto-fit: a lone section (only Needs you) takes the row, so its why has room; a section stops at 720 px, so its
+   action stays within reach of the words it acts on, as Settings' rows do */
 .home .now { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 0 var(--space-m); margin-bottom: var(--space-m); }
+.home .now > section { max-width: 720px; }
 .rrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .rrow {
   position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
@@ -148,7 +160,7 @@ html.kb :is(.rcard:hover .im, .rcard .hit:active ~ .im, .rrow .hit:active ~ .rth
 
 /* No reels yet: the sample, and one invitation */
 .home-empty { min-height: calc(100vh - var(--titlebar) - 96px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0; }
-.home-empty .sample-card { width: clamp(150px, 15vw, 188px); }
+.home-empty .sample-card { width: clamp(180px, 18vw, 240px); }
 .home-empty h2 { margin-top: 24px; max-width: 460px; font-size: var(--fs-heading); line-height: var(--lh-heading); font-weight: 620; letter-spacing: -.01em; text-wrap: balance; }
 .home-empty .row { display: flex; gap: 8px; margin-top: 24px; }
 .home-empty .faint { margin-top: 16px; }
