@@ -239,6 +239,19 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet . The
 Whisper in the CTranslate2 conversion from Hugging Face (`Systran/faster-whisper-*`; the app offers `small.en` by
 default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en
 
+### First-run sample (bundled, CC0 1.0 and CC BY)
+
+The first run edits a short sample in front of you (`app/src/renderer/src/assets/sample/`). The person in it and
+her script are made up: the clips are a silent slideshow of the photos below with zooms and cuts, and the speech,
+pauses and subtitles are simulated from a written script. The photos are cropped and recompressed.
+
+| File | Source (Wikimedia Commons) | Author | License |
+|---|---|---|---|
+| `raw.mp4`, `ai.mp4`, `raw-poster.jpg`, `cover.jpg`, `cand-*.jpg` | a photo of a baker in her kitchen studio | Anooch11 | CC0 1.0 |
+| `v_loaf.jpg` and the loaf in `ai.mp4` | Sourdough Bread Loaf.jpg | Agelaia | CC BY 4.0 |
+| `v_knead.jpg` and the hands in `ai.mp4` | Baker woman’s hands kneading bread dough.jpg | Shixart1985 | CC BY 2.0 |
+| `cut.mp3`, `ready.mp3` | Interface Sounds by Kenney (`drop_002`, `glass_004`), re-encoded to mono MP3 | Kenney | CC0 1.0 |
+
 ### Fonts (bundled, SIL OFL 1.1 or Apache-2.0)
 
 Every font keeps its own license text in the folder it ships in. Names and copyright lines below are read from each

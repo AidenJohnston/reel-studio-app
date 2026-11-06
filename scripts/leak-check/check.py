@@ -33,6 +33,9 @@ SALT = "rsleak1"
 # part is a person's name by design), and the name of the company that owns Reel Studio.
 # The company name is split so that main's own checker, which runs on every PR, passes this line too.
 ALLOW = ("AidenJohnston/reel-studio-app", "Cur" + "ate Technologies")
+# The maintainer's GitHub handle as .github/VOUCHED.td lists it for the trust labels (pr-vouch.yml), taken from the
+# slug above so this file holds no second copy of it.
+ALLOW += ("github:" + ALLOW[0].split("/")[0],)
 
 NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"^(status|bakeoff|tools)/",
@@ -42,12 +45,21 @@ NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"(^|/)release/",
     r"(^|/)\.env($|\.)",
     r"\.(pem|key|p12|p8|cer|mobileprovision|keychain)$",
-    r"(^|/)\.claude/",
+    # Local agent settings and transcripts stay out. The root .claude/skills/ is shared contributor
+    # guidance, and Claude Code loads project skills only from there.
+    r"^\.claude/(?!skills/)|/\.claude/",
     r"\.log$",
     r"\.(mp4|mov|m4v|mkv|avi|webm|mp3|m4a|aac|flac|ogg|opus)$",
 )]
 # The one media folder that ships: the CC0 sound effects, each listed with its source in engine/THIRD_PARTY.md.
 SHIPPED_MEDIA = re.compile(r"^engine/reelengine/sfx/[a-z0-9-]+\.opus$")
+# The first run's bundled sample (THIRD_PARTY.md, "First-run sample"), file by file: nothing else in that folder.
+SHIPPED_SAMPLE = {
+    "app/src/renderer/src/assets/sample/raw.mp4": "a silent slideshow of a CC0 Wikimedia Commons photo, made for the sample",
+    "app/src/renderer/src/assets/sample/ai.mp4": "the same, with two CC BY Commons photos credited in THIRD_PARTY.md",
+    "app/src/renderer/src/assets/sample/cut.mp3": "Kenney Interface Sounds drop_002, CC0, re-encoded",
+    "app/src/renderer/src/assets/sample/ready.mp3": "Kenney Interface Sounds glass_004, CC0, re-encoded",
+}
 NEVER_COMMIT_EXACT = {"SPEC.md", "docs/PUBLISH.md"}
 NEVER_COMMIT_PREFIX = ("docs/RELEASE-NOTES",)
 
@@ -72,7 +84,7 @@ BIG_FILE_ALLOW_PREFIXES = ("packaging/fonts/", "engine/reelengine/fonts/", "temp
 TEXT_EXT = {
     ".md", ".txt", ".json", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".css", ".html", ".yml", ".yaml",
     ".py", ".sh", ".ps1", ".plist", ".toml", ".cfg", ".ini", ".svg", ".gitignore", ".gitattributes", ".lock",
-    ".in", ".mdx",
+    ".in", ".mdx", ".td",
 }
 WORD = re.compile(r"[a-z]+")
 
@@ -148,7 +160,7 @@ def is_text(path: str, data: bytes) -> bool:
 
 
 def never_commit(path: str) -> bool:
-    if SHIPPED_MEDIA.match(path):
+    if SHIPPED_MEDIA.match(path) or path in SHIPPED_SAMPLE:
         return False
     return path in NEVER_COMMIT_EXACT or path.startswith(NEVER_COMMIT_PREFIX) or any(r.search(path) for r in NEVER_COMMIT)
 
