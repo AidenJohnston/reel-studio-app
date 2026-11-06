@@ -134,7 +134,7 @@ export async function exportPlatforms({ tries: requested, folder, runEngine, sig
         const video = sharedVideo ? files.find((f) => f.platform === platform)?.video : join(folder, `${stem}.mp4`)
         if (!video) throw new Error(`Try 2 for ${platform} has no Try 1 video to share`)
         const file = {
-          platform, ...(two && { try: n }),
+          platform, ...(two && { try: n }), version: item.version,
           video,
           cover: join(folder, `${stem} cover.jpg`), captionFile: join(folder, `${stem} caption.txt`), caption: item.caption
         }

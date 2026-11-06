@@ -67,6 +67,14 @@ interface Run {
   useClaude: Moment
   /** the longest tasks Chromium traced around "Use it", with the process and thread each ran on */
   useClaudeTasks: Task[]
+  /** what the page painted in the 600 ms after "Use it", by element, largest area first (the raster the GPU then does) */
+  useClaudePaints: PaintedNode[]
+}
+interface PaintedNode {
+  node: string
+  paints: number
+  /** CSS px², summed over its paints */
+  area: number
 }
 interface Task {
   process: string
@@ -84,7 +92,24 @@ interface TraceEvent {
   tid: number
   ts: number
   dur?: number
-  args?: { name?: string }
+  args?: { name?: string; data?: { nodeId?: number; clip?: number[] } }
+}
+
+/** The page's Paint events in the window after the click (ms from the trace's first task), summed by DOM node. */
+function paintsByNode(events: TraceEvent[], windowMs: number): Map<number, { paints: number; area: number }> {
+  const t0 = Math.min(...events.filter((e) => e.ph === 'X').map((e) => e.ts))
+  const out = new Map<number, { paints: number; area: number }>()
+  for (const e of events) {
+    const id = e.args?.data?.nodeId
+    const q = e.args?.data?.clip
+    if (e.name !== 'Paint' || id === undefined || !q || q.length !== 8 || (e.ts - t0) / 1000 > windowMs) continue
+    const xs = [q[0], q[2], q[4], q[6]]
+    const ys = [q[1], q[3], q[5], q[7]]
+    const area = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys))
+    const n = out.get(id) ?? { paints: 0, area: 0 }
+    out.set(id, { paints: n.paints + 1, area: n.area + area })
+  }
+  return out
 }
 
 /** The longest complete tasks of a trace, longest first, each named by its process and thread (GPU, renderer...). */
@@ -154,7 +179,25 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
       const ended = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()))
       await cdp.send('Tracing.end')
       await ended
-      runs.push({ run, load: { before, after: machineLoad() }, flyIn, useClaude, useClaudeTasks: longestTasks(events) })
+      // name each painted node as a selector would: tag, test id, classes
+      const painted = [...paintsByNode(events, 600)].sort((a, b) => b[1].area - a[1].area).slice(0, 8)
+      await cdp.send('DOM.getDocument', { depth: 0 })
+      const useClaudePaints: PaintedNode[] = []
+      for (const [backendNodeId, n] of painted) {
+        let node = `backend node ${backendNodeId}`
+        try {
+          const { node: d } = await cdp.send('DOM.describeNode', { backendNodeId })
+          const attr = (k: string) => {
+            const i = d.attributes?.indexOf(k) ?? -1
+            return i >= 0 ? (d.attributes?.[i + 1] ?? '') : ''
+          }
+          node = `${d.nodeName.toLowerCase()}${attr('data-testid') ? `[data-testid=${attr('data-testid')}]` : ''}${attr('class') ? `.${attr('class').trim().split(/\s+/).join('.')}` : ''}`
+        } catch {
+          // the node is gone from the page since it painted
+        }
+        useClaudePaints.push({ node, paints: n.paints, area: Math.round(n.area) })
+      }
+      runs.push({ run, load: { before, after: machineLoad() }, flyIn, useClaude, useClaudeTasks: longestTasks(events), useClaudePaints })
     } finally {
       await app.close()
     }
