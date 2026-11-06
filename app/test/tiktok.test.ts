@@ -369,6 +369,8 @@ describe('TikTok fixture HTTP', () => {
     registerTikTokIpc({ handle, dev: true, service: w.service, saveSettings: async (s) => { configured = s } })
     expect(await handlers.get('tiktok:publish')?.(INPUT)).toMatchObject({ state: 'published' })
     w.stats(); expect(await handlers.get('tiktok:insights')?.('fixture', 1, '789')).toMatchObject({ metrics: { plays: 100 } })
+    // configuring forgets the connection, which also asks TikTok to end the grant
+    w.steps.push({ path: 'oauth/revoke/', raw: true, body: {} })
     await handlers.get('tiktok:configure')?.({ ...w.settings, tiktokEnabled: false }); expect(configured).toMatchObject({ tiktokEnabled: false })
     registerTikTokIpc({ handle, dev: false, service: w.service, saveSettings: async () => { throw new Error('must not save') } })
     await expect(handlers.get('tiktok:configure')?.({})).rejects.toMatchObject({ code: 'TT_DISABLED' }); w.done()
