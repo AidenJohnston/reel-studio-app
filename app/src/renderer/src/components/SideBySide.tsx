@@ -42,6 +42,8 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
   const end = Number.isFinite(duration) ? duration : 0
   const lead = () => refs[sound === 'a' ? 0 : 1].current
   const other = () => refs[sound === 'a' ? 1 : 0].current
+  // no time past the shorter version's end: not on the clock, not handed back to the player
+  const clamp = (t: number) => (end ? Math.min(t, end) : t)
 
   useEffect(() => {
     // the player under the dialog stops: one picture with sound at a time
@@ -51,12 +53,20 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // opened past the shorter one's end (the player was further into the longer version): both wait at that end
+  useEffect(() => {
+    if (!end) return
+    for (const r of refs) if (r.current && r.current.currentTime > end) r.current.currentTime = end
+    setTime((t) => Math.min(t, end))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [end])
+
   // the one with the sound leads; the other follows it each frame it shows
   useEffect(() => {
     const v = lead()
     if (!v) return
     const tick = () => {
-      setTime(v.currentTime)
+      setTime(clamp(v.currentTime))
       if (end && v.currentTime >= end) stop()
       const o = other()
       if (o && Math.abs(o.currentTime - v.currentTime) > DRIFT_S) o.currentTime = v.currentTime
@@ -82,13 +92,14 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
     for (const v of vs) v.currentTime = t
     void Promise.all(vs.map((v) => v.play().catch(() => undefined))).then(() => setPlaying(true))
   }
-  const seek = (s: number) => {
+  const seek = (to: number) => {
+    const s = clamp(to)
     for (const r of refs) if (r.current) r.current.currentTime = s
     setTime(s)
   }
   const leave = (then: (seconds: number) => void) => () => {
     for (const r of refs) r.current?.pause()
-    then(lead()?.currentTime ?? time)
+    then(clamp(lead()?.currentTime ?? time))
   }
   const done = leave(onDone)
 

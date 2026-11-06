@@ -2,9 +2,11 @@
 .modal.wide:has(.sbs) { width: min(760px, 94vw); }
 .sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-width: 0; }
 .sbs-phone { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
-/* sized by height so each is a true 9:16 phone picture, never letterboxed inside a wider box */
+/* a true 9:16 phone picture at any window size: the width is the column's or the one a 58vh-tall phone would have,
+   whichever is smaller, and the height follows it. Sizing by a fixed height and capping the width squeezed the box
+   narrower than 9:16 in a narrow window, and cover then cropped the picture. */
 .sbs-phone video {
-  height: min(58vh, 560px); width: auto; max-width: 100%; aspect-ratio: 9 / 16; object-fit: cover; background: #000; border-radius: var(--r-lg); display: block;
+  width: min(100%, calc(min(58vh, 560px) * 9 / 16)); height: auto; aspect-ratio: 9 / 16; object-fit: cover; background: #000; border-radius: var(--r-lg); display: block;
 }
 .sbs-phone figcaption { display: flex; gap: 8px; align-items: baseline; min-width: 0; max-width: 100%; font-size: var(--fs-base); }
 .sbs-phone figcaption b { font-weight: 650; white-space: nowrap; }

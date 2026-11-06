@@ -41,12 +41,16 @@ test('fails if Side by side does not play both versions in step with one sound, 
     expect(await muted()).toEqual([false, true])
     await page.getByTestId('sbs-sound-b').click()
     expect(await muted()).toEqual([true, false])
-    // in step: the two pictures stay within a fraction of a second of each other
-    const gap = await page.evaluate(() => {
-      const [a, b] = Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]'))
-      return Math.abs(a.currentTime - b.currentTime)
-    })
-    expect(gap).toBeLessThan(0.3)
+    // in step: after more than a second of playing, after the sound switched, the two pictures are still within a
+    // fraction of a second of each other
+    const times = () => page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')).map((v) => v.currentTime))
+    await expect.poll(async () => Math.min(...(await times())), { timeout: 15_000 }).toBeGreaterThan(1.2)
+    const [ta, tb] = await times()
+    expect(Math.abs(ta - tb)).toBeLessThan(0.3)
+    // one picture with sound at a time: the player under the dialog does not play along
+    const others = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('video')).filter((v) => !v.dataset.testid?.startsWith('sbs-video-') && v.dataset.testid !== 'change-window').map((v) => v.paused))
+    expect(others.length).toBeGreaterThan(0)
+    expect(others.every(Boolean)).toBe(true)
     await shot(page, 'side-by-side-01-playing')
     await page.getByTestId('sbs-done').click()
     await expect(sbs).toHaveCount(0)
