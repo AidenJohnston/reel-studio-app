@@ -73,7 +73,8 @@ export interface EditResult extends AgentResult {
 const engineArgs = (dir: string, extra: string[] = []) => ['--project', dir, ...extra];
 
 function progress(onEvent: (e: AgentEvent) => void, phase?: Phase) {
-  return (p: { stage: string; pct: number; message: string }) => onEvent({ type: 'status', message: p.message, pct: p.pct, ...(phase ? { phase } : {}) });
+  return (p: { stage: string; pct: number; message: string; note?: string }) =>
+    onEvent({ type: 'status', message: p.message, pct: p.pct, ...(phase ? { phase } : {}), ...(p.note ? { note: p.note } : {}) });
 }
 
 /** Seconds of raw video in the project (the time estimate scales with it). */

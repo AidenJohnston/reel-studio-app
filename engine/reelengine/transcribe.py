@@ -302,6 +302,9 @@ def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
 
 # --- device -------------------------------------------------------------------------------------
 
+# Shown beside "Listening to your video" when this computer has an NVIDIA card but listening runs on the CPU.
+CPU_FALLBACK_NOTE = "Slower: listening on the processor, not your graphics card"
+
 _DLL_DONE = False
 
 
@@ -455,8 +458,10 @@ def speech_check(name: Optional[str] = None) -> dict:
     name = name or default_model()
     path = str(require_model(name))
     default = default_threads()
-    if cuda_available():
-        # The GPU ignores the CPU thread count; leave it to load_model's own GPU check.
+    if cuda_available() and cuda_selftest(path):
+        # The GPU ignores the CPU thread count. An NVIDIA card it can't load a model on (the packaged runtime has no
+        # CUDA libraries: packaging/README.md) still counts as a device, so it is proved first: otherwise such a
+        # computer listens on the CPU at the untested default count, every time.
         return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
@@ -861,6 +866,11 @@ def run(project_dir: Path, model_name: Optional[str] = None, language: Optional[
         model, dev, compute = load_model(name, prefer=device)
     t_load = time.time() - t1
     log(f"# whisper {name} on {dev} ({compute}), loaded in {t_load:.1f}s")
+    asked = (device or os.environ.get("REELENGINE_ASR_DEVICE") or "auto").lower()
+    if dev == "cpu" and asked != "cpu" and cuda_available():
+        # An NVIDIA card listening couldn't use (load_model fell back): said beside the step, or a listen several
+        # times slower than usual looks stuck.
+        progress(STAGE, 9, "Listening to your video", force=True, note=CPU_FALLBACK_NOTE)
 
     hints = {"hotwords": None, "initialPrompt": None, "words": []}
     # OPT-IN (REELENGINE_HINTS=1). Measured 2026-10-17 (status/issues.md): hints fixed Neve/Flowly on one

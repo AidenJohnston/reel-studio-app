@@ -402,7 +402,7 @@ export type Phase = 'prepare' | 'listen' | 'analyze' | 'firstLook' | 'edit' | 'f
  */
 export type JobUpdate =
   /** pct restarts per step unless aggregate marks whole-job progress. thinking = waiting on AI. */
-  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean; /** the message is the wait for the editor itself (ai agent.ts waitWords) */ waiting?: boolean; noAI?: boolean }
+  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean; /** the message is the wait for the editor itself (ai agent.ts waitWords) */ waiting?: boolean; noAI?: boolean; /** the engine's line for beside the current step, e.g. why listening is slow (engine proto.progress) */ note?: string }
   | { type: 'tool'; name: string; summary: string }
   /** A line for main.log only: how a model turn spent its time (ai agent.ts turnTrace). */
   | { type: 'trace'; text: string }

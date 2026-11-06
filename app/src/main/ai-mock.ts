@@ -318,7 +318,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
-      const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }) })
+      const status = (message: string, pct: number, phase?: Phase, note?: string): void =>
+        onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }), ...(note ? { note } : {}) })
       const changed: string[] = []
       // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
       // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
@@ -327,7 +328,7 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       if (!proposed) {
         status('Listening to your video', 1, 'listen')
-        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen'), signal)
+        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen', p.note), signal)
 
         status('Picking your best takes', 41, 'analyze')
         await host.runEngine('analyze', args, (p) => status('Picking your best takes', span(0, 50, p.pct), 'analyze'), signal)

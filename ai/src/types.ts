@@ -8,7 +8,7 @@ import type { StyleCheckProposal } from './rules';
 export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final';
 
 export type AgentEvent =
-  | { type: 'status'; message: string; pct?: number; phase?: Phase; /** waiting on the model's answer */ thinking?: boolean; /** the message is the wait itself (agent.ts waitWords), not the step's work */ waiting?: boolean; /** from the simple edit, made without the AI */ noAI?: boolean }
+  | { type: 'status'; message: string; pct?: number; phase?: Phase; /** waiting on the model's answer */ thinking?: boolean; /** the message is the wait itself (agent.ts waitWords), not the step's work */ waiting?: boolean; /** from the simple edit, made without the AI */ noAI?: boolean; /** the engine's line for beside the current step (EngineProgress.note) */ note?: string }
   | { type: 'tool'; name: string; summary: string }
   | { type: 'render'; version: number; draft: boolean; /** the no-AI first look, shown while the AI edits */ firstLook?: boolean; file?: string }
   /** a note's reply, known before the render that makes it true (fast notes): the app shows it at once */
@@ -62,7 +62,8 @@ export type PlanTurnResult = (
 export type MomentReady =
   | { kind: 'still'; t: number; file: string }
   | { kind: 'window'; from: number; to: number; file: string };
-export interface EngineProgress { stage: string; pct: number; message: string; ready?: MomentReady }
+/** note: a line the app shows beside the current step (engine proto.progress), e.g. why listening is slow */
+export interface EngineProgress { stage: string; pct: number; message: string; ready?: MomentReady; note?: string }
 export interface EngineHost {
   runEngine(command: string, args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal): Promise<any>;
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>;

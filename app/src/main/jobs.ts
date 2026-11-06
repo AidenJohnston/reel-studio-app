@@ -221,6 +221,7 @@ export function createJobManager(
             if (e.phase) phase = e.phase
             if (rows) {
               rows.update({ message: e.message, phase, noAI: e.noAI })
+              if (e.note) rows.note(e.note)
               job.steps = rows.steps()
             }
             job.thinking = !!e.thinking

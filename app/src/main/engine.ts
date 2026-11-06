@@ -15,6 +15,8 @@ export interface EngineProgress {
   pct: number
   message: string
   ready?: EngineReady
+  /** a line to show beside the current step (engine proto.progress), e.g. why listening is slow */
+  note?: string
 }
 
 export interface EngineError {
@@ -24,7 +26,7 @@ export interface EngineError {
 }
 
 export type EngineEvent =
-  | { event: 'progress'; stage: string; pct: number; message: string; ready?: EngineReady }
+  | { event: 'progress'; stage: string; pct: number; message: string; ready?: EngineReady; note?: string }
   | { event: 'done'; result: unknown }
   | { event: 'error'; code: string; message?: string; userMessage: string }
 
@@ -227,7 +229,8 @@ export function createEngineRunner(cfg: RunnerConfig) {
           log(`[engine ${command} stdout] ${line}`)
           return
         }
-        if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message, ...(ev.ready ? { ready: ev.ready } : {}) })
+        if (ev.event === 'progress')
+          onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message, ...(ev.ready ? { ready: ev.ready } : {}), ...(ev.note ? { note: ev.note } : {}) })
         else if (ev.event === 'done') result = { ok: true, value: ev.result }
         else result = { ok: false, err: { code: ev.code, userMessage: ev.userMessage, message: ev.message } }
       })
