@@ -594,8 +594,9 @@ MAX_DOUBLINGS = 4    # 16 taps: 8 left visible bands on hard edges in the fastes
 
 
 def _snap_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, scale_chain: str, fps: float,
-                t_shift: float, out_w: int, out_h: int, draft: bool) -> list:
-    """Chains turning [zs<zi>] (the base) into [zz<zi>]: output frames k0..k1-1 of snap zoom z.
+                t_shift: float, out_w: int, out_h: int, draft: bool, tag: str = "z") -> list:
+    """Chains turning [zs<zi>] (the base) into [zz<zi>]: output frames k0..k1-1 of snap zoom z. Every
+    label starts with `tag` ("z" for the footage, "q" for the speaker's matte, which moves with it).
 
     Each frame crops the base to a rectangle between the full frame and the hold's crop, all sharing
     one fixed point, so the picture grows out of that point like a camera punch-in. While the scale
@@ -641,14 +642,14 @@ def _snap_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, scale_chain
         return (f"perspective=x0={le}:y0={to}:x1={ri}:y1={to}:x2={le}:y2={bo}:x3={ri}:y3={bo}:"
                 f"sense=source:eval=frame:interpolation={interp}")
 
-    chains, labels = [f"[zs{zi}]split={len(runs)}" + "".join(f"[zs{zi}r{ri}]" for ri in range(len(runs)))], []
+    chains, labels = [f"[{tag}s{zi}]split={len(runs)}" + "".join(f"[{tag}s{zi}r{ri}]" for ri in range(len(runs)))], []
     for ri, (d, a, b, rows) in enumerate(runs):
-        chain = f"[zs{zi}r{ri}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS"
+        chain = f"[{tag}s{zi}r{ri}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS"
         if d is None:
             held = scale_chain if draft else scale_chain.replace(f"crop={cw}:{ch}:{x}:{y}",
                                                                f"crop={cw}:{ch}:{x}:{y}:exact=1")
-            chains.append(f"{chain},{held}[zr{zi}r{ri}]")
-            labels.append(f"[zr{zi}r{ri}]")
+            chains.append(f"{chain},{held}[{tag}r{zi}r{ri}]")
+            labels.append(f"[{tag}r{zi}r{ri}]")
             continue
         q = [(1 - 1 / lo) / (1 - 1 / s_end) for lo, _ in rows]
         # scale maps pixel centres; perspective maps coordinates directly. Match
@@ -661,21 +662,21 @@ def _snap_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, scale_chain
                             "linear" if draft else "cubic")
         for j in range(d):
             v = [1 - r ** -(1 << j) for _, r in rows]
-            p = f"zd{zi}r{ri}p{j}"
+            p = f"{tag}d{zi}r{ri}p{j}"
             chains.append(f"{chain},split=2[{p}a][{p}b]")
             chains.append(f"[{p}b]" + warp(v, (0, fx), (0, fy), (out_w, fx - out_w), (out_h, fy - out_h),
                                        "linear" if draft else "cubic")
                           + f"[{p}z]")
             chain = f"[{p}a][{p}z]mix=inputs=2"
-        chains.append(f"{chain}[zr{zi}r{ri}]")
-        labels.append(f"[zr{zi}r{ri}]")
+        chains.append(f"{chain}[{tag}r{zi}r{ri}]")
+        labels.append(f"[{tag}r{zi}r{ri}]")
     pad = f",tpad=start={k0}" if k0 > 0 else ""
-    chains.append("".join(labels) + f"concat=n={len(runs)}:v=1:a=0,setpts=N/({fps}*TB),fps={fps}{pad}[zz{zi}]")
+    chains.append("".join(labels) + f"concat=n={len(runs)}:v=1:a=0,setpts=N/({fps}*TB),fps={fps}{pad}[{tag}z{zi}]")
     return chains
 
 
 def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
-                t_shift: float, out_w: int, out_h: int, draft: bool) -> str:
+                t_shift: float, out_w: int, out_h: int, draft: bool, tag: str = "z") -> str:
     # FFmpeg 7.1.1 ignores crop size commands. Drafts use zoompan; finals need
     # fractional source coordinates because zoompan rounds size and origin
     # separately, reversing slow motion by more than a pixel in rendered tests.
@@ -700,9 +701,9 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
     if draft:
         crop_x = f"(iw-iw/zoom)*{_f(x / (out_w - cw))}"
         crop_y = f"(ih-ih/zoom)*{_f(y / (out_h - ch))}"
-        return (f"[zs{zi}]trim=start_frame={k0}:end_frame={k1},setpts=PTS-STARTPTS,"
+        return (f"[{tag}s{zi}]trim=start_frame={k0}:end_frame={k1},setpts=PTS-STARTPTS,"
                 f"zoompan=z='{zoom_scale(k0)}':x='{crop_x}':y='{crop_y}':"
-                f"d=1:s={out_w}x{out_h}:fps={fps},setsar=1{pad}[zz{zi}]")
+                f"d=1:s={out_w}x{out_h}:fps={fps},setsar=1{pad}[{tag}z{zi}]")
 
     # Use the ordinary scaler during a hold. Only moving frames pay for the
     # fractional warp; a full-length drift remains one moving run.
@@ -716,10 +717,10 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
         else:
             runs.append([bool(moving), k, k + 1])
 
-    chains = [f"[zs{zi}]split={len(runs)}" + "".join(f"[zp{zi}r{ri}]" for ri in range(len(runs)))]
+    chains = [f"[{tag}s{zi}]split={len(runs)}" + "".join(f"[{tag}p{zi}r{ri}]" for ri in range(len(runs)))]
     labels = []
     for ri, (moving, a, b) in enumerate(runs):
-        head = f"[zp{zi}r{ri}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS,"
+        head = f"[{tag}p{zi}r{ri}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS,"
         if moving:
             q = f"((1-1/{zoom_scale(a)})/(1-{_f(cw / out_w)}))"
             # Match scale's pixel-centre convention and the exact held crop.
@@ -732,10 +733,10 @@ def _ramp_chain(zi: int, z: ZoomSpan, k0: int, k1: int, crop: tuple, fps: float,
                       "sense=source:eval=frame:interpolation=cubic")
         else:
             motion = f"crop={cw}:{ch}:{x}:{y}:exact=1,scale={out_w}:{out_h}:flags=lanczos"
-        label = f"[zr{zi}p{ri}]"
+        label = f"[{tag}r{zi}p{ri}]"
         chains.append(f"{head}{motion},setsar=1{label}")
         labels.append(label)
-    chains.append("".join(labels) + f"concat=n={len(runs)}:v=1:a=0,setpts=N/({fps}*TB),fps={fps}{pad}[zz{zi}]")
+    chains.append("".join(labels) + f"concat=n={len(runs)}:v=1:a=0,setpts=N/({fps}*TB),fps={fps}{pad}[{tag}z{zi}]")
     return ";\n".join(chains)
 
 
@@ -831,41 +832,90 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
     if exposure != 1.0:
         chains.append(f"[{cur}]exposure=exposure={_f(math.log2(exposure))}[exposed]")
         cur = "exposed"
-    # zooms move the FOOTAGE, so they sit on the base, under every card and caption
-    for zi, z in enumerate(zooms or []):
-        t0, t1 = z.t0 - t_shift, z.t1 - t_shift
-        if t1 <= 0 or t0 >= dur or z.scale <= 1.001:
+    # The speaker cut out for words behind them ("matte" layers, segment.py): each matte clip is padded
+    # to the whole render on the base's frame grid, so the zoom chains below move it exactly as they
+    # move the footage, frame for frame.
+    mattes, drawn = [], []
+    for layer in layers or []:
+        (mattes if layer.kind == "matte" else drawn).append(layer)
+    layer_inputs, k, qcur = [], n_in, None
+    for mi, layer in enumerate(mattes):
+        t0, t1 = layer.t0 - t_shift, layer.t1 - t_shift
+        if t1 <= 0 or t0 >= dur:
             continue
-        t0, t1 = max(0.0, t0), min(dur, t1)
-        cw = int(round(out_w / z.scale / 2)) * 2
-        ch = int(round(out_h / z.scale / 2)) * 2
-        cx, cy = z.cx * f, z.cy * f
-        x = int(min(max(0, cx - cw / 2), out_w - cw))
-        y = int(min(max(0, cy - ch / 2), out_h - ch))
-        chains.append(f"[{cur}]split=2[zm{zi}][zs{zi}]")
-        # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The
-        # base is on the fps grid, so start on a frame: trim and padding then agree to the frame.
-        k0 = int(math.ceil(t0 * fps - 1e-6))
-        t0 = k0 / fps
-        pad = f",fps={fps},tpad=start={k0}" if k0 > 0 else ""
-        scale_chain = (f"crop={cw}:{ch}:{x}:{y},scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
-                       f"setsar=1")
-        k1 = int(math.ceil(t1 * fps - 1e-6))
-        # a crop rounded to the full width or height has no fixed point to grow from
-        if (z.ramp_in or z.ramp_out) and cw < out_w and ch < out_h and k1 > k0:
-            if z.blur:
-                chains += _snap_chain(zi, z, k0, k1, (cw, ch, x, y), scale_chain, fps, t_shift, out_w, out_h, ctx.draft)
-            else:
-                chains.append(_ramp_chain(zi, z, k0, k1, (cw, ch, x, y), fps, t_shift, out_w, out_h, ctx.draft))
+        layer_inputs += ["-i", str(layer.path)]
+        # the clip's frame j is the full render's frame ceil(t0 * fps) + j (segment.matte_clip); a window
+        # starting inside it drops whole frames, so the cut-out stays on the frame it was made for
+        first = int(math.ceil(layer.t0 * fps - 1e-6)) - int(round(t_shift * fps))
+        drop = f"trim=start_frame={-first},setpts=PTS-STARTPTS," if first < 0 else ""
+        chains.append(f"[{k}:v]setpts=PTS-STARTPTS,fps={fps},{drop}format=gray,scale={out_w}:{out_h},"
+                      f"tpad=start={max(0, first)}:stop=-1:stop_mode=add:color=black,trim=end_frame={n_frames}[qm{mi}]")
+        if qcur is None:
+            qcur = f"qm{mi}"
         else:
-            chains.append(f"[zs{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,{scale_chain}{pad}[zz{zi}]")
-        chains.append(f"[zm{zi}][zz{zi}]overlay=0:0:eof_action=pass:repeatlast=0:"
-                      f"enable='between(t,{_f(t0)},{_f(t1)})'[zb{zi}]")
-        cur = f"zb{zi}"
-    # overlay layers, lowest z first
-    k = n_in
-    layer_inputs = []
-    for li, layer in enumerate(sorted(layers or [], key=lambda l: (l.z, l.t0))):
+            chains.append(f"[{qcur}][qm{mi}]blend=all_mode=lighten[qb{mi}]")
+            qcur = f"qb{mi}"
+        k += 1
+
+    def zoom_lane(cur: str, tag: str) -> str:
+        """The zoom chains on `cur`; labels start with `tag`. Returns the zoomed label."""
+        for zi, z in enumerate(zooms or []):
+            t0, t1 = z.t0 - t_shift, z.t1 - t_shift
+            if t1 <= 0 or t0 >= dur or z.scale <= 1.001:
+                continue
+            t0, t1 = max(0.0, t0), min(dur, t1)
+            cw = int(round(out_w / z.scale / 2)) * 2
+            ch = int(round(out_h / z.scale / 2)) * 2
+            cx, cy = z.cx * f, z.cy * f
+            x = int(min(max(0, cx - cw / 2), out_w - cw))
+            y = int(min(max(0, cy - ch / 2), out_h - ch))
+            chains.append(f"[{cur}]split=2[{tag}m{zi}][{tag}s{zi}]")
+            # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The
+            # base is on the fps grid, so start on a frame: trim and padding then agree to the frame.
+            k0 = int(math.ceil(t0 * fps - 1e-6))
+            t0 = k0 / fps
+            pad = f",fps={fps},tpad=start={k0}" if k0 > 0 else ""
+            scale_chain = (f"crop={cw}:{ch}:{x}:{y},scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
+                           f"setsar=1")
+            k1 = int(math.ceil(t1 * fps - 1e-6))
+            # a crop rounded to the full width or height has no fixed point to grow from
+            if (z.ramp_in or z.ramp_out) and cw < out_w and ch < out_h and k1 > k0:
+                if z.blur:
+                    chains.extend(_snap_chain(zi, z, k0, k1, (cw, ch, x, y), scale_chain, fps, t_shift, out_w, out_h,
+                                              ctx.draft, tag))
+                else:
+                    chains.append(_ramp_chain(zi, z, k0, k1, (cw, ch, x, y), fps, t_shift, out_w, out_h, ctx.draft, tag))
+            else:
+                chains.append(f"[{tag}s{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,{scale_chain}{pad}[{tag}z{zi}]")
+            chains.append(f"[{tag}m{zi}][{tag}z{zi}]overlay=0:0:eof_action=pass:repeatlast=0:"
+                          f"enable='between(t,{_f(t0)},{_f(t1)})'[{tag}b{zi}]")
+            cur = f"{tag}b{zi}"
+        return cur
+
+    # zooms move the FOOTAGE, so they sit on the base, under every card and caption
+    cur = zoom_lane(cur, "z")
+    people = []
+    if qcur is not None:
+        # the matte's grey may arrive in either range after the zoom filters' conversions: anything
+        # near black is background, near white is the speaker
+        qcur = zoom_lane(qcur, "q")
+        chains.append(f"[{cur}]split=2[qbase][qfg]")
+        chains.append(f"[{qcur}]format=gray,lut=c0='clip((val-24)*255/208,0,255)'[qa]")
+        live = [m for m in mattes if m.t1 - t_shift > 0 and m.t0 - t_shift < dur]
+        chains.append("[qfg][qa]alphamerge" + (f",split={len(live)}" if len(live) > 1 else "")
+                      + "".join(f"[qp{j}]" for j in range(len(live))))
+        people = [(m, f"qp{j}") for j, m in enumerate(live)]
+        cur = "qbase"
+    # overlay layers, lowest z first; a speaker cut-out draws at its own z, above its words
+    order = sorted([(l.z, l.t0, i, l, None) for i, l in enumerate(drawn)] +
+                   [(m.z, m.t0, len(drawn) + j, m, lab) for j, (m, lab) in enumerate(people)], key=lambda r: r[:3])
+    for li, (_z, _t, _i, layer, person) in enumerate(order):
+        if person is not None:
+            t0, t1 = max(0.0, layer.t0 - t_shift), min(dur, layer.t1 - t_shift)
+            chains.append(f"[{cur}][{person}]overlay=0:0:eof_action=pass:repeatlast=0:"
+                          f"enable='between(t,{_f(t0)},{_f(t1)})'[o{li}]")
+            cur = f"o{li}"
+            continue
         lc = _layer_chain(li, layer, f, fps, t_shift, dur)
         if lc is None:
             continue

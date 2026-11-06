@@ -49,7 +49,7 @@ export interface Music {
 }
 
 export const TREATMENTS = [
-  'card-above-head', 'full-frame', 'phone-card', 'side-card', 'text-pop', 'post-wall', 'icon-wall', 'split-top',
+  'card-above-head', 'full-frame', 'phone-card', 'side-card', 'text-pop', 'text-behind', 'post-wall', 'icon-wall', 'split-top',
   'animation',
 ] as const;
 export type Treatment = (typeof TREATMENTS)[number];

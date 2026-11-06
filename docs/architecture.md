@@ -332,8 +332,15 @@ Treatments (`engine/reelengine/templates/treatments/` and `broll.py`): `card-abo
 the face, slight tilt, sized to read), `full-frame` (covers the frame, face hidden), `phone-card` (asset in a
 phone frame, beside the face), `side-card` (left or right of the face), `text-pop` (big words above the head),
 `post-wall` (a grid of images building one per word), `icon-wall`, `split-top` (asset on the top half, speaker
-on the bottom half), and `animation`. Each treatment is a deterministic layout from (asset, face track, frame
-size, params).
+on the bottom half), `animation`, and `text-behind` (big words behind the speaker). Each treatment is a
+deterministic layout from (asset, face track, frame size, params).
+
+`text-behind` draws its words as a layer, then a `matte` layer above them: the speaker cut out of the footage.
+`segment.py` makes the matte, a grey clip of the window, with PP-HumanSeg (OpenCV Model Zoo, downloaded once and
+pinned by SHA-256) on each source frame through the render's own crop, turn and mirror. `build_video_cmd` pads
+that clip to the whole render, runs it through the same zoom chains as the footage, and alpha-merges it with a
+copy of the zoomed frame, so the cut-out follows every zoom. Without the model (offline), the words go above
+the face as `text-pop` and the render result says so.
 
 **Placement rule.** The protected zone is the **eyes-to-chin** region (eyes, nose and mouth: from just above
 the eyebrows to the chin, outer eye corners plus a margin) and the **caption band**, not the whole face box.

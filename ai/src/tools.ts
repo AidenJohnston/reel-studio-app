@@ -609,10 +609,10 @@ export function unshownNames(p: Project, t: Transcript, max = 12): { from: strin
   return namesIn(keptWords(t, p.cut.keep), t, { covered, lowerFix, max });
 }
 
-/** Plain word cards (text-pop in the big "pop" style): the hook title and step labels use "label" and
- * do not count. A first edit that fills gaps with these reads as filler. */
+/** Plain word cards (text-pop in the big "pop" style, and words behind the speaker): the hook title and
+ * step labels use "label" and do not count. A first edit that fills gaps with these reads as filler. */
 export function popCards(p: Project): { id: string; text: string }[] {
-  return p.broll.filter((b) => b.treatment === 'text-pop' && !b.asset && (b.params as any)?.style !== 'label')
+  return p.broll.filter((b) => (b.treatment === 'text-behind' || (b.treatment === 'text-pop' && (b.params as any)?.style !== 'label')) && !b.asset)
     .map((b) => ({ id: b.id, text: asData(String((b.params as any)?.text ?? '')) }));
 }
 
@@ -710,8 +710,11 @@ export function renderEvent(r: RenderInfo): AgentEvent {
 
 /** What a b-roll item is, in a status line: the treatment decides, never the word "picture" for all. */
 function shownAs(treatment: string | undefined): string {
-  return treatment === 'animation' ? 'animation' : treatment === 'text-pop' ? 'words on screen' : 'picture';
+  return treatment === 'animation' ? 'animation' : WORD_TREATMENTS.has(treatment ?? '') ? 'words on screen' : 'picture';
 }
+
+/** Treatments that draw words alone, with no picture: text-pop over the footage, text-behind behind the speaker. */
+const WORD_TREATMENTS = new Set(['text-pop', 'text-behind']);
 
 /** What one edit is about to do, in plain words from its own arguments and the project it changes
  * ("Cutting 3 words at 0:31"), for the status line. Undefined when there is nothing more specific to
@@ -747,7 +750,7 @@ export function operationStatus(ctx: ToolContext, name: string, args: any): stri
       return undefined;
     }
     case 'add_broll':
-      return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : args?.treatment === 'text-pop' ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
+      return `Adding ${args?.treatment === 'animation' || args?.animation ? 'an animation' : WORD_TREATMENTS.has(args?.treatment) ? 'words on screen' : 'a picture'}${at(args?.anchor?.from)}`;
     case 'update_broll':
       return broll ? `Changing the ${shownAs(broll.treatment)}${at(broll.anchor.from)}` : undefined;
     case 'remove_broll':
@@ -1797,7 +1800,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_broll',
-    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text.',
+    description: 'Put a visual on screen over a word range. Give exactly one of asset or animation. asset is a Library/... picture or clip path from list_library (frozen as it is placed), or the assetId of a web or project picture or clip committed with resolve_asset. text-pop needs only params.text. text-behind draws one or two big words BEHIND the speaker, who stays in front of them (it needs only params.text; params.size and params.color as for text-pop).',
     parameters: S.obj({
       anchor: ANCHOR,
       treatment: S.enum(TREATMENTS),
@@ -1819,10 +1822,10 @@ const tools: ToolDef[] = [
           { fullScreen: args.treatment === 'full-frame' });
         asset = made.asset;
         args.treatment = 'animation';                 // a finished full-frame layer, never a card
-      } else if (args.treatment !== 'text-pop') {
-        throw new ToolInputError('give a committed asset or animation (only text-pop works with text alone)');
+      } else if (!WORD_TREATMENTS.has(args.treatment)) {
+        throw new ToolInputError('give a committed asset or animation (only text-pop and text-behind work with text alone)');
       }
-      if (args.treatment === 'text-pop' && !asset && !args.params?.text) throw new ToolInputError('text-pop needs params.text');
+      if (WORD_TREATMENTS.has(args.treatment) && !asset && !args.params?.text) throw new ToolInputError(`${args.treatment} needs params.text`);
       let id = '';
       await mutate(ctx, 'broll', (p) => {
         id = nextBrollId(p);

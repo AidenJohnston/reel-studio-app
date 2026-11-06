@@ -92,6 +92,8 @@ BUILTIN_DEFAULTS = {
     "side-card": {"tilt": 2.0, "scale": 1.0, "side": "auto", "radius": 0.022, "shadow": True},
     "text-pop": {"text": None, "tilt": -3.0, "color": "#FFFFFF", "outline": "#000000", "size": 0.11,
                  "case": "upper"},
+    # words behind the speaker: big, level, no outline (the speaker's own edge separates them)
+    "text-behind": {"text": None, "color": "#FFFFFF", "size": 0.22, "case": "upper"},
     "post-wall": {"columns": 3, "gap": 0.012, "background": "#101010", "items": []},
     "icon-wall": {"items": [], "tile": "auto"},
     "split-top": {"focusX": 0.5, "focusY": 0.5, "split": "auto", "fit": "auto", "background": "#101010"},
@@ -1222,6 +1224,53 @@ def _t_text(ctx, plan, params, kind, src, zones, face, frame):
         {"zone": zone["zone"], "bbox": _opaque_bbox(rot, x, y), "text": text, "fontPx": size}
 
 
+# How far down the face box the words' bottom edge sits: the head covers their lower part, the
+# words read above it. Judged on rendered frames of one take; no measurement behind it.
+BEHIND_DEPTH = 0.3
+BEHIND_MAX_H = 0.34          # of the frame's height: two lines of big words at most
+
+
+def _t_behind(ctx, plan, params, kind, src, zones, face, frame):
+    """Big words drawn behind the speaker: the words layer, then the speaker cut out of the zoomed
+    footage above it (segment.matte_clip; render.build_video_cmd draws a "matte" layer that way).
+    When the speaker can't be cut out (no model, offline), the words go above the face as text-pop."""
+    from . import segment
+    W, H, _ = fmt_of(ctx)
+    text = params.get("text") or plan["item"].get("text")
+    if not text:
+        text = " ".join((_word_text(ctx, w) for w in word_ids_between(ctx, plan["word_from"], plan["word_to"])))
+    if params.get("case", "upper") == "upper":
+        text = text.upper()
+    want = float(params.get("size", 0.22))
+    size = int(want * W) if want < 1 else int(want)
+    while True:
+        # outlined in its own colour: the stroke only makes the letters heavier, which they need to read
+        # with the head over their lower part
+        img, ok = _text_image(text, int(W * 0.94), size, params.get("color", "#FFFFFF"), params.get("color", "#FFFFFF"), W)
+        if (img.width <= W * 0.96 and img.height <= H * BEHIND_MAX_H and ok) or size <= int(0.06 * W):
+            break
+        size = int(size * 0.9)
+    x = int(round((W - img.width) / 2))
+    y = int(round(min(max(0.04 * H, face[1] + BEHIND_DEPTH * face[3] - img.height), H * 0.5 - img.height)))
+    try:
+        matte = segment.matte_clip(ctx, plan["t0"], plan["t1"], layers_dir(ctx), plan["id"])
+    except EngineError as e:
+        log(f"broll {plan['id']}: no matte ({e.message}); words above the face instead")
+        pop = {**treatment_defaults("text-pop"), "text": text, "case": "as-is"}
+        layers, rec = _t_text(ctx, plan, pop, kind, src, zones, face, frame)
+        why = getattr(e, "user_message", None) or "the cut-out failed"
+        rec["fallback"] = f"the words couldn't go behind you ({why.rstrip('.')}); shown above your face instead"
+        rec["fallbackTreatment"] = "text-pop"
+        return layers, rec
+    stem = f"{plan['id']}-{_key('behind', text, params, size)}"
+    path = _save_png(img, ctx, stem)
+    layers = [Layer(path, "image", plan["t0"], plan["t1"], x, y, img.width, img.height, 0.0)]
+    if matte is not None:
+        layers.append(Layer(matte, "matte", plan["t0"], plan["t1"], 0, 0, W, H, 0.0, z=1))
+    return layers, {"zone": "behind", "bbox": _opaque_bbox(img, x, y), "text": text, "fontPx": size,
+                    **({"matte": matte.name} if matte is not None else {})}
+
+
 def _word_text(ctx, wid):
     from .compose_util import ctx_words
     return str((ctx_words(ctx).get(wid) or {}).get("w", "")).strip()
@@ -1383,7 +1432,7 @@ def _t_anim(ctx, plan, params, kind, src, zones, face, frame):
 
 TREATMENT_FNS = {
     "card-above-head": _t_card, "full-frame": _t_full, "phone-card": _t_phone, "side-card": _t_side,
-    "text-pop": _t_text, "post-wall": _t_post_wall, "icon-wall": _t_icon_wall, "split-top": _t_split,
+    "text-pop": _t_text, "text-behind": _t_behind, "post-wall": _t_post_wall, "icon-wall": _t_icon_wall, "split-top": _t_split,
     "animation": _t_anim,
 }
 
@@ -1409,13 +1458,13 @@ def build_layers(ctx) -> list:
         asked = tname
         try:
             src, kind = None, "none"
-            if it.get("asset") and tname not in ("post-wall", "icon-wall"):
+            if it.get("asset") and tname not in ("post-wall", "icon-wall", "text-behind"):
                 src = _asset_path(ctx, it["asset"])
                 kind = kind_of(src)
                 if kind not in ("image", "video"):
                     raise EngineError("ASSET_KIND", f"{src.name} is {kind}",
                                       "This b-roll file isn't a picture or a video.")
-            elif tname not in ("text-pop", "post-wall", "icon-wall"):
+            elif tname not in ("text-pop", "text-behind", "post-wall", "icon-wall"):
                 raise EngineError("ASSET_NONE", f"{plan['id']}: {tname} needs an asset",
                                   "This b-roll needs a picture or a clip.")
             asked = tname

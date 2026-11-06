@@ -239,6 +239,16 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet . The
 Whisper in the CTranslate2 conversion from Hugging Face (`Systran/faster-whisper-*`; the app offers `small.en` by
 default). License: MIT (OpenAI Whisper weights). https://huggingface.co/Systran/faster-whisper-small.en
 
+### Person segmentation model (downloaded on first use, not bundled, Apache-2.0)
+
+PP-HumanSeg, `human_segmentation_pphumanseg_2023mar.onnx` from the OpenCV Model Zoo, unmodified, downloaded
+from OpenCV's Hugging Face copy of the zoo (`opencv/human_segmentation_pphumanseg` at revision
+`e876e63603f6c65c1a22576bfd5fc7c07ecf9eb9`; 6,163,938 bytes, sha256
+`552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24`). Apache License 2.0, Copyright (c) 2021
+PaddlePaddle Authors. https://github.com/opencv/opencv_zoo/tree/main/models/human_segmentation_pphumanseg .
+The engine fetches it the first time a version draws words behind the speaker and keeps it only when its size
+and SHA-256 match (`engine/reelengine/models/segment-models.json`).
+
 ### First-run sample (bundled, CC0 1.0 and CC BY)
 
 The first run edits a short sample in front of you (`app/src/renderer/src/assets/sample/`). The person in it and

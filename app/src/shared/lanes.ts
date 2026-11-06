@@ -143,7 +143,7 @@ export function animationName(asset: string): string | null {
 export function pictureKind(b: Broll): PictureKind {
   const asset = typeof b.asset === 'string' ? b.asset : ''
   if (b.treatment === 'animation' || animationName(asset)) return 'animation'
-  if (b.treatment === 'text-pop' && !asset) return 'words'
+  if ((b.treatment === 'text-pop' || b.treatment === 'text-behind') && !asset) return 'words'
   if (b.treatment === 'post-wall' || b.treatment === 'icon-wall') return 'wall'
   return isVideoFile(asset) ? 'clip' : 'picture'
 }
@@ -158,6 +158,7 @@ export function pictureWhat(b: Broll): string {
   if (anim) return anim
   if (b.treatment === 'animation') return 'Animation'
   if (b.treatment === 'text-pop') return text ? `Words on screen: “${text}”` : 'Words on screen'
+  if (b.treatment === 'text-behind') return text ? `Words behind you: “${text}”` : 'Words behind you'
   if (b.treatment === 'post-wall') return 'Wall of pictures'
   if (b.treatment === 'icon-wall') return 'Wall of icons'
   const place = PLACES[b.treatment]

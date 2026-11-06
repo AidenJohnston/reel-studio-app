@@ -291,6 +291,16 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).music.enabled).toBe(false);
   });
 
+  it('fails if words behind the speaker are refused without a picture, or accepted with no words', async () => {
+    const { ctx, dir } = await ctxFor();
+    const at = { anchor: { from: 'w29', to: 'w30' }, treatment: 'text-behind', asset: null, animation: null };
+    const empty = await executeTool(ctx, 'add_broll', { ...at, params: { tilt: null, scale: null, text: null } });
+    expect(empty.content).toMatch(/text-behind needs params.text/);
+    const words = await executeTool(ctx, 'add_broll', { ...at, params: { tilt: null, scale: null, text: 'WAIT' } });
+    expect(words.isError, words.content).toBe(false);
+    expect((await loadProject(dir)).broll).toMatchObject([{ treatment: 'text-behind', asset: null, params: { text: 'WAIT' } }]);
+  });
+
   it('b-roll: text-pop, committed image, animation, update, remove', async () => {
     const { ctx, root, dir, host } = await ctxFor();
     await fsp.writeFile(path.join(root, 'Library', 'Images', 'flour.png'), tinyPng());

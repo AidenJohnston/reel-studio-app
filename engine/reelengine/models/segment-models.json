@@ -1,0 +1,7 @@
+{
+  "pphumanseg": {
+    "repo": "opencv/human_segmentation_pphumanseg",
+    "revision": "e876e63603f6c65c1a22576bfd5fc7c07ecf9eb9",
+    "file": { "name": "human_segmentation_pphumanseg_2023mar.onnx", "size": 6163938, "sha256": "552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24" }
+  }
+}

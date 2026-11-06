@@ -669,7 +669,7 @@ export function checklist(p: ProjectJson, words: Word[], kept: string[], version
 export function brollLabel(broll: NonNullable<ProjectJson['broll']>): string {
   const n = { picture: 0, animation: 0, text: 0 }
   for (const b of broll) {
-    if (b.treatment === 'text-pop' && !b.asset) n.text++
+    if ((b.treatment === 'text-pop' || b.treatment === 'text-behind') && !b.asset) n.text++
     else if (b.treatment === 'animation') n.animation++
     else n.picture++
   }

@@ -17,6 +17,7 @@ const TREATMENTS: Record<string, string> = {
   'phone-card': 'In a phone',
   'side-card': 'Beside you',
   'text-pop': 'Big words on the screen',
+  'text-behind': 'Big words behind you',
   'post-wall': 'Wall of pictures',
   'icon-wall': 'Wall of icons',
   'split-top': 'Top half'
