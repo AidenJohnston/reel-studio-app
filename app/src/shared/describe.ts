@@ -8,11 +8,15 @@ type Style = Record<string, unknown>
 
 const size = (s: Style): number => Number(s.size ?? 105)
 const pos = (s: Style): number => Number(s.position ?? 0.75)
-const look = (s: Style): string => (s.box ? 'box' : String(s.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow')
+// null: the colour is not known. A receipt lists only the style fields that changed, so a style rebuilt
+// from it has no colour unless the colour changed, and naming one would guess.
+const look = (s: Style, partial: boolean): string | null =>
+  s.box ? 'box' : partial && !('color' in s) ? null : String(s.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow'
 const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
-function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions']): string[] {
+/** `partial`: the styles hold only the fields a receipt says changed (describeFacts), not whole styles. */
+function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions'], partial = false): string[] {
   if (!after) return []
   if (before?.enabled !== false && after.enabled === false) return ['no subtitles']
   if (before?.enabled === false && after.enabled !== false) return ['subtitles back on']
@@ -21,8 +25,8 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   const words: string[] = []
   if (size(b) > size(a)) words.push('bigger')
   if (size(b) < size(a)) words.push('smaller')
-  const lb = look(b)
-  if (lb !== look(a)) words.push(lb === 'box' ? 'boxed' : lb)
+  const lb = look(b, partial)
+  if (lb !== look(a, partial)) words.push(lb === 'box' ? 'boxed' : lb ?? 'unboxed')
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
   if (pos(b) < pos(a) - 0.01) out.push(out.length ? 'moved up' : 'subtitles moved up')
@@ -105,7 +109,7 @@ function changes(facts: EditFact[], words: Word[]): Change[] {
       }
       return c as NonNullable<ProjectJson['captions']>
     }
-    const said = subtitles(side('before'), side('after'))
+    const said = subtitles(side('before'), side('after'), true)
     const first = said[0] ?? ''
     out.push({
       group: 'subtitles',
@@ -185,7 +189,7 @@ const LEXICON: [Group, Lexicon][] = [
     markers: ['subtitle'],
     nouns: ['subtitle', 'word', 'look', 'moved'],
     dirs: {
-      bigger: 'bigger', smaller: 'smaller', yellow: 'yellow', white: 'white', boxed: 'boxed', up: 'up', down: 'down',
+      bigger: 'bigger', smaller: 'smaller', yellow: 'yellow', white: 'white', boxed: 'boxed', unboxed: 'unboxed', up: 'up', down: 'down',
       no: 'off', off: 'off', back: 'on', on: 'on', fixed: 'fixed', corrected: 'fixed', new: 'changed', changed: 'changed'
     }
   }],

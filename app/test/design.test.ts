@@ -149,6 +149,15 @@ describe('version messages', () => {
     expect(own.title).toBe('More words back, bigger subtitles and more')
     expect(acceptRewrite(own, restored, words)).toEqual(own)
   })
+  it('fails if a version button names a subtitle colour its receipt does not record', () => {
+    // yellow subtitles in a box; this edit only took the box away, so the receipt has no colour
+    const unboxed = [{ kind: 'captions.style', field: 'box', before: true, after: false }]
+    expect(describeFacts(unboxed, [])).toBe('unboxed subtitles')
+    const own = { title: versionTitle(unboxed, []), summary: describeFacts(unboxed, []) }
+    expect(acceptRewrite(own, unboxed, [])).toEqual(own)
+    // a colour field the project never had is the default, which is white
+    expect(describeFacts([...unboxed, { kind: 'captions.style', field: 'color', before: '#FFD60A', after: null }], [])).toBe('white subtitles')
+  })
   it("fails if a version button shows the AI's chat reply when a receipt exists, or for a version made after receipts", () => {
     const chat: ChatMessage[] = [
       { id: '1', from: 'editor', text: 'I made the subtitles bigger.', at: '', version: 1 },
