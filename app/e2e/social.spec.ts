@@ -4,13 +4,15 @@
 // the test reads the sign-in link the app would have opened and plays the person clicking Allow.
 //
 // Run: npx playwright test e2e/social.spec.ts (after npm run build).
-import { test, expect, type ElectronApplication } from '@playwright/test'
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { configFromEnv } from '../src/server/signin/config.ts'
 import { createSigninHandler } from '../src/server/signin/handler.ts'
-import { launch, makeMedia, openSettings, passFirstRun, shot, startReel } from './helpers'
+import { mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
+import { BASE, launch, makeMedia, openSettings, passFirstRun, shot, startReel } from './helpers'
 
 const SIGNIN = 'https://signin.e2e.test'
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64')
@@ -45,12 +47,12 @@ function platforms(seen: Seen) {
     }
     if (at === 'graph.instagram.com/v26.0/42/media') {
       seen.containers.push(new URLSearchParams(String(init.body)))
-      return json({ id: '900' })
+      return json({ id: `90${seen.containers.length}` })
     }
-    if (at === 'graph.instagram.com/v26.0/900') return json({ status_code: 'FINISHED' })
+    if (/^graph\.instagram\.com\/v26\.0\/90\d$/.test(at)) return json({ status_code: 'FINISHED' })
     if (at === 'graph.instagram.com/v26.0/42/media_publish') {
       seen.published++
-      return json({ id: '789' })
+      return json({ id: `78${seen.published}` })
     }
     // Facebook: the sign-in service's exchange, then the app's Graph calls
     const fb = 'graph.facebook.com/v26.0'
@@ -136,6 +138,17 @@ async function opened(app: ElectronApplication): Promise<URL> {
   await expect.poll(async () => (link = (await app.evaluate(() => (globalThis as { __reelstudioOpened?: string }).__reelstudioOpened ?? '')))).not.toBe('')
   await app.evaluate(() => { delete (globalThis as { __reelstudioOpened?: string }).__reelstudioOpened })
   return new URL(link)
+}
+
+/** Settings › Posting › Connect Instagram, with the test playing the person clicking Allow. */
+async function connectInstagram(app: ElectronApplication, page: Page, url: string): Promise<void> {
+  await openSettings(page)
+  const row = page.locator('[data-setting="instagram"]')
+  await row.getByTestId('instagram-connect').click()
+  const link = await opened(app)
+  const back = await fetch(`${url}/signin.e2e.test/v1/instagram/callback?${new URLSearchParams({ code: 'ig-code', state: link.searchParams.get('state')! })}`, { redirect: 'manual' })
+  expect((await fetch(back.headers.get('location')!)).status).toBe(200)
+  await expect(row).toContainText('Connected as @e2e_creator')
 }
 
 test('connect Instagram in Settings, see the account in the preview, and post a trial reel from Share', async () => {
@@ -281,6 +294,41 @@ test('connect Facebook, choose the Page and post a reel to it', async () => {
     expect(seen.facebookBytes).toBeGreaterThan(1000)
     expect(seen.facebookFinish?.get('video_state')).toBe('PUBLISHED')
     expect(seen.facebookFinish?.get('description')).toBe('From the e2e #reel')
+  } finally {
+    await app.close()
+    server.close()
+  }
+})
+
+test('post Try 1 and Try 2 to Instagram as two trial reels from Other platforms', async () => {
+  test.setTimeout(15 * 60_000)
+  const media = makeMedia()
+  const { server, url, seen } = await world()
+  const mine = mkdtempSync(join(BASE, 'trial-pair-'))
+  // the practice editor proposes Try 2 (e2e/try-two-versions.spec.ts)
+  const { app, page } = await launch({ REELSTUDIO_SIGNIN_URL: SIGNIN, REELSTUDIO_TEST_PLATFORMS: url, REELSTUDIO_MOCK_NOTE: '800',
+    REELSTUDIO_ROOT: join(mine, 'Reel Studio'), REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await connectInstagram(app, page, url)
+    await startReel(page, media.video)
+    await expect(page.getByTestId('share')).toBeEnabled({ timeout: 10 * 60_000 })
+    await page.getByTestId('share').click()
+    await page.getByTestId('share-platforms-toggle').click()
+    const platforms = page.getByTestId('share-platforms')
+    await expect(platforms.getByRole('checkbox', { name: 'Instagram Reels' })).toBeChecked()
+    await expect(platforms.getByTestId('try-two-use')).toBeVisible({ timeout: 60_000 })
+    await platforms.getByTestId('try-two-use').click()
+    await platforms.getByTestId('export-selected').click()
+    await expect(platforms.getByTestId('export-saved')).toBeVisible({ timeout: 120_000 })
+    await shot(page, 'social-9-trial-pair')
+    await platforms.getByTestId('trial-pair-post').click()
+    await expect(platforms.getByTestId('trial-pair-done')).toBeVisible({ timeout: 3 * 60_000 })
+    await shot(page, 'social-10-trial-pair-done')
+    expect(seen.containers).toHaveLength(2)
+    for (const c of seen.containers) expect(c.get('trial_params')).toBe('{"graduation_strategy":"MANUAL"}')
+    expect(seen.containers[0].get('caption')).not.toBe(seen.containers[1].get('caption') ?? '')
+    expect(seen.published).toBe(2)
   } finally {
     await app.close()
     server.close()
