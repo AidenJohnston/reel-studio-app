@@ -316,6 +316,9 @@ export function ShowMeHow({
     }
     return coverPicks.current
   }
+  // The engine makes the stills from the saved project: a flip not saved yet is shown on them instead.
+  const savedFlip = d.project.sources?.find((s) => s.id === coverSource)?.mirror === true
+  const pendingFlip = p.sources?.find((s) => s.id === coverSource)?.mirror === true
   // Closing the drawer stops a look still running (main waits for the engine to exit). The stopped look
   // is forgotten, so an effect that runs again (React's development double run) starts a new one
   // instead of showing "Stopped.".
@@ -629,6 +632,7 @@ export function ShowMeHow({
                 load={loadCoverPicks}
                 waiting={coverMoments(d.words, kept, coverSource).length}
                 chosen={coverTime}
+                flipped={pendingFlip !== savedFlip}
                 onPick={(c) => set('cover', { ...(p.cover ?? { text: null }), atSourceTime: c.atSourceTime, source: c.source, exact: null, manual: true })}
               />
               <h3 style={{ marginTop: 6 }}>Or pick any moment</h3>

@@ -1,5 +1,6 @@
-// The cover picker: frames picked from the video, each with its time and why, the chosen one marked, and
-// a pick saved as that exact frame. Run after a build: npx playwright test e2e/cover.spec.ts
+// The cover picker: frames picked from the video, each with its time and why, shown flipped while
+// "Flip picture" is changed but not saved, the chosen one marked, and a pick saved as that exact
+// frame. Run after a build: npx playwright test e2e/cover.spec.ts
 import { test, expect } from '@playwright/test'
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -25,6 +26,20 @@ test('cover suggestions say when and why, mark the chosen frame, and save it as 
   // the stand-in engine's first frame: eyes open and face in focus beat its neighbours
   await expect(picks.first()).toContainText(/^0:\d\dEyes open, face in focus$/)
   await expect(page.getByText('Drag to fine-tune')).toHaveCount(0)
+
+  // "Flip picture" not saved yet: the stills were made from the saved project, so they show flipped, as
+  // the cover will render; turned back off, as they were made.
+  const still = picks.first().locator('img')
+  const turned = () => still.evaluate((img) => getComputedStyle(img).transform)
+  await expect.poll(turned).toBe('none')
+  await page.getByTestId('tab-cut').click()
+  await page.getByTestId('mirror-on').check()
+  await page.getByTestId('tab-cover').click()
+  await expect.poll(turned).toBe('matrix(-1, 0, 0, 1, 0, 0)')
+  await page.getByTestId('tab-cut').click()
+  await page.getByTestId('mirror-on').uncheck()
+  await page.getByTestId('tab-cover').click()
+  await expect.poll(turned).toBe('none')
 
   await picks.nth(0).click()
   await page.keyboard.press('ArrowRight') // radio buttons: arrows move and pick

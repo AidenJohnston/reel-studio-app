@@ -13,6 +13,7 @@ export function CoverPicks({
   load,
   waiting,
   chosen,
+  flipped,
   onPick
 }: {
   /** the engine's answer; the drawer keeps one per opening so switching tabs does not look again */
@@ -21,6 +22,8 @@ export function CoverPicks({
   waiting: number
   /** the cover's time now, in raw-take seconds */
   chosen: number
+  /** "Flip picture" changed since the stills were made: show them flipped, as the cover will render */
+  flipped: boolean
   onPick: (c: CoverCandidate) => void
 }) {
   const [picks, setPicks] = useState<CoverCandidate[] | null>(null)
@@ -92,7 +95,7 @@ export function CoverPicks({
                 data-testid="cover-pick"
               >
                 <span className="cover-pick-frame">
-                  <img src={c.image} alt="" />
+                  <img src={c.image} alt="" style={flipped ? { transform: 'scaleX(-1)' } : undefined} />
                   {on && (
                     <span className="cover-pick-check">
                       <Icon name="check" size={14} stroke={2.5} />
