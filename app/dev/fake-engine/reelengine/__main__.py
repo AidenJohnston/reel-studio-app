@@ -677,6 +677,34 @@ def cmd_measure_reel(args: list[str]) -> dict:
     return out
 
 
+def cmd_match_joins(args: list[str]) -> dict:
+    """The real engine compares frames (reelengine/match.py). This stand-in has none to compare, so a join lines up
+    when the first word after it has an even number (w2, w4, ...): tests can pick a cut that matches and one that
+    doesn't."""
+    proj = Path(take(args, "--project"))
+    data = load(proj, take(args, "--project-file"))
+    raw = take(args, "--keep")
+    keep = json.loads(raw) if raw is not None else data["cut"]["keep"]
+    every = "--every" in args
+    joins = []
+    for i, k in enumerate(keep):
+        if not i or "clip" in k or "clip" in keep[i - 1]:
+            continue
+        if not every and (k.get("join") or {}).get("transition") != "match":
+            continue
+        n = int(re.sub(r"\D", "", k["from"]) or 1)
+        joins.append({"keep": i, "matched": n % 2 == 0, "at": float(i),
+                      **({} if n % 2 == 0 else {"why": "the speaker moves too much across the cut (0.081, a match allows 0.045)"})})
+    return {"joins": joins}
+
+
+def cmd_pace_preview(args: list[str]) -> dict:
+    """Fixed counts in the real engine's shape (reelengine pace-preview): the stand-in plans no framing."""
+    take(args, "--project")
+    rows = {"none": (6, 1, 3), "clean": (8, 1, 1), "standard": (14, 2, 2), "hyper": (26, 5, 4), "punchline": (9, 1, 2)}
+    return {"seconds": 5.0, "paces": {k: {"perMinute": a, "opening": b, "openingMax": c, "issues": []} for k, (a, b, c) in rows.items()}}
+
+
 def cmd_proxy(_args: list[str]) -> dict:
     """The real engine makes preview copies of 4K/HDR takes; the fake one's takes are small."""
     return {"sources": {}}
@@ -693,6 +721,7 @@ COMMANDS = {
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
     "reference-scan": cmd_reference_scan, "moments": cmd_moments, "score": cmd_score, "measure-reel": cmd_measure_reel,
+    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview,
 }
 
 

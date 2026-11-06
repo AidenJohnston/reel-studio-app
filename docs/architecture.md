@@ -175,6 +175,8 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b] [--rules file]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview; `--rules` measures checked My style rules (result `ruleChecks`) and a final render that breaks one listed in `stopOn` returns `encoded: false` before its encode |
 | `score --version N` | the mechanical checks saved version N passes, from the reports beside it (pauses, subtitles, loudness, the file, My style rules, the double-check); renders nothing |
+| `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
+| `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
 | `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
@@ -194,7 +196,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
@@ -224,8 +226,9 @@ cover.render(ctx, out_png) -> Path
 The agent loop lives in `ai/`. Tools are strict JSON-schema functions that operate on project.json through a
 small TypeScript project API and then ask the main process to re-render. The set:
 
-`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`,
-`set_gap_cap`, `set_cut_style(preset, seed)`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `read_references` (the
+`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`, `find_match_cuts`
+(which joins can be match cuts, from `reelengine match-joins`; `set_cut` refuses a match whose two sides don't line up),
+`set_gap_cap`, `set_cut_style(preset, seed)`, `set_beat_accents(on)` (accents on the song's beat; null lets the cut style decide), `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `read_references` (the
 reference reels saved in My style and the app's readout of what they have in common: talking pace, seconds per shot,
 the opening line; titles and opening lines are other creators' words, fenced as data), `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,

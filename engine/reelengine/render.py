@@ -180,12 +180,10 @@ def source_faces(project_dir: Path, proj: dict) -> dict:
     return faces
 
 
-def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
-    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
-    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
-    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
-    rot = int(src.get("rotation") or 0) % 360
-    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+def display_crop(disp: tuple, out_w: int, out_h: int, face: Optional[tuple]) -> tuple:
+    """(x, y, cw, ch): the part of the upright picture (disp = its width, height) that fills
+    out_w x out_h, centred on the face when known. Match cuts compare frames through it (match.py)."""
+    w, h = disp
     target = out_w / out_h
     if w / h > target + 1e-3:          # too wide: crop the sides
         cw, ch = int(round(h * target)) // 2 * 2, h // 2 * 2
@@ -199,6 +197,16 @@ def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> di
         x = 0
     else:
         cw, ch, x, y = w // 2 * 2, h // 2 * 2, 0, 0
+    return x, y, cw, ch
+
+
+def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
+    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
+    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
+    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
+    rot = int(src.get("rotation") or 0) % 360
+    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+    x, y, cw, ch = display_crop((w, h), out_w, out_h, face)
     if rot == 90:
         rx, ry, rcw, rch = y, rh - x - cw, ch, cw
     elif rot == 270:
@@ -1183,6 +1191,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     ctx.window = win
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
+    for m in tl.match_joins:
+        if m.get("played") == "hard":
+            warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
     # 1. audio (always the full cut, then sliced for a window, so the music sits where it will)
@@ -1310,7 +1321,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift)
+    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
     result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps, "encoded": True,
               "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
@@ -1415,6 +1426,29 @@ def source_files(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
     return src_meta, src_paths
 
 
+# A flash join (Resolve's "dip to color", in white): the picture fades to white over FLASH_IN frames before the cut
+# and back over FLASH_OUT after it. It is a layer like any picture, so a draft, a window and the final draw it the
+# same, and captions stay on top of it. Frame counts judged by eye in other editors' presets (2 in, 3 out); no
+# measurement behind them.
+FLASH_IN, FLASH_OUT, FLASH_Z = 2, 3, 10_000
+
+
+def flash_layers(ctx: RenderCtx, segments: list) -> list:
+    cuts = [s.out_start for s in segments[1:] if s.join_transition == "flash"]
+    if not cuts:
+        return []
+    from PIL import Image
+    png = Path(ctx.work) / "render" / "flash.png"
+    if not png.exists():
+        png.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (16, 16), (255, 255, 255)).save(png)
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    # the project's frame rate, not a preview's, so a draft and a window flash for as long as the final does
+    fps = float(((ctx.project or {}).get("format") or {}).get("fps") or ctx.fmt["fps"])
+    return [Layer(path=png, kind="image", t0=max(0.0, t - FLASH_IN / fps), t1=t + FLASH_OUT / fps, x=0, y=0, w=W, h=H,
+                  z=FLASH_Z, fade_in=FLASH_IN / fps, fade_out=FLASH_OUT / fps) for t in cuts]
+
+
 def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
     """(layers, zooms, layer items, raw b-roll, broll_report): the b-roll layers and zooms (A2) drawn
     over the cut. The layer items are the records build_layers wrote to work/layers/layers.json, which
@@ -1450,6 +1484,7 @@ def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
         except Exception as exc:   # noqa: BLE001
             log(f"# zoom.build_zooms failed: {exc!r}")
             warnings.append(ZOOMS_FAILED)
+    layers += flash_layers(ctx, tl.segments)
     return layers, zooms, layer_items, raw_broll, broll_report
 
 

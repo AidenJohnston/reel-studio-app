@@ -121,7 +121,7 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -1512,6 +1512,26 @@ function registerIpc(): void {
     return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
+  // How often each pace would change the picture of this reel, from the plan a render makes (engine pace-preview), for
+  // the edit drawer's Pace: shown before the version is made, so the choice isn't blind.
+  handle('projects:pacePreview', async (_e, slug: string): Promise<PacePreview> => {
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('pace-preview', owned(['--project', projectDir(slug)], owner))
+    const paces: PacePreview['paces'] = {}
+    for (const [k, v] of Object.entries((r?.paces ?? {}) as Record<string, any>)) {
+      if (Number.isFinite(v?.perMinute) && Number.isInteger(v?.opening) && Number.isInteger(v?.openingMax)) paces[k] = { perMinute: v.perMinute, opening: v.opening, openingMax: v.openingMax }
+    }
+    return { paces }
+  })
+  // Whether the cut into each range lines up as a match cut (engine match-joins; engine/reelengine/match.py), for the
+  // edit drawer's Transitions. `keep`: the cut as the drawer has it, checked before it becomes a version.
+  handle('projects:matchJoins', async (_e, slug: string, keep: unknown): Promise<MatchVerdict[]> => {
+    if (!Array.isArray(keep) || keep.length > 2000) throw { code: 'BAD_CUT', userMessage: 'That cut could not be checked. Try again.' }
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner))
+    return Array.isArray(r?.joins) ? r.joins.filter((j: any) => Number.isInteger(j?.keep) && typeof j?.matched === 'boolean')
+      .map((j: any) => ({ keep: j.keep, matched: j.matched, ...(typeof j.why === 'string' ? { why: j.why } : {}) })) : []
+  })
 
   // More reels from this video (main/propose-reels.ts)
   const reelsDeps = (): ReelsDeps => ({ jobs, ai, startFirstEdit: (slug, init) => startFirstEdit(slug, init) })
