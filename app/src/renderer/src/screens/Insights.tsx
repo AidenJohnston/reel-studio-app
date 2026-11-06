@@ -232,7 +232,7 @@ function Trials({ trials, reels }: { trials: InsightTrialResult[]; reels: Insigh
             <li key={t.id} className="ins-trial" data-testid="insights-trial" data-verdict={v.kind}>
               <div className="ins-trial-h">
                 <span className="ttl">{title(t)}</span>
-                <span className="faint">{CHANGE[t.change]} test on {PLATFORM_NAMES[t.platform]}</span>
+                <span className="faint">{t.change ? `${CHANGE[t.change]} test` : 'Trial'} on {PLATFORM_NAMES[t.platform]}</span>
                 <span className={`ins-verdict ${v.kind}`} data-testid="insights-verdict">
                   {v.kind === 'winner' ? `Try ${v.winner} won` : v.kind === 'too-close' ? 'Too close to call' : v.kind === 'too-few' ? 'Too few views yet' : 'Waiting'}
                 </span>

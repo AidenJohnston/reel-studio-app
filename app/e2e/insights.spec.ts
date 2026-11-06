@@ -12,7 +12,7 @@ const FIXTURE = join(BASE, 'insights-platforms.json')
 const DAY = 86_400_000
 
 /** What publishing saves for each post (results-1106 CONTRACT.md); the numbers come later, from the refresh. */
-function recordPosts(dir: string, posts: { version: number; platform: 'instagram' | 'tiktok'; postId: string; accountId: string; trial?: { id: string; try: 1 | 2; change: string } }[]) {
+function recordPosts(dir: string, posts: { version: number; platform: 'instagram' | 'tiktok'; postId: string; accountId: string; trial?: { graduation: 'MANUAL'; try: 1 | 2; group: string } }[]) {
   const publishedAt = new Date(Date.now() - 3 * DAY).toISOString()
   const versions: Record<string, Record<string, unknown>> = {}
   for (const p of posts) {
@@ -54,10 +54,11 @@ test('Insights: results read, explained and opened at the posted version', async
     const second = newProjectFolder(root(), before)
     const title = (dir: string) => JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')).title as string
 
-    // Version 1 of the first reel went to Instagram as a caption trial and to TikTok; the second reel to Instagram.
+    // Version 1 of the first reel went to Instagram as two trial reels (Try 1 and Try 2, the tag Instagram publishing
+    // saves) and to TikTok; the second reel to Instagram.
     recordPosts(first, [
-      { version: 1, platform: 'instagram', postId: '9001', accountId: '17', trial: { id: 'cap-test', try: 1, change: 'caption' } },
-      { version: 1, platform: 'instagram', postId: '9002', accountId: '17', trial: { id: 'cap-test', try: 2, change: 'caption' } },
+      { version: 1, platform: 'instagram', postId: '9001', accountId: '17', trial: { graduation: 'MANUAL', try: 1, group: 'cap-test' } },
+      { version: 1, platform: 'instagram', postId: '9002', accountId: '17', trial: { graduation: 'MANUAL', try: 2, group: 'cap-test' } },
       { version: 1, platform: 'tiktok', postId: '7001', accountId: 'tt-1' }
     ])
     recordPosts(second, [{ version: 1, platform: 'instagram', postId: '9101', accountId: '17' }])
@@ -97,7 +98,7 @@ test('Insights: results read, explained and opened at the posted version', async
     await shot(page, 'insights-02-results')
     // the trial tag survives the read, so the pair stays a pair on the next visit
     const saved = JSON.parse(readFileSync(join(first, 'outcomes.json'), 'utf8'))
-    expect(saved.versions.v1['9002']).toMatchObject({ trial: { id: 'cap-test', try: 2 }, metrics: { plays: 640 } })
+    expect(saved.versions.v1['9002']).toMatchObject({ trial: { group: 'cap-test', try: 2 }, metrics: { plays: 640 } })
 
     // ---- a row opens its reel at the posted version, not the newest ----
     // fails if Insights opens Version 2 when Version 1 is the one with these results

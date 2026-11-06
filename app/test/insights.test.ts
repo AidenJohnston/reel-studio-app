@@ -22,7 +22,7 @@ async function world() {
   return dir
 }
 function post(options: { version?: number; postId?: string; platform?: InsightPlatform; publishedAt?: string;
-  observedAt?: string | null; metrics?: Partial<InstagramMetrics> | null; accountId?: string; trial?: PostTrial } = {}) {
+  observedAt?: string | null; metrics?: Partial<InstagramMetrics> | null; accountId?: string; trial?: unknown } = {}) {
   const platform = options.platform ?? 'instagram'
   return {
     version: options.version ?? 1, postId: options.postId ?? '100', platform, accountId: options.accountId ?? '123',
@@ -320,12 +320,24 @@ it('links the engine’s trial log when Try 2 is another version', async () => {
   expect((await summary(root)).trialResults[0].engine).toMatchObject({ parentVersion: 1, variable: 'seed', from: 4, to: 9 })
 })
 
+// fails if Instagram's own trial tag (as publish saves it: graduation, try, group) isn't read as a pair, or a lone
+// trial reel breaks Insights
+it('reads the trial tag Instagram publishing saves', async () => {
+  const root = await world()
+  const ig = (n: 1 | 2) => ({ graduation: 'MANUAL', try: n, group: 'g1' })
+  await seed(root, 'trial', [post({ postId: '1', trial: ig(1) }), post({ postId: '2', trial: ig(2) }),
+    post({ postId: '3', trial: { graduation: 'SS_PERFORMANCE' } })])
+  const result = await summary(root)
+  expect(result.trialResults).toMatchObject([{ id: 'g1', change: null, tries: [{ postId: '1' }, { postId: '2' }] }])
+  expect(result.reels[0].posts.find((p) => p.postId === '3')?.trial).toBeNull()
+})
+
 // fails if a broken trial record (two Try 1s, mixed platforms, an unknown change) is shown as a trial
 it('refuses broken trial records', async () => {
   const root = await world()
   await seed(root, 'trial', [post({ postId: '1', trial: TRY(1) }), post({ platform: 'tiktok', postId: '2', trial: TRY(2) })])
   await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA' })
-  await seed(root, 'trial', [post({ postId: '1', trial: { id: 'x', try: 1, change: 'music' as PostTrial['change'] } })])
+  await seed(root, 'trial', [post({ postId: '1', trial: { id: 'x', try: 1, change: 'music' } })])
   await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA' })
 })
 

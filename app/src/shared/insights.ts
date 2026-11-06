@@ -12,11 +12,15 @@ export interface InsightsOptions {
 /** What a trial's second try changed (shared/platforms.ts TryVariable), or 'video' for another version. */
 export type TrialChange = 'video' | 'hook' | 'caption' | 'cover' | 'brightness'
 
-/** Set by publish on both tries of a trial post (outcomes.json `trial`); the same id ties them together. */
+/**
+ * One try of a trial post, from outcomes.json `trial` as publish saves it: Instagram's `{ graduation, try, group }`
+ * (shared/instagram.ts InstagramTrial), where `group` ties Try 1 and Try 2 together, or `{ id, try, change }`.
+ * `change` is null when publish didn't record what Try 2 changed.
+ */
 export interface PostTrial {
   id: string
   try: 1 | 2
-  change: TrialChange
+  change: TrialChange | null
 }
 
 export interface InsightPostRef {
@@ -97,7 +101,7 @@ export interface InsightTrialResult {
   id: string
   project: string
   platform: InsightPlatform
-  change: TrialChange
+  change: TrialChange | null
   /** Try 1, then Try 2. */
   tries: [InsightPost, InsightPost]
   verdict: TrialVerdict

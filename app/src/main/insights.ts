@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
 import type {
   InsightChange, InsightMetric, InsightPlatform, InsightPost, InsightPostRef, InsightReel, InsightSentence, InsightTotals,
-  InsightTrial, InsightTrialResult, InsightValues, InsightsOptions, InsightsSummary, PlatformAudience, PostTrial
+  InsightTrial, InsightTrialResult, InsightValues, InsightsOptions, InsightsSummary, PlatformAudience, PostTrial, TrialChange
 } from '../shared/insights'
 import { decideTrial } from './trial-decision'
 
@@ -95,12 +95,19 @@ function parseTrials(value: unknown, project: string): InsightTrial[] {
 function isPlatform(value: unknown): value is InsightPlatform {
   return value === 'instagram' || value === 'tiktok' || value === 'facebook'
 }
-/** outcomes.json `trial`, written by publish on both tries of a trial post. Absent on an ordinary post. */
+/**
+ * outcomes.json `trial`, written by publish (shared/insights.ts PostTrial). Absent on an ordinary post. A trial reel
+ * posted on its own (no Try 1 / Try 2 pair: no group or try) is an ordinary post here.
+ */
 function parseTrial(value: unknown, file: string): PostTrial | null {
   if (value === undefined) return null
-  if (!object(value) || typeof value.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.id) || (value.try !== 1 && value.try !== 2)
-    || typeof value.change !== 'string' || !TRIAL_CHANGES.has(value.change)) return badData(file)
-  return { id: value.id, try: value.try, change: value.change as PostTrial['change'] }
+  if (!object(value)) return badData(file)
+  const id = value.id ?? value.group
+  if (value.graduation !== undefined && value.graduation !== 'MANUAL' && value.graduation !== 'SS_PERFORMANCE') return badData(file)
+  if (id === undefined && value.try === undefined) return null
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id) || (value.try !== 1 && value.try !== 2)
+    || (value.change !== undefined && (typeof value.change !== 'string' || !TRIAL_CHANGES.has(value.change)))) return badData(file)
+  return { id, try: value.try, change: typeof value.change === 'string' ? value.change as TrialChange : null }
 }
 function parsePost(value: unknown, project: string, version: number, key: string): SavedPost {
   const file = `${project}/outcomes.json`
