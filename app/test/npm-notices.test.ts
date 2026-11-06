@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 // package can carry a nested copy at another version than the top-level one (electron-updater's semver 7.7.4 beside
 // a dev-only 7.8.5). The lock's own dev flags are not used.
 const repo = resolve(__dirname, '../..')
-type Entry = { version?: string; link?: boolean; resolved?: string; dev?: boolean; devOptional?: boolean; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> }
+type Entry = { version?: string; link?: boolean; resolved?: string; dev?: boolean; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }> }
 const lock = JSON.parse(readFileSync(resolve(repo, 'package-lock.json'), 'utf8')).packages as Record<string, Entry>
 // The front-end libraries vite bundles into the window (devDependencies, but they ship).
 const BUNDLED = ['react', 'react-dom', 'scheduler']
@@ -30,8 +30,11 @@ function runtime(): Map<string, string> {
   const queue = ['app', 'ai'] // the workspaces; only their production dependencies ship
   while (queue.length) {
     const at = queue.pop()!
-    for (const name of Object.keys({ ...lock[at].dependencies, ...lock[at].optionalDependencies })) {
+    const { dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta } = lock[at]
+    for (const name of Object.keys({ ...dependencies, ...optionalDependencies, ...peerDependencies })) {
       const path = locate(name, at)
+      // a missing optional peer isn't installed, so nothing loads it
+      if (path === null && peerDependenciesMeta?.[name]?.optional) continue
       if (path === null || seen.has(path)) continue
       seen.set(path, name)
       queue.push(path)
@@ -65,8 +68,9 @@ it('fails if the npm licence notices miss a shipped package version or name one 
 })
 
 it('fails if package-lock.json marks a package the app loads at run time as dev-only', () => {
-  // A dev flag tells an install that omits dev packages (npm ci --omit=dev, or a packager asking npm for production
-  // dependencies) to leave the package out; electron-updater then fails to load in the packaged app.
-  const devOnly = [...runtime().keys()].filter((path) => lock[path].dev || lock[path].devOptional)
+  // electron-builder collects the app's node_modules by asking npm for production and optional packages, omitting
+  // dev ones, so a dev flag here leaves the package out and electron-updater fails to load in the packaged app.
+  // (devOptional is kept by that omit, so only dev counts.)
+  const devOnly = [...runtime().keys()].filter((path) => lock[path].dev)
   expect(devOnly.sort()).toEqual([])
 })
