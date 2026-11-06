@@ -1432,8 +1432,11 @@ const tools: ToolDef[] = [
         // checked before the cut changes, so a refused match leaves the cut as it was
         const unmet = (await matchVerdicts(ctx, keep, false)).filter((j) => !j.matched);
         if (unmet.length) {
+          const action = unmet.some((j) => j.transition === 'action');
           throw new ToolInputError(`${unmet.map((j) => `keep[${j.keep}]: no ${j.transition === 'action' ? 'cut on action' : 'match cut'} here, ${j.why ?? 'its two sides do not line up'}`).join('; ')}. `
-            + 'Call find_match_cuts to see which cuts line up, or use hard, j, l, smash or flash here.');
+            + (action
+              ? 'An action cut needs movement in the pause on both sides of the cut; use hard, j, l, smash or flash here.'
+              : 'Call find_match_cuts to see which cuts line up, or use hard, j, l, smash or flash here.'));
         }
       }
       await mutate(ctx, 'cut', (p) => { p.cut.keep = keep; });
