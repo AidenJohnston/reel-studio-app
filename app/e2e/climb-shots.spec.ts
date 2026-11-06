@@ -150,7 +150,7 @@ async function pauseAt(page: Page, t: number): Promise<void> {
   // (Player.tsx FADE_MS): hold every player video at `t` until none is loading and all stay there.
   const hold = () =>
     page.evaluate((at) => {
-      const vs = [...document.querySelectorAll<HTMLVideoElement>('video[data-testid=player]')]
+      const vs = Array.from(document.querySelectorAll<HTMLVideoElement>('video[data-testid=player]'))
       if (!vs.length || document.querySelector('video.layer.loading')) return false
       for (const v of vs) {
         if (!v.paused) v.pause()
