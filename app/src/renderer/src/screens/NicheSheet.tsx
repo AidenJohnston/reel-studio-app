@@ -25,8 +25,11 @@ export function NicheSheet({ start, onClose, onSaved, onWriteYourself }: { start
   const end = useRef<HTMLDivElement>(null)
 
   useEffect(() => reel.niche.onStatus((s) => setStatus(s.message)), [])
-  // the newest line stays in view as the chat grows; no glide under reduced motion
-  useLayoutEffect(() => end.current?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }), [turns, busy, draft])
+  // the newest line stays in view as the chat grows; no glide under reduced motion. A block body: Chromium's
+  // scrollIntoView returns a promise, and an effect that returns one crashes the screen when React calls it as cleanup.
+  useLayoutEffect(() => {
+    end.current?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }, [turns, busy, draft])
 
   const send = async (e: FormEvent) => {
     e.preventDefault()
