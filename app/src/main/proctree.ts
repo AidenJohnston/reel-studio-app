@@ -34,7 +34,13 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
  * process itself is still alive 5 s later. */
 export async function killTree(pid: number): Promise<boolean> {
   if (process.platform === 'win32') {
-    await new Promise<void>((resolve) => execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve()))
+    await new Promise<void>((resolve) => {
+      try {
+        execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve())
+      } catch {
+        resolve() // Windows refused to start it at all (spawn UNKNOWN): the check below decides
+      }
+    })
     // taskkill can fail (access denied, or it could not be started): only the exit shows the engine
     // stopped. A number Windows has already handed on reads as alive too, which keeps the video closed.
     return within(5000, () => !isAlive(pid))
