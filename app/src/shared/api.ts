@@ -1,5 +1,6 @@
 // TikTok API v2: https://developers.tiktok.com/doc/login-kit-desktop/
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
+import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
@@ -16,6 +17,8 @@ import type { HandEdit } from './hand-edit'
 import type { SoundEffect } from './sfx'
 import type { LayerItem } from './lanes'
 import type { CutStyle, Zoom } from './cut-style'
+import type { ReferenceEntry, ReferenceView, Readout } from './references'
+import type { Niche, NicheTurn, NicheTurnResult, SavedNiche } from './niche'
 export type { VersionRow } from './version-diff'
 export type { ChatAction } from './notes'
 export type { CoverCandidate } from './cover'
@@ -132,6 +135,8 @@ export interface ChatMessage {
   suggestion?: string
   /** A typed My style rule to ask about instead (lowercase captions after a note made them so). */
   proposal?: StyleProposal
+  /** With `suggestion`: once saved, the app measures this rule on every render ("I'll check this every time"). */
+  check?: RuleCheck
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
   /** Where a note asked "Just here" points: shown as a muted "0:08" before the words and placed as a mark (shared/moments.ts). */
@@ -729,6 +734,8 @@ export interface StyleRule {
   paused?: boolean
   /** Set: the app applies this rule itself when a new video is made. Otherwise the AI reads it on every edit. */
   payload?: { kind: 'caption-case'; case: 'lower' }
+  /** Set: the app measures this on every render, and a note can't finish while it fails. Its words are the app's. */
+  check?: RuleCheck
   /** The reel, version and note it was learned from. */
   source?: { project: string; title: string; version: number; note?: string }
   /** Learned from another editor's export (My style, Learn from my past edits): its file name. */
@@ -738,7 +745,28 @@ export interface StyleRule {
   updatedAt?: string
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
   byYou?: true
+  /** Kept from a suggestion made from post results or hand edits: what it was read from. */
+  learned?: { from: 'results' | 'edits'; evidence: string }
 }
+
+/** A memory My style suggests (ai/src/style.ts MemoryProposal): nothing is saved until the person keeps it. */
+export interface MemorySuggestion {
+  id: string
+  kind: 'captions' | 'pacing' | 'music' | 'cuts' | 'look'
+  /** the short line the list shows, at most 60 characters */
+  line: string
+  text: string
+  proposedAt: string
+  from:
+    | { kind: 'note'; project: string; title: string; version: number; note?: string }
+    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string }
+    | { kind: 'edits'; reels: string[]; n: number; evidence: string }
+}
+
+/** A checked My style rule's machine form (ai/src/rules.ts validates it; engine/reelengine/rule_checks.py measures it). */
+export type RuleCheck =
+  | { kind: 'captions.maxWords' | 'captions.maxSize' | 'captions.minSize' | 'music.underVoiceDb'; value: number }
+  | { kind: 'broll.keepOut'; zone: 'face' | 'eyes' }
 
 /** One rule "Learn from my past edits" read from an export, with what it was read from. Nothing is saved until the person keeps it. */
 export interface LearnedRule {
@@ -996,6 +1024,9 @@ export interface ReelApi {
     /** Slugs of the reels whose title or spoken words contain every word of `query`, newest first. */
     search(query: string): Promise<string[]>
     get(slug: string): Promise<ProjectDetail>
+    /** The mechanical checks a saved version passes (engine `score`): pauses, subtitles, loudness, the video file,
+     * My style rules and the double-check. Reads the version's reports; renders nothing. */
+    score(slug: string, version: number): Promise<EditScore>
     create(files: string[]): Promise<{ slug: string; jobId: string; skipped: DropResult[] }>
     /** New reel: a reel with no video yet, titled "New reel" until the editor titles it. */
     plan(): Promise<{ slug: string }>
@@ -1148,6 +1179,39 @@ export interface ReelApi {
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
     /** "Use lowercase for new reels too", ticked in Edit it myself: the same rule a note's question saves. */
     rememberLowercase(slug: string): Promise<void>
+    /** Memories My style suggests from post results and hand edits, after looking again. */
+    suggestions(): Promise<MemorySuggestion[]>
+    /** Keep a suggestion as a rule, with its words or `text` the person typed. */
+    keepSuggestion(id: string, text?: string): Promise<StyleRule>
+    /** No thanks: the suggestion and its words are never suggested again. */
+    dismissSuggestion(id: string): Promise<void>
+  }
+  /** My style › Reference reels (main references.ts): other creators' reels to learn from, and the readout. */
+  references: {
+    list(): Promise<{ references: ReferenceView[]; readout: Readout }>
+    /** Copies the videos in and measures them in the background; files it skipped come back with the reason. */
+    add(paths: string[]): Promise<{ added: number; skipped: { name: string; reason: string }[] }>
+    /** A pasted link: downloaded when it goes straight to a video file, else kept with what to do to add the file. */
+    addLink(url: string): Promise<ReferenceEntry>
+    /** The file for a link the app would not download. */
+    attach(id: string, path: string): Promise<void>
+    /** Out of the list; the app's copy is deleted, the person's own file is not. */
+    remove(id: string): Promise<void>
+    openLink(id: string): Promise<void>
+    reveal(id: string): Promise<void>
+    /** A reel was measured, or could not be. */
+    onChange(cb: () => void): () => void
+  }
+  /** My style › Your niche (main niche-ipc.ts). */
+  niche: {
+    get(): Promise<{ niche: SavedNiche | null; damaged: boolean }>
+    save(niche: Niche, from: SavedNiche['from']): Promise<SavedNiche>
+    remove(): Promise<void>
+    /** One turn of the niche chat. `turns` start after the app's own question; `asked`: the editor's questions so far. */
+    say(turns: NicheTurn[], asked: number, draft: Niche | null): Promise<NicheTurnResult>
+    stop(): Promise<void>
+    /** The editor's waits while it answers. */
+    onStatus(cb: (s: { message: string; waiting?: boolean }) => void): () => void
   }
   sfx: {
     /** Every built-in sound effect, with a URL to hear it. */

@@ -6,7 +6,8 @@ import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
-import type { Phase, StyleProposal, StyleRule } from '../shared/api'
+import type { NicheTurnResult } from '../shared/niche'
+import type { MemorySuggestion, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -91,7 +92,7 @@ const sameRule = (s: string): string =>
     .trim()
 
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
-type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; [field: string]: unknown }
+type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; proposals?: MemorySuggestion[]; [field: string]: unknown }
 
 const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.'
 
@@ -133,9 +134,15 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeJson(styleFile(), { ...s, rules })
   }
   /** As the real package's StyleStore.add: the same words again turn a paused rule back on instead of adding a copy. */
-  const addRule = (text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<{ added: boolean; rule: StyleRule }> =>
+  const addRule = (text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> =>
     withStyle(async (s) => {
       const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+      if (dup && check) {
+        // as the real store: a checked rule replaces any rule checking the same kind
+        const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, check }
+        await saveRules(s, [...s.rules.filter((r) => r.check?.kind !== check.kind && r !== dup), rule])
+        return { added: true, rule }
+      }
       if (dup) {
         if (dup.paused) {
           delete dup.paused
@@ -143,8 +150,8 @@ export const createMockAI: CreateAI = ({ host }) => {
         }
         return { added: false, rule: dup }
       }
-      const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from }
-      await saveRules(s, [...s.rules, rule])
+      const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, ...(check ? { check } : {}) }
+      await saveRules(s, [...s.rules.filter((r) => !check || r.check?.kind !== check.kind), rule])
       return { added: true, rule }
     })
 
@@ -417,6 +424,18 @@ export const createMockAI: CreateAI = ({ host }) => {
           : { id: randomUUID(), text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' }, source: { project: p.id, title: p.title, version } }
         return { summary: 'I made the subtitles lowercase.', version, styleRulesAdded: [], changed: ['captions'], ...(styleProposal ? { styleProposal } : {}) }
       }
+      // Tests only, as above: "at most 2 words" asks to check that on every reel, as the real package does once it has
+      // measured the finished reel (ai/src/editor.ts checkedProposals). The words are the app's (ai/src/rules.ts ruleText).
+      const most = chosen === 'claude-cli' && state.claude === 'ready' ? /\bat most ([1-4]) words?\b/i.exec(note) : null
+      if (most) {
+        const value = Number(most[1])
+        const text = value === 1 ? 'Show subtitles one word at a time.' : `Show at most ${value} words in a subtitle.`
+        const summary = 'Your subtitles already show that many words, so I left this reel as it is.'
+        p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...(opts?.id ? { id: opts.id } : {}), reply: summary }]
+        await writeProject(projectDir, p)
+        onEvent({ type: 'status', message: 'Done', pct: 100 })
+        return { summary, version: p.version ?? 0, styleRulesAdded: [], styleSuggestions: [], styleChecks: [{ text, check: { kind: 'captions.maxWords', value } }], changed: [] }
+      }
       // a rule to remember is only proposed: the app asks before anything goes into My style
       const proposed = /\b(always|never|every video|from now on|in general)\b/i.test(note) ? [note.trim()] : []
       const summary = proposed.length
@@ -466,6 +485,27 @@ export const createMockAI: CreateAI = ({ host }) => {
         hooks: ['You do not need a mixer to make good sourdough.', 'I kneaded bread by hand for a year before I learned this.', 'Flour, water, salt. That is the whole list.'],
         beats: ['Flour, water, salt. Nothing else goes in.', 'Mix it by hand, then leave it for an hour.', 'Fold it four times, an hour apart.', 'It sleeps in the fridge overnight.', 'Bake it hot in a closed pot. No mixer, ever.'],
         shots: ['You at the kitchen counter, chest up, by the window', 'Your hands folding the dough, close up', 'The loaf coming out of the pot']
+      }
+    },
+
+    // The practice editor finds a niche as the real one does (ai niche.ts): who it is for, then what they get, then a
+    // fixed niche, each after thinking as long as over a note.
+    async nicheTurn(input, onEvent, signal): Promise<NicheTurnResult> {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find your niche together, or write it yourself.' }
+      onEvent({ type: 'status', message: 'Thinking about your niche', pct: 10, thinking: true })
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, Math.min(noteMs, 800))
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      if (!input.niche && input.asked === 0) return { kind: 'question', text: 'Who do you picture watching? Be as specific as you can.' }
+      if (!input.niche && input.asked === 1) return { kind: 'question', text: 'What do they get from you that they don’t get elsewhere?' }
+      return {
+        kind: 'niche',
+        say: input.niche ? 'I made that change.' : 'I aimed it at people baking their very first loaf.',
+        who: 'People who want to bake bread at home but have never tried sourdough',
+        promise: 'A real loaf from flour, water, salt and their own two hands',
+        angles: ['The mistake that ruins most first loaves', 'One step of the bake, start to finish', 'A question from a viewer, answered at the counter', 'Before and after: what changed in my bread this month'],
+        avoid: ['hack', 'game-changer', 'easy peasy']
       }
     },
 
@@ -527,8 +567,52 @@ export const createMockAI: CreateAI = ({ host }) => {
     async styleWasDamaged() {
       return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
-    async addStyleRule(text, from) {
-      return (await addRule(text, from)).rule
+    async addStyleRule(text, from, check) {
+      return (await addRule(text, from, check)).rule
+    },
+    // The learning loop, as the real StyleStore keeps it: at most three waiting, never a rule until kept, and words
+    // turned down or forgotten never come back. This stand-in has no post results to learn from.
+    async learnFromResults() {
+      return []
+    },
+    async proposeMemory(draft) {
+      const d = draft as Omit<MemorySuggestion, 'id' | 'proposedAt'>
+      return withStyle(async (s) => {
+        const words = sameRule(d.text)
+        if ((s.forgotten ?? []).some((f) => sameRule(f) === words)) return 'forgotten'
+        if (s.rules.some((r) => sameRule(r.text) === words) || (s.proposals ?? []).some((x) => sameRule(x.text) === words)) return 'duplicate'
+        if ((s.proposals ?? []).length >= 3) return 'full'
+        await writeJson(styleFile(), { ...s, proposals: [...(s.proposals ?? []), { ...d, id: randomUUID(), proposedAt: new Date().toISOString() }] })
+        return 'added'
+      })
+    },
+    async memoryProposals() {
+      return withStyle(async (s) => s.proposals ?? []).catch(() => [])
+    },
+    async acceptMemory(id, words) {
+      return withStyle(async (s) => {
+        const x = (s.proposals ?? []).find((m) => m.id === id)
+        if (!x) return null
+        const proposals = (s.proposals ?? []).filter((m) => m.id !== id)
+        const text = cleanRule(words ?? x.text)
+        const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+        const from = x.from
+        const rule: StyleRule = dup ?? {
+          id: randomUUID(), text, createdAt: new Date().toISOString(),
+          ...(from.kind === 'note' ? { source: { project: from.project, title: from.title, version: from.version } } : { learned: { from: from.kind, evidence: from.evidence } })
+        }
+        // kept in other words: its own words are never suggested again (as the real StyleStore.accept)
+        const forgotten = sameRule(text) === sameRule(x.text) ? s.forgotten : [...(s.forgotten ?? []), x.text]
+        await writeJson(styleFile(), { ...s, rules: dup ? s.rules : [...s.rules, rule], proposals, ...(forgotten ? { forgotten } : {}) })
+        return rule
+      })
+    },
+    async dismissMemory(id) {
+      await withStyle(async (s) => {
+        const x = (s.proposals ?? []).find((m) => m.id === id)
+        if (!x) return
+        await writeJson(styleFile(), { ...s, proposals: (s.proposals ?? []).filter((m) => m.id !== id), forgotten: [...(s.forgotten ?? []), x.text] })
+      })
     },
     async restoreStyleRule(rule, index) {
       await withStyle(async (s) => {
