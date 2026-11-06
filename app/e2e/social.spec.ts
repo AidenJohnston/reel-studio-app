@@ -174,7 +174,8 @@ test('connect Instagram in Settings, see the account in the preview, and post a 
     expect((await fetch(back.headers.get('location')!)).status).toBe(200)
 
     await expect(row).toContainText('Connected as @e2e_creator')
-    await expect(row.getByTestId('instagram-review')).toBeVisible()
+    // connected: who else may connect no longer matters to this account
+    await expect(row.getByTestId('instagram-review')).toHaveCount(0)
     await shot(page, 'social-2-connected')
 
     // the preview names the connected account

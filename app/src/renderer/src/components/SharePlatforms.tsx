@@ -310,6 +310,9 @@ export function SharePlatforms({ slug, version, caption, open, disabled, onWork,
 }
 
 function Saved({ slug, result }: { slug: string; result: PlatformExportResult }) {
+  const [social] = useSocialStatus()
+  // Instagram connected: the app posts both tries itself (TrialPair), so the by-hand steps step aside
+  const igPosts = !!social?.instagram.availability.open && social.instagram.session.connected
   const platforms = [...new Set(result.files.map((f) => f.platform))]
   const two = result.files.some((f) => f.try)
   const firstOnly = platforms.filter((p) => !platformRule(p).tryTwo).map((p) => platformRule(p).label)
@@ -327,7 +330,7 @@ function Saved({ slug, result }: { slug: string; result: PlatformExportResult })
                 <button className="link inline" onClick={() => void reel.app.openFolder(own[0].video)} aria-label={`Show the ${platformRule(p).label} files in ${FOLDER_APP}`}>Show</button>
               </span>
             </p>
-            {two && test && own.length === 2 && <p className="muted-sm sp-steps">{test.steps}{own[0].video === own[1].video && test.tests === 'video' ? ' Both use the same video.' : ''}</p>}
+            {two && test && own.length === 2 && !(p === 'instagram' && igPosts) && <p className="muted-sm sp-steps">{test.steps}{own[0].video === own[1].video && test.tests === 'video' ? ' Both use the same video.' : ''}</p>}
             {p === 'instagram' && own.length === 2 && <TrialPair slug={slug} files={own} />}
           </div>
         )

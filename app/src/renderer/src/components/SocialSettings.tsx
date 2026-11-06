@@ -100,7 +100,8 @@ function PlatformRow({ id, s, reload }: { id: Id; s: SocialStatus; reload: (fres
 
   return (
     <SettingRow id={id} line={line} control={control}>
-      {account && a.open && a.review !== 'approved' && a.review !== 'own' && (
+      {/* once connected, only a limit on posting still matters (TikTok's Only me), not who else can connect */}
+      {account && a.open && a.review === 'private_only' && (
         <p className="srow-more muted-sm" data-testid={`${id}-review`}>
           {availabilityLine(id, a)}
         </p>

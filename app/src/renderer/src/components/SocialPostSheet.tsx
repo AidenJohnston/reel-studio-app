@@ -272,7 +272,7 @@ export function SocialPostSheet({
         <p style={{ margin: 0 }} data-testid="social-account">
           Posting to <strong>{platform === 'instagram' || platform === 'threads' || platform === 'x' ? `@${account}` : direct ? tt.displayName : account}</strong>
         </p>
-        {a.review !== 'approved' && a.review !== 'own' && <p className="muted-sm" style={{ margin: 0 }}>{availabilityLine(platform, a)}</p>}
+        {/* the account is connected, so "only testers can connect" no longer applies; TikTok's Only me limit is the note below */}
         {platform === 'facebook' && status.facebook.session.connected && status.facebook.session.pages.length > 1 && (
           <PagePicker session={status.facebook.session} onPicked={() => void reload()} onError={setNote} />
         )}
