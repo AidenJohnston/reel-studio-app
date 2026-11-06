@@ -159,15 +159,15 @@ def test_a_match_inside_one_continuous_stretch_is_no_cut():
 # --- through project.timeline, on decoded frames --------------------------------------------------
 
 def head_x(t):
-    """Where the speaker's head is at source time t: it moves away during "Gone." and comes back
-    at 2.15 s, then moves again at 2.9 s for good."""
+    """Where the speaker's head is at source time t: it moves away at 1.0 s, comes back at 2.15 s, then
+    moves at 2.9 s to a place it never was before (so nothing on the outgoing side looks like it)."""
     if t < 1.0:
         return 0.3
     if t < 2.15:
         return 0.7
     if t < 2.9:
         return 0.3
-    return 0.7
+    return 0.5
 
 
 def write_take(path, background=0, seconds=4.0, fps=30):
@@ -215,7 +215,7 @@ def test_the_engine_finds_the_frames_where_the_head_is_back(tmp_path):
     assert [(s.src_start, s.src_end) for s in again.segments] == [(s.src_start, s.src_end) for s in tl.segments]
 
 
-def test_the_engine_refuses_a_match_where_the_head_never_comes_back(tmp_path):
+def test_the_engine_refuses_a_match_where_no_frame_pair_lines_up(tmp_path):
     keep = [{"from": "w0", "to": "w0"}, {"from": "w3", "to": "w3", "join": {"transition": "match", "frames": 0}}]
     p = take_project(tmp_path, keep)
     tl = project.timeline(tmp_path, p, words_one_take())

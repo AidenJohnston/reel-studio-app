@@ -63,9 +63,10 @@ def main(argv=None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     proj = projmod.load(pdir)
     words = projmod.load_transcript(pdir, proj)["words"]
+    # split_phrases gives transcript positions: {i0, i1, ...}
     phrases = analyze.split_phrases(words)
     kept = phrases[::max(1, a.every)]
-    proj["cut"]["keep"] = [{"from": ph[0]["id"], "to": ph[-1]["id"]} for ph in kept if ph]
+    proj["cut"]["keep"] = [{"from": words[ph["i0"]]["id"], "to": words[ph["i1"]]["id"]} for ph in kept]
     for item in proj["cut"]["keep"][1:]:
         item["join"] = {"transition": "match", "frames": 0}
     base = projmod.cutmod.build_timeline(words, proj["cut"]["keep"], projmod.source_meta(proj), join_fps=float(proj["format"]["fps"]))

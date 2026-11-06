@@ -70,8 +70,10 @@ def main(argv=None) -> None:
         subprocess.run([sys.executable, "-m", "reelengine", "autocut", "--project", str(pdir)], check=True, capture_output=True)
         base = projmod.load(pdir)
     kept = set(projmod.timeline(pdir, base, words).first_pos)
-    phrases = [ph for ph in analyze.split_phrases(words) if ph and ph[0]["id"] in kept and ph[-1]["id"] in kept]
-    base["zooms"] = [{"anchor": {"from": ph[0]["id"], "to": ph[-1]["id"]}, "kind": "snap"} for ph in phrases[1::max(1, a.zoom_every)]]
+    # split_phrases gives transcript positions: {i0, i1, ...}
+    ends = [(words[ph["i0"]]["id"], words[ph["i1"]]["id"]) for ph in analyze.split_phrases(words)]
+    phrases = [(a_, b_) for a_, b_ in ends if a_ in kept and b_ in kept]
+    base["zooms"] = [{"anchor": {"from": a_, "to": b_}, "kind": "snap"} for a_, b_ in phrases[1::max(1, a.zoom_every)]]
     rows = []
     work = pdir / "work" / "pace-survey"
     work.mkdir(parents=True, exist_ok=True)
