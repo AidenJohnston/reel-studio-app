@@ -8,7 +8,8 @@ import type { DropResult, LibraryBin, LibraryFile } from '../shared/api'
 import type { RunEngine } from './engine'
 import { logDuration } from './diagnostics'
 
-export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts'])
+// .3gp too: the engine reads it (probe.py VIDEO_EXT), and a footage folder's .3gp clip must be importable
+export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts', '.3gp'])
 export const AUDIO_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 export const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.heic'])
 export const FONT_EXT = new Set(['.ttf', '.otf'])

@@ -3,7 +3,7 @@
 // that one file in the Library, so the editor's paths stay inside the project and the Library (ai/src/safety.ts).
 // A folder that goes away (a drive unplugged) keeps its index and shows as not plugged in until it comes back.
 import { createHash } from 'node:crypto'
-import { promises as fs, statSync, watch as fsWatch, type FSWatcher } from 'node:fs'
+import { promises as fs, realpathSync, statSync, watch as fsWatch, type FSWatcher } from 'node:fs'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { FootageSource } from '../shared/api'
 import { VIDEO_EXT } from './library'
@@ -41,12 +41,22 @@ const bad = (code: string, userMessage: string) => ({ code, userMessage })
 
 /** A folder's id, from its path (engine SOURCE_ID): the same folder added again is the same source. */
 export function sourceId(folder: string): string {
-  const key = process.platform === 'win32' || process.platform === 'darwin' ? resolve(folder).toLowerCase() : resolve(folder)
-  return 'src-' + createHash('sha256').update(key).digest('hex').slice(0, 16)
+  return 'src-' + createHash('sha256').update(canon(folder)).digest('hex').slice(0, 16)
+}
+
+/** The folder as the file system knows it: links followed, and lower case where names ignore case (Windows, macOS). */
+function canon(p: string): string {
+  let real = resolve(p)
+  try {
+    real = realpathSync.native(real)
+  } catch {
+    /* not there: compared as written */
+  }
+  return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real
 }
 
 const inside = (child: string, parent: string): boolean => {
-  const r = relative(resolve(parent), resolve(child))
+  const r = relative(canon(parent), canon(child))
   return r === '' || (!!r && !r.startsWith('..') && !isAbsolute(r))
 }
 
@@ -63,7 +73,7 @@ export function createFootageSources(deps: SourcesDeps) {
   const watchers = new Map<string, Pick<FSWatcher, 'close' | 'on'>>()
   let saved: SavedSource[] | null = null
   let counts = new Map<string, PlaceCount>()
-  let online = new Map<string, boolean>()
+  const online = new Map<string, boolean>()
   let poll: ReturnType<typeof setInterval> | undefined
   let settle: ReturnType<typeof setTimeout> | undefined
   let stopped = false
@@ -94,15 +104,19 @@ export function createFootageSources(deps: SourcesDeps) {
     watchers.delete(id)
   }
 
-  /** Looks at every folder once: one that came back or went away re-reads the index. */
+  let polls = 0
+  /** Looks at every folder once: one that came back or went away re-reads the index. A plugged-in folder that can't
+   * be watched (some network drives) is read every fourth look instead, so its new videos still arrive. */
   async function check(): Promise<void> {
     let moved = false
+    const blind = ++polls % 4 === 0
     for (const s of await all()) {
       const now = isFolder(s.path)
       if (online.has(s.id) && online.get(s.id) !== now) moved = true
       online.set(s.id, now)
       if (now) arm(s)
       else disarm(s.id)
+      if (now && blind && !watchers.has(s.id)) moved = true
     }
     if (moved) deps.changed()
   }
@@ -136,12 +150,12 @@ export function createFootageSources(deps: SourcesDeps) {
       const root = deps.root()
       if (inside(path, root)) throw bad('INSIDE_LIBRARY', 'That folder is part of Reel Studio already. Choose a folder of your own videos.')
       if (inside(root, path)) throw bad('HOLDS_LIBRARY', 'That folder holds your Reel Studio folder. Choose the folder your videos are in.')
-      const list = await all()
+      const current = await all()
       const id = sourceId(path)
-      if (list.some((s) => s.id === id)) throw bad('ALREADY_ADDED', `${basename(path) || path} is added already.`)
-      const near = list.find((s) => inside(path, s.path) || inside(s.path, path))
+      if (current.some((s) => s.id === id)) throw bad('ALREADY_ADDED', `${basename(path) || path} is added already.`)
+      const near = current.find((s) => inside(path, s.path) || inside(s.path, path))
       if (near) throw bad('OVERLAPS', `That folder overlaps ${basename(near.path) || near.path}, which is added already. Remove it first, or choose another folder.`)
-      saved = [...list, { id, path, addedAt: new Date().toISOString() }]
+      saved = [...current, { id, path, addedAt: new Date().toISOString() }]
       await deps.save(saved)
       online.set(id, true)
       arm(saved[saved.length - 1])
@@ -151,9 +165,9 @@ export function createFootageSources(deps: SourcesDeps) {
 
     /** The folder's files stay where they are; its index entries go with the next run. */
     async remove(id: string): Promise<FootageSource[]> {
-      const list = await all()
-      if (!list.some((s) => s.id === id)) throw bad('NOT_ADDED', 'That folder was removed already.')
-      saved = list.filter((s) => s.id !== id)
+      const current = await all()
+      if (!current.some((s) => s.id === id)) throw bad('NOT_ADDED', 'That folder was removed already.')
+      saved = current.filter((s) => s.id !== id)
       await deps.save(saved)
       disarm(id)
       online.delete(id)

@@ -2020,8 +2020,8 @@ app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   permissionHelper.close()
   const indexing = footageIndex.status().state === 'indexing'
-  footageSources.stop()
   if (quitting || (!jobs.runningCount() && !cloudSavesRunning() && !indexing)) {
+    footageSources.stop()
     void footageIndex.stop()
     void killAllEngines()
     return
@@ -2047,6 +2047,7 @@ app.on('before-quit', (e) => {
       for (const slug of making) await updateAppState(slug, (s) => void (s.paused = { reason: 'quit', until: null, editor: null })).catch(() => undefined)
     }
     quitting = true
+    footageSources.stop()
     noteQueue.quit()
     await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop()]).finally(() => app.quit())
   })()

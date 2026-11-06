@@ -98,6 +98,18 @@ def _settled(db, digest, stage, version) -> bool:
     return row is not None and row[0] == version
 
 
+def _failed(db, digest, stages) -> bool:
+    """A stage failed on these bytes at its current version: the file waits, whole, until it changes."""
+    return any(row is not None and row[0] == version and row[1] is not None
+               for stage, version in stages
+               for row in [db.execute("SELECT version, error FROM stages WHERE hash=? AND stage=?",
+                                      (digest, stage)).fetchone()])
+
+
+def _file_settled(db, digest, stages) -> bool:
+    return _failed(db, digest, stages) or all(_settled(db, digest, s, v) for s, v in stages)
+
+
 def _mark_failed(db, digest, stage, version, code):
     with db:
         db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?, ?, ?)",
@@ -240,23 +252,25 @@ def _places(root: Path, sources) -> list[tuple[str, Path, str]]:
     return out
 
 
-def _media_in(folder: Path, kinds: set) -> list[Path]:
-    """Media files under `folder`, sorted, never through a symlink and never in a hidden or system folder."""
-    found = []
-    for top, dirs, files in os.walk(folder, onerror=lambda error: None):
+def _media_in(folder: Path, kinds: set) -> tuple[list[Path], list[Path]]:
+    """Media files under `folder`, sorted, never through a symlink and never in a hidden or system folder; and the
+    folders that could not be read, whose indexed files must not be taken for deleted."""
+    found, unread = [], []
+    for top, dirs, files in os.walk(folder, onerror=lambda error: unread.append(Path(error.filename or folder))):
         dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
         for name in files:
             path = Path(top) / name
             if name.startswith(".") or path.suffix.lower() not in kinds or path.is_symlink():
                 continue
             found.append(path)
-    return sorted(found)
+    return sorted(found), unread
 
 
 def _scan(db, place: str, folder: Path, kinds: set, stages) -> list[tuple]:
     """Record every media file under one place; returns (place, path, digest, signature) per file."""
     found, rels = [], set()
-    for path in _media_in(folder, kinds):
+    paths, unread = _media_in(folder, kinds)
+    for path in paths:
         if not path.resolve().is_relative_to(folder.resolve()):
             continue
         rel = path.relative_to(folder).as_posix()
@@ -278,7 +292,8 @@ def _scan(db, place: str, folder: Path, kinds: set, stages) -> list[tuple]:
     if place != "Library" and not folder.is_dir():
         raise _Gone(place)
     for row in db.execute("SELECT rel FROM paths WHERE place=?", (place,)).fetchall():
-        if row[0] not in rels:
+        # a file under a folder that could not be read this time was not seen, which is not the same as gone
+        if row[0] not in rels and not any((folder / row[0]).is_relative_to(d) for d in unread):
             db.execute("DELETE FROM paths WHERE place=? AND rel=?", (place, row[0]))
     return found
 
@@ -337,7 +352,7 @@ def index(root: Path, *, model_name: str | None = None, budget_seconds: float | 
         # Copies share one analysis, so progress counts distinct files with work left.
         todo, queued = [], set()
         for entry in found:
-            if entry[2] not in queued and not all(_settled(db, entry[2], s, v) for s, v in stages):
+            if entry[2] not in queued and not _file_settled(db, entry[2], stages):
                 todo.append(entry)
                 queued.add(entry[2])
         ran = 0
@@ -347,28 +362,29 @@ def index(root: Path, *, model_name: str | None = None, budget_seconds: float | 
             if not online.get(place, True):
                 continue
             progress("footage-file", 100 * k / len(todo), f"Reading {path.name} ({k + 1} of {len(todo)})", force=True)
+            folder = next(f for pid, f, _ in places if pid == place)
             try:
                 ran += _analyse(db, path, digest, signature, stages, name, staging, deadline,
-                                model, k, len(todo))
+                                model, k, len(todo), lambda: folder.is_dir() and path.is_file())
             except (OSError, EngineError) as exc:
-                folder = next(f for pid, f, _ in places if pid == place)
                 if place == "Library" or folder.is_dir():
                     raise
                 online[place] = False
                 log(f"Footage index: {place} went offline during indexing ({type(exc).__name__}).")
                 continue
+        # a failed file's later stages wait on its bytes, not on another run
         pending = sum(not _settled(db, digest, stage, version) for digest in {e[2] for e in found}
-                      for stage, version in stages)
+                      if not _failed(db, digest, stages) for stage, version in stages)
         counts = {pid: db.execute("SELECT count(*) FROM paths WHERE place=?", (pid,)).fetchone()[0]
                   for pid, _, _ in places}
-        waiting = len({e[2] for e in found if not all(_settled(db, e[2], s, v) for s, v in stages)})
+        waiting = len({e[2] for e in found if not _file_settled(db, e[2], stages)})
         failed = db.execute("SELECT count(DISTINCT hash) FROM stages WHERE error IS NOT NULL").fetchone()[0]
         return {"files": len(found), "stagesRun": ran, "pending": pending, "filesPending": waiting, "filesFailed": failed,
                 "places": [{"id": pid, "files": counts[pid], "online": online.get(pid, True)}
                            for pid, _, _ in places]}
 
 
-def _analyse(db, path, digest, signature, stages, name, staging, deadline, model, k, total) -> int:
+def _analyse(db, path, digest, signature, stages, name, staging, deadline, model, k, total, there) -> int:
     """Run one file's missing stages, each committed on its own; returns how many ran."""
     ran = 0
     for stage, version in stages:
@@ -388,7 +404,8 @@ def _analyse(db, path, digest, signature, stages, name, staging, deadline, model
         except EngineError as exc:
             # A file that can't be read (damaged, half copied) must not stop every run at itself. A change while
             # reading is not the file's fault, and is reported as before.
-            if exc.code == "FOOTAGE_CHANGED":
+            # A file or drive that went away mid-read is not damaged: the caller sees its folder offline.
+            if exc.code == "FOOTAGE_CHANGED" or not there():
                 raise
             _mark_failed(db, digest, stage, version, exc.code)
             log(f"Footage index: {path.name} {stage} failed ({exc.code}); it is read again when it changes.")

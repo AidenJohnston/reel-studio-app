@@ -32,6 +32,10 @@ it('fails if a folder that would index Reel Studio itself, or the same videos tw
   await expect(sources.add(join(drive, 'day 1'))).rejects.toMatchObject({ code: 'OVERLAPS' })
   await expect(sources.add(join(base, 'Drive'))).rejects.toMatchObject({ code: 'OVERLAPS' })
   await expect(sources.add(join(base, 'missing'))).rejects.toMatchObject({ code: 'NOT_FOLDER' })
+  // a link that leads to the Reel Studio folder is that folder (Windows needs Developer Mode to make one)
+  let linked = true
+  try { symlinkSync(root, join(base, 'shortcut'), 'dir') } catch { linked = false }
+  if (linked) await expect(sources.add(join(base, 'shortcut'))).rejects.toMatchObject({ code: 'INSIDE_LIBRARY' })
   expect(saved().map((s) => s.path)).toEqual([drive])
 })
 

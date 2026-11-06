@@ -75,7 +75,7 @@ def test_copies_share_one_transcript(library):
         assert db.execute("SELECT count(*) FROM files").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM paths").fetchone()[0] == 2
     assert len(calls) == 1
-    assert result == {"files": 2, "stagesRun": 3, "pending": 0, "filesPending": 0,
+    assert result == {"files": 2, "stagesRun": 3, "pending": 0, "filesPending": 0, "filesFailed": 0,
                       "places": [{"id": "Library", "files": 2, "online": True}]}
 
 
@@ -210,7 +210,7 @@ def test_search_without_fts5_reports_literal_fallback(library, monkeypatch, caps
 def test_budget_and_stage_versions_resume_only_missing_work(library, monkeypatch):
     root, calls = library
     assert command(root, "index", "--budget-seconds", "0") == {
-        "files": 1, "stagesRun": 0, "pending": 3, "filesPending": 1,
+        "files": 1, "stagesRun": 0, "pending": 3, "filesPending": 1, "filesFailed": 0,
         "places": [{"id": "Library", "files": 1, "online": True}]}
     assert not calls
     command(root, "index")
@@ -563,3 +563,44 @@ def test_damaged_video_is_skipped_until_it_changes(library, clips, tmp_path):
     assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
     shutil.copyfile(clips[0], drive / "half copied.mp4")
     assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesFailed"] == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows folder permissions do not stop a directory listing this way")
+def test_unreadable_subfolder_keeps_its_indexed_files(library, clips, tmp_path):
+    root, calls = library
+    drive = tmp_path / "drive"
+    (drive / "locked").mkdir(parents=True)
+    shutil.copyfile(clips[1], drive / "locked" / "b.mp4")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    (drive / "locked").chmod(0)
+    try:
+        result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    finally:
+        (drive / "locked").chmod(0o755)
+    # fails if a folder that could not be listed is taken for empty and its analysis thrown away
+    assert result["places"][1]["files"] == 1
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
+    assert len(calls) == 2
+
+
+def test_drive_pulled_while_reading_is_offline_not_damaged(library, clips, tmp_path, monkeypatch):
+    root, calls = library
+    (root / "Library" / "a.mp4").unlink()
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    from reelengine import footage, probe
+    from reelengine.proto import EngineError
+    real = probe.probe
+
+    def pulled(path, quick=False):
+        drive.rename(tmp_path / "away")
+        raise EngineError("PROBE_FAILED", "gone", "I could not open this video.")
+    monkeypatch.setattr(probe, "probe", pulled)
+    result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    assert result["places"][1]["online"] is False and result["filesFailed"] == 0
+    monkeypatch.setattr(probe, "probe", real)
+    (tmp_path / "away").rename(drive)
+    # fails if a file read while its drive was pulled is marked damaged and never read again
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesPending"] == 0
+    assert len(calls) == 1

@@ -2,7 +2,9 @@
 // is made, it joins the series of the reel that talks most like it, or the two start one named after the older reel's
 // title, as More reels names its series (propose-reels.ts). It needs no editor: the words said are compared on this
 // computer. A series the person picks, or "no series", is theirs: grouping never moves that reel again.
+import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import type { ProjectJson } from '../shared/api'
 import type { AppState } from './store'
 import { listProjects, projectDir, readAppState, readProject, serialized, spokenWords, updateAppState, writeJson } from './store'
 
@@ -73,7 +75,8 @@ export function pickSeries(reel: SeriesReel, others: SeriesReel[]): { series: st
 async function setSeriesFile(slug: string, series: string | null): Promise<void> {
   const file = join(projectDir(slug), 'project.json')
   await serialized(file, async () => {
-    const p = await readProject(slug)
+    // read here, not with readProject: it takes the same per-file queue and would wait on this call for ever
+    const p = JSON.parse(await fs.readFile(file, 'utf8')) as ProjectJson
     if (series) p.series = series
     else delete p.series
     // updatedAt stays: a series is not an edit, and the reel keeps its place on Reels

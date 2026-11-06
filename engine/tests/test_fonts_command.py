@@ -28,3 +28,13 @@ def test_own_font_is_listed_first_and_resolves(tmp_path, monkeypatch):
     family, path, _, warning = captions.resolve_font(name)
     assert warning is None and path == mine / "My Brand.ttf"
     captions.font_index.cache_clear()
+
+
+def test_compositor_reads_every_font_folder_in_the_list(tmp_path, monkeypatch):
+    from reelengine import compose_util
+    a, b = tmp_path / "Library Fonts", tmp_path / "bundled"
+    a.mkdir()
+    b.mkdir()
+    monkeypatch.setenv("REELENGINE_FONTS", os.pathsep.join([str(a), str(b)]))
+    # fails if the path list the app sends is read as one folder, so graphics fall back to other faces
+    assert compose_util.font_dirs()[:2] == [a, b]
