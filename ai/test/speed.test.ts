@@ -34,6 +34,10 @@ describe('fast notes (no model turns)', () => {
       'different music', 'add a picture of my dog', 'cut the part where I say B-flat', 'make it better',
       'captions say Oregon but I said Oregano']) expect(kind(n)).toBeNull();
     expect(planFastNote("Don't make captions smaller", p)).toBeNull();
+    expect(planFastNote('No need to make captions smaller', p)).toBeNull();
+    expect(planFastNote('no need for bigger subtitles', p)).toBeNull();
+    expect(kind('no music')).toBe('music-off');
+    expect(kind('no more music')).toBe('music-off');
     // already at the floor: the AI explains instead of a no-op
     p.captions.style = { ...(p.captions.style as any), size: 80 };
     expect(planFastNote('smaller captions', p)).toBeNull();
