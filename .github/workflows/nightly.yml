@@ -1,0 +1,332 @@
+name: Nightly
+
+# Fork-only nightly prereleases of "Reel Studio (Nightly)", the separate app beside the stable one. The version alone
+# makes a build a nightly (app/src/shared/channel.ts): <next patch>-nightly.<UTC YYYYMMDD>.<run number>, so several
+# nightlies a day sort by time. It is set in the runner's checkout before building and never committed.
+#
+# The GPL and LGPL source of the bundled FFmpeg and libraries is the same for every nightly built from the same pins,
+# so it lives in one release per pin set (sources-<FFMPEG_TAG>-<hash of the pins>), made once and linked from each
+# nightly's notes (THIRD_PARTY.md, "FFmpeg corresponding source").
+#
+# GitHub runs `schedule` only from the repository's default branch, and the push trigger only from infra/nightly, so
+# this file on any other branch starts nothing by itself. The nightly app never updates itself
+# (update-machine.ts disabledReason); a person installs the next one from the releases page.
+
+on:
+  push:
+    branches: [infra/nightly]
+    paths: [nightly-ref.txt]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to package
+        required: true
+        default: redesign-beta
+        type: string
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-alpha
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve source commit and nightly version
+    if: github.repository == 'SamGu-NRX/reel-studio-app'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+      tag: ${{ steps.source.outputs.tag }}
+      title: ${{ steps.source.outputs.title }}
+      sources_tag: ${{ steps.source.outputs.sources_tag }}
+      ffmpeg_tag: ${{ steps.source.outputs.ffmpeg_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Select source ref
+        id: ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          if [[ "$EVENT_NAME" == push ]]; then
+            ref="$(cat nightly-ref.txt)"
+          elif [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            ref="$INPUT_REF"
+          else
+            ref=redesign-beta
+          fi
+          git check-ref-format "refs/heads/$ref" || {
+            echo '::error::Build ref must be one non-empty Git ref without whitespace'
+            exit 1
+          }
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - name: Resolve requested ref on the fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: SamGu-NRX/reel-studio-app
+          ref: ${{ steps.ref.outputs.ref }}
+          path: source
+          persist-credentials: false
+      - name: Version, tag, title and sources release
+        id: source
+        run: |
+          cd source
+          test -f app/src/shared/channel.ts || {
+            echo '::error::This ref predates the nightly channel (app/src/shared/channel.ts): it would build over the stable app'
+            exit 1
+          }
+          sha="$(git rev-parse HEAD)"
+          base="$(node -p "require('./app/package.json').version")"
+          [[ "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]] || { echo "::error::app/package.json version $base is not x.y.z"; exit 1; }
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))-nightly.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          node -e "
+            const src = require('fs').readFileSync('app/src/shared/channel.ts', 'utf8')
+            const re = new RegExp(src.match(/export const NIGHTLY_VERSION = \/(.+)\/\n/)[1])
+            if (!re.test(process.argv[1])) { console.error('not a nightly version: ' + process.argv[1]); process.exit(1) }
+          " "$version"
+          ffmpeg_tag="$(sed -n 's/^FFMPEG_TAG = "\(.*\)"$/\1/p' packaging/fetch_runtime.py)"
+          test -n "$ffmpeg_tag"
+          # Everything mirror_gpl_sources.py publishes follows from these files: the build recipe and sources.txt it
+          # pins, and the script's own list of extra sources and recipe revision.
+          pins="$(find packaging/ffmpeg -type f -print0 | sort -z | xargs -0 sha256sum | cat - <(sha256sum packaging/mirror_gpl_sources.py) | sha256sum | cut -c1-8)"
+          {
+            printf 'sha=%s\n' "$sha"
+            printf 'version=%s\n' "$version"
+            printf 'tag=v%s\n' "$version"
+            printf 'title=Reel Studio Nightly %s (%s)\n' "$version" "${sha:0:12}"
+            printf 'sources_tag=sources-%s-%s\n' "$ffmpeg_tag" "$pins"
+            printf 'ffmpeg_tag=%s\n' "$ffmpeg_tag"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Source commit: `%s`\nVersion: `%s`\nSources release: `sources-%s-%s`\n' "$sha" "$version" "$ffmpeg_tag" "$pins" >> "$GITHUB_STEP_SUMMARY"
+
+  build-macos:
+    name: Build and test macOS arm64
+    needs: resolve
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Stamp the nightly version (not committed)
+        run: node -e "const f='app/package.json',fs=require('fs'),p=JSON.parse(fs.readFileSync(f,'utf8'));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+      - name: Build DMG and ad-hoc seal without notarization
+        run: |
+          unset ELECTRON_RUN_AS_NODE
+          test "$(uname -m)" = arm64
+          bash packaging/build-mac.sh --no-adhoc
+          bash packaging/sign-mac.sh --adhoc --skip-notarize
+      - name: Install and smoke-test the sealed DMG
+        env:
+          TEST_APPS_DIR: ${{ runner.temp }}/Reel Studio install
+        run: |
+          dmg="app/release/signed/Reel-Studio-Nightly-${VERSION}-arm64.dmg"
+          test -s "$dmg"
+          bash packaging/test-mac-install.sh "$dmg" --fresh --unsigned --timeout 600 \
+            | tee "$RUNNER_TEMP/mac-install-smoke.log"
+          app="$TEST_APPS_DIR/Reel Studio (Nightly).app"
+          codesign --verify --deep --strict "$app"
+          plist="$app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = dev.reelstudio.app.nightly
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$VERSION"
+      - name: Upload tested macOS DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-macos-arm64
+          path: app/release/signed/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve macOS smoke output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: smoke-macos
+          path: ${{ runner.temp }}/mac-install-smoke.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build-windows:
+    name: Build and test Windows x64
+    needs: resolve
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Stamp the nightly version (not committed)
+        shell: bash
+        run: node -e "const f='app/package.json',fs=require('fs'),p=JSON.parse(fs.readFileSync(f,'utf8'));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+      - name: Build unsigned NSIS installer
+        shell: pwsh
+        run: .\packaging\build-win.ps1
+      - name: Install and smoke-test packaged app
+        shell: pwsh
+        env:
+          REELSTUDIO_USER_DATA: ${{ runner.temp }}/Reel Studio profile
+          REELSTUDIO_ROOT: ${{ runner.temp }}/Reel Studio library
+          REELENGINE_CACHE: ${{ runner.temp }}/Reel Studio engine cache
+        run: |
+          Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+          $installer = (Resolve-Path "app\release\Reel-Studio-Nightly-Setup-$env:VERSION-x64.exe").Path
+          powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File packaging\test-win-install.ps1 `
+            -Installer $installer -ExeName 'Reel Studio (Nightly).exe' `
+            -InstallDir (Join-Path $env:RUNNER_TEMP 'Reel Studio install') `
+            -UserDataDir $env:REELSTUDIO_USER_DATA
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows smoke check failed' }
+          $result = Get-Content (Join-Path $env:TEMP 'rs-selftest-result.json') -Raw | ConvertFrom-Json
+          if ($result.ok -ne $true -or $result.isPackaged -ne $true -or $result.arch -ne 'x64' -or $result.channel -ne 'nightly' -or $result.version -ne $env:VERSION) {
+            throw 'Smoke result must be a passing packaged x64 nightly of this version'
+          }
+          $feed = Get-Content app\release\latest.yml -Raw
+          if ($feed -notmatch "(?m)^version: $([regex]::Escape($env:VERSION))\s*$") { throw 'latest.yml is not for this version' }
+      - name: Upload tested Windows installer and its update feed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-windows-x64
+          path: |
+            app/release/*.exe
+            app/release/latest.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve Windows smoke result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: smoke-windows
+          path: ${{ runner.temp }}/rs-selftest-result.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  sources:
+    name: Corresponding GPL and LGPL source, once per pin set
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      complete: ${{ steps.have.outputs.complete }}
+    steps:
+      - name: Is the sources release already complete?
+        id: have
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCES_TAG: ${{ needs.resolve.outputs.sources_tag }}
+        run: |
+          complete=false
+          if gh release view "$SOURCES_TAG" --repo SamGu-NRX/reel-studio-app --json assets -q '.assets[].name' > have.txt 2>/dev/null \
+            && gh release download "$SOURCES_TAG" --repo SamGu-NRX/reel-studio-app -p SHA256SUMS.txt -O sums.txt 2>/dev/null; then
+            # every file SHA256SUMS.txt lists, plus README.txt and SHA256SUMS.txt themselves
+            if { awk '{print $2}' sums.txt; echo README.txt; echo SHA256SUMS.txt; } | sort -u | comm -23 - <(sort -u have.txt) | grep -q .; then
+              echo "::warning::$SOURCES_TAG is missing files; they are mirrored again"
+            else
+              complete=true
+            fi
+          fi
+          printf 'complete=%s\n' "$complete" >> "$GITHUB_OUTPUT"
+          printf 'Sources release `%s` complete: %s\n' "$SOURCES_TAG" "$complete" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.have.outputs.complete != 'true'
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - if: steps.have.outputs.complete != 'true'
+        run: python3 -I packaging/mirror_gpl_sources.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.have.outputs.complete != 'true'
+        with:
+          name: gpl-sources
+          path: release/gpl-sources/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish fork-only nightly prerelease
+    needs: [resolve, build-macos, build-windows, sources]
+    if: github.repository == 'SamGu-NRX/reel-studio-app'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: SamGu-NRX/reel-studio-app
+      SOURCE_REF: ${{ needs.resolve.outputs.ref }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      TITLE: ${{ needs.resolve.outputs.title }}
+      SOURCES_TAG: ${{ needs.resolve.outputs.sources_tag }}
+      FFMPEG_TAG: ${{ needs.resolve.outputs.ffmpeg_tag }}
+    steps:
+      - name: Download tested installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: nightly-*
+          path: release-assets
+          merge-multiple: true
+      - name: Download corresponding source
+        if: needs.sources.outputs.complete != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: gpl-sources
+          path: gpl-sources
+      - name: Publish the sources release for these pins
+        if: needs.sources.outputs.complete != 'true'
+        run: |
+          test -s gpl-sources/SHA256SUMS.txt && test -s gpl-sources/README.txt
+          if gh release view "$SOURCES_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$SOURCES_TAG" gpl-sources/* --clobber --repo "$REPO"
+          else
+            gh release create "$SOURCES_TAG" gpl-sources/* --repo "$REPO" --target "$SOURCE_SHA" \
+              --prerelease --latest=false --title "Source code for FFmpeg and libraries (${SOURCES_TAG#sources-})" \
+              --notes "The corresponding source of the FFmpeg, FFprobe and libraries bundled in Reel Studio Nightly builds made from these pins ($FFMPEG_TAG), under GPL v3 section 6(d). README.txt says what each file is, and SHA256SUMS.txt lists their hashes. Keep this release as long as any nightly links to it."
+          fi
+      - name: Create the nightly prerelease
+        run: |
+          shopt -s nullglob
+          cd release-assets
+          dmgs=(Reel-Studio-Nightly-"$VERSION"-arm64.dmg)
+          installers=(Reel-Studio-Nightly-Setup-"$VERSION"-x64.exe)
+          test -s "${dmgs[0]}" && test -s "${installers[0]}" && test -s latest.yml
+          # only what a person or the updater needs: the two installers, their checksums, and Windows' update feed
+          sha256sum "${dmgs[0]}" "${installers[0]}" > SHA256SUMS.txt
+          sources_url="https://github.com/$REPO/releases/tag/$SOURCES_TAG"
+          gh release view "$SOURCES_TAG" --repo "$REPO" >/dev/null
+          notes="$(printf '%s\n\n%s\n\n%s\n' \
+            "Reel Studio Nightly $VERSION, built from $SOURCE_REF at $SOURCE_SHA. It installs beside Reel Studio as \"Reel Studio (Nightly)\" with its own library and settings, and shares the downloaded speech model. Both installed-package self-tests passed. macOS is ad-hoc signed, not notarized; Windows is unsigned." \
+            "Source code for the bundled FFmpeg and libraries: $sources_url" \
+            "SHA256SUMS.txt lists the checksums of both installers.")"
+          gh release create "$TAG" "${dmgs[0]}" "${installers[0]}" latest.yml SHA256SUMS.txt \
+            --repo "$REPO" --target "$SOURCE_SHA" --prerelease --latest=false \
+            --title "$TITLE" --notes "$notes"
+          printf 'https://github.com/%s/releases/tag/%s\n' "$REPO" "$TAG" >> "$GITHUB_STEP_SUMMARY"
