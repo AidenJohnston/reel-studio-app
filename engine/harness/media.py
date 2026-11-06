@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Iterator
 
@@ -42,26 +43,29 @@ def iter_frames(ffmpeg: str, path: Path, width: int, height: int) -> Iterator[np
     (how the reference final is "scaled to preview size"), as uint8 RGB arrays."""
     cmd = [ffmpeg, "-nostdin", "-v", "error", "-i", path, "-map", "0:v:0", "-fps_mode", "passthrough",
            "-vf", f"scale={width}:{height}:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    p = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         stdin=subprocess.DEVNULL)
-    size = width * height * 3
-    finished = False
-    try:
-        while True:
-            buf = p.stdout.read(size)
-            if len(buf) < size:
-                finished = True
-                break
-            yield np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)
-    finally:
-        if not finished:            # the caller stopped early: not a decode failure
-            p.kill()
-        p.stdout.close()
-        err = p.stderr.read().decode("utf-8", "replace")
-        p.stderr.close()
-        code = p.wait()
-    if code != 0:
-        raise RuntimeError(f"decoding {Path(path).name} failed ({code}): {err[-800:]}")
+    # A damaged clip can fill a stderr pipe while we wait for its next frame.
+    with tempfile.TemporaryFile() as errors:
+        p = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=errors,
+                             stdin=subprocess.DEVNULL)
+        size = width * height * 3
+        finished = False
+        try:
+            while True:
+                buf = p.stdout.read(size)
+                if len(buf) < size:
+                    finished = True
+                    break
+                yield np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)
+        finally:
+            if not finished:            # the caller stopped early: not a decode failure
+                p.kill()
+            p.stdout.close()
+            code = p.wait()
+        if code != 0:
+            errors.seek(0, 2)
+            errors.seek(max(0, errors.tell() - 800))
+            err = errors.read().decode("utf-8", "replace")
+            raise RuntimeError(f"decoding {Path(path).name} failed ({code}): {err}")
 
 
 def read_image(path: Path) -> np.ndarray:
