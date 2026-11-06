@@ -76,7 +76,8 @@ describe('asking again for a rule paused in My style turns it back on', () => {
   });
 
   it('add() says it turned the rule back on only on the call that did, so a note undoes only its own change', async () => {
-    const style = new StyleStore(() => tmpDir('style '));
+    const root = tmpDir('style ');
+    const style = new StyleStore(() => root);
     const rule = (await style.add('Put a yellow box behind the captions.')).rule;
     await style.update(rule.id, { paused: true });
     expect(await style.add('put a yellow box behind the captions')).toMatchObject({ added: false, resumed: true, rule: { id: rule.id } });
