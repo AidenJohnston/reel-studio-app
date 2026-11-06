@@ -126,11 +126,28 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
 }
 
 /** Undo what a failed note did to My style: rules it saved are removed, paused rules it turned back on are paused
- * again. A rule removed in My style since then stays removed. */
-async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
-  for (const id of state.styleRuleIds) await deps.style.remove(id).catch(() => undefined);
-  for (const id of state.styleRulesResumed) await deps.style.update(id, { paused: true }).catch(() => undefined);
+ * again. A rule removed in My style since then stays removed. Returns the words of each rule it could not undo. */
+async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<string[]> {
+  const left: string[] = [];
+  for (const [i, id] of state.styleRuleIds.entries()) {
+    await deps.style.remove(id).catch(() => { left.push(state.styleRulesAdded[i] ?? id); });
+  }
+  for (const r of state.styleRulesResumed) {
+    await deps.style.update(r.id, { paused: true }).catch((e) => { if (e?.code !== 'NOT_FOUND') left.push(r.text); });
+  }
   state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
+  return left;
+}
+
+/** The error a failed note ends with. When My style could not be put back, the person is told which rules to
+ * check: a rule left on would change their next videos without a word. */
+function noteFailed(e: unknown, styleLeft: string[]): unknown {
+  if (!styleLeft.length) return e;
+  const u = e as Partial<AIError> | null;
+  const shown = typeof u?.userMessage === 'string' ? u.userMessage : "I couldn't finish that note.";
+  const rules = styleLeft.map((t) => `"${t}"`).join(' and ');
+  return new AIError(typeof u?.code === 'string' ? u.code : 'note_failed', `${shown} I also couldn't undo its change to ${rules} in My style, so please check it there.`,
+    { detail: e instanceof Error ? e.message : String(e), link: u?.link, retryable: u?.retryable });
 }
 
 async function listAssets(projectDir: string): Promise<Set<string>> {
@@ -139,16 +156,17 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
 }
 
 /** Put the project back exactly as it was before a failed note: project.json, what it changed in My style,
- * the credits book, and the pictures it downloaded. */
-async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<void> {
+ * the credits book, and the pictures it downloaded. Returns the My style rules it could not put back. */
+async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<string[]> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
-  await undoStyleRules(deps, state);
+  const styleLeft = await undoStyleRules(deps, state);
   const creditsPath = path.join(projectDir, 'work', 'assets', 'credits.json');
   if (creditsBefore === null) await fsp.rm(creditsPath, { force: true }).catch(() => undefined);
   else if (creditsBefore) await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
   for (const f of await listAssets(projectDir)) {
     if (!assetsBefore.has(f)) await fsp.rm(path.join(projectDir, 'work', 'assets', f), { force: true }).catch(() => undefined);
   }
+  return styleLeft;
 }
 
 /** The caption's credit line follows the pictures the edit ends with (one removed after write_post
@@ -340,8 +358,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
-        await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-        throw e;
+        throw noteFailed(e, await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state));
       }
     }
     // the direct change did not fit this project: undo it and let the AI read the note
@@ -379,8 +396,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     onEvent({ type: 'status', message: 'Done', pct: 100 });
     return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
   } catch (e) {
-    await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
-    throw e;
+    throw noteFailed(e, await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state));
   }
 }
 

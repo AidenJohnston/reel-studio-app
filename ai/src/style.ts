@@ -96,8 +96,10 @@ export class StyleStore {
   }
 
   /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
-   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A). */
-  async add(text: string): Promise<{ added: boolean; rule: StyleRule }> {
+   * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A).
+   * `resumed`: this call is what turned it back on, decided in the same write, so a caller undoing its own change
+   * never pauses a rule someone else turned on. */
+  async add(text: string): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     return this.serial(() => this.addNow(text));
   }
 
@@ -107,20 +109,21 @@ export class StyleStore {
     return (await this.list()).find((r) => normalize(r.text) === n);
   }
 
-  private async addNow(text: string): Promise<{ added: boolean; rule: StyleRule }> {
+  private async addNow(text: string): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     const clean = cleanRuleText(text);
     const data = await this.read();
     const dup = data.rules.find((r) => normalize(r.text) === normalize(clean));
     if (dup) {
-      if (dup.paused) {
+      const resumed = !!dup.paused;
+      if (resumed) {
         delete dup.paused;
         await this.write(data);
       }
-      return { added: false, rule: dup };
+      return { added: false, resumed, rule: dup };
     }
     const rule: StyleRule = { id: randomUUID(), text: clean, createdAt: new Date().toISOString() };
     await this.write({ ...data, rules: [...data.rules, rule] });
-    return { added: true, rule };
+    return { added: true, resumed: false, rule };
   }
 
   /** My style: the person changed a rule's words, or paused or resumed it. */
