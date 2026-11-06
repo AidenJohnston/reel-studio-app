@@ -242,7 +242,7 @@ export function ChangeAt({
       dropDepth.current = 0
       setDropOver(false)
       window.dispatchEvent(new Event(NOTE_DROP_DONE))
-      att.onDropFiles(e.dataTransfer)
+      if (!sending) att.onDropFiles(e.dataTransfer)
     }
   }
 
@@ -273,6 +273,7 @@ export function ChangeAt({
           className={`change-pop${isOpen ? '' : ' closing'}${instant ? ' instant' : ''}${dropOver ? ' over' : ''}`}
           role="dialog"
           aria-label={title}
+          aria-busy={sending}
           onBlur={(e) => {
             // tabbing out closes it; a native file picker taking focus (no next element) does not
             if (e.relatedTarget && elsewhere(e.relatedTarget)) close(true, false)
@@ -280,7 +281,7 @@ export function ChangeAt({
           {...dropProps}
           data-testid="change-pop"
         >
-          {dropOver && <div className="note-drop-hint">Drop to put it in your note</div>}
+          {dropOver && !sending && <div className="note-drop-hint">Drop to put it in your note</div>}
           <h3 className="change-title">{title}</h3>
           {(heard?.length || (shown && !shown.latest)) && (
             <div className="change-context" data-testid="change-context">
@@ -293,7 +294,9 @@ export function ChangeAt({
               )}
             </div>
           )}
-          <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
+          {/* While a note is sending, what it carries is fixed: a sent note clears the box, so anything
+              typed, attached or removed meanwhile would be lost or would delete a file being sent. */}
+          <AttachmentChips chips={att.chips} busy={att.busy} disabled={sending} onRemove={(a) => void att.remove(a)} />
           <textarea
             ref={field}
             className="input change-input"
@@ -301,11 +304,12 @@ export function ChangeAt({
             placeholder="For example: make this part faster"
             aria-label={title}
             value={text}
+            readOnly={sending}
             onChange={(e) => {
               setText(e.target.value)
               setAlert(null)
             }}
-            onPaste={att.onPaste}
+            onPaste={sending ? undefined : att.onPaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -316,11 +320,11 @@ export function ChangeAt({
           />
           <div className="change-quick" aria-label="Quick changes" role="group">
             {QUICK.map((q) => (
-              <button key={q.label} className="pill" aria-pressed={text.trim() === q.text} onClick={() => pick(q)} data-testid="change-quick">
+              <button key={q.label} className="pill" aria-pressed={text.trim() === q.text} onClick={() => pick(q)} disabled={sending} data-testid="change-quick">
                 {q.label}
               </button>
             ))}
-            <button className="pill" onClick={att.choose} title="Attach a picture or a clip of your own" data-testid="change-attach">
+            <button className="pill" onClick={att.choose} disabled={sending} title="Attach a picture or a clip of your own" data-testid="change-attach">
               <Icon name="paperclip" size={14} stroke={2} /> Attach a file
             </button>
           </div>
@@ -342,6 +346,7 @@ export function ChangeAt({
                     type="radio"
                     name={`change-scope-${slug}`}
                     checked={scope === v}
+                    disabled={sending}
                     onChange={() => {
                       setScope(v)
                       setAlert(null)

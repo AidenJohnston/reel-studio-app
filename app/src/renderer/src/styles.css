@@ -371,6 +371,10 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .change-alert { font-size: 13.5px; color: var(--red-ink); background: var(--red-soft); padding: 8px 10px; border-radius: var(--radius-sm); }
 .change-input { resize: none; min-height: 64px; max-height: 140px; field-sizing: content; line-height: 1.4; }
 .change-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+/* While its note sends (usually well under a second) the pop-up's controls wait. Not dimmed: a
+   flash of grey on every send reads as a glitch; the send button's own disabled look says enough. */
+.change-pop .pill:disabled, .change-pop .att-remove:disabled, .change-pop .scope-opt:has(:disabled) { cursor: default; }
+.change-pop .pill:disabled:active { transform: none; }
 .change-foot { display: flex; align-items: center; gap: 12px; }
 .change-foot > .btn { flex: none; }
 .scope { display: flex; gap: 14px; }

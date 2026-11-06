@@ -151,5 +151,28 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
   await expect(page.getByTestId('note-attachment')).toHaveCount(0)
   await expect(page.getByTestId('bubble-you').last().getByTestId('bubble-attachments').locator('img')).toHaveCount(4)
   await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 60_000 })
+
+  // ---- fails if the pop-up takes typing while its note is sending: a sent note clears the box, so
+  // those words were lost. The note is held in main until the check is done. ----
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('projects:note')
+    const waiting: ((v: unknown) => void)[] = []
+    ;(globalThis as { __noteWaiting?: typeof waiting }).__noteWaiting = waiting
+    ipcMain.handle('projects:note', () => new Promise((answer) => waiting.push(answer)))
+  })
+  await page.getByTestId('change-at').click()
+  await page.getByTestId('scope-whole').check()
+  await page.getByTestId('change-input').fill('zoom in on my face')
+  await page.getByTestId('change-send').click()
+  await expect(page.getByTestId('change-pop')).toHaveAttribute('aria-busy', 'true')
+  await page.getByTestId('change-input').click()
+  await page.keyboard.type(' and cut the pause')
+  await expect(page.getByTestId('change-input')).toHaveValue('zoom in on my face')
+  await expect(page.getByTestId('change-attach')).toBeDisabled()
+  await app.evaluate(() => {
+    for (const answer of (globalThis as { __noteWaiting?: ((v: unknown) => void)[] }).__noteWaiting ?? [])
+      answer({ ok: true, value: { jobId: null } })
+  })
+  await expect(page.getByTestId('change-pop')).toHaveCount(0)
   await app.close()
 })
