@@ -230,11 +230,11 @@ interface Waiter { resolve: (r: any) => void; reject: (e: unknown) => void }
 
 const END_STEP_MS = 3000;
 
-/** Settles once a session process has exited and closed its output. With its input ended it is given
- * END_STEP_MS, then SIGTERM, then SIGKILL, END_STEP_MS each. Still open after that (a process that
- * survives SIGKILL, or a child of it holding the output), it fails: Stop says so instead of waiting forever. */
-function ended(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+/** Settles once a session process has exited and closed its output (`closed`). With its input ended it
+ * is given END_STEP_MS, then SIGTERM, then SIGKILL, END_STEP_MS each. Still open after that (a process
+ * that survives SIGKILL, or a child of it holding the output, even after the process itself exited), it
+ * fails: Stop says so instead of waiting forever. */
+function ended(child: ChildProcessWithoutNullStreams, closed: Promise<void>): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const steps: (() => void)[] = [
       () => child.kill(),
@@ -248,13 +248,15 @@ function ended(child: ChildProcessWithoutNullStreams): Promise<void> {
         if (steps.length) next();
       }, END_STEP_MS);
     };
-    child.once('close', () => { clearTimeout(timer); resolve(); });
     next();
+    void closed.then(() => { clearTimeout(timer); resolve(); });
   });
 }
 
 interface LiveSession {
   child: ChildProcessWithoutNullStreams;
+  /** settles on the process's 'close': it exited and nothing holds its output open */
+  done: Promise<void>;
   key: string;
   /** req.messages.length + 1 after the last answered turn: where the next delta starts */
   next: number;
@@ -299,7 +301,7 @@ export class ClaudeCliProvider implements ModelProvider {
       if (s.idle) clearTimeout(s.idle);
       s.closed = true;
       try { s.child.stdin.end(); } catch { /* gone */ }
-      this.ending = Promise.all([this.ending, ended(s.child)]).then(() => undefined);
+      this.ending = Promise.all([this.ending, ended(s.child, s.done)]).then(() => undefined);
     }
     return this.ending;
   }
@@ -311,7 +313,8 @@ export class ClaudeCliProvider implements ModelProvider {
 
   private startSession(key: string): LiveSession {
     const child = spawn(this.o.bin ?? 'claude', this.args(), { cwd: this.o.cwd ?? workDir(), env: cliEnv(this.o.env), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const s: LiveSession = { child, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
+    const done = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    const s: LiveSession = { child, done, key, next: 0, buf: '', closed: false, waiter: null, idle: null };
     let errTail = '';
     child.stderr.setEncoding('utf8').on('data', (d: string) => { errTail = (errTail + d).slice(-800); });
     child.stdout.setEncoding('utf8').on('data', (d: string) => {
