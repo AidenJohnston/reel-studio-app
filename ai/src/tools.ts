@@ -18,11 +18,10 @@ import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, 
 
 export interface RenderInfo { version: number; draft: boolean; result: any }
 
-/** A note's checked My style rules. `before`: the ones already failing in the version the note started from.
- * Those are named in the reply, never chased: "make the captions blue" must not send the AI after b-roll
- * placed three notes ago. */
-/** `before`: rules the version a note starts from broke. `unknown`: rules it was never measured against (rendered
- * before checks, or before the rule was saved or turned back on). A note has to meet neither. */
+/** A note's checked My style rules. `before`: the ones already failing in the version the note started from;
+ * `unknown`: ones that version was never measured against (rendered before checks, or before the rule was saved
+ * or turned back on); `startFailures`: that version's report of them. A note has to meet neither: they are named
+ * in the reply, never chased, so "make the captions blue" must not send the AI after b-roll placed three notes ago. */
 export interface NoteRules { active: CheckedRule[]; before: Set<string>; unknown: Set<string>; startFailures: LintFailure[] }
 
 /** A rule this note need not meet: the video already broke it, or may have. */
