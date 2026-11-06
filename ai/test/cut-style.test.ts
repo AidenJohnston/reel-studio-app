@@ -141,3 +141,18 @@ it('accepts in-band clean cuts without demanding extra pictures', async () => {
   expect(result.faceOnly).toBeUndefined();
   expect(result.note ?? '').not.toMatch(/Fill each now|Put a picture|Before finishing, add pictures/);
 });
+
+it('set_beat_accents turns beat landing on or off and hands it back to the pace, saying when there is no song', async () => {
+  const { ctx, dir } = await setup();
+  const on = await executeTool(ctx, 'set_beat_accents', { on: true });
+  expect(on.isError, JSON.stringify(on.content)).toBe(false);
+  expect((await loadProject(dir)).beatAccents).toBe(true);
+  // fails if the person's "no" can't hold against the fast pace
+  await executeTool(ctx, 'set_cut_style', { preset: 'hyper', seed: 1 });
+  await executeTool(ctx, 'set_beat_accents', { on: false });
+  expect((await loadProject(dir)).beatAccents).toBe(false);
+  await executeTool(ctx, 'set_beat_accents', { on: null });
+  expect('beatAccents' in (await loadProject(dir))).toBe(false);
+  // the test project has no song (withDefaults: track null)
+  expect(JSON.parse(on.content as string).note).toMatch(/no song yet/);
+});

@@ -17,8 +17,15 @@ See "Build from source" in the [README](README.md). The short version:
 
 ```
 npm install && npm run build -w ai
-cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
+cd engine
+uv venv --python 3.11 --managed-python
+uv pip install --python .venv -c requirements.txt -e ".[dev]"
 ```
+
+[uv](https://docs.astral.sh/uv/) is what CI uses; the same lines work in PowerShell and on macOS. `--managed-python`
+keeps uv from picking another Python 3.11 on the computer (an Anaconda one crashes the speech model on Windows).
+`-c requirements.txt` installs the engine's exact pins, the ones the installer ships
+(`packaging/requirements-runtime.hashed.txt`, which adds a hash to each).
 
 If you work on `reelengine import-reference` or run its tests, install `.[dev,reference]` instead.
 
@@ -50,6 +57,8 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
 * Keep a change focused, add a test for a bug you fix, and use the PR template to explain the change and verification.
 * Before you open one, go through "Check every surface" in [AGENTS.md](AGENTS.md). It's written for coding agents
   and applies to people too.
+* Actions sets the `size:*` label from the diff (tests not counted) and the `vouch:*` label from
+  [.github/VOUCHED.td](.github/VOUCHED.td) on `main`. Both are review signals, not merge gates, so don't set them by hand.
 * Put a `Changelog:` line in the PR description. At the next release, create `CHANGELOG.md` from the PRs' `Changelog:` lines.
   Feature PRs must not edit `CHANGELOG.md`, so they do not conflict.
 * `project.json` changes are additive only (optional fields). Note them in `docs/schema-changes.md`.
@@ -57,6 +66,7 @@ PRs are squash-merged. The PR title becomes the single commit on main, so use Co
 * New dependencies need a permissive license (MIT, BSD, Apache-2.0, ISC or similar) and, if they ship in the installer, an entry in
   `THIRD_PARTY.md`.
 
-Reel Studio is released under the [GNU AGPL v3 only](LICENSE); see [NOTICE.md](NOTICE.md). Before your first pull request
-can merge, you sign the [Contributor License Agreement](CLA.md) once. A check on the pull request walks you through it.
+Reel Studio is released under the [GNU AGPL v3 only](LICENSE); see [NOTICE.md](NOTICE.md). Before a pull request of
+yours can merge, you accept the [Contributor License Agreement](CLA.md) by commenting one sentence on it. The `CLA` check on
+the pull request posts the sentence and turns green once your comment is in.
 Copyleft or non-commercial material needs written approval first (section 4 of the agreement).

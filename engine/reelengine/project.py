@@ -364,10 +364,18 @@ def timeline(project_dir: Path, proj: dict, words: Optional[list] = None) -> cut
             words = (read_json(tp).get("words") or []) if tp.exists() else []
         else:
             words = load_transcript(project_dir, proj)["words"]
-    return cutmod.build_timeline(words, keep, source_meta(proj),
-                                 gap_cap=float(c.get("gapCap", cutmod.GAP_CAP)),
-                                 min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)),
-                                 join_fps=float(proj["format"]["fps"]))
+    def build(points=None):
+        return cutmod.build_timeline(words, keep, source_meta(proj),
+                                     gap_cap=float(c.get("gapCap", cutmod.GAP_CAP)),
+                                     min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)),
+                                     join_fps=float(proj["format"]["fps"]), match_points=points)
+    tl = build()
+    if any(m.get("played") != "none" for m in tl.match_joins):
+        # Every render, window, still and moment builds its timeline here, so a match join lands on the
+        # same frames in all of them (match.py caches the search).
+        from . import match
+        tl = build(match.plan(project_dir, proj, tl))
+    return tl
 
 
 def _anchor_slots(proj: dict):

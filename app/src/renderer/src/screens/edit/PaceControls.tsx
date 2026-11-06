@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
-import { CUT_PRESETS, kindOf, nextSeed, paceLine, PACE_LABELS, withKind, ZOOM_KIND_LABELS, ZOOM_KINDS, zoomKey, type CutPreset, type Zoom } from '../../../../shared/cut-style'
+import { useEffect, useMemo, useState } from 'react'
+import type { PacePreview } from '../../../../shared/api'
+import { CUT_PRESETS, kindOf, nextSeed, PACE_BANDS, paceLine, PACE_LABELS, withKind, ZOOM_KIND_LABELS, ZOOM_KINDS, zoomKey, type CutPreset, type Zoom } from '../../../../shared/cut-style'
 import { clock } from '../../../../shared/progress'
+import { reel } from '../../api'
 import { Icon } from '../../components/icons'
 import { Segmented } from '../../components/ui'
 import { setP, type TabProps } from './controls'
@@ -10,12 +12,28 @@ const NONE = 'none'
 /** Long enough to tell zoom-ins apart, short enough for one line of the column. */
 const QUOTE_WORDS = 6
 
+/** What a pace does to this reel, from the plan its render would make (engine pace-preview). */
+function measured(p: PacePreview['paces'][string] | undefined): string | null {
+  if (!p) return null
+  const often = `About ${Math.round(p.perMinute)} changes a minute`
+  return p.opening > p.openingMax ? `${often}, ${p.opening} in the first 5 seconds: a busy start.` : `${often}.`
+}
+
 /**
  * Cut > Pace: the reel's pace (project.json cutStyle) and how each zoom-in moves, the choices the AI makes with
  * set_cut_style and set_zoom. Neither shows on the player until it is rendered, so the panel says so first.
  */
 export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
   const style = now.p.cutStyle
+  const [preview, setPreview] = useState<PacePreview | null>(null)
+  // counted on the saved reel, once per version: the drawer's own word changes are not in it
+  useEffect(() => {
+    let live = true
+    reel.projects.pacePreview(d.slug).then((p) => live && setPreview(p), () => live && setPreview(null))
+    return () => {
+      live = false
+    }
+  }, [d.slug, d.project.version])
   const zooms = useMemo(() => now.p.zooms ?? [], [now.p.zooms])
   const wordAt = useMemo(() => new Map(d.words.map((w, i) => [w.id, i])), [d.words])
 
@@ -53,6 +71,13 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
   const setKind = (key: string, kind: (typeof ZOOM_KINDS)[number]) =>
     change(setP((p) => ({ zooms: (p.zooms ?? []).map((z) => (zoomKey(z) === key ? withKind(z, kind) : z)) })))
 
+  // beat landing: the person's own choice when set, else the pace's (Fast lands on the beat)
+  const paceBeats = style ? PACE_BANDS[style.preset].beatAccents : false
+  const beats = now.p.beatAccents ?? paceBeats
+  const song = !!(now.p.music?.track && now.p.music.enabled !== false)
+  // a choice that matches the pace is stored as no choice, so a later pace still decides
+  const setBeats = (on: boolean) => change(setP(() => ({ beatAccents: on === paceBeats ? undefined : on })))
+
   const value = style?.preset ?? NONE
   const reseeded = !!style && style.preset === base.p.cutStyle?.preset && style.seed !== base.p.cutStyle?.seed
 
@@ -77,6 +102,12 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
                 </span>
                 <span className="edit-row-sub" id={`pace-${key}-what`}>
                   {key === NONE ? 'The picture changes only at cuts, pictures and zoom-ins.' : paceLine(key)}
+                  {measured(preview?.paces[key]) && (
+                    <span className="pace-measured" data-testid={`pace-${key}-measured`}>
+                      {' '}
+                      {measured(preview?.paces[key])}
+                    </span>
+                  )}
                 </span>
               </span>
             </label>
@@ -96,6 +127,24 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
               : 'Keeps the pace and changes its moments: where the framing switches, and which zoom-in of a set plays.'}
           </p>
         )}
+      </div>
+
+      <div className="edit-field">
+        <label className="toggle quiet">
+          <input type="checkbox" checked={beats} disabled={!song} onChange={(e) => setBeats(e.target.checked)} data-testid="pace-beats" aria-describedby="pace-beats-why" />
+          Land sound effects and pictures on the beat
+        </label>
+        <p className="edit-hint" id="pace-beats-why" data-testid="pace-beats-why">
+          {!song
+            ? 'Needs a song. Add one in Sound first.'
+            : now.p.beatAccents === undefined
+              ? paceBeats
+                ? 'The fast pace does this. Untick it to keep each one on its word.'
+                : 'Each moves at most an eighth of a second; what you say never moves.'
+              : now.p.beatAccents
+                ? 'On for this reel, whatever the pace.'
+                : 'Off for this reel, even at the fast pace.'}
+        </p>
       </div>
 
       <div className="edit-rule" />

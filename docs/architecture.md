@@ -80,7 +80,7 @@ A file there that can't be parsed is kept as `My style.damaged.json`
 <slug>/
   project.json            the edit (schema below), the only file the AI changes
   media/                  copies (or hard links) of the user's raw takes for this project
-  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxies; safe to delete
+  work/                   engine caches: transcript.json, audio.wav, face.json, layers/, proxy/ (preview copies); safe to delete
   versions/v1/            project.json snapshot + export.mp4 + cover.png + verify.json + notes.md (+ ai-run.json)
   versions/v2/ ...
   versions/preview/       the one scratch folder for drafts, overwritten each time (see versions.md)
@@ -170,6 +170,9 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
+| `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
+| `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
 | `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
@@ -188,7 +191,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
@@ -218,8 +221,9 @@ cover.render(ctx, out_png) -> Path
 The agent loop lives in `ai/`. Tools are strict JSON-schema functions that operate on project.json through a
 small TypeScript project API and then ask the main process to re-render. The set:
 
-`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`,
-`set_gap_cap`, `set_cut_style(preset, seed)`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
+`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`, `find_match_cuts`
+(which joins can be match cuts, from `reelengine match-joins`; `set_cut` refuses a match whose two sides don't line up),
+`set_gap_cap`, `set_cut_style(preset, seed)`, `set_beat_accents(on)` (accents on the song's beat; null lets the cut style decide), `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
 `remove_broll`, `set_mirror(on, source)` (flip a mirrored take; the editor calls it when text in the room reads
 backwards in the frames it looks at, or when a note says the video is mirrored), `resolve_asset(kind, intent, phase, candidateId)`, `list_assets`, `preview_asset`, `export_asset_credits`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
