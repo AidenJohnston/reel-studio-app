@@ -139,6 +139,13 @@ function assetName(ctx: ToolContext, hint: string): string {
   return ctx.note ? `${notePrefix(ctx.note.id)}${hint}` : hint;
 }
 
+/** assetName for a picture, made a slug of 40 characters at most. The hint is made a slug first, and
+ * one with nothing usable in it becomes `fallback`: a note's file must keep its whole prefix, dash
+ * included, or it would pass as saved (projectAssets). */
+function assetSlug(ctx: ToolContext, hint: string, fallback = 'image'): string {
+  return assetName(ctx, slugName(hint, ctx.note ? 40 - notePrefix(ctx.note.id).length : 40, fallback));
+}
+
 /** Files already in work/assets the editor may reuse: everything except a download from a note that
  * was never saved (and a half-written `.part` file). Files from first edits and older projects carry
  * no note prefix and are always offered. */
@@ -497,7 +504,7 @@ async function downloadImage(ctx: ToolContext, url: string, nameHint?: string): 
   const ext = sniffImage(buf);
   if (!ext) throw new ToolInputError(`that link is not an image (${res.headers.get('content-type') ?? 'unknown type'})`);
   const urlPath = new URL(got.url).pathname;
-  const base = slugName(nameHint ?? assetName(ctx, path.basename(urlPath, path.extname(urlPath))));
+  const base = nameHint ?? assetSlug(ctx, path.basename(urlPath, path.extname(urlPath)));
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   // claim the name with the write itself: fetch_image runs in parallel
@@ -563,7 +570,7 @@ async function captureSite(ctx: ToolContext, url: string, layout: 'phone' | 'des
   if (!ctx.host.captureWebsite) throw new ToolInputError('website screenshots only work in the Reel Studio app; use search_images or a text-pop with the name');
   let host = '';
   try { host = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url.trim()) ? url.trim() : `https://${url.trim()}`).hostname.replace(/^www\./i, ''); } catch { /* the host refuses it below */ }
-  const base = slugName(assetName(ctx, nameHint || `${host || 'website'}-screen`));
+  const base = assetSlug(ctx, nameHint || `${host || 'website'}-screen`, 'website-screen');
   const dir = path.join(ctx.projectDir, 'work', 'assets');
   await fsp.mkdir(dir, { recursive: true });
   let name = `${base}.png`; let n = 2;
@@ -593,8 +600,9 @@ async function fetchImageWithThumb(ctx: ToolContext, url: string, nameHint?: str
   if (!/^https?:\/\//i.test(url)) throw new ToolInputError('url must start with http:// or https://');
   // the name is a slug before it reaches the engine's argv; the engine slugs too
   const urlPath = new URL(url).pathname;
-  const hint = nameHint ?? (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : undefined);
-  const name = hint ? slugName(assetName(ctx, hint)) : undefined;
+  const hint = nameHint || (ctx.note ? path.basename(urlPath, path.extname(urlPath)) : '');
+  // a note's picture always gets a name: the engine's own (image.png) carries no note prefix
+  const name = hint || ctx.note ? assetSlug(ctx, hint) : undefined;
   try {
     const r = await engine(ctx, 'fetch-image', ['--url', url, ...(name ? ['--name', name] : [])], 'Downloading the picture');
     const asset = r?.asset;
