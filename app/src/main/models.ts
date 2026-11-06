@@ -1,6 +1,6 @@
 // The listening model: reuse a matching copy already on this computer, else the one-time download, then a timing
 // check that picks how many processor threads it should use here.
-import { existsSync, readFileSync, promises as fs } from 'node:fs'
+import { existsSync, readFileSync, statSync, promises as fs } from 'node:fs'
 import { cpus } from 'node:os'
 import { join } from 'node:path'
 import { engineMode, modelsDir } from './paths'
@@ -29,6 +29,23 @@ export function modelInstalled(dir = join(modelsDir(), modelName())): boolean {
     existsSync(join(dir, 'config.json')) &&
     ['tokenizer.json', 'vocabulary.txt', 'vocabulary.json'].some((f) => existsSync(join(dir, f)))
   )
+}
+
+/** What a stopped download of `pin` already has in `dir`: each file whole at its pinned size, or what its .part holds.
+ * A .part longer than its file counts for nothing, as the engine starts that file again (transcribe.download_model). */
+function bytesOnDisk(dir: string, pin: PinnedModel | null): number {
+  const size = (path: string): number => {
+    try {
+      return statSync(path).size
+    } catch {
+      return 0
+    }
+  }
+  return (pin?.files ?? []).reduce((sum, f) => {
+    if (size(join(dir, f.name)) === f.size) return sum + f.size
+    const part = size(join(dir, `${f.name}.part`))
+    return sum + (part <= f.size ? part : 0)
+  }, 0)
 }
 
 /** A profile copied to another computer checks again. */
@@ -165,7 +182,10 @@ export function createModelManager(deps: ModelDeps) {
       const dir = join(modelsDir(), modelName())
       if (existsSync(join(dir, '.fake')) && engineMode() === 'real') await fs.rm(dir, { recursive: true, force: true })
       download = new AbortController()
-      set({ downloading: true, error: null, pct: 0, bytes: 0 })
+      // A resumed download's bar starts from the bytes it already has. Floor, so the engine's first report (the same
+      // bytes, rounded) never moves it back.
+      const have = bytesOnDisk(dir, pinnedModel())
+      set({ downloading: true, error: null, ...(total() ? { bytes: have, pct: Math.floor((have / total()) * 100) } : {}) })
       try {
         // The engine's percent is bytes / total of the pinned files, so it converts back to MB exactly.
         await runEngine('download-model', ['--name', modelName()], (p) => set({ pct: Math.round(p.pct), bytes: Math.round((p.pct / 100) * total()) }), download.signal)
