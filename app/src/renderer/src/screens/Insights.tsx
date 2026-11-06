@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { failingRows, scoreLine, scoreRows, type EditScore } from '../../../shared/edit-score'
 import { TitleBarSlot } from '../components/titlebar'
 import { Button, Spinner } from '../components/ui'
 import { reel } from '../api'
@@ -182,6 +183,23 @@ function ReelList({ reels, go }: { reels: InsightReel[]; go: Go }) {
 }
 const latest = (r: InsightReel) => Math.max(...r.posts.map((p) => Date.parse(p.publishedAt)))
 
+/** The posted version's edit checks (engine `score`), so a reel's results sit beside how its edit checked out. Null
+ * while they load, and for a version the engine can't score (an older or damaged folder): the row then says nothing. */
+function useEditScore(project: string, version: number): EditScore | null {
+  const [score, setScore] = useState<EditScore | null>(null)
+  useEffect(() => {
+    let live = true
+    reel.projects.score(project, version).then(
+      (s) => live && setScore(scoreRows(s).length ? s : null),
+      () => live && setScore(null)
+    )
+    return () => {
+      live = false
+    }
+  }, [project, version])
+  return score
+}
+
 function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go }) {
   const t = r.totals.metrics
   const counting = r.posts.some((p) => p.status === 'still counting')
@@ -197,14 +215,25 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
   )
   const watchedText = watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : null
   const line = reelLine(r, all)
+  const score = useEditScore(r.project, r.version)
+  // what to fix in the edit, beside what the reel did: the failing checks, by name and value
+  const off = score ? failingRows(score) : []
   return (
     <li className={`ins-reel${counting ? ' counting' : ''}`} data-testid="insights-reel" data-project={r.project} data-version={r.version}>
       <button className="hit" onClick={() => go({ name: 'reel', slug: r.project, version: r.version })} aria-label={`Open ${versionName(r)}`} data-testid="insights-open" />
       <div className="rthumb" aria-hidden>{r.cover && <img src={r.cover} alt="" loading="lazy" decoding="async" />}</div>
       <div className="rtext">
         <div className="ttl">{r.title ?? r.project}</div>
-        <div className="cm">Version {r.version} · {where} · {ago(r.posts[0].publishedAt, Date.now())}</div>
+        <div className="cm">
+          Version {r.version} · {where} · {ago(r.posts[0].publishedAt, Date.now())}
+          {score && <span data-testid="insights-checks"> · {scoreLine(score)}</span>}
+        </div>
         <div className={`ins-why${counting ? ' faint' : ''}`} data-testid="insights-why">{line}</div>
+        {off.length > 0 && (
+          <div className="ins-why faint" data-testid="insights-checks-off">
+            In the edit: {off.map((row) => `${row.label.toLowerCase()} ${row.after}`).join('; ')}.
+          </div>
+        )}
       </div>
       {cell('Views', t.plays === null ? null : compact(t.plays), 'views')}
       <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : undefined}>
