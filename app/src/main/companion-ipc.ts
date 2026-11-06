@@ -1,4 +1,4 @@
-// The main-process side of Settings > Devices: the "Phone and browser" switch, pairing codes, the paired list, and
+// The main-process side of Settings > Phone and browser: the "Phone and browser" switch, pairing codes, the paired list, and
 // the companion server's lifetime (main/companion/). Electron's pieces come in from index.ts, so this file is tested
 // without Electron (test/companion-ipc.test.ts).
 import { promises as fs } from 'node:fs'

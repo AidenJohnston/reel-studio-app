@@ -1,5 +1,5 @@
 // The companion server: what a paired phone or browser on the home network talks to. One listener on the LAN
-// address Send to my phone uses, only while Settings > Devices > "Phone and browser" is on. Routes and signatures:
+// address Send to my phone uses, only while Settings > Phone and browser > "Phone and browser" is on. Routes and signatures:
 // shared/contract.ts. No Electron imports, so the unit tests run it under plain Node.
 //
 // What it guards, and how (the person is told the rest in the pairing sheet):

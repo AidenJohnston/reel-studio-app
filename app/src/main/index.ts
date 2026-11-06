@@ -253,7 +253,7 @@ function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
   companion?.publish(channel, payload)
 }
-/** Settings > Devices: the paired phones and browsers (main/companion-ipc.ts). Set in registerIpc. */
+/** Settings > Phone and browser: the paired phones and browsers (main/companion-ipc.ts). Set in registerIpc. */
 let companion: ReturnType<typeof registerCompanionIpc> | null = null
 /** This computer's name for "Connected to …" on a paired phone: the host name, without ".local" and dashes. */
 const computerName = (): string => (TEST ? 'Test computer' : hostname().replace(/\.local$/i, '').replace(/[-_]+/g, ' ').trim() || 'this computer')
@@ -980,7 +980,7 @@ function registerIpc(): void {
     log,
     test: TEST
   })
-  // Settings > Devices: a paired phone or browser watches versions and leaves notes (main/companion-ipc.ts). It reads
+  // Settings > Phone and browser: a paired phone or browser watches versions and leaves notes (main/companion-ipc.ts). It reads
   // and notes through the same functions as the window's projects:get and projects:note.
   companion = registerCompanionIpc({
     handle,

@@ -85,6 +85,25 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await expect(phone.locator('[data-testid="cp-version"][data-n="2"]')).toBeVisible({ timeout: 120_000 })
     await expect(phone.getByTestId('cp-chat')).toContainText('I made the subtitles lowercase.')
     await phone.screenshot({ path: join(SHOTS, 'companion-05-phone-version-2.png') })
+    // the same page in a desktop browser, and with reduced motion on (prep-for-prod's runtime pass)
+    await phone.setViewportSize({ width: 1440, height: 900 })
+    await phone.screenshot({ path: join(SHOTS, 'companion-05b-wide.png') })
+    await phone.setViewportSize({ width: 320, height: 640 })
+    await phone.emulateMedia({ reducedMotion: 'reduce' })
+    await phone.locator('[data-testid="cp-version"][data-n="1"]').click()
+    await phone.screenshot({ path: join(SHOTS, 'companion-05c-320-reduced-motion.png') })
+    // every control in reach of the keyboard shows where focus is
+    for (let i = 0; i < 6; i++) {
+      await phone.keyboard.press('Tab')
+      const ring = await phone.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null
+        if (!el || el === document.body) return 'none'
+        const cs = getComputedStyle(el)
+        return cs.outlineStyle !== 'none' || cs.boxShadow !== 'none' ? 'shown' : `missing on ${el.tagName}.${el.className}`
+      })
+      expect(ring).not.toMatch(/^missing/)
+    }
+    await phone.setViewportSize({ width: 390, height: 844 })
     await page.getByTestId('pair-close').click()
     await page.getByTestId('nav-home').click()
     await page.getByTestId('project-card').first().click()

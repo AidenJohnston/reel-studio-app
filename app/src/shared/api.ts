@@ -798,7 +798,7 @@ export interface PhoneShare {
 
 export type PhoneEvent = { kind: 'page' } | { kind: 'video' } | { kind: 'stopped'; reason: 'timeout' | 'closed' }
 
-/** A phone or browser paired with this computer (Settings > Devices; main/companion/devices.ts). */
+/** A phone or browser paired with this computer (Settings > Phone and browser; main/companion/devices.ts). */
 export interface PairedDevice {
   id: string
   /** The device's own guess at its name ("iPhone", "Chrome on Windows"). */
@@ -810,7 +810,7 @@ export interface PairedDevice {
   lastSeenAt: number
 }
 
-/** Settings > Devices. */
+/** Settings > Phone and browser. */
 export interface DevicesStatus {
   /** The "Phone and browser" switch. */
   on: boolean
@@ -1072,7 +1072,7 @@ export interface ReelApi {
     cancel(id: string): Promise<void>
     onProgress(cb: (p: { id: string; pct: number }) => void): () => void
   }
-  /** Settings > Devices: phones and browsers that watch versions and leave notes over the home network. */
+  /** Settings > Phone and browser: phones and browsers that watch versions and leave notes over the home network. */
   devices: {
     status(): Promise<DevicesStatus>
     setOn(on: boolean): Promise<DevicesStatus>
