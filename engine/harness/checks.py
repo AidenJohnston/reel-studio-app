@@ -176,7 +176,8 @@ def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, capti
     if bad:
         return bad
     rp = media.video_pts(ffprobe, ref)
-    idx = next((i for i, x in enumerate(rp) if x >= t - 1e-6), len(rp) - 1)
+    # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame.
+    idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:
