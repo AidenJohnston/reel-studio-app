@@ -156,7 +156,8 @@ export function ShowMeHow({
   // Its own tab changes come back as this prop through onTab, equal to `tab`, so they change nothing here.
   useEffect(() => {
     if (initialTab === tab) return
-    setTabState(initialTab)
+    // through setTab, so leaving Sound or Pictures drops their pick as a click on the tab does
+    setTab(initialTab)
     requestAnimationFrame(() => tabRefs.current[initialTab]?.focus())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab])

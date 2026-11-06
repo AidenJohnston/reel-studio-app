@@ -346,6 +346,18 @@ const SCENES: Scene[] = [
       ready: (page) => page.locator(`[data-testid="tab-${key}"][aria-selected="true"], [data-testid="tab-${key}"].active`).first()
     })
   ),
+  // Cut's other two ways of changing the cut (CutTab.tsx MODES): each pace's rows, and how each join plays
+  ...(['pace', 'joins'] as const).map(
+    (mode): Scene => ({
+      id: `edit-cut-${mode}`,
+      enter: async ({ page }) => {
+        if (await page.getByTestId('done-compare').isVisible()) await page.getByTestId('done-compare').click()
+        await openTab(page, 'cut')
+        await page.getByTestId(`cut-mode-${mode}`).click()
+      },
+      ready: byTestId(mode === 'pace' ? 'pace' : 'joins')
+    })
+  ),
   {
     id: 'share',
     enter: async ({ page }) => {
