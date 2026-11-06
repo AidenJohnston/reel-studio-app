@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -9,6 +9,20 @@ import { isAlive, killTree } from '../src/main/proctree'
 import { createEngineRunner } from '../src/main/engine'
 import { engineEnv, projectsDir } from '../src/main/paths'
 import { APP_DIR, PYTHON, setupPaths } from './helpers'
+
+// Off: the real renameSync. On: moving that one file is refused, as Windows refuses while another
+// program (a virus scanner, an indexer) has it open. Root on macOS/Linux is never refused for real.
+const refuseRename = vi.hoisted(() => ({ from: '' }))
+vi.mock(import('node:fs'), async (real) => {
+  const fs = await real()
+  return {
+    ...fs,
+    renameSync: (...args: Parameters<typeof fs.renameSync>) => {
+      if (String(args[0]) === refuseRename.from) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${args[0]}'`), { code: 'EPERM' })
+      return fs.renameSync(...args)
+    }
+  }
+})
 
 describe('orphaned engine reaper', () => {
   it('names a running process', async () => {
@@ -184,8 +198,11 @@ describe('orphaned engine reaper', () => {
     const other = spawn(PYTHON, ['-c', 'import time; time.sleep(60)'], { stdio: 'ignore', windowsHide: true })
     await once(other, 'spawn')
     const path = process.env.PATH
-    // taskkill cannot be found, so it stops nothing
-    process.env.PATH = mkdtempSync(join(tmpdir(), 'rs-no-taskkill-'))
+    // the taskkill found first on PATH cannot run, so nothing is stopped (the lookup checks the
+    // working folder, then PATH in order, and takes the first match)
+    const fake = mkdtempSync(join(tmpdir(), 'rs-no-taskkill-'))
+    writeFileSync(join(fake, 'taskkill.exe'), 'not a program')
+    process.env.PATH = fake
     try {
       expect(await killTree(other.pid!)).toBe(false)
       expect(isAlive(other.pid!)).toBe(true)
@@ -325,35 +342,17 @@ describe('orphaned engine reaper', () => {
     writeFileSync(file, '[{"pid":4242,"proj')
     // the crashed run's engine, still rendering bread
     const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
-    let unlock: () => Promise<void>
-    if (process.platform === 'win32') {
-      // open without sharing delete, as a virus scanner or an indexer may: it cannot be renamed
-      const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
-        `$f = [IO.File]::Open('${file.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'held'; [Console]::In.ReadLine(); $f.Close()`], { stdio: ['pipe', 'pipe', 'inherit'] })
-      await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve()))
-      unlock = async () => {
-        holder.stdin.end('\n')
-        await once(holder, 'exit')
-      }
-    } else {
-      chmodSync(settings, 0o555)
-      unlock = async () => chmodSync(settings, 0o755)
-    }
-    let locked = true
-    const release = async (): Promise<void> => {
-      if (locked) await unlock()
-      locked = false
-    }
     try {
       await once(engine, 'spawn')
-      const registry = createPidRegistry(settings)
-      expect(await registry.reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
-      await release()
-      // the other program lets go, and the list is rewritten (an engine starts or ends)
-      registry.remove(4242)
+      // the list cannot be moved aside, and this start rewrites it
+      refuseRename.from = file
+      try {
+        expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
+      } finally {
+        refuseRename.from = ''
+      }
       expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
     } finally {
-      await release()
       await killTree(engine.pid!)
     }
   }, 60000)
