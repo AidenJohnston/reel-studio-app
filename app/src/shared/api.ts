@@ -1016,6 +1016,8 @@ export interface ReelApi {
     makeReels(slug: string, ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
     /** Not now (true) folds the card to one line; Show (false) opens it again. */
     foldReels(slug: string, folded: boolean): Promise<void>
+    /** The person's own series for this reel, or null for none; automatic grouping leaves it alone after (main/series.ts). */
+    setSeries(slug: string, series: string | null): Promise<ProjectDetail>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */

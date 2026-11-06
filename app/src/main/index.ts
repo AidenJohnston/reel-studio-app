@@ -88,6 +88,7 @@ import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
+import { chooseSeries, groupReel } from './series'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -697,6 +698,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
+    await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
     return replyAskingAboutStyle(r, r.summary)
   }, { pause, record: started })
 }
@@ -1326,6 +1328,11 @@ function registerIpc(): void {
   handle('projects:timeline', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
     return readTimeline(slug, n)
+  })
+  handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
+    if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
+    await chooseSeries(slug, series)
+    return detail(slug)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     // a reel with no video yet has no project.json: only its name can change

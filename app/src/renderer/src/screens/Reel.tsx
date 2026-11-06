@@ -13,6 +13,7 @@ import type { Go } from '../nav'
 import { Button, Confirm, IS_MAC, IconButton, PickFiles, Spinner } from '../components/ui'
 import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
+import { SeriesPicker } from '../components/SeriesPicker'
 import { PhonePlayer } from '../components/Player'
 import type { SubtitleLook } from '../../../shared/caption-presets'
 import { PhoneViewSwitch, usePhoneShape, usePhoneView } from '../components/Phone'
@@ -117,6 +118,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [pickingSeries, setPickingSeries] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [more, setMore] = useState(false)
   const moreBtn = useRef<HTMLButtonElement>(null)
@@ -838,6 +840,16 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           >
             <Icon name="scissors" size={16} /> More reels from this video
           </button>
+          <button
+            className="mi"
+            role="menuitem"
+            disabled={!hasVersions}
+            title={!hasVersions ? 'Wait for Version 1.' : undefined}
+            onClick={() => (setMore(false), setPickingSeries(true))}
+            data-testid="series"
+          >
+            <Icon name="folder" size={16} /> {d.series ? `Series: ${d.series}` : 'Series…'}
+          </button>
           <button className="mi danger" role="menuitem" disabled={!!job} onClick={() => (setMore(false), setConfirmDelete(true))} data-testid="delete">
             <Icon name="trash" size={16} /> Delete…
           </button>
@@ -1191,6 +1203,17 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
         </div>
       </div>
 
+      {pickingSeries && (
+        <SeriesPicker
+          slug={slug}
+          current={d.series}
+          onClose={() => setPickingSeries(false)}
+          onSaved={() => {
+            setPickingSeries(false)
+            void load()
+          }}
+        />
+      )}
       {confirmDelete && (
         <Confirm
           title="Delete this reel?"

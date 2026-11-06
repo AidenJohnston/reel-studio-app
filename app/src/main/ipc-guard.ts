@@ -92,6 +92,7 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'projects:makeReels': ok = Array.isArray(second) && second.length >= 1 && second.length <= 5 && new Set(second).size === second.length &&
       second.every((id) => text(id) && /^r\d+$/.test(id)); break
     case 'projects:foldReels': ok = typeof second === 'boolean'; break
+    case 'projects:setSeries': ok = second === null || (text(second) && second.trim().length > 0 && second.length <= 80); break
     // found edits by id (style:find); the paths stay in main
     case 'style:learn': ok = first === undefined || (Array.isArray(first) && first.length > 0 && first.every((id) => text(id) && /^[0-9a-f]{16}$/.test(id))); break
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break

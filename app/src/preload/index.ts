@@ -133,6 +133,7 @@ const api: ReelApi = {
     proposeReels: (slug) => call('projects:proposeReels', slug),
     makeReels: (slug, ids) => call('projects:makeReels', slug, ids),
     foldReels: (slug, folded) => call('projects:foldReels', slug, folded),
+    setSeries: (slug, series) => call('projects:setSeries', slug, series),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {
