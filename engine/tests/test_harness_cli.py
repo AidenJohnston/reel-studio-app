@@ -60,7 +60,8 @@ def test_agree_refuses_different_work_or_pins(tmp_path, capsys, difference):
         path.write_text(json.dumps(report), encoding="utf-8")
     assert cli.main(["agree", *map(str, paths)]) == 2
     err = capsys.readouterr().err
-    assert ("ffmpeg" if difference == "missing pin" else difference) in err
+    field = "take sets" if difference == "takes" else ("ffmpeg" if difference == "missing pin" else difference)
+    assert field in err
     if difference == "takes":
         assert "one" in err and "other" in err
 
