@@ -9,6 +9,9 @@ type Style = Record<string, unknown>
 const size = (s: Style): number => Number(s.size ?? 105)
 const pos = (s: Style): number => Number(s.position ?? 0.75)
 const look = (s: Style): string => (s.box ? 'box' : String(s.color ?? '#FFFFFF').toUpperCase() === '#FFFFFF' ? 'white' : 'yellow')
+// The Spoken word colours the Subtitles editor offers (ShowMeHow HIGHLIGHTS), by name.
+const LIT: Record<string, string> = { '#FFD60A': 'yellow', '#30D158': 'green' }
+const lit = (s: Style): string => (typeof s.highlight === 'string' ? s.highlight.toUpperCase() : '')
 const name = (p: string | null | undefined): string =>
   (p ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ?? ''
 
@@ -19,6 +22,8 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
   const a = (before?.style ?? {}) as Style
   const b = (after.style ?? {}) as Style
   const words: string[] = []
+  // A new look's name says its highlight; within one look (the saved name stays) a changed highlight is said apart.
+  let highlight = ''
   const preset = presetOf(b)
   if (preset && preset !== presetOf(a)) words.push(CAPTION_PRESETS.find((x) => x.key === preset)!.label.toLowerCase())
   else {
@@ -26,9 +31,12 @@ function subtitles(before: ProjectJson['captions'], after: ProjectJson['captions
     if (size(b) < size(a)) words.push('smaller')
     const lb = look(b)
     if (lb !== look(a)) words.push(lb === 'box' ? 'boxed' : lb)
+    const hb = lit(b)
+    if (hb !== lit(a)) highlight = !hb ? 'words no longer light up' : LIT[hb] ? `words light up ${LIT[hb]}` : 'words light up in a new colour'
   }
   const out: string[] = []
   if (words.length) out.push(`${words.join(' ')} subtitles`)
+  if (highlight) out.push(highlight)
   if (pos(b) < pos(a) - 0.01) out.push(out.length ? 'moved up' : 'subtitles moved up')
   if (pos(b) > pos(a) + 0.01) out.push(out.length ? 'moved down' : 'subtitles moved down')
   const fixes = (after.corrections ?? []).filter((fix) =>
