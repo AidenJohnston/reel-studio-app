@@ -31,7 +31,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'cover', label: 'Cover' }
 ]
 // The parts of the project a hand edit can change, for the plain-words summary.
-const PARTS = ['sources', 'captions', 'music', 'broll', 'cover', 'sfx', 'cutStyle', 'zooms', 'cut'] as const
+const PARTS = ['sources', 'captions', 'music', 'broll', 'cover', 'sfx', 'cutStyle', 'beatAccents', 'zooms', 'cut'] as const
 // Matches the .edit enter animation (edit.css): the notes column and this panel swap in a 150 ms crossfade.
 const LEAVE_MS = 150
 
@@ -296,7 +296,7 @@ export function ShowMeHow({
   const make = async () => {
     const patch: Partial<ProjectJson> = {}
     // a pace taken off stays absent: describeChange reads that as turning it off
-    for (const k of PARTS) if (JSON.stringify(now.p[k]) !== JSON.stringify(base.p[k])) Object.assign(patch, { [k]: k === 'cutStyle' ? now.p[k] : (now.p[k] ?? []) })
+    for (const k of PARTS) if (JSON.stringify(now.p[k]) !== JSON.stringify(base.p[k])) Object.assign(patch, { [k]: k === 'cutStyle' || k === 'beatAccents' ? now.p[k] : (now.p[k] ?? []) })
     // said after "You" in the notes (shared/notes-log.ts handLine)
     const summary = describeChange(base.p, patch, now.kept.size - base.kept.size) || 'made a change'
     setMaking(true)

@@ -332,6 +332,8 @@ export interface ProjectJson {
   /** The group this reel belongs to on Reels ("Sourdough basics"). */
   series?: string
   transcript?: { file: string; language?: string }
+  /** true: sound effects and picture starts land on the song's beats; false: never, even at the fast pace; absent: the pace decides */
+  beatAccents?: boolean
   cut?: { keep: { from: string; to: string; join?: { transition: 'hard' | 'j' | 'l' | 'smash' | 'match'; frames: number } }[]; gapCap?: number; minSaving?: number }
   captions?: {
     enabled: boolean

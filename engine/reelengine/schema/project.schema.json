@@ -14,7 +14,7 @@
     "updatedAt": { "type": "string" },
     "version": { "type": "integer", "minimum": 0 },
     "exposure": { "type": "number", "minimum": 0.125, "maximum": 8, "description": "linear footage exposure multiplier, limited to ffmpeg exposure's -3 to +3 stops; absent means 1" },
-    "beatAccents": { "type": "boolean", "description": "Snap SFX hits and b-roll starts to detected music beats within 0.12 seconds. Absent or false leaves their timing unchanged unless cutStyle.preset is hyper. Speech cuts never move; b-roll keeps its word lead." },
+    "beatAccents": { "type": "boolean", "description": "Snap SFX hits and b-roll starts to detected music beats within 0.12 seconds. true: always; false: never, even when cutStyle.preset is hyper; absent: only when cutStyle.preset is hyper. Speech cuts never move; b-roll keeps its word lead." },
     "format": {
       "type": "object",
       "required": ["width", "height", "fps"],

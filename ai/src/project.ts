@@ -91,6 +91,8 @@ export interface Project {
   id: string; title: string; slug: string; createdAt: string; updatedAt: string; version: number;
   format: Format;
   cutStyle?: CutStyle;
+  /** true: sound effects and picture starts land on the song's beats; false: never, even at the hyper pace; absent: the pace decides */
+  beatAccents?: boolean;
   exposure?: number;
   sources: Source[];
   transcript: { file: string; language?: string };
@@ -188,6 +190,7 @@ export function validateProject(p: unknown, transcript?: Transcript): string[] {
     else if (typeof q.cutStyle.preset !== 'string' || !Object.prototype.hasOwnProperty.call(CUT_STYLES, q.cutStyle.preset)) out.push('cutStyle.preset must be clean, standard, hyper, or punchline');
     else if (!Number.isInteger(q.cutStyle.seed)) out.push('cutStyle.seed must be an integer');
   }
+  if (q.beatAccents !== undefined && typeof q.beatAccents !== 'boolean') out.push('beatAccents must be true or false');
   if (!q.format || !isNum(q.format.width) || !isNum(q.format.height) || !isNum(q.format.fps)) out.push('format needs width/height/fps');
   // ffmpeg exposure accepts -3 to +3 stops, equivalent to these linear multipliers.
   if (q.exposure !== undefined && (!isNum(q.exposure) || q.exposure < 0.125 || q.exposure > 8)) out.push('exposure must be a number between 0.125 and 8');

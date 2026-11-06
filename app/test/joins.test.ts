@@ -100,3 +100,14 @@ describe('joins through the drawer', () => {
     expect(() => parseHandEdit({ ...old, joins: [{ at: 4, join: null }] })).toThrow()
   })
 })
+
+describe('beat landing through the drawer', () => {
+  it("fails if turning the fast pace's beat landing off doesn't reach the version, or a non-boolean gets past main", () => {
+    const v1 = { ...project([{ from: 'w1', to: 'w10' }]), cutStyle: { preset: 'hyper' as const, seed: 3 } }
+    const edit = diffProject(v1, { ...v1, beatAccents: false }, kept(v1), kept(v1))
+    expect(applyHandEdit(v1, parseHandEdit(JSON.parse(JSON.stringify(edit))), words).beatAccents).toBe(false)
+    const back = diffProject({ ...v1, beatAccents: false }, v1, kept(v1), kept(v1))
+    expect('beatAccents' in applyHandEdit({ ...v1, beatAccents: false }, back, words)).toBe(false)
+    expect(() => parseHandEdit({ set: [{ path: ['beatAccents'], value: 'yes' }], items: [], words: { cut: [], keep: [] }, mirror: [] })).toThrow()
+  })
+})

@@ -10,7 +10,7 @@ import { FakeHost, makeProject, tinyPng, commitImage, tinyMp3, commitLocalAsset 
 import { CAPTION_PRESETS, applyPreset, presetOf } from '../../app/src/shared/caption-presets';
 import { describeChange } from '../../app/src/shared/describe';
 
-const SPEC_TOOLS = ['merge_versions', 'get_project', 'get_transcript', 'list_sources', 'set_clips', 'set_cut', 'find_match_cuts', 'set_cut_style', 'make_variant', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
+const SPEC_TOOLS = ['merge_versions', 'get_project', 'get_transcript', 'list_sources', 'set_clips', 'set_cut', 'find_match_cuts', 'set_cut_style', 'set_beat_accents', 'make_variant', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'search_footage', 'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'resolve_asset', 'list_assets', 'preview_asset',
   'export_asset_credits', 'search_images', 'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_sfx', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'lint_edit', 'look_at_frames', 'finish'];
 

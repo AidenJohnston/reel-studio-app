@@ -60,6 +60,10 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await shot(page, 'pace-01-as-made')
 
     await paces.getByRole('radio', { name: 'Fast' }).check()
+    // the fast pace lands accents on the beat, but this reel has no song: the toggle says what it needs
+    await expect(page.getByTestId('pace-beats')).toBeChecked()
+    await expect(page.getByTestId('pace-beats')).toBeDisabled()
+    await expect(page.getByTestId('pace-beats-why')).toHaveText('Needs a song. Add one in Sound first.')
     await rows.nth(0).getByRole('radio', { name: 'Slow' }).click()
     await expect(rows.nth(0).getByRole('radio', { name: 'Slow' })).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByTestId('change-count')).toHaveText('2 changes')

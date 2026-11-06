@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { PacePreview } from '../../../../shared/api'
-import { CUT_PRESETS, kindOf, nextSeed, paceLine, PACE_LABELS, withKind, ZOOM_KIND_LABELS, ZOOM_KINDS, zoomKey, type CutPreset, type Zoom } from '../../../../shared/cut-style'
+import { CUT_PRESETS, kindOf, nextSeed, PACE_BANDS, paceLine, PACE_LABELS, withKind, ZOOM_KIND_LABELS, ZOOM_KINDS, zoomKey, type CutPreset, type Zoom } from '../../../../shared/cut-style'
 import { clock } from '../../../../shared/progress'
 import { reel } from '../../api'
 import { Icon } from '../../components/icons'
@@ -71,6 +71,13 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
   const setKind = (key: string, kind: (typeof ZOOM_KINDS)[number]) =>
     change(setP((p) => ({ zooms: (p.zooms ?? []).map((z) => (zoomKey(z) === key ? withKind(z, kind) : z)) })))
 
+  // beat landing: the person's own choice when set, else the pace's (Fast lands on the beat)
+  const paceBeats = style ? PACE_BANDS[style.preset].beatAccents : false
+  const beats = now.p.beatAccents ?? paceBeats
+  const song = !!(now.p.music?.track && now.p.music.enabled !== false)
+  // a choice that matches the pace is stored as no choice, so a later pace still decides
+  const setBeats = (on: boolean) => change(setP(() => ({ beatAccents: on === paceBeats ? undefined : on })))
+
   const value = style?.preset ?? NONE
   const reseeded = !!style && style.preset === base.p.cutStyle?.preset && style.seed !== base.p.cutStyle?.seed
 
@@ -120,6 +127,24 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
               : 'Keeps the pace and changes its moments: where the framing switches, and which zoom-in of a set plays.'}
           </p>
         )}
+      </div>
+
+      <div className="edit-field">
+        <label className="toggle quiet">
+          <input type="checkbox" checked={beats} disabled={!song} onChange={(e) => setBeats(e.target.checked)} data-testid="pace-beats" aria-describedby="pace-beats-why" />
+          Land sound effects and pictures on the beat
+        </label>
+        <p className="edit-hint" id="pace-beats-why" data-testid="pace-beats-why">
+          {!song
+            ? 'Needs a song. Add one in Sound first.'
+            : now.p.beatAccents === undefined
+              ? paceBeats
+                ? 'The fast pace does this. Untick it to keep each one on its word.'
+                : 'Each moves at most an eighth of a second; what you say never moves.'
+              : now.p.beatAccents
+                ? 'On for this reel, whatever the pace.'
+                : 'Off for this reel, even at the fast pace.'}
+        </p>
       </div>
 
       <div className="edit-rule" />

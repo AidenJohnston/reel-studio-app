@@ -3,7 +3,7 @@
 import type { ChatMessage, DropResult, EditFact, ProjectJson, VersionInfo, Word } from './api'
 import { keptIds } from './cut'
 import { CAPTION_PRESETS, presetOf } from './caption-presets'
-import { kindsByWords, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
+import { kindsByWords, PACE_BANDS, PACE_LABELS, ZOOM_KIND_LABELS, type CutStyle } from './cut-style'
 import { isMirrored } from './mirror'
 import { gainOf, momentKey, musicFades, secondsText, sfxName } from './sfx'
 
@@ -162,6 +162,11 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
       if (was) acts.push('turned the set pace off')
     } else if (now.preset !== was?.preset) acts.push(`gave the reel a ${PACE_LABELS[now.preset].toLowerCase()} pace`)
     else if (now.seed !== was?.seed) acts.push('picked other moments for the accents')
+  }
+  if ('beatAccents' in patch) {
+    const on = (p: Partial<ProjectJson>, style: ProjectJson['cutStyle']) => p.beatAccents ?? (style ? PACE_BANDS[style.preset].beatAccents : false)
+    const [was, now] = [on(before, before.cutStyle), on(patch, 'cutStyle' in patch ? patch.cutStyle : before.cutStyle)]
+    if (now !== was) acts.push(now ? 'made sounds and pictures land on the beat' : 'turned off landing on the beat')
   }
   if (patch.cut) {
     // a join is told apart by the first word after its cut (shared/hand-edit.ts)

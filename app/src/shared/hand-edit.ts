@@ -25,8 +25,8 @@ export interface HandEdit {
 
 const SET_ROOTS = ['captions', 'music', 'cover']
 // Set or removed whole: a pace is its preset and seed together, and a seed kept from one pace onto another the
-// person never picked would be a choice nobody made.
-const WHOLE = ['cutStyle']
+// person never picked would be a choice nobody made. beatAccents is one true or false.
+const WHOLE = ['cutStyle', 'beatAccents']
 const LISTS: Record<ListName, (x: any) => string> = {
   broll: (b) => String(b?.id),
   // the engine plays one effect per moment, so the moment names the effect
@@ -173,7 +173,7 @@ export function parseHandEdit(v: unknown): HandEdit {
       if (path.length === 1 && WHOLE.includes(path[0])) {
         if (s.unset === true) return { path, unset: true as const }
         const value = json(s.value)
-        const problem = cutStyleProblem(value)
+        const problem = path[0] === 'cutStyle' ? cutStyleProblem(value) : typeof value === 'boolean' ? null : 'beatAccents must be true or false'
         return problem ? bad(problem) : { path, value }
       }
       if (path.length < 2 || !SET_ROOTS.includes(path[0]) || path.some((k) => !k || k === '__proto__' || k === 'constructor' || k === 'prototype')) bad(`path ${path.join('.')}`)

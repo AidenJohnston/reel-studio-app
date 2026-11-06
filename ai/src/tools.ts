@@ -1469,6 +1469,24 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'set_beat_accents',
+    description: "Land sound effects and the starts of pictures on the song's beats (moved at most 0.12 s; spoken cuts never move). on=true for a rhythmic, music-led reel; false to keep every accent on its word even at the hyper pace; null to let the cut style decide (hyper lands on the beat). It needs a song; never combine it with a J or L join on the same cut.",
+    parameters: S.obj({ on: S.opt(S.bool('true: on the beat; false: never; null: the cut style decides')) }),
+    async run(ctx, args) {
+      const on: boolean | null = args.on ?? null;
+      await mutate(ctx, 'beatAccents', (p) => {
+        if (on === null) delete p.beatAccents;
+        else p.beatAccents = on;
+      });
+      const p = ctx.project!;
+      const song = !!(p.music?.enabled !== false && p.music?.track);
+      return {
+        content: { ok: true, beatAccents: on, ...(on && !song ? { note: 'There is no song yet, so nothing lands on a beat until you choose one.' } : {}) },
+        summary: on === null ? 'Let the pace decide the beat' : on ? 'Put the accents on the beat' : 'Kept the accents on their words',
+      };
+    },
+  },
+  {
     name: 'make_variant',
     description: 'Make a trial changing exactly one variable. seed generates and logs a new seed in the same style. For hook, choose a different opening among your candidates and pass its word range; the body stays fixed. For cover or caption, supply your alternative. brightness is +8 or -8 percent exposure. The engine saves the edit and a trials.json record with its parent version. Render to compare.',
     parameters: S.obj({

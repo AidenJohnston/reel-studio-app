@@ -11,6 +11,16 @@ CUT_STYLES = {
     "punchline": {"secondsPerVisualChange": None, "framingPair": [1.0, 1.25], "jlBridges": 0, "smashes": 4, "sfxOnCuts": 4, "beatAccents": False, "extraVisualsFirst5s": False, "openingMax": 2},
 }
 
+def beat_accents_on(proj: dict) -> bool:
+    """Whether accents land on the song's beats: beatAccents when it is set (false turns them off even at the fast
+    pace), else the pace's own choice (hyper)."""
+    value = proj.get("beatAccents")
+    if isinstance(value, bool):
+        return value
+    style = proj.get("cutStyle")
+    return isinstance(style, dict) and isinstance(style.get("preset"), str) and bool(CUT_STYLES.get(style["preset"], {}).get("beatAccents"))
+
+
 OPENING = 5.0
 OPENING_MAX_UNSTYLED = 3   # the same check with no pace set
 
