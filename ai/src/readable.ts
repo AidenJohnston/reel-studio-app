@@ -19,7 +19,8 @@ export function minHeroPx(template: string, params: Record<string, any> = {}): n
 export const FULL_REGION = { x: 60, y: 260, w: 960, h: 1240 };
 
 interface Piece { chars: number; size: number; nowrap?: boolean; mono?: boolean }
-interface Spec { hero: number; pieces: Piece[]; maxKTop: number; maxKFull: number }
+/** pad: the card's own padding and gaps, px at scale 1, that grow with the type (width, height). */
+interface Spec { hero: number; pieces: Piece[]; maxKTop: number; maxKFull: number; pad?: { w: number; h: number } }
 
 const len = (v: unknown) => (typeof v === 'string' ? v.trim().length : typeof v === 'number' ? String(v).length : 0);
 
@@ -73,7 +74,8 @@ function composeSpec(p: Record<string, any>): Spec {
     pieces.push({ chars: Math.max(1, chars), size, nowrap: true, mono });
   }
   const hero = pieces.length ? Math.max(...pieces.map((x) => x.size)) : TIER.hero;
-  return { hero, maxKTop: 1.35, maxKFull: 2.2, pieces };
+  // compose/index.html: the card's 52 px sides and 40 px top and bottom, 18 px between rows
+  return { hero, maxKTop: 1.35, maxKFull: 2.2, pieces, pad: { w: 2 * 52, h: 2 * 40 + 18 * Math.max(0, rows.length - 1) } };
 }
 
 /** Estimated hero text height (px at 1080 wide) for template + params in a region. null = unknown template. */
@@ -85,12 +87,13 @@ export function estimateHeroPx(template: string, params: Record<string, any>, re
   // the templates' own loop: start at the largest scale, shrink until every line fits the width
   // and the wrapped stack fits the height
   const fits = (k: number) => {
-    let h = 0;
+    const roomW = maxW - (s.pad?.w ?? 0) * k;
+    let h = (s.pad?.h ?? 0) * k;
     for (const pc of s.pieces) {
       if (!pc.chars) continue;
       const w = pc.chars * cw(pc) * k;
-      if (pc.nowrap && w > maxW) return false;
-      h += pc.size * k * 1.12 * (pc.nowrap ? 1 : Math.max(1, Math.ceil(w / maxW)));
+      if (pc.nowrap && w > roomW) return false;
+      h += pc.size * k * 1.12 * (pc.nowrap ? 1 : Math.max(1, Math.ceil(w / roomW)));
     }
     return h <= maxH;
   };

@@ -70,6 +70,14 @@
       `<path transform="translate(${i * 30} 0)" d="${STAR}" ${fill ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"'}/>`).join('');
     return `<svg viewBox="0 0 ${w} 24" height="100%" style="height:100%;width:auto">${paths}</svg>`;
   }
+  /** How far across the stars' drawing (percent) a rating reaches: whole stars, then part of the next,
+   *  skipping the gaps between stars (each 24 wide, 30 apart, as starsSvg draws them). */
+  function starFill(v, n) {
+    const w = 24 * n + 6 * (n - 1);
+    const whole = Math.floor(v);
+    const x = whole >= n ? w : 30 * whole + 24 * (v - whole);
+    return (100 * x) / w;
+  }
   const ARROW = '<svg viewBox="0 0 90 50" width="100%" height="100%"><path d="M4 25H80M60 7l20 18-20 18" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /** Each part's entrance time in reading order: its own `at`, else STEP after the previous part. */
@@ -87,16 +95,18 @@
   RS.define({
     fonts: ['700 60px Inter', '600 60px Inter', '700 66px Fraunces', '600 66px Fraunces', '700 60px "JetBrains Mono"', '500 60px "JetBrains Mono"'],
     tilt: 0,
+    // the last part lands, then the graphic holds 1.8 s; never so short a late part is cut off
     duration(p) {
       const t = times(p.rows || []);
-      return Math.max(3, Math.min(12, (t[t.length - 1] || 0) + 1.8));
+      return Math.max(3, (t[t.length - 1] || 0) + 1.8);
     },
     enterAt: (p, ctx) => RS.firstBeat(ctx.times),
     build(p, ctx) {
       document.body.classList.add('face-' + (['serif', 'mono'].includes(p.face) ? p.face : 'sans'), 'align-' + (p.align === 'center' ? 'center' : 'start'));
-      const rows = (p.rows || []).slice(0, 5).map((r) => ({ parts: (r.parts || []).slice(0, 5) }));
-      let budget = MAX_PARTS;
-      for (const r of rows) { r.parts = r.parts.slice(0, Math.max(0, budget)); budget -= r.parts.length; }
+      const rows = (p.rows || []).map((r) => ({ parts: r.parts || [] }));
+      const count = rows.reduce((n, r) => n + r.parts.length, 0);
+      // the schema allows 5 rows of 5; a graphic with parts left off would say less than was asked
+      if (count > MAX_PARTS) throw new Error(`compose shows at most ${MAX_PARTS} parts; got ${count}`);
       ctx.times = times(rows);
       ctx.parts = [];
       const html = rows.map((row, ri) => `<div class="row">${row.parts.map((part, pi) => {
@@ -111,7 +121,7 @@
         } else if (kind === 'stars') {
           const max = Math.max(1, Math.min(10, Math.round(Number(part.max) || 5)));
           inner = `<span class="stars" id="${id}-s"><span class="c-muted">${starsSvg(max, false)}</span><span class="fill">${starsSvg(max, true)}</span></span>`;
-          ctx.parts.push({ id, kind, motion, fillTo: Math.max(0, Math.min(1, (Number(part.value) || 0) / max)) });
+          ctx.parts.push({ id, kind, motion, max, rating: Math.max(0, Math.min(max, Number(part.value) || 0)) });
         } else if (kind === 'arrow') {
           inner = ARROW;
         } else if (kind === 'text') {
@@ -167,7 +177,7 @@
         }
         if (pt.kind === 'stars') {
           const q = pt.motion === 'fill' ? RS.ease.outCubic(RS.prog(t, at, 0.6)) : 1;
-          pt.fill.style.clipPath = `inset(0 ${(100 * (1 - pt.fillTo * q)).toFixed(2)}% 0 0)`;
+          pt.fill.style.clipPath = `inset(0 ${(100 - starFill(pt.rating * q, pt.max)).toFixed(2)}% 0 0)`;
         }
         if (pt.bar) {
           const q = RS.ease.outCubic(RS.prog(t, pt.strikeAt, 0.18));
