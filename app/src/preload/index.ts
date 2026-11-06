@@ -119,6 +119,7 @@ const api: ReelApi = {
     list: () => call('projects:list'),
     search: (query) => call('projects:search', query),
     get: (slug) => call('projects:get', slug),
+    score: (slug, version) => call('projects:score', slug, version),
     create: (files) => call('projects:create', files),
     plan: () => call('projects:plan'),
     leave: (slug) => call('projects:leave', slug),
@@ -135,6 +136,8 @@ const api: ReelApi = {
     exportVersion: (slug, n) => call('projects:export', slug, n),
     coverCandidates: (slug, moments, source) => call('projects:coverCandidates', slug, moments, source),
     stopCoverCandidates: (slug) => call('projects:stopCoverCandidates', slug),
+    matchJoins: (slug, keep) => call('projects:matchJoins', slug, keep),
+    pacePreview: (slug) => call('projects:pacePreview', slug),
     exportPlatforms: (slug, n, request) => call('projects:exportPlatforms', slug, n, request),
     proposeTry: (slug, n, ask) => call('projects:proposeTry', slug, n, ask),
     proposeReels: (slug) => call('projects:proposeReels', slug),
@@ -205,7 +208,28 @@ const api: ReelApi = {
     keepLearned: (rules, from) => call('style:keepLearned', rules, from),
     update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
-    rememberLowercase: (slug) => call('style:rememberLowercase', slug)
+    rememberLowercase: (slug) => call('style:rememberLowercase', slug),
+    suggestions: () => call('style:suggestions'),
+    keepSuggestion: (id, text) => call('style:keepSuggestion', id, text),
+    dismissSuggestion: (id) => call('style:dismissSuggestion', id)
+  },
+  references: {
+    list: () => call('refs:list'),
+    add: (paths) => call('refs:add', paths),
+    addLink: (url) => call('refs:addLink', url),
+    attach: (id, path) => call('refs:attach', id, path),
+    remove: (id) => call('refs:remove', id),
+    openLink: (id) => call('refs:openLink', id),
+    reveal: (id) => call('refs:reveal', id),
+    onChange: (cb) => on<void>('refs:changed', () => cb())
+  },
+  niche: {
+    get: () => call('niche:get'),
+    save: (niche, from) => call('niche:save', niche, from),
+    remove: () => call('niche:remove'),
+    say: (turns, asked, draft) => call('niche:say', turns, asked, draft),
+    stop: () => call('niche:stop'),
+    onStatus: (cb) => on<{ message: string; waiting?: boolean }>('niche:status', cb)
   },
   sfx: {
     pack: () => call('sfx:pack')

@@ -7,6 +7,9 @@ import { Icon, type IconName } from '../components/icons'
 import { byKeyboard, reducedMotion } from '../components/motion'
 import { TitleBarSlot } from '../components/titlebar'
 import { LearnSheet } from './LearnSheet'
+import { MemorySuggestions } from './MemorySuggestions'
+import { NicheSection } from './NicheSection'
+import { ReferenceReels } from './ReferenceReels'
 import { styleEmptyLine } from './style-words'
 import '../components/library.css'
 
@@ -24,6 +27,7 @@ const EASE = 'cubic-bezier(.2, .8, .2, 1)'
 /** What the open line says under the full sentence: who uses the rule, or that nobody does while it is paused. */
 function usedBy(r: StyleRule): string {
   if (r.paused) return 'Paused. Not used on new reels until you resume it.'
+  if (r.check) return 'The app checks this on every reel it makes, and your editor fixes a reel that breaks it.'
   return r.payload ? 'The app sets this on every new reel.' : 'Your editor reads this on every new reel.'
 }
 
@@ -52,6 +56,8 @@ export function MyStyle() {
   const [sheet, setSheet] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [damaged, setDamaged] = useState(false)
+  // suggestions waiting above the list: the empty page's "Nothing learned yet" would contradict them
+  const [suggested, setSuggested] = useState(0)
   const editButtons = useRef(new Map<string, HTMLButtonElement>())
   const forgetButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
@@ -241,6 +247,8 @@ export function MyStyle() {
         </p>
       )}
 
+      <MemorySuggestions onKept={() => void load()} onCount={setSuggested} onGone={() => addButton.current?.focus()} />
+
       {lesson && (
         <section className="lesson" aria-labelledby="lesson-h" data-testid="style-lesson">
           <div className="lesson-h">
@@ -310,7 +318,7 @@ export function MyStyle() {
         </form>
       )}
 
-      {rules && !rules.length && !forgot && adding === null && !lesson && (
+      {rules && !rules.length && !forgot && adding === null && !lesson && !suggested && (
         <div className="style-empty" data-testid="style-empty">
           <h2>Nothing learned yet</h2>
           <p>{styleEmptyLine(IS_MAC)}</p>
@@ -363,7 +371,7 @@ export function MyStyle() {
                       value={editing.text}
                       onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
                       aria-label="Rule"
-                      aria-describedby={r.payload ? `edit-hint-${r.id}` : undefined}
+                      aria-describedby={r.payload || r.check ? `edit-hint-${r.id}` : undefined}
                       autoFocus
                       data-testid="style-edit-input"
                     />
@@ -374,9 +382,11 @@ export function MyStyle() {
                       Cancel
                     </button>
                   </form>
-                  {r.payload && (
+                  {(r.payload || r.check) && (
                     <p id={`edit-hint-${r.id}`} className="muted-sm style-edit-hint" data-testid="style-edit-hint">
-                      If you change these words, they become a sentence the AI reads, and the app no longer makes new reels lowercase by itself.
+                      {r.check
+                        ? 'If you change these words, they become a sentence the AI reads, and the app no longer checks every reel for it.'
+                        : 'If you change these words, they become a sentence the AI reads, and the app no longer makes new reels lowercase by itself.'}
                     </p>
                   )}
                 </li>
@@ -400,7 +410,7 @@ export function MyStyle() {
                   {kind && <span className="sr-only">{KIND_NAME[kind]}: </span>}
                   {line}
                 </button>
-                <span className="mem-state">{r.paused && 'Paused'}</span>
+                <span className="mem-state">{r.paused ? 'Paused' : r.check ? 'Checked' : null}</span>
                 <span className="mem-acts">
                   <button
                     className="btn small ghost"
@@ -448,6 +458,8 @@ export function MyStyle() {
           })}
         </ul>
       )}
+      <NicheSection />
+      <ReferenceReels />
       {sheet && <LearnSheet onClose={() => setSheet(false)} onLearned={learned} />}
     </div>
   )

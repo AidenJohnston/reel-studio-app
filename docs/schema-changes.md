@@ -2,6 +2,18 @@
 
 Existing project shapes remain valid. New shapes can require a newer engine, as noted below. Schema: `engine/reelengine/schema/project.schema.json`.
 
+## 2026-11-06 (match cuts, joins and beat landing by hand)
+
+- `cut.keep[].join.transition` accepts `"match"`. The engine searches the silence around that cut for the frames
+  that line up (`engine/reelengine/match.py`) and cuts there; when none do, the join plays as a plain cut and the
+  render warns. Older builds refuse a project with a match join (`BAD_JOIN`) rather than render something else.
+- `cut.keep[].join.transition` accepts `"flash"`: the picture dips to white for 2 frames before the cut and 3 after
+  it (`render.flash_layers`), drawn as a layer so every kind of render shows it.
+- `beatAccents: false` now turns beat landing off even when `cutStyle.preset` is `"hyper"`. Before, false meant the
+  same as absent. Neither the app nor the AI ever wrote false, so only a project edited by hand can render differently.
+- "Edit it myself" sets joins (Cut > Transitions) and `beatAccents` (Cut > Pace) through the `handEdits` queue. A
+  queued hand edit saved before this has no `joins` list and applies as it did.
+
 ## 2026-11-05 (pace by hand, receipts name it)
 
 - No new field. "Edit it myself" now sets `cutStyle` (Cut > Pace) and each zoom's `kind`, through the same

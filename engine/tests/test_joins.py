@@ -157,7 +157,8 @@ def test_join_markers_survive_source_splits_repeats_and_merged_ranges(tmp_path):
 
 @pytest.mark.parametrize("join,first", [
     ({"transition": "j", "frames": 6}, True),
-    ({"transition": "match", "frames": 6}, False),
+    ({"transition": "match", "frames": 6}, True),
+    ({"transition": "dissolve", "frames": 6}, False),
     ({"transition": "j", "frames": -1}, False),
     ({"transition": "l", "frames": 1.5}, False),
 ])
