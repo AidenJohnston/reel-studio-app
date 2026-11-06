@@ -63,6 +63,10 @@ label.edit-row-main { flex-direction: row; align-items: center; gap: 10px; curso
 .edit-row.zoom-row, .edit-row.join-row { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 .zoom-row > .edit-row-main, .join-row > .edit-row-main { min-width: 160px; }
 .zoom-row .edit-row-title, .join-row .edit-row-title { white-space: normal; }
+/* Six or seven ways a cut can play don't fit beside the words at the smallest window: they take their own line,
+   split evenly across the column (Windows 11 screenshot at 1100 x 720 clipped "Flash" when they sat beside them). */
+.join-row > .segmented { flex: 1 1 100%; display: grid; }
+.join-row > .segmented > button { min-width: 0; padding: 0 4px; }
 
 /* Sound (SoundTab.tsx). A slider is its label, the track, and its value in a fixed column so the tracks line up. */
 .edit-sliders { display: flex; flex-direction: column; gap: 2px; }

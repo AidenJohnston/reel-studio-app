@@ -87,7 +87,7 @@ it('find_match_cuts asks about every join and reports which line up', async () =
   host.matchable.add('w27');
   const r = await executeTool(ctx, 'find_match_cuts', {});
   expect(r.isError, r.content).toBe(false);
-  expect((r.content as any).joins).toEqual([
+  expect(JSON.parse(r.content as string).joins).toEqual([
     { keep: 1, at: 2, matched: false, why: 'the speaker moves too much across the cut' },
     { keep: 2, at: 4, matched: true },
   ]);

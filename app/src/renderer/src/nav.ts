@@ -1,6 +1,7 @@
 export type Screen =
   | { name: 'home' }
-  | { name: 'reel'; slug: string }
+  /** `version`: open showing this version (Insights opens the one that was posted) instead of the newest. */
+  | { name: 'reel'; slug: string; version?: number }
   | { name: 'library' }
   | { name: 'style' }
   | { name: 'insights' }
@@ -9,4 +10,4 @@ export type Screen =
 
 export type Go = (s: Screen) => void
 
-export type SettingsSection = 'ai' | 'listen' | 'where' | 'notify' | 'privacy' | 'about'
+export type SettingsSection = 'ai' | 'listen' | 'where' | 'notify' | 'privacy' | 'posting' | 'about'
