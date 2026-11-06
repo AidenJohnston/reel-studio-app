@@ -752,16 +752,17 @@ export function createAI(opts: CreateAIOptions) {
     return harness;
   }
 
+  /** The other app checks a note made in one (Settings > Double-check each edit), when it can answer: installed and
+   * signed in. Otherwise undefined, and the checker model reviews it as in our own loop (applyNote). */
   async function checkerHarness(editorHarness: Harness | undefined): Promise<Harness | undefined> {
     if (opts.checkerHarnessOverride) return opts.checkerHarnessOverride;
-    if (!opts.dev) return undefined;
     if (editorHarness?.id === 'claude-code') {
-      const bin = (await localCodex()).bin;
-      return new CodexHarness({ env: env(), ...(bin ? { bin } : {}) });
+      const other = await localCodex();
+      return other.state === 'ready' && other.bin ? new CodexHarness({ env: env(), bin: other.bin }) : undefined;
     }
     if (editorHarness?.id === 'codex') {
-      const bin = (await localClaude()).bin;
-      return new ClaudeCodeHarness({ env: env(), ...(bin ? { bin } : {}) });
+      const other = await localClaude();
+      return other.state === 'ready' && other.bin ? new ClaudeCodeHarness({ env: env(), bin: other.bin }) : undefined;
     }
     return undefined;
   }
@@ -1076,7 +1077,8 @@ export function createAI(opts: CreateAIOptions) {
         const harness = await noteHarness(provider);
         // "Double-check each edit": in our own loop the checker role's model reviews (#73); a note in an MCP harness
         // is reviewed by the other harness (mcp-harness-2)
-        const checker = !opts.checkEdit ? {} : harness ? { checkerHarness: await checkerHarness(harness) } : { checker: await modelProvider('checker', fell) };
+        const other = opts.checkEdit && harness ? await checkerHarness(harness) : undefined;
+        const checker = !opts.checkEdit ? {} : other ? { checkerHarness: other } : { checker: await modelProvider('checker', fell) };
         const r = withFallbacks(await editor.applyNote({ ...d, ...checker, harness }, provider, projectDir, note, onEvent, signal, opts), fell);
         return r.version !== undefined && r.changed.length ? { ...r, ...(await madeWith(provider)) } : r;
       }));

@@ -663,10 +663,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const question = undone && /^[^.!]*\?$/.test(r.finished?.trim() ?? '') ? r.finished : null;
     // Settings > "Double-check each edit": a checker reviews a note that changed the edit before its final render
     // a note in an MCP harness (dev only) is checked by the other harness instead (mcp-harness-2, checkInHarness)
-    const harnessed = opts.checkEdit && ctx.state.changed.size && deps.harness
+    // the other app checks when it can answer (index.ts checkerHarness); otherwise the checker model does
+    const crossCheck = !!(opts.checkEdit && ctx.state.changed.size && deps.harness && deps.checkerHarness);
+    const harnessed = crossCheck
       ? await checkInHarness(deps, harness, ctx, { noteText, files, images, start: p0, said: r.finished || 'I saved your preference.', tokens: r.tokens }, onEvent, signal)
       : null;
-    const review = !opts.checkEdit || !ctx.state.changed.size || deps.harness ? null : await checkAndRepair(deps, provider, ctx, label, p0,
+    const review = !opts.checkEdit || !ctx.state.changed.size || crossCheck ? null : await checkAndRepair(deps, provider, ctx, label, p0,
       { files, images, assets: [...attached, ...earlier].map((a) => a.asset) }, onEvent, signal)
       // a checker model of its own only asked (askChecker), so no agent run disposed of it
       .finally(() => (deps.checker && deps.checker !== provider ? deps.checker.dispose?.() : undefined));
