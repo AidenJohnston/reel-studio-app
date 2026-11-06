@@ -65,7 +65,9 @@ frame (`PerformanceObserver` type `long-animation-frame`, with the scripts that 
 It reports, per moment and run, the median gap (the display's frame time), the longest gap, the 95th percentile and
 the frames longer than 50 ms. Around "Use it" it also records a Chromium trace and reports its longest tasks with the process and thread
 each ran on (the renderer's main thread, the GPU process, the compositor), so a long frame can be put down to its
-cause, and what the page painted in the 600 ms after the click, by element and area: the raster a GPU task
-then does. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
+cause, and what the page painted in the 600 ms after the click, by element and area. The same trace covers the
+600 ms before the click (`stillTasks`, `stillPaints`): what the step does with nobody touching it, so the work the click
+adds is the difference. A Paint's area is what Chromium re-recorded, not what the GPU rastered; the GPU tasks' time is
+the raster. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
 report's path.
 
