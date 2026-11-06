@@ -7,12 +7,12 @@ import { createJobManager } from '../src/main/jobs'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
-import { projectDir, readAppState, recoverInterrupted } from '../src/main/store'
+import { projectDir, readAppState, recoverInterrupted, updateAppState } from '../src/main/store'
 import { setupPaths } from './helpers'
 
 // Off: the real fs.promises.rm. On: removing that one path is refused, as Windows refuses while a file in
 // it is open (a player, a virus scanner).
-const refuseRm = vi.hoisted(() => ({ path: '', refused: 0 }))
+const refuseRm = vi.hoisted(() => ({ path: '', refused: 0, code: 'EPERM' }))
 vi.mock(import('node:fs'), async (real) => {
   const fs = await real()
   return {
@@ -22,7 +22,7 @@ vi.mock(import('node:fs'), async (real) => {
       rm: async (...args: Parameters<typeof fs.promises.rm>) => {
         if (String(args[0]) === refuseRm.path) {
           refuseRm.refused++
-          throw Object.assign(new Error(`EPERM: operation not permitted, rm '${args[0]}'`), { code: 'EPERM' })
+          throw Object.assign(new Error(`${refuseRm.code}: rm '${args[0]}'`), { code: refuseRm.code })
         }
         return fs.promises.rm(...args)
       }
@@ -146,5 +146,57 @@ describe('a job whose unfinished version cannot be removed', () => {
     expect(s.lastError?.code).toBe('RENDER_FAILED')
     expect(s.chat.map((m) => m.text)).not.toContainEqual(expect.stringMatching(/closed before I finished/))
     expect(await recoverInterrupted()).toEqual([])
+  })
+
+  /** Projects a crash left with a job in app.json and an unfinished version 2. */
+  async function interrupted(...slugs: string[]) {
+    setupPaths()
+    for (const slug of slugs) {
+      mkdirSync(join(projectDir(slug), 'versions', 'v2'), { recursive: true })
+      writeFileSync(join(projectDir(slug), 'versions', 'v2', '.rendering'), '')
+      await updateAppState(slug, (s) => {
+        s.job = { id: `job-${slug}`, kind: 'rerender', startedAt: new Date().toISOString() }
+      })
+    }
+    return (slug: string) => join(projectDir(slug), 'versions', 'v2')
+  }
+
+  it('a start that still cannot remove one project\'s version settles its job, keeps the mark, and recovers the projects after it', async () => {
+    const v2 = await interrupted('a-held', 'b-next')
+    // its job was recorded, and so was a clean-up it owed
+    await updateAppState('a-held', (s) => {
+      s.cleanupOwed = true
+    })
+    refuseRm.path = v2('a-held')
+    refuseRm.refused = 0
+    try {
+      expect((await recoverInterrupted()).sort()).toEqual(['a-held', 'b-next'])
+    } finally {
+      refuseRm.path = ''
+    }
+    expect(refuseRm.refused).toBe(1)
+    expect(existsSync(v2('b-next'))).toBe(false)
+    expect((await readAppState('b-next')).job).toBeNull()
+    const held = await readAppState('a-held')
+    expect(held.job).toBeNull()
+    expect(held.cleanupOwed).toBe(true)
+    expect(existsSync(v2('a-held'))).toBe(true)
+
+    // the next start
+    expect(await recoverInterrupted()).toEqual(['a-held'])
+    expect(existsSync(v2('a-held'))).toBe(false)
+    expect((await readAppState('a-held')).cleanupOwed).toBeUndefined()
+  })
+
+  it('a removal that fails for another reason than a refusal still stops the start\'s recovery', async () => {
+    const v2 = await interrupted('broken')
+    refuseRm.path = v2('broken')
+    refuseRm.code = 'EIO'
+    try {
+      await expect(recoverInterrupted()).rejects.toMatchObject({ code: 'EIO' })
+    } finally {
+      refuseRm.path = ''
+      refuseRm.code = 'EPERM'
+    }
   })
 })
