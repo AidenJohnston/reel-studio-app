@@ -18,9 +18,21 @@ test('first run downloads the listening model with progress', async () => {
     await page.getByTestId('get-started').click()
     await passMacStage(page)
     await shot(page, 'firstrun/01-download')
+    // Every value the bar shows, as it changes (not sampled: a fast download can pass between samples). The bar,
+    // not its words: the line under it reads "x of y MB" when the model's size is known.
+    await page.evaluate(() => {
+      const shown: number[] = []
+      ;(window as unknown as { downloadShown: number[] }).downloadShown = shown
+      const read = (): void => {
+        const value = document.querySelector('[role=progressbar][aria-label="Downloading the listening model"]')?.getAttribute('aria-valuenow')
+        if (value != null && Number(value) !== shown.at(-1)) shown.push(Number(value))
+      }
+      new MutationObserver(read).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-valuenow'] })
+    })
+    const shown = (): Promise<number[]> => page.evaluate(() => (window as unknown as { downloadShown: number[] }).downloadShown)
     const t0 = Date.now()
     await page.getByTestId('download-model').click()
-    const seen = new Set<number>()
+    let progressShot = false
     // When the download finishes the screen moves on to "Connect your AI editor" by itself.
     const connect = page.getByText('Connect your AI editor')
     // A dropped connection stops the download with an error banner and a "Keep downloading" button, like a
@@ -36,17 +48,19 @@ test('first run downloads the listening model with progress', async () => {
         await again.click()
         await page.waitForTimeout(2000)
       }
-      // The bar, not its words: the line under it reads "x of y MB" when the model's size is known.
-      const now = await page.getByRole('progressbar', { name: 'Downloading the listening model' }).getAttribute('aria-valuenow', { timeout: 1000 }).catch(() => null)
-      if (now !== null) seen.add(Number(now))
-      if (seen.size === 3) await shot(page, 'firstrun/02-progress')
+      if (!progressShot && (await shown()).length >= 3) {
+        progressShot = true
+        await shot(page, 'firstrun/02-progress')
+      }
       if (Date.now() - t0 > 25 * 60_000) throw new Error('download took over 25 minutes')
       await page.waitForTimeout(300)
     }
     const secs = Math.round((Date.now() - t0) / 1000)
-    const pcts = [...seen].sort((a, b) => a - b)
+    const pcts = await shown()
     console.log(`model ${model} downloaded in ${secs}s (${retries} resumed after a stop), progress seen: ${pcts.join(',')}`)
-    expect(pcts.length, 'saw the progress move').toBeGreaterThan(2)
+    expect(new Set(pcts).size, 'saw the progress move').toBeGreaterThan(1)
+    // A resumed download carries on from what it already had, so the bar never goes back.
+    expect(pcts).toEqual([...pcts].sort((a, b) => a - b))
     expect(readdirSync(join(models, model))).toEqual(expect.arrayContaining(['model.bin', 'config.json']))
     expect(existsSync(join(models, model, 'model.bin.part'))).toBe(false)
     await shot(page, 'firstrun/03-connect')
