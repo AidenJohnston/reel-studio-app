@@ -27,6 +27,12 @@ async function phoneShot(app: ElectronApplication, name: string): Promise<void> 
   writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'))
 }
 
+/** Sizes the phone window itself as well as Playwright's viewport: capturePage reads the window, not the emulation. */
+async function sizePhone(app: ElectronApplication, phone: Page, width: number, height: number): Promise<void> {
+  await app.evaluate((_e, [w, h]) => (globalThis as unknown as { __phone: { setContentSize(w: number, h: number): void } }).__phone.setContentSize(w, h), [width, height])
+  await phone.setViewportSize({ width, height })
+}
+
 async function openPhone(app: ElectronApplication, url: string): Promise<Page> {
   const opened = app.waitForEvent('window')
   await app.evaluate(({ BrowserWindow }, u) => {
@@ -41,7 +47,7 @@ async function openPhone(app: ElectronApplication, url: string): Promise<Page> {
     void w.loadURL(u)
   }, url)
   const phone = await opened
-  await phone.setViewportSize({ width: 390, height: 844 })
+  await sizePhone(app, phone, 390, 844)
   return phone
 }
 
@@ -104,9 +110,11 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await expect(phone.getByTestId('cp-chat')).toContainText('I made the subtitles lowercase.')
     await phoneShot(app, 'companion-05-phone-version-2')
     // the same page in a desktop browser, and with reduced motion on (prep-for-prod's runtime pass)
-    await phone.setViewportSize({ width: 1440, height: 900 })
+    await sizePhone(app, phone, 960, 800)
+    await phoneShot(app, 'companion-05a-960')
+    await sizePhone(app, phone, 1440, 900)
     await phoneShot(app, 'companion-05b-wide')
-    await phone.setViewportSize({ width: 320, height: 640 })
+    await sizePhone(app, phone, 320, 640)
     await phone.emulateMedia({ reducedMotion: 'reduce' })
     await phone.locator('[data-testid="cp-version"][data-n="1"]').click()
     await phoneShot(app, 'companion-05c-320-reduced-motion')
@@ -121,7 +129,7 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
       })
       expect(ring).not.toMatch(/^missing/)
     }
-    await phone.setViewportSize({ width: 390, height: 844 })
+    await sizePhone(app, phone, 390, 844)
     await page.getByTestId('pair-close').click()
     await page.getByTestId('nav-home').click()
     await page.getByTestId('project-card').first().click()

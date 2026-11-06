@@ -46,6 +46,36 @@ const api: ReelApi = {
     publish: (input) => call('instagram:publish', input),
     insights: (slug, version, postId) => call('instagram:insights', slug, version, postId)
   },
+  social: { status: (fresh) => call('social:status', fresh === true) },
+  facebook: {
+    session: () => call('facebook:session'),
+    connect: () => call('facebook:connect'),
+    cancelConnect: () => call('facebook:cancelConnect'),
+    disconnect: () => call('facebook:disconnect'),
+    choosePage: (pageId) => call('facebook:choosePage', pageId),
+    publish: (input) => call('facebook:publish', input)
+  },
+  threads: {
+    session: () => call('threads:session'),
+    connect: () => call('threads:connect'),
+    cancelConnect: () => call('threads:cancelConnect'),
+    disconnect: () => call('threads:disconnect'),
+    publish: (input) => call('threads:publish', input)
+  },
+  x: {
+    session: () => call('x:session'),
+    connect: () => call('x:connect'),
+    cancelConnect: () => call('x:cancelConnect'),
+    disconnect: () => call('x:disconnect'),
+    publish: (input) => call('x:publish', input)
+  },
+  linkedin: {
+    session: () => call('linkedin:session'),
+    connect: () => call('linkedin:connect'),
+    cancelConnect: () => call('linkedin:cancelConnect'),
+    disconnect: () => call('linkedin:disconnect'),
+    publish: (input) => call('linkedin:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),
