@@ -66,10 +66,16 @@ def resolve(project: dict, timeline) -> tuple[dict, dict | None]:
             held = [s.out_start for s in timeline.segments if s.join_transition == "match"]
             boundaries = sorted({float(w["s"]) for w in timeline.words_out
                                  if w["s"] > 0 and all(abs(w["s"] - h) >= MATCH_HOLD for h in held)})
+            # A cut already changes the picture. On a real take (harness/pace_survey.py, Windows 11) every pace
+            # added its switches on top of the cut's own, so Calm changed the picture more often than no pace at
+            # all: a switch closer to a cut than the band's shortest hold is left out.
+            cuts = [float(s.out_start) for s in list(timeline.segments)[1:]]
             while target < timeline.duration:
                 candidates = [t for t in boundaries if t > changes[-1] and abs(t - target) <= .5]
                 if candidates:
-                    changes.append(min(candidates, key=lambda t: (abs(t - target), t)))
+                    pick = min(candidates, key=lambda t: (abs(t - target), t))
+                    if not any(abs(c - pick) < band[0] for c in cuts):
+                        changes.append(pick)
                 target += cadence
         for i, t0 in enumerate(changes):
             framing.append({"t0": t0, "t1": changes[i + 1] if i + 1 < len(changes) else timeline.duration,
