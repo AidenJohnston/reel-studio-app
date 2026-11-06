@@ -173,6 +173,7 @@ const api: ReelApi = {
     proposeReels: (slug) => call('projects:proposeReels', slug),
     makeReels: (slug, ids) => call('projects:makeReels', slug, ids),
     foldReels: (slug, folded) => call('projects:foldReels', slug, folded),
+    setSeries: (slug, series) => call('projects:setSeries', slug, series),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {
@@ -222,6 +223,12 @@ const api: ReelApi = {
     add: (paths) => call('library:add', paths),
     choose: (kind) => call('library:choose', kind),
     preview: (path) => call('library:preview', path)
+  },
+  footage: {
+    sources: () => call('footage:sources'),
+    addSource: () => call('footage:addSource'),
+    removeSource: (id) => call('footage:removeSource', id),
+    status: () => call('footage:status')
   },
   style: {
     rules: () => call('style:rules'),

@@ -75,7 +75,8 @@ def test_copies_share_one_transcript(library):
         assert db.execute("SELECT count(*) FROM files").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM paths").fetchone()[0] == 2
     assert len(calls) == 1
-    assert result == {"files": 2, "stagesRun": 3, "pending": 0}
+    assert result == {"files": 2, "stagesRun": 3, "pending": 0, "filesPending": 0, "filesFailed": 0,
+                      "places": [{"id": "Library", "files": 2, "online": True}]}
 
 
 def test_interrupted_run_keeps_committed_stages(library, clips):
@@ -209,12 +210,13 @@ def test_search_without_fts5_reports_literal_fallback(library, monkeypatch, caps
 def test_budget_and_stage_versions_resume_only_missing_work(library, monkeypatch):
     root, calls = library
     assert command(root, "index", "--budget-seconds", "0") == {
-        "files": 1, "stagesRun": 0, "pending": 3}
+        "files": 1, "stagesRun": 0, "pending": 3, "filesPending": 1, "filesFailed": 0,
+        "places": [{"id": "Library", "files": 1, "online": True}]}
     assert not calls
     command(root, "index")
     from reelengine import footage
     monkeypatch.setattr(footage, "SHOTS_VERSION", footage.SHOTS_VERSION + 1)
-    assert command(root, "index") == {"files": 1, "stagesRun": 1, "pending": 0}
+    assert command(root, "index")["stagesRun"] == 1
     assert len(calls) == 1
     assert command(root, "index", "--model", "tiny.en")["stagesRun"] == 1
     assert len(calls) == 2
@@ -478,3 +480,127 @@ def test_search_rejects_malformed_stored_hash_before_thumbnail_writes(library, t
         command(root, "search", "--query", "twenty bucks")
     assert list(outside.iterdir()) == []
     assert not (root / ".index" / "thumbs").exists()
+
+
+SOURCE = "src-0123abcd"
+
+
+def test_footage_folder_is_indexed_in_place_and_found(library, clips, tmp_path):
+    root, calls = library
+    drive = tmp_path / "Drive ü" / "Shoots"
+    (drive / "day 1").mkdir(parents=True)
+    (drive / ".hidden").mkdir()
+    shutil.copyfile(clips[1], drive / "day 1" / "b.mp4")
+    shutil.copyfile(clips[1], drive / ".hidden" / "skip.mp4")
+    (drive / "song.mp3").write_bytes(b"not a video")
+    result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    # fails if a footage folder is copied, read for songs, or walked into hidden folders
+    assert result["places"] == [{"id": "Library", "files": 1, "online": True},
+                                {"id": SOURCE, "files": 1, "online": True}]
+    assert len(calls) == 2
+    assert not (root / "Library" / "b.mp4").exists()
+    paths = {hit["file"]["path"] for hit in command(root, "search", "--query", "twenty bucks")["hits"]}
+    # fails if a hit in an added folder is named as a Library file the editor would then not find
+    assert paths == {"Library/a.mp4", f"Footage/{SOURCE}/day 1/b.mp4"}
+
+
+def test_unplugged_folder_keeps_its_index_and_says_so(library, clips, tmp_path):
+    root, calls = library
+    (root / "Library" / "a.mp4").unlink()
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    drive.rename(tmp_path / "unplugged")
+    result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    # fails if an unplugged drive's analysis is thrown away, so plugging it back listens to every file again
+    assert result["places"][1] == {"id": SOURCE, "files": 1, "online": False}
+    hit, = command(root, "search", "--query", "twenty bucks")["hits"]
+    assert hit["file"]["online"] is False and hit["thumbnail"] is None
+    assert hit["file"]["path"] == f"Footage/{SOURCE}/b.mp4"
+    (tmp_path / "unplugged").rename(drive)
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
+    assert len(calls) == 1
+
+
+def test_folder_no_longer_named_is_forgotten(library, clips, tmp_path):
+    root, _ = library
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    result = command(root, "index")
+    # fails if a removed folder's clips stay searchable after the person removed it
+    assert result["places"] == [{"id": "Library", "files": 1, "online": True}]
+    assert [h["file"]["path"] for h in command(root, "search", "--query", "twenty bucks")["hits"]] == ["Library/a.mp4"]
+    with connect(root) as db:
+        assert db.execute("SELECT count(*) FROM places").fetchone()[0] == 1
+
+
+def test_progress_counts_the_files_left_once_per_copy(library, clips, monkeypatch):
+    root, _ = library
+    shutil.copyfile(clips[0], root / "Library" / "copy of a.mp4")
+    shutil.copyfile(clips[1], root / "Library" / "b.mp4")
+    from reelengine import footage
+    seen = []
+    monkeypatch.setattr(footage, "progress", lambda stage, pct, message, force=False: seen.append((pct, message)))
+    command(root, "index")
+    # fails if a copy is counted as more work, or the bar ends short of full
+    assert {m for _, m in seen} == {"Reading a.mp4 (1 of 2)", "Reading b.mp4 (2 of 2)"}
+    assert [p for p, _ in seen] == sorted(p for p, _ in seen) and seen[-1][0] == 100
+
+
+def test_damaged_video_is_skipped_until_it_changes(library, clips, tmp_path):
+    root, calls = library
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    (drive / "half copied.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42 not really a video")
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    first = command(root, "index", "--source", f"{SOURCE}={drive}")
+    # fails if one damaged file stops every run at itself, or keeps the app re-running the index for ever
+    assert first["pending"] == 0 and first["filesFailed"] == 1
+    assert len(calls) == 2
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
+    shutil.copyfile(clips[0], drive / "half copied.mp4")
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesFailed"] == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows folder permissions do not stop a directory listing this way")
+def test_unreadable_subfolder_keeps_its_indexed_files(library, clips, tmp_path):
+    root, calls = library
+    drive = tmp_path / "drive"
+    (drive / "locked").mkdir(parents=True)
+    shutil.copyfile(clips[1], drive / "locked" / "b.mp4")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    (drive / "locked").chmod(0)
+    try:
+        result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    finally:
+        (drive / "locked").chmod(0o755)
+    # fails if a folder that could not be listed is taken for empty and its analysis thrown away
+    assert result["places"][1]["files"] == 1
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
+    assert len(calls) == 2
+
+
+def test_drive_pulled_while_reading_is_offline_not_damaged(library, clips, tmp_path, monkeypatch):
+    root, calls = library
+    (root / "Library" / "a.mp4").unlink()
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    from reelengine import footage, probe
+    from reelengine.proto import EngineError
+    real = probe.probe
+
+    def pulled(path, quick=False):
+        drive.rename(tmp_path / "away")
+        raise EngineError("PROBE_FAILED", "gone", "I could not open this video.")
+    monkeypatch.setattr(probe, "probe", pulled)
+    result = command(root, "index", "--source", f"{SOURCE}={drive}")
+    assert result["places"][1]["online"] is False and result["filesFailed"] == 0
+    monkeypatch.setattr(probe, "probe", real)
+    (tmp_path / "away").rename(drive)
+    # fails if a file read while its drive was pulled is marked damaged and never read again
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesPending"] == 0
+    assert len(calls) == 1
