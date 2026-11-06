@@ -2,7 +2,7 @@
 // Pure, so every sentence has a test (app/test/insight-words.test.ts).
 import type { AudienceSlice, InsightPlatform, InsightReel, PlatformAudience } from './insights'
 
-export const PLATFORM_NAMES: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
+export const PLATFORM_NAMES: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads', x: 'X', linkedin: 'LinkedIn' }
 
 /** 12,400 → "12.4K". Counts under 10,000 keep every digit. */
 export function compact(n: number): string {

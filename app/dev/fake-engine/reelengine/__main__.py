@@ -772,6 +772,44 @@ def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
 
+def cmd_footage(args: list[str]) -> dict:
+    """footage index: counts the videos in each --source folder (and the Library's media), with the real engine's
+    per-file progress and result shape (reelengine/footage.py), but reads nothing. footage search finds nothing.
+    FAKE_ENGINE_INDEX_STEP=<seconds> is how long each file takes (default 0.4), so a test can see the progress."""
+    action = args.pop(0) if args else ""
+    if action == "search":
+        return {"hits": [], "more": False, "backend": "none"}
+    if action != "index":
+        raise Fail("BAD_ARGS", "Reel Studio asked for something I do not know how to do.", action)
+    root = Path(take(args, "--root") or ROOT)
+    places = [("Library", root / "Library", VIDEO | AUDIO)]
+    while "--source" in args:
+        sid, _, folder = take(args, "--source").partition("=")
+        places.append((sid, Path(folder), VIDEO))
+    step = float(os.environ.get("FAKE_ENGINE_INDEX_STEP", "0.4") or 0)
+    # the real engine keeps an unplugged folder's rows; the stand-in keeps its last count
+    counts_file = root / ".index" / "fake-counts.json"
+    counts = json.loads(counts_file.read_text()) if counts_file.is_file() else {}
+    found, out = [], []
+    for pid, folder, kinds in places:
+        if pid != "Library" and not folder.is_dir():
+            out.append({"id": pid, "files": counts.get(pid, 0), "online": False})
+            continue
+        files = sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in kinds
+                       and not any(part.startswith(".") for part in p.relative_to(folder).parts))
+        out.append({"id": pid, "files": len(files), "online": True})
+        counts[pid] = len(files)
+        found += files
+    counts_file.parent.mkdir(parents=True, exist_ok=True)
+    counts_file.write_text(json.dumps(counts))
+    for k, f in enumerate(found):
+        progress("footage-file", 100 * k / len(found), f"Reading {f.name} ({k + 1} of {len(found)})")
+        time.sleep(step)
+    if found:
+        progress("footage-shots", 100, f"Reading {found[-1].name} ({len(found)} of {len(found)})")
+    return {"files": len(found), "stagesRun": 3 * len(found), "pending": 0, "filesPending": 0, "places": out}
+
+
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
@@ -779,7 +817,7 @@ COMMANDS = {
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
     "reference-scan": cmd_reference_scan, "moments": cmd_moments, "score": cmd_score, "measure-reel": cmd_measure_reel,
-    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview,
+    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview, "footage": cmd_footage,
 }
 
 
