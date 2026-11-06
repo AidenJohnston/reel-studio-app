@@ -1,11 +1,12 @@
 """The Windows Job Object setup (contain.py), against a stand-in kernel32: these are the calls and
-their failure handling. That Windows then ends ffmpeg with the engine needs a Windows machine."""
+their failure handling. On Windows, the real job is checked to end a crashed engine's child."""
 import ctypes
 import io
 import json
 import subprocess
 import sys
 import wave
+from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,48 @@ def test_on_windows_a_command_finishes_when_the_engine_cannot_join_its_job(tmp_p
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert json.loads(proc.stdout.splitlines()[-1])["event"] == "done"
     assert "no Job Object (Windows error 5)" in proc.stderr
+
+
+# An engine that joins its job, starts a child (as a render starts ffmpeg), reports the child's pid, and
+# dies without any clean-up once its input closes.
+CRASHING_ENGINE = r"""
+import os, subprocess, sys
+from reelengine import contain
+contain.contain_children()
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+print(child.pid, flush=True)
+sys.stdin.readline()
+os._exit(1)
+"""
+
+SYNCHRONIZE, PROCESS_TERMINATE = 0x00100000, 0x0001
+WAIT_OBJECT_0, WAIT_TIMEOUT = 0, 0x102
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the real Job Object")
+def test_on_windows_a_crashed_engine_takes_its_child_with_it():
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    engine = subprocess.Popen([sys.executable, "-c", CRASHING_ENGINE], cwd=ENGINE,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        pid = int(engine.stdout.readline())
+        # held open, so the child's number can't pass to another process while this test looks at it
+        child = k32.OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, False, pid)
+        assert child, ctypes.get_last_error()
+        try:
+            assert k32.WaitForSingleObject(child, 0) == WAIT_TIMEOUT    # running while the engine is
+            engine.stdin.close()
+            assert engine.wait(timeout=30) == 1
+            assert k32.WaitForSingleObject(child, 10_000) == WAIT_OBJECT_0
+        finally:
+            k32.TerminateProcess(child, 1)
+            k32.CloseHandle(child)
+    finally:
+        if engine.poll() is None:
+            engine.kill()
