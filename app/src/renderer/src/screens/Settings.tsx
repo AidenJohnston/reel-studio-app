@@ -246,7 +246,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               {lookUps !== null && (
                 <SettingRow
                   id="look-ups"
-                  line="When a note needs pictures of several things, a second AI searches for them at the same time: your other app (Claude Code or Codex) when it is signed in, otherwise another copy of your editor. It only looks things up and never changes your video. Uses more of your AI plan."
+                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: Claude Code or Codex, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
                   control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
                 />
               )}

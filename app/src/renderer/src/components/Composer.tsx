@@ -217,7 +217,7 @@ export function Composer({
         <>
           {base && (
             <span className="base-chip" data-testid="note-base">
-              Changes Version {base.n}
+              New version from Version {base.n}
               <button
                 className="x"
                 aria-label={`Change the newest version instead of Version ${base.n}`}

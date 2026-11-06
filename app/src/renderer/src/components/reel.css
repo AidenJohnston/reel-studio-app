@@ -492,7 +492,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .scrub-speed.on { background: #fff; color: var(--ink); }
 
 /* What the keyboard opens or folds just appears. */
-html.kb :is(.acc > div, .stripwrap > div, .steps > div, .tchip, .spot, .draghandle, .tl-mark, .transport .pp, .cmp-done, .send) { transition: none !important; }
+html.kb :is(.acc > div, .stripwrap > div, .steps > div, .tchip, .spot, .draghandle, .tl-mark, .transport .pp, .cmp-done, .cmp-side, .sbs-pp, .send) { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .acc > div, .stripwrap > div, .steps > div { transform: none; transition-property: opacity; }
   .phone.landing .phone-screen > video.layer.loading { filter: none; }

@@ -30,17 +30,22 @@ const DRIFT_S = 0.12
  * Compare › Side by side: both versions play at once, in step, from where the player was. The sound comes from one
  * of them (the person picks which); one Play and one scrubber drive both. Done hands the time back to the player.
  */
-export function SideBySide({ a, b, nameOf, at, onDone, onOne }: { a: VersionInfo; b: VersionInfo; nameOf: (v: VersionInfo) => string; at: number; onDone: (seconds: number) => void; onOne: (seconds: number) => void }) {
+export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: VersionInfo; b: VersionInfo; nameOf: (v: VersionInfo) => string; at: number; onOpen: () => void; onDone: (seconds: number) => void; onOne: (seconds: number) => void }) {
   const titleId = useId()
   const refs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)]
   const [sound, setSound] = useState<'a' | 'b'>('a')
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(at)
-  const [duration, setDuration] = useState(0)
+  // both play only as long as the shorter one
+  const [durations, setDurations] = useState<[number, number]>([0, 0])
+  const duration = Math.min(...durations.filter((d) => d > 0), Infinity)
+  const end = Number.isFinite(duration) ? duration : 0
   const lead = () => refs[sound === 'a' ? 0 : 1].current
   const other = () => refs[sound === 'a' ? 1 : 0].current
 
   useEffect(() => {
+    // the player under the dialog stops: one picture with sound at a time
+    onOpen()
     for (const r of refs) if (r.current) r.current.currentTime = at
     // once: where the player was when Side by side opened
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,6 +57,7 @@ export function SideBySide({ a, b, nameOf, at, onDone, onOne }: { a: VersionInfo
     if (!v) return
     const tick = () => {
       setTime(v.currentTime)
+      if (end && v.currentTime >= end) stop()
       const o = other()
       if (o && Math.abs(o.currentTime - v.currentTime) > DRIFT_S) o.currentTime = v.currentTime
     }
@@ -62,16 +68,17 @@ export function SideBySide({ a, b, nameOf, at, onDone, onOne }: { a: VersionInfo
       v.removeEventListener('seeked', tick)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sound])
+  }, [sound, end])
 
+  const stop = () => {
+    for (const r of refs) r.current?.pause()
+    setPlaying(false)
+  }
   const toggle = () => {
     const vs = refs.map((r) => r.current).filter((v): v is HTMLVideoElement => !!v)
-    if (playing) {
-      for (const v of vs) v.pause()
-      setPlaying(false)
-      return
-    }
-    const t = lead()?.currentTime ?? time
+    if (playing) return stop()
+    // from the start again once the shorter one has ended
+    const t = end && (lead()?.currentTime ?? 0) >= end - 0.05 ? 0 : (lead()?.currentTime ?? time)
     for (const v of vs) v.currentTime = t
     void Promise.all(vs.map((v) => v.play().catch(() => undefined))).then(() => setPlaying(true))
   }
@@ -98,8 +105,12 @@ export function SideBySide({ a, b, nameOf, at, onDone, onOne }: { a: VersionInfo
               playsInline
               preload="auto"
               muted={(i === 0 ? 'a' : 'b') !== sound}
-              onLoadedMetadata={(e) => i === 0 && setDuration(e.currentTarget.duration)}
-              onEnded={() => setPlaying(false)}
+              aria-label={`Version ${v.n}`}
+              onLoadedMetadata={(e) => {
+                const d = e.currentTarget.duration
+                setDurations((ds) => (i === 0 ? [d, ds[1]] : [ds[0], d]))
+              }}
+              onEnded={stop}
               data-testid={`sbs-video-${v.n}`}
             />
             <figcaption>
@@ -117,9 +128,9 @@ export function SideBySide({ a, b, nameOf, at, onDone, onOne }: { a: VersionInfo
           className="sbs-scrub"
           type="range"
           min={0}
-          max={duration || 0}
+          max={end}
           step={0.01}
-          value={Math.min(time, duration || time)}
+          value={Math.min(time, end || time)}
           onChange={(e) => seek(Number(e.target.value))}
           aria-label="Where both versions are"
           aria-valuetext={clock(time)}

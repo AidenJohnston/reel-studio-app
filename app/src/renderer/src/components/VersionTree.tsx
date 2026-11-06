@@ -96,7 +96,7 @@ export function VersionTree({
                   <span className="vt-name">{ghost.q.text}</span>
                 </span>
                 <span className="vt-l2">
-                  {running ? `Making it from ${fromNumber(ghost.from)}` : `Waits its turn, then changes ${fromNumber(ghost.from)}`}
+                  {running ? `Making it from ${fromNumber(ghost.from)}` : `Waits its turn · from ${fromNumber(ghost.from)}`}
                 </span>
               </span>
             </li>
@@ -121,7 +121,7 @@ export function VersionTree({
                 Change this one
               </button>
               {versions.length > 1 && (
-                <button className="lk" disabled={busy} title={busy ? 'Wait for this version to finish' : undefined} onClick={() => onCombine(row.n)} data-testid={`vt-combine-${row.n}`}>
+                <button className="lk" onClick={() => onCombine(row.n)} data-testid={`vt-combine-${row.n}`}>
                   Combine…
                 </button>
               )}
@@ -135,7 +135,7 @@ export function VersionTree({
 
 /** Combine: a new version that starts from `ours` and takes the parts the person picks from another. Only the parts
  * that differ are asked about. */
-export function CombineDialog({ slug, versions, ours, onClose, onStarted }: { slug: string; versions: VersionInfo[]; ours: number; onClose: () => void; onStarted: (jobId: string) => void }) {
+export function CombineDialog({ slug, versions, ours, busy, onClose, onStarted }: { slug: string; versions: VersionInfo[]; ours: number; busy: boolean; onClose: () => void; onStarted: (jobId: string) => void }) {
   const titleId = useId()
   const others = versions.filter((v) => v.n !== ours).map((v) => v.n)
   // the one most likely meant: the newest other version
@@ -147,6 +147,7 @@ export function CombineDialog({ slug, versions, ours, onClose, onStarted }: { sl
   useEffect(() => {
     let live = true
     setDiffer(null)
+    setError(null)
     setTake(Object.fromEntries(MERGE_LAYERS.map((l) => [l, 'ours'])) as MergeRequest['take'])
     reel.projects
       .mergeLayers(slug, ours, theirs)
@@ -217,6 +218,11 @@ export function CombineDialog({ slug, versions, ours, onClose, onStarted }: { sl
           The same in both: {same.map((l) => LAYER_WORDS[l].toLowerCase().replace(/^the /, '')).join(', ')}.
         </p>
       )}
+      {busy && (
+        <p className="muted" data-testid="combine-busy">
+          You can make it once the version being made now is finished.
+        </p>
+      )}
       {error && (
         <p className="cin-alert" role="alert" data-testid="combine-error">
           {error}
@@ -226,7 +232,7 @@ export function CombineDialog({ slug, versions, ours, onClose, onStarted }: { sl
         <Button kind="tertiary" onClick={onClose} data-testid="combine-cancel">
           Cancel
         </Button>
-        <Button kind="primary" disabled={!picked || starting} title={picked ? mergeWords(request) : `Pick at least one part from Version ${theirs}`} onClick={() => void start()} data-testid="combine-make">
+        <Button kind="primary" disabled={!picked || starting || busy || differ === null} title={picked ? mergeWords(request) : `Pick at least one part from Version ${theirs}`} onClick={() => void start()} data-testid="combine-make">
           Make the new version
         </Button>
       </div>

@@ -1262,6 +1262,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           b={d.versions.find((v) => v.n === compare.b)!}
           nameOf={nameOf}
           at={playhead.get()}
+          onOpen={() => {
+            if (transport.get().playing) transport.toggle()
+          }}
           onDone={(t) => {
             transport.seek(t)
             setCompare(null)
@@ -1278,6 +1281,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           slug={slug}
           versions={d.versions}
           ours={combine}
+          busy={!!job}
           onClose={() => setCombine(null)}
           onStarted={(jobId) => {
             setCombine(null)

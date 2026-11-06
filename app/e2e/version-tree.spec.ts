@@ -31,7 +31,7 @@ test('fails if a note on an older version does not branch from it, or Combine do
 
     // a note on Version 2 makes Version 4, a branch from Version 2
     await page.getByTestId('vt-change-2').click()
-    await expect(page.getByTestId('note-base')).toHaveText(/Changes Version 2/)
+    await expect(page.getByTestId('note-base')).toHaveText(/New version from Version 2/)
     await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', /Version 2/)
     await shot(page, 'version-tree-02-change-this-one')
     await page.getByTestId('note-input').fill('quieter music')
@@ -63,7 +63,7 @@ test('fails if a note on an older version does not branch from it, or Combine do
     // from the title bar: watching an older version offers Change this one, and the chip goes back to the newest
     await page.getByTestId('vt-play-2').click()
     await page.getByTestId('version-change-this').click()
-    await expect(page.getByTestId('note-base')).toHaveText(/Changes Version 2/)
+    await expect(page.getByTestId('note-base')).toHaveText(/New version from Version 2/)
     await page.getByTestId('note-base-clear').click()
     await expect(page.getByTestId('note-base')).toHaveCount(0)
   } finally {
