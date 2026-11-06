@@ -144,7 +144,8 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
       // a trace beside the frame timing, so a long frame can be put down to its process and task
       const cdp = await page.context().newCDPSession(page)
       const events: TraceEvent[] = []
-      cdp.on('Tracing.dataCollected', (e) => void events.push(...(e.value as TraceEvent[])))
+      // the protocol types a trace event as a string map; its fields are numbers and objects too (TraceEvent)
+      cdp.on('Tracing.dataCollected', (e) => void events.push(...(e.value as unknown as TraceEvent[])))
       await cdp.send('Tracing.start', {
         categories: 'toplevel,devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,gpu,viz,media',
         transferMode: 'ReportEvents'
