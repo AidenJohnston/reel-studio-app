@@ -174,15 +174,19 @@ export function createArchiveReels(deps: ArchiveDeps) {
         st.fromArchive = seed
         st.copyFrom = files
       })
+      // made before its job starts, so a quit at any point after leaves the pick marked and its reel on Reels to
+      // Resume, never a second reel from it
+      s.made[c.id] = slug
       try {
+        await writeJson(deps.file(), s)
         deps.startFirstEdit(slug, { title: c.title, files })
       } catch (e) {
         // never started: no reel is left behind, and the pick can be made again
+        delete s.made[c.id]
+        await writeJson(deps.file(), s).catch(() => undefined)
         await fs.rm(projectDir(slug), { recursive: true, force: true })
         throw e
       }
-      s.made[c.id] = slug
-      await writeJson(deps.file(), s)
       made.push({ id: c.id, slug })
     }
     return { made }

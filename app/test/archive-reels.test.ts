@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { expect, it } from 'vitest'
 import { createArchiveReels, libraryRef, seedFromArchive } from '../src/main/archive-reels'
@@ -17,7 +17,7 @@ const HASHES = { [A]: 'hash-a', [B]: 'hash-b' }
 function setup(over: { start?: () => string; get?: (id: string) => { done: Promise<void> } | undefined; firstEdit?: () => string; now?: Record<string, string> } = {}) {
   const { root } = setupPaths()
   const file = join(root, '..', 'archive-reels.json')
-  const started: { slug: string; files: string[] }[] = []
+  const started: { slug: string; files: string[]; marked: Record<string, string> }[] = []
   const engine: string[][] = []
   const archive = createArchiveReels({
     jobs: { start: over.start ?? (() => 'job-1'), get: over.get ?? (() => undefined) },
@@ -30,7 +30,8 @@ function setup(over: { start?: () => string; get?: (id: string) => { done: Promi
     root: () => root,
     file: () => file,
     resolve: async (ref) => `/footage/${ref.split('/').pop()}`,
-    startFirstEdit: over.firstEdit ?? ((slug, init) => (started.push({ slug, files: init.files }), 'job-2'))
+    // what is on disk as the job is admitted: a quit from here on must not let the pick be made again
+    startFirstEdit: over.firstEdit ?? ((slug, init) => (started.push({ slug, files: init.files, marked: JSON.parse(readFileSync(file, 'utf8')).made }), 'job-2'))
   })
   return { root, file, archive, started, engine }
 }
@@ -47,7 +48,7 @@ it('fails if a pick copies a file twice, puts spans on the wrong source or past 
   await stored(file)
   const { made } = await archive.make(['r1'])
   // each file once, in the order the reel first uses it, so engine init numbers them s1, s2
-  expect(started).toEqual([{ slug: made[0].slug, files: ['/footage/a.mp4', '/footage/b.mp4'] }])
+  expect(started).toEqual([{ slug: made[0].slug, files: ['/footage/a.mp4', '/footage/b.mp4'], marked: { r1: made[0].slug } }])
   const st = await readAppState(made[0].slug)
   expect(st.fromArchive!.spans).toEqual([{ file: 0, t0: 5, t1: 15 }, { file: 1, t0: 2, t1: 7 }, { file: 0, t0: 30, t1: 35 }])
   // a quit before the job records what it copies from still leaves a reel that copies in on Resume

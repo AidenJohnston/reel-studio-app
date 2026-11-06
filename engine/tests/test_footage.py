@@ -628,6 +628,15 @@ def test_digest_lists_each_present_file_once_with_timed_lines(library, clips, tm
         indexed = db.execute("SELECT hash FROM paths WHERE place='Library' AND rel='a.mp4'").fetchone()[0]
     only = command(root, "digest", "--ref", "Library/a.mp4")
     assert [(f["ref"], f["hash"]) for f in only["files"]] == [("Library/a.mp4", indexed)]
+    # other bytes of the same size, with the old time kept: the index still trusts it, a reel about to be cut doesn't
+    a = root / "Library" / "a.mp4"
+    stat = a.stat()
+    data = bytearray(a.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    a.write_bytes(bytes(data))
+    os.utime(a, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert "Library/a.mp4" in [f["ref"] for f in command(root, "digest")["files"]]
+    assert command(root, "digest", "--ref", "Library/a.mp4")["files"] == []
     drive.rename(tmp_path / "away")
     # an unplugged drive's files can't be made into reels, so they are not offered
     assert [f["ref"] for f in command(root, "digest")["files"]] == ["Library/a.mp4"]

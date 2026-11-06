@@ -551,7 +551,8 @@ def digest(root: Path, *, max_chars: int = DIGEST_CHARS, refs: list[str] | None 
     matches) and their times, for proposing reels across the whole archive. A file on an unplugged drive
     is left out: nothing could be made from it. Audio files are left out too: a reel is cut from video.
     Files past `max_chars` are left out and `truncated` says so. Each file carries its content `hash`, so a
-    reel made later can check it is the same file (`refs`: only these files, as the app does then)."""
+    reel made later can check it is the same file (`refs`: only these files, as the app does then, each hashed
+    again and left out if its bytes differ from what was indexed)."""
     root = Path(root).resolve()
     database = root / ".index" / "index.sqlite"
     if not database.is_file():
@@ -571,8 +572,15 @@ def digest(root: Path, *, max_chars: int = DIGEST_CHARS, refs: list[str] | None 
             current = next((p for p in paths if _current(folders.get(p["place"]), p)), None)
             if current is None or Path(current["rel"]).suffix.lower() not in probe.VIDEO_EXT:
                 continue
-            if refs is not None and ref_of(current["place"], current["rel"]) not in refs:
-                continue
+            if refs is not None:
+                if ref_of(current["place"], current["rel"]) not in refs:
+                    continue
+                # a reel is about to be cut from it: the bytes themselves, since a swap can keep size and time
+                try:
+                    if file_hash(folders[current["place"]] / current["rel"]) != digest_:
+                        continue
+                except OSError:
+                    continue
             model = db.execute("SELECT model FROM text_fts WHERE hash=? LIMIT 1", (digest_,)).fetchone()[0]
             if not _done(db, digest_, f"transcript:{model}", TRANSCRIPT_VERSION):
                 continue
