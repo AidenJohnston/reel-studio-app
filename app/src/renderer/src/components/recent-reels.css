@@ -1,5 +1,5 @@
 /* Insights > Your recent reels (components/RecentReels.tsx). Layout only; type and colour come from styles.css. */
-.recent-reels { display: flex; flex-direction: column; gap: 10px; width: min(560px, 100%); margin: 0 auto; padding: 16px 0; }
+.recent-reels { display: flex; flex-direction: column; gap: 10px; width: min(640px, 100%); margin-top: var(--space-m); padding: 16px 0; }
 .recent-reels h2 { font-size: var(--fs-section); line-height: var(--lh-section); margin: 0; }
 .recent-body { display: flex; flex-direction: column; gap: 14px; }
 .recent-body > div { display: flex; flex-direction: column; gap: 4px; }
