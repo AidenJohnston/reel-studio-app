@@ -115,7 +115,8 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
    choice gets everywhere in the app (styles.css .cover-frame.on). */
 .cp-strip {
   display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
-  margin-inline: calc(-1 * var(--cp-pad)); padding: 2px var(--cp-pad) 6px; scroll-padding-inline: var(--cp-pad);
+  /* 6 px of room all round: a scroller clips, and the focus ring reaches 4 px past each version */
+  margin-inline: calc(-1 * var(--cp-pad)); padding: 6px var(--cp-pad); scroll-padding-inline: var(--cp-pad);
 }
 .cp-ver {
   flex: none; width: 176px; min-height: 76px; display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px;
@@ -125,6 +126,8 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 }
 .cp-ver[aria-checked="true"] { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
 .cp-ver:active { transform: scale(.97); }
+/* High contrast drops box-shadow, which is all that marks the chosen version */
+@media (forced-colors: active) { .cp-ver[aria-checked="true"] { outline: 2px solid CanvasText; outline-offset: -2px; } }
 @media (hover: hover) and (pointer: fine) { .cp-ver[aria-checked="false"]:hover { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); } }
 .cp-ver-pic { flex: none; width: 36px; aspect-ratio: 9 / 16; border-radius: 6px; overflow: hidden; background: var(--sunk); }
 .cp-ver-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -137,6 +140,7 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 .cp-hint { font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-2); }
 .cp-hint summary { min-height: 44px; display: flex; align-items: center; justify-content: center; list-style: none; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .cp-hint summary::-webkit-details-marker { display: none; }
+.cp-hint summary:active { color: var(--ink); }
 .cp-hint ol { margin: 0 0 4px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
 
 /* ---- notes ---- */
@@ -168,6 +172,7 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 
 /* ---- what never moves ---- */
 html.kb :is(.cp-layer, .cp-card, .cp-ver, .cp-tap) { transition: none; }
+html.kb :is(.cp-card, .cp-ver, .cp-tap):active { transform: none; }
 html.kb :is(.cp-pop, .cp-here) { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .cp-layer, .cp-card, .cp-ver, .cp-tap { transition: none; }

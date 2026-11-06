@@ -1,6 +1,6 @@
 // The companion page's root: not paired, pairing, or paired (Shell). A pairing link's fragment pairs at once, on
 // first load or when a new code is scanned into an open page (only the fragment changes, so the page doesn't reload).
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { parsePairingFragment } from '../../../shared/contract'
 import { Logo } from '../components/brand'
 import { useInputMode } from '../components/motion'
@@ -70,10 +70,17 @@ export function Companion() {
 
 function NotPaired({ why, onRetry }: { why: string | null; onRetry: (() => void) | null }) {
   const where = noun() === 'browser' ? 'in this browser' : `on this ${noun()}`
+  // after Forget, a removal or a failed pairing the screen changed under the person: start them at its heading
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (document.activeElement === document.body || document.activeElement === null) heading.current?.focus({ preventScroll: true })
+  }, [])
   return (
     <div className="cp-intro-body" data-testid="cp-not-paired">
       <div className="cp-intro-text">
-        <h1>Your reels, {where}</h1>
+        <h1 ref={heading} tabIndex={-1}>
+          Your reels, {where}
+        </h1>
         <p className="cp-lede">Watch every version of a reel, save the one you like, and leave a note that starts an edit on your computer.</p>
       </div>
       {why && (

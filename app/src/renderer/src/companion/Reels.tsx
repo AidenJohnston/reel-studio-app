@@ -1,6 +1,6 @@
 // Every reel on the computer, as a wall of 9:16 covers two across: the shape a creator's own Reels grid has.
 // A reel being made carries its job's words and a slim bar under its title.
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import type { ProjectId, ReelSummaryDto } from '../../../shared/contract'
 import { Progress } from '../components/ui'
 import { CompanionError, call, mediaUrl } from './client'
@@ -13,7 +13,8 @@ export function ReelsScreen({
   reels,
   onReels,
   onOpen,
-  onOffline
+  onOffline,
+  focusOn
 }: {
   pulse: Pulse
   jobs: LiveJobs
@@ -21,6 +22,8 @@ export function ReelsScreen({
   onReels: (r: ReelSummaryDto[]) => void
   onOpen: (id: ProjectId) => void
   onOffline: () => void
+  /** The reel just left with Back: its card takes focus again. */
+  focusOn: ProjectId | null
 }) {
   const [error, setError] = useState<string | null>(null)
   // The summary carries no job, so a reel already being made when the list loads is read once for its job; after
@@ -55,6 +58,13 @@ export function ReelsScreen({
     // read again on every pulse; nothing else should start a read
   }, [pulse.n])
 
+  const grid = useRef<HTMLUListElement>(null)
+  const listed = reels !== null
+  useEffect(() => {
+    if (!focusOn || !listed) return
+    grid.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(focusOn)}"]`)?.focus({ preventScroll: true })
+  }, [focusOn, listed])
+
   return (
     <>
       <h1 className="cp-title">Your reels</h1>
@@ -68,10 +78,10 @@ export function ReelsScreen({
       ) : reels.length === 0 ? (
         <p className="cp-empty" data-testid="cp-reels-empty">No reels yet. Make one in Reel Studio on your computer, and it shows up here.</p>
       ) : (
-        <ul className="cp-grid">
-          {reels.map((r) => (
+        <ul className="cp-grid" ref={grid}>
+          {reels.map((r, i) => (
             <li key={r.id}>
-              <Card r={r} job={r.id in jobs ? jobs[r.id] : (seeded[r.id] ?? null)} onOpen={onOpen} />
+              <Card r={r} eager={i < 4} job={r.id in jobs ? jobs[r.id] : (seeded[r.id] ?? null)} onOpen={onOpen} />
             </li>
           ))}
         </ul>
@@ -80,7 +90,8 @@ export function ReelsScreen({
   )
 }
 
-function Card({ r, job, onOpen }: { r: ReelSummaryDto; job: LiveJobs[string]; onOpen: (id: ProjectId) => void }) {
+/** `eager`: the first row or two, on screen at once, load before the rest. */
+function Card({ r, eager, job, onOpen }: { r: ReelSummaryDto; eager: boolean; job: LiveJobs[string]; onOpen: (id: ProjectId) => void }) {
   const status = statusOf(r)
   const making = isMaking(r.status)
   const go = (e: MouseEvent<HTMLAnchorElement>) => {
@@ -90,9 +101,15 @@ function Card({ r, job, onOpen }: { r: ReelSummaryDto; job: LiveJobs[string]; on
     onOpen(r.id)
   }
   return (
-    <a className="cp-card" href={`#r=${encodeURIComponent(r.id)}`} onClick={go} data-testid="cp-reel-row">
+    <a className="cp-card" href={`#r=${encodeURIComponent(r.id)}`} onClick={go} data-id={r.id} data-testid="cp-reel-row">
       <span className="cp-card-pic">
-        {r.cover ? <img src={mediaUrl(r.cover)} alt="" loading="lazy" decoding="async" /> : <span className="cp-card-blank">{r.title}</span>}
+        {r.cover ? (
+          <img src={mediaUrl(r.cover)} alt="" loading={eager ? 'eager' : 'lazy'} decoding="async" />
+        ) : (
+          <span className="cp-card-blank" aria-hidden>
+            {r.title}
+          </span>
+        )}
       </span>
       <span className="cp-card-title">{r.title}</span>
       <span className={`badge ${status.tone}`}>{status.words}</span>

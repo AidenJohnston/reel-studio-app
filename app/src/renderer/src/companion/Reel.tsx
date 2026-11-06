@@ -89,9 +89,28 @@ export function ReelScreen({
     if (n === fresh) setFresh(null)
   }
 
+  // a running job's words replace the last "Version N is ready", which must not be read again when the job ends
+  const running = job !== null
+  useEffect(() => {
+    if (running) setSaid('')
+  }, [running])
+
   const title = reel?.title ?? summary?.title ?? ''
   const head = reel ?? summary
   const status = head ? statusOf(head) : null
+
+  // A new screen: its name in the tab, and focus on its heading, so a screen reader starts here and Tab goes on
+  // from the top instead of from where the list's card was.
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+  }, [])
+  useEffect(() => {
+    document.title = title ? `${title} · Reel Studio` : 'Reel Studio'
+    return () => {
+      document.title = 'Reel Studio'
+    }
+  }, [title])
 
   return (
     <>
@@ -100,7 +119,9 @@ export function ReelScreen({
           <Icon name="chevron-left" size={22} />
         </button>
         <div className="cp-reel-name">
-          <h1 className="cp-title">{title}</h1>
+          <h1 className="cp-title" ref={heading} tabIndex={-1}>
+            {title}
+          </h1>
           {status && <span className={`badge ${status.tone}`}>{status.words}</span>}
         </div>
       </div>
@@ -168,16 +189,22 @@ function Stage({
   // the newest layer is last; at most two
   const [layers, setLayers] = useState<VersionDto[]>(() => (version ? [version] : []))
   const [shown, setShown] = useState(false)
+  // the front layer's fade has finished (shown only says it started)
+  const [settled, setSettled] = useState(false)
 
   useEffect(() => {
     if (!version) return
     setLayers((ls) => {
       if (ls.at(-1)?.n === version.n) return ls
-      // switching again mid-fade keeps the layer that was fully on screen under the new one
-      const under = shown ? ls.at(-1) : ls.at(-2)
+      // switching again mid-fade keeps the layer that was fully on screen under the new one, so the stage never
+      // shows through a half-faded layer
+      const under = settled ? ls.at(-1) : (ls.at(-2) ?? ls.at(-1))
       return under ? [under, version] : [version]
     })
-    setShown((s) => (layers.at(-1)?.n === version.n ? s : false))
+    if (layers.at(-1)?.n !== version.n) {
+      setShown(false)
+      setSettled(false)
+    }
     // follows the version number: a re-read hands over a new object for the same version
   }, [version?.n])
 
@@ -189,6 +216,7 @@ function Stage({
     const drop = () => {
       setLayers((ls) => ls.slice(-1))
       setBare(false)
+      setSettled(true)
     }
     if (byKeyboard() || reducedMotion()) {
       drop()
@@ -243,14 +271,19 @@ function Layer({
   isFront.current = front
   const readyRef = useRef(onReady)
   readyRef.current = onReady
+  // the first frame decoded is as good as the poster; both go through the same once-only, frame-late call
+  const firstFrame = useRef<() => void>(noop)
 
   useEffect(() => {
     let done = false
+    let frame = 0
+    // two frames on: a cached poster can load before the layer was ever drawn at opacity 0, which skips the fade
     const ready = () => {
       if (done) return
       done = true
-      readyRef.current()
+      frame = requestAnimationFrame(() => (frame = requestAnimationFrame(() => readyRef.current())))
     }
+    firstFrame.current = ready
     const t = setTimeout(ready, READY_WAIT_MS)
     if (poster) {
       const img = new Image()
@@ -261,6 +294,7 @@ function Layer({
     return () => {
       done = true
       clearTimeout(t)
+      cancelAnimationFrame(frame)
     }
   }, [poster])
 
@@ -285,8 +319,8 @@ function Layer({
         controls={front}
         playsInline
         preload="metadata"
+        onLoadedData={() => firstFrame.current()}
         aria-label={`${title}, Version ${v.n}`}
-        onLoadedData={() => readyRef.current()}
         onLoadedMetadata={(e) => {
           if (resumeAt.current) e.currentTarget.currentTime = resumeAt.current
           resumeAt.current = 0
@@ -514,7 +548,11 @@ function NoteBox({
   const send = async (e?: FormEvent) => {
     e?.preventDefault()
     const body = text.trim()
-    if (!body || sending) return
+    if (sending) return
+    if (!body) {
+      setProblem('Write a note first.')
+      return
+    }
     const key = JSON.stringify([body, version, at])
     if (pending.current?.key !== key) pending.current = { key, requestId: requestId() }
     const args: NoteArgs = { requestId: pending.current.requestId, text: body }
@@ -526,7 +564,8 @@ function NoteBox({
     try {
       const r = await call('projects.note', [id, args])
       pending.current = null
-      setText('')
+      // only what was sent: words typed while it was on its way stay
+      setText((t) => (t.trim() === body ? '' : t))
       setNotice(r.queued ? "Sent. It's next, after the edit that's running now." : null)
       onSent()
     } catch (err) {
@@ -561,6 +600,7 @@ function NoteBox({
         onChange={(e) => {
           setText(e.target.value)
           setNotice(null)
+          if (problem === 'Write a note first.') setProblem(null)
         }}
         onKeyDown={key}
         rows={3}
@@ -574,7 +614,7 @@ function NoteBox({
             <span>Note here at {clock(moment)}</span>
           </label>
         )}
-        <Button kind="primary" size="big" type="submit" className="cp-send" disabled={!text.trim() || sending} data-testid="cp-note-send">
+        <Button kind="primary" size="big" type="submit" className="cp-send" disabled={sending} data-testid="cp-note-send">
           {sending && <Spinner />}
           Send
         </Button>

@@ -15,7 +15,7 @@ export interface Pulse {
   project: ProjectId | null
 }
 
-/** Live jobs from `job` events. A reel missing here has had no event yet; null means its job finished. */
+/** Live jobs from `job` events. A reel whose job finished is dropped, so the next read's job shows until its own events come. */
 export type LiveJobs = Record<ProjectId, JobDto | null>
 
 export type Connection = 'connecting' | 'live' | 'offline'
@@ -40,12 +40,16 @@ export function Shell() {
   const [reels, setReels] = useState<ReelSummaryDto[] | null>(null)
   const stream = useRef<EventStream | null>(null)
   const listScroll = useRef(0)
+  // the reel last opened, so Back puts focus on its card again
+  const [opened, setOpened] = useState<ProjectId | null>(null)
 
   const bump = useCallback((project: ProjectId | null) => setPulse((p) => ({ n: p.n + 1, project })), [])
 
   const readInfo = useCallback(async (): Promise<boolean> => {
     try {
       setInfo(await call('app.info', []))
+      // the computer answered: whatever failed before, it is reachable now
+      setConn((c) => (c === 'offline' ? 'live' : c))
       return true
     } catch (e) {
       if (e instanceof CompanionError && e.kind === 'offline') setConn('offline')
@@ -64,7 +68,11 @@ export function Shell() {
           // app.info changes with the editor connecting or a scope changing; neither names a reel
           if (e.project === null) void readInfo()
         } else if (e.type === 'job') {
-          setJobs((j) => ({ ...j, [e.project]: e.done ? null : e.job }))
+          setJobs((j) => {
+            if (!e.done) return { ...j, [e.project]: e.job }
+            const { [e.project]: _finished, ...rest } = j
+            return rest
+          })
           if (e.done) bump(e.project)
         }
       },
@@ -108,6 +116,7 @@ export function Shell() {
 
   const open = (id: ProjectId) => {
     listScroll.current = window.scrollY
+    setOpened(id)
     history.pushState({ cpReel: id }, '', `#r=${encodeURIComponent(id)}`)
     setReel(id)
   }
@@ -145,8 +154,8 @@ export function Shell() {
         <DeviceMenu computer={name} />
       </header>
       {conn === 'offline' && (
-        <div className="cp-offline" role="alert" data-testid="cp-offline">
-          <p className="banner">
+        <div className="cp-offline" data-testid="cp-offline">
+          <p className="banner" role="alert">
             <span>{OFFLINE_WORDS}</span>
           </p>
           <Button size="big" className="cp-wide" onClick={tryAgain}>
@@ -159,7 +168,7 @@ export function Shell() {
         {reel ? (
           <ReelScreen key={reel} id={reel} summary={summary} info={info} pulse={pulse} liveJob={reel in jobs ? jobs[reel] : undefined} onBack={close} onOffline={offline} />
         ) : (
-          <ReelsScreen pulse={pulse} jobs={jobs} reels={reels} onReels={setReels} onOpen={open} onOffline={offline} />
+          <ReelsScreen pulse={pulse} jobs={jobs} reels={reels} onReels={setReels} onOpen={open} onOffline={offline} focusOn={opened} />
         )}
       </main>
     </div>
@@ -194,14 +203,22 @@ function DeviceMenu({ computer }: { computer: string }) {
   }, [open])
 
   return (
-    <div className="cp-menu" ref={box}>
+    <div
+      className="cp-menu"
+      ref={box}
+      // Tab out closes it. Focus going nowhere is left to the pointer handler: Safari blurs on a click without
+      // focusing the button, and closing then would swallow the click on Forget.
+      onBlur={(e) => {
+        if (open && e.relatedTarget instanceof Node && !box.current?.contains(e.relatedTarget)) setOpen(false)
+      }}
+    >
       <button
         ref={trigger}
         type="button"
         className="cp-tap"
         aria-label="Menu"
         aria-expanded={open}
-        aria-controls="cp-menu-pop"
+        aria-controls={open ? 'cp-menu-pop' : undefined}
         onClick={() => setOpen((o) => !o)}
         data-testid="cp-menu"
       >
