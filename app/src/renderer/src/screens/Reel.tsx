@@ -354,6 +354,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
 
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   const changePreview = job?.preview && d?.versions.length ? job.preview.video : null
+  // Compare › Side by side is open (SideBySide.tsx): both versions there, for as long as both still exist
+  const sideBySide = !!compare && layout === 'side' && !!d?.versions.some((v) => v.n === compare.a) && !!d?.versions.some((v) => v.n === compare.b)
   // A running job's pictures of the change it is making, before its draft (none while comparing or in Edit it
   // myself, where a preview waits too).
   const change = useChangeMoment(job && !compare && !drawer ? job.moments : null, job?.jobId ?? null)
@@ -956,7 +958,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
                   poster={hasVersions ? version?.cover : null}
                   className={[landing !== null && 'landing', tag === 'Original' && d.project.sources?.[0]?.mirror === true && 'mirrored-original'].filter(Boolean).join(' ') || undefined}
                   autoPlayMuted={!!changePreview || !hasVersions}
-                  playRequest={!changePreview && playRequest?.n === version?.n ? playRequest?.ask : undefined}
+                  // Side by side plays both versions itself: the player under it takes no play request meanwhile
+                  playRequest={!changePreview && !sideBySide && playRequest?.n === version?.n ? playRequest?.ask : undefined}
                   onPlayRequestHandled={() => setPlayRequest(null)}
                   subtitle={drawer && preview ? preview : null}
                   still={drawer && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
@@ -1258,13 +1261,15 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
         </div>
       </div>
 
-      {compare && layout === 'side' && d.versions.some((v) => v.n === compare.a) && d.versions.some((v) => v.n === compare.b) && (
+      {sideBySide && compare && (
         <SideBySide
           a={d.versions.find((v) => v.n === compare.a)!}
           b={d.versions.find((v) => v.n === compare.b)!}
           nameOf={nameOf}
           at={playhead.get()}
           onOpen={() => {
+            // a Watch pressed just before still waits for its video to show: it would start under the dialog with sound
+            setPlayRequest(null)
             if (transport.get().playing) transport.toggle()
           }}
           onDone={(t) => {
