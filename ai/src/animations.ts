@@ -126,6 +126,18 @@ export function composeProblems(params: Record<string, unknown>): string[] {
   return out;
 }
 
+/** A compose part that would land after the clip has ended (an explicit `duration` shorter than the
+ *  timed words, or a word past the renderer's 30 s cap): it would never be seen. */
+export function composeTimingProblem(params: Record<string, unknown>): string | null {
+  const ats = composeParts(params).map(({ part }) => part.at).filter((t): t is number => typeof t === 'number');
+  if (!ats.length) return null;
+  const last = Math.max(...ats);
+  const d = typeof params.duration === 'number' ? params.duration : null;
+  if (d !== null && last + 0.3 > d) return `compose: a part lands at ${last} s but the clip ends at ${d} s; leave duration out or anchor fewer words`;
+  if (last + 1.8 > 30) return `compose: a part lands at ${last} s, too late for an animation (30 s at most); anchor the graphic closer to its words`;
+  return null;
+}
+
 /** Sets each compose part's `at` (seconds from the clip start): the first of its `on` words, found
  *  in reading order; a part with no `on`, or one not found, follows the previous part by 0.3 s.
  *  Returns how many parts landed on a spoken word. Mutates `params.rows`. */
