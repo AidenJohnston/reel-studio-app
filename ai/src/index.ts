@@ -24,6 +24,7 @@ import { ClaudeCodeHarness } from './mcp/claudeCode';
 import { CodexHarness } from './mcp/codex';
 import { SessionHarness } from './mcp/session';
 import type { Harness } from './harness';
+import type { Helper } from './helpers';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
@@ -752,6 +753,20 @@ export function createAI(opts: CreateAIOptions) {
     return harness;
   }
 
+  /** Who looks things up for a note (helpers.ts): the person's other app when the editor is one of them and the
+   * other is signed in, so a second AI brings its own eye; otherwise a fresh copy of the editor's own model. */
+  async function helperFor(editorProvider: ModelProvider): Promise<Helper> {
+    if (editorProvider.id === 'claude-cli') {
+      const other = await localCodex();
+      if (other.state === 'ready' && other.bin) return { label: 'Your Codex app', make: async () => new CodexCliProvider({ env: env(), bin: other.bin }) };
+    }
+    if (editorProvider.id === 'codex-cli') {
+      const other = await localClaude();
+      if (other.state === 'ready' && other.bin) return { label: 'Your Claude Code app', make: async () => new ClaudeCliProvider({ env: env(), bin: other.bin }) };
+    }
+    return { label: 'Your editor', make: () => modelProvider('editor') };
+  }
+
   /** The other app checks a note made in one (Settings > Double-check each edit), when it can answer: installed and
    * signed in. Otherwise undefined, and the checker model reviews it as in our own loop (applyNote). */
   async function checkerHarness(editorHarness: Harness | undefined): Promise<Harness | undefined> {
@@ -1079,7 +1094,8 @@ export function createAI(opts: CreateAIOptions) {
         // is reviewed by the other harness (mcp-harness-2)
         const other = opts.checkEdit && harness ? await checkerHarness(harness) : undefined;
         const checker = !opts.checkEdit ? {} : other ? { checkerHarness: other } : { checker: await modelProvider('checker', fell) };
-        const r = withFallbacks(await editor.applyNote({ ...d, ...checker, harness }, provider, projectDir, note, onEvent, signal, opts), fell);
+        const helper = opts.helpers && provider ? await helperFor(provider) : undefined;
+        const r = withFallbacks(await editor.applyNote({ ...d, ...checker, harness, ...(helper ? { helper } : {}) }, provider, projectDir, note, onEvent, signal, opts), fell);
         return r.version !== undefined && r.changed.length ? { ...r, ...(await madeWith(provider)) } : r;
       }));
     },

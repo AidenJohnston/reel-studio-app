@@ -932,6 +932,9 @@ export interface ReelApi {
     /** Settings > "Double-check each edit" (off by default). */
     checkEdits(): Promise<boolean>
     setCheckEdits(on: boolean): Promise<boolean>
+    /** Settings > "Look things up in parallel" (main/settings.ts lookUps) */
+    lookUps(): Promise<boolean>
+    setLookUps(on: boolean): Promise<boolean>
     connections(): Promise<ConnectionInfo[]>
     saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
     removeConnection(id: string): Promise<void>

@@ -361,8 +361,8 @@ async function startNote(slug: string, { id: noteId, text: own, attachments, mom
       const before = (await readProject(slug)).version ?? 0
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
-      const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
-      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
+      const { checkEdits: checkEdit, lookUps: helpers } = await loadSettings() // Settings > "Double-check each edit", "Look things up in parallel"
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, helpers, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
       // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part";
       // what it says back while it works reaches the progress card in the person's own words
       const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
@@ -1053,6 +1053,11 @@ function registerIpc(): void {
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
   handle('ai:checkEdits', async () => (await loadSettings()).checkEdits)
+  handle('ai:lookUps', async () => (await loadSettings()).lookUps)
+  handle('ai:setLookUps', async (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
+    return (await saveSettings({ lookUps: on })).lookUps
+  })
   handle('ai:setCheckEdits', async (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
     return (await saveSettings({ checkEdits: on })).checkEdits

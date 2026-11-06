@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { refuseIfOpen } from './owner';
 import { MergeRequest, MergeResult } from './version-merge';
 import type { NoteSteer } from './steer';
+import type { Helper } from './helpers';
 
 export interface EditorDeps {
   host: EngineHost;
@@ -49,6 +50,8 @@ export interface EditorDeps {
   fastNotes?: boolean;
   /** the model that proofreads Version 1's subtitles (Settings: Checks each edit); default the editor's */
   checker?: ModelProvider | null;
+  /** Settings > "Look things up in parallel": the second AI the note's look_up tool hands searches to (helpers.ts) */
+  helper?: Helper;
   /** the model that writes the caption the editor left out (Settings: Writes titles); default the editor's */
   writer?: ModelProvider | null;
   /** An AI failure the host pauses on (a plan at its limit, no internet): Version 1 is not made without the editor
@@ -400,6 +403,8 @@ export interface ApplyNoteOptions {
   checkEdit?: boolean;
   /** words the person adds while the note runs (steer.ts); the note reads them before it can finish */
   steer?: NoteSteer;
+  /** Settings > "Look things up in parallel": the note may hand searches to a second AI (helpers.ts) */
+  helpers?: boolean;
 }
 
 const REPAIR_STEPS = 12;
@@ -605,7 +610,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
     await writeFileAtomic(file, edit);
-    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, ...(opts.steer ? { steer: opts.steer } : {}) };
+    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, ...(opts.steer ? { steer: opts.steer } : {}), ...(deps.helper ? { helper: deps.helper } : {}) };
   };
   const label = noteLabel(note, attached);
   let committed: EditResult;
@@ -648,7 +653,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const files = attachmentsSection(attached, earlier, harness.supportsImages ? stills : new Map());
     const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
-    const r = await harness.run({ system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, tools: TOOL_NAMES, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+    const tools = deps.helper ? [...TOOL_NAMES, 'look_up'] : TOOL_NAMES;
+    const r = await harness.run({ system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, tools, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     const nothing = !ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length;
     // A note that stopped before finish (step limit, or replies with no tool call) is not applied, and
     // says so when that throws work away. With nothing to throw away it gets the "not sure" reply.

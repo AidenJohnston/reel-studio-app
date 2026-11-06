@@ -21,6 +21,7 @@ import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema 
 import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
 import { NoteSteer, finishRefused, withAdded } from './steer';
+import { Helper, MAX_LOOKUPS, lookUp } from './helpers';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -90,6 +91,8 @@ export interface ToolContext {
   moments?: Moments;
   /** words the person adds while this note runs, from the app's queue (steer.ts) */
   steer?: NoteSteer;
+  /** a second AI that looks things up in parallel (helpers.ts); look_up is offered only with one */
+  helper?: Helper;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -2168,6 +2171,16 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'look_up',
+    description: `Hand up to ${MAX_LOOKUPS} searches to helpers that run at the same time (and alongside any other searches in the same reply): each finds pictures or footage for ONE thing (a named place, product, person, number or example) and fetches the best candidates. Returns what each found and the candidate ids, which you place with add_broll like your own. Use it when several different things need pictures; search_images yourself for one.`,
+    parameters: S.obj({ things: S.arr(S.str('one thing to find pictures or footage for, in a few words'), undefined, { minItems: 1, maxItems: MAX_LOOKUPS }) }),
+    async run(ctx, args) {
+      if (!ctx.helper) throw new ToolInputError('No helpers in this task: use search_images yourself.');
+      const r = await lookUp(ctx, ctx.helper, args.things, ctx.emit);
+      return { content: r, summary: `Looked up ${r.found.map((f) => f.thing).join(', ')}` };
+    },
+  },
+  {
     name: 'finish',
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
@@ -2247,14 +2260,15 @@ function stripNulls<T extends Record<string, any>>(o: T): T {
 }
 
 export const TOOLS: ToolDef[] = tools;
-export const TOOL_NAMES = tools.map((t) => t.name);
+/** Every tool a task offers by default. look_up only comes with a helper (editor.ts applyNote). */
+export const TOOL_NAMES = tools.map((t) => t.name).filter((n) => n !== 'look_up');
 export function toolByName(name: string): ToolDef | undefined {
   // Some providers prefix namespaced tools ("reel_editor.set_cut").
   const bare = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
   return tools.find((t) => t.name === bare);
 }
 export function toolSchemas(names?: string[]): ToolSchema[] {
-  return tools.filter((t) => !names || names.includes(t.name)).map(({ name, description, parameters }) => ({ name, description, parameters }));
+  return tools.filter((t) => (names ? names.includes(t.name) : TOOL_NAMES.includes(t.name))).map(({ name, description, parameters }) => ({ name, description, parameters }));
 }
 
 /** Validates + runs one tool call. Never throws for model mistakes: returns an error result the model can read. */

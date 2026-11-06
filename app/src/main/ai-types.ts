@@ -161,7 +161,7 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number; steer?: NoteSteer }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; helpers?: boolean; base?: number; steer?: NoteSteer }
   ): Promise<AgentResult>
   mergeVersions?(projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult & { edit: ProjectJson; report: string[] }>
   /** The parts two saved versions differ in. Optional: older packages lack it. */
