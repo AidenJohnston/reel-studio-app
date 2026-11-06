@@ -36,9 +36,9 @@ export function SocialRows() {
           id="social-closed"
           line={closedLine(closed, unreachable)}
           control={
+            // the same button as Editor's Check again (vendor-connect.tsx)
             <Button
               size="small"
-              kind="tertiary"
               disabled={checking}
               onClick={() => {
                 setChecking(true)
@@ -46,6 +46,7 @@ export function SocialRows() {
               }}
               data-testid="social-check"
             >
+              {checking ? <Spinner /> : null}
               Check again
             </Button>
           }
