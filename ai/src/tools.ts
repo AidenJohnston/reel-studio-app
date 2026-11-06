@@ -34,8 +34,8 @@ export interface ToolState {
   styleSuggestions: string[];
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
-  /** ids of paused rules this note turned back on, so a failed note can pause them again */
-  styleRulesResumed: string[];
+  /** paused rules this note turned back on, so a failed note can pause them again */
+  styleRulesResumed: { id: string; text: string }[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -1240,20 +1240,22 @@ const tools: ToolDef[] = [
         if (!list.some((c) => c.choice === args.check)) list.push({ text, choice: args.check });
         return { content: { ok: true, proposed: text, note: 'NOT saved. When the video is finished the app measures it and asks the user whether to check this on every video. Do not say you saved it or that you will remember it.' } };
       }
-      const existing = await ctx.style.find(text);
-      if (existing && existing.paused && noteAsksToRemember(ctx.userNote)) {
-        // The note asks again for a rule paused in My style: add() turns it back on. Not in styleRuleIds, because
-        // undoing this note must not delete a rule that was there before it; undoing it pauses the rule again.
-        const r = await ctx.style.add(text);
-        ctx.state.styleRulesResumed.push(r.rule.id);
-        return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
-      }
-      if (existing) return { content: { ok: true, alreadySaved: existing.text } };
       if (noteAsksToRemember(ctx.userNote)) {
+        // One store call decides and writes, so only what this note did is undone if it fails: a rule it saved is
+        // removed, and a paused rule it turned back on (not one that was already on) is paused again.
         const r = await ctx.style.add(text);
-        if (r.added) { ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id); }
-        return { content: { ok: true, saved: r.rule.text }, summary: r.added ? `Saved to My style: "${r.rule.text}"` : undefined };
+        if (r.added) {
+          ctx.state.styleRulesAdded.push(r.rule.text); ctx.state.styleRuleIds.push(r.rule.id);
+          return { content: { ok: true, saved: r.rule.text }, summary: `Saved to My style: "${r.rule.text}"` };
+        }
+        if (r.resumed) {
+          ctx.state.styleRulesResumed.push({ id: r.rule.id, text: r.rule.text });
+          return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
+        }
+        return { content: { ok: true, alreadySaved: r.rule.text } };
       }
+      const existing = await ctx.style.find(text);
+      if (existing) return { content: { ok: true, alreadySaved: existing.text } };
       if (!ctx.state.styleSuggestions.includes(text)) ctx.state.styleSuggestions.push(text);
       return { content: { ok: true, proposed: text, note: 'NOT saved. The app will ask the user "Remember this for next time?". Do not say you saved it or that you will remember it.' } };
     },

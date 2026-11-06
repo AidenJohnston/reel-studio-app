@@ -142,19 +142,21 @@ export class StyleStore {
   /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
    * suggestion, or an "always..." note), so an equivalent paused rule is turned back on (PR #83 review, option A).
    * A checked rule's words must be its check's (the question showed them), and it replaces any rule checking
-   * the same kind: two "at most N words" rules can't both hold. */
-  async add(text: string, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> {
+   * the same kind: two "at most N words" rules can't both hold.
+   * `resumed`: this call is what turned it back on, decided in the same write, so a caller undoing its own change
+   * never pauses a rule someone else turned on. */
+  async add(text: string, check?: RuleCheck): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     if (check === undefined) return this.serial(() => this.addNow(text));
     const c = parseCheck(check);
     if (cleanRuleText(text) !== ruleText(c)) throw new Error('the question does not match the rule it would save');
     return this.serial(async () => {
       const data = await this.read();
       const same = data.rules.find((r) => normalize(r.text) === normalize(ruleText(c)));
-      if (same && same.check?.kind === c.kind && !same.paused) return { added: false, rule: same };
+      if (same && same.check?.kind === c.kind && !same.paused) return { added: false, resumed: false, rule: same };
       const rule: StyleRule = { id: randomUUID(), text: ruleText(c), createdAt: new Date().toISOString(), check: c };
       const rest = data.rules.filter((r) => r.check?.kind !== c.kind && normalize(r.text) !== normalize(rule.text));
       await this.write({ ...data, rules: [...rest, rule] });
-      return { added: true, rule };
+      return { added: true, resumed: false, rule };
     });
   }
 
@@ -164,20 +166,21 @@ export class StyleStore {
     return (await this.list()).find((r) => normalize(r.text) === n);
   }
 
-  private async addNow(text: string): Promise<{ added: boolean; rule: StyleRule }> {
+  private async addNow(text: string): Promise<{ added: boolean; resumed: boolean; rule: StyleRule }> {
     const clean = cleanRuleText(text);
     const data = await this.read();
     const dup = data.rules.find((r) => normalize(r.text) === normalize(clean));
     if (dup) {
-      if (dup.paused) {
+      const resumed = !!dup.paused;
+      if (resumed) {
         delete dup.paused;
         await this.write(data);
       }
-      return { added: false, rule: dup };
+      return { added: false, resumed, rule: dup };
     }
     const rule: StyleRule = { id: randomUUID(), text: clean, createdAt: new Date().toISOString() };
     await this.write({ ...data, rules: [...data.rules, rule] });
-    return { added: true, rule };
+    return { added: true, resumed: false, rule };
   }
 
   /** The person said Yes to `p`: the rule and its consent are saved in one write. Answering the same question
