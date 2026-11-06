@@ -5,7 +5,7 @@ import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
-import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
+import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { Phase, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -165,7 +165,7 @@ export const createMockAI: CreateAI = ({ host }) => {
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
-  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
@@ -186,6 +186,14 @@ export const createMockAI: CreateAI = ({ host }) => {
       const t = setTimeout(resolve, noteMs)
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
+    // like the real package: words added while it worked are read before it can finish (ai steer.ts)
+    const added: string[] = []
+    while (opts?.steer && !opts.steer.seal()) added.push(...opts.steer.take())
+    if (added.length) {
+      const edit = JSON.parse(await fs.readFile(copy, 'utf8'))
+      edit.notes[edit.notes.length - 1].text = [note, ...added].join('\n')
+      await writeJson(copy, edit)
+    }
     onEvent({ type: 'status', message: 'Making the final version', pct: 0, phase: 'final' })
     const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
     const version = Number(r?.version)
@@ -194,7 +202,8 @@ export const createMockAI: CreateAI = ({ host }) => {
     done.notes[done.notes.length - 1].version = version
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-    return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
+    const also = added.length ? ` Also: ${added.map((w) => `"${w}"`).join(', ')}.` : ''
+    return { summary: `Done: "${note}".${also} It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 
   async function firstMusicTrack(): Promise<string | null> {

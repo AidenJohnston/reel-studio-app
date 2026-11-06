@@ -23,6 +23,7 @@ import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { refuseIfOpen } from './owner';
 import { MergeRequest, MergeResult } from './version-merge';
+import type { NoteSteer } from './steer';
 
 export interface EditorDeps {
   host: EngineHost;
@@ -397,6 +398,8 @@ export interface ApplyNoteOptions {
   /** Settings > "Double-check each edit": a second request checks the edit before it becomes a version
    * (checkAndRepair). Off unless the app passes true: its added tokens and time are not measured yet. */
   checkEdit?: boolean;
+  /** words the person adds while the note runs (steer.ts); the note reads them before it can finish */
+  steer?: NoteSteer;
 }
 
 const REPAIR_STEPS = 12;
@@ -602,7 +605,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
     await writeFileAtomic(file, edit);
-    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId };
+    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, ...(opts.steer ? { steer: opts.steer } : {}) };
   };
   const label = noteLabel(note, attached);
   let committed: EditResult;
@@ -615,7 +618,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     let ctx = await begin();
     const { p: p0 } = await load(ctx);
     // "smaller captions", "quieter music": one direct change and the final render, no AI turns
-    const fast = deps.fastNotes === false || attached.length || (opts.checkEdit && deps.harness) ? null : planFastNote(note, p0);
+    let fast = deps.fastNotes === false || attached.length || (opts.checkEdit && deps.harness) ? null : planFastNote(note, p0);
+    // words added before a direct change starts need the model to read them; once sealed, later ones become the next note
+    if (fast && opts.steer && !opts.steer.seal()) fast = null;
     if (fast) {
       onEvent({ type: 'status', message: operationStatus(ctx, fast.calls[0].name, fast.calls[0].args) ?? 'Making your change', pct: 10, phase: 'final' });
       let ok = true;
@@ -630,6 +635,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         return { ...r, fast: fast.kind };
       }
       // the direct change did not fit this project: start again from the saved project and let the AI read the note
+      opts.steer?.unseal();
       ctx = await begin();
       await load(ctx);
     }
@@ -782,6 +788,8 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
       ...(final ? { version } : {}), text: n.text, applied: [...ctx.state.changed], at: new Date().toISOString(),
       ...(n.attachments.length ? { attachments: n.attachments } : {}), ...(receipt ? { receipt } : {}),
       id: ctx.note!.id, reply: n.summary,
+      // what the person added while it ran is part of what they asked (steer.ts)
+      ...(ctx.state.added?.length ? { text: [n.text, ...ctx.state.added].join('\n') } : {}),
       ...(styleRulesAdded.length ? { styleRulesAdded } : {}), ...(styleSuggestions.length ? { styleSuggestions } : {}),
     };
     p.notes = [...(p.notes ?? []), entry];

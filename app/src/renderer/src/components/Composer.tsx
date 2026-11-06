@@ -56,6 +56,7 @@ export function Composer({
   alert,
   connect,
   onSend,
+  onAdd,
   onStop,
   onRunNext,
   onClear,
@@ -101,6 +102,8 @@ export function Composer({
   /** the editor picker, in place of the box, when no editor is connected */
   connect: ReactNode
   onSend: () => void
+  /** ⌘/Ctrl+Enter: into the version being made now (Add now); absent when nothing can take it */
+  onAdd?: () => void
   onStop: () => void
   onRunNext: () => void
   onClear: () => void
@@ -294,7 +297,9 @@ export function Composer({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    if (canSend) onSend()
+                    if (!canSend) return
+                    if ((e.metaKey || e.ctrlKey) && onAdd) onAdd()
+                    else onSend()
                   }
                 }}
                 disabled={checking}

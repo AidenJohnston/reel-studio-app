@@ -339,7 +339,9 @@ const jobs = createJobManager(
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
-async function startNote(slug: string, { id: noteId, text, attachments, moment, branch }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+async function startNote(slug: string, { id: noteId, text: own, attachments, moment, branch, steers, steer }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+  // words added on an earlier run (Add now) are part of the note from the start this time
+  const text = [own, ...(steers ?? []).map((x) => x.text)].join('\n')
   const dir = projectDir(slug)
   const startedAt = Date.now()
   let editor: string | null = null
@@ -359,10 +361,10 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
       const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
-      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}) }
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
       // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part";
       // what it says back while it works reaches the progress card in the person's own words
-      const aiText = aiNoteText(text, moment)
+      const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
       await recordMadeWith(dir, r)
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
@@ -384,7 +386,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
   jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry), { note: HAND_MESSAGE, record })
-const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log })
+const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log, words: (q) => aiNoteText(q.text, q.moment) })
 
 const models = createModelManager({
   runEngine,
@@ -1230,7 +1232,7 @@ function registerIpc(): void {
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) => {
+  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown) => {
     // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
     // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
     const admit = async () => {
@@ -1284,7 +1286,7 @@ function registerIpc(): void {
       // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
       const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
       return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
-    }, given ?? 0)
+    }, given ?? 0, { steer: steer === true })
   })
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
@@ -1420,6 +1422,7 @@ function registerIpc(): void {
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
+  handle('queue:steer', (_e, slug: string, id: string) => noteQueue.steer(slug, String(id)))
   // Send now / Run next: a held queue goes on, and a paused job's wait ends (main/pause.ts)
   handle('queue:runNext', async (_e, slug: string) => {
     pauser.cancel(slug)

@@ -43,6 +43,7 @@ export type { ToolContext, ToolDef } from './tools';
 export { runAgent } from './agent';
 export { loopHarness } from './harness';
 export type { Harness, HarnessRun } from './harness';
+export type { NoteSteer } from './steer';
 export { ClaudeCodeHarness } from './mcp/claudeCode';
 export { CodexHarness } from './mcp/codex';
 export { SessionHarness } from './mcp/session';

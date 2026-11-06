@@ -138,6 +138,8 @@ export interface ChatMessage {
   moment?: NoteMoment
   /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
   jobId?: string
+  /** Words added to the note with this id while it ran (Add now): the notes show them under that note. */
+  steerOf?: string
   outcome?: NoteOutcome
   /** Said while planning, before the reel had a video. */
   plan?: true
@@ -237,6 +239,9 @@ export interface QueuedNote {
   branch?: number
   /** Set while its note job runs: `base` = the version it started from. */
   attempt?: { base: number }
+  /** Words added to this note while it ran (Add now), oldest first. Its next run, after Stop or a failure, reads them
+   * with its own words. */
+  steers?: { id: string; text: string; moment?: NoteMoment }[]
   /** A change made in "Edit it myself" rather than a note: it runs without the editor (`text` says what it changes). */
   hand?: { edit: HandEdit; changes: number }
 }
@@ -970,8 +975,10 @@ export interface ReelApi {
      * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one).
      * `moment`: a "Just here" note's place; main writes it into the text the AI reads. `onVersion`: the version on
      * screen while it was written (default: the moment's). `base`: a saved version the note changes instead of the
-     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn. */
-    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number): Promise<{ jobId: string | null; queued?: boolean }>
+     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn.
+     * `steer`: add the words to the note running now instead (queue.steer); `added` says whether they made it in
+     * time, and a note too late for it waits to run next. */
+    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number, steer?: boolean): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }>
     /** One version's layers with another's, as a new version (docs/version-merge.md). */
     mergeVersions(slug: string, request: MergeRequest): Promise<{ jobId: string }>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
@@ -1028,6 +1035,9 @@ export interface ReelApi {
     cancel(slug: string, id: string): Promise<void>
     /** -1 = one place earlier, 1 = one place later */
     move(slug: string, id: string, by: -1 | 1): Promise<void>
+    /** Add now: a waiting note's words go into the note running now, which reads them before it finishes. False when
+     * that note had already finished: this one stays first in line. */
+    steer(slug: string, id: string): Promise<{ added: boolean }>
     /** Send now: runs the waiting notes again, from the first, after Stop, a failed note or a restart, and ends a
      * paused job's wait. */
     runNext(slug: string): Promise<void>

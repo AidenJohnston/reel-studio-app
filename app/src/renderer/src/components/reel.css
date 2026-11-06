@@ -315,6 +315,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 }
 .bubble > .icon { display: inline-block; vertical-align: -3px; margin-right: 6px; color: var(--ink-3); }
 .bubble.waiting { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink-2); }
+/* words added to a note while it ran (Add now) */
+.bubble .added { color: var(--ink-3); font-weight: 650; margin-right: 6px; }
 .q-att { display: inline-flex; gap: 6px; vertical-align: middle; margin-left: 8px; }
 /* a note about a moment: the time, in marker yellow */
 .tm {

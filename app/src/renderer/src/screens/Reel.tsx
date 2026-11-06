@@ -10,7 +10,7 @@ import { pausedSentence, pausedWords } from '../../../shared/pause'
 import type { Step } from '../../../shared/steps'
 import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
-import { Button, Confirm, IS_MAC, IconButton, PickFiles, Spinner } from '../components/ui'
+import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Spinner } from '../components/ui'
 import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
@@ -504,8 +504,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   // the moment attached by itself: the person stopped on it, and the video is still there
   const autoMoment = stoppedOn && !playing && hasVersions && !chip
 
-  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined) => {
-    const r = await reel.projects.note(slug, text, files, moment, version?.n)
+  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined, add: boolean) => {
+    const r = await reel.projects.note(slug, text, files, moment, version?.n, undefined, add || undefined)
+    if (add && r.added === false) notify('That version was already being saved, so your note runs next on its own.', 'info')
     if (r.jobId) setJob((cur) => (cur?.jobId === r.jobId ? cur : { ...EMPTY_LIVE, jobId: r.jobId, message: 'Reading your note' }))
     await load()
   }
@@ -520,7 +521,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     return words.length ? noteMoment(c.at, n, words, c.to) : noSpeech(c.at)
   }
 
-  const send = async () => {
+  /** `add`: into the version being made now (Add now), when it can still take it */
+  const send = async (add = false) => {
     const text = draft.trim()
     const files = att.chips
     if ((!text && !files.length) || att.busy || !providerChecked) return
@@ -555,7 +557,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     setStoppedOn(false)
     att.clear()
     try {
-      await note(words || 'Put this here', files.length ? files.map((f) => f.asset) : undefined, moment)
+      await note(words || 'Put this here', files.length ? files.map((f) => f.asset) : undefined, moment, add)
       if (spot && chip) {
         const next = [...pins, { n: spot.n, at: chip.at, x: spot.x, y: spot.y, text: text || 'Change this' }]
         localStorage.setItem(pinsKey(slug), JSON.stringify(next))
@@ -717,6 +719,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const held = d.queueHeld ? waitingRows(d.queue, entries).length : 0
   const nextSpot = Math.max(0, ...pins.map((p) => p.n)) + 1
   const lastResult = entries[entries.length - 1]?.result?.kind
+  // a note making the next version can take more words (Add now); a change made by hand or Version 1 cannot
+  const addable = d.job?.kind === 'note' && making !== null
   const placeholder = notePlaceholder({
     planned,
     hasPlan: !!d.plan,
@@ -724,7 +728,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     asking: lastResult === 'question',
     hasVersions,
     making: making !== null,
-    busy: !!job
+    busy: !!job,
+    ...(addable ? { addKeys: `${MOD}Enter` } : {})
   })
   const showComposer = (planned && !aiOff) || hasVersions || first?.kind === 'making'
   const planCard = d.plan && (
@@ -1179,6 +1184,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                       ) : null
                     }
                     onSend={() => void send()}
+                    onAdd={addable && !att.chips.length ? () => void send(true) : undefined}
                     onStop={() => job?.jobId && void reel.jobs.cancel(job.jobId)}
                     onRunNext={() => void reel.queue.runNext(slug).catch((e) => notify(userMessage(e), 'error'))}
                     onClear={() => void reel.queue.clear(slug).catch((e) => notify(userMessage(e), 'error'))}

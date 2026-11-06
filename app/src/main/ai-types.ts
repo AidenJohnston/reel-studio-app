@@ -131,6 +131,13 @@ export interface SecretStore {
   getSelectedStorageBackend?(): string
 }
 
+/** Words the person adds to a running note (ai/src/steer.ts; the app's side is main/steer.ts). */
+export interface NoteSteer {
+  take(): string[]
+  seal(): boolean
+  unseal(): void
+}
+
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
@@ -154,7 +161,7 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number; steer?: NoteSteer }
   ): Promise<AgentResult>
   mergeVersions?(projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult & { edit: ProjectJson; report: string[] }>
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */

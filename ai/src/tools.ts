@@ -20,6 +20,7 @@ import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
+import { NoteSteer, finishRefused, withAdded } from './steer';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
@@ -54,6 +55,8 @@ export interface ToolState {
   /** project saves so far in this task, and the number of the last one that changed what the video shows */
   edits: number;
   pictureEdit: number;
+  /** words the person added while the note ran, as the model got them (steer.ts); saved with the note's words */
+  added?: string[];
 }
 
 export interface ToolContext {
@@ -85,6 +88,8 @@ export interface ToolContext {
   renderGate?: Promise<unknown>;
   /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
   moments?: Moments;
+  /** words the person adds while this note runs, from the app's queue (steer.ts) */
+  steer?: NoteSteer;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -2259,20 +2264,37 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
   const args = fillNulls(tool.parameters, rawArgs ?? {});
   const problems = validate(tool.parameters, args);
-  if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
+  if (problems.length) return delivered(ctx, { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true });
+  const finishing = tool.name === 'finish' && !!ctx.steer;
+  if (finishing && !ctx.steer!.seal()) return { content: finishRefused(took(ctx)), isError: true };
   try {
     const out = await tool.run(ctx, args);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
     const content = typeof out.content === 'string' ? out.content : JSON.stringify(out.content);
-    return { content, images: out.images, isError: false, summary: out.summary };
+    // finish sealed the box: nothing can be waiting
+    return delivered(ctx, { content, images: out.images, isError: false, summary: out.summary });
   } catch (err: any) {
+    if (finishing) ctx.steer!.unseal();
     if (ctx.signal?.aborted) throw err;
-    if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
+    if (err instanceof ToolInputError) return delivered(ctx, { content: JSON.stringify({ error: err.message }), isError: true });
     if (err instanceof AIError) throw err;
     // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
     if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
-    return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };
+    return delivered(ctx, { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true });
   }
+}
+
+/** The person's added words, recorded as given to the model. */
+function took(ctx: ToolContext): string[] {
+  const added = ctx.steer?.take() ?? [];
+  if (added.length) ctx.state.added = [...(ctx.state.added ?? []), ...added];
+  return added;
+}
+
+/** A result with any words the person added since the last one after it (steer.ts). */
+function delivered<R extends { content: string }>(ctx: ToolContext, r: R): R {
+  const added = took(ctx);
+  return added.length ? { ...r, content: withAdded(r.content, added) } : r;
 }
