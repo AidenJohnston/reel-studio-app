@@ -464,10 +464,10 @@ def speech_check(name: Optional[str] = None) -> dict:
     default = default_threads()
     # 40 s, not the default 180: the app stops the whole check after 60 s (app main/models.ts). A self-test that runs
     # out counts as no GPU here, which only costs a thread count the GPU would ignore.
-    if cuda_available() and cuda_selftest(path, timeout=40.0):
-        # The GPU ignores the CPU thread count. An NVIDIA card it can't load a model on (the packaged runtime has no
-        # CUDA libraries: packaging/README.md) still counts as a device, so it is proved first: otherwise such a
-        # computer listens on the CPU at the untested default count, every time.
+    if uses_gpu(path, timeout=40.0):
+        # The GPU ignores the CPU thread count. A computer load_model keeps on the CPU (asked for it with
+        # REELENGINE_ASR_DEVICE=cpu, or an NVIDIA card it can't load a model on: the packaged runtime has no CUDA
+        # libraries, packaging/README.md) is measured like any other, or it listens at the untested default count.
         return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
@@ -500,13 +500,19 @@ def speech_check(name: Optional[str] = None) -> dict:
                       "sameWords": r["words"] == runs[0]["words"]} for r in runs]}
 
 
+def uses_gpu(path: str, prefer: Optional[str] = None, timeout: float = 180.0) -> bool:
+    """Whether load_model tries the GPU for this model: REELENGINE_ASR_DEVICE allows it, a GPU is
+    there, and it passes the self-test (within `timeout` seconds)."""
+    want = (prefer or os.environ.get("REELENGINE_ASR_DEVICE") or "auto").lower()
+    return want in ("auto", "cuda") and cuda_available() and cuda_selftest(path, timeout=timeout)
+
+
 def load_model(name: str, prefer: Optional[str] = None):
     """(WhisperModel, device, compute_type). The GPU is a speed choice, never a failure."""
     from faster_whisper import WhisperModel
     path = str(require_model(name))
-    want = (prefer or os.environ.get("REELENGINE_ASR_DEVICE") or "auto").lower()
     order = []
-    if want in ("auto", "cuda") and cuda_available() and cuda_selftest(path):
+    if uses_gpu(path, prefer):
         order.append(("cuda", "float16"))
     order.append(("cpu", "int8"))
     last = None
