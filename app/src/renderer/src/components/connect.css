@@ -17,6 +17,9 @@
 .pv-status > span { display: inline-flex; align-items: center; gap: 6px; }
 .pv-ok { display: inline-flex; align-items: center; gap: 4px; }
 .pv-main > .btn { flex: none; }
+/* a text button at the row's end (Disconnect) hangs its padding, so its word ends on the column's edge with the selects and
+   outlined buttons under it, as Library's Show in Finder does */
+.pv-main > .btn.ghost.small:last-child { margin-right: -6px; }
 
 /* a status that changes (Found → Checking Claude… → Connected) settles in; the first one is just there */
 .pv-status.enter { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }

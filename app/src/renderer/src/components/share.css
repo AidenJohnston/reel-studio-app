@@ -18,6 +18,8 @@
   padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; cursor: default;
   --o: top right; pointer-events: auto; -webkit-app-region: no-drag; user-select: none;
 }
+/* its scroll bar stays inside the rounded corners instead of running along them */
+.share-pop::-webkit-scrollbar-track { margin: 12px 0; }
 .share-pop[hidden] { display: none; }
 .share-pop.instant { transition: none; }
 .sp-main { display: flex; flex-direction: column; gap: 8px; }

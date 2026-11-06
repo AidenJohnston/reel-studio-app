@@ -1,13 +1,10 @@
 /* Settings (screens/Settings.tsx): rows and hairlines, never cards (ux-foundation-b.md section 9). A list of sections
    on the left; search, then the sections, on the right. */
 
-/* centred in the page, as My style's column is: at 1920 the list and the sections stopped at 58% of the width */
-/* centred, so the room either side is even; in a window narrower than the page it starts at the gutter, where the
-   nav's labels sit under the screen's title */
-.page.settings-page { max-width: 920px; margin: 0 auto; padding: 0 var(--gutter) var(--space-l); }
-/* Narrower than 1200 px (the sidebar's rail width, Sidebar.tsx RAIL_BELOW) it starts at the gutter like Library and
-   Reels: centred, its edge fell 7 px from the screen title's (the consistency audit's near miss at 1100 x 720). */
-@media (max-width: 1199px) { .page.settings-page { margin-left: 0; } }
+/* At the gutter at every width, as Reels and Library are, so the nav's labels sit under the screen's title. Centred, it
+   gave the screen three left edges at 1440 (title, nav, sections: Consistency re-score); the cost is room on the right
+   of a wide window, which a settings list doesn't need filled. */
+.page.settings-page { max-width: 920px; margin: 0; padding: 0 var(--gutter) var(--space-l); }
 .settings { display: grid; grid-template-columns: 168px minmax(0, 640px); gap: 32px; align-items: start; }
 
 /* the rows' wash hangs 12 px left, so their labels start where the screen's title does */
