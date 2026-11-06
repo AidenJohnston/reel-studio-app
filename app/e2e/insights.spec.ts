@@ -37,7 +37,7 @@ test('Insights: results read, explained and opened at the posted version', async
     // ---- nothing connected: the page says what it will show and where to connect ----
     // fails if the empty page loses its way to Settings › Posting
     await page.getByTestId('nav-insights').click()
-    await expect(page.getByTestId('insights-empty')).toContainText('Connect Instagram, TikTok or Facebook first.')
+    await expect(page.getByTestId('insights-empty')).toContainText('Connect Instagram or TikTok first. Facebook posts don’t report results here yet.')
     await shot(page, 'insights-01-empty')
     await page.getByTestId('insights-connect').click()
     await expect(page.locator('#sec-posting')).toBeInViewport()
