@@ -219,7 +219,8 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
     const timer = setInterval(() => write(res, ': keep-alive\n\n'), LIMITS.keepAliveMs)
     timer.unref?.()
     streams.set(res, { device: device.id, timer })
-    req.on('close', () => endStream(res))
+    // The response's close, not the request's: a GET's request side can finish long before the stream does.
+    res.on('close', () => endStream(res))
     write(res, `data: ${JSON.stringify({ type: 'ready' } satisfies ContractEvent)}\n\n`)
   }
 
@@ -288,7 +289,15 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
       if (!get) return plain(res, 405, 'Not allowed')
       if (path === '/api/time') return json(res, 200, { now: Math.floor(Date.now() / 1000), contract: CONTRACT_VERSION })
       if (path === '/api/events' && req.method === 'GET') return events(req, res, url.searchParams)
-      if (path.startsWith('/media/')) return media(req, res, decodeURIComponent(path.slice('/media/'.length)), url.searchParams)
+      if (path.startsWith('/media/')) {
+        let ref: string
+        try {
+          ref = decodeURIComponent(path.slice('/media/'.length))
+        } catch {
+          return plain(res, 404, 'Not found')
+        }
+        return media(req, res, ref, url.searchParams)
+      }
       return serveStatic(req, res, path)
     })().catch((e) => {
       o.log(`[companion] request failed: ${String(e)}`)
