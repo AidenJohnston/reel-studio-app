@@ -76,6 +76,9 @@ export class AIError extends Error implements UserFacingError {
   retryable: boolean;
   status?: number;
   requestId?: string;
+  /** Said to the person even when they pressed Stop, which otherwise shows no message: something the stop could
+   * not put back, such as a My style rule left on. */
+  tellAfterStop?: string;
   toJSON(): UserFacingError & { status?: number; requestId?: string } {
     return { code: this.code, userMessage: this.userMessage, link: this.link, retryable: this.retryable, status: this.status, requestId: this.requestId };
   }

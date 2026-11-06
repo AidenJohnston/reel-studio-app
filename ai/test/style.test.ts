@@ -136,4 +136,28 @@ describe('asking again for a rule paused in My style turns it back on', () => {
       userMessage: 'You reached your ChatGPT limit. I also couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.',
     });
   });
+
+  it('and when the person presses Stop and My style cannot be put back, the stop still says which rule to check', async () => {
+    const { root, dir } = await makeProject();
+    const style = new StyleStore(() => root);
+    const rule = (await style.add('Put a yellow box behind the captions.')).rule;
+    await style.update(rule.id, { paused: true });
+    const stop = new AbortController();
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_style_rule', { rule: 'Put a yellow box behind the captions.' }), call('set_gap_cap', { seconds: 0.4 })] },
+      async () => {
+        await fsp.rm(style.file);
+        await fsp.mkdir(style.file);
+        stop.abort();
+        return { toolCalls: [call('set_gap_cap', { seconds: 0.5 })] };
+      },
+    ]);
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: m });
+
+    // the app shows no error for Stop (app/src/main/jobs.ts), so this sentence is the only word the person gets
+    await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined, stop.signal)).rejects.toMatchObject({
+      code: 'cancelled',
+      tellAfterStop: 'I stopped that note, but I couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.',
+    });
+  });
 });

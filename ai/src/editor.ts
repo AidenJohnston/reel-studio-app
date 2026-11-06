@@ -141,14 +141,17 @@ async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<strin
 }
 
 /** The error a failed note ends with. When My style could not be put back, the person is told which rules to
- * check: a rule left on would change their next videos without a word. */
+ * check: a rule left on would change their next videos without a word. The app shows no error for Stop, so the
+ * same news also goes in `tellAfterStop`. */
 function noteFailed(e: unknown, styleLeft: string[]): unknown {
   if (!styleLeft.length) return e;
   const u = e as Partial<AIError> | null;
   const shown = typeof u?.userMessage === 'string' ? u.userMessage : "I couldn't finish that note.";
   const rules = styleLeft.map((t) => `"${t}"`).join(' and ');
-  return new AIError(typeof u?.code === 'string' ? u.code : 'note_failed', `${shown} I also couldn't undo its change to ${rules} in My style, so please check it there.`,
+  const err = new AIError(typeof u?.code === 'string' ? u.code : 'note_failed', `${shown} I also couldn't undo its change to ${rules} in My style, so please check it there.`,
     { detail: e instanceof Error ? e.message : String(e), link: u?.link, retryable: u?.retryable });
+  err.tellAfterStop = `I stopped that note, but I couldn't undo its change to ${rules} in My style, so please check it there.`;
+  return err;
 }
 
 async function listAssets(projectDir: string): Promise<Set<string>> {
