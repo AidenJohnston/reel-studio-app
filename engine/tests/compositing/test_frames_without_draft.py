@@ -24,6 +24,9 @@ TEXT = "so here is the short videos everyone makes and nobody really watches unt
 # without the window caption clock scored 13.8 in the caption band, and the frame after it 23.4 in the
 # square's band. A missing card was not measured.
 CAPTION_DB, SQUARE_DB, CARD_DB, FRAME_DB = 30.0, 30.0, 30.0, 30.0
+# Proposed, not measured: one frame of a 0.5 s fade moves a card's alpha by 1/15, about 31 dB on its
+# box, while a still and its draft frame scored 46.7 dB or more above. A still a frame off mid-fade fails.
+FADE_DB = 38.0
 
 
 def _moving_take(path: Path, dur: float = 8.0) -> Path:
@@ -142,8 +145,8 @@ def test_a_still_inside_a_cards_fade_is_the_drafts_frame(tmp_path, monkeypatch):
     draft = Path(render.run(pdir, draft=True, verify=False)["file"])
     b1 = _layer_item(pdir, "b1")
     assert not b1.get("skipped") and b1["t1"] - b1["t0"] > 1.5
-    fading_in, settled, fading_out = b1["t0"] + 0.2, (b1["t0"] + b1["t1"]) / 2, b1["t1"] - 0.2
-    times = [round(fading_in, 3), round(settled, 3), round(fading_out, 3)]
+    settled = (b1["t0"] + b1["t1"]) / 2
+    times = [round(t, 3) for t in (b1["t0"] + 0.1, b1["t0"] + 0.25, settled, b1["t1"] - 0.25, b1["t1"] - 0.1)]
 
     drawn = render.stills(pdir, times, DRAFT_W)["frames"]
     taken = frames.from_video(draft, times, DRAFT_W)["frames"]
@@ -154,9 +157,10 @@ def test_a_still_inside_a_cards_fade_is_the_drafts_frame(tmp_path, monkeypatch):
     def box(f) -> np.ndarray:
         return _gray(f["file"])[by0:by1, bx0:bx1]
     # not vacuous: in the preview the card is visibly less drawn mid-fade than once it has settled
-    assert _psnr(box(taken[0]), box(taken[1])) < CARD_DB and _psnr(box(taken[2]), box(taken[1])) < CARD_DB
-    scores = [_psnr(box(d), box(k)) for d, k in zip(drawn, taken)]
-    assert min(scores) >= CARD_DB, scores
+    assert all(_psnr(box(taken[i]), box(taken[2])) < CARD_DB for i in (0, 1, 3, 4))
+    scores = [round(_psnr(box(d), box(k)), 1) for d, k in zip(drawn, taken)]
+    print(json.dumps({"times": times, "cardDb": scores}))
+    assert min(scores) >= FADE_DB, scores
 
 def test_frames_reuses_a_render_only_while_it_shows_the_project(tmp_path, monkeypatch):
     """A preview whose picture no longer matches the project (captions, the transcript, the face track, a
