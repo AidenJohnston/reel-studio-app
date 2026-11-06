@@ -14,6 +14,12 @@ const WATCH_MS = 3000
 const TRACE_MS = 600
 /** the user-timing mark the click sets, found in the trace to split it */
 const CLICK_MARK = 'rs-use-claude'
+/**
+ * How "Use it" is pressed: `pointer` (default) clicks it; `key` focuses it and presses Enter. A key press puts the app
+ * in keyboard mode (components/motion.ts, `html.kb`), where the status line's settle-in and other step transitions
+ * are off, so comparing the two says how much of the jank those transitions cause.
+ */
+const PRESS = process.env.REELSTUDIO_PERF_MOTION_PRESS === 'key' ? 'key' : 'pointer'
 
 interface Loaf {
   start: number
@@ -225,7 +231,11 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
       // waits for the button to be ready before clicking, so a mark set beforehand could fall well before the click)
       await use.evaluate((el, m) => el.addEventListener('click', () => performance.mark(m), { capture: true, once: true }), CLICK_MARK)
       await page.waitForTimeout(TRACE_MS)
-      const useClaude = await measure(page, () => use.click())
+      const useClaude = await measure(page, async () => {
+        if (PRESS === 'pointer') return use.click()
+        await use.focus()
+        await page.keyboard.press('Enter')
+      })
       const ended = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()))
       await cdp.send('Tracing.end')
       await ended
@@ -253,6 +263,7 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
   const report = {
     what: 'Reel Studio first-run motion (app/perf/README.md)',
     reportOnly: 'No thresholds. maxGapMs is the longest time between two animation frames in the 3 s after the click.',
+    useClaudePressedBy: PRESS,
     machine: { platform: process.platform, release: release(), cpu: cpus()[0]?.model ?? null, cpus: cpus().length },
     summary,
     runs
