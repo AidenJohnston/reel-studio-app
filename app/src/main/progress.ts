@@ -55,6 +55,15 @@ const PLAN: Record<string, Timed[]> = {
 
 export { timeLeftText as formatEta } from '../shared/progress'
 
+/** The highest a whole-job percent shows by itself (the engine's `render` stage); the rest is left to the creep. */
+const AGGREGATE_CAP = 99 * 0.99
+/** Once a job runs past what it was expected to take, the gap between the bar and 99% shrinks to
+ * gap / (1 + seconds / CREEP_SECONDS): halved after this many seconds, then ever slower. Not a fixed half-life:
+ * halving every 30 s rounds the bar to exactly 99 within half an hour, and this never gets there.
+ * No measurement chose 30 s. From 98% the bar rises a quarter of a point in the first ten seconds. From 98.9%
+ * only a tenth of a point is left, so no setting moves it visibly; the time-left line beside it has to say it. */
+const CREEP_SECONDS = 30
+
 export class ProgressTracker {
   private phases: Timed[]
   private cur = -1
@@ -62,11 +71,8 @@ export class ProgressTracker {
   private best = 0
   private jobStart: number | undefined
   private aggregate: { pct: number; at: number } | undefined
-  /** How long the job has run past its whole-job projection, in lengths of that projection, summed piece by
-   * piece so a later, longer projection slows the creep below 99% but never takes it back. */
-  private overrun = 0
-  /** Seconds into the job at the last snapshot: where the next piece of overrun starts counting. */
-  private counted = 0
+  /** Where the creep toward 99% started: when, and the gap then. Restarts whenever an estimate raises the bar. */
+  private creep: { at: number; gap: number } | undefined
   private readonly spent: Partial<Record<Timed, number>> = {}
 
   constructor(
@@ -169,18 +175,23 @@ export class ProgressTracker {
     const jobElapsed = this.jobStart === undefined ? 0 : (this.now() - this.jobStart) / 1000
     const aggregateLeft = projected === undefined ? undefined : projected - jobElapsed
     const total = done + elapsed + Math.max(0, aggregateLeft ?? displayRemaining)
-    if (projected !== undefined) this.overrun += Math.max(0, jobElapsed - Math.max(this.counted, projected)) / projected
-    this.counted = Math.max(this.counted, jobElapsed)
-    // Leave a gap below the phase ceiling, shrinking it as an overrun continues. A job that outlives its
-    // whole-job projection gets the same gap, so its bar creeps toward 99 instead of stopping there. With
-    // one projection throughout, 1 / (1 + overrun) is projected / jobElapsed, as for a phase.
+    // Leave a gap below the phase ceiling, shrinking it as an overrun continues. A whole-job percent shows at
+    // most AGGREGATE_CAP.
     const ceiling = projected === undefined
       ? (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
-      : 99 * (1 - 0.01 / (1 + this.overrun))
-    const overall = Math.min(99, ceiling, (done + elapsed) / total * 100)
-    // An engine report of 99 or 100 while work remains (cover, check) stays under the same ceiling, or the
-    // bar would stop there.
-    this.best = Math.max(this.best, overall, Math.min(ceiling, this.aggregate?.pct ?? 0))
+      : AGGREGATE_CAP
+    const raised = Math.min(ceiling, Math.max((done + elapsed) / total * 100, this.aggregate?.pct ?? 0))
+    // Past the projection, or at the cap a whole-job percent cannot pass, time alone moves the bar, whatever a
+    // later engine report does to the projection. Lower down, a report that has fallen behind the bar holds it
+    // instead: creeping from there would race the bar toward 99 with most of the job still to do.
+    const pastEstimate = projected === undefined ? remaining <= 0 : aggregateLeft! <= 0 || this.best >= AGGREGATE_CAP
+    if (!pastEstimate || raised > this.best) this.creep = undefined
+    this.best = Math.max(this.best, raised)
+    if (pastEstimate) {
+      const t = this.now()
+      this.creep ??= { at: t, gap: 99 - this.best }
+      this.best = Math.max(this.best, 99 - this.creep.gap / (1 + (t - this.creep.at) / 1000 / CREEP_SECONDS))
+    }
     const remainingPhases = this.phases.slice(this.cur)
     const approximate = remainingPhases.some((p) => !this.local(p))
     const out = { overall: this.best }
