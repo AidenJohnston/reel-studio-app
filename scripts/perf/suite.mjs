@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process'
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { aggregate, compare, report } from './metrics.mjs'
+import { clipPath } from './fixtures.mjs'
 
 const scripts = dirname(fileURLToPath(import.meta.url))
 const root = '/tmp/rs-perf-harness'
@@ -64,7 +65,7 @@ try {
     }
     const result = readResult(join(cached ? roundDir : childOutput, 'results.json'))
     if (code !== 0 || result.error || !result.cleaned) throw new Error(`${ref} round ${round} failed: ${result.error ?? result.cleanupErrors ?? code}`)
-    const expectedClips = values.long ? ['aiden-v1-new.mp4', 'IMG_7303.mov'] : [values.clip === 'long' ? 'IMG_7303.mov' : 'aiden-v1-new.mp4']
+    const expectedClips = (values.long ? ['short', 'long'] : [values.clip === 'long' ? 'long' : 'short']).map((k) => basename(clipPath(k)))
     if (result.sha !== actualRef || result.replayNote !== values.note || !!result.adoptModel !== values['adopt-model'] || JSON.stringify(result.runs.map((r) => r.clip)) !== JSON.stringify(expectedClips)) throw new Error(`Incompatible cached workload for ${ref}`)
     compare(result, result)
     const previous = history.get(ref)

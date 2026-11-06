@@ -91,7 +91,6 @@
   flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 320px;
   padding-bottom: 64px; text-align: center;
 }
-.insights-empty .style-example { justify-self: center; }
 .insights-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .insights-empty p { max-width: 44ch; color: var(--ink-2); }
 .style-empty {
