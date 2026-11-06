@@ -36,7 +36,7 @@ export interface Pairing {
   /** 64 hex characters: the 32-byte secret from the pairing link's fragment. */
   secret: string
   installationId: string
-  /** "Sam's MacBook"; empty until the first app.info after pairing. */
+  /** "Jo's MacBook"; empty until the first app.info after pairing. */
   computer: string
   /** The computer's clock minus this one's, in seconds (from /api/time). Every signed time adds it. */
   offset: number

@@ -1,4 +1,4 @@
-// The paired page: the header ("Connected to Sam's MacBook" and its menu), the event stream, and which screen shows.
+// The paired page: the header ("Connected to Jo's MacBook" and its menu), the event stream, and which screen shows.
 // The stream carries no data, only "read again": each `changed`, each finished job and each reconnect bumps `pulse`,
 // and the screen on show reads what it shows again. Job progress rides on the `job` events themselves.
 import { useCallback, useEffect, useRef, useState } from 'react'

@@ -31,7 +31,7 @@ export const NOTE_MAX_CHARS = 10_000
 export interface AppInfoDto {
   version: string
   contract: number
-  /** This computer's name, for "Connected to Sam's MacBook". */
+  /** This computer's name, for "Connected to Jo's MacBook". */
   computer: string
   /** Random, made once per installation: which computer a device is paired with. */
   installationId: string

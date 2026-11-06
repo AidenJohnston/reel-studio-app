@@ -44,7 +44,7 @@ function serve(routes: Record<string, (init: RequestInit | undefined, n: number)
 }
 
 const paired = (offset: number): Pairing => {
-  const p: Pairing = { device: DEVICE, secret: SECRET, installationId: 'inst-1', computer: "Sam's MacBook", offset }
+  const p: Pairing = { device: DEVICE, secret: SECRET, installationId: 'inst-1', computer: "Jo's MacBook", offset }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
   return p
 }
