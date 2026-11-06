@@ -1,14 +1,34 @@
 // The job lane once part of a job's engine would not stop (ENGINE_STUCK): the video stays closed for
 // the rest of the session, nothing cleans up after that engine, and nothing else writes to the video.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJobManager } from '../src/main/jobs'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerAttachmentIpc, type AttachIpcDeps } from '../src/main/attachments'
 import { takeNote } from '../src/main/note-intake'
-import { projectDir } from '../src/main/store'
+import { projectDir, readAppState, recoverInterrupted } from '../src/main/store'
 import { setupPaths } from './helpers'
+
+// Off: the real fs.promises.rm. On: removing that one path is refused, as Windows refuses while a file in
+// it is open (a player, a virus scanner).
+const refuseRm = vi.hoisted(() => ({ path: '', refused: 0 }))
+vi.mock(import('node:fs'), async (real) => {
+  const fs = await real()
+  return {
+    ...fs,
+    promises: {
+      ...fs.promises,
+      rm: async (...args: Parameters<typeof fs.promises.rm>) => {
+        if (String(args[0]) === refuseRm.path) {
+          refuseRm.refused++
+          throw Object.assign(new Error(`EPERM: operation not permitted, rm '${args[0]}'`), { code: 'EPERM' })
+        }
+        return fs.promises.rm(...args)
+      }
+    }
+  }
+})
 
 const STUCK = { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop. Restart Reel Studio before you change this video again." }
 
@@ -81,5 +101,50 @@ describe('a job whose engine would not stop', () => {
   it('refuses a note with the "would not stop" message before it reaches the chat', async () => {
     const { slug, jobs } = await stuckVideo()
     await expect(takeNote(jobs, slug, 'make the captions bigger', undefined)).rejects.toMatchObject(STUCK)
+  })
+})
+
+describe('a job whose unfinished version cannot be removed', () => {
+  it('leaves it for the next start, which removes it without reporting the job as cut short', async () => {
+    setupPaths()
+    const slug = 'locked-reel'
+    const dir = projectDir(slug)
+    const partial = join(dir, 'versions', 'v2')
+    mkdirSync(partial, { recursive: true })
+    writeFileSync(join(partial, '.rendering'), '')
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ broll: [] }))
+    const logs: string[] = []
+    const jobs = createJobManager(() => undefined, (line) => logs.push(line))
+    refuseRm.path = partial
+    refuseRm.refused = 0
+    try {
+      const id = jobs.start(slug, 'rerender', async () => {
+        throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' }
+      })
+      await jobs.get(id)!.done
+    } finally {
+      refuseRm.path = ''
+    }
+    expect(refuseRm.refused).toBe(1)
+    expect(existsSync(partial)).toBe(true)
+    expect(logs).toContainEqual(expect.stringMatching(/could not remove an unfinished version/))
+
+    // a start while the file is still held open does not fail, and the mark stays for the next one
+    refuseRm.path = partial
+    try {
+      expect(await recoverInterrupted()).toEqual([])
+    } finally {
+      refuseRm.path = ''
+    }
+    expect(refuseRm.refused).toBe(2)
+    expect(existsSync(partial)).toBe(true)
+
+    // the next start
+    expect(await recoverInterrupted()).toEqual([slug])
+    expect(existsSync(partial)).toBe(false)
+    const s = await readAppState(slug)
+    expect(s.lastError?.code).toBe('RENDER_FAILED')
+    expect(s.chat.map((m) => m.text)).not.toContainEqual(expect.stringMatching(/closed before I finished/))
+    expect(await recoverInterrupted()).toEqual([])
   })
 })
