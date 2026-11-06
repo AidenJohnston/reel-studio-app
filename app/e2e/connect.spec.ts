@@ -101,10 +101,11 @@ test('already signed in: "Use Claude (your Claude Code app)" comes first, and on
   await expect(page.getByTestId('use-claude-code')).toHaveAccessibleName(USE_CLAUDE_CODE)
   await expect(panel.locator('[data-testid="vendor-claude"], [data-testid="vendor-chatgpt"]').locator('.pv-main > button').first()).toHaveAttribute('data-testid', 'use-claude-code')
   await expect(page.getByTestId('use-claude-code')).toHaveClass(/primary/)
-  // CLIProxyAPI, not running here, follows the app that is ready instead of sitting above it
-  const rows = page.getByTestId('ai-picker').locator(':scope > [data-testid]')
-  await expect(rows.first()).not.toHaveAttribute('data-testid', 'hub-row')
-  await expect(rows.last()).toHaveAttribute('data-testid', 'hub-row')
+  // CLIProxyAPI, not running here, waits under Advanced instead of sitting above the app that is ready
+  await expect(page.getByTestId('ai-picker').getByTestId('hub-row')).toHaveCount(0)
+  await page.getByTestId('ai-advanced').click()
+  await expect(page.getByTestId('hub-row')).toBeVisible()
+  await expect(page.getByTestId('hub-row')).toHaveAttribute('data-state', 'none')
   // the plan the app reports, beside its name
   await expect(page.getByTestId('vendor-plan-claude')).toHaveText('Max')
   await expect(panel).toContainText('Signed in. It uses your Claude plan’s limits.')

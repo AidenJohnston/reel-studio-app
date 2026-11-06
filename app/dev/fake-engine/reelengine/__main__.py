@@ -395,7 +395,7 @@ def cmd_moments(args: list[str]) -> dict:
     progress("moments", 1, "Looking at what changed")
     at = os.environ.get("FAKE_ENGINE_MOMENTS_AT")
     vf = "scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1" + ("" if at else ",hue=s=0")
-    starts = (float(at), float(at) + 0.8, float(at) + 1.6) if at else (0.8, 2.4, 4.0)
+    starts = (float(at), float(at) + 0.2, float(at) + 0.4) if at else (0.8, 2.4, 4.0)
     times = [t for t in starts if t < dur]
     stills = []
     for n, t in enumerate(times):

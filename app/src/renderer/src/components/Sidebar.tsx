@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ProjectSummary, ProviderInfo } from '../../../shared/api'
 import { reel } from '../api'
+import { onReelsChanged } from './reels-changed'
 import { stateOf } from '../screens/home-state'
 import type { Go } from '../nav'
 import { Icon, type IconName } from './icons'
@@ -47,8 +48,10 @@ export function useRail(): [boolean, (byShortcut?: boolean) => void] {
   const [rail, setRail] = useState(() => localStorage.getItem(RAIL_KEY) === '1')
   // byKeyboard() does not count Cmd/Ctrl shortcuts (motion.ts), so the shortcut says so itself
   const toggle = useCallback((byShortcut = false) => {
-    // folding hides the resize edge: focus on it moves to the toggle first, so it isn't left on nothing
-    if (document.activeElement?.classList.contains('side-resize')) sidebarToggle()?.focus()
+    // folding hides the resize edge and the Recent list: focus on either moves to the toggle first, so it isn't left
+    // on nothing
+    const focused = document.activeElement
+    if (focused?.classList.contains('side-resize') || focused?.closest('.side-recent')) sidebarToggle()?.focus()
     const moving = Array.from(document.querySelectorAll<HTMLElement>('.main, .tb-main'))
     // where each is on screen now, partway through a slide included
     const before = moving.map((el) => el.getBoundingClientRect().left)
@@ -200,23 +203,34 @@ const untouched = (r: ProjectSummary): boolean => r.noVideo && r.title === 'New 
 
 function SideRecent({ current, go }: { current: string | null; go: Go }) {
   const [list, setList] = useState<ProjectSummary[] | null>(null)
+  /** each listed reel's status, to notice a job starting on one listed as stopped or not listed (as Home does) */
+  const known = useRef(new Map<string, ProjectSummary['status']>())
   useEffect(() => {
     let alive = true
     const load = () =>
       reel.projects.list().then(
-        (p) => alive && setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX)),
+        (p) => {
+          if (!alive) return
+          known.current = new Map(p.map((r) => [r.slug, r.status]))
+          setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX))
+        },
         () => alive && setList([])
       )
     void load()
-    // a reel made, renamed, finished or stopped anywhere changes its line here too
+    // a reel made, finished or stopped anywhere changes its line here too; a status only when a job starts on a reel
+    // listed as stopped (a Resume), or one not listed yet
     const off = reel.jobs.onEvent((e) => {
-      if (e.type !== 'status') void load()
+      if (e.type !== 'status' || !e.slug) return void load()
+      const was = known.current.get(e.slug)
+      if (was === undefined || was === 'interrupted' || was === 'failed') void load()
     })
     const offQueue = reel.queue.onChange(() => void load())
+    const offRenamed = onReelsChanged(() => void load())
     return () => {
       alive = false
       off()
       offQueue()
+      offRenamed()
     }
   }, [current])
   if (!list?.length) return null

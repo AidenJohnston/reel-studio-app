@@ -25,6 +25,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { useNoteAttachments } from '../components/NoteAttachments'
 import { NotesLog, useVersionRows, type FirstState } from '../components/NotesLog'
+import { reelsChanged } from '../components/reels-changed'
 import { Composer, region, type Chip } from '../components/Composer'
 import { Timeline, type TimelineMark } from '../components/Timeline'
 import { lanesOf, pictureWhy, type Lanes } from '../../../shared/lanes'
@@ -594,6 +595,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     if (!t || t === d.title) return
     try {
       await reel.projects.update(slug, { title: t })
+      reelsChanged()
       await load()
     } catch (e) {
       notify(userMessage(e), 'error')

@@ -168,8 +168,9 @@ test('Tab goes from the sidebar toggle down the sidebar, then to the title row; 
     }
     expect(order.slice(0, 2)).toEqual(['sidebar-toggle', 'new-reel'])
     expect(order).not.toContain('sidebar-resize')
-    // the account row is the sidebar's last stop; Add files, the title row's first control, comes next
-    expect(order.slice(-2)).toEqual(['account', 'Add files'])
+    // the account row is the sidebar's last stop; then the title row: its tabs (one stop, the one selected), then
+    // Add files
+    expect(order.slice(-3)).toEqual(['account', 'library-tab-images', 'Add files'])
 
     // Cmd/Ctrl+Shift+\ focuses the edge, the arrow keys size the sidebar, Esc goes back to Add files, even after a
     // second press on the edge

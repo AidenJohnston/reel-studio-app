@@ -46,7 +46,8 @@ test('Library, My style and Insights', async () => {
 
   // ---- Library: tabs, no Finished videos, an empty tab says what goes there ----
   await page.getByTestId('nav-library').click()
-  await expect(page.getByTestId('titlebar-title')).toHaveText('Library')
+  // the title row holds the screen's name and its tabs
+  await expect(page.getByTestId('titlebar-title').getByRole('heading', { level: 1 })).toHaveText('Library')
   await expect(page.getByTestId('titlebar-actions').getByRole('button', { name: 'Add files' })).toBeVisible()
   await expect(page.getByRole('tab')).toHaveText(['Pictures0', 'Videos0', 'Music0', 'Sound effects37'])
   await expect(page.getByTestId('library-tab-images')).toHaveAttribute('aria-selected', 'true')
