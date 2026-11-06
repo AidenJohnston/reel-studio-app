@@ -12,6 +12,7 @@ from harness import checks, media, replay
     (True, 6.0, "draft", {"draft": "fail", "window": "pass"}),
     (True, 6.0, "window", {"draft": "pass", "window": "fail"}),
     (True, 6.0, "both", {"draft": "fail", "window": "fail"}),
+    (True, 6.0, "all", {"draft": "fail", "window": "fail"}),
     (True, 1.0, "draft", {"draft": "fail", "window": "none"}),
     (True, 2.0, "window", {"draft": "pass", "window": "none"}),
     (True, 2.000001, "window", {"draft": "pass", "window": "none"}),
@@ -40,12 +41,13 @@ def test_missing_moments_videos_fail_only_when_required(monkeypatch, tmp_path, c
     plans, files = [], []
     for k in range(2):
         draws = k == 0 or changed
-        outputs = {"still0": {"sha256": "still", "file": "still.png"}} if draws else {}
-        if draws and (k == 0 or missing not in ("draft", "both")):
+        has_still = draws and (k == 0 or missing != "all")
+        outputs = {"still0": {"sha256": "still", "file": "still.png"}} if has_still else {}
+        if draws and (k == 0 or missing not in ("draft", "both", "all")):
             outputs["draft"] = {"sha256": "draft", "file": "draft.mp4"}
-        if draws and long and (k == 0 or missing not in ("window", "both")):
+        if draws and long and (k == 0 or missing not in ("window", "both", "all")):
             outputs["window"] = {"sha256": "window", "file": "window.mp4"}
-        plans.append({"stills": [0.5] if draws else [], "intervals": [[0.0, duration]] if draws else [],
+        plans.append({"stills": [0.5] if has_still else [], "intervals": [[0.0, duration]] if has_still else [],
                       "window": [0.0, 2.0] if "window" in outputs else None})
         files.append(outputs)
     run = {"flow": "moments", "plans": plans, "files": files,
@@ -54,7 +56,7 @@ def test_missing_moments_videos_fail_only_when_required(monkeypatch, tmp_path, c
                                "ffmpeg", "ffprobe", {"preview": {}, "final": {}}, pins,
                                {"previewScale": 0.5, "stillWidth": 540})
     note = result["steps"][1]
-    assert note["coverage"]["status"] == "pass"
+    assert note["coverage"]["status"] == ("fail" if missing == "all" else "pass")
     for name, status in expected.items():
         assert note[name]["status"] == status
         if status == "fail":
