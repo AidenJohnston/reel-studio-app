@@ -17,11 +17,11 @@
 .vt-l2 { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vt-row.on .vt-main b { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 
-/* the row's actions show on hover or focus, and always on a touch screen or the version on screen */
+/* the row's actions show on hover or focus, and always on a touch screen; at rest the row's second line has the room */
 .vt-acts { display: flex; gap: 10px; flex: none; opacity: 0; transition: opacity 120ms var(--ease-out); }
 .vt-acts .lk { border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; cursor: pointer; white-space: nowrap; }
 .vt-acts .lk:disabled { color: var(--ink-4); cursor: default; }
-.vt-row:focus-within .vt-acts, .vt-row.on .vt-acts { opacity: 1; }
+.vt-row:focus-within .vt-acts { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
   .vt-row:hover { background: var(--wash); }
   .vt-row:hover .vt-acts { opacity: 1; }
