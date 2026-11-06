@@ -268,14 +268,21 @@ function ownClaims(c: Change): Map<string, number | undefined> {
   return out
 }
 
+/** The directions the app's own summary gives a change. A reworded summary replaces the whole tooltip,
+ * so it must keep every one: "bigger subtitles" alone hides "fixed 3 words". */
+function saidDirs(c: Change): string[] {
+  return splitParts(c.said).flatMap((part) => claimAbout(c.group, tokens(part))?.dirs ?? [])
+}
+
 /**
  * A small model's rewording of a version's title and summary. Kept only when it reads like a title and
  * every part (between commas or "and") means something the receipt says: each part is read as a claim
  * (kind of change, direction, number) in that kind's own words, and the receipt's change of that kind
  * must make the same claim. A number must be the app's own; "a" counts as one. In the summary, a
  * direction the app gives a number to must keep that number. A part that names no kind continues the
- * kind before it, or is any kind it is true of. Every kind must be named in the summary; only a title
- * may end in the app's "and more" form for kinds left unnamed. A quoted name must be the song's own.
+ * kind before it, or is any kind it is true of. Every kind must be named in the summary, with every
+ * direction the app's own summary gives it; only a title may end in the app's "and more" form for kinds
+ * left unnamed. A quoted name must be the song's own.
  * null = keep the app's own words.
  */
 export function acceptRewrite(text: { title: string; summary: string }, facts: EditFact[], words: Word[]): { title: string; summary: string } | null {
@@ -296,7 +303,7 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
   for (const [t, inSummary] of [[straight(title), false], [straight(summary), true]] as const) {
     if ((t.match(QUOTED) ?? []).some((q) => !songs.has(q))) return null
     const parts = splitParts(t)
-    const named = new Set<Group>()
+    const named = new Map<Group, Set<string>>()
     let andMore = false
     let group: Group | null = null
     for (const [i, part] of parts.entries()) {
@@ -314,9 +321,10 @@ export function acceptRewrite(text: { title: string; summary: string }, facts: E
       const claim: Claim | undefined = candidates.map((g) => claimAbout(g, w)).find((c): c is Claim => !!c && holds(c, inSummary))
       if (!claim) return null
       group = claim.group
-      named.add(claim.group)
+      named.set(claim.group, new Set([...(named.get(claim.group) ?? []), ...claim.dirs]))
     }
     if (!named.size || (!andMore && own.some((c) => !named.has(c.group)))) return null
+    if (inSummary && own.some((c) => saidDirs(c).some((d) => !named.get(c.group)?.has(d)))) return null
   }
   return { title, summary }
 }
