@@ -181,6 +181,27 @@ describe('agent loop with a scripted model', () => {
     expect((await fsp.readdir(path.join(dir, 'work', 'assets'))).filter((f) => f.endsWith('loaf.png'))).toHaveLength(1);
   });
 
+  it('an engine that would not stop is the error a note ends with even when the AI process would not stop either, and nothing is removed under it', async () => {
+    const { dir, host, settingsDir } = await setup();
+    host.engineAssets = true;
+    host.afterRenderFiles = ({ draft }) => {
+      if (draft) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+    };
+    class StuckCli extends ScriptedModel {
+      async dispose() { throw new AIError('cli_stuck', 'The AI would not stop. Restart Reel Studio if this keeps happening.'); }
+    }
+    const m = new StuckCli([
+      { toolCalls: [call('fetch_image', { url: 'https://example.com/loaf.png', name: 'loaf' })] },
+      { toolCalls: [call('render_draft')] },
+    ]);
+    const events: AgentEvent[] = [];
+    await expect(createAI({ host, settingsDir, providerOverride: m }).applyNote(dir, 'slower, with my loaf', (e) => events.push(e))).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    // the engine may still be using the note's files: they stay, and the app keeps the video closed
+    expect((await fsp.readdir(path.join(dir, 'work', 'assets'))).filter((f) => f.endsWith('loaf.png'))).toHaveLength(1);
+    // the AI process is still reported (main.log has every status line)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'status', message: expect.stringMatching(/AI would not stop/) }));
+  });
+
   it('part of a note\'s final render would not stop: the note ends with that error and saves nothing, not even its preview as the version', async () => {
     const { dir, host, settingsDir } = await setup();
     host.afterRenderFiles = ({ draft }) => {
