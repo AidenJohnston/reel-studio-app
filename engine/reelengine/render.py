@@ -565,12 +565,26 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
     reads and trims before the render's first frame. `video_dur` is the whole video's length: a window
     or still (any render but the full one) draws each layer frame the full render draws at that moment,
     with the same fade, counted in frames as the full render counts them."""
+    full_render = t_shift == 0 and (video_dur is None or abs(dur - video_dur) < 1e-6)
     t0, t1 = layer.t0 - t_shift, layer.t1 - t_shift
-    if t1 <= 0 or t0 >= dur or t1 - t0 < 1e-3:
+    if full_render and (t1 <= 0 or t0 >= dur or t1 - t0 < 1e-3):
         return None
     skip = max(0.0, -t0)
     t0 = max(0.0, t0)
     t1 = min(dur, t1)
+    if not full_render:
+        # The output frames the full render's enable (below) admits, moved onto this window's frames.
+        vd = layer.t1 if video_dur is None else video_dur
+        c0, c1 = max(0.0, layer.t0), min(layer.t1, vd)
+        if c1 <= 0 or c0 >= vd or layer.t1 - layer.t0 < 1e-3:
+            return None
+        k0 = round(t_shift * fps)                              # as the caption track maps a window
+        first = math.ceil(float(_f(c0)) * fps - 1e-6) - k0
+        last = math.floor(float(_f(c1)) * fps + 1e-6) - k0
+        if last < 0 or first > round(dur * fps) - 1 or last < first:
+            return None
+        # enable at half-frame midpoints: it admits exactly those frames, whatever the rounding
+        t0, t1 = max(0.0, (first - 0.5) / fps), (last + 0.5) / fps
     w, h = max(2, int(round(layer.w * f / 2)) * 2), max(2, int(round(layer.h * f / 2)) * 2)
     parts = []
     if layer.kind == "video":
@@ -585,7 +599,6 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         rh = abs(w * math.sin(a)) + abs(h * math.cos(a))
         x -= (rw - w) / 2
         y -= (rh - h) / 2
-    full_render = t_shift == 0 and (video_dur is None or abs(dur - video_dur) < 1e-6)
     if full_render:
         span = t1 - t0
         if layer.fade_in > 0 and skip <= 0:
@@ -598,17 +611,11 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         # What the full render draws: the layer's input seeked past the video's start, `pad` transparent
         # frames (tpad rounds its duration to the nearest frame), then layer frame j at output frame
         # pad + j with its fades timed from frame 0. Output frame k0 starts this window.
-        vd = layer.t1 if video_dur is None else video_dur
-        c0, c1 = max(0.0, layer.t0), min(layer.t1, vd)
         span = c1 - c0
         fi = min(layer.fade_in, span / 2) if layer.fade_in > 0 and layer.t0 >= 0 else 0.0
         fo = min(layer.fade_out, span / 2) if layer.fade_out > 0 and layer.t1 <= vd + 1e-6 else 0.0
         pad_full = math.floor(float(_f(c0)) * fps + 0.5) if c0 > 0 else 0
-        k0 = round(t_shift * fps)                              # as the caption track maps a window
         j0 = k0 - pad_full                                     # the layer frame at this window's frame 0
-        # The full render shows the layer while its own clock is inside [c0, c1]; on the window's clock
-        # that is [c0, c1] less the time of output frame k0, not less t_shift.
-        t0, t1 = max(0.0, c0 - k0 / fps), min(dur, c1 - k0 / fps)
         if j0 < 0 or layer.kind == "image":
             js = 0                                             # an image input can't be seeked
         elif fi > 0 and j0 < fi * fps:
