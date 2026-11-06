@@ -316,10 +316,14 @@ export function ShowMeHow({
     }
     return coverPicks.current
   }
-  // Closing the drawer stops a look still running (main waits for the engine to exit).
+  // Closing the drawer stops a look still running (main waits for the engine to exit). The stopped look
+  // is forgotten, so an effect that runs again (React's development double run) starts a new one
+  // instead of showing "Stopped.".
   useEffect(
     () => () => {
-      if (coverPicks.current) void reel.projects.stopCoverCandidates(d.slug)
+      if (!coverPicks.current) return
+      coverPicks.current = null
+      void reel.projects.stopCoverCandidates(d.slug)
     },
     [d.slug]
   )
