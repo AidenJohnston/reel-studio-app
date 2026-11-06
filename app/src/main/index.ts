@@ -854,7 +854,14 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' && process.execPath.includes('/AppTranslocation/')) {
     log('[start] executable is under /AppTranslocation/ on macOS; running from a read-only Gatekeeper translocated copy')
   }
-  if (SELF_TEST.selfTest) return selfTestAndQuit()
+  // Anything that throws, such as an --out that cannot be written or a full disk, must still end the run:
+  // the install checker would otherwise wait for its own timeout.
+  if (SELF_TEST.selfTest) {
+    return selfTestAndQuit().catch((e) => {
+      process.stderr.write(`self-test failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`)
+      app.exit(1)
+    })
+  }
   if (gotLock) {
     const move = await offerMoveToApplications(
       {
