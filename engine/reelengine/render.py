@@ -604,7 +604,11 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         fi = min(layer.fade_in, span / 2) if layer.fade_in > 0 and layer.t0 >= 0 else 0.0
         fo = min(layer.fade_out, span / 2) if layer.fade_out > 0 and layer.t1 <= vd + 1e-6 else 0.0
         pad_full = math.floor(float(_f(c0)) * fps + 0.5) if c0 > 0 else 0
-        j0 = math.floor(t_shift * fps + 0.5) - pad_full       # the layer frame at this window's frame 0
+        k0 = round(t_shift * fps)                              # as the caption track maps a window
+        j0 = k0 - pad_full                                     # the layer frame at this window's frame 0
+        # The full render shows the layer while its own clock is inside [c0, c1]; on the window's clock
+        # that is [c0, c1] less the time of output frame k0, not less t_shift.
+        t0, t1 = max(0.0, c0 - k0 / fps), min(dur, c1 - k0 / fps)
         if j0 < 0 or layer.kind == "image":
             js = 0                                             # an image input can't be seeked
         elif fi > 0 and j0 < fi * fps:
