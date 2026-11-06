@@ -34,6 +34,7 @@ DECODE_DIV = 5          # frames are decoded at 1/5 of the output size: 216x384 
 EDGE_LO, EDGE_HI = 0.35, 0.65
 SMOOTH = 0.4            # of the previous frame kept, within one kept stretch: damps edge flicker
 VERSION = 1             # bump when the matte for the same inputs would change
+MAX_SHORT = 2           # frames a take may end before the cut's last one (its duration is rounded)
 
 
 def model_path() -> Path:
@@ -154,10 +155,18 @@ def _decode(ctx, path: Path, src: dict, face, first: int, last: int, w: int, h: 
     cmd = [ctx.ffmpeg, "-v", "error", "-nostdin", *no_rotate_args(src),
            "-ss", f"{max(0.0, (first - 0.5) / sfps):.6f}", "-i", str(path), "-frames:v", str(n), "-an",
            "-vf", reframe_filter(src, w, h, face, False), "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    raw = subprocess.run(cmd, capture_output=True, timeout=600, stdin=subprocess.DEVNULL).stdout
+    proc = subprocess.run(cmd, capture_output=True, timeout=600, stdin=subprocess.DEVNULL)
     size = w * h * 3
-    return {first + j: np.frombuffer(raw[j * size:(j + 1) * size], np.uint8).reshape(h, w, 3)
-            for j in range(min(n, len(raw) // size))}
+    got = min(n, len(proc.stdout) // size)
+    # A take can end a frame or two before the cut's last frame (its duration is rounded); any more
+    # missing means the file couldn't be read. A matte made without those frames would be black, and
+    # the words would cover the speaker: fail, so the caller shows the words above the face instead.
+    if proc.returncode != 0 or got < max(1, n - MAX_SHORT):
+        err = proc.stderr.decode("utf-8", "replace")[-300:]
+        raise EngineError("MATTE_DECODE", f"{path.name}: {got} of {n} frames from {first} (exit {proc.returncode}): {err}",
+                          "I couldn't read your video to cut you out of it")
+    return {first + j: np.frombuffer(proc.stdout[j * size:(j + 1) * size], np.uint8).reshape(h, w, 3)
+            for j in range(got)}
 
 
 def matte_clip(ctx, t0: float, t1: float, out_dir: Path, stem: str) -> Optional[Path]:
@@ -195,8 +204,6 @@ def matte_clip(ctx, t0: float, t1: float, out_dir: Path, stem: str) -> Optional[
                     p = person_prob(frames[i])
                     prev = p if prev is None else (1 - SMOOTH) * p + SMOOTH * prev
                     held = _alpha(prev, W, H)
-                if held is None:          # the take ended early: nothing found to cut out
-                    held = np.zeros((H, W), np.uint8)
                 enc.stdin.write(held.tobytes())
         enc.stdin.close()
         err = enc.stderr.read().decode("utf-8", "replace")
