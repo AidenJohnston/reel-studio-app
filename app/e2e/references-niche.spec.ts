@@ -17,6 +17,14 @@ async function snap(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(DIR, `${name}.png`) })
 }
 
+/** A screen that crashes shows only "this screen hit a problem": print what the page itself said, so a failure says why. */
+function sayErrors(page: Page): void {
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.log(`[renderer] ${m.text()}`)
+  })
+  page.on('pageerror', (e) => console.log(`[pageerror] ${e.stack ?? e.message}`))
+}
+
 function video(name: string, seconds: number): string {
   const out = join(BASE, name)
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', `testsrc2=size=540x960:rate=30:duration=${seconds}`, '-f', 'lavfi', '-i', `sine=frequency=300:duration=${seconds}`,
@@ -86,6 +94,7 @@ test('reference reels: files are measured, a TikTok link asks for its file, and 
 test('niche: a short chat drafts it, Save keeps it for the editor, and Edit, Remove and Undo work', async () => {
   const file = join(root(), 'My niche.json')
   const { app, page } = await launch({ REELSTUDIO_MOCK_NOTE: '600' })
+  sayErrors(page)
   try {
     await passFirstRun(page)
     await page.getByTestId('nav-style').click()
@@ -140,6 +149,7 @@ test('niche: a short chat drafts it, Save keeps it for the editor, and Edit, Rem
 test('niche with no editor connected: the chat says so and Write it myself saves one', async () => {
   const own = join(BASE, 'no editor', 'Reel Studio')
   const { app, page } = await launch({ REELSTUDIO_ROOT: own, REELSTUDIO_USER_DATA: join(BASE, 'no editor', 'user data') }, { realViewport: true })
+  sayErrors(page)
   try {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1100, 720))
     await passFirstRun(page)
