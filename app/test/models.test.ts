@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import type { ModelStatus } from '../src/shared/api'
-import { createEngineRunner } from '../src/main/engine'
+import { createEngineRunner, type EngineProgress, type RunEngine } from '../src/main/engine'
 import { createModelManager, modelInstalled, type SpeechCheckResult } from '../src/main/models'
 import { engineEnv, modelsDir } from '../src/main/paths'
 import { isAlive } from '../src/main/proctree'
@@ -135,4 +135,40 @@ it('fails if a resumed download starts its bar from zero instead of the bytes al
   })
   await models.download()
   expect(shown.find((s) => s.downloading)).toMatchObject({ bytes: 500, total: 1100, pct: 45 })
+})
+
+it('fails if a retried download of a model of unknown size shows the percent of the run that was stopped', async () => {
+  // No pins for this model (an empty stand-in pin list), so main does not know its size.
+  const pins = join(mkdtempSync(join(tmpdir(), 'rs-pins-')), 'pins.json')
+  writeFileSync(pins, '{}')
+  vi.stubEnv('REELSTUDIO_TEST', '1')
+  vi.stubEnv('REELSTUDIO_TEST_SPEECH_PINS', pins)
+  vi.stubEnv('REELENGINE_MODEL', 'tiny.en')
+  onTestFinished(() => void vi.unstubAllEnvs())
+  setupPaths()
+
+  let runs = 0
+  const shown: ModelStatus[] = []
+  const models = createModelManager({
+    // The first run reports 40% and then waits to be stopped; the second reports nothing.
+    runEngine: (async (_command: string, _args: string[], onProgress?: (p: EngineProgress) => void, signal?: AbortSignal) => {
+      if (runs++ > 0) return null
+      onProgress?.({ stage: 'download', pct: 40, message: '' })
+      await new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' })))
+    }) as RunEngine,
+    onChange: (s) => shown.push(s),
+    loadCheck: async () => null,
+    saveCheck: async () => undefined,
+    useThreads: () => undefined,
+    gate: createWorkGate(),
+    checkDeadlineMs: 1000,
+    log: () => undefined
+  })
+  const first = models.download()
+  await vi.waitFor(() => expect(shown.at(-1)?.pct).toBe(40))
+  models.cancel()
+  await first
+  shown.length = 0
+  await models.download()
+  expect(shown.find((s) => s.downloading)).toMatchObject({ pct: 0, bytes: 0 })
 })

@@ -32,7 +32,9 @@ export function modelInstalled(dir = join(modelsDir(), modelName())): boolean {
 }
 
 /** What a stopped download of `pin` already has in `dir`: each file whole at its pinned size, or what its .part holds.
- * A .part longer than its file counts for nothing, as the engine starts that file again (transcribe.download_model). */
+ * A .part longer than its file counts for nothing, as the engine starts that file again (transcribe.download_model).
+ * The bar can still move back once the engine throws bytes away (the server ignores the resume range, answers 416,
+ * or a file fails its checksum); that is deliberate, because those bytes are gone. */
 function bytesOnDisk(dir: string, pin: PinnedModel | null): number {
   const size = (path: string): number => {
     try {
@@ -189,7 +191,6 @@ export function createModelManager(deps: ModelDeps) {
       finding ??= findOnComputer().finally(() => (finding = null))
       return finding
     },
-
     /** The download, or the one already under way: a first edit waits on the same one the welcome started. */
     download(): Promise<ModelStatus> {
       inflight ??= fetchModel().finally(() => (inflight = null))
@@ -212,9 +213,10 @@ export function createModelManager(deps: ModelDeps) {
     if (existsSync(join(dir, '.fake')) && engineMode() === 'real') await fs.rm(dir, { recursive: true, force: true })
     download = new AbortController()
     // A resumed download's bar starts from the bytes it already has. Floor, so the engine's first report (the same
-    // bytes, rounded) never moves it back.
+    // bytes, rounded) never moves it back. A model of unknown size starts at 0: what an earlier, stopped run showed
+    // may no longer be on disk, and the engine's first report says what is.
     const have = bytesOnDisk(dir, pinnedModel())
-    set({ downloading: true, error: null, ...(total() ? { bytes: have, pct: Math.floor((have / total()) * 100) } : {}) })
+    set({ downloading: true, error: null, ...(total() ? { bytes: have, pct: Math.floor((have / total()) * 100) } : { bytes: 0, pct: 0 }) })
     try {
       // The engine's percent is bytes / total of the pinned files, so it converts back to MB exactly.
       await runEngine('download-model', ['--name', modelName()], (p) => set({ pct: Math.round(p.pct), bytes: Math.round((p.pct / 100) * total()) }), download.signal)
