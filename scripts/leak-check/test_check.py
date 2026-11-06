@@ -30,3 +30,13 @@ def test_shared_skills_at_the_root_may_be_committed(path):
 ])
 def test_other_agent_files_never_are(path):
     assert check.never_commit(path)
+
+
+@pytest.mark.parametrize("path,shipped", [
+    ("app/src/renderer/src/assets/sample/raw.mp4", True),
+    ("app/src/renderer/src/assets/sample/cut.mp3", True),
+    ("app/src/renderer/src/assets/sample/my-take.mp4", False),      # only the credited sample files
+    ("app/src/renderer/src/assets/raw.mp4", False),
+])
+def test_only_the_credited_sample_media_may_be_committed(path, shipped):
+    assert check.never_commit(path) is not shipped
