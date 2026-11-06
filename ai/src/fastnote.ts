@@ -32,6 +32,9 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
   if (caps) {
     const style: any = p.captions?.style ?? {};
     const size = Number(style.size) || 105;
+    // Size changes turn captions on, so a caption hidden before is new on screen even where it already sat.
+    const newlyUnder = (next: Record<string, unknown>) =>
+      !!captionsUnderInstagram(p.format, next) && (!p.captions.enabled || !captionsUnderInstagram(p.format, style));
     if (/\b(no|remove|turn off|take out|get rid of|hide|without)\b/.test(n) && !/\b(smaller|bigger|larger|higher|lower|up|down)\b/.test(n)) {
       if (!p.captions.enabled) return null;
       return { kind: 'captions-off', calls: [{ name: 'set_caption_style', args: { enabled: false } }], summary: 'I took the subtitles off.' };
@@ -39,14 +42,14 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
     if (/\b(smaller|too big|too large|tinier|less big|shrink)\b/.test(n)) {
       const next = Math.round(clamp(size * 0.85, 80, 160));
       if (next >= size) return null;               // already at the smallest readable size: the AI explains
-      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the subtitles a bit smaller.' };
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the subtitles a bit smaller. ${UNDER_INSTAGRAM}` : 'I made the subtitles a bit smaller.';
+      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     if (/\b(bigger|larger|too small|too tiny|hard to read|enlarge)\b/.test(n)) {
       const next = Math.round(clamp(size * 1.15, 80, 160));
       if (next <= size) return null;
       // a bigger line is taller and can reach Instagram's caption: say so, but never move them unasked
-      const under = !captionsUnderInstagram(p.format, style) && captionsUnderInstagram(p.format, { ...style, size: next });
-      const summary = under ? `I made the subtitles a bit bigger. ${UNDER_INSTAGRAM}` : 'I made the subtitles a bit bigger.';
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the subtitles a bit bigger. ${UNDER_INSTAGRAM}` : 'I made the subtitles a bit bigger.';
       return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     const pos = Number(style.position) || 0.75;

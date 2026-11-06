@@ -90,6 +90,9 @@ describe('fast notes (no model turns)', () => {
     expect(planFastNote('turn on captions', p)!.summary).toBe('I put the subtitles back on.');
     p.captions.style = { ...p.captions.style, position: 0.88 };
     expect(planFastNote('turn on captions', p)!.summary).toMatch(/^I put the subtitles back on\. .*under Instagram's own caption and username/);
+    // a size change turns hidden captions on where they sit
+    expect(planFastNote('bigger captions', p)!.summary).toMatch(/^I made the subtitles a bit bigger\. .*under Instagram's own caption and username/);
+    expect(planFastNote('smaller captions', p)!.summary).toMatch(/^I made the subtitles a bit smaller\. .*under Instagram's own caption and username/);
   });
 
   it('"lower case captions" means the letters, so it goes to the AI instead of moving the captions down', async () => {
