@@ -1,6 +1,6 @@
 /* Versions: the reel's versions as a tree (VersionTree.tsx). Rows are one height so the lines between them join. */
 .vt { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; flex: 1; }
-.vt-row { display: flex; align-items: center; gap: 8px; min-height: 48px; height: 48px; padding-right: 4px; border-radius: 10px; min-width: 0; }
+.vt-row { display: flex; align-items: center; gap: 8px; min-height: 48px; height: 48px; padding-right: 4px; border-radius: var(--r-md); min-width: 0; }
 .vt-lanes { flex: none; align-self: stretch; height: 48px; }
 .vt-lanes line, .vt-lanes path { stroke: var(--line-strong); stroke-width: 1.5; fill: none; }
 .vt-lanes circle { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.5; }
@@ -9,7 +9,7 @@
 
 .vt-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 100%; border: 0; background: none;
-  padding: 0 4px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: 8px;
+  padding: 0 4px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: var(--r-sm);
 }
 .vt-l1 { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: var(--fs-base); line-height: var(--lh-base); }
 .vt-l1 b { font-weight: 650; white-space: nowrap; }
@@ -35,10 +35,10 @@
 
 /* in the note box: the version the next note changes, when it is not the newest */
 .base-chip {
-  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start; height: 28px; padding: 0 2px 0 9px; margin: 0 0 6px 8px; border-radius: 7px;
+  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start; height: 26px; padding: 0 1px 0 10px; margin: 0 0 6px 8px; border-radius: 999px;
   background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600;
 }
-.base-chip .x { border: 0; background: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; color: var(--ink-3); cursor: pointer; }
+.base-chip .x { border: 0; background: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; color: var(--ink-3); cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .base-chip .x:hover { background: var(--wash); color: var(--ink); } }
 
 /* Combine */
