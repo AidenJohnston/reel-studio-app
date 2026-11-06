@@ -48,9 +48,14 @@ test('fails if Side by side does not play both versions in step with one sound, 
     const [ta, tb] = await times()
     expect(Math.abs(ta - tb)).toBeLessThan(0.3)
     // one picture with sound at a time: the player under the dialog does not play along
-    const others = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('video')).filter((v) => !v.dataset.testid?.startsWith('sbs-video-') && v.dataset.testid !== 'change-window').map((v) => v.paused))
+    const others = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
+        .filter((v) => !v.dataset.testid?.startsWith('sbs-video-') && v.dataset.testid !== 'change-window')
+        .map((v) => ({ cls: v.className, src: v.getAttribute('src')?.split('/').slice(-3).join('/') ?? '', muted: v.muted, t: Math.round(v.currentTime * 10) / 10, paused: v.paused }))
+    )
     expect(others.length).toBeGreaterThan(0)
-    expect(others.every(Boolean)).toBe(true)
+    // each one still playing is named in the failure
+    expect(others.filter((v) => !v.paused)).toEqual([])
     await shot(page, 'side-by-side-01-playing')
     await page.getByTestId('sbs-done').click()
     await expect(sbs).toHaveCount(0)
