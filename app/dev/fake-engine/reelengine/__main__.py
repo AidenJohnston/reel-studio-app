@@ -6,6 +6,7 @@ transcribe: the transcript is placeholder words spread over the take.
 
 Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
+  FAKE_ENGINE_SLOW_INIT=<seconds>   sleep this long inside init after copying, before project.json exists
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
 """
 from __future__ import annotations
@@ -165,6 +166,10 @@ def cmd_init(args: list[str]) -> dict:
         sources.append({"id": f"s{i}", "path": f"media/{dest.name}", "duration": info["duration"],
                         "fps": info.get("fps", 30), "width": info.get("width"), "height": info.get("height"),
                         "rotation": info.get("rotation", 0)})
+    slow = float(os.environ.get("FAKE_ENGINE_SLOW_INIT", "0") or 0)
+    for i in range(20 if slow else 0):     # the real engine's "Preparing your video" re-encode
+        progress("init", 100 * i / 20, "Preparing your video")
+        time.sleep(slow / 20)
     slug = proj.name
     data = {
         "schemaVersion": 1, "id": str(uuid.uuid4()), "title": title, "slug": slug,

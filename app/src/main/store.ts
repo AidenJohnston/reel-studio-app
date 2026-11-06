@@ -29,6 +29,8 @@ export interface AppState {
   lastError: { code: string; userMessage: string } | null
   /** Title chosen at creation, shown until project.json exists. */
   title?: string
+  /** The dropped videos, until init has made project.json: a job stopped before that starts init again from them. */
+  importing?: string[]
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
 }

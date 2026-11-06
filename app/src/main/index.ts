@@ -295,6 +295,9 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
           ),
         signal
       )
+      await updateAppState(slug, (s) => {
+        delete s.importing
+      })
     }
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -558,16 +561,20 @@ function registerIpc(): void {
     await updateAppState(slug, (s) => {
       s.status = 'working'
       s.title = title
+      s.importing = videos
     })
     const jobId = startFirstEdit(slug, { title, files: videos })
     return { slug, jobId, skipped }
   })
   handle('projects:resume', async (_e, slug: string) => {
     const dir = projectDir(slug)
-    if (!existsSync(join(dir, 'project.json'))) {
+    if (existsSync(join(dir, 'project.json'))) return { jobId: startFirstEdit(slug, null) }
+    // Stopped while the video was still being copied or prepared: do that again from the dropped videos.
+    const { title, importing } = await readAppState(slug)
+    if (!Array.isArray(importing) || !importing.length || !importing.every((f) => typeof f === 'string')) {
       throw { code: 'CANNOT_RESUME', userMessage: 'This video never finished copying. Delete it and drop the video in again.' }
     }
-    return { jobId: startFirstEdit(slug, null) }
+    return { jobId: startFirstEdit(slug, { title: title ?? titleFromFile(importing[0]), files: importing }) }
   })
   handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown) => {
     const note = String(text ?? '').trim()
