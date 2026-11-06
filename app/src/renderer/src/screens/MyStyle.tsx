@@ -245,7 +245,7 @@ export function MyStyle() {
         </p>
       )}
 
-      <MemorySuggestions onKept={() => void load()} onCount={setSuggested} />
+      <MemorySuggestions onKept={() => void load()} onCount={setSuggested} onGone={() => addButton.current?.focus()} />
 
       {lesson && (
         <section className="lesson" aria-labelledby="lesson-h" data-testid="style-lesson">

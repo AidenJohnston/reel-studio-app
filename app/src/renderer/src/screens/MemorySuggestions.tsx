@@ -15,12 +15,14 @@ function evidence(s: MemorySuggestion): string {
  * changed by hand in several reels. Nothing is a rule until they keep it; Edit keeps it in their own words, and
  * No thanks means it, and its words, are never suggested again. Opening My style looks again (main memory-loop.ts).
  */
-export function MemorySuggestions({ onKept, onCount }: { onKept: () => void; onCount: (n: number) => void }) {
+/** `onGone`: the last suggestion went, and the section with it: the page puts the focus somewhere that stays. */
+export function MemorySuggestions({ onKept, onCount, onGone }: { onKept: () => void; onCount: (n: number) => void; onGone: () => void }) {
   const [list, setList] = useState<MemorySuggestion[]>([])
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [said, setSaid] = useState('')
   const heading = useRef<HTMLHeadingElement>(null)
+  const editButtons = useRef(new Map<string, HTMLButtonElement>())
   const load = () =>
     reel.style.suggestions().then(
       (l) => (setList(l), onCount(l.length)),
@@ -38,13 +40,17 @@ export function MemorySuggestions({ onKept, onCount }: { onKept: () => void; onC
       setSaid(done)
       await load()
       onKept()
-      // the row the focus was on is gone: the section heading takes it, so the keyboard stays here
-      requestAnimationFrame(() => heading.current?.focus())
+      // the row the focus was on is gone: the section heading takes it, or the page when the section went too
+      requestAnimationFrame(() => (heading.current ? heading.current.focus() : onGone()))
     } catch (e) {
       setError(userMessage(e))
     }
   }
   const keep = (s: MemorySuggestion, text?: string) => act(() => reel.style.keepSuggestion(s.id, text), `Kept “${text ?? s.line}” in My style.`)
+  const stopEditing = (id: string) => {
+    setEditing(null)
+    requestAnimationFrame(() => editButtons.current.get(id)?.focus())
+  }
   const saveEdit = (e: FormEvent, s: MemorySuggestion) => {
     e.preventDefault()
     if (editing?.text.trim()) void keep(s, editing.text.trim())
@@ -72,7 +78,7 @@ export function MemorySuggestions({ onKept, onCount }: { onKept: () => void; onC
             {list.map((s) =>
               editing?.id === s.id ? (
                 <li key={s.id}>
-                  <form className="style-form" onSubmit={(e) => saveEdit(e, s)} onKeyDown={(e) => e.key === 'Escape' && setEditing(null)}>
+                  <form className="style-form" onSubmit={(e) => saveEdit(e, s)} onKeyDown={(e) => e.key === 'Escape' && stopEditing(s.id)}>
                     <input
                       className="input"
                       value={editing.text}
@@ -84,7 +90,7 @@ export function MemorySuggestions({ onKept, onCount }: { onKept: () => void; onC
                     <button className="btn small primary" type="submit" disabled={!editing.text.trim()}>
                       Keep
                     </button>
-                    <button className="btn small ghost" type="button" onClick={() => setEditing(null)}>
+                    <button className="btn small ghost" type="button" onClick={() => stopEditing(s.id)}>
                       Cancel
                     </button>
                   </form>
@@ -99,7 +105,15 @@ export function MemorySuggestions({ onKept, onCount }: { onKept: () => void; onC
                     <button className="btn small primary" onClick={() => void keep(s)} aria-label={`Keep "${s.line}"`}>
                       Keep
                     </button>
-                    <button className="btn small ghost" onClick={() => setEditing({ id: s.id, text: s.text })} aria-label={`Edit "${s.line}" before keeping it`}>
+                    <button
+                      className="btn small ghost"
+                      ref={(el) => {
+                        if (el) editButtons.current.set(s.id, el)
+                        else editButtons.current.delete(s.id)
+                      }}
+                      onClick={() => setEditing({ id: s.id, text: s.text })}
+                      aria-label={`Edit "${s.line}" before keeping it`}
+                    >
                       Edit
                     </button>
                     <button
