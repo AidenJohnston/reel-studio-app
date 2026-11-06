@@ -19,7 +19,7 @@ describe('versions to compare', () => {
   })
 
   it("fails if a set of moments reuses the reel's seed or repeats a seed, or the line does not log the seed", () => {
-    const list = variations(reel({ preset: 'hyper', seed: 5 }), 'moments', repeating(5, 9, 9, 12, 30))!
+    const list = variations(reel({ preset: 'hyper', seed: 5 }), 'moments', [], repeating(5, 9, 9, 12, 30))!
     const seeds = list.map((v) => (v.edit.set[0].value as { seed: number }).seed)
     expect(seeds).toEqual([9, 12, 30])
     expect(list.map((v) => (v.edit.set[0].value as { preset: string }).preset)).toEqual(['hyper', 'hyper', 'hyper'])

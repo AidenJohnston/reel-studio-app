@@ -126,7 +126,7 @@ describe('Learn from my past edits: finding them', () => {
       return q.includes('fcpbundle') ? { paths: libraries, cut: false } : { paths: [], cut: false }
     }
     const look = await findPastEdits({ platform: 'darwin', home, spotlight, limits: { spotlight: 4 } })
-    expect(asked).toEqual([4, 4])
+    expect(asked).toEqual([4, 4, 4])
     expect(look.cut).toBe(true)
     expect(look.edits).toHaveLength(4)
   })

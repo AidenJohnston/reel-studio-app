@@ -67,7 +67,7 @@ def _time(n: int, rate: Fraction) -> dict:
 
 
 def read(data: bytes) -> dict:
-    """{name, timelines, losses, rawMetadata} with one timeline, or BAD_EDL / NO_TIMELINE."""
+    """{timelines, losses, rawMetadata} with one timeline, or BAD_EDL / NO_TIMELINE."""
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
