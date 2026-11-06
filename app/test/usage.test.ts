@@ -1,0 +1,130 @@
+// Anonymous usage data (src/main/usage.ts): opt in, a fixed shape per event, deleted on opt-out, sent only to an endpoint.
+import { describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { DataSharing, UsageEvent } from '../src/shared/api'
+import { createUsage, editScore, invalidEvent, usageCode } from '../src/main/usage'
+
+const ON: DataSharing = { asked: true, on: true, usage: true, quality: true, posts: true }
+const JOB: UsageEvent = { part: 'usage', name: 'job', job: 'note', outcome: 'done', seconds: 42 }
+const EDIT: UsageEvent = { part: 'quality', name: 'edit', outcome: 'kept' }
+
+function setup(sharing: DataSharing, endpoint: string | null = null, fetch?: typeof globalThis.fetch, maxLines?: number) {
+  const dir = join(mkdtempSync(join(tmpdir(), 'usage-')), 'usage')
+  const state = { sharing }
+  const usage = createUsage({ dir: () => dir, sharing: async () => state.sharing, version: '1.2.3', platform: 'win32', log: () => {}, endpoint, fetch, maxLines })
+  return { dir, state, usage }
+}
+
+describe('usage data', () => {
+  it('fails if anything is kept before the person turns sharing on, or for a part they left off', async () => {
+    const off = setup({ asked: false, on: false, usage: true, quality: true, posts: true })
+    expect(await off.usage.record(JOB)).toBe(false)
+    expect(existsSync(off.dir)).toBe(false) // not even an install id
+    const noQuality = setup({ ...ON, quality: false })
+    expect(await noQuality.usage.record(EDIT)).toBe(false)
+    expect(await noQuality.usage.record(JOB)).toBe(true)
+    expect((await noQuality.usage.read()).map((l) => l.name)).toEqual(['job'])
+  })
+
+  it('fails if an event could carry a field or value outside its fixed shape', () => {
+    expect(invalidEvent(JOB)).toBeNull()
+    expect(invalidEvent({ ...JOB, code: 'ENGINE_STUCK' })).toBeNull()
+    expect(invalidEvent({ ...JOB, title: 'My trip to Lisbon' })).toMatch(/no field title/)
+    expect(invalidEvent({ ...JOB, code: 'C:\\Users\\me\\take.mov not found' })).toMatch(/code/)
+    expect(invalidEvent({ ...JOB, job: 'my note' })).toMatch(/job/)
+    expect(invalidEvent({ ...JOB, seconds: 4.5 })).toMatch(/seconds/)
+    expect(invalidEvent({ ...JOB, part: 'posts' })).toMatch(/belongs to usage/)
+    expect(invalidEvent({ part: 'posts', name: 'views', platform: 'instagram', views: 10 })).toMatch(/needs hours/)
+    expect(invalidEvent({ part: 'usage', name: 'note-text' })).toMatch(/unknown event/)
+  })
+
+  it('fails if a refused event is written instead of thrown', async () => {
+    const { usage } = setup(ON)
+    await expect(usage.record({ ...JOB, note: 'cut the intro' } as unknown as UsageEvent)).rejects.toThrow(/no field note/)
+    expect(await usage.read()).toEqual([])
+  })
+
+  it('fails if a line lacks its day, version, system and install id, or a new opt-in reuses the old id', async () => {
+    const { usage, state, dir } = setup(ON)
+    await usage.record(JOB)
+    const [line] = await usage.read()
+    expect(line).toMatchObject({ ...JOB, app: '1.2.3', os: 'win32' })
+    expect(line.day).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    const first = line.install
+    state.sharing = { ...ON, on: false }
+    await usage.applySharing(state.sharing)
+    expect(existsSync(join(dir, 'queue.jsonl'))).toBe(false)
+    expect(existsSync(join(dir, 'install-id'))).toBe(false)
+    state.sharing = ON
+    await usage.record(JOB)
+    const [again] = await usage.read()
+    expect(again.install).not.toBe(first)
+  })
+
+  it('fails if an event that ends as sharing is switched off is written after it', async () => {
+    const { usage, state, dir } = setup(ON)
+    const late = usage.record(JOB)
+    state.sharing = { ...ON, on: false }
+    await usage.applySharing(state.sharing)
+    expect(await late).toBe(false)
+    expect(existsSync(join(dir, 'queue.jsonl'))).toBe(false)
+  })
+
+  it('fails if a part switched off keeps its lines', async () => {
+    const { usage, state } = setup(ON)
+    await usage.record(JOB)
+    await usage.record(EDIT)
+    state.sharing = { ...ON, usage: false }
+    await usage.applySharing(state.sharing)
+    expect((await usage.read()).map((l) => l.part)).toEqual(['quality'])
+  })
+
+  it('fails if the queue grows past its cap or drops the newest lines', async () => {
+    const { usage } = setup(ON, null, undefined, 5)
+    await Promise.all(Array.from({ length: 8 }, (_, i) => usage.record({ ...JOB, seconds: i })))
+    expect((await usage.read()).map((l) => l.seconds)).toEqual([3, 4, 5, 6, 7])
+  })
+
+  it('fails if anything is sent with no endpoint, or with sharing off', async () => {
+    let calls = 0
+    const fetch = (async () => ((calls += 1), new Response('{}'))) as typeof globalThis.fetch
+    const none = setup(ON, null, fetch)
+    await none.usage.record(JOB)
+    expect(await none.usage.send()).toBe(0)
+    const off = setup(ON, 'https://usage.example.com/v1', fetch)
+    await off.usage.record(JOB)
+    off.state.sharing = { ...ON, on: false }
+    expect(await off.usage.send()).toBe(0)
+    expect(calls).toBe(0)
+  })
+
+  it('fails if a send loses lines the endpoint did not accept, or keeps the ones it did', async () => {
+    const bodies: string[] = []
+    let status = 500
+    const fetch = (async (_url: string, init: RequestInit) => (bodies.push(String(init.body)), new Response('', { status }))) as typeof globalThis.fetch
+    const { usage, dir } = setup(ON, 'https://usage.example.com/v1', fetch)
+    await usage.record(JOB)
+    await usage.record(EDIT)
+    await expect(usage.send()).rejects.toThrow(/500/)
+    expect(await usage.read()).toHaveLength(2)
+    status = 200
+    expect(await usage.send()).toBe(2)
+    expect(JSON.parse(bodies[1]).lines.map((l: { name: string }) => l.name)).toEqual(['job', 'edit'])
+    expect(await usage.read()).toEqual([])
+    expect(existsSync(join(dir, 'queue.jsonl'))).toBe(false)
+    expect(readFileSync(join(dir, 'install-id'), 'utf8')).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('fails if an edit is scored from the wrong next step', () => {
+    expect(editScore({ type: 'export' }, 3)).toBe('kept')
+    expect(editScore({ type: 'note', on: 3 }, 3)).toBe('changed')
+    expect(editScore({ type: 'note', on: 2 }, 3)).toBe('undone')
+  })
+
+  it('fails if an error code that is not a constant reaches a line', () => {
+    expect(usageCode('ENGINE_STUCK')).toBe('ENGINE_STUCK')
+    expect(usageCode('ENOENT: no such file, open C:\\Users\\me\\take.mov')).toBe('OTHER')
+  })
+})

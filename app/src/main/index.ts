@@ -86,6 +86,8 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { USAGE_ENDPOINT } from '../shared/config'
+import { createUsage, editScore, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -112,6 +114,7 @@ import { claudeCheckWords, createVendorConnect, type CliStatus, type VendorConne
 import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
+import type { UsageEvent } from '../shared/api'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
@@ -311,6 +314,24 @@ async function continuePaused(slug: string): Promise<void> {
   startFirstEdit(slug, null)
 }
 
+// Settings › Privacy: anonymous usage data, only the parts the person switched on (main/usage.ts)
+const usage = createUsage({
+  dir: () => join(settingsDir(), 'usage'),
+  sharing: async () => (await loadSettings()).sharing,
+  version: app.getVersion(),
+  platform: process.platform,
+  log,
+  endpoint: USAGE_ENDPOINT
+})
+const recordUsage = (e: UsageEvent): void => void usage.record(e).catch((err) => log(`[usage] ${String(err?.message ?? err)}`))
+// Each version an edit made is scored once per run of the app, by the next thing done to its reel (usage.ts editScore).
+const scoredEdits = new Set<string>()
+function scoreEdit(slug: string, made: number, next: Parameters<typeof editScore>[0]): void {
+  if (!(made >= 1) || scoredEdits.has(`${slug}:${made}`)) return
+  scoredEdits.add(`${slug}:${made}`)
+  recordUsage({ part: 'quality', name: 'edit', outcome: editScore(next, made) })
+}
+
 const jobs = createJobManager(
   (e: JobEvent) => {
     broadcast('job:event', e)
@@ -337,7 +358,16 @@ const jobs = createJobManager(
   () => updates.assertCanStartWork(),
   footageIndex,
   // and so do the pictures of each change made before its draft
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
+  (kind, last, seconds) =>
+    recordUsage({
+      part: 'usage',
+      name: 'job',
+      job: kind,
+      outcome: last.type === 'error' ? 'failed' : last.type,
+      ...(last.type === 'error' ? { code: usageCode(last.code) } : {}),
+      seconds: Math.round(seconds)
+    })
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
@@ -358,6 +388,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
+      scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
       const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
@@ -859,9 +890,13 @@ function registerIpc(): void {
     const x = (v ?? {}) as Record<string, unknown>
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
-    await saveSettings({ sharing: Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean> })
+    const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
+    await saveSettings({ sharing })
+    // off deletes what was kept; a part switched off loses its lines
+    await usage.applySharing(sharing)
     return appInfo()
   })
+  handle('app:usage', () => usage.read())
   handle('app:setPhoneView', async (_e, view: unknown) => {
     if (view !== 'instagram' && view !== 'clean') throw { code: 'BAD_INPUT', userMessage: 'Choose Instagram or Clean.' }
     await saveSettings({ phoneView: view })
@@ -1358,7 +1393,11 @@ function registerIpc(): void {
     updates.assertCanStartWork()
     exportsWriting++ // the updater will not restart the app while an export writes its file
     try {
-      return await exportVersion(slug, n)
+      const done = await exportVersion(slug, n)
+      // exporting the newest version keeps the edit that made it
+      const latest = (await readProject(slug)).version ?? 0
+      if (n === latest) scoreEdit(slug, n, { type: 'export' })
+      return done
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : ''
       if (code === 'ENOSPC') throw { code: 'NO_SPACE', userMessage: `There isn't enough space on this ${process.platform === 'darwin' ? 'Mac' : 'PC'}. Free some up, then try again.` }

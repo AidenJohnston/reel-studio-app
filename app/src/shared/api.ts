@@ -630,6 +630,20 @@ export interface DataSharing {
   posts: boolean
 }
 
+/** One anonymous event of a part of DataSharing (main/usage.ts says what each holds and what it may never hold). */
+export type UsageEvent =
+  /** a job ended: which kind, how, and how long it ran */
+  | { part: 'usage'; name: 'job'; job: JobKind; outcome: 'done' | 'failed' | 'cancelled'; code?: string; seconds: number }
+  /** what the person did next with a version an edit made (main/usage.ts editScore) */
+  | { part: 'quality'; name: 'edit'; outcome: EditOutcome }
+  /** a posted reel's views, as the platform reported them */
+  | { part: 'posts'; name: 'views'; platform: 'instagram' | 'tiktok' | 'youtube' | 'facebook'; views: number; hours: number }
+
+export type EditOutcome = 'kept' | 'changed' | 'undone'
+
+/** An event as it waits on this computer: the day, the app's version, the OS and a random install id are added. */
+export type UsageLine = UsageEvent & { day: string; app: string; os: string; install: string }
+
 /** The person's own Claude Code app: not found / found but will not start / not signed in / ready. */
 export type ClaudeCodeState = 'missing' | 'broken' | 'signed_out' | 'ready'
 
@@ -872,6 +886,8 @@ export interface ReelApi {
     setFasterExports(on: boolean): Promise<AppInfo>
     setModels(models: ModelChoice): Promise<AppInfo>
     setSharing(sharing: DataSharing): Promise<AppInfo>
+    /** the anonymous usage data waiting on this computer (Settings › Privacy) */
+    usage(): Promise<UsageLine[]>
     setPhoneView(view: PhoneView): Promise<AppInfo>
     setSoundEffects(on: boolean): Promise<AppInfo>
     /** Shows or hides the Reel screen's timeline, remembered on this computer; the View menu's check follows. */
