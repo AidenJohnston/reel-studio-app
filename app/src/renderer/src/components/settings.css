@@ -2,7 +2,8 @@
    on the left; search, then the sections, on the right. */
 
 /* centred in the page, as My style's column is: at 1920 the list and the sections stopped at 58% of the width */
-.page.settings-page { max-width: 920px; margin: 0 auto; padding: 0 var(--gutter) var(--space-l); }
+/* from the gutter, as every page's content is, so the nav's labels start under the screen's title */
+.page.settings-page { max-width: 920px; margin: 0; padding: 0 var(--gutter) var(--space-l); }
 .settings { display: grid; grid-template-columns: 168px minmax(0, 640px); gap: 32px; align-items: start; }
 
 /* the rows' wash hangs 12 px left, so their labels start where the screen's title does */

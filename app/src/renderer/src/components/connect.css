@@ -186,14 +186,15 @@ html.kb .vcode-box { transition: none; }
 .mstages.open .mstages-h .chev { transform: rotate(90deg); }
 .mstages-title { flex: none; }
 .mstages-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--ink-3); text-align: right; }
-.mrows { list-style: none; margin: 0; padding: 0 0 6px; display: grid; min-width: 0; }
+/* under the Models label, as a disclosure's body sits under its label (.disc-body) */
+.mrows { list-style: none; margin: 0; padding: 0 0 6px 32px; display: grid; min-width: 0; }
 /* display: grid would otherwise beat the hidden attribute: closed means its rows are not drawn */
 .mrows[hidden] { display: none; }
 .mrow { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 0; }
 .mrow + .mrow { box-shadow: inset 0 1px 0 var(--line); }
 .mrow-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink); }
-.mrow-line { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
+.mrow-line { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .mrow-line.warn { color: var(--amber); }
 .mchip {
   flex: 0 1 auto; max-width: 62%; min-width: 0; height: 28px; padding: 0 8px 0 8px; display: inline-flex; align-items: center; gap: 6px;

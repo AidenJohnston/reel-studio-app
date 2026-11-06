@@ -147,7 +147,8 @@ html.kb .tl-track:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .tl-clip { position: absolute; top: 26px; height: 8px; border-radius: 2px; background: var(--ink-4); box-shadow: 0 0 0 1.5px var(--paper); pointer-events: none; }
 /* The head moves by translating a full-width box; clipping it to the track (with room for the dot) keeps the box
    at the end from widening the page, which scrolled the whole Reel screen sideways. */
-.tl-heads { position: absolute; inset: 0; overflow-x: clip; overflow-clip-margin: 8px; pointer-events: none; }
+/* clip on both axes: Chromium honours overflow-clip-margin only then, and without it the head at the very end was cut in half */
+.tl-heads { position: absolute; inset: 0; overflow: clip; overflow-clip-margin: 8px; pointer-events: none; }
 .tl-head { position: absolute; inset: 0; pointer-events: none; }
 .tl-head i { position: absolute; left: -6px; top: 24px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px var(--paper); pointer-events: auto; cursor: grab; }
 .tl-sel { position: absolute; top: 26px; height: 8px; border-radius: 3px; background: var(--marker); pointer-events: none; }
@@ -369,7 +370,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .nt-res.enter { animation: line-in 180ms cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
 .heard { padding-left: 24px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); overflow-wrap: anywhere; }
-.heard b { color: var(--ink); font-weight: 620; margin-right: 4px; }
+.heard b { color: var(--ink); font-weight: 620; }
 
 /* the editor's script for a planned reel */
 .script { padding-left: 24px; display: grid; gap: 6px; justify-items: start; }
@@ -419,7 +420,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .strip .m { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .strip .sp { flex: 1; }
 .strip .sbtn {
-  height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600;
+  height: 32px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600;
   display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 4px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
 }
 @media (hover: hover) and (pointer: fine) { .strip .sbtn:hover { background: var(--wash); color: var(--ink); } }

@@ -13,7 +13,8 @@
 .share-dot.failed { background: var(--pencil); box-shadow: 0 0 0 1.5px #fff; }
 
 .share-pop {
-  right: 0; top: calc(100% + 8px); width: 360px; overflow-y: auto; overscroll-behavior: contain;
+  /* its right edge on the column's, past the ⋯ button (32 px and the title bar's 8 px gap) that follows Share */
+  right: -40px; top: calc(100% + 8px); width: 360px; overflow-y: auto; overscroll-behavior: contain;
   padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; cursor: default;
   --o: top right; pointer-events: auto; -webkit-app-region: no-drag; user-select: none;
 }
@@ -28,11 +29,13 @@
 .sp-cap label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
 .sp-cap span { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
 .sp-cap .sp-over { color: var(--pencil); font-weight: 600; }
-.textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-sm); user-select: text; }
+.textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-md); user-select: text; }
 
 /* the rows' wash hangs 8 px (their padding) past the caption's edges, so the icons start where the caption does */
 .sp-list { list-style: none; margin: 8px -8px 0; padding: 0; display: flex; flex-direction: column; }
-.sp-row + .sp-row { box-shadow: inset 0 1px 0 var(--line); }
+/* the rule between rows starts and ends at the rows' words, not at their hanging wash */
+.sp-row { position: relative; }
+.sp-row + .sp-row::before { content: ''; position: absolute; left: 8px; right: 8px; top: 0; height: 1px; background: var(--line); pointer-events: none; }
 .sp-go {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px; border: 0; border-radius: var(--r-sm);
   background: transparent; font: inherit; color: var(--ink); text-align: left; cursor: pointer;

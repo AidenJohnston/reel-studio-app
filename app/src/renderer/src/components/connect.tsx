@@ -102,7 +102,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       status={<ConnectedMark testid="ai-connected" />}
       tone="ok"
       action={
-        <Button size="small" kind="tertiary" onClick={() => void disconnect()} data-testid="use-no-ai">
+        <Button size="small" onClick={() => void disconnect()} data-testid="use-no-ai">
           Disconnect
         </Button>
       }
