@@ -9,7 +9,7 @@ import { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { InstagramMetrics, InstagramOutcome, InstagramPost, InstagramPublishInput, InstagramSession, InstagramSettings } from '../shared/instagram'
 import { instagramCallback } from './instagram-oauth'
-import { httpsUrl, id, INSTAGRAM_GRAPH, INSTAGRAM_SCOPES, INSTAGRAM_VERSION, InstagramError, invalidResponse, jsonPost, object, positive, request, text, type InstagramFetch } from './instagram-http'
+import { httpsUrl, id, INSTAGRAM_GRAPH, INSTAGRAM_SCOPES, INSTAGRAM_VERSION, InstagramError, invalidResponse, jsonPost, object, positive, request, serviceOrigin, text, type InstagramFetch } from './instagram-http'
 import { InstagramTokenStore, readObject, receipt, saveOutcome, saveReceipt, type InstagramCredentials, type InstagramSecretStore } from './instagram-store'
 
 const DAY = 24 * 60 * 60_000
@@ -24,7 +24,7 @@ const METRICS = {
 } satisfies Record<keyof InstagramMetrics, string>
 
 interface Options {
-  dev: boolean
+  /** Where Instagram stands: the sign-in service's answer (main/signin-config.ts), or a developer's own app. */
   settings: () => Promise<InstagramSettings>
   settingsDir: string
   projectsDir: () => string
@@ -43,14 +43,14 @@ export function instagramSettings(value: unknown): InstagramSettings {
   const s = object(value)
   if (typeof s.instagramEnabled !== 'boolean' || !Array.isArray(s.instagramUploadOrigins)) return invalidResponse()
   const appId = s.instagramAppId === null ? null : id(s.instagramAppId)
-  const broker = s.instagramBrokerUrl === null ? null : httpsUrl(s.instagramBrokerUrl)
-  if (broker && (broker.pathname !== '/' || broker.search)) return invalidResponse()
+  const broker = s.instagramBrokerUrl === null ? null : serviceOrigin(s.instagramBrokerUrl)
+  // storage Instagram fetches from: https only, since Meta's servers have to reach it
   const origins = s.instagramUploadOrigins.map((value) => {
     const u = httpsUrl(value)
     if (u.pathname !== '/' || u.search) return invalidResponse()
     return u.origin
   })
-  return { instagramEnabled: s.instagramEnabled, instagramAppId: appId, instagramBrokerUrl: broker?.origin ?? null, instagramUploadOrigins: origins }
+  return { instagramEnabled: s.instagramEnabled, instagramAppId: appId, instagramBrokerUrl: broker, instagramUploadOrigins: origins }
 }
 
 function publishInput(value: unknown): InstagramPublishInput {
@@ -59,10 +59,17 @@ function publishInput(value: unknown): InstagramPublishInput {
       typeof p.version !== 'number' || !Number.isSafeInteger(p.version) || p.version < 1 ||
       typeof p.caption !== 'string' || [...p.caption].length > 2200)
     throw new InstagramError('IG_INPUT', 'Choose a finished version and a caption of at most 2,200 characters.')
+  let trial: InstagramPublishInput['trial']
+  if (p.trial !== undefined) {
+    const t = object(p.trial)
+    if (t.graduation !== 'MANUAL' && t.graduation !== 'SS_PERFORMANCE') throw new InstagramError('IG_INPUT', 'Choose how the trial reel is shared to your followers.')
+    trial = { graduation: t.graduation }
+  }
+  const base = { slug: p.slug, version: p.version, caption: p.caption, ...(trial ? { trial } : {}) }
   const c = object(p.cover)
-  if (c.kind === 'image') return { slug: p.slug, version: p.version, caption: p.caption, cover: { kind: 'image' } }
+  if (c.kind === 'image') return { ...base, cover: { kind: 'image' } }
   if (c.kind === 'frame' && typeof c.offsetMs === 'number' && Number.isSafeInteger(c.offsetMs) && c.offsetMs >= 0)
-    return { slug: p.slug, version: p.version, caption: p.caption, cover: { kind: 'frame', offsetMs: c.offsetMs } }
+    return { ...base, cover: { kind: 'frame', offsetMs: c.offsetMs } }
   throw new InstagramError('IG_COVER', 'Choose a cover image or a frame in the exported video.')
 }
 
@@ -80,10 +87,9 @@ export class InstagramService {
   constructor(private readonly o: Options) { this.tokens = new InstagramTokenStore(o.settingsDir, o.secrets) }
   private now(): number { return this.o.now?.() ?? Date.now() }
   private async config(): Promise<InstagramSettings & { instagramAppId: string; instagramBrokerUrl: string }> {
-    if (!this.o.dev) throw new InstagramError('IG_DISABLED', 'Instagram is available only in developer mode.')
     const c = instagramSettings(await this.o.settings())
-    if (!c.instagramEnabled) throw new InstagramError('IG_DISABLED', 'Enable the Instagram developer setting first.')
-    if (!c.instagramAppId || !c.instagramBrokerUrl) throw new InstagramError('IG_SETUP', 'Set the Instagram app ID and server URL in developer settings first.')
+    if (!c.instagramEnabled || !c.instagramAppId || !c.instagramBrokerUrl)
+      throw new InstagramError('IG_DISABLED', 'Posting to Instagram isn’t open yet. Settings › Posting says what’s missing.')
     return { ...c, instagramAppId: c.instagramAppId, instagramBrokerUrl: c.instagramBrokerUrl }
   }
   private run<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -156,17 +162,20 @@ export class InstagramService {
       const verifier = randomBytes(32).toString('base64url')
       const listener = await instagramCallback(state, signal)
       try {
-        await request(this.o.fetch, `${config.instagramBrokerUrl}/api/instagram/oauth/start`, jsonPost({
-          app_id: config.instagramAppId, state, loopback_uri: listener.redirectUri,
+        // The sign-in service (docs/signin.md) makes Instagram's link; only Instagram's own page, for this app,
+        // sending the person back through the service, is opened.
+        const started = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/v1/instagram/start`, jsonPost({
+          state, loopback_uri: listener.redirectUri,
           code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256'
-        }), signal)
-        const url = new URL('https://www.instagram.com/oauth/authorize')
-        url.search = new URLSearchParams({ client_id: config.instagramAppId, redirect_uri: `${config.instagramBrokerUrl}/api/instagram/oauth/callback`,
-          response_type: 'code', scope: INSTAGRAM_SCOPES.join(','), state, enable_fb_login: 'false' }).toString()
+        }), signal))
+        const url = httpsUrl(started.authorize_url)
+        if (url.origin + url.pathname !== 'https://www.instagram.com/oauth/authorize' || url.searchParams.get('client_id') !== config.instagramAppId ||
+            url.searchParams.get('redirect_uri') !== `${config.instagramBrokerUrl}/v1/instagram/callback`)
+          return invalidResponse()
         signal.throwIfAborted()
         await this.o.openExternal(url.toString())
         const handoff = await listener.result
-        const data = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/api/instagram/oauth/complete`, jsonPost({ handoff, state, code_verifier: verifier }), signal))
+        const data = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/v1/instagram/complete`, jsonPost({ handoff, code_verifier: verifier }), signal))
         const permissions = data.permissions
         if (String(data.token_type).toLowerCase() !== 'bearer' || !Array.isArray(permissions) || !INSTAGRAM_SCOPES.every((s) => permissions.includes(s)))
           throw new InstagramError('IG_PERMISSION', 'Allow publishing and insights when connecting your Instagram account.')
@@ -283,7 +292,7 @@ export class InstagramService {
         if (!cover.length || cover.length > 8_000_000) throw new InstagramError('IG_COVER', 'The JPEG cover must be smaller than 8 MB.')
       }
       const credentials = await this.credentials()
-      const upload = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/api/instagram/uploads`, {
+      const upload = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/v1/instagram/uploads`, {
         ...jsonPost({ video_size: video.size, cover_size: cover?.length ?? null }),
         headers: { 'content-type': 'application/json', authorization: `Bearer ${credentials.accessToken}` }
       }, signal))
@@ -292,7 +301,7 @@ export class InstagramService {
         const put = httpsUrl(part.upload_url)
         const read = httpsUrl(part.public_url)
         if (!config.instagramUploadOrigins.includes(put.origin) || !config.instagramUploadOrigins.includes(read.origin))
-          throw new InstagramError('IG_UPLOAD_HOST', 'The media server returned an unapproved storage address. Check the developer settings.')
+          throw new InstagramError('IG_UPLOAD_HOST', 'The sign-in service returned a storage address it doesn’t list. Try again later.')
         return { put: put.toString(), read: read.toString() }
       }
       const v = parseUpload(upload.video)
@@ -321,7 +330,8 @@ export class InstagramService {
       const c = await this.credentials()
       const account = this.parseProfile(object(await this.graph('me?fields=user_id,username,account_type', { method: 'GET' }, signal)))
       if (account.accountId !== c.accountId) throw new InstagramError('IG_ACCOUNT', 'Instagram returned another account. Connect again in Settings.')
-      const inputHash = createHash('sha256').update(JSON.stringify({ caption: input.caption, cover: input.cover })).digest('hex')
+      // a trial is part of what was asked: posting the same version again as a normal reel is a different post
+      const inputHash = createHash('sha256').update(JSON.stringify(input.trial ? { caption: input.caption, cover: input.cover, trial: input.trial } : { caption: input.caption, cover: input.cover })).digest('hex')
       let saved = await receipt(dir, input.version)
       if (saved && saved.accountId !== c.accountId) throw new InstagramError('IG_ACCOUNT', 'This version already has a publish attempt for another Instagram account.')
       if (saved?.state === 'published') {
@@ -335,6 +345,7 @@ export class InstagramService {
         const fields = new URLSearchParams({ media_type: 'REELS', video_url: media.videoUrl, caption: input.caption })
         if (media.coverUrl) fields.set('cover_url', media.coverUrl)
         else if (input.cover.kind === 'frame') fields.set('thumb_offset', String(input.cover.offsetMs))
+        if (input.trial) fields.set('trial_params', JSON.stringify({ graduation_strategy: input.trial.graduation }))
         const data = object(await this.graph(`${c.accountId}/media`, { method: 'POST', body: fields }, signal))
         saved = { state: 'processing', accountId: c.accountId, containerId: id(data.id), inputHash }
         await saveReceipt(dir, input.version, saved)
@@ -364,7 +375,7 @@ export class InstagramService {
         }
         throw new InstagramError('IG_PUBLISH_UNKNOWN', 'Instagram did not confirm whether this reel was published. Check Instagram before retrying. This version is blocked to prevent a duplicate post.')
       }
-      const post = { version: input.version, accountId: c.accountId, postId, publishedAt: new Date(this.now()).toISOString() }
+      const post: InstagramPost = { version: input.version, accountId: c.accountId, postId, publishedAt: new Date(this.now()).toISOString(), ...(input.trial ? { trial: input.trial } : {}) }
       try {
         await saveReceipt(dir, input.version, { ...saved, state: 'published', post })
         await this.ensureOutcome(dir, post)

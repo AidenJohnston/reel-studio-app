@@ -40,6 +40,7 @@ const api: ReelApi = {
     publish: (input) => call('instagram:publish', input),
     insights: (slug, version, postId) => call('instagram:insights', slug, version, postId)
   },
+  social: { status: (fresh) => call('social:status', fresh === true) },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),

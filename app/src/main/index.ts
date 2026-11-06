@@ -95,10 +95,14 @@ import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animat
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
-import { TikTokService } from './tiktok'
+import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
-import { InstagramService } from './instagram'
+import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
+import { instagramFrom, SigninDirectory, signinUrl, tiktokFrom } from './signin-config'
+import { registerSocialIpc } from './social-ipc'
+import { testPlatformFetch } from './test-platforms'
+import { SIGNIN_URL } from '../shared/config'
 import { registerInsightsIpc } from './insights-ipc'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
@@ -795,20 +799,38 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 
 function registerIpc(): void {
   registerInsightsIpc({ handle, projectsRoot: projectsDir })
+  // Instagram and TikTok connect through Reel Studio's sign-in service (docs/signin.md): its list of platforms says
+  // which can be connected. A developer's own app (REELSTUDIO_DEV=1 and saved instagram*/tiktok* settings) wins.
+  const platformFetch = TEST && process.env.REELSTUDIO_TEST_PLATFORMS
+    ? testPlatformFetch(process.env.REELSTUDIO_TEST_PLATFORMS, (url, init) => fetch(url, init))
+    : (url: string, init: RequestInit) => fetch(url, init)
+  const signin = new SigninDirectory({ baseUrl: signinUrl(process.env, SIGNIN_URL, log), fetch: platformFetch, now: () => Date.now(), log })
+  const ownApps = async () => {
+    if (!DEV_PROVIDERS || TEST) return { instagram: null, tiktok: null }
+    const saved = await loadSettings()
+    const ig = instagramSettings(saved), tt = tiktokSettings(saved)
+    return { instagram: ig.instagramEnabled ? ig : null, tiktok: tt.tiktokEnabled ? tt : null }
+  }
+  // test runs never open the browser: e2e/social.spec.ts reads the link here and plays the person signing in
+  const openSignin = (url: string) => {
+    if (!TEST) return shell.openExternal(url)
+    ;(globalThis as { __reelstudioOpened?: string }).__reelstudioOpened = url
+    log('[signin] test run: browser not opened')
+    return Promise.resolve()
+  }
   const tiktok = new TikTokService({
-    dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
-    secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
+    settings: async () => (await ownApps()).tiktok ?? tiktokFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
   })
   registerTikTokIpc({ handle, service: tiktok, dev: DEV_PROVIDERS && !TEST, saveSettings })
   app.on('before-quit', () => { tiktok.stop() })
   const instagram = new InstagramService({
-    dev: DEV_PROVIDERS && !TEST,
-    settings: loadSettings,
+    settings: async () => (await ownApps()).instagram ?? instagramFrom(await signin.get(), signin.baseUrl),
     settingsDir: settingsDir(),
     projectsDir,
     secrets: safeStorage,
-    fetch: (url, init) => fetch(url, init),
-    openExternal: (url) => shell.openExternal(url),
+    fetch: platformFetch,
+    openExternal: openSignin,
     coverJpeg: (bytes) => {
       const image = nativeImage.createFromBuffer(bytes)
       if (image.isEmpty()) throw new InstagramError('IG_COVER', 'The cover image could not be read. Export this version again.')
@@ -824,6 +846,10 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
+  registerSocialIpc({
+    handle, directory: signin, instagram, tiktok,
+    own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
+  })
   handle('app:info', () => appInfo())
   handle('app:setModels', async (_e, m: unknown) => {
     const ok = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 200 && !v.includes('\0')
@@ -1612,7 +1638,7 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
-  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  // Posting to YouTube (main/posting.ts), on unless REELSTUDIO_POSTING=0. It signs in with the same download key.
   setupPosting({
     handle,
     env: process.env,

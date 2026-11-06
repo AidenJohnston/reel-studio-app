@@ -9,12 +9,13 @@ import { isAbsolute, join, relative } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { InstagramSecretStore } from './instagram-store'
 import type { TikTokCreator, TikTokOutcome, TikTokPrivacy, TikTokPublishInput, TikTokPublishResult, TikTokSession, TikTokSettings } from '../shared/tiktok'
-import { apiError, count, fail, httpsUrl, invalid, jsonPost, object, positive, request, text, TikTokError, TIKTOK_API, transport, type TikTokFetch } from './tiktok-http'
+import { apiError, count, fail, invalid, jsonPost, object, positive, request, text, TikTokError, TIKTOK_API, transport, type TikTokFetch } from './tiktok-http'
+import { serviceOrigin } from './instagram-http'
 import { tiktokCallback } from './tiktok-oauth'
 import { clearReceipt, receipt, saveOutcome, saveReceipt, strings, TikTokTokenStore, uploadUrl, type TikTokCredentials, type TikTokReceipt } from './tiktok-store'
 
 interface Options {
-  dev: boolean
+  /** Where TikTok stands: the sign-in service's answer (main/signin-config.ts), or a developer's own app. */
   settings: () => Promise<TikTokSettings>
   settingsDir: string
   projectsDir: () => string
@@ -28,10 +29,10 @@ export function tiktokSettings(value: unknown): TikTokSettings {
   if (typeof s.tiktokEnabled !== 'boolean' || typeof s.tiktokAudited !== 'boolean' || typeof s.tiktokDirectPost !== 'boolean') return invalid()
   const clientKey = s.tiktokClientKey === null ? null : text(s.tiktokClientKey)
   if (clientKey && !/^[A-Za-z0-9_-]{1,128}$/.test(clientKey)) return invalid()
-  const broker = s.tiktokBrokerUrl === null ? null : httpsUrl(s.tiktokBrokerUrl)
-  if (broker && (broker.pathname !== '/' || broker.search)) return invalid()
+  let broker: string | null = null
+  try { broker = s.tiktokBrokerUrl === null ? null : serviceOrigin(s.tiktokBrokerUrl) } catch { return invalid() }
   return { tiktokEnabled: s.tiktokEnabled, tiktokAudited: s.tiktokAudited, tiktokDirectPost: s.tiktokDirectPost,
-    tiktokClientKey: clientKey, tiktokBrokerUrl: broker?.origin ?? null }
+    tiktokClientKey: clientKey, tiktokBrokerUrl: broker }
 }
 function privacy(value: unknown): TikTokPrivacy {
   if (value === 'PUBLIC_TO_EVERYONE' || value === 'MUTUAL_FOLLOW_FRIENDS' || value === 'FOLLOWER_OF_CREATOR' || value === 'SELF_ONLY') return value
@@ -65,10 +66,9 @@ export class TikTokService {
   constructor(private readonly o: Options) { this.tokens = new TikTokTokenStore(o.settingsDir, o.secrets) }
   private now(): number { return this.o.now?.() ?? Date.now() }
   private async config() {
-    if (!this.o.dev) return fail('TT_DISABLED', 'TikTok is available only in developer mode.')
     const c = tiktokSettings(await this.o.settings())
-    if (!c.tiktokEnabled) return fail('TT_DISABLED', 'Enable the TikTok developer setting first.')
-    if (!c.tiktokClientKey || !c.tiktokBrokerUrl) return fail('TT_SETUP', 'Set the TikTok client key and authorization server in developer settings.')
+    if (!c.tiktokEnabled || !c.tiktokClientKey || !c.tiktokBrokerUrl)
+      return fail('TT_DISABLED', 'Posting to TikTok isn’t open yet. Settings › Posting says what’s missing.')
     return { ...c, tiktokClientKey: c.tiktokClientKey, tiktokBrokerUrl: c.tiktokBrokerUrl }
   }
   private run<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -100,7 +100,7 @@ export class TikTokService {
   }
   private async refresh(c: TikTokCredentials, signal: AbortSignal): Promise<TikTokCredentials> {
     if (c.refreshExpiresAt <= this.now()) throw apiError('invalid_grant')
-    const data = await request(this.o.fetch, `${c.brokerUrl}/api/tiktok/oauth/token`, jsonPost({
+    const data = await request(this.o.fetch, `${c.brokerUrl}/v1/tiktok/token`, jsonPost({
       client_key: c.clientKey, grant_type: 'refresh_token', refresh_token: c.refreshToken
     }), signal, false)
     const next = this.parseToken(data, { tiktokClientKey: c.clientKey, tiktokBrokerUrl: c.brokerUrl }, c.displayName)
@@ -125,7 +125,8 @@ export class TikTokService {
   }
   session(): Promise<TikTokSession> {
     return this.run(async () => {
-      await this.config()
+      // TikTok not open yet is an answer, not an error: Settings and Share ask on every visit
+      try { await this.config() } catch (e) { if (e instanceof TikTokError && e.code === 'TT_DISABLED') return { connected: false }; throw e }
       let c: TikTokCredentials
       try { c = await this.credentials() } catch (e) { if (e instanceof TikTokError && e.code === 'TT_TOKEN') return { connected: false }; throw e }
       if (c.refreshExpiresAt <= this.now()) return { connected: false }
@@ -147,7 +148,7 @@ export class TikTokService {
           redirect_uri: listener.redirectUri, code_challenge: createHash('sha256').update(verifier).digest('hex'), code_challenge_method: 'S256' }).toString()
         signal.throwIfAborted(); await this.o.openExternal(url.toString())
         const code = await listener.result
-        const data = await request(this.o.fetch, `${config.tiktokBrokerUrl}/api/tiktok/oauth/token`, jsonPost({
+        const data = await request(this.o.fetch, `${config.tiktokBrokerUrl}/v1/tiktok/token`, jsonPost({
           client_key: config.tiktokClientKey, grant_type: 'authorization_code', code, redirect_uri: listener.redirectUri, code_verifier: verifier
         }), signal, false)
         let credentials = this.parseToken(data, config, 'TikTok creator')
@@ -172,9 +173,17 @@ export class TikTokService {
   }
   cancelConnect(): void { this.connecting?.abort() }
   stop(): void { this.cancelConnect(); this.connection.abort() }
+  /** Forgets the connection on this computer, then asks TikTok (through the sign-in service) to end the grant too. */
   async disconnect(): Promise<void> {
     this.stop(); this.connection = new AbortController()
-    const result = this.queue.then(() => this.tokens.clear(), () => this.tokens.clear())
+    const forget = async () => {
+      const c = await this.tokens.load().catch(() => null)
+      await this.tokens.clear()
+      // best effort, for at most 5 s: the grant also ends on its own, and the person can remove the app in TikTok
+      if (c) await request(this.o.fetch, `${c.brokerUrl}/v1/tiktok/revoke`, jsonPost({ client_key: c.clientKey, token: c.accessToken }),
+        AbortSignal.timeout(5_000), false).catch(() => undefined)
+    }
+    const result = this.queue.then(forget, forget)
     this.queue = result.catch(() => undefined)
     return result
   }

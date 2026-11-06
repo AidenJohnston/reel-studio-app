@@ -1,5 +1,5 @@
 // "Post to YouTube", end to end in the real app, against the in-memory posting server (test/fake-posting.ts) served
-// over HTTP on 127.0.0.1: Share offers it only with REELSTUDIO_POSTING=1, Connect YouTube (the test plays the person
+// over HTTP on 127.0.0.1: Share offers it with no setting, Connect YouTube (the test plays the person
 // clicking Allow in the browser, which a test run never opens), a post whose connection drops part way and carries
 // on, the done screen, and Settings › Posting with Sign out everywhere.
 //
@@ -51,7 +51,7 @@ test('post to YouTube from Share: connect, a dropped connection, done, Settings'
   // The download key from the receipt email (automatic updates), already pasted.
   mkdirSync(userData(), { recursive: true })
   writeFileSync(join(userData(), 'settings.json'), JSON.stringify({ updateKey: KEY }))
-  const { app, page } = await launch({ REELSTUDIO_POSTING: '1', REELSTUDIO_POSTING_URL: url })
+  const { app, page } = await launch({ REELSTUDIO_POSTING_URL: url })
   try {
     await passFirstRun(page)
     await startReel(page, media.video)
@@ -157,11 +157,11 @@ test('post to YouTube from Share: connect, a dropped connection, done, Settings'
   }
 })
 
-test('posting is hidden without REELSTUDIO_POSTING=1', async () => {
+test('posting is hidden with REELSTUDIO_POSTING=0', async () => {
   const media = makeMedia()
   // a profile of its own: the first test's sign-in and finished first run stay out of it
   const own = join(userData(), '..', 'hidden')
-  const { app, page } = await launch({ REELSTUDIO_USER_DATA: join(own, 'user data'), REELSTUDIO_ROOT: join(own, 'Reel Studio') })
+  const { app, page } = await launch({ REELSTUDIO_POSTING: '0', REELSTUDIO_USER_DATA: join(own, 'user data'), REELSTUDIO_ROOT: join(own, 'Reel Studio') })
   try {
     await passFirstRun(page)
     await startReel(page, media.video)

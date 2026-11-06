@@ -89,7 +89,10 @@ function post(value: unknown): InstagramPost {
   if (typeof p.version !== 'number' || !Number.isSafeInteger(p.version) || p.version < 1) return localDataError()
   const publishedAt = text(p.publishedAt)
   if (!Number.isFinite(Date.parse(publishedAt))) return localDataError()
-  return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt }
+  if (p.trial === undefined) return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt }
+  const g = object(p.trial).graduation
+  if (g !== 'MANUAL' && g !== 'SS_PERFORMANCE') return localDataError()
+  return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt, trial: { graduation: g } }
 }
 
 export async function receipt(dir: string, version: number): Promise<PublishReceipt | null> {

@@ -17,3 +17,8 @@ export const VENDOR_INSTALL_PAGES = {
 export const CLAUDE_PLANS_URL = 'https://claude.ai/upgrade'
 /** The posting server (main/posting.ts). Not live yet; REELSTUDIO_POSTING_URL points the app at staging or a local run. */
 export const POSTING_URL = 'https://post.getreelstudio.com'
+/**
+ * Reel Studio's sign-in service (app/src/server/signin, docs/signin.md): holds the Instagram, Facebook and TikTok app
+ * secrets and does their sign-in exchange. Not deployed yet; REELSTUDIO_SIGNIN_URL points the app at a local run.
+ */
+export const SIGNIN_URL = 'https://signin.getreelstudio.com'

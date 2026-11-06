@@ -29,7 +29,7 @@ go through this list. In the pull request's Verification section, say which item
   change and check it still renders.
 - **Export and the phone.** A change to the finished video has to play from the export folder and through "Send to
   my phone", which plays it in the phone's browser (`app/src/main/phone-share.ts`).
-- **Posting.** Posting stays hidden unless `REELSTUDIO_POSTING=1`, and with it off nothing about posting should
+- **Posting.** Posting shows for everyone; `REELSTUDIO_POSTING=0` hides it, and with it off nothing about posting should
   show. A change to what the app sends (`app/src/shared/posting.ts`) needs the matching change in the posting
   server, which lives in a separate repository.
 - **The way back out.** If you add a way in, add the way out and a way to see which state you're in. A job that

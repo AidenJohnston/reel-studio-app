@@ -13,7 +13,8 @@ import { TikTokTokenStore, saveOutcome } from '../src/main/tiktok-store'
 import { saveOutcome as saveInstagramOutcome } from '../src/main/instagram-store'
 import { request } from '../src/main/tiktok-http'
 import { registerTikTokIpc } from '../src/main/tiktok-ipc'
-import { createTikTokBroker } from '../src/server/tiktok-broker'
+import { configFromEnv } from '../src/server/signin/config'
+import { createSigninHandler } from '../src/server/signin/handler'
 import type { TikTokPublishInput, TikTokSettings } from '../src/shared/tiktok'
 
 const NOW = Date.UTC(2026, 9, 23), API = 'https://open.tiktokapis.com/v2', BROKER = 'https://broker.example'
@@ -27,6 +28,10 @@ const CREATOR = { creator_nickname: 'Fixture creator', privacy_level_options: ['
   comment_disabled: true, duet_disabled: false, stitch_disabled: true, max_video_post_duration_sec: 60 }
 const token = (extra = {}) => ({ access_token: TOKEN, refresh_token: REFRESH, token_type: 'Bearer', expires_in: 86400,
   refresh_expires_in: 31536000, open_id: 'fixture-open-id', scope: SCOPES.join(','), ...extra })
+const signinWith = (fetcher: (url: string, init: RequestInit) => Promise<Response>) => createSigninHandler(configFromEnv({
+  SIGNIN_PUBLIC_URL: BROKER, SIGNIN_SECRET: randomBytes(32).toString('base64url'),
+  TIKTOK_CLIENT_KEY: 'fixture-key', TIKTOK_CLIENT_SECRET: 'fabricated-server-secret'
+}, fetcher))
 interface Step {
   path: string
   method?: string
@@ -42,7 +47,7 @@ afterEach(async () => {
   for (const w of cleanup.splice(0)) { w.service.stop(); await fs.rm(w.dir, { recursive: true, force: true }) }
   expect(fixtureErrors.splice(0)).toEqual([])
 })
-async function world(opts: { dev?: boolean; enabled?: boolean; audited?: boolean; direct?: boolean; backend?: string } = {}) {
+async function world(opts: { enabled?: boolean; audited?: boolean; direct?: boolean; backend?: string } = {}) {
   const dir = await fs.mkdtemp(join(tmpdir(), 'tt-fixture-')), project = join(dir, 'projects', 'fixture')
   const version = join(project, 'versions', 'v1')
   await fs.mkdir(version, { recursive: true }); await fs.writeFile(join(project, 'project.json'), '{}')
@@ -81,10 +86,11 @@ async function world(opts: { dev?: boolean; enabled?: boolean; audited?: boolean
     return Response.json(step.raw ? step.body : { data: step.body ?? {}, error: { code: 'ok', message: '' } }, { status: step.status ?? 200 })
   }
   let browser = async (_url: string): Promise<void> => { throw new Error('Unexpected browser') }
-  const broker = createTikTokBroker({ clientKey: 'fixture-key', clientSecret: 'fabricated-server-secret', fetch: fetchFixture })
-  const service = new TikTokService({ dev: opts.dev ?? true, settings: async () => settings, settingsDir: join(dir, 'settings'),
+  // the real sign-in service in front of the TikTok fixture (src/server/signin)
+  const broker = signinWith(fetchFixture)
+  const service = new TikTokService({ settings: async () => settings, settingsDir: join(dir, 'settings'),
     projectsDir: () => join(dir, 'projects'), secrets, now: () => now,
-    fetch: (url, init) => url === `${BROKER}/api/tiktok/oauth/token` ? broker(new Request(url, init)) : fetchFixture(url, init),
+    fetch: (url, init) => url.startsWith(`${BROKER}/v1/`) ? broker(new Request(url, init)) : fetchFixture(url, init),
     openExternal: (url) => browser(url) })
   cleanup.push({ service, dir })
   const store = new TikTokTokenStore(join(dir, 'settings'), secrets)
@@ -156,11 +162,13 @@ describe('TikTok fixture HTTP', () => {
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'TT_CANCELLED' })
     expect(await w.store.load()).toBeNull(); w.done()
   })
-  it.each([{ dev: false }, { enabled: false }])('blocks network actions behind the developer gates %j', async (opts) => {
-    const w = await world(opts)
+  it('blocks network actions while TikTok isn’t open', async () => {
+    const w = await world({ enabled: false })
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'TT_DISABLED' })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'TT_DISABLED' })
     await expect(w.service.insights('fixture', 1, '789')).rejects.toMatchObject({ code: 'TT_DISABLED' })
+    // Settings and Share ask on every visit: not open reads as not connected
+    expect(await w.service.session()).toEqual({ connected: false })
     expect(w.calls).toEqual([])
   })
   it('refuses insecure keychain storage before opening authorization', async () => {
@@ -331,6 +339,10 @@ describe('TikTok fixture HTTP', () => {
       started(); init.signal?.addEventListener('abort', () => reject(new Error('fixture aborted')), { once: true })
     }) })
     const pending = expect(w.service.creator()).rejects.toMatchObject({ code: 'TT_CANCELLED' })
+    // and asks TikTok, through the sign-in service, to end the grant
+    w.steps.push({ path: 'oauth/revoke/', raw: true, body: {}, inspect: (init) => {
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({ client_key: 'fixture-key', client_secret: 'fabricated-server-secret', token: TOKEN })
+    } })
     await began; await w.service.disconnect(); await pending
     expect(await w.store.load()).toBeNull(); w.done()
   })
@@ -389,19 +401,5 @@ describe('TikTok API and OAuth error messages', () => {
   it.each([[400, 'TT_API'], [403, 'TT_PERMISSION'], [404, 'TT_API'], [413, 'TT_API'], [416, 'TT_API'], [429, 'TT_RATE_LIMIT'], [500, 'TT_API']])('maps non-JSON HTTP %s without exposing the response', async (status, code) => {
     await expect(request(async () => new Response(TOKEN, { status: Number(status) }), 'https://fixture.example', {}, new AbortController().signal))
       .rejects.toMatchObject({ code, userMessage: expect.not.stringContaining(TOKEN) })
-  })
-})
-
-describe('server-only TikTok broker', () => {
-  it('rejects arbitrary grants, app keys and non-loopback redirects without upstream HTTP', async () => {
-    let calls = 0
-    const handler = createTikTokBroker({ clientKey: 'fixture-key', clientSecret: 'fabricated-secret', fetch: async () => { calls++; throw new Error('Unexpected upstream') } })
-    for (const body of [{ client_key: 'other', grant_type: 'refresh_token', refresh_token: REFRESH },
-      { client_key: 'fixture-key', grant_type: 'password' },
-      { client_key: 'fixture-key', grant_type: 'authorization_code', redirect_uri: 'https://unapproved.example/callback', code_verifier: 'a'.repeat(43), code: 'fabricated' }]) {
-      const response = await handler(new Request(`${BROKER}/api/tiktok/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
-      expect(response.status).toBe(400); expect(await response.text()).not.toContain('fabricated-secret')
-    }
-    expect(calls).toBe(0)
   })
 })

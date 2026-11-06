@@ -2,6 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
+import type { SocialStatus } from './social'
 import type { InsightsOptions, InsightsSummary } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
@@ -846,6 +847,8 @@ export interface ReelApi {
   insights: { get(options?: InsightsOptions): Promise<InsightsSummary> }
   tiktok: TikTokApi
   instagram: InstagramApi
+  /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
+  social: { status(fresh?: boolean): Promise<SocialStatus> }
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
@@ -1139,7 +1142,7 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
-  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  /** Posting to YouTube (main/posting.ts). Hidden only with REELSTUDIO_POSTING=0. */
   posting: {
     status(): Promise<PostingStatus>
     /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
@@ -1173,7 +1176,7 @@ export type PostPrivacy = 'private' | 'unlisted' | 'public'
 
 /** What Settings and the Post sheet show. Never the key, the session or any Google token. */
 export interface PostingStatus {
-  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  /** Not turned off with REELSTUDIO_POSTING=0, and a usable server address */
   enabled: boolean
   /** A download key is saved (automatic updates on) */
   hasKey: boolean

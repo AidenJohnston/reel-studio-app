@@ -1,5 +1,5 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
-// The HTTPS broker redirects a one-use handoff to this loopback listener, never a token.
+// The sign-in service redirects a sealed handoff to this loopback listener, never a token (docs/signin.md).
 import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { InstagramError } from './instagram-http'
@@ -38,7 +38,7 @@ export async function instagramCallback(state: string, signal: AbortSignal) {
       return
     }
     const handoff = url.searchParams.get('handoff')
-    if (url.searchParams.getAll('handoff').length !== 1 || !handoff || !/^[A-Za-z0-9_-]{16,512}$/.test(handoff)) {
+    if (url.searchParams.getAll('handoff').length !== 1 || !handoff || !/^[A-Za-z0-9_-]{16,2048}$/.test(handoff)) {
       res.writeHead(400).end('The sign-in response is incomplete.')
       return
     }

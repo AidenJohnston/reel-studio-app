@@ -15,7 +15,8 @@
     "start": "node scripts/electron-vite.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
-    "e2e": "electron-vite build && playwright test"
+    "e2e": "electron-vite build && playwright test",
+    "signin": "node --experimental-strip-types src/server/signin/local.ts"
   },
   "dependencies": {
     "@reelstudio/ai": "*",
