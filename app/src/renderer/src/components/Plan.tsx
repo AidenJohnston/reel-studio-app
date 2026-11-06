@@ -410,7 +410,7 @@ export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: Provider
     ? hasPlan
       ? 'Connect your editor to change the plan in a chat.'
       : 'Your editor plans it with you: a question or two, then hooks to pick from, the beats and the shots.'
-    : 'Say what it’s about. Your editor asks a question or two, then gives you hooks to pick from, the beats and the shots.'
+    : 'Plan it first: say what it’s about, and your editor asks a question or two, then gives you hooks to pick from, the beats and the shots.'
   return (
     <div className="pl-empty" data-testid={onConnect ? 'plan-connect-step' : 'plan-greeting'}>
       {marks.length > 0 && (
@@ -419,7 +419,8 @@ export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: Provider
         </span>
       )}
       {!onConnect && <PlanWho provider={provider} />}
-      <h3>{hasPlan ? 'Change the plan together' : 'Plan it before you film'}</h3>
+      {/* beside "Drop the video you filmed", the other way in: planning reads as the choice for a video not filmed yet */}
+      <h3>{hasPlan ? 'Change the plan together' : onConnect ? 'Plan it before you film' : 'Not filmed yet?'}</h3>
       <p {...(!hasPlan && { 'data-testid': 'plan-empty' })}>{line}</p>
       {onConnect && (
         <Button onClick={onConnect} data-testid="plan-connect">

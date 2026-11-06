@@ -36,7 +36,7 @@ async function plainWords(page: import('@playwright/test').Page): Promise<void> 
 test('nothing on this computer: each row says so and links to its maker\'s install page; nothing installs', async () => {
   const { app, page, info, panel, claude, chatgpt } = await connectScreen('missing', 'missing')
   test.skip(info.ai !== 'mock', 'the mock plays the vendor states')
-  // CLIProxyAPI is always the first row, saying it isn't running here, with an outlined Check again
+  // with nothing else ready, CLIProxyAPI is the first row, saying it isn't running here, with an outlined Check again
   await expect(page.getByTestId('ai-picker').locator(':scope > *').first()).toHaveAttribute('data-testid', 'hub-row')
   await expect(page.getByTestId('hub-row')).toHaveAttribute('data-state', 'none')
   await expect(page.getByTestId('hub-row')).toContainText('Not running on this computer')
@@ -101,6 +101,10 @@ test('already signed in: "Use Claude (your Claude Code app)" comes first, and on
   await expect(page.getByTestId('use-claude-code')).toHaveAccessibleName(USE_CLAUDE_CODE)
   await expect(panel.locator('[data-testid="vendor-claude"], [data-testid="vendor-chatgpt"]').locator('.pv-main > button').first()).toHaveAttribute('data-testid', 'use-claude-code')
   await expect(page.getByTestId('use-claude-code')).toHaveClass(/primary/)
+  // CLIProxyAPI, not running here, follows the app that is ready instead of sitting above it
+  const rows = page.getByTestId('ai-picker').locator(':scope > [data-testid]')
+  await expect(rows.first()).not.toHaveAttribute('data-testid', 'hub-row')
+  await expect(rows.last()).toHaveAttribute('data-testid', 'hub-row')
   // the plan the app reports, beside its name
   await expect(page.getByTestId('vendor-plan-claude')).toHaveText('Max')
   await expect(panel).toContainText('Signed in. It uses your Claude plan’s limits.')

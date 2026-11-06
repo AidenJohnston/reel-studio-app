@@ -16,6 +16,8 @@ Extra test hooks (env):
   FAKE_ENGINE_MOMENTS_GAP=<seconds>  `moments` waits this long before each still, the window and the draft (default 0.3)
   FAKE_ENGINE_MOMENTS_GATE=<folder>  instead, `moments` draws its n-th thing (three stills, the window, the draft) only
                                      once <folder>/go-<n> exists, so a test decides when each arrives
+  FAKE_ENGINE_MOMENTS_AT=<seconds>  `moments` shows the change from there, in colour, as the real engine does;
+                                    without it, three grey stills at fixed times, so a test tells them from the reel
   FAKE_ENGINE_TRANSCRIPT=<file>  transcribe writes these words instead of the placeholder ones: a JSON list of
                                  {"w", "s", "e"} in seconds of the first source, with "cut": true on the words autocut
                                  drops (a screenshot set shows a real take's words and cuts this way)
@@ -391,8 +393,10 @@ def cmd_moments(args: list[str]) -> dict:
     stills_dir = vdir / "moments"
     stills_dir.mkdir(parents=True, exist_ok=True)
     progress("moments", 1, "Looking at what changed")
-    vf = "scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1,hue=s=0"
-    times = [t for t in (0.8, 2.4, 4.0) if t < dur]
+    at = os.environ.get("FAKE_ENGINE_MOMENTS_AT")
+    vf = "scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1" + ("" if at else ",hue=s=0")
+    starts = (float(at), float(at) + 0.8, float(at) + 1.6) if at else (0.8, 2.4, 4.0)
+    times = [t for t in starts if t < dur]
     stills = []
     for n, t in enumerate(times):
         wait(n)

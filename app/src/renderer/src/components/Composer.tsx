@@ -119,7 +119,10 @@ export function Composer({
   const now = firstSteps?.find((s) => s.state === 'now')
   // Version 1 names its step, unless the step is waiting on the editor: then the wait is what is happening
   const current = firstSteps && !job?.waiting ? (now ? STEP_LABEL[now.id] : null) : job?.message
-  const pct = job ? Math.min(1, job.overall / 100) : 0
+  // the time-based percent, but never past the end of the step in progress: the last phase holds five of Version 1's
+  // nine steps, and a bar nearly full over four ticks read as wrong (Sense, goal 3)
+  const reached = firstSteps?.length ? firstSteps.filter((s) => s.state !== 'todo').length / firstSteps.length : 1
+  const pct = job ? Math.min(1, job.overall / 100, reached) : 0
   const left = job ? timeLeftWords(job) : null
 
   return (
@@ -224,7 +227,8 @@ export function Composer({
               {plain ? null : chip || auto ? (
                 <span className="tchip" data-auto={chip ? undefined : true} data-testid="moment-chip">
                   {chip?.spot && <span className="spot-n">{chip.spot.n}</span>}
-                  {chip ? chipLabel(chip) : clock(second)}
+                  {/* "At 0:07", as a note's moment is said (aiNoteText): a bare time beside the box read as a clock */}
+                  At {chip ? chipLabel(chip) : clock(second)}
                   <button
                     className="x"
                     aria-label="Remove the moment"
@@ -252,7 +256,7 @@ export function Composer({
                     data-testid="moment-suggest"
                   >
                     <Icon name="plus" size={12} stroke={2} />
-                    {clock(second)}
+                    At {clock(second)}
                   </button>
                   <button
                     ref={caret}

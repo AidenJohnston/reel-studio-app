@@ -143,7 +143,7 @@ export function ViewMenu({
 }: {
   view: 'instagram' | 'clean'
   onView: (v: 'instagram' | 'clean') => void
-  /** comparing versions: the preview stays Clean until Done comparing */
+  /** comparing versions: the preview stays Clean until a version is kept */
   held: boolean
   timeline: boolean
   onTimeline: (shown: boolean) => void
@@ -196,7 +196,7 @@ export function ViewMenu({
             {v.key === view ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
             <span className="shape-mi-text">
               <span>{v.label}</span>
-              <span className="shape-mi-fit">{held ? 'Comparing shows the reel without Instagram. Your view comes back on Done comparing.' : v.fit}</span>
+              <span className="shape-mi-fit">{held ? 'Comparing shows the reel without Instagram. Your view comes back when you keep a version.' : v.fit}</span>
             </span>
           </button>
         ))}

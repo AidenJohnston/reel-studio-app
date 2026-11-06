@@ -51,7 +51,7 @@ export function Outs({
   post: ProjectJson['post']
   /** A version is being made: nothing new can start. */
   disabled: boolean
-  /** Another action is this screen's one green button (Done comparing, Make Version N, connecting an editor). */
+  /** Another action is this screen's one green button (Keep Version N while comparing, Make Version N, connecting an editor). */
   quiet?: boolean
   why?: string
   /** Saves the caption as typed (hashtags included) and reloads the reel. */
@@ -344,7 +344,8 @@ export function Outs({
       id: 'platforms',
       icon: <Icon name="layers" size={16} />,
       label: 'Other platforms',
-      hint: 'TikTok, YouTube Shorts and 5 more, with Try 2',
+      // Try 2 is introduced inside, where it is offered: named here it was a word nobody knew yet (Sense, goal 3)
+      hint: 'TikTok, YouTube Shorts and 5 more',
       testid: 'share-platforms-toggle',
       go: () => setPlatformsOpen((o) => !o)
     }

@@ -10,7 +10,7 @@
 // and the practice editor makes the first edit an editor makes: the screens read as they do for a person, not a test.
 import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TRANSCRIPT } from '../src/renderer/src/components/first-run/sample'
 import { BASE, launch, makeMedia, modelReady, startReel, toEditorStep } from './helpers'
@@ -132,14 +132,20 @@ async function settingsAt(page: Page, key: string): Promise<void> {
   if (!(await page.getByTestId('settings-search').isVisible())) await page.getByTestId('account').click()
   await page.getByTestId(`settings-nav-${key}`).click()
 }
-async function note(page: Page, text: string): Promise<void> {
-  // at a moment in the reel, as a creator makes one: paused 4 s in, so its mark sits clear of the reel's start
-  await page.evaluate(() => {
+/** Where the climb's note is made and its change looked at: a line the reel keeps, with its subtitle on screen. */
+const MOMENT = 7.5
+/** The player paused at `t`, as a person stops it to look. */
+async function pauseAt(page: Page, t: number): Promise<void> {
+  await page.evaluate((at) => {
     const v = document.querySelector('[data-testid=player]') as HTMLVideoElement | null
     v?.pause()
-    if (v) v.currentTime = 4
-  })
+    if (v) v.currentTime = at
+  }, t)
   await page.waitForTimeout(300)
+}
+async function note(page: Page, text: string): Promise<void> {
+  // at a moment in the reel, as a creator makes one, clear of the reel's start
+  await pauseAt(page, MOMENT)
   await page.getByTestId('note-input').fill(text)
   await expect(page.getByTestId('send')).toBeEnabled({ timeout: 30_000 })
   await page.getByTestId('note-input').press('Enter')
@@ -205,7 +211,7 @@ const SCENES: Scene[] = [
     enter: async ({ app, page }) => {
       await engineEnv(app, { FAKE_ENGINE_SLOW_RENDER: '0' })
       await expect(page.getByTestId('log-play-1')).toBeVisible({ timeout: 240_000 })
-      await page.evaluate(() => (document.querySelector('[data-testid=player]') as HTMLVideoElement | null)?.pause())
+      await pauseAt(page, MOMENT)
     },
     ready: byTestId('log-play-1')
   },
@@ -226,7 +232,8 @@ const SCENES: Scene[] = [
       for (const n of [2, 3, 4, 5, 6]) gate(n)
       await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 240_000 })
       await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 120_000 })
-      await page.evaluate(() => (document.querySelector('[data-testid=player]') as HTMLVideoElement | null)?.pause())
+      // stopped where the note asked for the change, to look at it
+      await pauseAt(page, MOMENT)
     },
     ready: byTestId('log-play-2')
   },
@@ -234,6 +241,7 @@ const SCENES: Scene[] = [
     id: 'reel-compare',
     enter: async ({ page }) => {
       if (!(await page.getByTestId('done-compare').isVisible())) await page.getByTestId(/^compare-\d+$/).last().click()
+      await pauseAt(page, MOMENT)
     },
     ready: byTestId('done-compare')
   },
@@ -311,13 +319,14 @@ test('climb scenes at two sizes', async () => {
   const heard = join(BASE, 'climb-transcript.json')
   writeFileSync(heard, JSON.stringify(words))
   MEDIA = makeMedia()
-  SILENT = join(BASE, 'my files ü', 'no sound.mp4')
-  execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=540x960:rate=30:duration=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', SILENT])
+  // another take of the same scene, filmed with the microphone off: the sample as it is, which has no sound track
+  SILENT = join(BASE, 'my files ü', 'kitchen take 2.mp4')
+  copyFileSync(join(__dirname, '../src/renderer/src/assets/sample/raw.mp4'), SILENT)
   const gateDir = join(BASE, 'moments-gate')
   mkdirSync(gateDir, { recursive: true })
   const { app, page } = await launch({
     REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '400', REELSTUDIO_MOCK_MOMENTS: '1', REELSTUDIO_MOCK_FIRST_EDIT: 'editor',
-    FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_TRANSCRIPT: heard
+    FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_MOMENTS_AT: String(MOMENT), FAKE_ENGINE_TRANSCRIPT: heard
   }, { realViewport: true })
   const ctx: Ctx = { app, page, gate: (n) => writeFileSync(join(gateDir, `go-${n}`), '') }
   const audit: Record<string, { findings: ConsistencyFinding[]; allowed: number; distinct: unknown }> = {}

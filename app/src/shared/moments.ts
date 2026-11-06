@@ -83,7 +83,12 @@ export function wordsBetween(placed: PlacedWord[], from: number, to: number): Mo
 }
 
 /** "0:12" or "0:12–0:15". */
-export const momentLabel = (m: { at: number; to?: number }): string => (m.to !== undefined ? `${clock(m.at)}–${clock(m.to)}` : clock(m.at))
+/** A moment as the player's clock and the note box's chip show it: whole seconds, rounded down, so a note made at 7.5 s
+ * reads 0:07 everywhere (clock() rounds, which made it 0:08 in the chat beside a 0:07 chip). */
+export const momentLabel = (m: { at: number; to?: number }): string => {
+  const t = (s: number): string => clock(Math.floor(s))
+  return m.to !== undefined ? `${t(m.at)}–${t(m.to)}` : t(m.at)
+}
 
 /** What the AI reads for a note: `At 0:14 (around "you don't need a mixer", words w80, w81): cut this part`. */
 export function aiNoteText(text: string, moment?: NoteMoment): string {

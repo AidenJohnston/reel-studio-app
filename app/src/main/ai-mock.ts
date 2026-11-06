@@ -169,7 +169,11 @@ export const createMockAI: CreateAI = ({ host }) => {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
-    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: ['note'], at: new Date().toISOString() }]
+    // the climb's editor (REELSTUDIO_MOCK_FIRST_EDIT=editor) does what a note about bigger subtitles asks, so the new
+    // version's "What changed" and reply read as an editor's would
+    const bigger = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor' && /\bsubtitles? bigger\b/i.test(note)
+    if (bigger) p.captions = { ...p.captions, style: { ...p.captions?.style, size: 125 } }
+    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: [bigger ? 'captions' : 'note'], at: new Date().toISOString() }]
     await fs.mkdir(join(copy, '..'), { recursive: true })
     await writeJson(copy, p)
     onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
@@ -194,6 +198,7 @@ export const createMockAI: CreateAI = ({ host }) => {
     done.notes[done.notes.length - 1].version = version
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
+    if (bigger) return { summary: 'I made the subtitles bigger, so they read at a glance on a phone.', version, styleRulesAdded: [], changed: ['captions'] }
     return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 

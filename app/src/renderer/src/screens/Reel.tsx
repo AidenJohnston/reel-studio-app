@@ -864,8 +864,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
               </button>
             ))}
           </div>
+          {/* names the one it keeps on screen, the one Share sends: "Done comparing" left the choice unsaid (Sense, goal 3) */}
           <button className="cmp-done" onClick={() => (setCompare(null), keyboardBackToTimeline())} data-testid="done-compare">
-            Done comparing
+            Keep Version {selected ?? compare.b}
           </button>
         </div>
       )}
@@ -891,14 +892,14 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   )
 
   // Comparing shows the reel without Instagram's header and buttons: the switch sits on the top edge of the picture,
-  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back on Done.
+  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back when a version is kept.
   const shownView = compare ? 'clean' : phoneView
   const viewSwitch = compare ? (
     <span className="view-held" data-testid="phone-view-held">
       <span inert>
         <PhoneViewSwitch value={shownView} onChange={() => undefined} />
       </span>
-      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back on Done comparing.</span>
+      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back when you keep a version.</span>
     </span>
   ) : (
     <PhoneViewSwitch value={phoneView} onChange={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))} />
