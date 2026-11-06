@@ -13,7 +13,7 @@ describe('versions to compare', () => {
     const list = variations(reel({ preset: 'standard', seed: 7 }), 'paces')!
     expect(list.map((v) => v.edit.set.map((s) => s.path.join('.')))).toEqual([['cutStyle'], ['cutStyle']])
     expect(list.map((v) => (v.edit.set[0].value as { preset: string }).preset)).toEqual(['clean', 'hyper'])
-    expect(list.every((v) => !v.edit.items.length && !v.edit.words.cut.length && !v.edit.words.keep.length && !v.edit.mirror.length)).toBe(true)
+    expect(list.every((v) => !v.edit.items.length && !v.edit.words.cut.length && !v.edit.words.keep.length && !v.edit.mirror.length && !v.edit.joins.length)).toBe(true)
     // a reel with no pace gets all three
     expect(variations(reel(), 'paces')!.map((v) => (v.edit.set[0].value as { preset: string }).preset)).toEqual(['clean', 'standard', 'hyper'])
   })

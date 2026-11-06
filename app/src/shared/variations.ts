@@ -23,7 +23,8 @@ const paceEdit = (preset: CutPreset, seed: number): HandEdit => ({
   set: [{ path: ['cutStyle'], value: { preset, seed } }],
   items: [],
   words: { cut: [], keep: [] },
-  mirror: []
+  mirror: [],
+  joins: []
 })
 
 /** The hand edits for `kind`, from the reel as it is. `paces`: one at each pace other than the reel's own. `moments`:
