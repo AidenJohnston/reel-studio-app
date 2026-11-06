@@ -2,8 +2,16 @@ import { expect, it, vi } from 'vitest'
 import { once } from 'node:events'
 import { connect, createServer, type TcpNetConnectOpts } from 'node:net'
 
-const network = vi.hoisted(() => ({ address: '93.184.215.14', port: 0, destinations: [] as string[] }))
-vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: network.address }] }))
+const network = vi.hoisted(() => ({
+  address: '93.184.215.14', port: 0, destinations: [] as string[],
+  // While set, lookups wait for it; asked() fires when a lookup starts.
+  gate: null as Promise<void> | null, asked: () => {}
+}))
+vi.mock('node:dns/promises', () => ({ lookup: async () => {
+  network.asked()
+  if (network.gate) await network.gate
+  return [{ address: network.address }]
+} }))
 vi.mock('node:net', async (original) => {
   const net = await original<typeof import('node:net')>()
   return { ...net, connect: (options: TcpNetConnectOpts, ready?: () => void) => {
@@ -51,5 +59,33 @@ it('CONNECT pins the tunnel, forwards received bytes, and blocks a later private
   } finally {
     await proxy.close()
     await new Promise<void>((resolve, reject) => echo.close((error) => error ? reject(error) : resolve()))
+  }
+})
+
+it('a CONNECT client that resets while its address is checked does not crash the app', async () => {
+  const crashes: unknown[] = []
+  const onCrash = (error: unknown) => { crashes.push(error) }
+  process.on('uncaughtException', onCrash)
+  let release = () => {}
+  network.gate = new Promise<void>((resolve) => { release = resolve })
+  const asked = new Promise<void>((resolve) => { network.asked = resolve })
+  // A refusal after the reset covers the 403 path too.
+  network.address = '127.0.0.1'
+  const proxy = await createCaptureProxy()
+  try {
+    const socket = connect({ host: '127.0.0.1', port: proxy.port })
+    await once(socket, 'connect')
+    socket.write('CONNECT reset.example:443 HTTP/1.1\r\nHost: reset.example:443\r\n\r\n')
+    await asked
+    socket.resetAndDestroy()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(crashes).toEqual([])
+  } finally {
+    process.off('uncaughtException', onCrash)
+    network.gate = null
+    network.asked = () => {}
+    await proxy.close()
   }
 })

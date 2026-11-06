@@ -33,6 +33,10 @@ export async function createCaptureProxy(): Promise<{ port: number; close(): Pro
     }
   })
   server.on('connect', async (req, client, head) => {
+    // Node drops its own socket error listener before emitting 'connect', so a reset while DNS
+    // is pending, or after a refusal, would throw ECONNRESET in the main process. The 'close'
+    // listener below tears down the tunnel.
+    client.on('error', () => {})
     try {
       const url = normaliseCaptureUrl(`https://${req.url}`)
       const address = await publicHostAddress(url.hostname)
@@ -45,7 +49,6 @@ export async function createCaptureProxy(): Promise<{ port: number; close(): Pro
       })
       upstream.on('error', () => client.destroy())
       upstream.on('close', () => client.destroy())
-      client.on('error', () => upstream.destroy())
       client.on('close', () => upstream.destroy())
     } catch {
       client.end('HTTP/1.1 403 Forbidden\r\n\r\n')
