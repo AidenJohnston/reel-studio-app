@@ -123,6 +123,30 @@ def test_a_preview_reads_the_take_unless_its_copy_is_finished_and_current(tmp_pa
     assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
 
 
+def test_a_draft_whose_copy_fails_never_marks_its_encoder_failed(tmp_path, monkeypatch):
+    """A preview from a damaged copy is made again from the take with the same encoder first. The
+    retry used to switch encoder and input together, then save the GPU encoder as failed for days
+    although only the copy was broken."""
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=4.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 3.0),))
+    copy = Path(proxy.run(pdir, short_side=540)["sources"]["s1"]["file"])
+    monkeypatch.setattr(render.tools, "draft_encoder", lambda: "h264_nvenc")
+    marked, runs = [], []
+    monkeypatch.setattr(render.tools, "mark_encoder_failed", marked.append)
+
+    def encode(cmd, dur, on_pct, **_):            # the copy can't be decoded; NVENC works
+        from_copy = any(isinstance(a, str) and Path(a).name == copy.name for a in cmd)
+        runs.append((cmd[cmd.index("-c:v") + 1], from_copy))
+        if from_copy:
+            raise render.EngineError("FFMPEG_FAILED", "Invalid data found when processing input", "x")
+        Path(cmd[-1]).write_bytes(b"")
+        return ""
+    monkeypatch.setattr(render.tools, "ffmpeg_progress", encode)
+    r = _draft(pdir)
+    assert runs == [("h264_nvenc", True), ("h264_nvenc", False)]
+    assert marked == [] and r["videoFrom"] == {"s1": "original"}
+
+
 def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
     take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
     pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))

@@ -878,16 +878,30 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
+    err = None
     try:
         err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
                                     cwd=rwork, user_message="I couldn't finish making your video. "
                                                             "Please try again.")
     except EngineError as exc:
-        if draft:
+        if not draft:
+            raise
+        if vpaths != src_paths:
+            # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
+            # so a bad copy costs one retry and never marks a working encoder as failed.
+            log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
+            video_from = {sid: "original" for sid in src_meta}
+            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
+            try:
+                err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                            cwd=rwork)
+            except EngineError as again:
+                exc = again
+        if err is None:
             log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
             warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
             failed_encoder, encoder = encoder, "libx264"
-            # the originals too: a damaged copy must cost speed, never the preview
             video_from = {sid: "original" for sid in src_meta}
             cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
                                   ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
@@ -897,8 +911,6 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             if failed_encoder != "libx264":
                 # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
                 tools.mark_encoder_failed(failed_encoder)
-        else:
-            raise
     timings["encode"] = round(time.time() - t, 2)
     if font_path is not None:
         bad = check_fontselect(err, Path(font_path))
