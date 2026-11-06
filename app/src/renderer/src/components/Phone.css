@@ -57,6 +57,9 @@
 }
 .phone-reel > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 /* On a phone the reel's box overhangs the screen where Instagram trims it: only the part above the tab bar shows. */
+/* Without Instagram's screen over it (Clean, and while comparing) that part sits in the middle of the screen
+   (shapeVars --reel-t-clean); everything placed from the reel's top (the video, the sample, subtitles) moves with it. */
+.phone-screen:not(:has(> .igc:not(.off))) { --reel-t: var(--reel-t-clean); }
 .phone-screen > video { clip-path: var(--reel-clip, none); }
 .phone-screen > video.raw-video { opacity: 0; pointer-events: none; transition: opacity .12s; }
 .phone-screen > video.raw-video.on { opacity: 1; }

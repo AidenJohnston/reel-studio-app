@@ -366,7 +366,17 @@ export const createMockAI: CreateAI = ({ host }) => {
         changed.push('music')
         onEvent({ type: 'tool', name: 'choose_music', summary: `Picked a song: ${track.split('/').pop()}` })
       }
-      // No post caption here: nothing smart ran, so the user writes it ("Post caption: add your own").
+      // No post caption on a basic version: nothing smart ran, so the user writes it ("Post caption: add your own"). An
+      // editor writes one, as ai/src/tools.ts write_post does: the caption, exactly 5 hashtags, search keywords.
+      if (editor) {
+        p.post = {
+          caption: "You don't need a mixer for good bread. Four things and a little time.",
+          hashtags: ['#bread', '#breadmaking', '#homebaking', '#baking', '#easyrecipes'],
+          keywords: ['bread', 'no mixer', 'home baking']
+        }
+        changed.push('post')
+        onEvent({ type: 'tool', name: 'write_post', summary: 'Wrote your caption and hashtags' })
+      }
       const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
       const lower = rules.some((r) => r.payload?.case === 'lower' && !r.paused)
       if (lower) p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
