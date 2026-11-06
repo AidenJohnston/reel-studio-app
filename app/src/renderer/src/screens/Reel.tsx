@@ -12,6 +12,7 @@ import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
 import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Segmented, Spinner } from '../components/ui'
 import { CombineDialog, VersionTree } from '../components/VersionTree'
+import { SideBySide, saveLayout, savedLayout, type CompareLayout } from '../components/SideBySide'
 import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
@@ -133,6 +134,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const [base, setBase] = useState<number | null>(null)
   const [notesView, setNotesView] = useState<'notes' | 'versions'>('notes')
   const [combine, setCombine] = useState<number | null>(null)
+  // Compare as one player that switches, or both versions at once (SideBySide), as the person last chose
+  const [layout, setLayout] = useState<CompareLayout>(savedLayout)
+  const pickLayout = (l: CompareLayout) => (setLayout(l), saveLayout(l))
   const [landed, setLanded] = useState<number | null>(null)
   const [unwatched, setUnwatched] = useState<number | null>(null)
   // the version whose arrival crosses over the one on screen
@@ -892,6 +896,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
               </button>
             ))}
           </div>
+          <button className="cmp-side" onClick={() => pickLayout('side')} data-testid="compare-side-by-side">
+            Side by side
+          </button>
           <button className="cmp-done" onClick={() => (setCompare(null), keyboardBackToTimeline())} data-testid="done-compare">
             Done comparing
           </button>
@@ -1108,6 +1115,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                 <NotesLog
                   slug={slug}
                   madeWith={Object.fromEntries(d.versions.flatMap((v) => (v.madeWith ? [[v.n, v.madeWith]] : [])))}
+                  madeFrom={Object.fromEntries(d.versions.flatMap((v) => (v.parent !== null ? [[v.n, v.parent]] : [])))}
                   entries={entries}
                   queue={d.queue}
                   held={d.queueHeld}
@@ -1248,6 +1256,23 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
         </div>
       </div>
 
+      {compare && layout === 'side' && d.versions.some((v) => v.n === compare.a) && d.versions.some((v) => v.n === compare.b) && (
+        <SideBySide
+          a={d.versions.find((v) => v.n === compare.a)!}
+          b={d.versions.find((v) => v.n === compare.b)!}
+          nameOf={nameOf}
+          at={playhead.get()}
+          onDone={(t) => {
+            transport.seek(t)
+            setCompare(null)
+            keyboardBackToTimeline()
+          }}
+          onOne={(t) => {
+            transport.seek(t)
+            pickLayout('one')
+          }}
+        />
+      )}
       {combine !== null && (
         <CombineDialog
           slug={slug}

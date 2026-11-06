@@ -71,6 +71,7 @@ const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
 export function NotesLog({
   slug,
   madeWith,
+  madeFrom,
   entries,
   queue,
   held,
@@ -103,6 +104,8 @@ export function NotesLog({
   slug: string
   /** the model that made each version, by its number (VersionInfo.madeWith): its line names it */
   madeWith?: Record<number, string>
+  /** the version each was made from (Compare compares with it; on a branch it is not the one before) */
+  madeFrom?: Record<number, number>
   entries: LogEntry[]
   queue: QueuedNote[]
   held: boolean
@@ -244,7 +247,7 @@ export function NotesLog({
             {v > 1 && (
               <div className="dacts">
                 <button className="lk" onClick={() => onCompare(v)} data-testid={`compare-${v}`}>
-                  <Icon name="compare" size={14} /> Compare with Version {v - 1}
+                  <Icon name="compare" size={14} /> Compare with Version {madeFrom?.[v] ?? v - 1}
                 </button>
               </div>
             )}
