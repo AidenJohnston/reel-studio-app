@@ -151,8 +151,8 @@ def _key(obj) -> str:
 
 def _beats(proj: dict) -> bool:
     """Whether cards land on the song's beats (music.accent_beats): then the music and the sound effects move them."""
-    style = proj.get("cutStyle")
-    return proj.get("beatAccents") is True or (isinstance(style, dict) and style.get("preset") == "hyper")
+    from .cut_style import beat_accents_on
+    return beat_accents_on(proj)
 
 
 def _whole_picture(old: dict, new: dict) -> Optional[str]:

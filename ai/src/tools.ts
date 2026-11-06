@@ -10,7 +10,7 @@ import { readAttachment } from './attachments';
 import {
   Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir,
+  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS,
 } from './project';
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
@@ -405,7 +405,7 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 
 /** Engine commands that read the edit: during a note they read its private copy (`frames` without a
  * render id shows the edit). */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments']);
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins']);
 
 export function projectArgs(ctx: { projectDir: string; note?: { file: string } }, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
@@ -431,6 +431,15 @@ async function engine(ctx: ToolContext, command: string, extra: string[] = [], s
     if (command === 'render' && RENDER_DONE.test(pr.message)) return;
     ctx.emit({ type: 'status', message: pr.message || stageMessage || 'Working', pct: pr.pct });
   }, ctx.signal);
+}
+
+/** What `reelengine match-joins` says about one join (engine/reelengine/match.py). */
+export interface MatchVerdict { keep: number; matched: boolean; at: number | null; why?: string; look?: number; move?: number }
+
+/** Which joins of `keep` line up as match cuts: those asking for one, or with `every`, every join that could hold one. */
+export async function matchVerdicts(ctx: ToolContext, keep: unknown[], every: boolean): Promise<MatchVerdict[]> {
+  const r = await engine(ctx, 'match-joins', ['--keep', JSON.stringify(keep), ...(every ? ['--every'] : [])], 'Comparing the frames at each cut');
+  return Array.isArray(r?.joins) ? r.joins : [];
 }
 
 /** The engine's (and the dev engine's) last render step. */
@@ -1425,11 +1434,11 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_cut',
-    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l or smash. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range.',
+    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l, smash, match or flash. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range. A match is refused where its two sides do not line up; find_match_cuts says where they do.',
     parameters: S.obj({ keep: S.arr(S.obj({
       ...ANCHOR.properties,
       join: S.opt(S.obj({
-        transition: S.enum(['hard', 'j', 'l', 'smash']),
+        transition: S.enum([...JOIN_TRANSITIONS]),
         frames: S.int('Requested overlap in output frames, usually 6-12; ignored for hard and smash', { minimum: 0 }),
       }, 'Join into this range; null on the first range or for the default hard cut')),
     }), 'ranges to keep, in the order they should play', { minItems: 1 }) }),
@@ -1437,11 +1446,33 @@ const tools: ToolDef[] = [
       const { t } = await load(ctx);
       const { keep, problems } = normalizeKeep(t, args.keep);
       if (problems.length) throw new ToolInputError(problems.join('; '));
+      if (keep.some((k) => k.join?.transition === 'match')) {
+        // checked before the cut changes, so a refused match leaves the cut as it was
+        const unmet = (await matchVerdicts(ctx, keep, false)).filter((j) => !j.matched);
+        if (unmet.length) {
+          throw new ToolInputError(`${unmet.map((j) => `keep[${j.keep}]: no match cut here, ${j.why ?? 'its two sides do not line up'}`).join('; ')}. `
+            + 'Call find_match_cuts to see which cuts line up, or use hard, j, l or smash here.');
+        }
+      }
       await mutate(ctx, 'cut', (p) => { p.cut.keep = keep; });
       const p = ctx.project!;
       return {
         content: { ok: true, ...(cutSummary(t, p) as object) },
         summary: 'Picked your best takes',
+      };
+    },
+  },
+  {
+    name: 'find_match_cuts',
+    description: 'Say which cuts in the current cut can be match cuts. For each join the engine searches the pause around it for a frame before and a frame after that look alike: the same shot, the speaker in the same place, so the cut hides. Returns every join by keep index, its time in the video, whether it lines up and why not. Then set match on the ones that do with set_cut.',
+    parameters: S.obj({}),
+    async run(ctx) {
+      const { p } = await load(ctx);
+      const joins = await matchVerdicts(ctx, p.cut.keep, true);
+      const lined = joins.filter((j) => j.matched).length;
+      return {
+        content: { joins: joins.map(({ keep, at, matched, why }) => ({ keep, at, matched, ...(why && !matched ? { why } : {}) })) },
+        summary: joins.length ? `${lined} of ${joins.length} cuts can hide as match cuts` : 'No cuts to compare yet',
       };
     },
   },
@@ -1453,6 +1484,24 @@ const tools: ToolDef[] = [
       const seed = args.seed === null || args.seed === undefined ? randomInt(0, 2 ** 31) : args.seed;
       await mutate(ctx, 'cutStyle', (p) => { p.cutStyle = { preset: args.preset as CutPreset, seed }; });
       return { content: { ok: true, cutStyle: { preset: args.preset, seed }, settings: CUT_STYLES[args.preset as CutPreset] }, summary: `Set cut style to ${args.preset} (seed ${seed})` };
+    },
+  },
+  {
+    name: 'set_beat_accents',
+    description: "Land sound effects and the starts of pictures on the song's beats (moved at most 0.12 s; spoken cuts never move). on=true for a rhythmic, music-led reel; false to keep every accent on its word even at the hyper pace; null to let the cut style decide (hyper lands on the beat). It needs a song; never combine it with a J or L join on the same cut.",
+    parameters: S.obj({ on: S.opt(S.bool('true: on the beat; false: never; null: the cut style decides')) }),
+    async run(ctx, args) {
+      const on: boolean | null = args.on ?? null;
+      await mutate(ctx, 'beatAccents', (p) => {
+        if (on === null) delete p.beatAccents;
+        else p.beatAccents = on;
+      });
+      const p = ctx.project!;
+      const song = !!(p.music?.enabled !== false && p.music?.track);
+      return {
+        content: { ok: true, beatAccents: on, ...(on && !song ? { note: 'There is no song yet, so nothing lands on a beat until you choose one.' } : {}) },
+        summary: on === null ? 'Let the pace decide the beat' : on ? 'Put the accents on the beat' : 'Kept the accents on their words',
+      };
     },
   },
   {

@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .cut_style import CUT_STYLES
+from .cut_style import CUT_STYLES, OPENING, OPENING_MAX_UNSTYLED
+from .cut import MATCH_HOLD
 from .placement import SAFE_BOTTOM, SAFE_TOP
 
 
@@ -17,6 +18,7 @@ class LintTimeline:
     snaps: list = field(default_factory=list)
     captions: list = field(default_factory=list)
     event_times: list | None = None
+    match_joins: list = field(default_factory=list)   # cut.Timeline.match_joins
 
 
 def snap_crosses(start, end, events):
@@ -93,8 +95,33 @@ def lint_edit(edit: dict, timeline: LintTimeline) -> dict:
         if seg.join_transition in ('j', 'l') and any(abs(s['snapped'] - seg.out_start) <= 1 / fps for s in accepted):
             issue('join-beat', seg.out_start, 'A J or L bridge shares this join with a beat accent.', 'Remove the bridge or move the beat accent.')
 
+    for m in timeline.match_joins:
+        if m.get('played') == 'none':
+            # nothing to hide: the take runs straight on, so the request does nothing on screen
+            issue('match-no-cut', 0, f"cut.keep[{m['keep']}] asks for a match cut where the take runs straight on, so there is no cut to hide.",
+                  'Drop the join here.')
+        elif m.get('played') != 'match':
+            at = timeline.segments[m['in']].out_start if 'in' in m else 0
+            issue('match-unmet', at, f"cut.keep[{m['keep']}] asks for a match cut, but {m.get('why') or 'its frames were not compared'}; it plays as a plain cut.",
+                  'Choose another join here, or move the cut to where the two sides line up.')
+    for seg in timeline.segments:
+        # a framing change on a match cut undoes it: the two sides no longer sit the same way
+        if seg.join_transition == 'match' and any(abs(t - seg.out_start) < MATCH_HOLD for z in timeline.zooms for t in (z.t0, z.t1)):
+            issue('match-framing', seg.out_start, 'A zoom changes the framing right at this match cut, so the two sides no longer line up.',
+                  'Move the zoom off this join, or use a plain cut here.')
+
     style = edit.get('cutStyle')
     preset = CUT_STYLES.get(style['preset']) if style else None
+    # The opening decides whether someone stays: past a few changes it reads as noise before the hook lands.
+    # Changes inside one frame of each other are one, as in the cadence below.
+    opening = []
+    for t in sorted(t for t in changes if 0 < t < min(OPENING, timeline.duration)):
+        if not opening or t - opening[-1] > 1 / fps:
+            opening.append(t)
+    cap = preset['openingMax'] if preset else OPENING_MAX_UNSTYLED
+    if len(opening) > cap:
+        issue('opening-busy', opening[cap], f'The first {OPENING:g} seconds change {len(opening)} times; {"this pace" if preset else "an opening"} holds at most {cap}.',
+              'Let the opening breathe: move a zoom, picture or cut in the first 5 seconds later, or drop it.')
     if preset:
         counts = [('jl-budget', sum(s.join_transition in ('j', 'l') for s in timeline.segments), preset['jlBridges'], 'J/L bridges'),
                   ('smash-budget', sum(s.join_transition == 'smash' for s in timeline.segments), preset['smashes'], 'smash cuts'),
@@ -149,11 +176,13 @@ def prepare(ctx, tl):
     if (ctx.project.get('captions') or {}).get('enabled', True):
         _, cues, *_ = captions.build_for_timeline(tl, ctx.project, ctx.fmt['width'], ctx.fmt['height'])
     # Compare against unsnapped events so an event cannot collide with its own target.
-    plan = LintTimeline(tl.segments, tl.duration, visuals, zooms, ctx._lint_snap_requests, cues, ctx._lint_events)
+    plan = LintTimeline(tl.segments, tl.duration, visuals, zooms, ctx._lint_snap_requests, cues, ctx._lint_events,
+                        getattr(tl, 'match_joins', []))
     result = lint_edit(ctx.project, plan)
     for fix in result['fixed']:
         if fix['rule'] == 'zoom-ramp':
             z = zooms[fix['target']]
             z.ramp_in, z.ramp_out = fix['ramp_in'], fix['ramp_out']
     ctx.lint_zooms = zooms
+    ctx.lint_visuals = visuals
     return result
