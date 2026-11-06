@@ -148,9 +148,14 @@ function watchMoments(deps: EditorDeps, ctx: ToolContext): void {
   ctx.moments.mark();
 }
 
+/** What every editor prompt carries about the person: their My style rules and their niche, read together. */
+async function promptVars(deps: EditorDeps): Promise<{ styleRules: string; niche: string }> {
+  const [styleRules, niche] = await Promise.all([deps.style.asPromptText(), nicheVars(deps.host.reelStudioRoot())]);
+  return { styleRules, ...niche };
+}
+
 async function systemPrompt(deps: EditorDeps): Promise<string> {
-  const vars = { styleRules: await deps.style.asPromptText(), ...(await nicheVars(deps.host.reelStudioRoot())) };
-  return `${deps.prompts.render('system', vars)}\n\n${DATA_BOUNDARY}\n`;
+  return `${deps.prompts.render('system', await promptVars(deps))}\n\n${DATA_BOUNDARY}\n`;
 }
 
 /** The user always hears about a My style rule the AI saved. */
@@ -911,8 +916,7 @@ export async function planTurn(deps: EditorDeps, provider: ModelProvider | null,
     asked: String(Math.min(input.asked, PLAN_QUESTIONS)),
     mustPropose: mustPropose ? 'No questions are left: propose the plan now.' : '',
     plan: input.plan ? planForPrompt(input.plan) : 'None yet.',
-    styleRules: await deps.style.asPromptText(),
-    ...(await nicheVars(deps.host.reelStudioRoot())),
+    ...(await promptVars(deps)),
   });
   // one message per side in turn, as every provider expects: the creator's words, and the editor's replies as the JSON it gave
   const messages: any[] = [];
@@ -957,7 +961,7 @@ export async function planTurn(deps: EditorDeps, provider: ModelProvider | null,
 export async function writeScript(deps: EditorDeps, provider: ModelProvider | null, idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
   if (!provider) throw new AIError('no_ai', 'Connect an editor in Settings to get help writing your script.');
   onEvent({ type: 'status', message: 'Writing your script', pct: 10 });
-  const system = deps.prompts.render('writeScript', { idea: idea.trim(), styleRules: await deps.style.asPromptText(), ...(await nicheVars(deps.host.reelStudioRoot())) });
+  const system = deps.prompts.render('writeScript', { idea: idea.trim(), ...(await promptVars(deps)) });
   const messages: any[] = [{ role: 'user', content: [{ type: 'text', text: `Idea: ${idea.trim()}\n\nReply with the JSON only.` }] }];
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await provider.complete({ system, messages, tools: [], jsonOnly: true, signal });

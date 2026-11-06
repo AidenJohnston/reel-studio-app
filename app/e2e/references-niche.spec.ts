@@ -64,7 +64,8 @@ test('reference reels: files are measured, a TikTok link asks for its file, and 
     await expect(page.getByTestId('references-error')).toContainText('That is not a link')
 
     // its file, added on its row, is measured like the others
-    const linkRow = rows.filter({ has: needs })
+    // an inner locator is matched inside each row, so it starts from the page, not the section
+    const linkRow = rows.filter({ has: page.getByTestId('reference-needs-file') })
     await linkRow.getByTestId('file-input').setInputFiles(second)
     await expect(section.getByTestId('reference-needs-file')).toHaveCount(0)
     await expect(readout).toContainText('What these 3 reels have in common')

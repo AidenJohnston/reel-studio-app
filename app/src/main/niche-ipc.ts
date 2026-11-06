@@ -61,9 +61,9 @@ export function registerNicheIpc(d: {
     const checked = checkTurns(turns)
     if (checked[checked.length - 1].from !== 'you') throw { code: 'BAD_ARGS', userMessage: 'Say something first.' }
     const ai = d.ai()
-    if (!ai.nicheTurn) throw { code: 'NOT_READY', userMessage: 'This version of the editor cannot help with a niche. Write it yourself instead.' }
     const active = await ai.active().catch(() => null)
     if (!active?.connected || active.id === 'none') throw { code: 'NO_AI', userMessage: 'Connect an editor to find your niche together, or write it yourself.' }
+    if (!ai.nicheTurn) throw { code: 'NO_AI', userMessage: 'This version of the editor cannot help with a niche. Write it yourself instead.' }
     if (asking) throw { code: 'BUSY', userMessage: 'Your editor is still answering. Wait for it, or press Stop.' }
     const controller = new AbortController()
     asking = controller

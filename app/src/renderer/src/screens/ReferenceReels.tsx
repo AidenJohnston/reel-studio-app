@@ -174,7 +174,7 @@ export function ReferenceReels() {
           {refs.map((r) => (
             <li key={r.id} className={`rr-row ${r.state}`} data-testid="reference">
               <span className="rr-poster" aria-hidden>
-                {r.posterUrl ? <img src={r.posterUrl} alt="" /> : <Icon name={r.link && !r.file ? 'external' : 'film'} size={16} />}
+                {r.posterUrl ? <img src={r.posterUrl} alt="" width={36} height={64} loading="lazy" decoding="async" /> : <Icon name={r.link && !r.file ? 'external' : 'film'} size={16} />}
               </span>
               <span className="rr-t">
                 <b title={r.title}>{r.title}</b>

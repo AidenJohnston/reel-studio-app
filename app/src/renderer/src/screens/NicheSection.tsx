@@ -26,6 +26,7 @@ export function NicheSection() {
   const [error, setError] = useState<string | null>(null)
   const [said, setSaid] = useState('')
   const editButton = useRef<HTMLButtonElement>(null)
+  const writeButton = useRef<HTMLButtonElement>(null)
   const undoButton = useRef<HTMLButtonElement>(null)
 
   const load = () => reel.niche.get().then(setState, (e) => setError(userMessage(e)))
@@ -68,6 +69,11 @@ export function NicheSection() {
       requestAnimationFrame(() => editButton.current?.focus())
     }
   }
+  // Cancel and Escape give the keyboard back to the button that opened the form
+  const closeForm = () => {
+    setForm(null)
+    requestAnimationFrame(() => (editButton.current ?? writeButton.current)?.focus())
+  }
   const startForm = (n: Niche | null) => {
     setRemoved(null)
     setForm(toForm(n))
@@ -101,7 +107,7 @@ export function NicheSection() {
                 <button className="btn small" onClick={() => setSheet('new')} data-testid="niche-find">
                   Find my niche
                 </button>
-                <button className="btn small ghost" onClick={() => startForm(null)} data-testid="niche-write">
+                <button ref={writeButton} className="btn small ghost" onClick={() => startForm(null)} data-testid="niche-write">
                   Write it myself
                 </button>
               </>
@@ -125,7 +131,7 @@ export function NicheSection() {
       )}
 
       {form ? (
-        <form className="nf" onSubmit={save} onKeyDown={(e) => e.key === 'Escape' && setForm(null)} aria-label="Your niche" data-testid="niche-form">
+        <form className="nf" onSubmit={save} onKeyDown={(e) => e.key === 'Escape' && closeForm()} aria-label="Your niche" data-testid="niche-form">
           <label htmlFor={`${formId}-who`}>Who your reels are for</label>
           <input id={`${formId}-who`} className="input" placeholder="Nurses who work night shifts" maxLength={160} autoFocus {...field('who')} />
           <label htmlFor={`${formId}-promise`}>What they get from watching</label>
@@ -138,7 +144,7 @@ export function NicheSection() {
             <button className="btn small" type="submit" disabled={!form.who.trim() || !form.promise.trim() || !form.angles.trim()} data-testid="niche-form-save">
               Save
             </button>
-            <button className="btn small ghost" type="button" onClick={() => setForm(null)}>
+            <button className="btn small ghost" type="button" onClick={closeForm}>
               Cancel
             </button>
           </div>
