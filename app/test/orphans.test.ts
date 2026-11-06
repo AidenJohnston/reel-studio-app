@@ -323,6 +323,48 @@ describe('orphaned engine reaper', () => {
     expect(existsSync(unreadable)).toBe(true)
   }, 60000)
 
+  it('a list that cannot be set aside still has the next start look for running engines, after the list is rewritten', async () => {
+    setupPaths()
+    const settings = mkdtempSync(join(tmpdir(), 'rs-orphan-'))
+    const file = join(settings, 'engines.json')
+    const bread = join(projectsDir(), 'bread')
+    mkdirSync(join(bread, 'work'), { recursive: true })
+    writeFileSync(file, '[{"pid":4242,"proj')
+    // the crashed run's engine, still rendering bread
+    const engine = spawn(PYTHON, ['-s', '-E', '-m', 'reelengine', 'sleep', '--project', bread], { cwd: join(APP_DIR, 'test', 'fixtures', 'sleeper'), stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    let unlock: () => Promise<void>
+    if (process.platform === 'win32') {
+      // open without sharing delete, as a virus scanner or an indexer may: it cannot be renamed
+      const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+        `$f = [IO.File]::Open('${file.replace(/'/g, "''")}', 'Open', 'Read', 'Read'); 'held'; [Console]::In.ReadLine(); $f.Close()`], { stdio: ['pipe', 'pipe', 'inherit'] })
+      await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve()))
+      unlock = async () => {
+        holder.stdin.end('\n')
+        await once(holder, 'exit')
+      }
+    } else {
+      chmodSync(settings, 0o555)
+      unlock = async () => chmodSync(settings, 0o755)
+    }
+    let locked = true
+    const release = async (): Promise<void> => {
+      if (locked) await unlock()
+      locked = false
+    }
+    try {
+      await once(engine, 'spawn')
+      const registry = createPidRegistry(settings)
+      expect(await registry.reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
+      await release()
+      // the other program lets go, and the list is rewritten (an engine starts or ends)
+      registry.remove(4242)
+      expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
+    } finally {
+      await release()
+      await killTree(engine.pid!)
+    }
+  }, 60000)
+
   it('recognises only our engine command line', () => {
     expect(isOurEngine('"C:/x/python.exe" -s -E -X utf8 -u -m reelengine render --project p')).toBe(true)
     expect(isOurEngine('/r/python/bin/python3 -s -E -m reelengine transcribe')).toBe(true)

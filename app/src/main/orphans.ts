@@ -4,7 +4,7 @@
 // startup stop whatever can be shown to be ours (leftRunning). A project with something we could not
 // stop, or would not signal, stays closed until nothing of ours runs in it.
 import { execFile } from 'node:child_process'
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { projectsDir } from './paths'
 import { groupAlive, isAlive, killTree } from './proctree'
@@ -18,8 +18,15 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
   // A list that cannot be read may hide engines that are still running. It is kept aside, and every
   // start looks for them among the running processes (stillWorking) until a look finds none.
   const unreadable = join(dir, 'engines.unreadable.json')
+  // Set when that list could not be moved aside (another program had it open): a write of the list
+  // must leave the mark first, or the next start would read the new list and never look.
+  let markUnreadable = false
   // Written whole or not at all: a crash mid-write must not leave a list the next start cannot read.
   const write = (): void => {
+    if (markUnreadable) {
+      writeFileSync(unreadable, '', { flag: 'a' })
+      markUnreadable = false
+    }
     const tmp = `${file}.${process.pid}.tmp`
     const fd = openSync(tmp, 'w')
     try {
@@ -80,7 +87,8 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
           try {
             renameSync(file, unreadable)
           } catch {
-            /* looked for at this start only */
+            // the next write of the list leaves the mark instead
+            markUnreadable = true
           }
         }
       }
@@ -105,6 +113,7 @@ export function createPidRegistry(dir: string, stop: (pid: number) => Promise<bo
       const folders = projectFolders()
       const working = await stillWorking(folders)
       if (working && !working.length) {
+        markUnreadable = false
         try {
           rmSync(unreadable, { force: true })
         } catch {
