@@ -18,8 +18,10 @@ def test_a_saved_version_is_scored_from_its_reports(tmp_path):
     ids = [w["id"] for w in tl.words_out]
     # every kept word drawn but the last, in boxes clear of the buttons
     (vdir / "captions.json").write_text(json.dumps({"cues": [{"box": [300, 1300, 480, 120], "ids": ids[:-1]}]}), encoding="utf-8")
-    (vdir / "verify.json").write_text(json.dumps({"lufs": -14.1, "checks": [{"name": "loudness", "status": "PASS"}]}), encoding="utf-8")
-    (vdir / "render.json").write_text(json.dumps({"ruleChecks": {"checked": 2, "failures": [{"id": "r1"}]}}), encoding="utf-8")
+    (vdir / "verify.json").write_text(json.dumps({"lufs": -14.1, "checks": [{"name": "loudness", "status": "PASS"},
+                                                                         {"name": "duration", "status": "PASS"}]}), encoding="utf-8")
+    # the words as the render saved them (render.py manifest `words`)
+    (vdir / "render.json").write_text(json.dumps({"words": tl.words_out, "ruleChecks": {"checked": 2, "failures": [{"id": "r1"}]}}), encoding="utf-8")
 
     rep = score.run(pdir, 1)
     by = {c["id"]: c for c in rep["checks"]}
@@ -28,6 +30,10 @@ def test_a_saved_version_is_scored_from_its_reports(tmp_path):
     assert by["subtitleSafeZone"]["ok"] and by["loudness"]["ok"] and by["videoFile"]["ok"]
     assert by["myStyle"] == {"id": "myStyle", "ok": False, "count": 1, "rules": 2}
     assert rep["measured"] == 6 and rep["passed"] == sum(c["ok"] for c in rep["checks"])
+
+    # the transcript made again since, with other ids: this version is still scored on the words it saved
+    (pdir / "work" / "transcript.json").write_text(json.dumps({"words": [{"id": "x1", "source": "s1", "s": 0.1, "e": 0.4, "w": "new"}]}), encoding="utf-8")
+    assert {c["id"]: c for c in score.run(pdir, 1)["checks"]}["subtitleCoverage"]["count"] == 1
 
     # subtitles off: nothing about subtitles is measured, so nothing about them passes either
     proj["captions"]["enabled"] = False

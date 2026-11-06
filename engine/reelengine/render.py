@@ -1214,6 +1214,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             # the version folder made above holds nothing yet: no number is used up
             shutil.rmtree(vdir, ignore_errors=True)
             progress(STAGE, 100, "Checking your rules", force=True)
+            timings["total"] = round(time.time() - t_start, 2)
             return {"version": version, "preview": preview, "draft": draft, "encoded": False,
                     "ruleChecks": rule_report, "warnings": warnings, "timings": timings}
 

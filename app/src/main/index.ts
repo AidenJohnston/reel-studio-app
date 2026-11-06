@@ -1554,7 +1554,7 @@ function registerIpc(): void {
     if (!Number.isSafeInteger(version) || (version as number) < 1) throw { code: 'BAD_ARGS', userMessage: 'That version is not saved.' }
     return runEngine('score', ['--project', projectDir(slug), '--version', String(version)])
   })
-  // the learning loop (memory-loop.ts): looks again when My style opens, at most once a minute
+  // the learning loop (memory-loop.ts): looks again each time My style opens
   handle('style:suggestions', async () => {
     await refreshMemories(ai, projectsDir(), log)
     return (await ai.memoryProposals?.().catch(() => [])) ?? []

@@ -51,6 +51,15 @@ def test_verify_report_splits_into_loudness_and_the_video_file():
     ]
     # an older version with no verify report measures neither
     assert score.from_verify(None) == []
+    # loudness alone says nothing about the file: no "plays as expected" without a file check behind it
+    assert score.from_verify({"lufs": -14.0, "checks": [{"name": "loudness", "status": "PASS"}]}) == [
+        {"id": "loudness", "ok": True, "lufs": -14.0, "target": verify.TARGET_LUFS}]
+
+
+def test_words_come_from_the_render_or_not_at_all():
+    assert score.saved_words({"words": [{"id": "w1", "s": 0.0, "e": 0.3, "w": "hi"}]}).index == {"w1": 0}
+    # a render that did not save its words: pauses and coverage are not measured, rather than read from today's transcript
+    assert score.saved_words({}) is None and score.saved_words({"words": [{"id": "w1"}]}) is None
 
 
 def test_a_version_that_is_not_saved_is_refused(tmp_path):

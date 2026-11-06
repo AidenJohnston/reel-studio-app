@@ -150,24 +150,23 @@ export interface MemoryAI {
   proposeMemory?(draft: unknown): Promise<string>
 }
 
-/** How often a refresh may run: each one reads every reel's folder. */
-const REFRESH_MS = 60_000
-let last = 0
 let running: Promise<void> | null = null
 
-/** Drafts memories from post results and hand edits and keeps the new ones waiting in My style. Runs when My style
- * opens and after post results are read; at most once a minute, and never two at once. Fails soft: a damaged My
- * style file or one bad reel never stops the screen from opening. */
+/** Drafts memories from post results and hand edits and keeps the new ones waiting in My style. Runs each time My
+ * style opens, never two at once. It reads small JSON files per reel and no media, so it needs no throttle; a throttle
+ * hid a hand edit made just after a look (review). Fails soft: a damaged My style file or one bad reel never stops
+ * the screen from opening. */
 export function refreshMemories(ai: MemoryAI, projectsRoot: string, log: (m: string) => void): Promise<void> {
   if (running) return running
-  if (Date.now() - last < REFRESH_MS || !ai.proposeMemory) return Promise.resolve()
-  last = Date.now()
+  if (!ai.proposeMemory) return Promise.resolve()
   running = (async () => {
     const fromResults = await ai.learnFromResults?.().catch((e) => (log(`[memory] results: ${String(e)}`), [])) ?? []
     const fromEdits = editDrafts(await handPairs(projectsRoot))
     for (const d of [...fromResults, ...fromEdits]) await ai.proposeMemory!(d).catch((e) => log(`[memory] propose: ${String(e)}`))
-  })().finally(() => {
-    running = null
-  })
+  })()
+    .catch((e) => log(`[memory] refresh: ${String(e)}`))
+    .finally(() => {
+      running = null
+    })
   return running
 }

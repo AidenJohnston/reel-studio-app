@@ -1122,7 +1122,7 @@ export interface ReelApi {
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
     /** "Use lowercase for new reels too", ticked in Edit it myself: the same rule a note's question saves. */
     rememberLowercase(slug: string): Promise<void>
-    /** Memories My style suggests from post results and hand edits, after looking again (at most once a minute). */
+    /** Memories My style suggests from post results and hand edits, after looking again. */
     suggestions(): Promise<MemorySuggestion[]>
     /** Keep a suggestion as a rule, with its words or `text` the person typed. */
     keepSuggestion(id: string, text?: string): Promise<StyleRule>

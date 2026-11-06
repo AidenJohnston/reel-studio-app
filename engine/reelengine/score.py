@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from . import captions as capmod, project as projmod, verify as verifymod
 from .proto import EngineError
@@ -66,9 +67,20 @@ def from_verify(rep: dict) -> list:
     out = []
     if loud is not None:
         out.append({"id": "loudness", "ok": loud.get("status") != "FAIL", "lufs": rep.get("lufs"), "target": verifymod.TARGET_LUFS})
-    failed = [c.get("name") for c in rest if c.get("status") == "FAIL"]
-    out.append({"id": "videoFile", "ok": not failed, "count": len(failed), "failed": failed[:5]})
+    # a report with no file checks measured nothing about the file, so it says nothing about it
+    if rest:
+        failed = [c.get("name") for c in rest if c.get("status") == "FAIL"]
+        out.append({"id": "videoFile", "ok": not failed, "count": len(failed), "failed": failed[:5]})
     return out
+
+
+def saved_words(render) -> SimpleNamespace | None:
+    """The words this version kept, at its own output times, from its render.json: the live transcript may have been
+    made again since, with other times or ids. None for a render that did not save them."""
+    words = render.get("words") if isinstance(render, dict) else None
+    if not isinstance(words, list) or not all(isinstance(w, dict) and {"id", "s", "e", "w"} <= set(w) for w in words):
+        return None
+    return SimpleNamespace(words_out=words, words=words, index={w["id"]: i for i, w in enumerate(words)})
 
 
 def run(project_dir: Path, version: int) -> dict:
@@ -80,10 +92,8 @@ def run(project_dir: Path, version: int) -> dict:
     proj = projmod.load(project_dir, file=snap)
     fmt = (int(proj["format"]["width"]), int(proj["format"]["height"]))
     checks = []
-    try:
-        tl = projmod.timeline(project_dir, proj)
-    except EngineError:
-        tl = None                      # the transcript is gone: nothing about words can be measured
+    render = _read(vdir / "render.json")
+    tl = saved_words(render)            # None: nothing about words can be measured
     report = _read(vdir / "captions.json")
     cues = report.get("cues") if isinstance(report, dict) and isinstance(report.get("cues"), list) else None
     if tl is not None:
@@ -93,7 +103,6 @@ def run(project_dir: Path, version: int) -> dict:
             checks.append(coverage(tl, proj, cues))
         checks.append(safe_band(cues, fmt))
     checks += from_verify(_read(vdir / "verify.json"))
-    render = _read(vdir / "render.json")
     rules = render.get("ruleChecks") if isinstance(render, dict) else None
     if isinstance(rules, dict) and rules.get("checked"):
         failing = len(rules.get("failures") or [])

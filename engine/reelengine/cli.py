@@ -430,8 +430,9 @@ def cmd_reference_scan(args):
 # Commands that change nothing in the project, and `attach`, which only adds its own uniquely named
 # file: they run even while Reel Studio has the project open. Every other command given --project is
 # refused then unless Reel Studio runs it (owner.py).
+# `score` only reads a saved version's folder, which no job rewrites: it runs while a note owns the project
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
-                      "classify", "attach"}
+                      "classify", "attach", "score"}
 
 
 def build_parser() -> argparse.ArgumentParser:
