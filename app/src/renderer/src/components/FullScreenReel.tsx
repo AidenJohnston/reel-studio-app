@@ -99,13 +99,18 @@ export function FullScreenReel({
   }, [close])
 
   // Window capture phase: this runs before the page's bubble-phase handlers (the phone's Space, the
-  // drawer's Esc), so those never see these keys. While closing, Space is the phone's again.
+  // drawer's Esc and Cmd/Ctrl+Z), so those never see these keys. While closing, Space is the phone's
+  // again. Export's Cmd/Ctrl+E still gets through.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopImmediatePropagation()
         close()
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        // The edit drawer behind is out of sight: undo there would drop edits nobody can see go.
+        e.preventDefault()
+        e.stopImmediatePropagation()
       } else if (e.code === 'Space' && !closingRef.current) {
         e.stopImmediatePropagation()
         if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return // Space presses that button

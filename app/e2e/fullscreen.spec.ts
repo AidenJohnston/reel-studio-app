@@ -1,9 +1,9 @@
 // Watching the reel full screen from the Reel screen: the window goes full screen and the reel fills
 // its height at 9:16, playback carries over both ways, Space plays and pauses, Esc and the Exit
 // button close it and focus goes back to "Full screen". Then: Esc straight after opening, Space
-// while closing, exporting from the menu while watching (the view closes for the dialog), the
-// smallest window, a window already in macOS full screen (it must stay there, and opening again after
-// leaving it must work), and reduced motion.
+// while closing, exporting from the menu while watching (the view closes for the dialog), undo with
+// the edit drawer open behind the view, the smallest window, a window already in macOS full screen
+// (it must stay there, and opening again after leaving it must work), and reduced motion.
 //
 // Run: npx playwright test e2e/fullscreen.spec.ts (after npm run build).
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
@@ -187,6 +187,19 @@ test('full screen reel: open, hand-off both ways, Space, Esc, Exit button, small
   await expect(page.getByTestId('export-saved')).toBeVisible({ timeout: 120_000 })
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('export-dialog')).toHaveCount(0)
+
+  // ---- the edit drawer left open with an unsaved edit: Cmd/Ctrl+Z in the view does not undo it out of sight ----
+  await page.getByTestId('edit-myself').click()
+  await page.locator('.word').first().click()
+  await expect(page.getByTestId('drawer-undo')).toBeVisible()
+  await open(page)
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Z' : 'Control+Z')
+  await page.keyboard.press('Escape')
+  await closed(page, app)
+  await expect(page.getByTestId('drawer-undo')).toBeVisible()
+  await page.getByTestId('drawer-undo').click()
+  await page.getByTestId('drawer-close').click()
+  await expect(page.getByTestId('drawer')).toHaveCount(0)
 
   // ---- the smallest window the app allows (1024 x 700): the view still fills the screen at 9:16 ----
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 700))
