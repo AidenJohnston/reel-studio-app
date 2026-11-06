@@ -203,26 +203,26 @@ const untouched = (r: ProjectSummary): boolean => r.noVideo && r.title === 'New 
 
 function SideRecent({ current, go }: { current: string | null; go: Go }) {
   const [list, setList] = useState<ProjectSummary[] | null>(null)
-  /** each listed reel's status, to notice a job starting on one listed as stopped or not listed (as Home does) */
-  const known = useRef(new Map<string, ProjectSummary['status']>())
+  /** the jobs already seen: a new one (a first edit, a Resume, a note) reads the list once, as a reel it starts on
+   * may be listed as stopped, or not at all (a New reel keeps its slug when its video comes in) */
+  const seenJobs = useRef(new Set<string>())
   useEffect(() => {
     let alive = true
     const load = () =>
       reel.projects.list().then(
         (p) => {
           if (!alive) return
-          known.current = new Map(p.map((r) => [r.slug, r.status]))
           setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX))
         },
         () => alive && setList([])
       )
     void load()
-    // a reel made, finished or stopped anywhere changes its line here too; a status only when a job starts on a reel
-    // listed as stopped (a Resume), or one not listed yet
+    // a reel made, finished or stopped anywhere changes its line here too; of the status events, a job's first
     const off = reel.jobs.onEvent((e) => {
-      if (e.type !== 'status' || !e.slug) return void load()
-      const was = known.current.get(e.slug)
-      if (was === undefined || was === 'interrupted' || was === 'failed') void load()
+      if (e.type !== 'status') return void load()
+      if (seenJobs.current.has(e.jobId)) return
+      seenJobs.current.add(e.jobId)
+      void load()
     })
     const offQueue = reel.queue.onChange(() => void load())
     const offRenamed = onReelsChanged(() => void load())

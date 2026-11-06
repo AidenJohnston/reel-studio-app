@@ -342,6 +342,9 @@ test('climb scenes at two sizes', async () => {
   test.setTimeout(30 * 60_000)
   const files = join(BASE, 'my files ü')
   mkdirSync(files, { recursive: true })
+  // makeMedia reads its take from the environment: set for that one call, then put back, so no other spec in this
+  // worker picks up the sample
+  const priorVideo = process.env.REELSTUDIO_E2E_VIDEO
   process.env.REELSTUDIO_E2E_VIDEO = join(files, 'my first take.mp4')
   // the sample has no sound of its own (the first run plays it muted), and a take with none is refused: a quiet tone
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', join(__dirname, '../src/renderer/src/assets/sample/raw.mp4'), '-f', 'lavfi', '-i', 'sine=frequency=180:duration=24',
@@ -355,6 +358,8 @@ test('climb scenes at two sizes', async () => {
   const heard = join(BASE, 'climb-transcript.json')
   writeFileSync(heard, JSON.stringify(words))
   MEDIA = makeMedia()
+  if (priorVideo === undefined) delete process.env.REELSTUDIO_E2E_VIDEO
+  else process.env.REELSTUDIO_E2E_VIDEO = priorVideo
   // another take of the same scene, filmed with the microphone off: the sample as it is, which has no sound track
   SILENT = join(BASE, 'my files ü', 'kitchen take 2.mp4')
   copyFileSync(join(__dirname, '../src/renderer/src/assets/sample/raw.mp4'), SILENT)

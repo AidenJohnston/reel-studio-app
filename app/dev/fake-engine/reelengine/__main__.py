@@ -225,7 +225,7 @@ def cmd_transcribe(args: list[str]) -> dict:
     if given:
         src = data["sources"][0]["id"]
         for i, w in enumerate(json.loads(Path(given).read_text("utf-8"))):
-            words.append({"id": f"w{i}", "source": src, "s": w["s"], "e": w["e"], "w": w["w"], **({"cut": True} if w.get("cut") else {})})
+            words.append({"id": f"w{i}", "source": src, "s": w["s"], "e": w["e"], "w": w["w"], "cut": bool(w.get("cut"))})
     for src in ([] if given else data["sources"]):
         t = 0.3
         while t < min(src["duration"], 60.0) - 0.5:
