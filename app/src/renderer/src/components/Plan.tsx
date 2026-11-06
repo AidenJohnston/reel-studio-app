@@ -404,8 +404,8 @@ export function PlanChip({ plan }: { plan: ReelPlan }) {
  * Choose your editor (screens/Connect.tsx), which comes back here with the note box focused.
  */
 export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: ProviderInfo | null; hasPlan: boolean; onConnect?: () => void }) {
-  // with no editor, the two it can be; connected, the one that answers
-  const marks: AnswererMark[] = onConnect ? ['claude', 'openai'] : [planAnswerer(provider, 'auto')?.mark].filter((m): m is AnswererMark => !!m)
+  // with no editor, the two it can be; connected, the one that answers, by name (PlanWho)
+  const marks: AnswererMark[] = onConnect ? ['claude', 'openai'] : []
   const line = onConnect
     ? hasPlan
       ? 'Connect your editor to change the plan in a chat.'
@@ -418,6 +418,7 @@ export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: Provider
           {marks.map((m) => (m === 'server' ? <Icon key={m} name="server" size={20} /> : <BrandMark key={m} name={m} size={20} />))}
         </span>
       )}
+      {!onConnect && <PlanWho provider={provider} />}
       <h3>{hasPlan ? 'Change the plan together' : 'Plan it before you film'}</h3>
       <p {...(!hasPlan && { 'data-testid': 'plan-empty' })}>{line}</p>
       {onConnect && (

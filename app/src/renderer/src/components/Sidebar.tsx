@@ -194,13 +194,17 @@ const RECENT_MAX = 6
  * doesn't go through Reels. A dot says which are being made or need you; the open one is marked. Folded to the rail,
  * it hides with the labels.
  */
+/** A New reel nothing was done with yet (no video, no word said, its first name): main discards it when it is left
+ * (store.ts isUntouchedPlanned), and listed here it only repeated the New reel button above. */
+const untouched = (r: ProjectSummary): boolean => r.noVideo && r.title === 'New reel' && r.updatedAt === r.createdAt
+
 function SideRecent({ current, go }: { current: string | null; go: Go }) {
   const [list, setList] = useState<ProjectSummary[] | null>(null)
   useEffect(() => {
     let alive = true
     const load = () =>
       reel.projects.list().then(
-        (p) => alive && setList([...p].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX)),
+        (p) => alive && setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX)),
         () => alive && setList([])
       )
     void load()

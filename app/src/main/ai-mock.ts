@@ -237,6 +237,9 @@ export const createMockAI: CreateAI = ({ host }) => {
       return [{ id: 'claude', connected: false, label: 'Claude' }, claudeProvider(), cliProvider('chatgpt'), NOT_CONNECTED]
     },
     async active() {
+      // the climb's screenshots (REELSTUDIO_MOCK_FIRST_EDIT=editor) start with no editor and choose the Claude Code app,
+      // as a person does; the practice editor is a test's own and never on a person's screen
+      if (process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor') return chosen === 'claude-cli' && state.claude === 'ready' ? claudeProvider() : NOT_CONNECTED
       if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
@@ -311,7 +314,10 @@ export const createMockAI: CreateAI = ({ host }) => {
       const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
-      const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }) })
+      // Tests only (REELSTUDIO_MOCK_FIRST_EDIT=editor): the first edit an editor makes, its steps and its own words, so a
+      // screenshot set shows the path a person with an editor sees (e2e/climb-shots.spec.ts)
+      const editor = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor'
+      const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 || editor ? {} : { noAI: true }) })
       const changed: string[] = []
       // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
       // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
@@ -346,6 +352,7 @@ export const createMockAI: CreateAI = ({ host }) => {
         await new Promise((r) => setTimeout(r, hold))
       }
 
+      if (editor) status('Picking takes and pictures', 50, 'edit')
       status('Adding music', 56)
       const track = await firstMusicTrack()
       const p = await readProject(projectDir)
@@ -369,8 +376,9 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       const did = proposed ? 'the proposed part of the video kept and subtitles added' : 'pauses cut and subtitles added'
       return {
-        summary:
-          (track
+        summary: editor
+          ? 'I kept your clean take of each line and cut the false start, the filler and the long pauses. Subtitles and a cover are on.'
+          : (track
             ? `Basic version: ${did}, with your song underneath. Connect an editor to pick your best takes and add pictures.`
             : `Basic version: ${did}. Add a song for music, and connect an editor to pick your best takes and add pictures.`) +
           (lower ? ' Subtitles are lowercase, from My style.' : ''),

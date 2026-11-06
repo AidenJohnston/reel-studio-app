@@ -68,9 +68,9 @@ export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason:
   },
   {
     rule: 'off-scale',
-    selector: '.pl-who, .steps li .sr',
+    selector: '.steps li .sr',
     props: ['margin-left'],
-    reason: 'margin-left: auto pushes these to the end of their row (plan.css .pl-who, reel.css .steps li .sr); the used length is the room left.'
+    reason: "margin-left: auto pushes a step's result to the end of its row (reel.css .steps li .sr); the used length is the room left."
   },
   {
     rule: 'off-scale',

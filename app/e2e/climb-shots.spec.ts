@@ -5,12 +5,14 @@
 //   REELSTUDIO_CLIMB_OUT=<folder>       where <scene>@<w>x<h>.png, audit.json and metrics.json go
 //   REELSTUDIO_CLIMB_SCENES=a,b         only these scenes (the path to them still runs)
 //
-// Every scene comes from the stand-in engine, the practice editor and one generated take, so two runs of one build
-// show the same screens.
+// Every scene comes from the stand-in engine and the practice editor, so two runs of one build show the same screens.
+// The take is the first run's sample (someone talking about bread, assets/sample/raw.mp4) with its own words and cuts,
+// and the practice editor makes the first edit an editor makes: the screens read as they do for a person, not a test.
 import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { TRANSCRIPT } from '../src/renderer/src/components/first-run/sample'
 import { BASE, launch, makeMedia, modelReady, startReel, toEditorStep } from './helpers'
 import { auditConsistency, type ConsistencyFinding } from './layout-audit/consistency'
 import { CONSISTENCY_ALLOW, SCALE } from './layout-audit/consistency-allow'
@@ -169,6 +171,8 @@ const SCENES: Scene[] = [
   {
     id: 'new-reel',
     enter: async ({ page }) => {
+      await page.getByTestId('use-claude-code').click()
+      await expect(page.getByTestId('ai-connected')).toHaveText('Connected')
       await page.getByTestId('not-now').or(page.getByTestId('editor-continue')).click()
     },
     ready: byTestId('planned-stage')
@@ -292,12 +296,29 @@ let SILENT = ''
 
 test('climb scenes at two sizes', async () => {
   test.setTimeout(30 * 60_000)
+  const files = join(BASE, 'my files ü')
+  mkdirSync(files, { recursive: true })
+  process.env.REELSTUDIO_E2E_VIDEO = join(files, 'my first take.mp4')
+  // the sample has no sound of its own (the first run plays it muted), and a take with none is refused: a quiet tone
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', join(__dirname, '../src/renderer/src/assets/sample/raw.mp4'), '-f', 'lavfi', '-i', 'sine=frequency=180:duration=24',
+    '-filter:a', 'volume=0.05', '-c:v', 'copy', '-c:a', 'aac', '-shortest', process.env.REELSTUDIO_E2E_VIDEO])
+  // the sample's words, each line's words spread over its time; the filler, the false starts and the weaker take cut
+  const words = TRANSCRIPT.flatMap((seg) => {
+    const ws = seg.text?.split(' ') ?? []
+    const step = (seg.e - seg.s) / Math.max(1, ws.length)
+    return ws.map((w, i) => ({ w, s: +(seg.s + i * step).toFixed(3), e: +(seg.s + (i + 0.85) * step).toFixed(3), cut: seg.kind !== 'keep' }))
+  })
+  const heard = join(BASE, 'climb-transcript.json')
+  writeFileSync(heard, JSON.stringify(words))
   MEDIA = makeMedia()
   SILENT = join(BASE, 'my files ü', 'no sound.mp4')
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=540x960:rate=30:duration=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', SILENT])
   const gateDir = join(BASE, 'moments-gate')
   mkdirSync(gateDir, { recursive: true })
-  const { app, page } = await launch({ REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '400', REELSTUDIO_MOCK_MOMENTS: '1', FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir }, { realViewport: true })
+  const { app, page } = await launch({
+    REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '400', REELSTUDIO_MOCK_MOMENTS: '1', REELSTUDIO_MOCK_FIRST_EDIT: 'editor',
+    FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_TRANSCRIPT: heard
+  }, { realViewport: true })
   const ctx: Ctx = { app, page, gate: (n) => writeFileSync(join(gateDir, `go-${n}`), '') }
   const audit: Record<string, { findings: ConsistencyFinding[]; allowed: number; distinct: unknown }> = {}
   const metrics: Record<string, unknown> = {}

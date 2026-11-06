@@ -16,6 +16,9 @@ Extra test hooks (env):
   FAKE_ENGINE_MOMENTS_GAP=<seconds>  `moments` waits this long before each still, the window and the draft (default 0.3)
   FAKE_ENGINE_MOMENTS_GATE=<folder>  instead, `moments` draws its n-th thing (three stills, the window, the draft) only
                                      once <folder>/go-<n> exists, so a test decides when each arrives
+  FAKE_ENGINE_TRANSCRIPT=<file>  transcribe writes these words instead of the placeholder ones: a JSON list of
+                                 {"w", "s", "e"} in seconds of the first source, with "cut": true on the words autocut
+                                 drops (a screenshot set shows a real take's words and cuts this way)
 """
 from __future__ import annotations
 
@@ -213,7 +216,12 @@ def cmd_transcribe(args: list[str]) -> dict:
         time.sleep(slow / steps if slow else 0.03)
     words = []
     n = 0
-    for src in data["sources"]:
+    given = os.environ.get("FAKE_ENGINE_TRANSCRIPT")
+    if given:
+        src = data["sources"][0]["id"]
+        for i, w in enumerate(json.loads(Path(given).read_text("utf-8"))):
+            words.append({"id": f"w{i}", "source": src, "s": w["s"], "e": w["e"], "w": w["w"], **({"cut": True} if w.get("cut") else {})})
+    for src in ([] if given else data["sources"]):
         t = 0.3
         while t < min(src["duration"], 60.0) - 0.5:
             w = PLACEHOLDER[n % len(PLACEHOLDER)]
@@ -239,7 +247,7 @@ def cmd_autocut(args: list[str]) -> dict:
     words = json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]
     keep, start = [], None
     for i, w in enumerate(words):
-        drop = i % 23 in (5, 6)  # pretend these were a false start
+        drop = w["cut"] if "cut" in w else i % 23 in (5, 6)  # given cuts, or pretend these were a false start
         if not drop and start is None:
             start = w["id"]
         if drop and start is not None:

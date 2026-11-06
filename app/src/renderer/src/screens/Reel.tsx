@@ -36,7 +36,7 @@ import { Outs } from '../components/Outs'
 import { PopMenu } from '../components/PopMenu'
 import { TitleBarSlot } from '../components/titlebar'
 import { ConnectAI, ModelDownload } from '../components/connect'
-import { PlanCard, PlanChip, PlanEmpty, PlannedStage, PlanWho, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
+import { PlanCard, PlanChip, PlanEmpty, PlannedStage, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
 import { ReelsFound } from '../components/ReelsFound'
 import { ChangePicture, ChangeTag, useChangeMoment } from '../components/ChangeMoments'
 import { byKeyboard, reducedMotion } from '../components/motion'
@@ -785,8 +785,6 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           {taggedName}
         </span>
       )}
-      {/* planning: who answers, a caption after the title as the version on screen is (the column has no title row) */}
-      {planned && !drawer && !aiOff && providerChecked && <PlanWho provider={provider} />}
       {older && !compare && (
         <Button kind="tertiary" size="small" onClick={() => watch(latestN!)} data-testid="version-latest">
           Back to latest
