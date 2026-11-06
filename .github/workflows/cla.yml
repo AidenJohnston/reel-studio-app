@@ -1,0 +1,60 @@
+# The CLA check (CONTRIBUTING.md, CLA.md): a `CLA` commit status on each pull request, green once its author has
+# commented the acceptance sentence. Decisions are in .github/scripts/cla.cjs.
+#
+# pull_request_target and issue_comment run this file and the script from the default branch, never from the pull
+# request, and the pull request's files are never checked out: a pull request cannot change or skip its own check.
+# Comments are only compared with a fixed sentence.
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: CLA
+    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require('node:fs')
+            const cla = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/cla.cjs`)
+            const { owner, repo } = context.repo
+            const number = context.payload.pull_request?.number ?? context.payload.issue.number
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number })
+            if (pr.state !== 'open') return
+
+            const trusted = cla.trustedLogins(fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/.github/VOUCHED.td`, 'utf8'))
+            const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 })
+            const comments = all.map((c) => ({ login: c.user?.login ?? '', body: c.body ?? '' }))
+            const result = cla.claState({ author: { login: pr.user.login, type: pr.user.type }, comments, trusted })
+
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha: pr.head.sha, state: result.state, context: 'CLA',
+              description: result.description, target_url: `${context.serverUrl}/${owner}/${repo}/blob/HEAD/CLA.md`
+            })
+            core.info(`#${number} by ${pr.user.login}: ${result.state} (${result.description})`)
+
+            // One instructions comment per pull request, posted by this workflow and only while the CLA is missing.
+            const ours = all.find((c) => c.user?.type === 'Bot' && (c.body ?? '').startsWith(cla.MARKER))
+            if (result.state === 'failure' && !ours)
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body: cla.instructions(pr.user.login, `${context.serverUrl}/${owner}/${repo}`) })
