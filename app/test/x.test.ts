@@ -24,11 +24,12 @@ async function world() {
   const steps: Step[] = []
   const errors: unknown[] = []
   let now = NOW
+  let failSave = false
   let browser = async (_url: string): Promise<void> => { throw new Error('unexpected browser') }
   const service = new XService({
     settings: async () => ({ clientId: 'x-client', brokerUrl: BROKER }),
     settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), now: () => now, waitMs: 0,
-    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => Buffer.from(v).reverse(), decryptString: (b) => Buffer.from(b).reverse().toString() },
+    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => { if (failSave) throw new Error('disk full'); return Buffer.from(v).reverse() }, decryptString: (b) => Buffer.from(b).reverse().toString() },
     openExternal: (url) => browser(url),
     fetch: async (url, init) => {
       const step = steps.shift()
@@ -73,7 +74,7 @@ async function world() {
     steps.push({ url: `${X_API}/media/upload/1234/finalize`, method: 'POST', body: { data: { id: '1234', processing_info: { state: 'pending', check_after_secs: 1 } } } })
     steps.push({ url: `${X_API}/media/upload?command=STATUS&media_id=1234`, body: { data: { processing_info: { state: 'succeeded' } } } })
   }
-  return { dir, project, steps, service, connect, upload, later: (ms: number) => { now += ms }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
+  return { dir, project, steps, service, connect, upload, later: (ms: number) => { now += ms }, breakSaving: () => { failSave = true }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
 }
 
 const INPUT = { slug: 'fixture', version: 1, text: 'On X #reel' }
@@ -107,6 +108,14 @@ describe('X', () => {
     w.steps.push({ url: `${BROKER}/v1/x/refresh`, method: 'POST', body: { access_token: 'x-token-3', refresh_token: 'x-refresh-3', token_type: 'bearer', expires_in: 7200 },
       inspect: (init) => { expect(JSON.parse(String(init.body))).toEqual({ refresh_token: 'x-refresh-2' }) } })
     expect(await w.service.publish(INPUT)).toMatchObject({ postId: '5556' }); w.done()
+  })
+
+  it('says to connect again when X’s new refresh token can’t be kept', async () => {
+    const w = await world(); w.connect(); await w.service.connect()
+    w.later(2 * 3600_000)
+    w.steps.push({ url: `${BROKER}/v1/x/refresh`, method: 'POST', body: { access_token: 'x-token-2', refresh_token: 'x-refresh-2', token_type: 'bearer', expires_in: 7200 } })
+    w.breakSaving()
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'X_TOKEN', userMessage: expect.stringContaining('Connect X again') }); w.done()
   })
 
   it('never posts again after X’s answer to the post was lost; a refusal can be tried again', async () => {

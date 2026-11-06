@@ -109,6 +109,9 @@ describe('LinkedIn', () => {
     // an upload link anywhere else is refused before a byte is sent
     const v = await world(); v.connect(); await v.service.connect()
     v.steps.push({ url: `${LINKEDIN_API}/rest/videos?action=initializeUpload`, method: 'POST', body: { value: { video: 'urn:li:video:C1', uploadInstructions: [{ uploadUrl: 'https://evil.example/up', firstByte: 0, lastByte: VIDEO.length - 1 }] } } })
+    await expect(v.service.publish(INPUT)).rejects.toMatchObject({ code: 'LI_RESPONSE' })
+    // and so is a byte range that isn't a whole number
+    v.steps.push({ url: `${LINKEDIN_API}/rest/videos?action=initializeUpload`, method: 'POST', body: { value: { video: 'urn:li:video:C1', uploadInstructions: [{ uploadUrl: 'https://www.linkedin.com/up', firstByte: 0, lastByte: 9.5 }] } } })
     await expect(v.service.publish(INPUT)).rejects.toMatchObject({ code: 'LI_RESPONSE' }); v.done()
   })
 })

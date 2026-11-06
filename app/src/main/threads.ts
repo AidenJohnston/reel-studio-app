@@ -47,9 +47,10 @@ interface Credentials {
   uploadPass: string
 }
 
+/** inputHash: the text and the export's bytes; textHash: the text alone, all a posted version is compared on later. */
 type Receipt =
-  | { state: 'processing' | 'publishing'; userId: string; containerId: string; inputHash: string }
-  | { state: 'published'; userId: string; containerId: string; inputHash: string; post: ThreadsPost }
+  | { state: 'processing' | 'publishing'; userId: string; containerId: string; inputHash: string; textHash?: string }
+  | { state: 'published'; userId: string; containerId: string; inputHash: string; textHash?: string; post: ThreadsPost }
 
 interface Options {
   settings(): Promise<ThreadsSettings>
@@ -83,7 +84,7 @@ async function receipt(dir: string, version: number): Promise<Receipt | null> {
   if (v === undefined) return null
   try {
     const r = object(v)
-    const base = { userId: id(r.userId), containerId: id(r.containerId), inputHash: text(r.inputHash) }
+    const base = { userId: id(r.userId), containerId: id(r.containerId), inputHash: text(r.inputHash), ...(typeof r.textHash === 'string' ? { textHash: r.textHash } : {}) }
     if (r.state === 'processing' || r.state === 'publishing') return { ...base, state: r.state }
     if (r.state === 'published') {
       const p = object(r.post)
@@ -307,7 +308,9 @@ export class ThreadsService {
       const version = p.version
       let saved = await receipt(dir, version)
       if (saved && saved.userId !== c.userId) return fail('ACCOUNT', 'This version already started posting to another Threads account.')
-      if (saved?.state === 'published' && saved.inputHash !== createHash('sha256').update(JSON.stringify({ text: p.text })).update(await exportHash(dir, version)).digest('hex'))
+      // once posted, only the words matter: the export may be made again after posting
+      const textHash = createHash('sha256').update(JSON.stringify({ text: p.text })).digest('hex')
+      if (saved?.state === 'published' && saved.textHash !== undefined && saved.textHash !== textHash)
         return fail('ALREADY_POSTED', 'This version is already on Threads with other text. Export a new version to post it again.')
       if (saved?.state === 'published') {
         await saveOutcome(dir, { ...saved.post, platform: 'threads', apiVersion: THREADS_VERSION, observedAt: null, metrics: null })
@@ -323,7 +326,7 @@ export class ThreadsService {
         const made = await request(this.o.fetch, `${THREADS_GRAPH}/${c.userId}/threads`, {
           method: 'POST', headers: { ...auth, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ media_type: 'VIDEO', video_url: videoUrl, text: p.text })
         }, signal)
-        saved = { state: 'processing', userId: c.userId, containerId: id(made.id), inputHash }
+        saved = { state: 'processing', userId: c.userId, containerId: id(made.id), inputHash, textHash }
         await saveReceipt(dir, version, saved)
       }
       // Threads processes the video before it can be published; about 30 s, Meta says
