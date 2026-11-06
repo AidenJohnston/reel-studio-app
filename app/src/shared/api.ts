@@ -591,6 +591,29 @@ export type FootageIndexStatus =
   | { state: 'indexing'; stage: string; pct: number; message: string }
   | { state: 'error'; message: string }
 
+/** Reels the editor found across the footage archive (main/archive-reels.ts), each with the reel made from it. */
+export interface ArchiveStatus {
+  state: 'idle' | 'finding' | 'error'
+  /** what the editor is doing, or why the last look failed */
+  message?: string
+  jobId?: string
+  candidates: {
+    id: string
+    title: string
+    hook: string
+    why: string
+    /** ref: Library/... or Footage/<folder>/<file> */
+    spans: { ref: string; t0: number; t1: number; said: string }[]
+    seconds: number
+    /** the reel made from it, or null */
+    made: string | null
+  }[]
+  notes: string
+  /** the footage had more to read than one look reads */
+  truncated: boolean
+  at: string | null
+}
+
 /** A folder or drive of someone's videos, indexed where it is (main/footage-sources.ts). */
 export interface FootageSource {
   id: string
@@ -1198,6 +1221,10 @@ export interface ReelApi {
     addSource(): Promise<FootageSource[]>
     removeSource(id: string): Promise<FootageSource[]>
     status(): Promise<FootageIndexStatus>
+    /** Reels across all the read footage (main/archive-reels.ts): the editor's look, what it found, and making them. */
+    findReels(): Promise<{ jobId: string }>
+    reels(): Promise<ArchiveStatus>
+    makeReels(ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
   }
   style: {
     rules(): Promise<StyleRule[]>

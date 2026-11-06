@@ -604,3 +604,22 @@ def test_drive_pulled_while_reading_is_offline_not_damaged(library, clips, tmp_p
     # fails if a file read while its drive was pulled is marked damaged and never read again
     assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesPending"] == 0
     assert len(calls) == 1
+
+
+def test_digest_lists_each_present_file_once_with_timed_lines(library, clips, tmp_path):
+    root, _ = library
+    shutil.copyfile(root / "Library" / "a.mp4", root / "Library" / "copy.mp4")
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    result = command(root, "digest")
+    # fails if a copy is proposed twice, a footage folder's file loses its Footage/ name, or lines lose their times
+    assert [f["ref"] for f in result["files"]] == ["Library/a.mp4", f"Footage/{SOURCE}/b.mp4"]
+    assert result["files"][0]["lines"] == [{"s": .25, "e": .8, "text": "twenty bucks."}]
+    assert result["truncated"] is False
+    drive.rename(tmp_path / "away")
+    # an unplugged drive's files can't be made into reels, so they are not offered
+    assert [f["ref"] for f in command(root, "digest")["files"]] == ["Library/a.mp4"]
+    from reelengine import footage
+    assert footage.digest(root, max_chars=5) == {"files": [], "truncated": True}

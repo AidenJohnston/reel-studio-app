@@ -541,6 +541,54 @@ def _current(folder: Path | None, row) -> bool:
         return False
 
 
+# The words an archive proposal reads (ai propose-archive.ts), at most this many characters of lines. A budget
+# with no measurement behind it: about 15,000 tokens, under every connected model's window with room to answer.
+DIGEST_CHARS = 60_000
+
+
+def digest(root: Path, *, max_chars: int = DIGEST_CHARS) -> dict:
+    """Every indexed file that is here and was listened to, with its lines (the sentence windows search
+    matches) and their times, for proposing reels across the whole archive. A file on an unplugged drive
+    is left out: nothing could be made from it. Files past `max_chars` are left out and `truncated` says so."""
+    root = Path(root).resolve()
+    database = root / ".index" / "index.sqlite"
+    if not database.is_file():
+        return {"files": [], "truncated": False}
+    out, used, truncated = [], 0, False
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("BEGIN")
+        folders = {row["id"]: (root / "Library" if row["id"] == "Library" else Path(row["root"]))
+                   for row in db.execute("SELECT id, root FROM places")}
+        hashes = [row[0] for row in db.execute(
+            "SELECT DISTINCT hash FROM text_fts WHERE kind='speech' ORDER BY hash")]
+        entries = []
+        for digest_ in hashes:
+            paths = db.execute("SELECT * FROM paths WHERE hash=? ORDER BY place != 'Library', place, rel",
+                               (digest_,)).fetchall()
+            current = next((p for p in paths if _current(folders.get(p["place"]), p)), None)
+            if current is None:
+                continue
+            model = db.execute("SELECT model FROM text_fts WHERE hash=? LIMIT 1", (digest_,)).fetchone()[0]
+            if not _done(db, digest_, f"transcript:{model}", TRANSCRIPT_VERSION):
+                continue
+            lines = [{"s": round(r["s"], 2), "e": round(r["e"], 2), "text": r["text"]} for r in db.execute(
+                "SELECT s, e, text FROM text_fts WHERE hash=? AND model=? ORDER BY s", (digest_, model))]
+            duration = db.execute("SELECT duration FROM files WHERE hash=?", (digest_,)).fetchone()[0]
+            entries.append((current["place"], current["rel"], {
+                "ref": ref_of(current["place"], current["rel"]), "name": Path(current["rel"]).name,
+                "duration": duration, "lines": lines}))
+        # a stable order the person would recognise: the Library first, then each folder, by path
+        for _, _, entry in sorted(entries, key=lambda e: (e[0] != "Library", e[0], e[1])):
+            size = sum(len(line["text"]) for line in entry["lines"])
+            if used + size > max_chars:
+                truncated = True
+                continue
+            used += size
+            out.append(entry)
+    return {"files": out, "truncated": truncated}
+
+
 def search(root: Path, query: str, *, limit: int = 8) -> dict:
     if not query.strip() or not 1 <= limit <= 8:
         raise EngineError("BAD_ARGS", "search needs a query and limit between 1 and 8",

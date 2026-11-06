@@ -779,6 +779,24 @@ def cmd_footage(args: list[str]) -> dict:
     action = args.pop(0) if args else ""
     if action == "search":
         return {"hits": [], "more": False, "backend": "none"}
+    if action == "digest":
+        # the files the last index run saw, each with a placeholder line every 4 s (real: footage.py digest)
+        root = Path(take(args, "--root") or ROOT)
+        seen = root / ".index" / "fake-files.json"
+        out = []
+        for entry in (json.loads(seen.read_text()) if seen.is_file() else []):
+            path = Path(entry["path"])
+            if not path.is_file():
+                continue
+            duration = float(probe(str(path)).get("duration") or 0)
+            lines, t, n = [], 0.5, 0
+            while t + 3.5 <= duration:
+                lines.append({"s": round(t, 2), "e": round(t + 3.5, 2),
+                              "text": " ".join(PLACEHOLDER[(n * 6) % len(PLACEHOLDER):][:6]) + "."})
+                t += 4
+                n += 1
+            out.append({"ref": entry["ref"], "name": path.name, "duration": duration, "lines": lines})
+        return {"files": out, "truncated": False}
     if action != "index":
         raise Fail("BAD_ARGS", "Reel Studio asked for something I do not know how to do.", action)
     root = Path(take(args, "--root") or ROOT)
@@ -790,7 +808,7 @@ def cmd_footage(args: list[str]) -> dict:
     # the real engine keeps an unplugged folder's rows; the stand-in keeps its last count
     counts_file = root / ".index" / "fake-counts.json"
     counts = json.loads(counts_file.read_text()) if counts_file.is_file() else {}
-    found, out = [], []
+    found, out, refs = [], [], []
     for pid, folder, kinds in places:
         if pid != "Library" and not folder.is_dir():
             out.append({"id": pid, "files": counts.get(pid, 0), "online": False})
@@ -800,8 +818,11 @@ def cmd_footage(args: list[str]) -> dict:
         out.append({"id": pid, "files": len(files), "online": True})
         counts[pid] = len(files)
         found += files
+        refs += [{"ref": ("Library/" if pid == "Library" else f"Footage/{pid}/") + f.relative_to(folder).as_posix(),
+                  "path": str(f)} for f in files]
     counts_file.parent.mkdir(parents=True, exist_ok=True)
     counts_file.write_text(json.dumps(counts))
+    (root / ".index" / "fake-files.json").write_text(json.dumps(refs))
     for k, f in enumerate(found):
         progress("footage-file", 100 * k / len(found), f"Reading {f.name} ({k + 1} of {len(found)})")
         time.sleep(step)

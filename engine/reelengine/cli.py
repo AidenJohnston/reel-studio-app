@@ -98,6 +98,8 @@ def cmd_footage(args):
                                   "A footage folder in your settings is damaged. Remove it and add it again.")
             sources.append((sid, folder))
         return footage.index(root, model_name=args.model, budget_seconds=args.budget_seconds, sources=sources)
+    if args.footage_command == "digest":
+        return footage.digest(root)
     return footage.search(root, args.query, limit=args.limit)
 
 
@@ -566,7 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--device", choices=["auto", "cuda", "cpu"])
     sp = sub.add_parser("footage", help="index and search Library footage")
     footage_sub = sp.add_subparsers(dest="footage_command", required=True, parser_class=_Parser)
-    for action in ("index", "search"):
+    for action in ("index", "search", "digest"):
         fp = footage_sub.add_parser(action)
         fp.set_defaults(fn=cmd_footage)
         fp.add_argument("--root", help="Reel Studio root")
@@ -575,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
                             help="ID=FOLDER: an added footage folder, indexed with the Library (repeatable)")
             fp.add_argument("--model")
             fp.add_argument("--budget-seconds", type=float, help="stop between stages after this budget")
-        else:
+        elif action == "search":
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
     add("fonts", cmd_fonts, "list the caption fonts a project can name")

@@ -91,6 +91,7 @@ import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
 import { chooseSeries, groupReel } from './series'
+import { createArchiveReels, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -268,6 +269,27 @@ const host: EngineHost = {
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
   reelStudioRoot,
   importFootage: (ref) => importFootage(ref)
+}
+
+// Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
+const archiveReels = createArchiveReels({
+  jobs: { start: (...a) => jobs.start(...a) },
+  ai: () => ai,
+  runEngine,
+  root: reelStudioRoot,
+  file: () => join(settingsDir(), 'archive-reels.json'),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryFile(ref)),
+  startFirstEdit: (slug, init) => startFirstEdit(slug, init)
+})
+
+/** A Library/... path the engine's digest named, as a file on disk, refused when it is gone or leaves the Library. */
+function libraryFile(ref: string): string {
+  const rel = ref.replace(/^Library\//, '')
+  const abs = join(libraryDir(), ...rel.split('/'))
+  if (!ref.startsWith('Library/') || rel.split('/').includes('..') || !existsSync(abs)) {
+    throw { code: 'FILE_GONE', userMessage: `${basename(ref)} is not in your Library any more.` }
+  }
+  return abs
 }
 
 /** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
@@ -751,6 +773,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
+    await seedFromArchive(slug)
     startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
@@ -1708,6 +1732,9 @@ function registerIpc(): void {
   })
   handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
   handle('footage:status', () => footageIndex.status())
+  handle('footage:findReels', () => archiveReels.find())
+  handle('footage:reels', () => archiveReels.status())
+  handle('footage:makeReels', (_e, ids: string[]) => archiveReels.make(ids))
 
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()

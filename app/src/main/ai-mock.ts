@@ -541,6 +541,36 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
+    // The practice editor's reels across the footage archive: lines taken in file order until a reel plays for 15 s,
+    // so a short file runs on into the next one, up to three reels. It reads no words: it is a stand-in.
+    async proposeFromArchive(req, signal) {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find reels in your footage.' }
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, noteMs)
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      type Span = { ref: string; t0: number; t1: number; said: string }
+      const reels: Span[][] = []
+      let open: Span[] = []
+      const length = (spans: Span[]) => spans.reduce((t, x) => t + x.t1 - x.t0, 0)
+      for (const f of req.files) {
+        for (const l of f.lines) {
+          const last = open.at(-1)
+          if (last && last.ref === f.ref) Object.assign(last, { t1: l.e, said: `${last.said} ${l.text}` })
+          else open.push({ ref: f.ref, t0: l.s, t1: l.e, said: l.text })
+          if (length(open) >= 15 && reels.length < 3) (reels.push(open), (open = []))
+        }
+      }
+      return {
+        candidates: reels.map((spans, k) => ({
+          id: `r${k + 1}`, title: PRACTICE_REELS[k].title, why: PRACTICE_REELS[k].why, hook: spans[0].said,
+          spans, seconds: Math.round(length(spans) * 10) / 10
+        })),
+        notes: '',
+        attempts: 1
+      }
+    },
+
     async styleRules() {
       return withStyle(async (s) => s.rules).catch(() => [])
     },

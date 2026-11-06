@@ -54,6 +54,25 @@ export interface TryRequest {
   variable?: TryVariable
 }
 
+/** ai propose-archive.ts: what the editor reads (engine footage digest) and what it proposes. */
+export interface ArchiveRequest {
+  files: { ref: string; name: string; duration: number; lines: { s: number; e: number; text: string }[] }[]
+  limit?: number
+}
+export interface ArchiveCandidate {
+  id: string
+  title: string
+  hook: string
+  why: string
+  spans: { ref: string; t0: number; t1: number; said: string }[]
+  seconds: number
+}
+export interface ArchiveProposal {
+  candidates: ArchiveCandidate[]
+  notes: string
+  attempts: number
+}
+
 /** What the editor reads to find more reels in one video (ai/src/propose.ts). */
 export interface ProposeReelsRequest {
   /** work/transcript.json, with the analysis's retake groups */
@@ -173,6 +192,8 @@ export interface AI {
   proposeTry?(req: TryRequest, signal?: AbortSignal): Promise<{ variable: unknown; value: unknown; reason: unknown }>
   /** More reels from one video. `onEvent` hears the waits for the editor's answer. Optional: older packages lack it. */
   proposeReels?(req: ProposeReelsRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ReelProposal>
+  /** Reels across the whole footage archive (ai propose-archive.ts). Optional: older packages lack it. */
+  proposeFromArchive?(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal>
   styleRules(): Promise<StyleRule[]>
   /** The removed rule and where it was, for Undo; null when it was already gone. */
   /** The removed rule and where it was, for Undo; null when it was already gone. `forget` (default true): learning
