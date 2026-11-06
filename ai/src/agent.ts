@@ -131,8 +131,10 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) =
   };
   // every started call ends before this returns or throws: a Stop must not leave a download writing
   const ran = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
-  const rejected = ran.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-  if (rejected) throw rejected.reason;
+  const errors = ran.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+  // a call whose engine would not stop outranks a Stop or a failure beside it: the editor must not roll
+  // back files that engine may still be writing (editor.ts engineStuck)
+  if (errors.length) throw errors.find((e) => e?.code === 'ENGINE_STUCK') ?? errors[0];
   return out;
 }
 
