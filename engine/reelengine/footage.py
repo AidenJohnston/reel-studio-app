@@ -92,6 +92,18 @@ def _done(db, digest, stage, version) -> bool:
     return row is not None and row[0] == version and row[1] is None
 
 
+def _settled(db, digest, stage, version) -> bool:
+    """Done, or failed on these very bytes at this version: a damaged file is not read again until it changes."""
+    row = db.execute("SELECT version FROM stages WHERE hash=? AND stage=?", (digest, stage)).fetchone()
+    return row is not None and row[0] == version
+
+
+def _mark_failed(db, digest, stage, version, code):
+    with db:
+        db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?, ?, ?)",
+                   (digest, stage, version, project.now_iso(), code))
+
+
 def _mark_done(db, digest, stage, version):
     db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?, ?, NULL)",
                (digest, stage, version, project.now_iso()))
@@ -325,7 +337,7 @@ def index(root: Path, *, model_name: str | None = None, budget_seconds: float | 
         # Copies share one analysis, so progress counts distinct files with work left.
         todo, queued = [], set()
         for entry in found:
-            if entry[2] not in queued and not all(_done(db, entry[2], s, v) for s, v in stages):
+            if entry[2] not in queued and not all(_settled(db, entry[2], s, v) for s, v in stages):
                 todo.append(entry)
                 queued.add(entry[2])
         ran = 0
@@ -345,12 +357,13 @@ def index(root: Path, *, model_name: str | None = None, budget_seconds: float | 
                 online[place] = False
                 log(f"Footage index: {place} went offline during indexing ({type(exc).__name__}).")
                 continue
-        pending = sum(not _done(db, digest, stage, version) for digest in {e[2] for e in found}
+        pending = sum(not _settled(db, digest, stage, version) for digest in {e[2] for e in found}
                       for stage, version in stages)
         counts = {pid: db.execute("SELECT count(*) FROM paths WHERE place=?", (pid,)).fetchone()[0]
                   for pid, _, _ in places}
-        waiting = len({e[2] for e in found if not all(_done(db, e[2], s, v) for s, v in stages)})
-        return {"files": len(found), "stagesRun": ran, "pending": pending, "filesPending": waiting,
+        waiting = len({e[2] for e in found if not all(_settled(db, e[2], s, v) for s, v in stages)})
+        failed = db.execute("SELECT count(DISTINCT hash) FROM stages WHERE error IS NOT NULL").fetchone()[0]
+        return {"files": len(found), "stagesRun": ran, "pending": pending, "filesPending": waiting, "filesFailed": failed,
                 "places": [{"id": pid, "files": counts[pid], "online": online.get(pid, True)}
                            for pid, _, _ in places]}
 
@@ -359,55 +372,72 @@ def _analyse(db, path, digest, signature, stages, name, staging, deadline, model
     """Run one file's missing stages, each committed on its own; returns how many ran."""
     ran = 0
     for stage, version in stages:
-        if _done(db, digest, stage, version):
-            continue
+        if _settled(db, digest, stage, version):
+            if _done(db, digest, stage, version):
+                continue
+            break  # an earlier failure on these bytes: the later stages need what it would have made
         if time.monotonic() >= deadline:
             break
         _unchanged(path, signature, digest)
-        if stage == "probe":
-            info = probe.probe(path, quick=True)
-            _unchanged(path, signature, digest)
-            with db:
-                db.execute("INSERT OR REPLACE INTO files VALUES (?, 'sha256', ?, ?, ?, ?, ?, ?)",
-                           (digest, info["duration"], info["fps"], info["width"], info["height"],
-                            info["rotation"], int(info["hasAudio"])))
-                _mark_done(db, digest, stage, version)
-        else:
-            info = db.execute("SELECT * FROM files WHERE hash=?", (digest,)).fetchone()
-            if stage.startswith("transcript:"):
-                words, segments, language = [], [], None
-                if info["has_audio"]:
-                    if not model:
-                        model.append(transcribe.load_model(name)[0])
-                    words, segments, language = _speech(path, info["duration"], model[0], staging)
-                _unchanged(path, signature, digest)
-                with db:
-                    db.execute("DELETE FROM words WHERE hash=? AND model=?", (digest, name))
-                    db.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?)",
-                                   [(digest, w["s"], w["e"], w["w"], w.get("p"), name) for w in words])
-                    # Audio gaps drive cuts; segment tags keep vocabulary joins within a segment.
-                    metadata = [{k: v for k, v in w.items() if k not in {"s", "e", "w", "p"}}
-                                for w in words]
-                    db.execute("INSERT OR REPLACE INTO transcripts VALUES (?, ?, ?, ?, ?)",
-                               (digest, name, language, json.dumps(segments), json.dumps(metadata)))
-                    db.execute("DELETE FROM text_fts WHERE hash=? AND model=?", (digest, name))
-                    db.executemany("INSERT INTO text_fts VALUES (?, ?, ?, ?, 'speech', ?)",
-                                   [(" ".join(w["w"] for w in win), digest, win[0]["s"], win[-1]["e"], name)
-                                    for win in _windows(words)])
-                    _mark_done(db, digest, stage, version)
-            else:
-                shots = _shots(path, info["duration"], info["width"] > 0)
-                _unchanged(path, signature, digest)
-                with db:
-                    db.execute("DELETE FROM shots WHERE hash=?", (digest,))
-                    db.executemany("INSERT INTO shots(hash, n, s, e) VALUES (?, ?, ?, ?)",
-                                   [(digest, *shot) for shot in shots])
-                    _mark_done(db, digest, stage, version)
-        ran += 1
+        if stage.startswith("transcript:") and not model and \
+                db.execute("SELECT has_audio FROM files WHERE hash=?", (digest,)).fetchone()[0]:
+            # outside the per-file failure below: a missing model is no fault of this file
+            model.append(transcribe.load_model(name)[0])
+        try:
+            ran += _stage(db, path, digest, signature, stage, version, name, staging, model)
+        except EngineError as exc:
+            # A file that can't be read (damaged, half copied) must not stop every run at itself. A change while
+            # reading is not the file's fault, and is reported as before.
+            if exc.code == "FOOTAGE_CHANGED":
+                raise
+            _mark_failed(db, digest, stage, version, exc.code)
+            log(f"Footage index: {path.name} {stage} failed ({exc.code}); it is read again when it changes.")
+            break
         done = sum(_done(db, digest, s, v) for s, v in stages) / len(stages)
         progress("footage-" + stage.split(":")[0], 100 * (k + done) / total,
                  f"Reading {path.name} ({k + 1} of {total})", force=True)
     return ran
+
+
+def _stage(db, path, digest, signature, stage, version, name, staging, model) -> int:
+    """One stage of one file, committed on its own. The caller loads the listening model into `model`."""
+    if stage == "probe":
+        info = probe.probe(path, quick=True)
+        _unchanged(path, signature, digest)
+        with db:
+            db.execute("INSERT OR REPLACE INTO files VALUES (?, 'sha256', ?, ?, ?, ?, ?, ?)",
+                       (digest, info["duration"], info["fps"], info["width"], info["height"],
+                        info["rotation"], int(info["hasAudio"])))
+            _mark_done(db, digest, stage, version)
+        return 1
+    info = db.execute("SELECT * FROM files WHERE hash=?", (digest,)).fetchone()
+    if stage.startswith("transcript:"):
+        words, segments, language = [], [], None
+        if info["has_audio"]:
+            words, segments, language = _speech(path, info["duration"], model[0], staging)
+        _unchanged(path, signature, digest)
+        with db:
+            db.execute("DELETE FROM words WHERE hash=? AND model=?", (digest, name))
+            db.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?)",
+                           [(digest, w["s"], w["e"], w["w"], w.get("p"), name) for w in words])
+            # Audio gaps drive cuts; segment tags keep vocabulary joins within a segment.
+            metadata = [{k: v for k, v in w.items() if k not in {"s", "e", "w", "p"}} for w in words]
+            db.execute("INSERT OR REPLACE INTO transcripts VALUES (?, ?, ?, ?, ?)",
+                       (digest, name, language, json.dumps(segments), json.dumps(metadata)))
+            db.execute("DELETE FROM text_fts WHERE hash=? AND model=?", (digest, name))
+            db.executemany("INSERT INTO text_fts VALUES (?, ?, ?, ?, 'speech', ?)",
+                           [(" ".join(w["w"] for w in win), digest, win[0]["s"], win[-1]["e"], name)
+                            for win in _windows(words)])
+            _mark_done(db, digest, stage, version)
+        return 1
+    shots = _shots(path, info["duration"], info["width"] > 0)
+    _unchanged(path, signature, digest)
+    with db:
+        db.execute("DELETE FROM shots WHERE hash=?", (digest,))
+        db.executemany("INSERT INTO shots(hash, n, s, e) VALUES (?, ?, ?, ?)",
+                       [(digest, *shot) for shot in shots])
+        _mark_done(db, digest, stage, version)
+    return 1
 
 
 def lookup(root: Path, path: Path, model: str, language: str | None = None):

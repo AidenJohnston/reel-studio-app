@@ -548,3 +548,18 @@ def test_progress_counts_the_files_left_once_per_copy(library, clips, monkeypatc
     # fails if a copy is counted as more work, or the bar ends short of full
     assert {m for _, m in seen} == {"Reading a.mp4 (1 of 2)", "Reading b.mp4 (2 of 2)"}
     assert [p for p, _ in seen] == sorted(p for p, _ in seen) and seen[-1][0] == 100
+
+
+def test_damaged_video_is_skipped_until_it_changes(library, clips, tmp_path):
+    root, calls = library
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    (drive / "half copied.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42 not really a video")
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    first = command(root, "index", "--source", f"{SOURCE}={drive}")
+    # fails if one damaged file stops every run at itself, or keeps the app re-running the index for ever
+    assert first["pending"] == 0 and first["filesFailed"] == 1
+    assert len(calls) == 2
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["stagesRun"] == 0
+    shutil.copyfile(clips[0], drive / "half copied.mp4")
+    assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesFailed"] == 0
