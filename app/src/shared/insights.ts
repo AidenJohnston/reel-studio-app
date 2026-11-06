@@ -1,4 +1,4 @@
-export type InsightPlatform = 'instagram' | 'tiktok' | 'facebook'
+export type InsightPlatform = 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x' | 'linkedin'
 export type InsightMetric = 'plays' | 'reach' | 'averageWatchTimeMs' | 'completionEstimate' | 'skipRatePercent' | 'shares' | 'saves' | 'comments' | 'likes'
 export type InsightValues = Record<InsightMetric, number | null>
 

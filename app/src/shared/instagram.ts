@@ -13,11 +13,28 @@ export type InstagramSession =
   /** `picture`: the account's profile picture as a data URL, saved when it connected (absent if that failed). */
   | { connected: true; accountId: string; username: string; expiresAt: number; picture?: string }
 
+/**
+ * A trial reel goes to people who don't follow the account first. MANUAL: the person shares it to followers from
+ * Instagram; SS_PERFORMANCE: Instagram does when it does well. (Content publishing, "Trial reels".)
+ */
+export interface InstagramTrial {
+  graduation: 'MANUAL' | 'SS_PERFORMANCE'
+  /** Posted as Try 1 or Try 2 of Share › Other platforms; both carry the same `group`, so results can compare them. */
+  try?: 1 | 2
+  group?: string
+}
+
 export interface InstagramPublishInput {
   slug: string
   version: number
   caption: string
   cover: { kind: 'frame'; offsetMs: number } | { kind: 'image' }
+  trial?: InstagramTrial
+  /**
+   * Instead of the version's own export: a Try 1 or Try 2 file Share › Other platforms saved in Library › Finished
+   * videos (its video and JPEG cover). Needs trial.try. `cover` is then always that file's cover.
+   */
+  file?: { video: string; cover: string }
 }
 
 export interface InstagramPost {
@@ -25,6 +42,8 @@ export interface InstagramPost {
   accountId: string
   postId: string
   publishedAt: string
+  /** Posted as a trial reel (outcomes.json keeps it, so results can tell a trial's reach from a normal post's). */
+  trial?: InstagramTrial
 }
 
 export interface InstagramMetrics {
