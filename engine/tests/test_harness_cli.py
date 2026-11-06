@@ -41,14 +41,14 @@ def agreement_reports(tmp_path):
     return report, copy.deepcopy(report), [tmp_path / "a.json", tmp_path / "b.json"]
 
 
-@pytest.mark.parametrize("difference", ["takes", "split", "engineCommit", "ffmpeg", "ffprobe", "flow",
+@pytest.mark.parametrize("difference", ["takes", "split", "engineCommit", "ffmpeg", "ffprobe", "flow", "proxy",
                                         "missing pin"])
 def test_agree_refuses_different_work_or_pins(tmp_path, capsys, difference):
     first, second, paths = agreement_reports(tmp_path)
     if difference == "takes":
         second["takes"] = {"other": second["takes"]["one"]}
-    elif difference in ("split", "flow"):
-        second[difference] = "other"
+    elif difference in ("split", "flow", "proxy"):
+        second[difference] = True if difference == "proxy" else "other"
     elif difference == "engineCommit":
         second["pins"][difference] = "other"
     elif difference == "missing pin":
@@ -96,7 +96,7 @@ def test_run_writes_reports_and_returns_failure_for_any_failed_check(monkeypatch
     monkeypatch.setattr(cli, "git_head", lambda: {"commit": "candidate", "engineDirty": False})
     monkeypatch.setattr(cli, "ffmpeg_version", lambda p: "ffmpeg test")
     monkeypatch.setattr(cli, "load_sample", lambda: {})
-    monkeypatch.setattr(cli.replay, "replay", lambda *args: run)
+    monkeypatch.setattr(cli.replay, "replay", lambda *args, **kwargs: run)
     monkeypatch.setattr(cli.replay, "check_take", lambda *args: checked)
     monkeypatch.setattr(cli.replay, "prune_duplicates", lambda runs: None)
     assert cli.main(["run", "--no-warmup"]) == (1 if failed else 0)
