@@ -3,6 +3,11 @@
 import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
+import type { SocialStatus } from './social'
+import type { FacebookApi } from './facebook'
+import type { ThreadsApi } from './threads'
+import type { XApi } from './x'
+import type { LinkedInApi } from './linkedin'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
 import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
@@ -841,7 +846,8 @@ export interface ExportResult {
 export interface PlatformExportResult {
   folder: string
   /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
-  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `version`: the version each file was made from (Try 2 can be another version). */
+  files: { platform: Platform; try?: 1 | 2; version: number; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */
@@ -952,6 +958,12 @@ export interface ReelApi {
   wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
+  /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
+  social: { status(fresh?: boolean): Promise<SocialStatus> }
+  facebook: FacebookApi
+  threads: ThreadsApi
+  x: XApi
+  linkedin: LinkedInApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
@@ -1310,7 +1322,7 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
-  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  /** Posting to YouTube (main/posting.ts). Hidden only with REELSTUDIO_POSTING=0. */
   posting: {
     status(): Promise<PostingStatus>
     /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
@@ -1344,7 +1356,7 @@ export type PostPrivacy = 'private' | 'unlisted' | 'public'
 
 /** What Settings and the Post sheet show. Never the key, the session or any Google token. */
 export interface PostingStatus {
-  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  /** Not turned off with REELSTUDIO_POSTING=0, and a usable server address */
   enabled: boolean
   /** A download key is saved (automatic updates on) */
   hasKey: boolean

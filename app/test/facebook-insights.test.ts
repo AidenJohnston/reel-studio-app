@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { parseFacebookReel, readFacebookReel } from '../src/main/facebook-insights'
 import { parseAudience } from '../src/main/instagram-audience'
+import { errorKind } from '../src/main/results-refresh'
 
 // The shape Graph API v26.0 returns for /{video-id}/video_insights (InsightsResult nodes, lifetime, one value each).
 const REEL = {
@@ -61,6 +62,19 @@ it('asks the Graph API with the Page token and maps its errors', async () => {
   await expect(readFacebookReel(answer(403, { error: { code: 10 } }), 't', '1', signal)).rejects.toMatchObject({ code: 'FB_PERMISSION' })
   await expect(readFacebookReel(async () => { throw new TypeError('offline') }, 't', '1', signal)).rejects.toMatchObject({ code: 'FB_NETWORK' })
   await expect(readFacebookReel(answer(200, REEL), 't', '../me', signal)).rejects.toMatchObject({ code: 'FB_RESPONSE' })
+})
+
+// fails if one deleted or hidden reel stops the results refresh from reading the Page's other reels
+it('treats a reel Facebook no longer has as that post’s problem only', async () => {
+  const signal = new AbortController().signal
+  const answer = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status })
+  for (const gone of [answer(400, { error: { code: 100, error_subcode: 33 } }), answer(404, { error: { code: 803 } })]) {
+    const e = await readFacebookReel(gone, 't', '1', signal).catch((x: unknown) => x)
+    expect(e).toMatchObject({ code: 'FB_POST' })
+    expect(errorKind(e)).toBe('post')
+  }
+  // a malformed request is wrong for every reel, so it still stops the run
+  expect(errorKind(await readFacebookReel(answer(400, { error: { code: 100 } }), 't', '1', signal).catch((x: unknown) => x))).toBe('stop')
 })
 
 // The shape follower_demographics returns with metric_type=total_value and one breakdown.

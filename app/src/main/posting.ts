@@ -68,7 +68,7 @@ export interface PendingEntry {
 }
 
 export interface PostingDeps {
-  /** REELSTUDIO_POSTING=1 and a usable address (postingConfig). */
+  /** On unless REELSTUDIO_POSTING=0, with a usable address (postingConfig). */
   enabled: boolean
   /** The server's origin, no trailing slash. */
   baseUrl: string
@@ -95,9 +95,14 @@ export interface PostingDeps {
   send(channel: 'posting:change' | 'posting:progress', value: unknown): void
 }
 
-/** REELSTUDIO_POSTING=1 turns posting on; REELSTUDIO_POSTING_URL moves it to another server (https, or http on this computer). */
+/**
+ * Posting is on for everyone: nothing reaches the server until the person clicks Sign in or Connect, and the Post
+ * sheet says when Google hasn't verified the app yet (POST_COPY.connecting). It used to need REELSTUDIO_POSTING=1
+ * while the server and Google's review were pending; REELSTUDIO_POSTING=0 still turns it off.
+ * REELSTUDIO_POSTING_URL moves it to another server (https, or http on this computer).
+ */
 export function postingConfig(env: Record<string, string | undefined>, fallback: string, log: (line: string) => void): { enabled: boolean; baseUrl: string } {
-  if (env.REELSTUDIO_POSTING !== '1') return { enabled: false, baseUrl: fallback }
+  if (env.REELSTUDIO_POSTING === '0') return { enabled: false, baseUrl: fallback }
   const raw = env.REELSTUDIO_POSTING_URL?.trim()
   if (!raw) return { enabled: true, baseUrl: fallback }
   const base = usableBase(raw)

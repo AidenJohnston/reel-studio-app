@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
-import { makePastEditsHome } from './past-edits-home'
+import { makePastEditsHome, videoFolder } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
 import { OUT, commit, counts, outlinedShot, sourceFor, writeScreen, type Finding, type ScreenResult } from './layout-audit/report'
@@ -614,7 +614,7 @@ SCREENS.push({
       id: 'my-style-learn-found',
       enter: async ({ page }) => {
         await closeAll(page)
-        if (!existsSync(join(STYLE_HOME, 'Movies'))) makePastEditsHome(STYLE_HOME)
+        if (!existsSync(join(STYLE_HOME, videoFolder()))) makePastEditsHome(STYLE_HOME)
         await page.getByTestId('style-learn').click()
         // the timeline counts have arrived
         await expect(page.getByTestId('learn-item').first()).toContainText('timeline')

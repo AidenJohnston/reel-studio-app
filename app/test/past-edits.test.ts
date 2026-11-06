@@ -15,7 +15,7 @@ const shape = (found: Awaited<ReturnType<typeof findPastEdits>>['edits']) => fou
 describe('Learn from my past edits: finding them', () => {
   it('finds each editor’s exports, libraries and projects where they are kept, newest first, and leaves out copies', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const look = await findPastEdits({ platform: 'darwin', home, spotlight: null })
     expect(look.cut).toBe(false)
     expect(shape(look.edits)).toEqual([
@@ -66,7 +66,7 @@ describe('Learn from my past edits: finding them', () => {
 
   it('keeps the same id for the same file across looks, so ticks survive a refresh', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const a = (await findPastEdits({ platform: 'darwin', home, spotlight: null })).edits
     const b = (await findPastEdits({ platform: 'darwin', home, spotlight: null })).edits
     expect(b.map((f) => f.id)).toEqual(a.map((f) => f.id))
@@ -93,7 +93,7 @@ describe('Learn from my past edits: finding them', () => {
 
   it('says it was cut short when a limit stops the walk, and keeps what it found', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const look = await findPastEdits({ platform: 'darwin', home, spotlight: null, limits: { walk: 3 } })
     expect(look.cut).toBe(true)
     expect(look.edits.length).toBeLessThan(5)

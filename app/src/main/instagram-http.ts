@@ -42,6 +42,16 @@ export function httpsUrl(value: unknown): URL {
   return url
 }
 
+/** An https origin, or http on this computer (a sign-in service or storage run locally, docs/signin.md). */
+export function serviceOrigin(value: unknown): string {
+  let url: URL
+  try { url = new URL(text(value)) } catch { return invalidResponse() }
+  const local = url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && local)) || url.username || url.password || url.hash || url.search || url.pathname !== '/')
+    return invalidResponse()
+  return url.origin
+}
+
 export type InstagramFetch = (url: string, init: RequestInit) => Promise<Response>
 
 export async function request(fetcher: InstagramFetch, url: string, init: RequestInit, signal: AbortSignal, onDispatch?: () => void): Promise<unknown> {

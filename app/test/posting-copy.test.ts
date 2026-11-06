@@ -184,7 +184,7 @@ describe('copy', () => {
     expect(sheet).toContain('CONNECT_NOTES')
     expect(sheet).toContain('TERMS_URL')
     const settings = src('PostingSettings.tsx')
-    for (const k of ['intro', 'coming', 'privacy', 'everywhereBody']) expect(settings, k).toContain(`SETTINGS_COPY.${k}`)
+    for (const k of ['intro', 'privacy', 'everywhereBody']) expect(settings, k).toContain(`SETTINGS_COPY.${k}`)
     expect(settings).toContain('youtubeLine(s)')
     // Share's destination (the redesign has no Post button) shows only while posting is on
     expect(src('Outs.tsx')).toContain('posting?.enabled')
