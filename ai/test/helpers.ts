@@ -84,6 +84,7 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  framesExtra: any = {};
   constructor(private readonly root: string, private readonly lines = SAMPLE_LINES) {}
   reelStudioRoot(): string { return this.root; }
   async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
@@ -129,7 +130,7 @@ export class FakeHost implements EngineHost {
         await fsp.mkdir(fd, { recursive: true });
         const frames = [];
         for (const t of times) { const f = path.join(fd, `f_${t}.png`); await fsp.writeFile(f, tinyPng()); frames.push({ time: t, path: f }); }
-        return { frames };
+        return { frames, ...this.framesExtra };
       }
       case 'search-images': return { results: this.searchResults };
       case 'fetch-image': {

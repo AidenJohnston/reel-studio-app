@@ -22,10 +22,16 @@ def run(project_dir: Path, times: list, file: Optional[Path] = None, width: int 
     if file:
         return from_video(Path(file), times, width)
     src = render.current_render(project_dir)
-    if src is None:
+    # The render's own animation windows: layers.json belongs to whatever was drawn last, which can be
+    # another edit. A render from before they were recorded is drawn again instead.
+    manifest = {} if src is None else render.render_manifest(src)
+    windows = manifest.get("animations")
+    if windows is None:
         return dict(render.stills(project_dir, times, width), source="edit")
-    pick, moved = render.settle_on_animations(project_dir, times)
-    return dict(from_video(src, pick, width), animationsSampledAtEnd=moved, source="render")
+    pick, moved = render.settle_on_animations(project_dir, times, windows)
+    # the render's own b-roll report and warnings, as render_draft gave them
+    return dict(from_video(src, pick, width), animationsSampledAtEnd=moved, source="render",
+                warnings=manifest.get("warnings") or [], broll=manifest.get("broll") or [])
 
 
 def from_video(src: Path, times: list, width: int) -> dict:

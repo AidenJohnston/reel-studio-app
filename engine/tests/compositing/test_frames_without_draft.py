@@ -188,6 +188,13 @@ def test_frames_reuses_a_render_only_while_it_shows_the_project(tmp_path, monkey
     ask = round((full["t0"] + full["t1"]) / 2, 2)
     want = [{"asked": ask, "sampled": math.floor((full["t1"] - 0.15) * 100 + 0.5) / 100, "id": "b1"}]
     assert frames.run(pdir, [ask])["animationsSampledAtEnd"] == want
+    # The render's own card window, not the last drawing's: draw another edit, then go back to the rendered one.
+    saved = (pdir / "project.json").read_text(encoding="utf-8")
+    edit(lambda p: p["broll"][0].update(anchor={"from": fx.word_near(ctx, 0.4), "to": fx.word_near(ctx, 0.8)}))
+    assert frames.run(pdir, [0.6])["source"] == "edit"              # layers.json now holds that edit's card
+    (pdir / "project.json").write_text(saved, encoding="utf-8")
+    back = frames.run(pdir, [ask])
+    assert back["source"] == "render" and back["animationsSampledAtEnd"] == want
 
     edit(lambda p: p.update(post=dict(p["post"], caption="new words"),
                             music=dict(p["music"], startAt=2.0, fadeOut=3.0)))
