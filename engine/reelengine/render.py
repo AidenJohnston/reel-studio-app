@@ -29,6 +29,7 @@ import os
 import shutil
 import time
 import uuid
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
@@ -557,6 +558,21 @@ def build_audio(ctx: RenderCtx, segments: list, src_paths: dict, rwork: Path, wa
 
 # --- video graph --------------------------------------------------------------------------------
 
+def _frames_between(lo: float, hi: float, fps: float) -> tuple:
+    """(first, last) output frames whose time FFmpeg's `between(t, lo, hi)` admits. Frame n's time is n
+    times the time base the `fps` filter sets, the inverse of the rate it parses from `fps` (29.97 is
+    2997/100), as a double; comparing those exactly needs no tolerance."""
+    rate = Fraction(fps).limit_denominator(1001000)
+    step = rate.denominator / rate.numerator
+    first = max(0, math.floor(lo / step) - 1)
+    while first * step < lo:
+        first += 1
+    last = math.floor(hi / step) + 1
+    while last >= 0 and last * step > hi:
+        last -= 1
+    return first, last
+
+
 def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, dur: float,
                  video_dur: Optional[float] = None):
     """(chain, x, y, t0, t1, seek, lead) for one overlay layer, or None when it falls outside the render.
@@ -579,8 +595,8 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         if c1 <= 0 or c0 >= vd or layer.t1 - layer.t0 < 1e-3:
             return None
         k0 = round(t_shift * fps)                              # as the caption track maps a window
-        first = math.ceil(float(_f(c0)) * fps - 1e-6) - k0
-        last = math.floor(float(_f(c1)) * fps + 1e-6) - k0
+        first, last = _frames_between(float(_f(c0)), float(_f(c1)), fps)
+        first, last = first - k0, last - k0
         if last < 0 or first > round(dur * fps) - 1 or last < first:
             return None
         # enable at half-frame midpoints: it admits exactly those frames, whatever the rounding
