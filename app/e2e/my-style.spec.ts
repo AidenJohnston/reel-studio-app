@@ -146,6 +146,43 @@ test('Learn from my past edits lists the edits on this computer by app, and lear
   }
 })
 
+// The sample is built from the documented draft layout (engine reference_capcut.py), not a real CapCut project.
+test('a CapCut project where CapCut keeps it is listed under CapCut, read as it is, and its rules say CapCut', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  const home = join(mine, 'home')
+  mkdirSync(root, { recursive: true })
+  const projects = join(home, ...(process.platform === 'darwin' ? ['Movies'] : ['AppData', 'Local']), 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft')
+  mkdirSync(join(projects, 'Bread reel'), { recursive: true })
+  copyFileSync(join(__dirname, '..', '..', 'engine', 'tests', 'fixtures', 'reference-import', 'capcut-draft', 'draft_content.json'), join(projects, 'Bread reel', 'draft_content.json'))
+  const { app, page } = await launch({
+    REELSTUDIO_ROOT: root,
+    REELSTUDIO_USER_DATA: join(mine, 'user data'),
+    REELSTUDIO_TEST_PAST_EDITS_HOME: home
+  })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    await page.getByTestId('style-learn').click()
+    const sheet = page.getByTestId('learn-sheet')
+    await expect(sheet.getByTestId('learn-group')).toHaveText([/^CapCut/])
+    const item = sheet.getByTestId('learn-item')
+    await expect(item).toHaveText([/^Bread reelProject · .* · 1 timeline · CapCut$/])
+    await expect(item.locator('input')).toBeChecked()
+    await shot(page, 'learn-capcut-01-listed')
+    await page.getByTestId('learn-go').click()
+    const lesson = page.getByTestId('style-lesson')
+    await expect(lesson).toContainText('Bread reel/draft_content.json (CapCut)')
+    // the sample's title at half a second and its song under the talking
+    await expect(page.getByTestId('style-lesson-rule')).toContainText(['Open with a title on screen in the first few seconds.', 'Put music under the talking.'])
+    await page.getByTestId('style-lesson-keep').click()
+    await expect(page.getByTestId('style-rule').first()).toContainText('from your CapCut edit Bread reel/draft_content.json')
+    await shot(page, 'learn-capcut-02-kept')
+  } finally {
+    await app.close().catch(() => {})
+  }
+})
+
 test('with nothing found, Learn from my past edits says so and how to get one in, and opens no file dialog by itself', async () => {
   const mine = mkdtempSync(join(BASE, 'style-'))
   const root = join(mine, 'Documents', 'Reel Studio')
@@ -164,9 +201,9 @@ test('with nothing found, Learn from my past edits says so and how to get one in
     })
     await page.getByTestId('style-learn').click()
     const none = page.getByTestId('learn-none')
-    await expect(none).toContainText(/No Final Cut Pro or Premiere Pro edits on this (Mac|PC) yet\./)
+    await expect(none).toContainText(/No edits from (Final Cut Pro, )?Premiere Pro, DaVinci Resolve or CapCut on this (Mac|PC) yet\./)
     await expect(none).toContainText('Export one from your editor.')
-    await expect(none).toContainText('In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML… Save it anywhere')
+    await expect(none).toContainText('In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML… In DaVinci Resolve, choose File › Export › Timeline… and save it as FCPXML. Save it anywhere')
     opened.push(String(await app.evaluate(() => (globalThis as any).__dialogs)))
     await page.getByTestId('learn-choose').click()
     opened.push(String(await app.evaluate(() => (globalThis as any).__dialogs)))

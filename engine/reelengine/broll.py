@@ -1077,6 +1077,9 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
             th_auto, _, _ = split_geometry(ctx, face, {})
             params = {**params, "split": max(th_auto / H, 0.45)}
         th, _, _ = split_geometry(ctx, face, params)
+        # th sizes the band and the phone in it, and comes partly from the caption band, which the
+        # stem does not carry
+        stem = f"{stem}-{_key(W, H, th)}"
         from PIL import Image
         bgc = _rgba(params.get("background", "#EDEBE7"))
         top = Image.new("RGBA", (W, th), bgc)
@@ -1123,7 +1126,8 @@ def _phone_split(ctx, plan, card_mov, top_bg_png, card_size, face, params, stem)
     d = layers_dir(ctx)
     th, _, _ = split_geometry(ctx, face, params)
     dur = plan["t1"] - plan["t0"]
-    top = d / f"{stem}-top-{_key(*_rate_key(fps), _enc(ctx))}.mp4"
+    # the length is part of the name: a phone re-anchored to a longer span must not reuse the shorter band
+    top = d / f"{stem}-top-{_key(round(dur, 3), *_rate_key(fps), _enc(ctx))}.mp4"
     if not top.exists():
         cw, chh = card_size
         run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",

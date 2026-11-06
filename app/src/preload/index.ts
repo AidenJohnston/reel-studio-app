@@ -143,6 +143,7 @@ const api: ReelApi = {
     proposeReels: (slug) => call('projects:proposeReels', slug),
     makeReels: (slug, ids) => call('projects:makeReels', slug, ids),
     foldReels: (slug, folded) => call('projects:foldReels', slug, folded),
+    setSeries: (slug, series) => call('projects:setSeries', slug, series),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {
@@ -193,6 +194,12 @@ const api: ReelApi = {
     choose: (kind) => call('library:choose', kind),
     preview: (path) => call('library:preview', path)
   },
+  footage: {
+    sources: () => call('footage:sources'),
+    addSource: () => call('footage:addSource'),
+    removeSource: (id) => call('footage:removeSource', id),
+    status: () => call('footage:status')
+  },
   style: {
     rules: () => call('style:rules'),
     add: (text) => call('style:add', text),
@@ -205,7 +212,7 @@ const api: ReelApi = {
     onLearnProgress: (cb) => on<{ done: number; total: number }>('style:learnProgress', cb),
     appIcons: () => call('style:appIcons'),
     reveal: (id) => call('style:reveal', id),
-    keepLearned: (rules, from) => call('style:keepLearned', rules, from),
+    keepLearned: (rules, from, editor) => call('style:keepLearned', rules, from, editor),
     update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
     rememberLowercase: (slug) => call('style:rememberLowercase', slug),
