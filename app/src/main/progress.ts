@@ -62,6 +62,11 @@ export class ProgressTracker {
   private best = 0
   private jobStart: number | undefined
   private aggregate: { pct: number; at: number } | undefined
+  /** How long the job has run past its whole-job projection, in lengths of that projection, summed piece by
+   * piece so a later, longer projection slows the creep below 99% but never takes it back. */
+  private overrun = 0
+  /** Seconds into the job at the last snapshot: where the next piece of overrun starts counting. */
+  private counted = 0
   private readonly spent: Partial<Record<Timed, number>> = {}
 
   constructor(
@@ -164,11 +169,14 @@ export class ProgressTracker {
     const jobElapsed = this.jobStart === undefined ? 0 : (this.now() - this.jobStart) / 1000
     const aggregateLeft = projected === undefined ? undefined : projected - jobElapsed
     const total = done + elapsed + Math.max(0, aggregateLeft ?? displayRemaining)
+    if (projected !== undefined) this.overrun += Math.max(0, jobElapsed - Math.max(this.counted, projected)) / projected
+    this.counted = Math.max(this.counted, jobElapsed)
     // Leave a gap below the phase ceiling, shrinking it as an overrun continues. A job that outlives its
-    // whole-job projection gets the same gap, so its bar creeps toward 99 instead of stopping there.
+    // whole-job projection gets the same gap, so its bar creeps toward 99 instead of stopping there. With
+    // one projection throughout, 1 / (1 + overrun) is projected / jobElapsed, as for a phase.
     const ceiling = projected === undefined
       ? (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
-      : 99 * (1 - 0.01 * projected / Math.max(projected, jobElapsed))
+      : 99 * (1 - 0.01 / (1 + this.overrun))
     const overall = Math.min(99, ceiling, (done + elapsed) / total * 100)
     // An engine report of 99 or 100 while work remains (cover, check) stays under the same ceiling, or the
     // bar would stop there.

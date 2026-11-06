@@ -77,13 +77,13 @@ describe('honest progress', () => {
     expect(early).toBeLessThan(99)
     expect(late).toBeGreaterThan(early)
     expect(late).toBeLessThan(99)
-    // The render reports 100 while the cover and check still run: the bar keeps creeping, below 99.
+    // The render reports 100 while the cover and check still run. That longer projection slows the creep but
+    // never sets it back: the bar keeps moving, below 99, from the next seconds on.
     t.update('final', 100, true)
-    const reported = t.snapshot().overall
-    expect(reported).toBeLessThan(99)
-    now = 4_000_000
-    expect(t.snapshot().overall).toBeGreaterThan(reported)
-    expect(t.snapshot().overall).toBeLessThan(99)
+    const seen = [t.snapshot().overall]
+    for (now of [45_000, 60_000, 4_000_000]) seen.push(t.snapshot().overall)
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1])
+    expect(seen.at(-1)).toBeLessThan(99)
   })
 
   it('recalibrates remaining engine defaults from a slow first step', () => {
