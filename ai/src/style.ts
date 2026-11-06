@@ -19,8 +19,8 @@ export interface StyleRule {
   paused?: boolean;
   payload?: CaptionCaseRule;
   source?: StyleSource;
-  /** the question the person said Yes to */
-  consent?: { proposal: string; at: string };
+  /** the question the person said Yes to; `also`: other questions about this rule they said Yes to after it was saved */
+  consent?: { proposal: string; at: string; also?: string[] };
 }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over.
  * `forgotten`: questions whose rule was removed, so answering one again cannot bring it back. IDs only. */
@@ -29,6 +29,13 @@ export type Approval = { status: 'saved' | 'exists'; rule: StyleRule } | { statu
 
 export const LOWERCASE_CAPTIONS = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
+/** The later questions kept with a rule. My style.json can be edited by hand: anything but a list of IDs is none. */
+const alsoYes = (r: StyleRule): string[] => {
+  const also: unknown = r.consent?.also;
+  return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [];
+};
+/** Every question the person said Yes to for this rule. */
+const answeredYes = (r: StyleRule): string[] => (r.consent ? [r.consent.proposal, ...alsoYes(r)] : []);
 
 const CAPTION_CASE_PROMPT = 'New videos start with lowercase captions (the app sets this). Use another case only when the note asks for it.';
 
@@ -152,19 +159,32 @@ export class StyleStore {
   }
 
   /** The person said Yes to `p`: the rule and its consent are saved in one write. Answering the same question
-   * again returns the same rule, and the question of a rule they removed cannot bring it back. */
+   * again returns the same rule, and the question of a rule they removed cannot bring it back. Yes is the person
+   * asking for the rule, so a paused typed rule is turned back on, as add() does, before "saved" promises it. */
   async approve(p: StyleProposal): Promise<Approval> {
     return this.serial(async () => {
       if (!p?.id || p.text !== LOWERCASE_CAPTIONS || !isCaptionCase(p.payload)) throw new Error('the question does not match the rule it would save');
       const data = await this.read();
       if (data.forgotten?.includes(p.id)) return { status: 'forgotten' };
-      const same = data.rules.find((r) => r.consent?.proposal === p.id);
+      const at = new Date().toISOString();
+      const same = data.rules.find((r) => answeredYes(r).includes(p.id));
       // Edited to new words since the Yes, the rule is a sentence the AI reads, so "Saved" would promise lowercase
       // videos the app no longer makes.
-      if (same) return { status: isCaptionCase(same.payload) ? 'saved' : 'exists', rule: same };
+      if (same && !isCaptionCase(same.payload)) return { status: 'exists', rule: same };
+      if (same) {
+        if (same.paused) { delete same.paused; await this.write(data); }
+        return { status: 'saved', rule: same };
+      }
       const typed = data.rules.find((r) => isCaptionCase(r.payload));
-      if (typed) return { status: 'exists', rule: typed };
-      const at = new Date().toISOString();
+      if (typed) {
+        // This question is kept with the rule, so removing the rule blocks it too, even when its reply was lost
+        // and its buttons are still there.
+        typed.consent = typed.consent ? { ...typed.consent, also: [...alsoYes(typed), p.id] } : { proposal: p.id, at };
+        const wasPaused = !!typed.paused;
+        delete typed.paused;
+        await this.write(data);
+        return { status: wasPaused ? 'saved' : 'exists', rule: typed };
+      }
       const fields = {
         text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' } as const,
         source: { project: String(p.source?.project ?? ''), title: String(p.source?.title ?? '').slice(0, 120), version: Number(p.source?.version) || 0 },
@@ -210,8 +230,9 @@ export class StyleStore {
   async remove(id: string): Promise<void> {
     return this.serial(async () => {
       const data = await this.read();
-      const asked = data.rules.find((r) => r.id === id)?.consent?.proposal;
-      await this.write({ ...data, rules: data.rules.filter((r) => r.id !== id), ...(asked ? { forgotten: [...(data.forgotten ?? []), asked] } : {}) });
+      const rule = data.rules.find((r) => r.id === id);
+      const asked = rule ? answeredYes(rule) : [];
+      await this.write({ ...data, rules: data.rules.filter((r) => r.id !== id), ...(asked.length ? { forgotten: [...(data.forgotten ?? []), ...asked] } : {}) });
     });
   }
 

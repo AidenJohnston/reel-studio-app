@@ -336,7 +336,8 @@ export interface StyleRule {
   /** Set: the app applies this rule itself when a new video is made. Otherwise the AI reads it on every edit. */
   payload?: { kind: 'caption-case'; case: 'lower' }
   source?: { project: string; title: string; version: number }
-  consent?: { proposal: string; at: string }
+  /** `also`: other questions about this rule the person said Yes to after it was saved */
+  consent?: { proposal: string; at: string; also?: string[] }
 }
 
 export interface StyleProposal {

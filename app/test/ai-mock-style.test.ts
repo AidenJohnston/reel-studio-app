@@ -72,6 +72,21 @@ describe('My style in the stand-in AI', () => {
     expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ payload: expect.anything() })])
   })
 
+  it('Yes again to a paused rule\'s question turns it back on, and a second question removed with the rule stays removed', async () => {
+    const { ai } = standIn()
+    await ai.approveStyleProposal!(proposal)
+    const [rule] = await ai.styleRules()
+    await ai.updateStyleRule!(rule.id, { paused: true })
+    expect(await ai.approveStyleProposal!(proposal)).toEqual({ status: 'saved' })
+    expect(await ai.styleRules()).toEqual([expect.not.objectContaining({ paused: true })])
+
+    const second = { ...proposal, id: 'q2' }
+    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'exists' })
+    await ai.removeStyleRule(rule.id)
+    expect(await ai.approveStyleProposal!(second)).toEqual({ status: 'forgotten' })
+    expect(await ai.styleRules()).toEqual([])
+  })
+
   it('a lowercase note from a person whose AI package failed to load is kept as a note and changes nothing', async () => {
     // no REELSTUDIO_MOCK_CLAUDE and nothing chosen in Settings: how a real person meets the stand-in
     const { ai, root } = standIn()
