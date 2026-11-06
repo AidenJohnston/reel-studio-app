@@ -243,3 +243,21 @@ def test_a_pinned_model_downloads_its_revision_and_refuses_other_bytes(env, monk
     with pytest.raises(EngineError) as e:
         transcribe.download_model("tiny.en")
     assert e.value.code == "DOWNLOAD_CORRUPT" and not (d / "config.json").exists()
+
+
+def test_a_resumed_download_reports_from_the_bytes_it_has_and_never_goes_back(env, monkeypatch):
+    """The app shows the engine's percent: picking a stopped download up again must not send its bar to 0."""
+    d, start = env
+    start(Plan([]))
+    d.mkdir(parents=True)
+    (d / "config.json").write_bytes(CONFIG)                      # finished before the stop
+    (d / "model.bin.part").write_bytes(MODEL[:1_000_000])        # stopped partway
+    (d / "tokenizer.json.part").write_bytes(FILES["tokenizer.json"][:5])
+    seen = []
+    monkeypatch.setattr(transcribe, "progress",
+                        lambda stage, pct, message, force=False: seen.append(pct) if stage == "download" else None)
+    transcribe.download_model("tiny.en")
+    total = sum(len(b) for b in FILES.values())
+    assert seen[0] == pytest.approx((len(CONFIG) + 1_000_000 + 5) / total * 100)
+    assert seen == sorted(seen) and seen[-1] == 100
+    assert (d / "model.bin").read_bytes() == MODEL
