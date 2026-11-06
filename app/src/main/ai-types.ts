@@ -9,6 +9,8 @@ export interface UserFacingError {
   code: string
   userMessage: string
   link?: string
+  /** Shown in the chat even after Stop, which otherwise says nothing (jobs.ts): what the stop could not undo. */
+  tellAfterStop?: string
 }
 
 export interface AgentResult {
@@ -97,7 +99,7 @@ export interface AI {
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
   /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). A rejected
-   * note may carry `tellAfterStop`: a sentence the chat shows even after Stop (jobs.ts). */
+   * note may carry `tellAfterStop` (UserFacingError). */
   applyNote(
     projectDir: string,
     note: string,

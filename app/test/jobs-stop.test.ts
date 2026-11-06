@@ -7,7 +7,8 @@ import { setupPaths } from './helpers'
 
 const LEFT_ON = 'I stopped that note, but I couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.'
 
-/** A note stopped by the person, ending the way @reelstudio/ai ends a stopped note. The chat it leaves. */
+/** A note stopped by the person, ending as @reelstudio/ai ends a stopped note once it is plain data (its toJSON):
+ * jobs.ts reads it only after toUserError normalizes it. The chat it leaves. */
 async function stopNote(slug: string, extra: Record<string, unknown> = {}) {
   mkdirSync(projectDir(slug), { recursive: true })
   const jobs = createJobManager(() => undefined, () => undefined)

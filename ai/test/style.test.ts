@@ -155,9 +155,10 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: m });
 
     // the app shows no error for Stop (app/src/main/jobs.ts), so this sentence is the only word the person gets
-    await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined, stop.signal)).rejects.toMatchObject({
-      code: 'cancelled',
-      tellAfterStop: 'I stopped that note, but I couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.',
-    });
+    const stopped = { code: 'cancelled', tellAfterStop: 'I stopped that note, but I couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.' };
+    const err = await ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined, stop.signal).then(() => null, (e) => e);
+    expect(err).toMatchObject(stopped);
+    // and it survives being passed on as JSON (toJSON), as AI errors are
+    expect(JSON.parse(JSON.stringify(err))).toMatchObject(stopped);
   });
 });
