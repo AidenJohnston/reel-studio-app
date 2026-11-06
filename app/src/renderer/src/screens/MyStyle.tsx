@@ -9,6 +9,16 @@ function about(r: StyleRule): string {
   return r.source ? `${where} From "${r.source.title}", version ${r.source.version}.` : where
 }
 
+/** What new words would cost a rule the app applies or checks itself (StyleStore.update drops its payload or check). */
+function editHint(r: StyleRule): string | null {
+  const then = r.payload
+    ? 'the app no longer makes new videos lowercase by itself'
+    : r.check
+      ? 'the app stops checking every video for it'
+      : null
+  return then && `If you change these words, they become a sentence the AI reads, and ${then}.`
+}
+
 export function MyStyle() {
   const notify = useNotify()
   const [rules, setRules] = useState<StyleRule[] | null>(null)
@@ -91,7 +101,7 @@ export function MyStyle() {
                 onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
                 readOnly={saving}
                 aria-label="Rule"
-                aria-describedby={r.payload ? `edit-hint-${r.id}` : undefined}
+                aria-describedby={editHint(r) ? `edit-hint-${r.id}` : undefined}
                 ref={editInput}
                 autoFocus
                 data-testid="style-edit-input"
@@ -102,10 +112,9 @@ export function MyStyle() {
               <button className="btn small ghost" type="button" onClick={() => stopEditing(r.id)} disabled={saving}>
                 Cancel
               </button>
-              {r.payload && (
+              {editHint(r) && (
                 <p id={`edit-hint-${r.id}`} className="muted-sm" style={{ flexBasis: '100%' }} data-testid="style-edit-hint">
-                  If you change these words, they become a sentence the AI reads, and the app no longer makes new videos
-                  lowercase by itself.
+                  {editHint(r)}
                 </p>
               )}
             </form>

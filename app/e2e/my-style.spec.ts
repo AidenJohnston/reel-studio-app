@@ -101,3 +101,22 @@ test('a rule\'s words cannot change while Save is still saving them', async () =
     await app.close().catch(() => {})
   }
 })
+
+test('editing a rule the app checks on every video says that new words stop the checks', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  mkdirSync(root, { recursive: true })
+  const rule = { id: 'r1', text: 'Show at most 2 words in a caption.', createdAt: '2026-11-05T00:00:00.000Z', check: { kind: 'captions.maxWords', value: 2 } }
+  writeFileSync(join(root, 'My style.json'), JSON.stringify({ version: 1, rules: [rule] }))
+  const { app, page } = await launch({ REELSTUDIO_ROOT: root, REELSTUDIO_USER_DATA: join(mine, 'user data') })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    await page.getByRole('button', { name: 'Edit "Show at most 2 words in a caption."' }).click()
+    await expect(page.getByTestId('style-edit-input')).toHaveAccessibleDescription(
+      'If you change these words, they become a sentence the AI reads, and the app stops checking every video for it.'
+    )
+  } finally {
+    await app.close().catch(() => {})
+  }
+})
