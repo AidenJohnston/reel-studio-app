@@ -91,6 +91,10 @@ export function fitLook(look: SubtitleLook, text: string, measure: Measure): { s
   return fitCaption(applyCase(text, look.case), look.size, 1080 * (1 - 2 * MARGIN_FRAC), outline, measure)
 }
 
+// A spoken word has a letter, digit or underscore in any script: Python's Unicode \w, which the engine
+// uses (captions.word_spans). JavaScript's /\w/ is ASCII only and would call "привет" or "你好" punctuation.
+const SPOKEN = /[\p{L}\p{N}_]/u
+
 /**
  * A sample line for the subtitle preview: kept words as the engine groups them (captions.chunk), up to
  * `maxWords` and never past a sentence end, shown at the moment its first word is spoken. A word that is only
@@ -98,7 +102,7 @@ export function fitLook(look: SubtitleLook, text: string, measure: Measure): { s
  */
 export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): { text: string; at: number; words: number } {
   const k = words.filter((w) => kept.has(w.id))
-  const spoken = k.filter((w) => /\w/.test(w.w))
+  const spoken = k.filter((w) => SPOKEN.test(w.w))
   const first = spoken[spoken.length > 6 ? 2 : 0]
   const pick: Word[] = []
   for (const w of first ? k.slice(k.indexOf(first)) : []) {
@@ -114,6 +118,6 @@ export function sampleLine(words: Word[], kept: Set<string>, maxWords: number): 
 export function sampleLook(style: CaptionStyle, sample: { text: string; words: number }): SubtitleLook {
   const look = lookFromStyle(style)
   const tokens = sample.text.split(' ')
-  if (tokens.length !== sample.words || !tokens.every((t) => /\w/.test(t))) look.highlight = null
+  if (tokens.length !== sample.words || !tokens.every((t) => SPOKEN.test(t))) look.highlight = null
   return look
 }

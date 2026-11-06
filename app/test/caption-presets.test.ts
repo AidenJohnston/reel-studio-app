@@ -32,6 +32,15 @@ describe('caption presets', () => {
     expect(sampleLook(applyPreset('karaoke'), sampleLine(words, new Set(['w0', 'w2']), 3)).highlight).toBe('#FFD60A')
   })
 
+  it('fails if the preview treats words in other scripts as punctuation, which the export lights', () => {
+    for (const said of [['привет', 'мир', 'друг'], ['你好', '世界']]) {
+      const words = said.map((w, i) => ({ id: `w${i}`, source: 's1', w, s: i * 0.4, e: i * 0.4 + 0.3 }))
+      const line = sampleLine(words, new Set(words.map((w) => w.id)), 3)
+      expect(line.text).toBe(said.join(' '))
+      expect(sampleLook(applyPreset('karaoke'), line).highlight).toBe('#FFD60A')
+    }
+  })
+
   it('a reel keeps its look through fine-tuning, and reels made before presets open on the look they have', () => {
     expect(presetOf({ ...applyPreset('karaoke'), size: 126, position: 0.66 })).toBe('karaoke')
     // engine/reelengine/project.py DEFAULT_CAPTION_STYLE, the style every older reel was made with
