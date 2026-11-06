@@ -16,8 +16,8 @@ export function folderLine(s: FootageSource): string {
   return s.files === 1 ? '1 video' : `${s.files} videos`
 }
 
-/** `say`: the Library's one result line (Library.tsx), for an error or what a removal did. */
-export function FootageFolders({ say }: { say: (r: { text: string; error?: boolean }) => void }) {
+/** `say`: the Library's one result line (Library.tsx), for an error or what a removal did; null clears it. */
+export function FootageFolders({ say }: { say: (r: { text: string; error?: boolean } | null) => void }) {
   const [sources, setSources] = useState<FootageSource[] | null>(null)
   const [status, setStatus] = useState<FootageIndexStatus>({ state: 'idle' })
   const [busy, setBusy] = useState(false)
@@ -45,6 +45,8 @@ export function FootageFolders({ say }: { say: (r: { text: string; error?: boole
 
   const run = async (work: () => Promise<FootageSource[]>, done?: string) => {
     setBusy(true)
+    // a refusal from the last try must not stay on screen over this one's result
+    say(null)
     try {
       setSources(await work())
       if (done) say({ text: done })

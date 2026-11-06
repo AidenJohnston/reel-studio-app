@@ -40,6 +40,8 @@ test('a footage folder is read where it is, watched, survives an unplugged drive
   await page.getByTestId('footage-add').click()
   const row = page.getByTestId('footage-folder')
   await expect(row).toHaveCount(1)
+  // fails if the refusal stays on screen over a folder that was added
+  await expect(page.getByTestId('library-result')).toHaveCount(0)
   await expect(row).toContainText('Shoots')
   const reading = page.getByTestId('footage-index')
   await expect(reading).toContainText(/Reading .+ \(\d+ of \d+\)/)
