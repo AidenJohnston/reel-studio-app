@@ -342,7 +342,7 @@ forehead down to just above the brows, and the sides of the head.
 - Default look: a short tilt (about 2-3 degrees) on stills; clips stay level.
 
 **Animations** (`templates/animations/`): HTML templates (`stat-count-up`, `big-quote`, `list-reveal`,
-`logo-pop`, `price-tag`, `typing-terminal`), each exposing `window.__setup(params)` and `window.__seek(t)`.
+`logo-pop`, `price-tag`, `typing-terminal`, and `compose`, which the AI builds from rows of typed parts), each exposing `window.__setup(params)` and `window.__seek(t)`.
 The Electron main process renders them in an offscreen window frame by frame into ffmpeg, producing a
 transparent layer. No CDN is used at run time; any JS is vendored.
 

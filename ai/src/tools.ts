@@ -15,7 +15,7 @@ import {
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { SFX_SOUNDS } from './sfx.generated';
-import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
+import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, composeProblems, itemTimes, phraseTime, templateSpec, timeComposeParts } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
@@ -1151,6 +1151,7 @@ const DEFAULT_TOP_REGION = { x: 38, y: 180, w: 1004, h: 560 };
 async function makeAnimation(ctx: ToolContext, template: string, raw: Record<string, unknown>, anchor?: WordAnchor | null,
   opts: { fullScreen?: boolean; topOnly?: boolean; replay?: boolean } = {}): Promise<{ asset: string; params: Record<string, unknown>; timing: string; layout: string; readable: { heroPx: number | null; note?: string } }> {
   const [params, problems] = cleanParams(template, raw);
+  if (template === 'compose') problems.push(...composeProblems(params));
   if (problems.length) throw new ToolInputError(problems.join('; '));
   const spec = templateSpec(template)!;
   for (const [k, ps] of Object.entries(spec.params)) {     // file params (logo-pop image): a committed picture
@@ -1178,6 +1179,8 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
       } else if ((template === 'stat-count-up' || template === 'logo-pop') && typeof params.text === 'string' && params.labelAt === undefined) {
         const lt = phraseTime(params.text, ws);
         if (lt !== null) { params.labelAt = lt; timing = 'the label lands on its spoken word'; }
+      } else if (template === 'compose' && Array.isArray(params.rows)) {
+        if (timeComposeParts(params, ws)) timing = 'each part lands on the word that says it';
       } else if (template === 'typing-terminal' && typeof params.text === 'string' && params.typeAt === undefined) {
         const tt = phraseTime(params.text, ws);
         if (tt !== null) { params.typeAt = tt; timing = 'typing starts on the spoken word'; }
@@ -1192,7 +1195,7 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   const choice = chooseReadableLayout(template, params as Record<string, any>, (params.region as any) ?? DEFAULT_TOP_REGION, lay);
   let readNote: string | undefined;
   if (choice.tooLong) {
-    throw new ToolInputError(`${template}: that text would be about ${choice.heroPx} px tall even full screen (readable needs ${minHeroPx(template)}+); shorten it to a few words`);
+    throw new ToolInputError(`${template}: that text would be about ${choice.heroPx} px tall even full screen (readable needs ${minHeroPx(template, params)}+); shorten it to a few words`);
   }
   if (choice.switched) {
     if (opts.topOnly) {

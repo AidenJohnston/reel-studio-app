@@ -10,8 +10,8 @@ export const MIN_HERO_PX = 64;
  * at scale 1: the e2e's 60 px "9" was a quarter of that). */
 export const MIN_SCALE = 0.55;
 
-export function minHeroPx(template: string): number {
-  const s = spec(template, {});
+export function minHeroPx(template: string, params: Record<string, any> = {}): number {
+  const s = spec(template, params);
   return s ? Math.max(MIN_HERO_PX, Math.round(MIN_SCALE * s.hero)) : MIN_HERO_PX;
 }
 
@@ -39,9 +39,41 @@ function spec(template: string, p: Record<string, any>): Spec | null {
       return { hero: 72, maxKTop: 1.35, maxKFull: 2.2, pieces: [{ chars: Math.max(1, len(p.text)), size: 72 }] };
     case 'typing-terminal':
       return { hero: 64, maxKTop: 1.35, maxKFull: 1.3, pieces: [{ chars: Math.max(1, len(p.text)), size: 64, mono: true }, { chars: len(p.response), size: 54, mono: true }] };
+    case 'compose':
+      return composeSpec(p);
     default:
       return null;
   }
+}
+
+/** compose/index.html's type tiers (px at scale 1) and each kind's default tier. */
+const TIER: Record<string, number> = { hero: 190, large: 112, body: 68, small: 40 };
+const KIND_TIER: Record<string, string> = { text: 'body', number: 'hero', stars: 'large', arrow: 'body', rule: 'body' };
+
+/** A composed graphic: one line per row (its CSS never wraps a row), at the row's largest tier; the
+ *  main text is the largest tier in the graphic. Widths in average glyphs: a star is about 1.75 of
+ *  them (0.78em tall, 30/24 as wide), an arrow 1.6 (0.9em), the 22 px gap between parts its share.
+ *  A rule adds a 4 px line, so it is left out. */
+function composeSpec(p: Record<string, any>): Spec {
+  const rows: any[] = Array.isArray(p.rows) ? p.rows : [];
+  const mono = p.face === 'mono';
+  const pieces: Piece[] = [];
+  for (const r of rows) {
+    const parts: any[] = (Array.isArray(r?.parts) ? r.parts : []).filter((x: any) => x?.kind !== 'rule');
+    if (!parts.length) continue;
+    const size = Math.max(...parts.map((x) => TIER[x.size] ?? TIER[KIND_TIER[x.kind] ?? 'body']));
+    const glyph = (mono ? 0.6 : 0.56) * size;
+    let chars = ((parts.length - 1) * 22) / glyph;
+    for (const x of parts) {
+      const own = (TIER[x.size] ?? TIER[KIND_TIER[x.kind] ?? 'body']) / size;   // a smaller part in a bigger row
+      if (x.kind === 'stars') chars += 1.75 * Math.max(1, Math.min(10, Math.round(Number(x.max) || 5))) * own;
+      else if (x.kind === 'arrow') chars += 1.6 * own;
+      else chars += len(x.text) * own * (x.size === 'small' ? 1.15 : 1);   // small is spaced capitals
+    }
+    pieces.push({ chars: Math.max(1, chars), size, nowrap: true, mono });
+  }
+  const hero = pieces.length ? Math.max(...pieces.map((x) => x.size)) : TIER.hero;
+  return { hero, maxKTop: 1.35, maxKFull: 2.2, pieces };
 }
 
 /** Estimated hero text height (px at 1080 wide) for template + params in a region. null = unknown template. */
@@ -73,7 +105,7 @@ export interface ReadableChoice { layout: 'top' | 'full'; heroPx: number | null;
  * even full screen is too small (the text must be shortened). */
 export function chooseReadableLayout(template: string, params: Record<string, any>, region: { w: number; h: number } | undefined,
   layout: 'top' | 'full'): ReadableChoice {
-  const min = minHeroPx(template);
+  const min = minHeroPx(template, params);
   if (layout === 'top' && region) {
     const top = estimateHeroPx(template, params, region, 'top');
     if (top === null || top >= min) return { layout: 'top', heroPx: top, switched: false, tooLong: false };

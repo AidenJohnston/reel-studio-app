@@ -13,6 +13,16 @@ video layer** that the engine overlays on the speaker.
 | `logo-pop` | logo/image pops in with a label | `image` (file path), `text`, `background` | 2.5 s |
 | `price-tag` | price tag slides in, optional struck old price | `value`, `oldValue`, `text`, `name` | 2.6 s (3.2 s with old price) |
 | `typing-terminal` | text types into a terminal or chat bubble | `text`, `style`, `response`, `title` | ~1.2 s after typing ends |
+| `compose` | a graphic built from parts in rows: words, counting numbers, stars, arrows, rules | `rows[].parts[]` (`kind`, `text`, `value`, `size`, `color`, `motion`, `at`), `face`, `align` | ~1.8 s after the last part |
+
+`compose` is the one template made of parts rather than fixed slots. Each part has a kind (`text`,
+`number`, `stars`, `arrow`, `rule`), a type tier (`hero` 190 px, `large` 112, `body` 68, `small` 40 at
+scale 1), a colour (`ink`, `muted`, `accent`) and a motion its kind allows (text: rise, strike; number:
+count, rise, pop, strike; stars: fill, rise; arrow and rule: draw). A row never wraps. A struck part
+draws its line when the next part in its row lands, and a counting number starts from the number before
+it in its row, so "1,200 -> 2,000" reads as a change. Each part enters at its `at` (seconds), else 0.3 s
+after the one before. The AI fills `at` from the words each part names (`on`), and refuses a motion
+the kind can't take.
 
 Every template also takes: `layout` (`top` = card above the head, speaker visible; `full` = opaque,
 covers the frame), `theme` (`light` | `dark` | `accent`), `accentColor`, `tilt`, `duration`, `drift`,

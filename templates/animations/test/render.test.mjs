@@ -21,10 +21,10 @@ function pixelDiff(p1, p2) {
   return { pixels, max };
 }
 
-const EXPECTED = ['big-quote', 'list-reveal', 'logo-pop', 'price-tag', 'stat-count-up', 'typing-terminal'];
+const EXPECTED = ['big-quote', 'compose', 'list-reveal', 'logo-pop', 'price-tag', 'stat-count-up', 'typing-terminal'];
 
 describe('templates', () => {
-  it('lists the six templates with a description and schema', () => {
+  it('lists every template with a description and schema', () => {
     const t = listTemplates();
     assert.deepEqual(t.map((x) => x.id), EXPECTED);
     for (const x of t) {
@@ -51,6 +51,9 @@ describe('templates', () => {
     const ok = prepareParams(m, { items: ['a', 'b'], sparkle: true, value: null });
     assert.deepEqual(ok.warnings, ['ignored unknown param "sparkle"']);
     assert.equal(ok.params.layout, 'top');
+    // inside a nested part a misspelt field is refused: dropping it would quietly lose the asked-for look
+    const c = loadMeta('compose');
+    assert.throws(() => prepareParams(c, { rows: [{ parts: [{ kind: 'text', text: 'Rent', colour: 'accent' }] }] }), (e) => /"rows\[0\]\.parts\[0\]\.colour" is not a field here/.test(e.message));
   });
 
   it('rejects unknown and unsafe template ids', () => {

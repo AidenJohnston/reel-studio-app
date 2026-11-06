@@ -3,7 +3,8 @@
 
 export interface AnimParamSpec {
   type?: string | string[]; enum?: unknown[]; description?: string; minimum?: number; maximum?: number;
-  minItems?: number; maxItems?: number; format?: string; default?: unknown; items?: { type: string }; ref?: string;
+  minLength?: number; maxLength?: number; minItems?: number; maxItems?: number; format?: string; default?: unknown;
+  items?: AnimParamSpec; properties?: Record<string, AnimParamSpec>; required?: string[]; ref?: string;
 }
 export interface AnimTemplateSpec {
   id: string; name: string; description: string; defaultDuration: number;
@@ -22,11 +23,14 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
     "params": {
       "text": {
         "type": "string",
-        "description": "The sentence, exactly as said (max ~14 words)."
+        "description": "The sentence, exactly as said (max ~14 words).",
+        "minLength": 1,
+        "maxLength": 120
       },
       "author": {
         "type": "string",
-        "description": "Optional attribution under the quote."
+        "description": "Optional attribution under the quote.",
+        "maxLength": 50
       },
       "highlight": {
         "type": "array",
@@ -107,6 +111,183 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
     }
   },
   {
+    "id": "compose",
+    "name": "Composed graphic",
+    "description": "A graphic you build from parts in rows: words, numbers that count, star ratings, arrows and rules, each landing on the word that says it. Use it when the moment has a relationship to show (a before and after, a sequence, a rating, a comparison) rather than one number or one quote. Put the relationship in one row.",
+    "defaultDuration": 3.5,
+    "required": [
+      "rows"
+    ],
+    "params": {
+      "rows": {
+        "type": "array",
+        "description": "Rows top to bottom. A row's parts sit on one line left to right and never wrap: old value, arrow, new value; step, arrow, step.",
+        "minItems": 1,
+        "maxItems": 5,
+        "items": {
+          "type": "object",
+          "properties": {
+            "parts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "number",
+                      "stars",
+                      "arrow",
+                      "rule"
+                    ],
+                    "description": "text: words as said. number: digits as said, counts up. stars: a rating. arrow: points to the next part in its row. rule: a thin line under the row."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "text and number: the words or digits exactly as said (1,200; 4.8; 92%; $3k).",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "stars: the rating as said.",
+                    "minimum": 0,
+                    "maximum": 1000
+                  },
+                  "max": {
+                    "type": "number",
+                    "description": "stars: out of how many. Default 5.",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "size": {
+                    "type": "string",
+                    "enum": [
+                      "hero",
+                      "large",
+                      "body",
+                      "small"
+                    ],
+                    "description": "Type tier. Default: number hero, stars large, text body. small is a capitals label."
+                  },
+                  "color": {
+                    "type": "string",
+                    "enum": [
+                      "ink",
+                      "muted",
+                      "accent"
+                    ],
+                    "description": "Colour role from the theme. Default ink; arrows and rules default muted."
+                  },
+                  "motion": {
+                    "type": "string",
+                    "enum": [
+                      "rise",
+                      "pop",
+                      "count",
+                      "strike",
+                      "draw",
+                      "fill"
+                    ],
+                    "description": "How it enters. Default: text rise, number count, stars fill, arrow and rule draw. pop: a number lands with a small bounce. strike: a text or number is crossed out when the next part in its row lands (an old price, a before)."
+                  },
+                  "on": {
+                    "type": "string",
+                    "description": "The spoken words this part lands on, as said. Leave out to follow the previous part.",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "at": {
+                    "type": "number",
+                    "description": "Filled in for you: seconds from the clip start.",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "required": [
+            "parts"
+          ]
+        }
+      },
+      "face": {
+        "type": "string",
+        "enum": [
+          "sans",
+          "serif",
+          "mono"
+        ],
+        "description": "Type for the whole graphic: sans (Inter) for steps and apps, serif (Fraunces) for money, quotes and story, mono (JetBrains Mono) for code and prices.",
+        "default": "sans"
+      },
+      "align": {
+        "type": "string",
+        "enum": [
+          "start",
+          "center"
+        ],
+        "description": "Rows start at the left, or are centred.",
+        "default": "start"
+      },
+      "layout": {
+        "type": "string",
+        "enum": [
+          "top",
+          "full"
+        ],
+        "description": "top = card above the head, speaker stays visible. full = covers the frame (speaker hidden).",
+        "default": "top"
+      },
+      "theme": {
+        "type": "string",
+        "enum": [
+          "light",
+          "dark",
+          "accent"
+        ],
+        "description": "light = warm white card, dark = near-black card, accent = card in the accent colour.",
+        "default": "light"
+      },
+      "accentColor": {
+        "type": "string",
+        "description": "Optional accent colour, e.g. #2F5BFF."
+      },
+      "tilt": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Tilt in degrees. Default 0: a composed graphic sits straight.",
+        "minimum": -8,
+        "maximum": 8,
+        "default": null
+      },
+      "duration": {
+        "type": "number",
+        "description": "Clip length in seconds. Leave out to use the template's own length.",
+        "minimum": 0.5,
+        "maximum": 30
+      },
+      "drift": {
+        "type": "number",
+        "description": "Slow push-in over the clip (0 = perfectly still).",
+        "minimum": 0,
+        "maximum": 0.08,
+        "default": 0.015
+      },
+      "region": {
+        "ref": "region"
+      }
+    }
+  },
+  {
     "id": "list-reveal",
     "name": "List, one item at a time",
     "description": "A list of 2 to 5 short items builds one row per beat, the newest row in focus. Use when the speaker counts things off (\"three things: ...\").",
@@ -126,7 +307,8 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
       },
       "text": {
         "type": "string",
-        "description": "Optional title above the list."
+        "description": "Optional title above the list.",
+        "maxLength": 50
       },
       "numbered": {
         "type": "boolean",
@@ -216,11 +398,13 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
       "image": {
         "type": "string",
         "description": "The logo or image: a file path (png, jpg, webp, svg), or a data: URL.",
+        "minLength": 1,
         "format": "file"
       },
       "text": {
         "type": "string",
-        "description": "Optional label under the logo, e.g. the name as said."
+        "description": "Optional label under the logo, e.g. the name as said.",
+        "maxLength": 40
       },
       "background": {
         "type": "string",
@@ -307,19 +491,24 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
     "params": {
       "value": {
         "type": "string",
-        "description": "The price exactly as said, in digits: \"$19.99\"; \"20 bucks\" becomes \"$20\"."
+        "description": "The price exactly as said, in digits: \"$19.99\"; \"20 bucks\" becomes \"$20\".",
+        "minLength": 1,
+        "maxLength": 12
       },
       "oldValue": {
         "type": "string",
-        "description": "Optional old price, shown first and struck through."
+        "description": "Optional old price, shown first and struck through.",
+        "maxLength": 12
       },
       "text": {
         "type": "string",
-        "description": "Optional line under the price: \"per week\", \"one time\"."
+        "description": "Optional line under the price: \"per week\", \"one time\".",
+        "maxLength": 40
       },
       "name": {
         "type": "string",
-        "description": "Optional product name above the price."
+        "description": "Optional product name above the price.",
+        "maxLength": 30
       },
       "strikeAt": {
         "type": "number",
@@ -389,11 +578,14 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
     "params": {
       "value": {
         "type": "string",
-        "description": "The number exactly as said, in digits, with its unit: \"3,000\", \"92%\", \"$1.5M\", \"4.8\"."
+        "description": "The number exactly as said, in digits, with its unit: \"3,000\", \"92%\", \"$1.5M\", \"4.8\".",
+        "minLength": 1,
+        "maxLength": 14
       },
       "text": {
         "type": "string",
-        "description": "Short label under the number, 2 to 6 words: \"people signed up\"."
+        "description": "Short label under the number, 2 to 6 words: \"people signed up\".",
+        "maxLength": 60
       },
       "from": {
         "type": "number",
@@ -475,7 +667,9 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
     "params": {
       "text": {
         "type": "string",
-        "description": "The text that gets typed."
+        "description": "The text that gets typed.",
+        "minLength": 1,
+        "maxLength": 160
       },
       "style": {
         "type": "string",
@@ -488,15 +682,18 @@ export const ANIMATION_TEMPLATES: AnimTemplateSpec[] = [
       },
       "response": {
         "type": "string",
-        "description": "Optional reply that lands after the typing (output line or answer bubble)."
+        "description": "Optional reply that lands after the typing (output line or answer bubble).",
+        "maxLength": 160
       },
       "title": {
         "type": "string",
-        "description": "Optional window title (terminal style)."
+        "description": "Optional window title (terminal style).",
+        "maxLength": 30
       },
       "prompt": {
         "type": "string",
         "description": "Prompt before the typed text (terminal style).",
+        "maxLength": 12,
         "default": "> "
       },
       "cps": {

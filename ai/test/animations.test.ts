@@ -132,3 +132,54 @@ describe('make_animation', () => {
     expect(host.animations[0].params).toEqual({ value: '3,000', text: 'people' });
   });
 });
+
+describe('make_animation compose (a graphic built from parts)', () => {
+  // "rent went from twelve hundred to two thousand", as anim-context gives it (seconds from the clip start)
+  async function composeCtx() {
+    const c = await ctxFor();
+    const run = c.host.runEngine.bind(c.host);
+    c.host.runEngine = async (command: string, args: string[], onProgress?: any) => {
+      if (command !== 'anim-context') return run(command, args, onProgress);
+      return { t0: 4, layout: 'top', region: { x: 38, y: 180, w: 1004, h: 520 },
+        words: ['rent', 'went', 'from', 'twelve', 'hundred', 'to', 'two', 'thousand'].map((w, i) => ({ id: `w${42 + i}`, w, t: round(0.13 + 0.3 * i) })) };
+    };
+    return c;
+  }
+  const round = (x: number) => Math.round(x * 1000) / 1000;
+  const make = (ctx: ToolContext, rows: unknown[]) =>
+    executeTool(ctx, 'make_animation', { template: 'compose', anchor: { from: 'w42', to: 'w49' }, params: { face: 'serif', rows } });
+
+  it("fails if a part reaches the renderer carrying strict mode's nulls, or doesn't land on the words that say it", async () => {
+    const { ctx, host } = await composeCtx();
+    // the model leaves every unused field out; the tool fills them with null, as a strict provider would send
+    const r = await make(ctx, [
+      { parts: [{ kind: 'text', text: 'Rent', size: 'small', color: 'muted', on: 'rent' }] },
+      { parts: [{ kind: 'number', text: '1,200', motion: 'strike', on: 'twelve hundred' }, { kind: 'arrow' }, { kind: 'number', text: '2,000', on: 'two thousand' }] },
+    ]);
+    expect(r.isError, r.content).toBe(false);
+    expect(JSON.parse(r.content).timing).toMatch(/each part lands on the word/);
+    expect(host.animations[0].params.rows).toEqual([
+      { parts: [{ kind: 'text', text: 'Rent', size: 'small', color: 'muted', on: 'rent', at: 0.13 }] },
+      // the arrow says nothing, so it follows the old value by 0.3 s
+      { parts: [{ kind: 'number', text: '1,200', motion: 'strike', on: 'twelve hundred', at: 1.03 }, { kind: 'arrow', at: 1.33 },
+        { kind: 'number', text: '2,000', on: 'two thousand', at: 1.93 }] },
+    ]);
+    // the times are the transcript's to set, never the model's
+    const guessed = await make(ctx, [{ parts: [{ kind: 'text', text: 'Rent', at: 0.5 }] }]);
+    expect(guessed.content).toMatch(/at: unknown field/);
+  });
+
+  it('fails if a graphic the template would draw differently from what was asked is rendered anyway', async () => {
+    const { ctx, host } = await composeCtx();
+    const counted = await make(ctx, [{ parts: [{ kind: 'text', text: 'Rent', motion: 'count' }] }]);
+    expect(counted.content).toMatch(/a text part can't count; it takes rise or strike/);
+    const row = { parts: Array.from({ length: 5 }, (_, i) => ({ kind: 'text', text: `step${i}` })) };
+    const crowded = await make(ctx, [row, row, { parts: row.parts.slice(0, 3) }]);
+    expect(crowded.content).toMatch(/at most 12 parts; this has 13/);
+    // a row never wraps, so a long one shrinks until nobody can read it
+    const long = await make(ctx, [{ parts: [{ kind: 'text', text: 'rent on my studio went up again this year, it hurt a lot' }] }]);
+    expect(long.content).toMatch(/shorten it/);
+    expect(host.animations).toHaveLength(0);
+  });
+});
+

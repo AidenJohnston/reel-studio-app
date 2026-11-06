@@ -38,7 +38,12 @@ export function validate(schema: JSONSchema, value: unknown, at = 'args'): strin
   const out: string[] = [];
   if (schema.anyOf) {
     const ok = schema.anyOf.some((s: JSONSchema) => validate(s, value, at).length === 0);
-    if (!ok) out.push(`${at}: does not match any allowed shape`);
+    if (ok) return out;
+    // a nullable object or list (S.opt) that was given: say what is wrong inside it, so the model
+    // can fix the one field instead of guessing at "any allowed shape"
+    const shapes = schema.anyOf.filter((s: JSONSchema) => s.type !== 'null');
+    if (value !== null && shapes.length === 1) return validate(shapes[0], value, at);
+    out.push(`${at}: does not match any allowed shape`);
     return out;
   }
   if (schema.type) {

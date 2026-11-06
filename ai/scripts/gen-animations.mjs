@@ -10,6 +10,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const templatesDir = path.resolve(here, '..', '..', 'templates', 'animations');
 const outFile = path.resolve(here, '..', 'src', 'animations.generated.ts');
 
+const KEYS = ['enum', 'description', 'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'format', 'default'];
+
+/** One param's spec, nested: an array's items and an object's properties keep their own specs, so a
+ *  template can take a list of parts (compose) and the tool schema can describe each field. */
+function paramSpec(v) {
+  const p = { type: v.type };
+  for (const key of KEYS) if (v[key] !== undefined) p[key] = v[key];
+  if (v.items) p.items = v.items.type === 'object' || v.items.type === 'array' ? paramSpec(v.items) : { type: v.items.type };
+  if (v.properties) {
+    p.properties = Object.fromEntries(Object.entries(v.properties).map(([k, s]) => [k, paramSpec(s)]));
+    p.required = v.required ?? [];
+  }
+  return p;
+}
+
 export function buildTemplates(dir = templatesDir) {
   const out = [];
   for (const id of fs.readdirSync(dir).sort()) {
@@ -20,12 +35,7 @@ export function buildTemplates(dir = templatesDir) {
     const props = {};
     for (const [k, v] of Object.entries(m.params?.properties ?? {})) {
       if (v.$ref) { props[k] = { ref: v.$ref.split('/').pop() }; continue; }
-      const p = { type: v.type };
-      for (const key of ['enum', 'description', 'minimum', 'maximum', 'minItems', 'maxItems', 'format', 'default']) {
-        if (v[key] !== undefined) p[key] = v[key];
-      }
-      if (v.items) p.items = { type: v.items.type };
-      props[k] = p;
+      props[k] = paramSpec(v);
     }
     out.push({
       id: m.id, name: m.name, description: m.description, defaultDuration: m.defaultDuration,
@@ -41,7 +51,8 @@ export function render(templates) {
 
 export interface AnimParamSpec {
   type?: string | string[]; enum?: unknown[]; description?: string; minimum?: number; maximum?: number;
-  minItems?: number; maxItems?: number; format?: string; default?: unknown; items?: { type: string }; ref?: string;
+  minLength?: number; maxLength?: number; minItems?: number; maxItems?: number; format?: string; default?: unknown;
+  items?: AnimParamSpec; properties?: Record<string, AnimParamSpec>; required?: string[]; ref?: string;
 }
 export interface AnimTemplateSpec {
   id: string; name: string; description: string; defaultDuration: number;

@@ -102,7 +102,11 @@ function checkValue(s, v, k) {
   }
   if (t === 'object' && s.properties) {
     for (const r of s.required || []) if (v[r] === undefined) return `"${k}.${r}" is missing`;
-    for (const [kk, vv] of Object.entries(v)) if (s.properties[kk]) { const e = checkValue(s.properties[kk], vv, `${k}.${kk}`); if (e) return e; }
+    for (const [kk, vv] of Object.entries(v)) {
+      // a nested part's misspelt field would otherwise vanish silently (compose: "colour" for "color")
+      if (!s.properties[kk]) { if (s.additionalProperties === false) return `"${k}.${kk}" is not a field here`; continue; }
+      const e = checkValue(s.properties[kk], vv, `${k}.${kk}`); if (e) return e;
+    }
   }
   return null;
 }
