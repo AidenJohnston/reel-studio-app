@@ -117,6 +117,32 @@ describe('rendering (playwright)', { skip: !pw && 'playwright not installed' }, 
     } finally { await s.close(); }
   });
 
+  it('fails if a composed rating fills the gaps between stars, or a part timed late never shows', async () => {
+    const { VISIBLE_LETTERS } = await import('../tools/firstframe.mjs');
+    const s = await startTemplateServer();
+    try {
+      const m = loadMeta('compose');
+      await adapter.load(`${s.url}/animations/compose/index.html`);
+      const rating = prepareParams(m, { rows: [{ parts: [{ kind: 'stars', value: 4.5, max: 5, at: 0 }] }] }).params;
+      const info = await adapter.evaluate(`window.__setup(${JSON.stringify(rating)})`);
+      await adapter.evaluate(`window.__seek(${info.duration - 0.05})`);
+      // where the fill's clip ends, against the fifth star's own outline, in screen px
+      const r = await adapter.evaluate(`(() => {
+        const fill = document.querySelector('.stars .fill');
+        const right = Number(getComputedStyle(fill).clipPath.match(/inset\\(0px ([\\d.]+)%/)[1]);
+        const box = fill.getBoundingClientRect();
+        const star = fill.querySelectorAll('path')[4].getBoundingClientRect();
+        return { edge: box.left + box.width * (1 - right / 100), mid: star.left + star.width / 2, w: star.width };
+      })()`);
+      assert.ok(Math.abs(r.edge - r.mid) < r.w * 0.06, `4.5 of 5 fills to ${r.edge.toFixed(1)} px; the fifth star's middle is ${r.mid.toFixed(1)}`);
+      await adapter.load(`${s.url}/animations/compose/index.html`);
+      const late = await adapter.evaluate(`window.__setup(${JSON.stringify(prepareParams(m, { rows: [{ parts: [{ kind: 'text', text: 'Later', at: 15 }] }] }).params)})`);
+      assert.ok(late.duration >= 16.5, `a part at 15 s in a ${late.duration} s clip`);
+      await adapter.evaluate('window.__seek(15.5)');
+      assert.ok((await adapter.evaluate(VISIBLE_LETTERS)) >= 5, 'the late part never shows');
+    } finally { await s.close(); }
+  });
+
   it('every card enters WITH content: no empty or half-built first frame, even when the words come later', async () => {
     const { cases, firstFrame } = await import('../tools/firstframe.mjs');
     const logo = path.join(dir, 'logo512.svg');
