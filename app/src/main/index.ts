@@ -876,7 +876,12 @@ function registerIpc(): void {
           read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
-    projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null),
+    projectsRoot: projectsDir, stateDir: settingsDir(), sources,
+    // new post results may make a trial's memory worth suggesting (memory-loop.ts): look now, not only when My style opens
+    changed: () => {
+      broadcast('insights:changed', null)
+      void refreshMemories(ai, projectsDir(), log)
+    },
     // Post results go into usage data only when sharing and its Post results part are both on (usage.ts record)
     onRead: (post, outcome) => {
       const views = postViews(post, outcome)
