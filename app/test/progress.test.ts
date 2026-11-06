@@ -63,7 +63,7 @@ describe('honest progress', () => {
     expect(t.snapshot().overall).toBeLessThan(99)
   })
 
-  it('keeps the final render overdue when aggregate progress outlives its estimate', () => {
+  it('keeps the final render overdue and its bar moving below 99 when aggregate progress outlives its estimate', () => {
     let now = 0
     const t = new ProgressTracker('rerender', 60, empty(), () => now)
     t.update('final', 0)
@@ -71,6 +71,12 @@ describe('honest progress', () => {
     t.update('final', 50, true)
     now = 4000
     expect(t.snapshot()).toMatchObject({ etaSec: null, overdue: true })
+    const early = t.snapshot().overall
+    now = 40_000
+    const late = t.snapshot().overall
+    expect(early).toBeLessThan(99)
+    expect(late).toBeGreaterThan(early)
+    expect(late).toBeLessThan(99)
   })
 
   it('recalibrates remaining engine defaults from a slow first step', () => {

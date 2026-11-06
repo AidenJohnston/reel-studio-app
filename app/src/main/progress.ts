@@ -158,13 +158,18 @@ export class ProgressTracker {
     const displayRemaining = aiBudget ? Math.max(1, aiBudget - aiElapsed) + other : remaining
     const phaseBudget = Math.max(current, elapsed)
     // A whole-job percent, when the engine sends one, projects the rest from the job's own pace.
-    const aggregateLeft = this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart
-      ? (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct - (this.now() - this.jobStart) / 1000
+    const projected = this.aggregate && this.aggregate.pct > 0 && this.jobStart !== undefined && this.aggregate.at > this.jobStart
+      ? (this.aggregate.at - this.jobStart) / 1000 * 100 / this.aggregate.pct
       : undefined
+    const jobElapsed = this.jobStart === undefined ? 0 : (this.now() - this.jobStart) / 1000
+    const aggregateLeft = projected === undefined ? undefined : projected - jobElapsed
     const total = done + elapsed + Math.max(0, aggregateLeft ?? displayRemaining)
-    // Leave a gap below the phase ceiling, shrinking it as an overrun continues.
-    const phaseEnd = (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
-    const overall = Math.min(99, aggregateLeft === undefined ? phaseEnd : 99, (done + elapsed) / total * 100)
+    // Leave a gap below the phase ceiling, shrinking it as an overrun continues. A job that outlives its
+    // whole-job projection gets the same gap, so its bar creeps toward 99 instead of stopping there.
+    const ceiling = projected === undefined
+      ? (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
+      : 99 * (1 - 0.01 * projected / Math.max(projected, jobElapsed))
+    const overall = Math.min(99, ceiling, (done + elapsed) / total * 100)
     this.best = Math.max(this.best, overall, Math.min(99, this.aggregate?.pct ?? 0))
     const remainingPhases = this.phases.slice(this.cur)
     const approximate = remainingPhases.some((p) => !this.local(p))
