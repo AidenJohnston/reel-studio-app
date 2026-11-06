@@ -42,7 +42,7 @@ test('Library, My style and Insights', async () => {
   await page.getByTestId('nav-insights').click()
   await expect(page.getByTestId('titlebar-title')).toHaveText('Insights')
   await expect(page.getByTestId('insights-empty')).toContainText('how long people watched')
-  await expect(page.getByTestId('insights-empty')).toContainText('Connect Instagram or TikTok first. Facebook posts don’t report results here yet.')
+  await expect(page.getByTestId('insights-empty')).toContainText('Connect Instagram, TikTok or Facebook first.')
 
   // ---- Library: tabs, no Finished videos, an empty tab says what goes there ----
   await page.getByTestId('nav-library').click()

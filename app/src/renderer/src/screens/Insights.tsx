@@ -111,7 +111,7 @@ function Empty({ connected, go }: { connected: boolean; go: Go }) {
         <p>Post a reel from Share. Its first numbers show up here about an hour later.</p>
       ) : (
         <>
-          <p>Connect Instagram or TikTok first. Facebook posts don’t report results here yet.</p>
+          <p>Connect Instagram, TikTok or Facebook first.</p>
           <Button className="ins-connect" onClick={() => go({ name: 'settings', section: 'posting' })} data-testid="insights-connect">
             Open Settings › Posting
           </Button>
