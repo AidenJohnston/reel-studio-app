@@ -14,8 +14,9 @@ Timing attribute (`elementtiming`), so the app never reads its own timings or wa
 enters a number.
 
 The Reel screen's player loads a version in a hidden layer and swaps it in once its first frame is ready
-(`Player.tsx`). Chromium may record that layer's first paint while it is still hidden, so a player moment ends at the
-later of that paint and the first animation frame in which the layer is the shown one. That frame's start can be up to
+(`Player.tsx`). Chromium records no Element Timing paint for a layer that loaded hidden (a Windows run timed out
+waiting for one), so a player moment ends at the first animation frame in which the layer is the shown one, or at
+the layer's paint when Chromium did record a later one (the first version on opening, which loads in view). That frame's start can be up to
 one frame (about 17 ms at 60 Hz) before the swap is on screen.
 
 | Moment | Starts | Ends |
@@ -24,10 +25,10 @@ one frame (about 17 ms at 60 Hz) before the swap is on screen.
 | Open a reel | the click on its card on Home | its latest version shown in the player: its cover, or its first frame if it has none |
 | Switch version | the click on Play for the version before it in the notes, not yet shown since launch | that version shown in the player |
 | Switch back | the click on Play for the latest version | the latest version shown in the player |
-| Scrub | the scrub bar's `input` event on a click | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
+| Scrub | the `pointerup` of a click on the timeline under the phone, which seeks there | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the words in the note's progress strip being painted |
 
-Scrub clicks five positions in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
+Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
 so its time depends on where it lands in the encode, and the first click after opening also loads data the player had
 not fetched yet. The fake engine encodes with x264's default keyframe spacing, so scrub numbers describe that encode,
 not the real engine's exports.
@@ -62,6 +63,9 @@ The report gives each moment's median over the runs, its min and max, and spread
 editor step, in a visible window at its real size, and records every animation frame's gap and every long animation
 frame (`PerformanceObserver` type `long-animation-frame`, with the scripts that ran in it) for 3 s after each click.
 It reports, per moment and run, the median gap (the display's frame time), the longest gap, the 95th percentile and
-the frames longer than 50 ms. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
+the frames longer than 50 ms. Around "Use it" it also records a Chromium trace and reports its longest tasks with the process and thread
+each ran on (the renderer's main thread, the GPU process, the compositor), so a long frame can be put down to its
+cause, and what the page painted in the 600 ms after the click, by element and area: the raster a GPU task
+then does. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
 report's path.
 

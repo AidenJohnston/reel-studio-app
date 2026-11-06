@@ -195,7 +195,6 @@ export const megabytes = (n: number): string => `${Math.round(n / 1_000_000)}`
 export const SETTINGS_COPY = {
   heading: 'Posting',
   intro: 'Post a finished video to your channels from Reel Studio. It posts only when you click Post.',
-  coming: 'Instagram, TikTok, Facebook, LinkedIn and X are coming.',
   privacy: "Your Google sign-in stays on Reel Studio's posting server, never on this computer. Your video passes through it to YouTube and isn't kept.",
   noKey: 'Signing in uses the download key from your receipt email.',
   disconnectTitle: 'Disconnect YouTube?',

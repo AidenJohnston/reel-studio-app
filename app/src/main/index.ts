@@ -7,7 +7,7 @@ import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, rea
 import { randomUUID } from 'node:crypto'
 import { hostname, tmpdir } from 'node:os'
 import { clipboardFiles, filesFromArgv } from './intake'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { assertIpcSender, validateIpcArgs } from './ipc-guard'
 import {
@@ -20,8 +20,10 @@ import {
   engineMode,
   ffmpegPath,
   ffprobePath,
+  fontsDir,
   initPaths,
   legalFile,
+  libraryDir,
   libraryPreviewDir,
   noteStagingDir,
   noteStagingRoot,
@@ -87,6 +89,8 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createFootageSources } from './footage-sources'
+import { chooseSeries, groupReel } from './series'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -100,10 +104,18 @@ import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animat
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
-import { TikTokService } from './tiktok'
+import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
-import { InstagramService } from './instagram'
+import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom, xFrom, linkedinFrom } from './signin-config'
+import { LinkedInService } from './linkedin'
+import { XService } from './x'
+import { ThreadsService } from './threads'
+import { FacebookService } from './facebook'
+import { registerSocialIpc } from './social-ipc'
+import { testPlatformFetch } from './test-platforms'
+import { SIGNIN_URL } from '../shared/config'
 import { registerInsightsIpc } from './insights-ipc'
 import { registerReferencesIpc } from './references-ipc'
 import { createReferenceLibrary } from './references'
@@ -121,7 +133,7 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -262,7 +274,17 @@ const host: EngineHost = {
   runEngine,
   renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
-  reelStudioRoot
+  reelStudioRoot,
+  importFootage: (ref) => importFootage(ref)
+}
+
+/** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
+async function importFootage(ref: string): Promise<string> {
+  const { abs } = await footageSources.resolve(ref)
+  await ensureRoot()
+  const [r] = await addToLibrary([abs], runEngine, log, indexLibrary)
+  if (!r?.dest) throw { code: 'IMPORT_FAILED', userMessage: r?.reason ?? 'That clip could not be added to your Library.' }
+  return 'Library/' + relative(libraryDir(), r.dest).split(sep).join('/')
 }
 
 let ai: AI
@@ -303,8 +325,21 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
-const footageIndex = createFootageIndexer({ runEngine, root: reelStudioRoot, busy: () => jobs.runningCount() > 0 })
-const indexLibrary = (): void => { if (!TEST) void footageIndex.request() }
+const footageSources = createFootageSources({
+  load: async () => (await loadSettings()).footageSources,
+  save: async (footageSources) => void (await saveSettings({ footageSources })),
+  root: reelStudioRoot,
+  changed: () => indexLibrary()
+})
+const footageIndex = createFootageIndexer({
+  runEngine,
+  root: reelStudioRoot,
+  busy: () => jobs.runningCount() > 0,
+  sources: () => footageSources.indexArgs(),
+  done: (r) => { if (r.places) footageSources.indexed(r.places) }
+})
+// Tests leave the index alone (the stand-in engine has no speech to read) unless one asks for it.
+const indexLibrary = (): void => { if (!TEST || process.env.REELSTUDIO_TEST_INDEX === '1') void footageIndex.request() }
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
 const speedHistoryFile = (): string => join(settingsDir(), 'speed-history.json')
 // Paused without you (main/pause.ts): work a plan limit, no internet, sleep or a quit stopped goes on by itself.
@@ -754,6 +789,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
+    await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
     return replyAskingAboutStyle(r, r.summary)
   }, { pause, record: started })
 }
@@ -884,20 +920,39 @@ function registerIpc(): void {
     showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
   })
   registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
+  // Instagram and TikTok connect through Reel Studio's sign-in service (docs/signin.md): its list of platforms says
+  // which can be connected. A developer's own app (REELSTUDIO_DEV=1 and saved instagram*/tiktok* settings) wins.
+  const platformFetch = TEST && process.env.REELSTUDIO_TEST_PLATFORMS
+    ? testPlatformFetch(process.env.REELSTUDIO_TEST_PLATFORMS, (url, init) => fetch(url, init))
+    : (url: string, init: RequestInit) => fetch(url, init)
+  const signin = new SigninDirectory({ baseUrl: signinUrl(process.env, SIGNIN_URL, log), fetch: platformFetch, now: () => Date.now(), log })
+  const ownApps = async () => {
+    if (!DEV_PROVIDERS || TEST) return { instagram: null, tiktok: null }
+    const saved = await loadSettings()
+    const ig = instagramSettings(saved), tt = tiktokSettings(saved)
+    return { instagram: ig.instagramEnabled ? ig : null, tiktok: tt.tiktokEnabled ? tt : null }
+  }
+  // test runs never open the browser: e2e/social.spec.ts reads the link here and plays the person signing in
+  const openSignin = (url: string) => {
+    if (!TEST) return shell.openExternal(url)
+    ;(globalThis as { __reelstudioOpened?: string }).__reelstudioOpened = url
+    log('[signin] test run: browser not opened')
+    return Promise.resolve()
+  }
   const tiktok = new TikTokService({
-    dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
-    secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
+    settings: async () => (await ownApps()).tiktok ?? tiktokFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
   })
   registerTikTokIpc({ handle, service: tiktok, dev: DEV_PROVIDERS && !TEST, saveSettings })
   app.on('before-quit', () => { tiktok.stop() })
   const instagram = new InstagramService({
-    dev: DEV_PROVIDERS && !TEST,
-    settings: loadSettings,
+    settings: async () => (await ownApps()).instagram ?? instagramFrom(await signin.get(), signin.baseUrl),
     settingsDir: settingsDir(),
     projectsDir,
+    exportsDir: () => binDir('exports'),
     secrets: safeStorage,
-    fetch: (url, init) => fetch(url, init),
-    openExternal: (url) => shell.openExternal(url),
+    fetch: platformFetch,
+    openExternal: openSignin,
     coverJpeg: (bytes) => {
       const image = nativeImage.createFromBuffer(bytes)
       if (image.isEmpty()) throw new InstagramError('IG_COVER', 'The cover image could not be read. Export this version again.')
@@ -913,6 +968,51 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
+  const facebook = new FacebookService({
+    settings: async () => facebookFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('facebook:session', () => facebook.session())
+  handle('facebook:connect', () => facebook.connect())
+  handle('facebook:cancelConnect', () => facebook.cancelConnect())
+  handle('facebook:disconnect', () => facebook.disconnect())
+  handle('facebook:choosePage', (_e, pageId) => facebook.choosePage(pageId))
+  handle('facebook:publish', (_e, input) => facebook.publish(input))
+  app.on('before-quit', () => { facebook.stop() })
+  const threads = new ThreadsService({
+    settings: async () => threadsFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('threads:session', () => threads.session())
+  handle('threads:connect', () => threads.connect())
+  handle('threads:cancelConnect', () => threads.cancelConnect())
+  handle('threads:disconnect', () => threads.disconnect())
+  handle('threads:publish', (_e, input) => threads.publish(input))
+  app.on('before-quit', () => { threads.stop() })
+  const xPosting = new XService({
+    settings: async () => xFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('x:session', () => xPosting.session())
+  handle('x:connect', () => xPosting.connect())
+  handle('x:cancelConnect', () => xPosting.cancelConnect())
+  handle('x:disconnect', () => xPosting.disconnect())
+  handle('x:publish', (_e, input) => xPosting.publish(input))
+  app.on('before-quit', () => { xPosting.stop() })
+  const linkedin = new LinkedInService({
+    settings: async () => linkedinFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('linkedin:session', () => linkedin.session())
+  handle('linkedin:connect', () => linkedin.connect())
+  handle('linkedin:cancelConnect', () => linkedin.cancelConnect())
+  handle('linkedin:disconnect', () => linkedin.disconnect())
+  handle('linkedin:publish', (_e, input) => linkedin.publish(input))
+  app.on('before-quit', () => { linkedin.stop() })
+  registerSocialIpc({
+    handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
+    own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
+  })
   // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
   const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
     ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
@@ -1486,6 +1586,11 @@ function registerIpc(): void {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
     return readTimeline(slug, n)
   })
+  handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
+    if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
+    await chooseSeries(slug, series)
+    return detail(slug)
+  })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     // a reel with no video yet has no project.json: only its name can change
     if (!existsSync(join(projectDir(slug), 'project.json'))) {
@@ -1667,6 +1772,15 @@ function registerIpc(): void {
 
   handle('library:preview', (_e, file: string) => libraryPreview(file))
 
+  handle('footage:sources', () => footageSources.list())
+  handle('footage:addSource', async () => {
+    const r = await showOpenDialog({ title: 'Choose a folder of your videos', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths.length) return footageSources.list()
+    return footageSources.add(r.filePaths[0])
+  })
+  handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
+  handle('footage:status', () => footageIndex.status())
+
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()
 
@@ -1740,25 +1854,26 @@ function registerIpc(): void {
     let files: string[]
     if (ids) {
       files = ids.map((id) => foundEdit(id)).filter((f) => f.readable).map((f) => f.path)
-      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an XML export to learn from.' }
+      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an export or a CapCut project to learn from.' }
     } else {
       const mac = process.platform === 'darwin'
       const picker = learnPicker(mac)
       const r = await showOpenDialog({
         title: picker.title,
-        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package
+        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package, and a CapCut project is a
+        // folder; on Windows the person picks the draft_content.json inside it
         properties: mac ? ['openFile', 'openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
-        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml'] }]
+        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml', 'edl', 'json'] }]
       })
       if (r.canceled || !r.filePaths.length) return null
       files = r.filePaths
     }
     return readLesson(files, (file) => runEngine('import-reference', [file]), (p) => e.sender.send('style:learnProgress', p))
   })
-  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string) => {
+  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string, editor?: EditorName) => {
     if (!ai.addStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
     const kept: StyleRule[] = []
-    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from } }))
+    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from, ...(editor ? { editor } : {}) } }))
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
@@ -1847,7 +1962,7 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
-  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  // Posting to YouTube (main/posting.ts), on unless REELSTUDIO_POSTING=0. It signs in with the same download key.
   setupPosting({
     handle,
     env: process.env,
@@ -2166,7 +2281,8 @@ app.whenReady().then(async () => {
   }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir()])
+  // fontsDir: Library › Fonts shows each bundled font in its own face
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
   registerIpc()
   void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
@@ -2191,6 +2307,7 @@ app.whenReady().then(async () => {
       awake = null
     }
   }, 5000).unref()
+  await footageSources.start()
   indexLibrary()
   await updates.init()
   updates.start() // 15 s after the window, so launch is never slower
@@ -2217,6 +2334,7 @@ app.on('before-quit', (e) => {
   permissionHelper.close()
   const indexing = footageIndex.status().state === 'indexing'
   if (quitting || (!jobs.runningCount() && !cloudSavesRunning() && !indexing)) {
+    footageSources.stop()
     void footageIndex.stop()
     void killAllEngines()
     return
@@ -2242,6 +2360,7 @@ app.on('before-quit', (e) => {
       for (const slug of making) await updateAppState(slug, (s) => void (s.paused = { reason: 'quit', until: null, editor: null })).catch(() => undefined)
     }
     quitting = true
+    footageSources.stop()
     noteQueue.quit()
     await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop()]).finally(() => app.quit())
   })()

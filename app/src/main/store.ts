@@ -68,6 +68,8 @@ export interface AppState {
   proposal?: StoredProposal
   /** This reel was made from another reel's proposal: what it is seeded from, kept so a resume can seed it again. */
   from?: ReelSeed
+  /** The person chose this reel's series (or no series) themselves: automatic grouping leaves it alone (main/series.ts). */
+  seriesChosen?: boolean
   /** The files Version 1 copies its video from, kept until the copy is in (project.json written): a first edit stopped
    * during the copy copies them again (main/index.ts startFirstEdit). */
   copyFrom?: string[]
@@ -796,7 +798,8 @@ const searchable = (t: string): string =>
 /** Each reel's spoken words, kept while its transcript file is unchanged: search reads every reel on each query. */
 const spoken = new Map<string, { file: string; mtimeMs: number; words: string }>()
 
-async function spokenWords(slug: string, p: ProjectJson): Promise<string> {
+/** What was said in a reel, lower case and without punctuation (searchable). */
+export async function spokenWords(slug: string, p: ProjectJson): Promise<string> {
   const dir = projectDir(slug)
   const file = join(dir, p.transcript?.file ?? 'work/transcript.json')
   const st = await fs.stat(file).catch(() => null)

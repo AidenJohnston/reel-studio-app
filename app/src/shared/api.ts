@@ -3,6 +3,11 @@
 import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
+import type { SocialStatus } from './social'
+import type { FacebookApi } from './facebook'
+import type { ThreadsApi } from './threads'
+import type { XApi } from './x'
+import type { LinkedInApi } from './linkedin'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
 import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
@@ -453,11 +458,13 @@ export interface LibraryFile {
   durationSec?: number
   /** The sound pack's job for a sound effect: whoosh, pop, click... */
   group?: string
+  /** A font's names from the file (main/fonts.ts): `full` is what a caption style names. */
+  font?: { family: string; full: string }
 }
 
 export interface LibraryBin {
-  /** sfx: the sound effects that come with Reel Studio, not a folder of yours. */
-  key: 'raw' | 'broll' | 'music' | 'images' | 'sfx'
+  /** sfx and fontpack: the sound effects and caption fonts that come with Reel Studio, not a folder of yours. */
+  key: 'raw' | 'broll' | 'music' | 'images' | 'fonts' | 'sfx' | 'fontpack'
   label: string
   dir: string
   files: LibraryFile[]
@@ -475,7 +482,7 @@ export interface LibraryPreview {
 export interface DropResult {
   file: string
   name: string
-  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | null
+  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | 'fonts' | null
   dest: string | null
   reason?: string
 }
@@ -588,6 +595,19 @@ export type FootageIndexStatus =
   | { state: 'idle' | 'paused' }
   | { state: 'indexing'; stage: string; pct: number; message: string }
   | { state: 'error'; message: string }
+
+/** A folder or drive of someone's videos, indexed where it is (main/footage-sources.ts). */
+export interface FootageSource {
+  id: string
+  path: string
+  /** the folder's own name, as the Library shows it */
+  name: string
+  /** false: the folder isn't there now (a drive unplugged); its index is kept */
+  online: boolean
+  /** videos the last index run found in it; null before the first run */
+  files: number | null
+  addedAt: string
+}
 
 export interface AppInfo {
   version: string
@@ -734,8 +754,9 @@ export interface StyleRule {
   check?: RuleCheck
   /** The reel, version and note it was learned from. */
   source?: { project: string; title: string; version: number; note?: string }
-  /** Learned from another editor's export (My style, Learn from my past edits): its file name. */
-  imported?: { file: string }
+  /** Learned from another editor's export (My style, Learn from my past edits): its file name, and the editor
+   * when one file was read (a rule kept before editors were remembered has none; shared/memory.ts guesses). */
+  imported?: { file: string; editor?: EditorName }
   consent?: { proposal: string; at: string }
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in the list. */
   updatedAt?: string
@@ -773,7 +794,7 @@ export interface LearnedRule {
 /** What "Learn from my past edits" read: the exports, how much was in them, and the rules, before any is saved. */
 export interface StyleLesson {
   /** By id and name; the paths stay in main. */
-  files: { id: string; name: string; editor: 'Final Cut Pro' | 'Premiere Pro' }[]
+  files: { id: string; name: string; editor: EditorName }[]
   timelines: number
   shots: number
   rules: LearnedRule[]
@@ -781,7 +802,9 @@ export interface StyleLesson {
   skipped: { name: string; reason: string }[]
 }
 
-export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj'
+export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj' | 'capcut'
+/** The editor a lesson says a file came from; an EDL names none. */
+export type EditorName = 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL'
 
 /** An edit "Learn from my past edits" found on this computer. Its path stays in main; the page names it by id. */
 export interface PastEdit {
@@ -792,7 +815,7 @@ export interface PastEdit {
   file: string
   /** The folder it is in, below the home folder ("Movies › Exports"), or its drive and folder. */
   where: string
-  app: 'Final Cut Pro' | 'Premiere Pro'
+  app: 'Final Cut Pro' | 'Premiere Pro' | 'CapCut'
   kind: PastEditKind
   /** ISO time it last changed. */
   modified: string
@@ -823,7 +846,8 @@ export interface ExportResult {
 export interface PlatformExportResult {
   folder: string
   /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
-  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `version`: the version each file was made from (Try 2 can be another version). */
+  files: { platform: Platform; try?: 1 | 2; version: number; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */
@@ -934,6 +958,12 @@ export interface ReelApi {
   wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
+  /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
+  social: { status(fresh?: boolean): Promise<SocialStatus> }
+  facebook: FacebookApi
+  threads: ThreadsApi
+  x: XApi
+  linkedin: LinkedInApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
@@ -1100,6 +1130,8 @@ export interface ReelApi {
     makeReels(slug: string, ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
     /** Not now (true) folds the card to one line; Show (false) opens it again. */
     foldReels(slug: string, folded: boolean): Promise<void>
+    /** The person's own series for this reel, or null for none; automatic grouping leaves it alone after (main/series.ts). */
+    setSeries(slug: string, series: string | null): Promise<ProjectDetail>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */
@@ -1171,6 +1203,14 @@ export interface ReelApi {
     /** A Library file's contact sheet or waveform (main/library-preview.ts). */
     preview(path: string): Promise<LibraryPreview>
   }
+  /** Footage folders and the index that reads them (main/footage-sources.ts, footage-index.ts). */
+  footage: {
+    sources(): Promise<FootageSource[]>
+    /** The system folder picker, then the picked folder is added. Unchanged list = cancelled. */
+    addSource(): Promise<FootageSource[]>
+    removeSource(id: string): Promise<FootageSource[]>
+    status(): Promise<FootageIndexStatus>
+  }
   style: {
     rules(): Promise<StyleRule[]>
     /** A rule typed in My style. */
@@ -1194,8 +1234,9 @@ export interface ReelApi {
     appIcons(): Promise<Partial<Record<PastEdit['app'], string>>>
     /** Show a found edit in Finder or File Explorer. */
     reveal(id: string): Promise<void>
-    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from. */
-    keepLearned(rules: LearnedRule[], from: string): Promise<StyleRule[]>
+    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from, and the editor
+     * that made it when the lesson read one file. */
+    keepLearned(rules: LearnedRule[], from: string, editor?: EditorName): Promise<StyleRule[]>
     /** Change a rule's words, or pause or resume it. */
     update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */
@@ -1281,7 +1322,7 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
-  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  /** Posting to YouTube (main/posting.ts). Hidden only with REELSTUDIO_POSTING=0. */
   posting: {
     status(): Promise<PostingStatus>
     /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
@@ -1315,7 +1356,7 @@ export type PostPrivacy = 'private' | 'unlisted' | 'public'
 
 /** What Settings and the Post sheet show. Never the key, the session or any Google token. */
 export interface PostingStatus {
-  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  /** Not turned off with REELSTUDIO_POSTING=0, and a usable server address */
   enabled: boolean
   /** A download key is saved (automatic updates on) */
   hasKey: boolean

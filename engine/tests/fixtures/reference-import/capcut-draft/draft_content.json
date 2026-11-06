@@ -1,0 +1,56 @@
+{
+  "id": "6C1E2A70-0000-4000-8000-000000000001",
+  "name": "",
+  "duration": 12000000,
+  "fps": 30.0,
+  "canvas_config": {"width": 1080, "height": 1920, "ratio": "9:16"},
+  "version": 360000,
+  "new_version": "110.0.0",
+  "platform": {"app_source": "cc", "app_version": "5.9.0", "os": "windows"},
+  "materials": {
+    "videos": [
+      {"id": "v-talk", "type": "video", "path": "/Users/me/Movies/clips/talk.mp4", "material_name": "talk.mp4", "duration": 60000000, "width": 1080, "height": 1920},
+      {"id": "v-chart", "type": "photo", "path": "C:/Users/me/Pictures/chart.png", "material_name": "chart.png", "duration": 10800000000, "width": 1080, "height": 1080}
+    ],
+    "audios": [
+      {"id": "a-song", "type": "music", "path": "/Users/me/Music/song.mp3", "name": "song", "duration": 180000000}
+    ],
+    "texts": [
+      {"id": "t-title", "type": "text", "content": "{\"text\":\"Three tips\",\"styles\":[{\"range\":[0,10],\"size\":12}]}"},
+      {"id": "t-cap", "type": "subtitle", "content": "{\"text\":\"so here is the first one\",\"styles\":[]}"}
+    ],
+    "transitions": [
+      {"id": "tr-mix", "type": "transition", "name": "Mix", "duration": 500000, "is_overlap": true}
+    ],
+    "speeds": [
+      {"id": "sp-1", "type": "speed", "speed": 1.0, "mode": 0},
+      {"id": "sp-2", "type": "speed", "speed": 1.0, "mode": 0},
+      {"id": "sp-3", "type": "speed", "speed": 1.0, "mode": 0},
+      {"id": "sp-4", "type": "speed", "speed": 1.0, "mode": 0}
+    ],
+    "effects": [{"id": "fx-1", "type": "video_effect", "name": "Shake"}]
+  },
+  "tracks": [
+    {"id": "track-main", "type": "video", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s4", "material_id": "v-talk", "target_timerange": {"start": 9000000, "duration": 3000000}, "source_timerange": {"start": 40000000, "duration": 3000000}, "speed": 1.0, "visible": true, "volume": 1.0, "extra_material_refs": ["sp-4"]},
+      {"id": "s1", "material_id": "v-talk", "target_timerange": {"start": 0, "duration": 3000000}, "source_timerange": {"start": 10000000, "duration": 3000000}, "speed": 1.0, "visible": true, "volume": 1.0, "extra_material_refs": ["sp-1"]},
+      {"id": "s2", "material_id": "v-talk", "target_timerange": {"start": 3000000, "duration": 3000000}, "source_timerange": {"start": 20000000, "duration": 3000000}, "speed": 1.0, "visible": true, "volume": 1.0, "extra_material_refs": ["sp-2", "tr-mix"]},
+      {"id": "s3", "material_id": "v-talk", "target_timerange": {"start": 6000000, "duration": 3000000}, "source_timerange": {"start": 30000000, "duration": 3000000}, "speed": 1.0, "visible": true, "volume": 1.0, "extra_material_refs": ["sp-3"]}
+    ]},
+    {"id": "track-pip", "type": "video", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s5", "material_id": "v-chart", "target_timerange": {"start": 4000000, "duration": 2000000}, "source_timerange": {"start": 0, "duration": 2000000}, "speed": 1.0, "visible": true, "volume": 1.0, "extra_material_refs": []}
+    ]},
+    {"id": "track-music", "type": "audio", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s6", "material_id": "a-song", "target_timerange": {"start": 0, "duration": 12000000}, "source_timerange": {"start": 0, "duration": 12000000}, "speed": 1.0, "visible": true, "volume": 0.3, "extra_material_refs": []}
+    ]},
+    {"id": "track-title", "type": "text", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s7", "material_id": "t-title", "target_timerange": {"start": 500000, "duration": 2000000}, "visible": true, "extra_material_refs": []}
+    ]},
+    {"id": "track-captions", "type": "text", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s8", "material_id": "t-cap", "target_timerange": {"start": 0, "duration": 1500000}, "visible": true, "extra_material_refs": []}
+    ]},
+    {"id": "track-fx", "type": "effect", "attribute": 0, "flag": 0, "segments": [
+      {"id": "s9", "material_id": "fx-1", "target_timerange": {"start": 0, "duration": 1000000}, "extra_material_refs": []}
+    ]}
+  ]
+}

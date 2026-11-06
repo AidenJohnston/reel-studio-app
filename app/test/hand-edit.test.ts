@@ -137,3 +137,11 @@ describe('hand edits', () => {
     expect(() => parseHandEdit({ ...empty, items: [{ list: 'zooms', key: 'w2>w3', item: { anchor: { from: 'w2', to: 'w3' } } }] })).toThrow()
   })
 })
+
+describe('a hand edit that sets the exposure', () => {
+  it('fails if an exposure outside what the engine renders gets past the main process', () => {
+    const e = (value: unknown) => ({ set: [{ path: ['exposure'], value }], items: [], words: { cut: [], keep: [] }, mirror: [], joins: [] })
+    expect(parseHandEdit(e(1.08)).set).toEqual([{ path: ['exposure'], value: 1.08 }])
+    for (const bad of [0, 9, '1.1', null]) expect(() => parseHandEdit(e(bad)), String(bad)).toThrow()
+  })
+})
