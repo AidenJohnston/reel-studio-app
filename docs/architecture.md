@@ -65,7 +65,8 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 `<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
 listed in My style but the AI doesn't read it, and the app doesn't apply it. A rule may also carry a typed `payload`
 the app applies itself when a new video is made (only `{"kind":"caption-case","case":"lower"}` so far), plus `source`
-(project, title, version) and `consent` (the question the person said Yes to). A rule may instead carry a `check`
+(project, title, version) and `consent` (the question the person said Yes to, and in `also` any later question about
+the same rule they said Yes to). A rule may instead carry a `check`
 the engine measures on every render, such as `{"kind":"captions.maxWords","value":2}` (`ai/src/rules.ts`,
 `engine/reelengine/lint.py`); its words are the app's, and a note can't finish while one fails. `forgotten` lists the questions of
 removed rules, so answering one again cannot bring a rule back. All of these are optional. An older version ignores `paused`, reads a

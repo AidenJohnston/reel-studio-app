@@ -89,6 +89,11 @@ const sameRule = (s: string): string =>
 type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; [field: string]: unknown }
 
 const LOWERCASE_CAPTIONS = 'Use lowercase captions.'
+/** Every question the person said Yes to for this rule (answeredYes in ai/src/style.ts). */
+const answeredYes = (r: StyleRule): string[] => {
+  const also: unknown = r.consent?.also
+  return r.consent ? [r.consent.proposal, ...(Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string') : [])] : []
+}
 
 export const createMockAI: CreateAI = ({ host }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
@@ -357,10 +362,24 @@ export const createMockAI: CreateAI = ({ host }) => {
     async approveStyleProposal(proposal) {
       return withStyle(async (s) => {
         if (s.forgotten?.includes(proposal.id)) return { status: 'forgotten' as const }
-        const same = s.rules.find((r) => r.consent?.proposal === proposal.id)
-        if (same) return { status: same.payload ? ('saved' as const) : ('exists' as const) }
-        if (s.rules.some((r) => r.payload)) return { status: 'exists' as const }
         const at = new Date().toISOString()
+        const same = s.rules.find((r) => answeredYes(r).includes(proposal.id))
+        if (same && !same.payload) return { status: 'exists' as const }
+        if (same) {
+          if (same.paused) {
+            delete same.paused
+            await saveRules(s, s.rules)
+          }
+          return { status: 'saved' as const }
+        }
+        const typed = s.rules.find((r) => r.payload)
+        if (typed) {
+          typed.consent = typed.consent ? { ...typed.consent, also: [...answeredYes(typed).slice(1), proposal.id] } : { proposal: proposal.id, at }
+          const wasPaused = !!typed.paused
+          delete typed.paused
+          await saveRules(s, s.rules)
+          return { status: wasPaused ? ('saved' as const) : ('exists' as const) }
+        }
         const rule = { id: randomUUID(), text: LOWERCASE_CAPTIONS, createdAt: at, payload: proposal.payload, source: proposal.source, consent: { proposal: proposal.id, at } }
         await saveRules(s, [...s.rules, rule])
         return { status: 'saved' as const }
@@ -391,8 +410,9 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
     async removeStyleRule(id) {
       await withStyle((s) => {
-        const asked = s.rules.find((r) => r.id === id)?.consent?.proposal
-        if (asked) s.forgotten = [...(s.forgotten ?? []), asked]
+        const rule = s.rules.find((r) => r.id === id)
+        const asked = rule ? answeredYes(rule) : []
+        if (asked.length) s.forgotten = [...(s.forgotten ?? []), ...asked]
         return saveRules(s, s.rules.filter((r) => r.id !== id))
       })
     }
