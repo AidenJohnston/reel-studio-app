@@ -15,7 +15,7 @@ const QUOTE_WORDS = 6
 /** What a pace does to this reel, from the plan its render would make (engine pace-preview). */
 function measured(p: PacePreview['paces'][string] | undefined): string | null {
   if (!p) return null
-  const often = `About ${Math.round(p.perMinute)} changes a minute in this reel`
+  const often = `About ${Math.round(p.perMinute)} changes a minute`
   return p.opening > p.openingMax ? `${often}, ${p.opening} in the first 5 seconds: a busy start.` : `${often}.`
 }
 

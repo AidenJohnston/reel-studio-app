@@ -55,8 +55,10 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     const paces = page.getByRole('radiogroup', { name: 'Pace' })
     await expect(paces.getByRole('radio', { name: 'No set pace' })).toBeChecked()
     // fails if a pace is offered blind: each row says how often it changes this reel, from the engine's plan
-    await expect(page.getByTestId('pace-standard-measured')).toHaveText('About 14 changes a minute in this reel.')
-    await expect(page.getByTestId('pace-hyper-measured')).toHaveText('About 26 changes a minute in this reel, 5 in the first 5 seconds: a busy start.')
+    await expect(page.getByTestId('pace-standard-measured')).toHaveText('About 14 changes a minute.')
+    await expect(page.getByTestId('pace-hyper-measured')).toHaveText('About 26 changes a minute, 5 in the first 5 seconds: a busy start.')
+    // where the panel opens, before anything scrolls it: the picks play only once made
+    await expect(page.getByTestId('pace-later')).toBeInViewport()
     // fails if Try other moments is offered with no pace to keep
     await expect(page.getByTestId('pace-reshuffle')).toHaveCount(0)
     const rows = page.getByTestId('zoom-row')
@@ -76,7 +78,6 @@ test('pace and zoom-in kinds: picked by hand, made into versions, other moments 
     await expect(page.getByTestId('change-count')).toHaveText('2 changes')
     // nothing here plays on the player until it is made, and the panel says so where it is seen
     await expect(page.getByTestId('pace-later')).toHaveText('The player shows the pace and zoom-ins as made. What you pick here plays in Version 2.')
-    await expect(page.getByTestId('pace-later')).toBeInViewport()
     // Undo steps back one choice at a time
     await page.getByTestId('drawer-undo').click()
     await expect(rows.nth(0).getByRole('radio', { name: 'Instant' })).toHaveAttribute('aria-checked', 'true')
