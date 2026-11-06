@@ -248,6 +248,9 @@ def test_a_match_that_did_not_line_up_is_reported_with_its_reason():
     tl.match_joins[0].update(played='match', matched=True)
     tl.segments[1].join_transition = 'match'
     assert 'match-unmet' not in rules(lint_edit(p, tl))
+    # where the take runs straight on there is no cut, so nothing plays as a plain cut
+    tl.match_joins = [{'keep': 1, 'played': 'none', 'matched': False}]
+    assert {'match-no-cut'} <= rules(lint_edit(p, tl)) and 'match-unmet' not in rules(lint_edit(p, tl))
 
 
 def test_a_zoom_on_a_match_cut_is_flagged_and_one_clear_of_it_is_not():

@@ -386,6 +386,9 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         if join["transition"] == "match":
             point = (match_points or {}).get(kk) or {}
             matched = point.get("matched") is True and abs(incoming.src_start - float(point.get("inStart", -1))) < EPS
+            if point.get("matched") is True and not matched:
+                # a cut made by shortening a pause inside one kept stretch: the bounds are only moved at a range start
+                point = {**point, "matched": False, "why": "this cut sits inside one kept stretch, where a pause was shortened, and can't be moved"}
             # an unmatched join is labelled what it is: a plain cut
             incoming.join_transition = "match" if matched else "hard"
             match_joins.append({"keep": kk, "out": si - 1, "in": si, "word": wi, "prevWord": previous_end,

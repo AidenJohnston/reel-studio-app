@@ -1153,7 +1153,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
     for m in tl.match_joins:
-        if m.get("played") != "match":
+        if m.get("played") == "hard":
             warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
@@ -1265,7 +1265,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift)
+    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
     result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps,
               "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,

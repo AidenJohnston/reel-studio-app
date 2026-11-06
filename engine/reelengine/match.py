@@ -185,20 +185,41 @@ def _head_box(track: Optional[dict], times: list, crop: tuple, disp: tuple) -> O
     return ((cx - gw - x) / cw, (cy - gh - y) / ch, (cx + gw - x) / cw, (cy + gh - y) / ch)
 
 
-def _descriptors(path: Path, times: list, crop: tuple, disp: tuple, mirrored: bool, ctx=None) -> list:
-    """[descriptor] of the frame shown from each time, cropped as the output crops it."""
+def _descriptors(path: Path, frames: list, fps: float, crop: tuple, disp: tuple, mirrored: bool, ctx=None) -> list:
+    """[descriptor] of source frames `frames` (frame k shows from k/fps), cropped as the output crops it.
+
+    One decode of the run k0..k1, seeking half a frame before k0: an accurate seek returns the first
+    frame at or after the seek time, so the first one out is frame k0 whatever the rounding, and frame
+    k0 + j follows it (sources are constant frame rate). compose_util.decode_frames is not used: it
+    labels frames from a seek rounded to milliseconds, which is one frame off for times on the grid."""
+    import subprocess
     import cv2
-    from .compose_util import decode_frames
+    from .compose_util import ffmpeg_bin
+    k0, k1 = min(frames), max(frames)
+    w = DECODE_WIDTH
+    h = max(2, int(round(disp[1] * w / disp[0])) // 2 * 2)
+    n = k1 - k0 + 1
+    cmd = [ffmpeg_bin(ctx), "-v", "error", "-nostdin", "-ss", f"{max(0.0, (k0 - 0.5) / fps):.6f}", "-i", str(path),
+           "-frames:v", str(n), "-an", "-vf", f"scale={w}:{h}:flags=area,format=gray", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+    raw = subprocess.run([str(c) for c in cmd], capture_output=True, timeout=120, check=True).stdout
+    if len(raw) < n * w * h:
+        raise ValueError(f"{len(raw) // (w * h)} of {n} frames decoded")
     x, y, cw, ch = crop
+    kx, ky = w / float(disp[0]), h / float(disp[1])
     out = []
-    for _, bgr in decode_frames(path, 0, DECODE_WIDTH, times=[max(0.0, t) for t in times], ctx=ctx):
-        k = bgr.shape[1] / float(disp[0])
-        part = bgr[int(round(y * k)):int(round((y + ch) * k)), int(round(x * k)):int(round((x + cw) * k))]
-        grey = cv2.cvtColor(part, cv2.COLOR_BGR2GRAY)
-        out.append(describe(grey[:, ::-1] if mirrored else grey))
-    if len(out) != len(times):
-        raise ValueError(f"{len(out)} of {len(times)} frames decoded")
+    for k in frames:
+        grey = np.frombuffer(raw[(k - k0) * w * h:(k - k0 + 1) * w * h], np.uint8).reshape(h, w)
+        part = grey[int(round(y * ky)):int(round((y + ch) * ky)), int(round(x * kx)):int(round((x + cw) * kx))]
+        out.append(describe(np.ascontiguousarray(part[:, ::-1] if mirrored else part)))
     return out
+
+
+def _stat(path: Path):
+    try:
+        st = path.stat()
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
 
 
 def _cache_key(parts: list) -> str:
@@ -260,20 +281,21 @@ def plan(project_dir: Path, proj: dict, tl) -> dict:
         except (KeyError, OSError) as exc:
             verdicts[join["keep"]] = {"matched": False, "why": f"a take could not be read ({exc.__class__.__name__})"}
             continue
+        # the face track decides the head box, so a new analysis of the take is a new search
         key = _cache_key([VERSION, LOOK_MIN, MOVE_MAX, HEAD_GROW, DESCRIPTOR, DECODE_WIDTH,
-                          [(str(s["path"]), s["stat"], s["crop"], is_mirrored(s["src"])) for s in sides],
+                          [(str(s["path"]), s["stat"], s["crop"], is_mirrored(s["src"]),
+                            _stat(project_dir / "work" / f"face-{s['src']['id']}.json")) for s in sides],
                           win["outTimes"], win["inTimes"], win["planned"]])
         if key in cache:
             verdicts[join["keep"]] = cache[key]
             continue
         o, i = sides
-        # the frame shown just before an end at te starts one frame earlier
-        # (decode_frames returns the first frame at or after each time, so step back a hair off the grid)
-        out_frames = [t - 1.0 / win["outFps"] - 1e-4 for t in win["outTimes"]]
-        in_frames = [t - 1e-4 for t in win["inTimes"]]
+        # an end at te shows frame te*fps - 1 last; a start at ts shows frame ts*fps first
+        out_frames = [round(t * win["outFps"]) - 1 for t in win["outTimes"]]
+        in_frames = [round(t * win["inFps"]) for t in win["inTimes"]]
         try:
-            da = _descriptors(o["path"], out_frames, o["crop"], o["disp"], is_mirrored(o["src"]))
-            db = _descriptors(i["path"], in_frames, i["crop"], i["disp"], is_mirrored(i["src"]))
+            da = _descriptors(o["path"], out_frames, win["outFps"], o["crop"], o["disp"], is_mirrored(o["src"]))
+            db = _descriptors(i["path"], in_frames, win["inFps"], i["crop"], i["disp"], is_mirrored(i["src"]))
         except Exception as exc:   # noqa: BLE001 -- an unreadable stretch only costs the match
             log(f"match join {join['keep']}: frames could not be read: {exc!r}")
             verdicts[join["keep"]] = {"matched": False, "why": "the frames around this join could not be read"}

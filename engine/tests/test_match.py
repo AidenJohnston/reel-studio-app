@@ -223,3 +223,14 @@ def test_the_engine_refuses_a_match_where_the_head_never_comes_back(tmp_path):
     assert row["played"] == "hard"
     assert "moves too much" in row["why"]
     assert tl.segments[1].join_transition == "hard"
+
+
+def test_frames_are_read_by_index_not_by_a_rounded_seek(tmp_path):
+    """Fails if a time on the frame grid reads the next frame (a seek rounded to milliseconds did at 30 fps)."""
+    path = tmp_path / "count.mp4"
+    frames = b"".join(np.full((H, W), 10 + 6 * k, np.uint8).tobytes() for k in range(40))
+    subprocess.run([compose_util.ffmpeg_bin(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "gray", "-s", f"{W}x{H}",
+                    "-r", "30", "-i", "-", "-c:v", "mpeg4", "-q:v", "1", "-pix_fmt", "yuv420p", str(path)], input=frames, check=True)
+    picked = [26, 27, 31]
+    got = match._descriptors(path, picked, 30.0, (0, 0, W, H), (W, H), False)
+    assert [round(float(g["grey"].mean()) * 255) for g in got] == pytest.approx([10 + 6 * k for k in picked], abs=2)

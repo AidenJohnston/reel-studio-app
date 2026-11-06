@@ -24,6 +24,10 @@ def test_meter_counts_each_visible_change_once():
     assert short["first30"]["seconds"] == 2
     assert short["first5"]["perMinute"] == 30
     assert visual_change_meter(0, [], [], [])["overall"]["perMinute"] == 0
+    # fails if changes two frames apart at 60 fps are merged as if the video were 30 fps
+    close = [SimpleNamespace(out_start=t) for t in [0, 1.0, 1.03]]
+    assert visual_change_meter(4, close, [], [], fps=60)["overall"]["total"] == 2
+    assert visual_change_meter(4, close, [], [], fps=30)["overall"]["total"] == 1
 
 
 @pytest.mark.parametrize("style", [
