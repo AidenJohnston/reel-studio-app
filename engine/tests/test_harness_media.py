@@ -1,5 +1,8 @@
 """Media checks using decoded samples and fake processes, without FFmpeg or media files."""
 from pathlib import Path
+import subprocess
+import sys
+import threading
 
 import numpy as np
 import pytest
@@ -40,3 +43,40 @@ def test_still_comparison_uses_the_engines_rounded_seek(monkeypatch):
                                 [], {"otherPsnrMinDb": 30.0}, (2, 2))
     assert result["status"] == "unset"
     assert result["metrics"]["otherPsnr"]["value"] == "inf"
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_frame_decoder_handles_stderr_larger_than_a_pipe(monkeypatch, exit_code):
+    popen = subprocess.Popen
+    children, timers = [], []
+    script = ("import sys; sys.stderr.buffer.write(b'x' * (2 * 1024 * 1024) + b'damaged clip'); "
+              "sys.stderr.buffer.flush(); sys.stdout.buffer.write(bytes([10, 20, 30])); "
+              f"sys.stdout.buffer.flush(); sys.exit({exit_code})")
+
+    def decoder(cmd, **kwargs):
+        child = popen([sys.executable, "-c", script], **kwargs)
+        children.append(child)
+        # Bound the regression case: an undrained stderr pipe prevents the RGB frame from arriving.
+        timer = threading.Timer(10, child.kill)
+        timers.append(timer)
+        timer.start()
+        return child
+
+    monkeypatch.setattr(media.subprocess, "Popen", decoder)
+    frames = media.iter_frames("ffmpeg", Path("damaged.mp4"), 1, 1)
+    try:
+        assert next(frames).tolist() == [[[10, 20, 30]]]
+        if exit_code:
+            with pytest.raises(RuntimeError, match=r"failed \(7\): .*damaged clip"):
+                next(frames)
+        else:
+            assert list(frames) == []
+    finally:
+        frames.close()
+        for timer in timers:
+            timer.cancel()
+            timer.join()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
