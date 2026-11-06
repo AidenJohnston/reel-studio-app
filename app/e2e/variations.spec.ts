@@ -40,7 +40,9 @@ test('one version at each pace, made in a row and compared', async () => {
     await expect(page.getByTestId('chat')).toContainText(`Variation: Fast pace (seed ${paces[2].cutStyle.seed})`)
 
     await page.getByTestId('log-play-4').click()
-    await page.getByTestId('what-changed-4').click()
+    // the newest version's rows may already be open: a click would close them
+    const changed = page.getByTestId('what-changed-4')
+    if ((await changed.getAttribute('aria-expanded')) !== 'true') await changed.click()
     await page.getByTestId('compare-4').click()
     await expect(page.getByTestId('compare-pick-3')).toBeVisible()
     await expect(page.getByTestId('compare-pick-4')).toBeVisible()

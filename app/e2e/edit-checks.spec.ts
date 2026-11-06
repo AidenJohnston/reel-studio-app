@@ -20,7 +20,9 @@ test("a version's checks show under What changed, failing ones first", async () 
     await makeReel(page, media.video)
     // a version nobody has watched offers Watch in that place: play it first
     await page.getByTestId('log-play-1').click()
-    await page.getByTestId('what-changed-1').click()
+    // the newest version's rows may already be open: a click would close them
+    const changed = page.getByTestId('what-changed-1')
+    if ((await changed.getAttribute('aria-expanded')) !== 'true') await changed.click()
     const checks = page.getByTestId('edit-checks-1')
     await expect(checks).toContainText('2 of 3 checks pass.')
     await expect(checks).toContainText('not whether the reel works')

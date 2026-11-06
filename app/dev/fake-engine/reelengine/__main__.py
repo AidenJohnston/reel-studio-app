@@ -641,14 +641,16 @@ def cmd_reference_scan(args: list[str]) -> dict:
 def cmd_score(args: list[str]) -> dict:
     """The real engine reads a version's reports (reelengine/score.py). This stand-in plays the source straight through
     and never normalizes its sound, so it says the file plays and the loudness is off target."""
-    vdir = Path(take(args, "--project")) / "versions" / f"v{int(take(args, '--version'))}"
+    # take() consumes each flag, so each is read once
+    project, version = take(args, "--project"), int(take(args, "--version"))
+    vdir = Path(project) / "versions" / f"v{version}"
     if not (vdir / "project.json").exists():
         raise Fail("NOT_FOUND", "That version isn't saved any more.")
     cues = json.loads((vdir / "captions.json").read_text("utf-8")).get("cues", []) if (vdir / "captions.json").exists() else []
     checks = [{"id": "subtitleSafeZone", "ok": True, "count": 0, "subtitles": len(cues)},
               {"id": "loudness", "ok": False, "lufs": -19.6, "target": -14.0},
               {"id": "videoFile", "ok": True, "count": 0, "failed": []}]
-    return {"version": int(take(args, "--version")), "checks": checks, "passed": 2, "measured": 3}
+    return {"version": version, "checks": checks, "passed": 2, "measured": 3}
 
 
 def cmd_doctor(_args: list[str]) -> dict:

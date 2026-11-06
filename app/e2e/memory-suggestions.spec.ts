@@ -30,12 +30,13 @@ function handMade(slug: string, title: string, before: object, after: object): v
 
 test('hand edits in two reels become a suggestion; Edit keeps it in my words, No thanks never asks again', async () => {
   test.setTimeout(5 * 60_000)
-  handMade('bread', 'Baking bread', project(105), project(126, 'quiet'))
-  handMade('coffee', 'Pour-over coffee', project(96), project(120, 'quiet'))
   const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data') })
   try {
     test.skip((await page.evaluate(() => window.reel.app.info())).ai !== 'mock', 'the mock keeps My style')
+    // after the first run, which removes every reel it finds
     await passFirstRun(page)
+    handMade('bread', 'Baking bread', project(105), project(126, 'quiet'))
+    handMade('coffee', 'Pour-over coffee', project(96), project(120, 'quiet'))
     await page.getByTestId('nav-style').click()
 
     const card = page.getByTestId('style-suggestions')
