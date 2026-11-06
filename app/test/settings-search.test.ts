@@ -23,6 +23,10 @@ describe('Settings search', () => {
     finds('licence', 'licence')
     finds("what's new", 'whats-new')
     finds('ÉDITOR', 'editor')
+    // what other apps call the way in: Vyra and Eddie AI both sell it as an "MCP server" or "connector"
+    finds('MCP', 'outside-apps')
+    finds('connector', 'outside-apps')
+    finds('MCP', 'note-runner')
   })
 
   it('fails if a search shows settings that do not match, or an empty search hides everything', () => {
@@ -40,7 +44,7 @@ describe('Settings sections', () => {
   it("fails if the sections leave spec section 8's order, or Editor or Advanced loses a row it holds", () => {
     expect(Object.keys(SECTIONS)).toEqual(['editor', 'privacy', 'reels', 'posting', 'about', 'advanced'])
     // the editor component holds the models for each stage, your own server and an API key (r12: one component)
-    expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'models', 'own-server', 'api-key'])
+    expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'note-runner', 'outside-apps', 'models', 'own-server', 'api-key'])
     const advanced = SETTING_IDS.filter((id) => SETTINGS[id].section === 'advanced')
     expect(advanced).toEqual(['stock-keys', 'engine-cache', 'logs', 'first-run'])
   })

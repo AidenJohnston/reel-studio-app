@@ -40,11 +40,15 @@ it.each(['refused', 'no-roundtrip'])('falls back for the whole session when the 
     { toolCalls: [{ id: 'f1', name: 'finish', args: { summary_for_user: 'Fallback one.' } }] },
     { toolCalls: [{ id: 'f2', name: 'finish', args: { summary_for_user: 'Fallback two.' } }] },
   ]);
-  const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model) });
+  // Settings › How notes run says it after it happens: once per failed self-test, with its reason
+  const fellBack: string[] = [];
+  const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model, (why) => fellBack.push(why)) });
   const statuses: string[] = [];
   const event = (e: { type: string; message?: string }) => { if (e.type === 'status') statuses.push(e.message ?? ''); };
   expect((await ai.applyNote(s.dir, 'one', event)).summary).toBe('Fallback one.');
   expect((await ai.applyNote(s.dir, 'two', event)).summary).toBe('Fallback two.');
+  expect(fellBack).toHaveLength(1);
+  expect(fellBack[0]).toMatch(probe === 'refused' ? /MCP refused|claude/i : /no_roundtrip/);
   expect((await fs.readFile(s.starts, 'utf8')).trim().split('\n')).toEqual(['probe']);
   expect(statuses.join('\n')).toMatch(/claude-code.*self-test.*(?:failed|harness_|round.trip)/i);
   expect(model.requests).toHaveLength(2);

@@ -12,6 +12,7 @@ import { useUpdateState } from '../components/update'
 import { AutoUpdatesControl, autoUpdatesLine, LegalText, UpdateSettingsRow, useUpdateKey, WhatsNew } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 import { CHECKS_NOTE, Privacy } from '../components/ModelsAndPrivacy'
+import { NoteRunnerRow, OutsideAppsRow } from '../components/AiApps'
 import { TitleBarSlot } from '../components/titlebar'
 import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type SettingId } from '../components/settings-index'
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
@@ -226,6 +227,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                   control={<Switch on={checkEdits} disabled={savingChecks} labelledBy="set-check-edits" onToggle={() => void toggleCheckEdits()} testid="check-edits" />}
                 />
               )}
+              <NoteRunnerRow onError={(m) => notify(m, 'error')} />
+              <OutsideAppsRow onError={(m) => notify(m, 'error')} />
             </Section>
 
             <Section id="privacy">

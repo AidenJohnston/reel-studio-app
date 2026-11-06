@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, NoteRunnerInfo, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
@@ -186,6 +186,9 @@ export interface AI {
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
+  /** Settings › Editor › How notes run. Optional: older packages run every note in Reel Studio's own editor. */
+  noteRunner?(): Promise<NoteRunnerInfo>
+  setNoteRunner?(runner: NoteRunnerInfo['runner']): Promise<NoteRunnerInfo>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */
   retireSignInWithChatGPT?(): Promise<boolean>
   /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */

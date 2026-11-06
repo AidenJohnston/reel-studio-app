@@ -19,6 +19,8 @@ const SHARING_WORDS = ['telemetry', 'analytics', 'data sharing']
 export const SETTINGS = {
   editor: { section: 'editor', label: 'Choose your editor', synonyms: ['AI', 'AI editor', 'Claude', 'Claude Code', 'ChatGPT', 'OpenAI', 'GPT', 'provider', 'connect', 'sign in', 'log in', 'sign out', 'disconnect', 'account', 'plan', 'subscription', 'CLIProxyAPI', 'proxy', 'hub', 'accounts', 'limits', 'usage', 'reset', 'test', 'Codex'] },
   'check-edits': { section: 'editor', label: 'Double-check each edit', synonyms: ['check', 'checker', 'double check', 'review', 'second look', 'verify', 'fix', 'mistakes'] },
+  'note-runner': { section: 'editor', label: 'How notes run', synonyms: ['Claude Code', 'Codex', 'MCP', 'agent', 'harness', 'tools', 'run notes', 'app'] },
+  'outside-apps': { section: 'editor', label: 'Let other AI apps use Reel Studio', synonyms: ['MCP', 'MCP server', 'Claude', 'Claude Desktop', 'Claude Code', 'Codex', 'ChatGPT', 'connector', 'integration', 'agent', 'automation', 'API', 'access', 'reset access'] },
   models: { section: 'editor', label: 'Models', synonyms: [...MODEL_WORDS, 'stage', 'stages', 'editor model', 'checker', 'writer', 'titles', 'planning', 'more reels', 'Try 2', 'reasoning', 'effort', 'GPT', 'small model'] },
   'own-server': { section: 'editor', label: 'Your own AI server', synonyms: ['server', 'local', 'self-hosted', 'Ollama', 'LM Studio', 'OpenAI-compatible', 'Anthropic-compatible', 'endpoint', 'base URL', 'proxy', 'custom', 'advanced'] },
   'api-key': { section: 'editor', label: 'Anthropic API key', synonyms: ['key', 'API', 'token', 'console', 'billing', 'pay as you go', 'advanced'] },

@@ -507,7 +507,7 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
 }
 
 /**
- * "Double-check each edit" for a note that ran in an MCP harness (mcp-harness-2, dev only): the other harness
+ * "Double-check each edit" for a note that ran in an MCP harness (mcp-harness-2): the other harness
  * reviews the candidate read-only (askHarnessChecker) and this one repairs, at most MAX_REPAIRS times, within
  * the note's token allowance. Returns the reply, with what is still wrong when the repairs ran out.
  */
@@ -597,7 +597,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   // what it froze and the records it appended (restoreAssets)
   const assetsBefore = await listAssets(projectDir);
   const ledgerBefore = await ledgerBytes(projectDir);
-  // what runs the note's AI turns: our own loop, or Claude Code over MCP behind the dev setting (mcp-harness)
+  // what runs the note's AI turns: our own loop, or the person's Claude Code or Codex app over MCP (Settings › How notes run)
   const harness = deps.harness ?? loopHarness(provider);
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
@@ -655,12 +655,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     if (undone) ctx.state.changed.clear();
     // only a reply that is nothing but a question passes: "I cut the intro. Want more?" still claims the cut
     const question = undone && /^[^.!]*\?$/.test(r.finished?.trim() ?? '') ? r.finished : null;
-    // Settings > "Double-check each edit": a checker reviews a note that changed the edit before its final render
-    // a note in an MCP harness (dev only) is checked by the other harness instead (mcp-harness-2, checkInHarness)
-    const harnessed = opts.checkEdit && ctx.state.changed.size && deps.harness
+    // Settings > "Double-check each edit": a checker reviews a note that changed the edit before its final render.
+    // A note run in one app (Claude Code or Codex over MCP) is checked by the other app when that one is signed in
+    // (mcp-harness-2, checkInHarness); without it, by the checker model, as a note in our own loop is.
+    const inOtherApp = !!(deps.harness && deps.checkerHarness);
+    const harnessed = opts.checkEdit && ctx.state.changed.size && inOtherApp
       ? await checkInHarness(deps, harness, ctx, { noteText, files, images, start: p0, said: r.finished || 'I saved your preference.', tokens: r.tokens }, onEvent, signal)
       : null;
-    const review = !opts.checkEdit || !ctx.state.changed.size || deps.harness ? null : await checkAndRepair(deps, provider, ctx, label, p0,
+    const review = !opts.checkEdit || !ctx.state.changed.size || inOtherApp ? null : await checkAndRepair(deps, provider, ctx, label, p0,
       { files, images, assets: [...attached, ...earlier].map((a) => a.asset) }, onEvent, signal)
       // a checker model of its own only asked (askChecker), so no agent run disposed of it
       .finally(() => (deps.checker && deps.checker !== provider ? deps.checker.dispose?.() : undefined));

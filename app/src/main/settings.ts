@@ -40,6 +40,8 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   timeline: boolean
   /** the first run's sample plays its two sounds */
   soundEffects: boolean
+  /** Settings › Editor › "Let other AI apps use Reel Studio" (main/outside-access.ts): off until the person turns it on */
+  outsideApps: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -58,6 +60,7 @@ const DEFAULTS: Settings = {
   // Sam asked for the timeline as a toggle that starts on (spec §7)
   timeline: true,
   soundEffects: true,
+  outsideApps: false,
   // Connection and publishing stay opt-in until the broker and Meta app have been configured.
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],
   // Posting requires explicit developer configuration and approval of the requested scopes.

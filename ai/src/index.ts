@@ -115,11 +115,21 @@ export interface AISettings {
   /** each connection's key is its own encrypted file, never in here */
   connections?: CustomConnection[];
   activeConnection?: string;
-  /** Dev only: the selected CLI runs notes with the app's tools over MCP. "Double-check each edit" is the app's
-   * setting (#73), passed with each note. */
+  /** Settings › Editor › How notes run: the person's own Claude Code or Codex app runs each note with Reel Studio's
+   * tools over MCP, when it is also the editor in use (noteHarness). Unset: Reel Studio's own loop. "Double-check each
+   * edit" is the app's setting (#73), passed with each note. */
   harness?: 'claude-code' | 'codex';
   /** set when the old in-app "Sign in with ChatGPT" was signed out on upgrade; cleared once the Codex app is chosen */
   chatgptMoved?: boolean;
+}
+
+/** Settings › Editor › How notes run. `app`: the editor in use's own app, offered only while it is the active editor and
+ * installed and signed in; null hides the choice. `fellBack`: this session's self-test failed, so its notes ran on Reel
+ * Studio's editor instead (SessionHarness). */
+export interface NoteRunnerInfo {
+  runner: 'reelstudio' | 'app';
+  app: 'claude-code' | 'codex' | null;
+  fellBack?: { app: 'claude-code' | 'codex'; reason: string; at: string };
 }
 
 export interface CustomConnection {
@@ -727,39 +737,59 @@ export function createAI(opts: CreateAIOptions) {
     }
   }
 
-  /** What runs a note's AI turns: Claude Code or Codex over MCP behind the dev setting, else our own loop (undefined). */
+  /** The app the editor in use runs in, when it can run notes over MCP: the active editor is that app, and the app is
+   * installed and signed in (the same detection the editor uses, localClaude.ts and localCodex.ts). */
+  async function harnessApp(): Promise<{ app: 'claude-code' | 'codex'; bin?: string } | null> {
+    const id = (await active()).id;
+    if (id === 'claude-cli') { const c = await localClaude(); return c.state === 'ready' ? { app: 'claude-code', ...(c.bin ? { bin: c.bin } : {}) } : null; }
+    if (id === 'codex-cli') { const c = await localCodex(); return c.state === 'ready' ? { app: 'codex', ...(c.bin ? { bin: c.bin } : {}) } : null; }
+    return null;
+  }
+
+  /** What runs a note's AI turns: the person's Claude Code or Codex app over MCP (Settings › How notes run), else our
+   * own loop (undefined). One SessionHarness per app, binary and model for the app session: its self-test runs once. */
   const sessionHarnesses = new Map<string, Harness>();
+  /** the last self-test that failed this session, for Settings (NoteRunnerInfo.fellBack) */
+  let fellBack: NoteRunnerInfo['fellBack'];
   async function noteHarness(provider: ModelProvider | null): Promise<Harness | undefined> {
     if (opts.harnessOverride) return opts.harnessOverride;
-    if (!opts.dev || opts.providerOverride || !provider) return undefined;
+    if (opts.providerOverride || !provider) return undefined;
     const s = await settings();
-    const id = (await active()).id;
-    if (!((s.harness === 'claude-code' && id === 'claude-cli') || (s.harness === 'codex' && id === 'codex-cli'))) return undefined;
-    // one way to find each CLI: localClaude.ts and localCodex.ts, as the editor itself uses
-    const bin = s.harness === 'claude-code' ? (await localClaude()).bin : (await localCodex()).bin;
-    const key = JSON.stringify([s.harness, bin, s.cliModel]);
+    if (!s.harness) return undefined;
+    const found = await harnessApp();
+    if (!found || found.app !== s.harness) return undefined;
+    const app = found.app;
+    const key = JSON.stringify([app, found.bin, s.cliModel]);
     let harness = sessionHarnesses.get(key);
     if (!harness) {
-      const o = { model: s.cliModel, env: env(), ...(bin ? { bin } : {}) };
-      const native = s.harness === 'codex' ? new CodexHarness(o) : new ClaudeCodeHarness(o);
-      harness = new SessionHarness(native, () => s.harness === 'codex'
+      const o = { model: s.cliModel, env: env(), ...(found.bin ? { bin: found.bin } : {}) };
+      const native = app === 'codex' ? new CodexHarness(o) : new ClaudeCodeHarness(o);
+      harness = new SessionHarness(native, () => app === 'codex'
         ? new CodexCliProvider(o)
-        : new ClaudeCliProvider({ ...o, session: true }));
+        : new ClaudeCliProvider({ ...o, session: true }),
+      (reason) => { fellBack = { app, reason, at: new Date().toISOString() }; });
       sessionHarnesses.set(key, harness);
     }
     return harness;
   }
 
+  async function noteRunner(): Promise<NoteRunnerInfo> {
+    const found = await harnessApp();
+    const s = await settings();
+    return { runner: found && s.harness === found.app ? 'app' : 'reelstudio', app: found?.app ?? null, ...(fellBack ? { fellBack } : {}) };
+  }
+
+  /** "Double-check each edit" for a note run in one app: the other app checks it, when that one is installed and signed
+   * in. Without it (undefined) the editor checks with the note's own model instead (editor.ts). */
   async function checkerHarness(editorHarness: Harness | undefined): Promise<Harness | undefined> {
     if (opts.checkerHarnessOverride) return opts.checkerHarnessOverride;
-    if (!opts.dev) return undefined;
     if (editorHarness?.id === 'claude-code') {
-      const bin = (await localCodex()).bin;
-      return new CodexHarness({ env: env(), ...(bin ? { bin } : {}) });
+      const c = await localCodex();
+      return c.state === 'ready' ? new CodexHarness({ env: env(), ...(c.bin ? { bin: c.bin } : {}) }) : undefined;
     }
     if (editorHarness?.id === 'codex') {
-      const bin = (await localClaude()).bin;
-      return new ClaudeCodeHarness({ env: env(), ...(bin ? { bin } : {}) });
+      const c = await localClaude();
+      return c.state === 'ready' ? new ClaudeCodeHarness({ env: env(), ...(c.bin ? { bin: c.bin } : {}) }) : undefined;
     }
     return undefined;
   }
@@ -814,6 +844,19 @@ export function createAI(opts: CreateAIOptions) {
     },
     /** Stops the check call setActive('claude-cli') is making; setActive then throws AIError 'cancelled' and saves nothing. */
     cancelCheck(): void { checking?.abort(); },
+    /** Settings › Editor › How notes run. */
+    noteRunner,
+    /** `app` runs notes in the editor in use's own app; refused unless that app is offered (noteRunner().app). Choosing
+     * again forgets this session's self-test, so the next note tries the app again. */
+    async setNoteRunner(runner: 'reelstudio' | 'app'): Promise<NoteRunnerInfo> {
+      if (runner !== 'reelstudio' && runner !== 'app') throw new AIError('bad_request', 'Choose how notes run.');
+      const found = await harnessApp();
+      if (runner === 'app' && !found) throw new AIError('not_available', 'Connect your Claude Code app or Codex app as your editor first.');
+      await saveSettings({ harness: runner === 'app' ? found!.app : undefined });
+      sessionHarnesses.clear();
+      fellBack = undefined;
+      return noteRunner();
+    },
     /** A fresh look at the person's own Claude Code app: state, version, plan kind and the binary path (for the
      * app's sign-in window). Never an e-mail, organization or token. */
     async claudeCodeStatus(): Promise<LocalClaude> { return localClaude(true); },
@@ -1072,9 +1115,10 @@ export function createAI(opts: CreateAIOptions) {
         const fell: string[] = [];
         const provider = await modelProvider('editor', fell);
         const harness = await noteHarness(provider);
-        // "Double-check each edit": in our own loop the checker role's model reviews (#73); a note in an MCP harness
-        // is reviewed by the other harness (mcp-harness-2)
-        const checker = !opts.checkEdit ? {} : harness ? { checkerHarness: await checkerHarness(harness) } : { checker: await modelProvider('checker', fell) };
+        // "Double-check each edit": in our own loop the checker role's model reviews (#73); a note in one app is
+        // reviewed by the other app when it is signed in (mcp-harness-2), else by the checker role's model too
+        const otherApp = opts.checkEdit && harness ? await checkerHarness(harness) : undefined;
+        const checker = !opts.checkEdit ? {} : otherApp ? { checkerHarness: otherApp } : { checker: await modelProvider('checker', fell) };
         const r = withFallbacks(await editor.applyNote({ ...d, ...checker, harness }, provider, projectDir, note, onEvent, signal, opts), fell);
         return r.version !== undefined && r.changed.length ? { ...r, ...(await madeWith(provider)) } : r;
       }));

@@ -842,6 +842,24 @@ export interface MergeRequest {
   take: Record<'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover', 'ours' | 'theirs'>
 }
 
+/** Settings › Editor › How notes run (ai NoteRunnerInfo). `app`: the editor in use's own app, offered only while it is
+ * the active editor and is installed and signed in; null hides the choice. `fellBack`: that app's self-test failed this
+ * session, so its notes ran on Reel Studio's editor. */
+export interface NoteRunnerInfo {
+  runner: 'reelstudio' | 'app'
+  app: 'claude-code' | 'codex' | null
+  fellBack?: { app: 'claude-code' | 'codex'; reason: string; at: string }
+}
+
+/** Settings › Editor › Let other AI apps use Reel Studio (main/outside-access.ts). */
+export interface OutsideStatus {
+  on: boolean
+  /** the AI apps connected now, by the name each gave */
+  connected: string[]
+  /** what to paste into each AI app; null while off */
+  setup: { claudeCode: string; claudeDesktop: string; codex: string; codexToml: string } | null
+}
+
 export interface ReelApi {
   insights: { get(options?: InsightsOptions): Promise<InsightsSummary> }
   tiktok: TikTokApi
@@ -920,6 +938,9 @@ export interface ReelApi {
      * only on the person's own click, since Codex clears the credentials it has when a sign-in starts. */
     vendorSignIn(v: VendorId): Promise<VendorInfo>
     onVendor(cb: (i: VendorInfo) => void): () => void
+    /** Settings › Editor › How notes run: Reel Studio's editor, or the editor in use's own app with Reel Studio's tools. */
+    noteRunner(): Promise<NoteRunnerInfo>
+    setNoteRunner(runner: NoteRunnerInfo['runner']): Promise<NoteRunnerInfo>
     /** Settings > "Double-check each edit" (off by default). */
     checkEdits(): Promise<boolean>
     setCheckEdits(on: boolean): Promise<boolean>
@@ -1035,6 +1056,14 @@ export interface ReelApi {
     /** Something about a reel's queue changed. */
     onChange(cb: (slug: string) => void): () => void
   },
+  /** Settings › Editor › Let other AI apps use Reel Studio (off by default). */
+  outside: {
+    status(): Promise<OutsideStatus>
+    setEnabled(on: boolean): Promise<OutsideStatus>
+    /** A new key: every connected AI app is disconnected. */
+    reset(): Promise<OutsideStatus>
+    onChange(cb: (s: OutsideStatus) => void): () => void
+  }
   cloud: {
     drives(): Promise<CloudDrive[]>
     /** `id` names this save for `cancel` and `onProgress`. A cancelled save rejects with code CANCELLED and leaves no file. */
