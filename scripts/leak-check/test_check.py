@@ -40,3 +40,8 @@ def test_other_agent_files_never_are(path):
 ])
 def test_only_the_credited_sample_media_may_be_committed(path, shipped):
     assert check.never_commit(path) is not shipped
+
+
+def test_the_trust_list_is_read_as_text_and_only_its_maintainer_line_is_allowed():
+    assert check.is_text(".github/VOUCHED.td", b"github:someone\n")
+    assert "github:" + check.ALLOW[0].split("/")[0] in check.ALLOW
