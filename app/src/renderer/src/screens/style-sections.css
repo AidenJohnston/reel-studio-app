@@ -6,7 +6,8 @@
 .ss-t { min-width: 0; display: grid; gap: 2px; }
 .ss-t > p { max-width: 54ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .ss-acts { flex: none; display: flex; align-items: center; gap: 4px; }
-.ss-empty { padding: 12px 0; box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line); color: var(--ink-3); }
+/* real borders: two stacked inset shadows drew faint side edges on Windows */
+.ss-empty { padding: 12px 0; border-block: 1px solid var(--line); color: var(--ink-3); }
 .ss-error { margin: 0 0 10px; color: var(--pencil); overflow-wrap: anywhere; }
 .ss-note { margin: 0 0 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
 .ss > .banner { margin-bottom: 10px; }
@@ -32,7 +33,7 @@
 .nf > label:first-child { margin-top: 0; }
 .nf > .textarea { height: auto; min-height: 88px; padding: 8px 12px; line-height: var(--lh-base); resize: vertical; }
 .nf-acts { display: flex; gap: 8px; margin-top: 8px; }
-.ns-removed { display: flex; align-items: center; gap: 12px; padding: 10px 0; box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line); color: var(--ink-3); }
+.ns-removed { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-block: 1px solid var(--line); color: var(--ink-3); }
 
 /* ---- reference reels ---- */
 .rr-link { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }

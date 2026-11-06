@@ -35,6 +35,9 @@ function video(name: string, seconds: number): string {
 }
 
 test('reference reels: files are measured, a TikTok link asks for its file, and the readout is what the editor reads', async () => {
+  // three reels are copied, probed and measured one after another (each with an ffmpeg still): on a loaded machine
+  // that ran past the default 300 s once, after its last check
+  test.slow()
   const { video: first } = makeMedia()
   const second = video('their reel ü.mp4', 20)
   const { app, page } = await launch()

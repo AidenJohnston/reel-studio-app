@@ -12,16 +12,19 @@ import './style-sections.css'
 
 const ACCEPT = VIDEO_EXTENSIONS.map((x) => `.${x}`).join(',')
 
+/** One decimal, as the readout shows them. */
+const one = (x: number): number => Math.round(x * 10) / 10
+
 /** The row's one line of numbers, or what is missing. */
 function measuredLine(r: ReferenceView): string {
   const m = r.measure!
-  const shot = m.shots.count <= 1 ? 'one shot, no cuts' : `new shot every ${m.shots.medianSeconds} s`
+  const shot = m.shots.count <= 1 ? 'one shot, no cuts' : `new shot every ${one(m.shots.medianSeconds)} s`
   if (!m.speech) {
     const why = m.speechMissing === 'no-model' ? 'not listened to: the listening model isn’t downloaded yet' : m.speechMissing === 'no-audio' ? 'no sound' : 'no talking heard'
     return `${why} · ${shot}`
   }
-  const hook = m.speech.hook ? ` · first sentence ${m.speech.hook.seconds} s` : ''
-  return `${m.speech.wordsPerSecond} words a second · ${shot}${hook}`
+  const hook = m.speech.hook ? ` · first sentence ${one(m.speech.hook.seconds)} s` : ''
+  return `${one(m.speech.wordsPerSecond)} words a second · ${shot}${hook}`
 }
 
 function Stat({ value, unit, label, testid }: { value: number; unit?: string; label: string; testid: string }) {
