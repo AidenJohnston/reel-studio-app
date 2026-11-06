@@ -267,7 +267,8 @@ function edit(reels: WrappedReel[]): WrappedEdit | null {
       changes: later ? later.version : null,
       fixedIn: later && !now ? later.version : null,
       ...e,
-      ...(now ? { at: now.at, editName: now.editName, note: now.note } : {}),
+      // the whole edit from the version it would change, so its words and the note agree
+      ...(now ? { headline: now.headline, detail: now.detail, at: now.at, editName: now.editName, note: now.note } : {}),
       measure:
         share !== null
           ? `After 2 days, compare the share of the new version people watch with this one's ${pct(share)}.${shorter ? ' Compare the share, not the seconds: the new version is shorter.' : ''}`

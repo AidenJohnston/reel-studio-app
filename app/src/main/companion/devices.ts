@@ -259,8 +259,10 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       try {
         await save()
       } catch (e) {
-        // not kept on disk, so not kept at all: it would vanish at the next launch
+        // Not kept, in memory or on disk: the failed write may have gone halfway, so the list without it is
+        // written again, best effort, and the phone is told pairing failed.
         f.devices = f.devices.filter((x) => x.id !== d.id)
+        await save().catch(() => {})
         throw e
       }
       changed()
@@ -306,6 +308,11 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       if (!sigOk(q.s, hmac(d.secret, mediaMessage(d.id, ref, e, q.save === '1')))) return 'bad-signature'
       touch(d)
       return view(d)
+    },
+
+    /** Still paired: checked again just before a video starts streaming, in case it was removed meanwhile. */
+    async has(id: string): Promise<boolean> {
+      return (await load()).devices.some((d) => d.id === id)
     },
 
     async remove(id: string): Promise<boolean> {

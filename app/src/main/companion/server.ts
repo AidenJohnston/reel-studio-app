@@ -12,7 +12,7 @@
 import { createReadStream, promises as fs, type BigIntStats } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
-import { extname, join, sep } from 'node:path'
+import { extname, isAbsolute, join, relative } from 'node:path'
 import { checkCall, CONTRACT_VERSION, HEADERS, VERSION_HEADER, type ContractEvent, type Reply } from '../../shared/contract'
 import { parseRange } from '../phone-share'
 import type { DeviceRegistry, Refusal } from './devices'
@@ -127,7 +127,9 @@ function disposition(kind: 'inline' | 'attachment', name: string): string {
 async function sameFileInside(file: string, root: string, st: BigIntStats): Promise<boolean> {
   try {
     const [real, realRoot] = await Promise.all([fs.realpath(file), fs.realpath(root)])
-    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return false
+    // relative() compares the way the platform does (without case on Windows); inside means a path below the root
+    const rel = relative(realRoot, real)
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return false
     const now = await fs.stat(real, { bigint: true })
     return now.dev === st.dev && now.ino === st.ino
   } catch {
@@ -270,6 +272,12 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
         res.writeHead(206, { ...headers, 'Content-Length': String(end - start + 1) })
       } else res.writeHead(200, { ...headers, 'Content-Length': String(size) })
       if (req.method === 'HEAD' || size === 0) return void res.end()
+      // Removed while the file was being looked up and opened: stop here. From this check to registering in
+      // `sending` nothing waits, so a removal can't slip between them.
+      if (!(await o.devices.has(device.id))) {
+        res.destroy()
+        return
+      }
       const stream = createReadStream('', { fd: fh.fd, start, end, autoClose: false })
       sending.set(res, device.id)
       res.on('close', () => sending.delete(res))

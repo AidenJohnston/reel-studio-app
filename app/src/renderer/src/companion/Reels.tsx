@@ -37,6 +37,8 @@ export function ReelsScreen({
         if (gone) return
         onReels(list)
         setError(null)
+        // a job read before this list (or before a reconnect) is kept only for a reel the list still calls making
+        setSeeded((s) => Object.fromEntries(Object.entries(s).filter(([id]) => list.some((x) => x.id === id && isMaking(x.status)))))
         for (const r of list.filter((x) => isMaking(x.status))) {
           call('projects.get', [r.id]).then(
             (full) => !gone && setSeeded((s) => ({ ...s, [r.id]: full.job })),
