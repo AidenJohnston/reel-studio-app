@@ -339,7 +339,7 @@ export interface ProjectJson {
   transcript?: { file: string; language?: string }
   /** true: sound effects and picture starts land on the song's beats; false: never, even at the fast pace; absent: the pace decides */
   beatAccents?: boolean
-  cut?: { keep: { from: string; to: string; join?: { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash'; frames: number } }[]; gapCap?: number; minSaving?: number }
+  cut?: { keep: { from: string; to: string; join?: { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash' | 'action'; frames: number } }[]; gapCap?: number; minSaving?: number }
   captions?: {
     enabled: boolean
     style?: Record<string, unknown>

@@ -32,7 +32,9 @@ AFTER_SHARE = 0.08      # of the kept air, at most this much stays with the OUTG
 HEAD_LEAD = 0.10        # air before the very first word of the video
 TAIL_KEEP = 0.35        # ring-out after the very last word
 EPS = 1e-6
-TRANSITIONS = ("hard", "j", "l", "smash", "match", "flash")
+TRANSITIONS = ("hard", "j", "l", "smash", "match", "flash", "action")
+# joins whose bounds the engine searches for in the air around the cut (match.py)
+SEARCHED = ("match", "action")
 MATCH_HOLD = 0.3        # seconds either side of a match cut where a framing change would undo it
 
 
@@ -51,7 +53,8 @@ class Timeline:
     kept_index: list = field(default_factory=list)   # sorted transcript positions that are kept
     index: dict = field(default_factory=dict)        # word id -> transcript position
     words: list = field(default_factory=list)        # the transcript words
-    # one row per match join: {keep, out, in, word, prevWord, played: "match" | "hard" | "none", matched?, why?}
+    # one row per searched join (match, action): {keep, transition, out, in, word, prevWord,
+    # played: the transition | "hard" | "none", matched?, why?}
     # (match.py fills in matched/look/move/why; "none" = no cut there, the take runs on)
     match_joins: list = field(default_factory=list)
 
@@ -311,7 +314,7 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                               is_first=(n == 0), is_last=(n == len(runs) - 1))
             positions = range(i0, i1 + 1)
             point = next(((match_points or {}).get(kk) for wi, _, join, kk in markers
-                          if wi == i0 and join["transition"] == "match"), None)
+                          if wi == i0 and join["transition"] in SEARCHED), None)
             if point and point.get("matched") and segments and pieces:
                 # the frames that line up, found inside the air around the join (match.windows): the
                 # outgoing side only gains or loses silence, so its words keep their output times
@@ -356,10 +359,10 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                         # There is no picture discontinuity here. A J/L handle would
                         # replay the same samples; clamp to zero without adding fades.
                         # A match has nothing to line up: the take simply runs on.
-                        if join["transition"] == "match":
-                            unmoved.append({"keep": kk, "word": wi, "prevWord": previous_end, "played": "none",
+                        if join["transition"] in SEARCHED:
+                            unmoved.append({"keep": kk, "transition": join["transition"], "word": wi, "prevWord": previous_end, "played": "none",
                                             "matched": False, "why": "there is no cut here: both sides are one continuous stretch of the take"})
-                        if join["transition"] in ("j", "l", "match"):
+                        if join["transition"] in ("j", "l", *SEARCHED):
                             break
                         right = Segment(src, t, seg.src_end, seg.out_start + t - seg.src_start,
                                         first_word=words[wi]["id"], last_word=seg.last_word)
@@ -383,15 +386,15 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         outgoing = segments[si - 1]
         incoming.join_transition = join["transition"]
         incoming.join_requested_frames = join["frames"]
-        if join["transition"] == "match":
+        if join["transition"] in SEARCHED:
             point = (match_points or {}).get(kk) or {}
             matched = point.get("matched") is True and abs(incoming.src_start - float(point.get("inStart", -1))) < EPS
             if point.get("matched") is True and not matched:
                 # a cut made by shortening a pause inside one kept stretch: the bounds are only moved at a range start
                 point = {**point, "matched": False, "why": "this cut sits inside one kept stretch, where a pause was shortened, and can't be moved"}
             # an unmatched join is labelled what it is: a plain cut
-            incoming.join_transition = "match" if matched else "hard"
-            match_joins.append({"keep": kk, "out": si - 1, "in": si, "word": wi, "prevWord": previous_end,
+            incoming.join_transition = join["transition"] if matched else "hard"
+            match_joins.append({"keep": kk, "transition": join["transition"], "out": si - 1, "in": si, "word": wi, "prevWord": previous_end,
                                 "played": incoming.join_transition, **point})
             continue
         if join["transition"] == "j":

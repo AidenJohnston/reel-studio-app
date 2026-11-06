@@ -45,7 +45,7 @@ it('project loading validates persisted joins without requiring a transcript', a
   const match = { ...p, cut: { ...p.cut, keep: [p.cut.keep[0], { ...p.cut.keep[1], join: { transition: 'match', frames: 0 } }] } };
   expect(validateProject(match)).toEqual([]);
   const unknown = { ...p, cut: { ...p.cut, keep: [p.cut.keep[0], { ...p.cut.keep[1], join: { transition: 'dissolve', frames: 0 } }] } };
-  expect(validateProject(unknown).join()).toMatch(/transition must be hard, j, l, smash, match or flash/);
+  expect(validateProject(unknown).join()).toMatch(/transition must be hard, j, l, smash, match, flash or action/);
   expect(validateProject(p)).toEqual([]);
 });
 

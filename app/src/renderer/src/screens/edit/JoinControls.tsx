@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { rangesKeepingOrder } from '../../../../shared/cut'
-import { cutRows, joinFor, TRANSITION_HINTS, TRANSITION_LABELS, TRANSITIONS, withJoin, type KeepRange, type Transition } from '../../../../shared/joins'
+import { cutRows, joinFor, SEARCHED, TRANSITION_HINTS, TRANSITION_LABELS, TRANSITIONS, withJoin, type KeepRange, type Transition } from '../../../../shared/joins'
 import { clock } from '../../../../shared/progress'
 import { reel, userMessage } from '../../api'
 import { Segmented } from '../../components/ui'
@@ -9,7 +9,7 @@ import type { TabProps } from './controls'
 const OPTIONS = TRANSITIONS.map((key) => ({ key, label: TRANSITION_LABELS[key], title: TRANSITION_HINTS[key] }))
 
 /** What the engine said when a match was asked for on one cut. */
-type Check = { state: 'checking' } | { state: 'no'; why: string } | { state: 'yes' }
+type Check = { state: 'checking'; t: Transition } | { state: 'no'; why: string } | { state: 'yes'; t: Transition }
 
 /** The engine's reason without its measurements, which say nothing to the person. */
 const plain = (why: string | undefined): string => (why ?? 'its two sides do not line up').replace(/\s*\([^)]*\)\s*$/, '')
@@ -45,20 +45,20 @@ export function JoinControls({ d, now, change, placed, next }: TabProps) {
   const pick = (at: string, index: number, t: Transition) => {
     const ticket = (asked.current.get(at) ?? 0) + 1
     asked.current.set(at, ticket)
-    if (t !== 'match' || !keep) {
+    if (!SEARCHED.includes(t) || !keep) {
       mark(at, null)
       put(at, t)
       return
     }
-    mark(at, { state: 'checking' })
+    mark(at, { state: 'checking', t })
     reel.projects
-      .matchJoins(d.slug, withJoin(keep, at, joinFor('match')))
+      .matchJoins(d.slug, withJoin(keep, at, joinFor(t)))
       .then((verdicts) => {
         if (asked.current.get(at) !== ticket) return // picked something else meanwhile
         const v = verdicts.find((x) => x.keep === index)
         if (v?.matched) {
-          put(at, 'match')
-          mark(at, { state: 'yes' })
+          put(at, t)
+          mark(at, { state: 'yes', t })
         } else mark(at, { state: 'no', why: plain(v?.why) })
       })
       .catch((e) => asked.current.get(at) === ticket && mark(at, { state: 'no', why: userMessage(e) }))
@@ -81,7 +81,7 @@ export function JoinControls({ d, now, change, placed, next }: TabProps) {
               const at = now.kept.has(row.at) ? placed.get(row.at)?.s : undefined
               const when = at === undefined ? null : clock(at)
               const check = checks.get(row.at)
-              const value = check?.state === 'checking' ? 'match' : row.transition
+              const value = check?.state === 'checking' ? check.t : row.transition
               return (
                 <li key={row.at} className="edit-row join-row" data-testid="join-row">
                   <span className="edit-row-main">
@@ -94,8 +94,10 @@ export function JoinControls({ d, now, change, placed, next }: TabProps) {
                         {check.state === 'checking'
                           ? 'Checking the frames on both sides…'
                           : check.state === 'yes'
-                            ? 'Lines up, so this cut hides.'
-                            : `No match here: ${check.why}.`}
+                            ? check.t === 'match'
+                              ? 'Lines up, so this cut hides.'
+                              : 'Lands on a move, so the eye follows it across.'
+                            : `Not here: ${check.why}.`}
                       </span>
                     )}
                   </span>
@@ -116,7 +118,7 @@ export function JoinControls({ d, now, change, placed, next }: TabProps) {
         )}
         {rows.length > 0 && (
           <p className="edit-hint">
-            J lets the next part be heard first, L lets the sound run on, Smash hits the cut with a sound, Flash dips to white. Match is kept only where both sides line up.
+            J lets the next part be heard first, L lets the sound run on, Smash hits the cut with a sound, Flash dips to white. Match and Action are kept only where the frames allow them.
           </p>
         )}
       </div>

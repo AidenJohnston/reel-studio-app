@@ -234,3 +234,27 @@ def test_frames_are_read_by_index_not_by_a_rounded_seek(tmp_path):
     picked = [26, 27, 31]
     got = match._descriptors(path, picked, 30.0, (0, 0, W, H), (W, H), False)
     assert [round(float(g["grey"].mean()) * 255) for g in got] == pytest.approx([10 + 6 * k for k in picked], abs=2)
+
+
+def test_an_action_cut_needs_movement_on_both_sides():
+    """Fails if a cut on action is accepted where only one side moves, or picks a still pair over a moving one."""
+    moving, still = 0.08, 0.002
+    verdict = match.best_action([(1.0, still), (1.1, moving)], [(2.0, moving), (2.1, still)], (1.0, 2.1))
+    assert (verdict["matched"], verdict["outEnd"], verdict["inStart"]) == (True, 1.1, 2.0)
+    refused = match.best_action([(1.0, moving)], [(2.0, still)], (1.0, 2.0))
+    assert refused["matched"] is False and "nothing moves on both sides" in refused["why"]
+
+
+def test_the_engine_puts_an_action_cut_on_the_head_moving(tmp_path):
+    """The head jumps at 1.0 s (end of the outgoing side) and at 2.15 s (start of the incoming one): the cut
+    lands on both jumps. Into "Three." nothing moves after 2.93 s, so that one plays plain."""
+    keep = [{"from": "w0", "to": "w0"}, {"from": "w2", "to": "w2", "join": {"transition": "action", "frames": 0}}]
+    p = take_project(tmp_path, keep)
+    tl = project.timeline(tmp_path, p, words_one_take())
+    (row,) = tl.match_joins
+    assert (row["transition"], row["played"]) == ("action", "action"), row
+    assert tl.segments[0].src_end == pytest.approx(31 / 30, abs=1e-4)   # frame 30 (head moved) shows last
+    assert tl.segments[1].src_start == pytest.approx(64 / 30, abs=1e-4)  # frame 65 (head back) is the next one
+    p["cut"]["keep"][1] = {"from": "w3", "to": "w3", "join": {"transition": "action", "frames": 0}}
+    (row,) = project.timeline(tmp_path, p, words_one_take()).match_joins
+    assert row["played"] == "hard" and "nothing moves" in row["why"]

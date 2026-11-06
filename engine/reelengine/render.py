@@ -1243,7 +1243,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     lint = prepare(ctx, tl)
     for m in tl.match_joins:
         if m.get("played") == "hard":
-            warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
+            name = "A match cut" if m.get("transition", "match") == "match" else "A cut on action"
+            warnings.append(f"{name} plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
     # 1. audio (always the full cut, then sliced for a window, so the music sits where it will)

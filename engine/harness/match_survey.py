@@ -1,15 +1,17 @@
 """Frames of the joins match.py would accept and refuse, on a real take (test code only).
 
-    python -m harness.match_survey <project folder> <out folder> [--every N]
+    python -m harness.match_survey <project folder> <out folder> [--every N] [--transition match|action]
 
 The project must already be transcribed and analysed (`reelengine transcribe`, `reelengine analyze`),
 so it has words and a face track. The survey keeps every Nth phrase of the take (default every other
-one), which makes a jump cut at each join, asks match.py about every join, and writes:
+one), which makes a jump cut at each join, asks match.py about every join (as a match cut, or with
+`--transition action` as a cut on action), and writes:
 
   out/joins.json      one row per join: the planned pair's LOOK and MOVE (the plain cut), the best
                       pair's, and the verdict
   out/join-KK.jpg     the frame before and after the cut, planned (top) and chosen (bottom), with the
-                      scores printed on them
+                      scores printed on them; for action, a third row shows the frame before the
+                      chosen out frame and after the chosen in frame, the motion the verdict measured
 
 It changes nothing in the project except the match cache in work/.
 """
@@ -58,6 +60,7 @@ def main(argv=None) -> None:
     ap.add_argument("project")
     ap.add_argument("out")
     ap.add_argument("--every", type=int, default=2)
+    ap.add_argument("--transition", choices=projmod.cutmod.SEARCHED, default="match")
     a = ap.parse_args(argv)
     pdir, out = Path(a.project), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -68,7 +71,7 @@ def main(argv=None) -> None:
     kept = phrases[::max(1, a.every)]
     proj["cut"]["keep"] = [{"from": words[ph["i0"]]["id"], "to": words[ph["i1"]]["id"]} for ph in kept]
     for item in proj["cut"]["keep"][1:]:
-        item["join"] = {"transition": "match", "frames": 0}
+        item["join"] = {"transition": a.transition, "frames": 0}
     base = projmod.cutmod.build_timeline(words, proj["cut"]["keep"], projmod.source_meta(proj), join_fps=float(proj["format"]["fps"]))
     verdicts = match.plan(pdir, proj, base)
     tl = projmod.timeline(pdir, proj, words)
@@ -96,13 +99,20 @@ def main(argv=None) -> None:
         top = np.hstack([_label(planned[0], f"planned out {o.src_end:.2f}"), _label(planned[1], f"in {i.src_start:.2f}")])
         if "outEnd" in v:
             chosen = [_frame(po, round(v["outEnd"] * fps_o) - 1, fps_o, co, disp_o), _frame(pi, round(v["inStart"] * fps_i), fps_i, ci, disp_i)]
-            tag = "MATCH" if v.get("matched") else "no match"
-            bottom = np.hstack([_label(chosen[0], f"{tag} look {v['look']:.2f}"), _label(chosen[1], f"move {v['move']:.3f}")])
+            if a.transition == "action":
+                tag = "ACTION" if v.get("matched") else "no action"
+                bottom = np.vstack([np.hstack([_label(chosen[0], f"{tag} out {v['outEnd']:.2f}"), _label(chosen[1], f"motion {v['motion']:.3f}")]),
+                                    np.hstack([_label(_frame(po, round(v["outEnd"] * fps_o) - 2, fps_o, co, disp_o), "frame before"),
+                                               _label(_frame(pi, round(v["inStart"] * fps_i) + 1, fps_i, ci, disp_i), "frame after")])])
+            else:
+                tag = "MATCH" if v.get("matched") else "no match"
+                bottom = np.hstack([_label(chosen[0], f"{tag} look {v['look']:.2f}"), _label(chosen[1], f"move {v['move']:.3f}")])
         else:
             bottom = np.hstack([_label(np.zeros_like(planned[0]), v.get("why", "")[:30]), np.zeros_like(planned[1])])
         cv2.imwrite(str(out / f"join-{m['keep']:02d}.jpg"), np.vstack([top, bottom]))
-    (out / "joins.json").write_text(json.dumps({"lookMin": match.LOOK_MIN, "moveMax": match.MOVE_MAX, "joins": rows}, indent=1), encoding="utf-8")
-    matched = sum(1 for r in rows if r.get("played") == "match")
+    (out / "joins.json").write_text(json.dumps({"transition": a.transition, "lookMin": match.LOOK_MIN, "moveMax": match.MOVE_MAX,
+                                                "actionMin": match.ACTION_MIN, "joins": rows}, indent=1), encoding="utf-8")
+    matched = sum(1 for r in rows if r.get("played") == a.transition)
     print(json.dumps({"joins": len(rows), "matched": matched, "out": str(out)}))
 
 

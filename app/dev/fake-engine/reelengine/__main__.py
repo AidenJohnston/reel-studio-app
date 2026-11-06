@@ -690,7 +690,7 @@ def cmd_match_joins(args: list[str]) -> dict:
     for i, k in enumerate(keep):
         if not i or "clip" in k or "clip" in keep[i - 1]:
             continue
-        if not every and (k.get("join") or {}).get("transition") != "match":
+        if not every and (k.get("join") or {}).get("transition") not in ("match", "action"):
             continue
         n = int(re.sub(r"\D", "", k["from"]) or 1)
         joins.append({"keep": i, "matched": n % 2 == 0, "at": float(i),

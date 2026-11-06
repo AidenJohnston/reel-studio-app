@@ -48,7 +48,7 @@ test('transitions: picked by hand, a match kept only where it lines up, made int
 
     // fails if a match the engine says doesn't line up is kept anyway
     await rows.nth(0).getByRole('radio', { name: 'Match', exact: true }).click()
-    await expect(rows.nth(0).getByTestId('join-check')).toHaveText('No match here: the speaker moves too much across the cut.')
+    await expect(rows.nth(0).getByTestId('join-check')).toHaveText('Not here: the speaker moves too much across the cut.')
     await expect(rows.nth(0).getByRole('radio', { name: 'Plain', exact: true })).toHaveAttribute('aria-checked', 'true')
     await shot(page, 'joins-02-no-match')
 

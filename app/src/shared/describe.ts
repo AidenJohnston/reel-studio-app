@@ -99,7 +99,7 @@ function joinActs(acts: string[]): string {
   return andList(phrases, phrases.some((x) => x.includes(' and ')))
 }
 
-const JOIN_PHRASES: Record<string, string> = { hard: 'plain', j: 'a J cut', l: 'an L cut', smash: 'a smash cut', match: 'a match cut', flash: 'a flash cut' }
+const JOIN_PHRASES: Record<string, string> = { hard: 'plain', j: 'a J cut', l: 'an L cut', smash: 'a smash cut', match: 'a match cut', flash: 'a flash cut', action: 'a cut on action' }
 
 /** The verbs an "Edit it myself" summary starts with (describeChange), so its line can say "You …". */
 export const HAND_VERBS: ReadonlySet<string> = new Set([
