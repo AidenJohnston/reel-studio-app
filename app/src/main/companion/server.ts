@@ -9,10 +9,10 @@
 // - Media is named by what it is (shared/contract.ts MediaRef); the service maps a ref to a file inside that reel's
 //   folder and the file is opened before it's checked, so it can't be swapped between the check and the read.
 // - It does not guard the traffic itself: this is plain HTTP on the home network, as Send to my phone is.
-import { createReadStream, promises as fs } from 'node:fs'
+import { createReadStream, promises as fs, type BigIntStats } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
-import { extname, join } from 'node:path'
+import { extname, join, sep } from 'node:path'
 import { checkCall, CONTRACT_VERSION, HEADERS, VERSION_HEADER, type ContractEvent, type Reply } from '../../shared/contract'
 import { parseRange } from '../phone-share'
 import type { DeviceRegistry, Refusal } from './devices'
@@ -59,7 +59,8 @@ const REFUSED: Record<Refusal, { status: number; code: string }> = {
   stale: { status: 401, code: 'CLOCK' },
   replayed: { status: 401, code: 'REPLAYED' },
   expired: { status: 403, code: 'EXPIRED' },
-  rate: { status: 429, code: 'TOO_MANY' }
+  rate: { status: 429, code: 'TOO_MANY' },
+  busy: { status: 429, code: 'TOO_MANY' }
 }
 
 export interface CompanionServerOptions {
@@ -122,6 +123,18 @@ function disposition(kind: 'inline' | 'attachment', name: string): string {
   return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safe)}`
 }
 
+/** The opened file (`st`) is the file at `file` with links resolved, and that real path is inside the real `root`. */
+async function sameFileInside(file: string, root: string, st: BigIntStats): Promise<boolean> {
+  try {
+    const [real, realRoot] = await Promise.all([fs.realpath(file), fs.realpath(root)])
+    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return false
+    const now = await fs.stat(real, { bigint: true })
+    return now.dev === st.dev && now.ino === st.ino
+  } catch {
+    return false
+  }
+}
+
 function userError(e: unknown): { code: string; userMessage: string } {
   if (e && typeof e === 'object' && 'userMessage' in e && typeof (e as { userMessage: unknown }).userMessage === 'string') {
     const code = (e as { code?: unknown }).code
@@ -136,6 +149,8 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
   let stopped = false
   const sockets = new Set<Socket>()
   const streams = new Map<ServerResponse, { device: string; timer: NodeJS.Timeout }>()
+  /** Videos being sent, by device, so removing a device stops them too. */
+  const sending = new Map<ServerResponse, string>()
 
   const endStream = (res: ServerResponse): void => {
     const s = streams.get(res)
@@ -230,13 +245,14 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
     if (isRefusal(device)) return plain(res, REFUSED[device].status === 401 ? 403 : REFUSED[device].status, 'Not allowed')
     const found = await o.service.mediaFile(ref)
     if (!found) return plain(res, 404, 'Not found')
-    // Opened first, then measured through the same handle: what is checked is what is sent.
+    // Opened first, then checked: the opened file must be the one the reel folder holds at that path, with every
+    // link resolved, so a file or folder swapped for a link to somewhere else is caught after the open, not before.
     const fh = await fs.open(found.file, 'r').catch(() => null)
     if (!fh) return plain(res, 404, 'Not found')
     try {
-      const st = await fh.stat()
-      if (!st.isFile()) return plain(res, 404, 'Not found')
-      const size = st.size
+      const st = await fh.stat({ bigint: true })
+      if (!st.isFile() || !(await sameFileInside(found.file, found.root, st))) return plain(res, 404, 'Not found')
+      const size = Number(st.size)
       const range = parseRange(req.headers.range, size)
       const headers: Record<string, string> = {
         ...BASE_HEADERS,
@@ -255,6 +271,8 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
       } else res.writeHead(200, { ...headers, 'Content-Length': String(size) })
       if (req.method === 'HEAD' || size === 0) return void res.end()
       const stream = createReadStream('', { fd: fh.fd, start, end, autoClose: false })
+      sending.set(res, device.id)
+      res.on('close', () => sending.delete(res))
       await new Promise<void>((resolve) => {
         stream.on('error', () => {
           res.destroy()
@@ -343,6 +361,7 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
       for (const res of [...streams.keys()]) write(res, line)
     },
     revoke(deviceId) {
+      for (const [res, d] of [...sending]) if (d === deviceId) res.destroy()
       const line = `data: ${JSON.stringify({ type: 'revoked' } satisfies ContractEvent)}\n\n`
       for (const [res, s] of [...streams]) {
         if (s.device !== deviceId) continue

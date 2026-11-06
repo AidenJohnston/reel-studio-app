@@ -1,8 +1,7 @@
 // What a paired device's calls do, and what goes back: the desktop's own project reads and note path, turned into
 // shared/contract.ts shapes that carry no path on this computer. No Electron imports; index.ts hands in the pieces
 // (the same functions its IPC handlers call), tests hand in fakes.
-import { realpathSync } from 'node:fs'
-import { extname, resolve, sep } from 'node:path'
+import { extname } from 'node:path'
 import type { JobEvent, NoteMoment, ProjectDetail, ProjectSummary } from '../../shared/api'
 import {
   BadRequest, mediaRef, parseMediaRef, type AppInfoDto, type ChatLineDto, type ContractEvent, type JobDto, type Method, type NoteArgs,
@@ -79,13 +78,14 @@ export function contractEvent(channel: string, payload: unknown): ContractEvent 
   switch (e.type) {
     case 'status':
       return { type: 'job', project: e.slug, job: { id: e.jobId, message: e.message, overall: e.overall, secondsLeft: e.secondsLeft, waiting: e.waiting || e.waitingForRender }, done: false }
+    // paused too: the job has left the computer's list, and goes on later as a new one
     case 'done':
     case 'error':
     case 'cancelled':
+    case 'paused':
       return { type: 'job', project: e.slug, job: null, done: true }
     case 'render':
     case 'reply':
-    case 'paused':
       return { type: 'changed', project: e.slug }
     default:
       return null
@@ -103,12 +103,14 @@ export function createCompanionService(deps: ServiceDeps) {
   async function note(device: string, slug: string, a: NoteArgs): Promise<NoteResult> {
     const key = `${device}:${slug}:${a.requestId}`
     const t = Date.now()
+    // Only answers past their keep time go; a live one is never dropped early, or its retry would run again.
     for (const [k, r] of replays) {
-      if (t - r.at < REPLAY_KEEP_MS && replays.size <= REPLAYS_MAX) break
+      if (t - r.at < REPLAY_KEEP_MS) break
       replays.delete(k)
     }
     const seen = replays.get(key)
     if (seen) return { ...(await seen.answer), replayed: true }
+    if (replays.size >= REPLAYS_MAX) throw { code: 'BUSY', userMessage: 'Too many notes at once. Wait a few minutes, then send it again.' }
     const answer = (async (): Promise<NoteResult> => {
       let moment: NoteMoment | undefined
       if (a.at !== undefined && a.version !== undefined) {
@@ -120,9 +122,12 @@ export function createCompanionService(deps: ServiceDeps) {
       const r = await deps.note(slug, a.text, undefined, moment, a.version)
       return { jobId: r.jobId, queued: !!r.queued, replayed: false }
     })()
-    replays.set(key, { at: t, answer })
+    const entry = { at: t, answer }
+    replays.set(key, entry)
     // A refused note can be sent again with the same id once it's fixed (a typo in the moment, no words there).
-    answer.catch(() => replays.delete(key))
+    answer.catch(() => {
+      if (replays.get(key) === entry) replays.delete(key)
+    })
     return answer
   }
 
@@ -159,10 +164,10 @@ export function createCompanionService(deps: ServiceDeps) {
     },
 
     /**
-     * The file a ref names, or null. The ref only picks among files the reel's own detail lists, and the file must
-     * really sit inside that reel's folder (symlinks resolved), so no request names a path.
+     * The file a ref names and the reel folder it must sit in, or null. The ref only picks among files the reel's own
+     * detail lists, so no request names a path; the server checks the opened file is inside `root` (server.ts media).
      */
-    async mediaFile(ref: string): Promise<{ file: string; type: string; name: string } | null> {
+    async mediaFile(ref: string): Promise<{ file: string; root: string; type: string; name: string } | null> {
       const cached = media.get(ref)
       let found: { file: string; name: string } | null
       if (cached && Date.now() - cached.at < MEDIA_CACHE_MS) found = cached.found
@@ -174,7 +179,7 @@ export function createCompanionService(deps: ServiceDeps) {
       if (!found) return null
       const ext = extname(found.file).toLowerCase()
       const type = TYPES[ext]
-      return type ? { file: found.file, type, name: found.name + ext } : null
+      return type ? { file: found.file, root: deps.projectDir(parseMediaRef(ref)!.project), type, name: found.name + ext } : null
     }
   }
 
@@ -190,10 +195,7 @@ export function createCompanionService(deps: ServiceDeps) {
       const v = d.versions.find((x) => x.n === r.n)
       if (v) path = r.kind === 'video' ? v.videoPath : v.cover ? pathFromMediaUrl(v.cover) : null
     }
-    if (!path) return null
-    const root = realpathSync.native(resolve(deps.projectDir(r.project)))
-    const real = realpathSync.native(resolve(path))
-    return real.startsWith(root.endsWith(sep) ? root : root + sep) ? { file: real, name } : null
+    return path ? { file: path, name } : null
   }
 }
 

@@ -63,6 +63,16 @@ describe('Phone and browser', () => {
     expect(await reachable(again.address!)).toBe(false)
   })
 
+  it('is not listening after Off, even when Off comes while it is still starting', async () => {
+    const { call } = open(mkdtempSync(join(tmpdir(), 'rs-cipc-')))
+    const on = call('devices:setOn', true)
+    const off = await call('devices:setOn', false)
+    const started = await on
+    expect(off.address).toBeNull()
+    expect(started.on).toBe(false)
+    expect(await call('devices:status')).toMatchObject({ on: false, address: null })
+  })
+
   it('closes the pairing code once a phone uses it, and lists the phone', async () => {
     const { call, pushed } = open(mkdtempSync(join(tmpdir(), 'rs-cipc-')))
     const s = await call('devices:pair', 'phone', false)

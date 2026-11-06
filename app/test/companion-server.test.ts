@@ -141,12 +141,17 @@ describe('pairing', () => {
     expect((await post('/api/pair', body)).status).toBe(404)
   })
 
-  it('refuses a wrong signature without using the code up, and an expired code', async () => {
+  it('refuses a wrong signature without using the code up', async () => {
     const p = devices.startPairing('phone', ['view'])
     const secret = fromHex(p.secret, 32)!
     expect((await post('/api/pair', { pairing: p.pairing, name: 'iPhone', sig: sign(new Uint8Array(32), pairMessage(p.pairing, 'iPhone')) })).status).toBe(401)
+    expect((await post('/api/pair', { pairing: p.pairing, name: 'iPhone', sig: sign(secret, pairMessage(p.pairing, 'iPhone')) })).status).toBe(200)
+  })
+
+  it('refuses a code after its five minutes', async () => {
+    const p = devices.startPairing('phone', ['view'])
     clock += PAIRING_TTL_MS + 1
-    expect((await post('/api/pair', { pairing: p.pairing, name: 'iPhone', sig: sign(secret, pairMessage(p.pairing, 'iPhone')) })).status).toBe(404)
+    expect((await post('/api/pair', { pairing: p.pairing, name: 'iPhone', sig: sign(fromHex(p.secret, 32)!, pairMessage(p.pairing, 'iPhone')) })).status).toBe(404)
   })
 
   it('reads the secret back out of a pairing link fragment', () => {

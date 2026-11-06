@@ -49,6 +49,19 @@ describe('wrappedReport', () => {
     expect(r.state === 'ready' && r.edit).toMatchObject({ kind: 'long-ending', project: 'reel-3', at: 16, note: 'End the reel on my last word: cut the 4 s after it.' })
   })
 
+  it("fails if it names a reel that held viewers longest when none has watch time saved", () => {
+    const r = wrappedReport([reelOf(1, { averageWatchTimeMs: null }), reelOf(2, { averageWatchTimeMs: null }), reelOf(3, { averageWatchTimeMs: null })], NOW)
+    expect(r.state === 'ready' && r.strength).toMatchObject({ kind: 'none', headline: 'None of these reels stands apart yet.' })
+  })
+
+  it('fails if Try this edit targets a problem the newest version has already fixed, or uses the posted timing for a newer one', () => {
+    const posted = { ...tidy, lastWord: 16 }
+    const fixed = wrappedReport([reelOf(1), reelOf(2), reelOf(3, { averageWatchTimeMs: 3000, timing: posted, latest: { version: 4, timing: tidy } })], NOW)
+    expect(fixed.state === 'ready' && fixed.edit).toMatchObject({ kind: 'long-ending', version: 1, changes: 4, fixedIn: 4 })
+    const still = wrappedReport([reelOf(1), reelOf(2), reelOf(3, { averageWatchTimeMs: 3000, timing: posted, latest: { version: 4, timing: { ...tidy, lastWord: 17 } } })], NOW)
+    expect(still.state === 'ready' && still.edit).toMatchObject({ changes: 4, fixedIn: null, at: 17, note: 'End the reel on my last word: cut the 3 s after it.' })
+  })
+
   it('fails if it offers an edit for a version whose render is gone', () => {
     const r = wrappedReport([reelOf(1), reelOf(2), reelOf(3, { averageWatchTimeMs: 1000, timing: null })], NOW)
     expect(r.state === 'ready' && r.edit).toBeNull()

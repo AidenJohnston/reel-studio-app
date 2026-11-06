@@ -47,7 +47,10 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
   let problem: string | null = null
   let pairingUrl: { url: string; expiresAt: number; kind: DeviceKind; notes: boolean } | null = null
   let pairingTimer: NodeJS.Timeout | undefined
-  let starting: Promise<void> | null = null
+  // Every change to whether the server runs goes through this one chain, so a switch flipped while the server is
+  // still starting (or at launch, while init runs) ends in the state the switch shows.
+  let lifetime: Promise<void> = Promise.resolve()
+  let touched = false
 
   async function readSaved(): Promise<Saved> {
     try {
@@ -98,9 +101,7 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
     }
   }
 
-  const ensure = (): Promise<void> => (starting ??= start().finally(() => (starting = null)))
-
-  async function stop(): Promise<void> {
+  async function close(): Promise<void> {
     devices.cancelPairing()
     pairingUrl = null
     const s = server
@@ -108,21 +109,29 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
     await s?.stop()
   }
 
+  /** Brings the server in line with the switch (`saved.on`), after any change already under way. */
+  function settle(): Promise<void> {
+    const run = lifetime.then(async () => {
+      if (saved.on && !server) await start()
+      else if (!saved.on && server) await close()
+      if (!saved.on) problem = null
+    })
+    lifetime = run.catch(() => {})
+    return run
+  }
+
   async function setOn(on: boolean): Promise<DevicesStatus> {
+    touched = true
     saved = { ...saved, on }
     await writeJson(file, saved)
-    if (on) await ensure()
-    else {
-      problem = null
-      await stop()
-    }
+    await settle()
     await changed()
     return status()
   }
 
   async function pair(kind: DeviceKind, notes: boolean): Promise<DevicesStatus> {
     if (!saved.on) await setOn(true)
-    else await ensure()
+    else await settle()
     if (!server) return status()
     const scopes: Scope[] = notes ? ['view', 'note'] : ['view']
     const p = devices.startPairing(kind, scopes)
@@ -158,8 +167,10 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
   return {
     /** At launch: on again if it was on. */
     async init(): Promise<void> {
-      saved = await readSaved()
-      if (saved.on) await ensure()
+      const read = await readSaved()
+      // a switch flipped before this read finished wins over what was saved
+      if (!touched) saved = read
+      await settle()
     },
     /** Every desktop broadcast passes through here; devices hear the ones they follow. */
     publish(channel: string, payload: unknown): void {
@@ -167,7 +178,12 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
       const e = contractEvent(channel, payload)
       if (e) server.publish(e)
     },
-    stop,
+    /** At quit: the switch stays as it is for the next launch. */
+    stop: (): Promise<void> => {
+      const run = lifetime.then(close)
+      lifetime = run.catch(() => {})
+      return run
+    },
     /** For tests and the e2e: the live server's origin. */
     origin: (): string | null => server?.origin ?? null
   }

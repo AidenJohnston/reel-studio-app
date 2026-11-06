@@ -65,12 +65,21 @@ export function RecentReels({ go }: { go: Go }) {
               <span className="recent-label">One to try</span>
               <b>{report.edit.headline}</b>
               <p className="muted-sm">{report.edit.detail}</p>
-              <div className="row">
-                <Button size="small" onClick={() => go({ name: 'reel', slug: report.edit!.project, draft: report.edit!.note })} data-testid="recent-try">
-                  {report.edit.editName}
-                </Button>
-              </div>
-              <p className="muted-sm">{report.edit.measure}</p>
+              {report.edit.fixedIn !== null ? (
+                <p className="muted-sm" data-testid="recent-fixed">
+                  That was the posted version. Version {report.edit.fixedIn}, made since, doesn't have this. Post it and compare.
+                </p>
+              ) : (
+                <>
+                  <div className="row">
+                    <Button size="small" onClick={() => go({ name: 'reel', slug: report.edit!.project, draft: report.edit!.note })} data-testid="recent-try">
+                      {report.edit.editName}
+                    </Button>
+                    {report.edit.changes !== null && <span className="muted-sm">It changes Version {report.edit.changes}, the newest.</span>}
+                  </div>
+                  <p className="muted-sm">{report.edit.measure}</p>
+                </>
+              )}
             </div>
           ) : (
             <p className="muted-sm">Nothing in these reels' timing stands out to change: they start talking at once, change shot early and end on the last word.</p>

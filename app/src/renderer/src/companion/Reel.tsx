@@ -5,7 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEven
 import { NOTE_MAX_CHARS, type AppInfoDto, type JobDto, type MediaRef, type NoteArgs, type ProjectId, type ReelDto, type ReelSummaryDto, type VersionDto } from '../../../shared/contract'
 import { clock } from '../../../shared/progress'
 import { Icon } from '../components/icons'
-import { byKeyboard, reducedMotion } from '../components/motion'
+import { byKeyboard } from '../components/motion'
 import { Button, Progress, Spinner, arrowPick, tabStop } from '../components/ui'
 import { CompanionError, call, mediaUrl, requestId } from './client'
 import { noun, platform } from './device'
@@ -169,7 +169,7 @@ const newestOf = (versions: VersionDto[]): number | null => (versions.length ? M
 
 /**
  * The 9:16 player. Each version is its own layer: the new one sits over the old at opacity 0 and fades in once its
- * poster has loaded (or after READY_WAIT_MS), then the old one goes. From the keyboard or with reduced motion the
+ * poster has loaded (or after READY_WAIT_MS), then the old one goes. From the keyboard the
  * swap is instant (companion.css).
  */
 function Stage({
@@ -218,7 +218,7 @@ function Stage({
       setBare(false)
       setSettled(true)
     }
-    if (byKeyboard() || reducedMotion()) {
+    if (byKeyboard()) {
       drop()
       return
     }

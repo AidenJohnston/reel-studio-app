@@ -79,6 +79,9 @@ export function Shell() {
       (live) => {
         if (live) {
           setConn('live')
+          // job events missed while away (a finish, a pause) can't be told apart from stale ones: drop them all and
+          // take each reel's job from the fresh read this bump starts
+          setJobs({})
           bump(null)
           void readInfo()
         } else {

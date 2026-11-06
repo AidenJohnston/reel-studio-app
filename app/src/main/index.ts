@@ -1148,10 +1148,14 @@ function registerIpc(): void {
     for (const r of summary.reels) {
       const title = (await readProject(r.project).catch(() => null))?.title || r.project
       const timeline = await readTimeline(r.project, r.version).catch(() => null)
+      // the version a note would change: the newest saved one (a draft isn't one)
+      const newest = Math.max(0, ...(await listVersions(projectDir(r.project)).catch(() => [])).filter((v) => !v.draft).map((v) => v.n))
+      const later = newest > r.version ? await readTimeline(r.project, newest).catch(() => null) : null
       const m = r.totals.metrics
       reels.push({
         project: r.project, version: r.version, title, publishedAt: r.posts.map((p) => p.publishedAt).sort().at(-1) ?? '',
-        plays: m.plays, averageWatchTimeMs: m.averageWatchTimeMs, shares: m.shares, saves: m.saves, timing: timeline ? timingOf(timeline) : null
+        plays: m.plays, averageWatchTimeMs: m.averageWatchTimeMs, shares: m.shares, saves: m.saves, timing: timeline ? timingOf(timeline) : null,
+        ...(newest > r.version ? { latest: { version: newest, timing: later ? timingOf(later) : null } } : {})
       })
     }
     return wrappedReport(reels, Date.now())

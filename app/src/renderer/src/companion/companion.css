@@ -174,8 +174,9 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 html.kb :is(.cp-layer, .cp-card, .cp-ver, .cp-tap) { transition: none; }
 html.kb :is(.cp-card, .cp-ver, .cp-tap):active { transform: none; }
 html.kb :is(.cp-pop, .cp-here) { animation: none; }
+/* Reduced motion: nothing scales or moves, but the version crossfade and the fades stay, because they say what changed. */
 @media (prefers-reduced-motion: reduce) {
-  .cp-layer, .cp-card, .cp-ver, .cp-tap { transition: none; }
-  .cp-pop, .cp-here { animation: none; }
+  .cp-card, .cp-ver, .cp-tap { transition: none; }
+  .cp-pop { animation: fade .15s ease-out; }
   .cp-card:not(.waiting):active, .cp-ver:active, .cp-tap:active { transform: none; }
 }

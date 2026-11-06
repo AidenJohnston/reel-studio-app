@@ -48,7 +48,7 @@ const NONCE_KEEP_MS = 2 * CLOCK_SKEW_S * 1000
 const NONCE_MAX = 10_000
 export const NAME_MAX = 60
 
-export type Refusal = 'unknown' | 'bad-signature' | 'stale' | 'replayed' | 'expired' | 'rate'
+export type Refusal = 'unknown' | 'bad-signature' | 'stale' | 'replayed' | 'expired' | 'rate' | 'busy'
 
 export interface Pairing {
   pairing: string
@@ -139,9 +139,10 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     return data!
   }
 
+  /** Writes the list. Rejects when the write fails (pairing and removal say so); later saves still run. */
   function save(): Promise<void> {
     const snapshot = JSON.stringify(data)
-    saving = saving.then(async () => {
+    const run = saving.catch(() => {}).then(async () => {
       await fs.mkdir(o.dir, { recursive: true })
       const write = async (file: string, body: string | Buffer): Promise<void> => {
         const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
@@ -156,7 +157,9 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
         await fs.rm(enc, { force: true })
       }
     })
-    return saving.catch((e) => o.log(`[devices] save failed: ${String(e)}`))
+    saving = run
+    run.catch((e) => o.log(`[devices] save failed: ${String(e)}`))
+    return run
   }
 
   /** Drops devices idle past DEVICE_IDLE_MS. */
@@ -180,20 +183,25 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     d.lastSeenAt = now()
     if (now() - (written.get(d.id) ?? 0) >= TOUCH_WRITE_MS) {
       written.set(d.id, now())
-      void save()
+      save().catch(() => {}) // logged in save; a missed last-used time is harmless
     }
   }
 
-  function freshNonce(nonce: unknown): boolean {
-    if (typeof nonce !== 'string' || !NONCE.test(nonce)) return false
+  /**
+   * Remembers a nonce for as long as its signature could still be accepted. Only expired ones are dropped: dropping a
+   * live one would let its request be replayed. A full cache refuses new requests until some expire.
+   */
+  function freshNonce(nonce: unknown): 'fresh' | 'replayed' | 'busy' {
+    if (typeof nonce !== 'string' || !NONCE.test(nonce)) return 'replayed'
     const t = now()
     for (const [n, at] of nonces) {
-      if (t - at < NONCE_KEEP_MS && nonces.size <= NONCE_MAX) break
+      if (t - at < NONCE_KEEP_MS) break
       nonces.delete(n) // a Map keeps insertion order: the oldest go first
     }
-    if (nonces.has(nonce)) return false
+    if (nonces.has(nonce)) return 'replayed'
+    if (nonces.size >= NONCE_MAX) return 'busy'
     nonces.set(nonce, t)
-    return true
+    return 'fresh'
   }
 
   const timeOk = (time: unknown): time is number =>
@@ -248,7 +256,13 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const d: Stored = { id: random(16).toString('hex'), name, kind: p.kind, scopes: p.scopes, pairedAt: now(), lastSeenAt: now(), secret: p.secret }
       f.devices.push(d)
       written.set(d.id, now())
-      await save()
+      try {
+        await save()
+      } catch (e) {
+        // not kept on disk, so not kept at all: it would vanish at the next launch
+        f.devices = f.devices.filter((x) => x.id !== d.id)
+        throw e
+      }
       changed()
       return view(d)
     },
@@ -260,7 +274,8 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const time = Number(h.time)
       if (!timeOk(time)) return 'stale'
       if (!sigOk(h.sig, hmac(d.secret, callMessage(d.id, time, String(h.nonce), body)))) return 'bad-signature'
-      if (!freshNonce(h.nonce)) return 'replayed'
+      const fresh = freshNonce(h.nonce)
+      if (fresh !== 'fresh') return fresh
       touch(d)
       return view(d)
     },
@@ -272,7 +287,8 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const time = Number(q.t)
       if (!timeOk(time)) return 'stale'
       if (!sigOk(q.s, hmac(d.secret, eventsMessage(d.id, time, String(q.n))))) return 'bad-signature'
-      if (!freshNonce(q.n)) return 'replayed'
+      const fresh = freshNonce(q.n)
+      if (fresh !== 'fresh') return fresh
       touch(d)
       return view(d)
     },

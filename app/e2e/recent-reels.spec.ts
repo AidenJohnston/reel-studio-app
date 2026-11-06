@@ -1,10 +1,10 @@
 // Insights > Your recent reels, end to end with the stand-in engine: three reels with saved post results (written as
 // the result readers save them, outcomes.json), the report on request, and "Try this edit" opening the reel with the
-// note written and unsent.
+// note written and unsent. One reel's render is given a long tail so the edit offered is known.
 //
 // Run: npm run build && npx playwright test e2e/recent-reels.spec.ts
 import { test, expect } from '@playwright/test'
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, launch, makeMedia, makeReel, passFirstRun, SHOTS } from './helpers'
 
@@ -38,6 +38,9 @@ test('the recent reels report names the shared reel, and Try this edit writes th
     saveResults(made[0], 1, { plays: 1200, watchMs: 6000, shares: 3 })
     saveResults(made[1], 2, { plays: 900, watchMs: 2500, shares: 45 })
     saveResults(made[2], 3, { plays: 1500, watchMs: 7000, shares: 4 })
+    const render = join(ROOT, 'Projects', made[1], 'versions', 'v1', 'render.json')
+    const r = JSON.parse(readFileSync(render, 'utf8'))
+    writeFileSync(render, JSON.stringify({ ...r, duration: r.duration + 3 }))
 
     await page.getByTestId('nav-insights').click()
     await expect(page.getByTestId('recent-reels')).toContainText('Nothing is sent anywhere')
@@ -48,19 +51,19 @@ test('the recent reels report names the shared reel, and Try this edit writes th
     await expect(report).toContainText('45 shares from 900 plays')
     await page.screenshot({ path: join(SHOTS, 'recent-reels-01-report.png') })
 
+    // The second reel's render runs 3 s past its last word (its render.json says so, as a render with a long tail
+    // would), and people watched least of it, so its edit is "End on your last word".
     const edit = page.getByTestId('recent-edit')
-    if (await edit.isVisible()) {
-      const note = await page.evaluate(() => window.reel.wrapped.report().then((r) => (r.state === 'ready' && r.edit ? r.edit.note : null)))
-      await page.getByTestId('recent-try').click()
-      await expect(page.getByTestId('note-input')).toHaveValue(note!)
-      await page.screenshot({ path: join(SHOTS, 'recent-reels-02-try-this-edit.png') })
-      // written, not sent: nothing new in the chat, nothing running
-      await expect(page.getByTestId('note-progress')).toHaveCount(0)
-    } else {
-      // The stand-in engine's renders may have nothing to change; say so rather than pass silently.
-      console.log('[recent-reels.spec] no edit offered for the stand-in renders; Try this edit not exercised')
-      await expect(report).toContainText("Nothing in these reels' timing stands out to change")
-    }
+    await expect(edit).toContainText('after your last word')
+    const note = await page.evaluate(() => window.reel.wrapped.report().then((r) => (r.state === 'ready' && r.edit ? r.edit.note : null)))
+    expect(note).toMatch(/^End the reel on my last word: cut the [\d.]+ s after it\.$/)
+    await page.getByTestId('recent-try').click()
+    await expect(page.getByTestId('note-input')).toHaveValue(note!)
+    await page.screenshot({ path: join(SHOTS, 'recent-reels-02-try-this-edit.png') })
+    // written, not sent: the note isn't in the reel's chat or project, and nothing is running
+    await expect(page.getByTestId('chat')).not.toContainText('End the reel on my last word')
+    expect(readFileSync(join(ROOT, 'Projects', made[1], 'project.json'), 'utf8')).not.toContain('End the reel on my last word')
+    await expect(page.getByTestId('note-progress')).toHaveCount(0)
   } finally {
     await app.close()
   }

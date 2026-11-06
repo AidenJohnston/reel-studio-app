@@ -49,10 +49,12 @@ export interface WrappedReel {
   saves: number | null
   /** null when that version's render is gone. */
   timing: WrappedTiming | null
+  /** The reel's newest version when it is newer than the posted one: a note changes that one, not the posted. */
+  latest?: { version: number; timing: WrappedTiming | null }
 }
 
 export interface WrappedStrength {
-  kind: 'shares' | 'saves' | 'watch' | 'held-longest'
+  kind: 'shares' | 'saves' | 'watch' | 'held-longest' | 'none'
   project: string
   version: number
   headline: string
@@ -62,7 +64,12 @@ export interface WrappedStrength {
 export interface WrappedEdit {
   kind: 'late-start' | 'long-first-shot' | 'long-ending'
   project: string
+  /** The posted version the observation is about. */
   version: number
+  /** The version a note would change (the reel's newest), when it isn't the posted one. */
+  changes: number | null
+  /** That newer version no longer has this problem: there's nothing to try, and the report says which fixed it. */
+  fixedIn: number | null
   headline: string
   detail: string
   /** Where on that version the moment is, for the player. */
@@ -157,7 +164,11 @@ function strength(reels: WrappedReel[]): WrappedStrength {
       return { kind: m.kind, project: best.project, version: best.version, headline: m.headline(best), detail: m.detail(best, others, ratio) }
     }
   }
-  // Nothing stands apart: say which held people longest, without claiming it's different.
+  // Nothing stands apart: say which held people longest, without claiming it's different. With no watch time saved
+  // for any of them, there is nothing to say that about either.
+  if (reels.every((r) => r.averageWatchTimeMs === null)) {
+    return { kind: 'none', project: reels[0].project, version: reels[0].version, headline: 'None of these reels stands apart yet.', detail: "The saved results have no watch time to compare them by." }
+  }
   const held = heldBy(reels)
   const best = reels.reduce((a, b) => (held(b) > held(a) ? b : a))
   const others = reels.filter((r) => r !== best)
@@ -245,11 +256,18 @@ function edit(reels: WrappedReel[]): WrappedEdit | null {
     if (!check) continue
     const { shorter, ...e } = check.edit(r, t)
     const share = watchShare(r)
+    // A note changes the reel's newest version. When that's newer than the posted one, the edit is checked again on
+    // it, and its words come from its own timing.
+    const later = r.latest && r.latest.version !== r.version ? r.latest : null
+    const now = later?.timing && check.applies(later.timing) ? check.edit(r, later.timing) : null
     return {
       kind: check.kind,
       project: r.project,
       version: r.version,
+      changes: later ? later.version : null,
+      fixedIn: later && !now ? later.version : null,
       ...e,
+      ...(now ? { at: now.at, editName: now.editName, note: now.note } : {}),
       measure:
         share !== null
           ? `After 2 days, compare the share of the new version people watch with this one's ${pct(share)}.${shorter ? ' Compare the share, not the seconds: the new version is shorter.' : ''}`
