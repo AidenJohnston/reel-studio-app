@@ -166,7 +166,9 @@ setInterval(()=>{},1000);${ANSWER}`);
     }
   }, 30000);
 
-  it.each([
+  // On Windows the session's exit closed our end of its output even while the child kept its copy (seen on
+  // the windows-latest runner, 6 November), so this hang can't be built this way there.
+  it.skipIf(process.platform === 'win32').each([
     ['is killed', false],
     ['exits before the run ends', true],
   ])('a session whose output a child keeps open after the process %s fails the run instead of holding Stop forever', async (_, exitsFirst) => {
