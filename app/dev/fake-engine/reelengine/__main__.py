@@ -638,6 +638,19 @@ def cmd_reference_scan(args: list[str]) -> dict:
     return {"files": files}
 
 
+def cmd_score(args: list[str]) -> dict:
+    """The real engine reads a version's reports (reelengine/score.py). This stand-in plays the source straight through
+    and never normalizes its sound, so it says the file plays and the loudness is off target."""
+    vdir = Path(take(args, "--project")) / "versions" / f"v{int(take(args, '--version'))}"
+    if not (vdir / "project.json").exists():
+        raise Fail("NOT_FOUND", "That version isn't saved any more.")
+    cues = json.loads((vdir / "captions.json").read_text("utf-8")).get("cues", []) if (vdir / "captions.json").exists() else []
+    checks = [{"id": "subtitleSafeZone", "ok": True, "count": 0, "subtitles": len(cues)},
+              {"id": "loudness", "ok": False, "lufs": -19.6, "target": -14.0},
+              {"id": "videoFile", "ok": True, "count": 0, "failed": []}]
+    return {"version": int(take(args, "--version")), "checks": checks, "passed": 2, "measured": 3}
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -648,7 +661,7 @@ COMMANDS = {
     "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach,
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
-    "reference-scan": cmd_reference_scan, "moments": cmd_moments,
+    "reference-scan": cmd_reference_scan, "moments": cmd_moments, "score": cmd_score,
 }
 
 

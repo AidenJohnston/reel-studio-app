@@ -112,6 +112,7 @@ const api: ReelApi = {
     list: () => call('projects:list'),
     search: (query) => call('projects:search', query),
     get: (slug) => call('projects:get', slug),
+    score: (slug, version) => call('projects:score', slug, version),
     create: (files) => call('projects:create', files),
     plan: () => call('projects:plan'),
     leave: (slug) => call('projects:leave', slug),

@@ -9,6 +9,7 @@ import { Icon } from './icons'
 import { Button, PickFiles } from './ui'
 import { AttachmentThumb } from './NoteAttachments'
 import { Thinking } from './ui'
+import { EditChecks } from './EditChecks'
 
 /** "What changed" under a version: its before → after rows, read once when first opened. */
 export function useVersionRows(slug: string): { rows: Map<number, VersionRow[] | null>; want: (n: number) => void } {
@@ -237,6 +238,7 @@ export function NotesLog({
         <div className={`acc${on ? ' open' : ''}`} inert={!on || undefined}>
           <div>
             <VersionRows rows={rows} asked={words && <p className="said selectable">{words}</p>} />
+            {on && <EditChecks slug={slug} version={v} />}
             {v > 1 && (
               <div className="dacts">
                 <button className="lk" onClick={() => onCompare(v)} data-testid={`compare-${v}`}>

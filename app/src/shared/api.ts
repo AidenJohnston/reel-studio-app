@@ -1,5 +1,6 @@
 // TikTok API v2: https://developers.tiktok.com/doc/login-kit-desktop/
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
+import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { InsightsOptions, InsightsSummary } from './insights'
@@ -977,6 +978,9 @@ export interface ReelApi {
     /** Slugs of the reels whose title or spoken words contain every word of `query`, newest first. */
     search(query: string): Promise<string[]>
     get(slug: string): Promise<ProjectDetail>
+    /** The mechanical checks a saved version passes (engine `score`): pauses, subtitles, loudness, the video file,
+     * My style rules and the double-check. Reads the version's reports; renders nothing. */
+    score(slug: string, version: number): Promise<EditScore>
     create(files: string[]): Promise<{ slug: string; jobId: string; skipped: DropResult[] }>
     /** New reel: a reel with no video yet, titled "New reel" until the editor titles it. */
     plan(): Promise<{ slug: string }>

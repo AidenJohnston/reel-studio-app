@@ -165,6 +165,11 @@ def cmd_verify(args):
                       project_dir=Path(args.project) if args.project else None)
 
 
+def cmd_score(args):
+    from . import score
+    return score.run(_project(args), args.version)
+
+
 def cmd_frames(args):
     from . import frames
     times = [float(t) for t in args.times.split(",") if t.strip()]
@@ -521,6 +526,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
+    sp = add("score", cmd_score, "the mechanical checks one saved version passes (score.py); reads its reports, renders nothing")
+    sp.add_argument("--version", type=int, required=True)
     sp = add("frames", cmd_frames, "stills: of one render, or of the edit (from a render that is up to date, else drawn directly)")
     sp.add_argument("--render-id")
     sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to show")

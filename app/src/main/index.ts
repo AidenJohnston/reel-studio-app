@@ -1549,6 +1549,11 @@ function registerIpc(): void {
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  // a version's edit checks (engine score.py): read-only, so it needs no job and never waits behind one
+  handle('projects:score', async (_e, slug: string, version: unknown) => {
+    if (!Number.isSafeInteger(version) || (version as number) < 1) throw { code: 'BAD_ARGS', userMessage: 'That version is not saved.' }
+    return runEngine('score', ['--project', projectDir(slug), '--version', String(version)])
+  })
   // the learning loop (memory-loop.ts): looks again when My style opens, at most once a minute
   handle('style:suggestions', async () => {
     await refreshMemories(ai, projectsDir(), log)
