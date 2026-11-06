@@ -18,6 +18,8 @@ test("a version's checks show under What changed, failing ones first", async () 
   try {
     await passFirstRun(page)
     await makeReel(page, media.video)
+    // a version nobody has watched offers Watch in that place: play it first
+    await page.getByTestId('log-play-1').click()
     await page.getByTestId('what-changed-1').click()
     const checks = page.getByTestId('edit-checks-1')
     await expect(checks).toContainText('2 of 3 checks pass.')
