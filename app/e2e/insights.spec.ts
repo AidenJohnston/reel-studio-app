@@ -5,7 +5,7 @@
 // Run: npx playwright test e2e/insights.spec.ts (after npm run build). Screenshots: e2e/screenshots/insights-*.png
 import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { BASE, launch, makeMedia, makeReel, newProjectFolder, passFirstRun, projectFolders, root, shot } from './helpers'
 
 const FIXTURE = join(BASE, 'insights-platforms.json')
@@ -52,7 +52,8 @@ test('Insights: results read, explained and opened at the posted version', async
     before = projectFolders(root())
     await makeReel(page, media.video)
     const second = newProjectFolder(root(), before)
-    const title = (dir: string) => JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')).title as string
+    // the name Insights shows: the reel's title, or its folder's name before it has one (main index.ts describe)
+    const title = (dir: string) => (JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8')).title as string) || basename(dir)
 
     // Version 1 of the first reel went to Instagram as two trial reels (Try 1 and Try 2, the tag Instagram publishing
     // saves) and to TikTok; the second reel to Instagram.
@@ -84,7 +85,7 @@ test('Insights: results read, explained and opened at the posted version', async
     await expect(page.getByTestId('insights-fresh')).toContainText('Updated just now')
     // fails if the readout stops naming the reel that did best, by views, in words
     await expect(page.getByTestId('insights-readout')).toContainText(`${title(second)} did best, with 2,300 views.`)
-    const firstRow = page.locator(`[data-testid="insights-reel"][data-project="${first.split(/[\\/]/).pop()}"]`)
+    const firstRow = page.locator(`[data-testid="insights-reel"][data-project="${basename(first)}"]`)
     // Instagram's two tries and TikTok add up on the version that was posted
     await expect(firstRow).toContainText('Version 1 · Instagram and TikTok')
     await expect(firstRow).toContainText('2,030')
