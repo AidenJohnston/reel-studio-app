@@ -1,5 +1,5 @@
 // Settings › Posting › YouTube: the connected channel with Disconnect, and this computer's sign-in to the posting
-// server (Sign out, Sign out everywhere). Rendered only while posting is on (REELSTUDIO_POSTING=1); main/posting.ts
+// server (Sign out, Sign out everywhere). Rendered unless posting is turned off (REELSTUDIO_POSTING=0); main/posting.ts
 // does the work and shared/posting.ts holds every line of copy.
 import { useState } from 'react'
 import { CONNECT_NOTES, POST_COPY, PRICING_URL, SETTINGS_COPY, disconnectBody, signedInLine, youtubeLine } from '../../../shared/posting'
@@ -147,12 +147,4 @@ export function PostingRows() {
       )}
     </>
   )
-}
-
-/** The Instagram row's line: what Share does for it, and, while posting is on, that the other platforms are coming. */
-export function useInstagramLine(): string {
-  const [s] = usePostingStatus()
-  return s?.enabled
-    ? `Not connected yet: Share saves your reel and copies its caption. ${SETTINGS_COPY.coming}`
-    : 'Posting from Reel Studio isn’t ready yet. Share saves your reel and sends it to your phone.'
 }

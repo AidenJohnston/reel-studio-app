@@ -4,22 +4,26 @@ import { describeSorted } from '../../../shared/describe'
 import { reel, userMessage } from '../api'
 import { Button, FOLDER_APP, PickFiles, Spinner } from '../components/ui'
 import { Icon } from '../components/icons'
+import { FootageFolders } from '../components/FootageFolders'
 import { TitleBarSlot } from '../components/titlebar'
 import '../components/library.css'
+import '../components/fonts.css'
 
-type Tab = 'images' | 'videos' | 'music' | 'sfx'
+type Tab = 'images' | 'videos' | 'music' | 'sfx' | 'fonts'
 const TABS: { key: Tab; label: string; bins: LibraryBin['key'][]; empty: [string, string] }[] = [
   { key: 'images', label: 'Pictures', bins: ['images'], empty: ['No pictures yet', 'Drop pictures, logos or screenshots on this window, or use Add files.'] },
   { key: 'videos', label: 'Videos', bins: ['broll', 'raw'], empty: ['No videos yet', 'Drop clips your editor can show while you talk, or use Add files.'] },
   { key: 'music', label: 'Music', bins: ['music'], empty: ['No music yet', 'Drop songs on this window, or use Add files.'] },
-  { key: 'sfx', label: 'Sound effects', bins: ['sfx'], empty: ['No sound effects', 'The sounds that come with Reel Studio are missing. Reinstall it to bring them back.'] }
+  { key: 'sfx', label: 'Sound effects', bins: ['sfx'], empty: ['No sound effects', 'The sounds that come with Reel Studio are missing. Reinstall it to bring them back.'] },
+  { key: 'fonts', label: 'Fonts', bins: ['fonts', 'fontpack'], empty: ['No fonts', 'The fonts that come with Reel Studio are missing. Reinstall it to bring them back.'] }
 ]
-const TAB_OF: Partial<Record<NonNullable<DropResult['bin']>, Tab>> = { images: 'images', broll: 'videos', raw: 'videos', music: 'music' }
+const TAB_OF: Partial<Record<NonNullable<DropResult['bin']>, Tab>> = { images: 'images', broll: 'videos', raw: 'videos', music: 'music', fonts: 'fonts' }
 const ABOUT: Record<Tab, string> = {
   images: 'Pictures your editor can put in a reel.',
   videos: 'Clips your editor can show while you talk.',
   music: 'Songs your editor can put under your voice.',
-  sfx: 'Come with Reel Studio, free to use (CC0). Your editor places them on cuts and words.'
+  sfx: 'Come with Reel Studio, free to use (CC0). Your editor places them on cuts and words.',
+  fonts: 'Faces your editor can set your subtitles in. Drop .ttf or .otf files to add your own.'
 }
 const SFX_GROUP: Record<string, string> = { whoosh: 'Whooshes', pop: 'Pops', click: 'Clicks', ding: 'Dings', impact: 'Hits', riser: 'Risers', typing: 'Typing' }
 
@@ -172,6 +176,49 @@ function Sounds({ files, previews, audition }: { files: LibraryFile[]; previews:
   )
 }
 
+/** Each font file as a face the page can draw with, so a row shows the font itself. Faces stay loaded while the app
+ * runs: the same file is asked for once. */
+const faces = new Map<string, string>()
+function faceOf(f: LibraryFile): string {
+  let family = faces.get(f.url)
+  if (!family) {
+    family = `rs-lib-font-${faces.size}`
+    faces.set(f.url, family)
+    const face = new FontFace(family, `url("${f.url}")`)
+    void face.load().then((loaded) => document.fonts.add(loaded), () => undefined)
+  }
+  return family
+}
+
+function Fonts({ groups }: { groups: LibraryBin[] }) {
+  return (
+    <>
+      {groups
+        .filter((b) => b.files.length)
+        .map((b) => (
+          <section key={b.key} className="lib-group" data-testid={`bin-${b.key}`}>
+            <h2>
+              {b.label} <span className="n">{b.files.length}</span>
+            </h2>
+            <ul className="lib-rows">
+              {b.files.map((f) => (
+                <li key={f.path} className="lib-font" data-testid="library-font">
+                  <span className="lib-font-sample" style={{ fontFamily: `"${faceOf(f)}", var(--font-ui)` }} aria-hidden>
+                    Your words, on screen
+                  </span>
+                  <span className="lib-row-t" title={f.name}>
+                    <b>{f.font?.full ?? f.name}</b>
+                    <span>{licence(f)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+    </>
+  )
+}
+
 function Pictures({ files }: { files: LibraryFile[] }) {
   return (
     <ul className="lib-grid lib-pics">
@@ -255,7 +302,7 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
   const previews = usePreviews(tab === 'images' ? [] : files)
   const count = (t: (typeof TABS)[number]) => (bins ?? []).filter((b) => t.bins.includes(b.key)).reduce((n, b) => n + b.files.length, 0)
   // where Add files and drops put this tab's files (Videos: Extra clips)
-  const folder = groups.find((b) => b.key !== 'sfx')
+  const folder = groups.find((b) => b.key !== 'sfx' && b.key !== 'fontpack')
 
   const choose = (t: Tab) => {
     audition.stop()
@@ -320,6 +367,7 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
         </p>
       )}
       <div id="lib-panel" role="tabpanel" aria-labelledby={`lib-tab-${tab}`} className="lib-panel" data-testid={`library-panel-${tab}`}>
+        {tab === 'videos' && <FootageFolders say={setResult} />}
         {bins && !files.length && (
           <div className="lib-empty" data-testid="library-empty">
             <h2>{current.empty[0]}</h2>
@@ -345,6 +393,7 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
             <Sounds files={files} previews={previews} audition={audition} />
           </div>
         )}
+        {tab === 'fonts' && files.length > 0 && <Fonts groups={groups} />}
         {tab === 'sfx' &&
           [...new Set(files.map((f) => f.group ?? ''))].map((job) => {
             const set = files.filter((f) => (f.group ?? '') === job)

@@ -7,7 +7,7 @@ import type {
 import { decideTrial } from './trial-decision'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads', 'x', 'linkedin']
 const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'skipRatePercent', 'shares', 'saves', 'comments', 'likes']
 /** Rates and averages, weighted by plays when posts are combined; every other metric is a count and is summed. */
 const PER_PLAY = new Set<InsightMetric>(['averageWatchTimeMs', 'completionEstimate', 'skipRatePercent'])
@@ -15,9 +15,9 @@ const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
   skipRatePercent: 'Skip rate', shares: 'Shares', saves: 'Saves', comments: 'Comments', likes: 'Likes'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
-const KEY_PREFIX: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:' }
-const API_VERSION: Record<InsightPlatform, RegExp> = { instagram: /^v26\.0$/, tiktok: /^v2$/, facebook: /^v\d{2}\.0$/ }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads', x: 'X', linkedin: 'LinkedIn' }
+const KEY_PREFIX: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:', threads: 'threads:', x: 'x:', linkedin: 'linkedin:' }
+const API_VERSION: Record<InsightPlatform, RegExp> = { instagram: /^v26\.0$/, tiktok: /^v2$/, facebook: /^v\d{2}\.0$/, threads: /^v1\.0$/, x: /^v2$/, linkedin: /^\d{6}$/ }
 const TRIAL_CHANGES = new Set(['video', 'hook', 'caption', 'cover', 'brightness'])
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
@@ -93,7 +93,7 @@ function parseTrials(value: unknown, project: string): InsightTrial[] {
   })
 }
 function isPlatform(value: unknown): value is InsightPlatform {
-  return value === 'instagram' || value === 'tiktok' || value === 'facebook'
+  return (PLATFORMS as unknown[]).includes(value)
 }
 /**
  * outcomes.json `trial`, written by publish (shared/insights.ts PostTrial). Absent on an ordinary post. A trial reel
