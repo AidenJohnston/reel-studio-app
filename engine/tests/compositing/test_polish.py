@@ -202,7 +202,7 @@ def test_meter_drops_broll_removed_after_a_render(tmp_path, video):
 
 
 @pytest.mark.needs_libass
-def test_window_meter_counts_only_visual_starts_in_the_rendered_interval(tmp_path, video):
+def test_window_meter_counts_only_visual_changes_in_the_rendered_interval(tmp_path, video):
     pdir = tmp_path / "p"
     fx.make_project(pdir, video, keep=((0.1, 11.9),), extra={
         "broll": [
@@ -218,4 +218,6 @@ def test_window_meter_counts_only_visual_starts_in_the_rendered_interval(tmp_pat
         assert row["seconds"] == 4
         assert row["zoomStarts"] == 1
         assert row["brollStarts"] == 1
-        assert row["perMinute"] == 30
+        # the zoom on w20-w21 also ends inside the window: its release is a change the eye sees
+        assert row["zoomEnds"] == 1
+        assert row["perMinute"] == 45

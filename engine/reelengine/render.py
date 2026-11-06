@@ -1,5 +1,7 @@
-"""`render [--draft] [--window a:b]`: project.json -> versions/vN/{export.mp4, cover.png, verify.json}
-for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+"""`render [--draft] [--window a:b] [--rules file]`: project.json -> versions/vN/{export.mp4, cover.png,
+verify.json} for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+With --rules, the result's `ruleChecks` says which checkable My style rules this render breaks
+(rule_checks.py), and a final render that breaks one the rules file lists in `stopOn` returns before its encode.
 
 Order of operations (docs/architecture.md section 5): cut video (+ zooms) -> overlay layers by z -> captions burned
 last -> mux the audio. The audio is built FIRST, as its own file: the cut voice, then the music
@@ -32,7 +34,7 @@ from typing import Optional
 
 import reelengine
 
-from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
@@ -178,12 +180,10 @@ def source_faces(project_dir: Path, proj: dict) -> dict:
     return faces
 
 
-def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
-    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
-    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
-    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
-    rot = int(src.get("rotation") or 0) % 360
-    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+def display_crop(disp: tuple, out_w: int, out_h: int, face: Optional[tuple]) -> tuple:
+    """(x, y, cw, ch): the part of the upright picture (disp = its width, height) that fills
+    out_w x out_h, centred on the face when known. Match cuts compare frames through it (match.py)."""
+    w, h = disp
     target = out_w / out_h
     if w / h > target + 1e-3:          # too wide: crop the sides
         cw, ch = int(round(h * target)) // 2 * 2, h // 2 * 2
@@ -197,6 +197,16 @@ def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> di
         x = 0
     else:
         cw, ch, x, y = w // 2 * 2, h // 2 * 2, 0, 0
+    return x, y, cw, ch
+
+
+def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
+    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
+    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
+    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
+    rot = int(src.get("rotation") or 0) % 360
+    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+    x, y, cw, ch = display_crop((w, h), out_w, out_h, face)
     if rot == 90:
         rx, ry, rcw, rch = y, rh - x - cw, ch, cw
     elif rot == 270:
@@ -1035,6 +1045,29 @@ def read_broll_report(items: list) -> list:
     return out
 
 
+def mix_measured(audio: Path) -> Optional[dict]:
+    """The mix report beside the audio this render used (music.build_audio), or None when it is missing.
+    The voice-only fallback (no music module, or the mix failed) has no music in it."""
+    audio = Path(audio)
+    if not audio.name.startswith("mix-"):
+        return {"music": None}
+    try:
+        return json.loads(audio.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def read_rules(path: Optional[str]) -> Optional[tuple]:
+    """`--rules`: the rules file (rule_checks.py), parsed strictly before any work starts."""
+    if path is None:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise EngineError("BAD_RULE", f"rules file: {exc}", "I couldn't read your My style rules. Please try again.") from None
+    return rule_checks.parse_rules(text)
+
+
 def check_fontselect(stderr: str, font_path: Path) -> Optional[str]:
     """libass logs which file it actually used. Anything other than our font = silent substitution."""
     hits = [ln for ln in stderr.splitlines() if "fontselect:" in ln]
@@ -1066,8 +1099,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
         music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
         out: Optional[Path] = None, job_id: Optional[str] = None, parent: Optional[int] = None,
-        merge_parent: Optional[int] = None) -> dict:
+        merge_parent: Optional[int] = None, rules: Optional[str] = None) -> dict:
     t_start = time.time()
+    checks = read_rules(rules)
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir, file=project_file)
     committed = int(proj.get("version") or 0)
@@ -1157,6 +1191,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     ctx.window = win
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
+    for m in tl.match_joins:
+        if m.get("played") == "hard":
+            warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
     # 1. audio (always the full cut, then sliced for a window, so the music sits where it will)
@@ -1189,6 +1226,21 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     # a window keeps the full track's cues that overlap it; a full render's go beside the video (#87)
     if win:
         cap_report = [r for r in cap_report if r["e"] > win[0] and r["s"] < win[1]]
+
+    # Every rule is measured on what was just built, before the encode: a final render that breaks
+    # one the app asked to stop on returns now, without spending a minute or two on a video.
+    rule_report = None
+    if checks is not None and not win:
+        gone = {r["id"] for r in broll_report if r.get("skipped")}
+        rule_report = rule_checks.check(checks[0], cues=cap_report, fmt=(W, H), mix=mix_measured(audio),
+                                        broll=[r for r in layer_items if r.get("id") not in gone], duration=tl.duration)
+        if not preview and any(f["id"] in checks[1] for f in rule_report["failures"]):
+            # the version folder made above holds nothing yet: no number is used up
+            shutil.rmtree(vdir, ignore_errors=True)
+            progress(STAGE, 100, "Checking your rules", force=True)
+            timings["total"] = round(time.time() - t_start, 2)
+            return {"version": version, "preview": preview, "draft": draft, "encoded": False,
+                    "ruleChecks": rule_report, "warnings": warnings, "timings": timings}
 
     # 4. the picture
     if win:
@@ -1269,8 +1321,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift)
-    result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps,
+    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
+    result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps, "encoded": True,
               "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
@@ -1279,6 +1331,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
               "expectedSilence": ctx.expected_silence,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
     result.update(lint)
+    if rule_report is not None:
+        result["ruleChecks"] = rule_report
     if ctx.variation is not None:
         result["variation"] = ctx.variation
 
@@ -1372,6 +1426,29 @@ def source_files(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
     return src_meta, src_paths
 
 
+# A flash join (Resolve's "dip to color", in white): the picture fades to white over FLASH_IN frames before the cut
+# and back over FLASH_OUT after it. It is a layer like any picture, so a draft, a window and the final draw it the
+# same, and captions stay on top of it. Frame counts judged by eye in other editors' presets (2 in, 3 out); no
+# measurement behind them.
+FLASH_IN, FLASH_OUT, FLASH_Z = 2, 3, 10_000
+
+
+def flash_layers(ctx: RenderCtx, segments: list) -> list:
+    cuts = [s.out_start for s in segments[1:] if s.join_transition == "flash"]
+    if not cuts:
+        return []
+    from PIL import Image
+    png = Path(ctx.work) / "render" / "flash.png"
+    if not png.exists():
+        png.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (16, 16), (255, 255, 255)).save(png)
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    # the project's frame rate, not a preview's, so a draft and a window flash for as long as the final does
+    fps = float(((ctx.project or {}).get("format") or {}).get("fps") or ctx.fmt["fps"])
+    return [Layer(path=png, kind="image", t0=max(0.0, t - FLASH_IN / fps), t1=t + FLASH_OUT / fps, x=0, y=0, w=W, h=H,
+                  z=FLASH_Z, fade_in=FLASH_IN / fps, fade_out=FLASH_OUT / fps) for t in cuts]
+
+
 def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
     """(layers, zooms, layer items, raw b-roll, broll_report): the b-roll layers and zooms (A2) drawn
     over the cut. The layer items are the records build_layers wrote to work/layers/layers.json, which
@@ -1407,6 +1484,7 @@ def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
         except Exception as exc:   # noqa: BLE001
             log(f"# zoom.build_zooms failed: {exc!r}")
             warnings.append(ZOOMS_FAILED)
+    layers += flash_layers(ctx, tl.segments)
     return layers, zooms, layer_items, raw_broll, broll_report
 
 

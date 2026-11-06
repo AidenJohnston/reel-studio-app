@@ -17,7 +17,8 @@ export interface Source {
   capturedAt?: string;
   [k: string]: unknown;
 }
-export interface Join { transition: 'hard' | 'j' | 'l' | 'smash'; frames: number }
+export interface Join { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash'; frames: number }
+export const JOIN_TRANSITIONS = ['hard', 'j', 'l', 'smash', 'match', 'flash'] as const;
 export interface WordAnchor { from: string; to: string }
 export interface CutRange extends WordAnchor { join?: Join }
 /** A clip from any source, played whole (multi-source): source seconds, start included and end excluded. */
@@ -90,6 +91,8 @@ export interface Project {
   id: string; title: string; slug: string; createdAt: string; updatedAt: string; version: number;
   format: Format;
   cutStyle?: CutStyle;
+  /** true: sound effects and picture starts land on the song's beats; false: never, even at the hyper pace; absent: the pace decides */
+  beatAccents?: boolean;
   exposure?: number;
   sources: Source[];
   transcript: { file: string; language?: string };
@@ -187,6 +190,7 @@ export function validateProject(p: unknown, transcript?: Transcript): string[] {
     else if (typeof q.cutStyle.preset !== 'string' || !Object.prototype.hasOwnProperty.call(CUT_STYLES, q.cutStyle.preset)) out.push('cutStyle.preset must be clean, standard, hyper, or punchline');
     else if (!Number.isInteger(q.cutStyle.seed)) out.push('cutStyle.seed must be an integer');
   }
+  if (q.beatAccents !== undefined && typeof q.beatAccents !== 'boolean') out.push('beatAccents must be true or false');
   if (!q.format || !isNum(q.format.width) || !isNum(q.format.height) || !isNum(q.format.fps)) out.push('format needs width/height/fps');
   // ffmpeg exposure accepts -3 to +3 stops, equivalent to these linear multipliers.
   if (q.exposure !== undefined && (!isNum(q.exposure) || q.exposure < 0.125 || q.exposure > 8)) out.push('exposure must be a number between 0.125 and 8');
@@ -573,11 +577,6 @@ export function approxDuration(t: Transcript, keep: CutItem[], gapCap: number): 
 
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
-// A match cut joins two shots that show the same shape or movement. The engine tracks where the face is in each take
-// (work/face-<source>.json) but never compares what two shots show, and most reels are one take, where both sides of
-// every join are the same shot. Saying "match" would label a plain jump cut. engine/reelengine/cut.py refuses it too.
-export const MATCH_CUT_REFUSAL = "match cuts are not available: the engine can't tell whether two shots match, so use hard, j, l or smash";
-
 /** `before`: the cut.keep item just before this range, when the caller has the whole cut. */
 function joinProblem(join: unknown, index: number, before?: unknown): string | null {
   if (join === undefined) return null;
@@ -586,8 +585,8 @@ function joinProblem(join: unknown, index: number, before?: unknown): string | n
   if (before && typeof before === 'object' && 'clip' in before) return 'not allowed right after a clip';
   if (!join || typeof join !== 'object') return 'needs transition and frames';
   const j = join as Partial<Join>;
-  if ((j.transition as string) === 'match') return MATCH_CUT_REFUSAL;
-  if (!['hard', 'j', 'l', 'smash'].includes(j.transition ?? '')) return 'transition must be hard, j, l or smash';
+  // a match is valid here; whether its two sides line up is the engine's to say (engine/reelengine/match.py)
+  if (!(JOIN_TRANSITIONS as readonly string[]).includes(j.transition ?? '')) return 'transition must be hard, j, l, smash, match or flash';
   if (!Number.isSafeInteger(j.frames) || j.frames! < 0) return 'frames must be a non-negative integer';
   return null;
 }

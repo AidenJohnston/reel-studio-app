@@ -6,15 +6,17 @@ import { useNotify } from '../../App'
 import { SubtitleLines } from '../../components/SubtitleLines'
 import { Button, Segmented } from '../../components/ui'
 import { pressKeys, setP, takes, wordKeys, type TabProps } from './controls'
+import { JoinControls } from './JoinControls'
 import { PaceControls } from './PaceControls'
 
 type Captions = NonNullable<ProjectJson['captions']>
-export type CutMode = 'cut' | 'fix' | 'pace'
+export type CutMode = 'cut' | 'fix' | 'pace' | 'joins'
 
 const MODES = [
   { key: 'cut', label: 'Cut words' },
   { key: 'fix', label: 'Fix words' },
-  { key: 'pace', label: 'Pace' }
+  { key: 'pace', label: 'Pace' },
+  { key: 'joins', label: 'Transitions' }
 ] as const
 const CASES = [
   { key: 'upper', label: 'CAPITALS' },
@@ -34,7 +36,7 @@ export function CutTab(props: TabProps & {
   return (
     <div className="edit-stack">
       <Segmented testid="cut-mode" label="What to change in the cut" value={props.mode} options={MODES} onPick={props.onMode} />
-      {props.mode === 'pace' ? <PaceControls {...props} /> : <Words {...props} />}
+      {props.mode === 'pace' ? <PaceControls {...props} /> : props.mode === 'joins' ? <JoinControls {...props} /> : <Words {...props} />}
     </div>
   )
 }
