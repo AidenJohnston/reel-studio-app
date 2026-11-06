@@ -20,12 +20,29 @@ function toSchema(p: AnimParamSpec, description: string): JSONSchema {
   const extra: JSONSchema = {};
   if (p.minimum !== undefined) extra.minimum = p.minimum;
   if (p.maximum !== undefined) extra.maximum = p.maximum;
-  if (t === 'array') return S.arr({ type: p.items?.type ?? 'string' }, description,
-    { ...(p.minItems !== undefined ? { minItems: p.minItems } : {}), ...(p.maxItems !== undefined ? { maxItems: p.maxItems } : {}) });
+  if (t === 'array') {
+    const items = p.items && (p.items.properties || p.items.type === 'array') ? toSchema(p.items, p.items.description ?? '') : { type: p.items?.type ?? 'string' };
+    return S.arr(items, description,
+      { ...(p.minItems !== undefined ? { minItems: p.minItems } : {}), ...(p.maxItems !== undefined ? { maxItems: p.maxItems } : {}) });
+  }
+  if (t === 'object' && p.properties) return S.obj(fieldSchemas(p), description);
   if (p.enum) return S.enum(p.enum.filter((v): v is string => typeof v === 'string'), description);
   if (t === 'number' || t === 'integer') return S.num(description, extra);
   if (t === 'boolean') return S.bool(description);
   return S.str(description);
+}
+
+/** A nested object's fields for the tool (compose's rows and parts): strict mode lists every field,
+ *  so a field the template doesn't require is nullable; engine-fed ones (a part's `at`) are left out. */
+function fieldSchemas(p: AnimParamSpec): Record<string, JSONSchema> {
+  const req = new Set(p.required ?? []);
+  const out: Record<string, JSONSchema> = {};
+  for (const [k, s] of Object.entries(p.properties ?? {})) {
+    if (ENGINE_FED.has(k)) continue;
+    const f = toSchema(s, s.description ?? '');
+    out[k] = req.has(k) ? f : S.opt(f);
+  }
+  return out;
 }
 
 /** One params object covering every template (strict mode: each field nullable). Each field says
@@ -60,10 +77,70 @@ export function cleanParams(id: string, params: Record<string, unknown>): [Recor
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v === null || v === undefined || !(k in spec.params) || ENGINE_FED.has(k)) continue;
-    out[k] = v;
+    out[k] = scrub(v);
   }
   const missing = spec.required.filter((k) => out[k] === undefined || out[k] === '');
   return [out, missing.map((k) => `${id} needs params.${k}`)];
+}
+
+/** Nested nulls (strict mode's "not set") and engine-fed fields go: a replayed compose part keeps no
+ *  old `at`, so a re-time lands it on its word again. */
+function scrub(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(scrub);
+  if (!v || typeof v !== 'object') return v;
+  return Object.fromEntries(Object.entries(v).filter(([k, x]) => x !== null && x !== undefined && !ENGINE_FED.has(k)).map(([k, x]) => [k, scrub(x)]));
+}
+
+// ---------------------------------------------------------------- compose
+
+/** The motions each kind of compose part can take; templates/animations/compose/index.html
+ *  (ALLOWED) quietly swaps any other for the kind's own, so the tool refuses it first. */
+export const COMPOSE_MOTIONS: Record<string, readonly string[]> = {
+  text: ['rise', 'strike'], number: ['count', 'rise', 'pop', 'strike'], stars: ['fill', 'rise'], arrow: ['draw'], rule: ['draw'],
+};
+/** Most parts one graphic shows (the template drops the rest), and the gap a part with no spoken
+ *  word follows the one before by: both the same as compose/index.html (MAX_PARTS, STEP). */
+export const COMPOSE_MAX_PARTS = 12;
+const COMPOSE_STEP = 0.3;
+
+interface ComposePart { kind?: string; text?: string; value?: number; max?: number; motion?: string; on?: string; at?: number }
+const composeParts = (params: Record<string, unknown>): { part: ComposePart; at: string }[] =>
+  (Array.isArray(params.rows) ? params.rows : []).flatMap((r: any, ri: number) =>
+    (Array.isArray(r?.parts) ? r.parts : []).map((part: ComposePart, pi: number) => ({ part, at: `rows[${ri}].parts[${pi}]` })));
+
+/** What the compose template would draw differently from what was asked: a motion the part's kind
+ *  can't take, a text or number part with nothing to show, a rating over its scale, too many parts. */
+export function composeProblems(params: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const parts = composeParts(params);
+  if (parts.length > COMPOSE_MAX_PARTS) out.push(`compose shows at most ${COMPOSE_MAX_PARTS} parts; this has ${parts.length}. Split it into two graphics or drop some`);
+  for (const { part, at } of parts) {
+    const ok = COMPOSE_MOTIONS[part.kind ?? ''];
+    if (!ok) { out.push(`${at}.kind must be one of ${Object.keys(COMPOSE_MOTIONS).join(', ')}`); continue; }
+    if (part.motion !== undefined && !ok.includes(part.motion)) out.push(`${at}: a ${part.kind} part can't ${part.motion}; it takes ${ok.join(' or ')}`);
+    if ((part.kind === 'text' || part.kind === 'number') && !String(part.text ?? '').trim()) out.push(`${at}: a ${part.kind} part needs text`);
+    if (part.kind === 'number' && part.text && !/\d/.test(part.text)) out.push(`${at}: a number part's text needs digits ("${part.text}"); use a text part for words`);
+    if (part.kind === 'stars' && typeof part.value !== 'number') out.push(`${at}: a stars part needs value (the rating as said)`);
+    if (part.kind === 'stars' && typeof part.value === 'number' && part.value > (part.max ?? 5)) out.push(`${at}: ${part.value} stars is more than max ${part.max ?? 5}`);
+  }
+  return out;
+}
+
+/** Sets each compose part's `at` (seconds from the clip start): the first of its `on` words, found
+ *  in reading order; a part with no `on`, or one not found, follows the previous part by 0.3 s.
+ *  Returns how many parts landed on a spoken word. Mutates `params.rows`. */
+export function timeComposeParts(params: Record<string, unknown>, words: TimedWord[]): number {
+  let j = 0, prev = -COMPOSE_STEP, hits = 0;
+  for (const { part } of composeParts(params)) {
+    let t: number | null = null;
+    const ns = tokens(part.on ?? '').map(norm).filter(Boolean).slice(0, 2);
+    if (ns.length) {
+      for (let k = j; k < words.length; k++) if (ns.includes(norm(words[k].w))) { t = words[k].t; j = k + 1; hits++; break; }
+    }
+    prev = t !== null ? Math.max(t, prev, 0) : prev + COMPOSE_STEP;
+    part.at = round(prev);
+  }
+  return hits;
 }
 
 // ---------------------------------------------------------------- word timing

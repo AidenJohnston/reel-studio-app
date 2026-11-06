@@ -44,6 +44,10 @@ export const LATE = {
   'price-tag': (p) => (p.oldValue ? { strikeAt: 0.9 } : {}),
   'stat-count-up': () => ({ labelAt: 0.8 }),
   'typing-terminal': () => ({ typeAt: 0.8 }),
+  compose: (p) => {
+    let i = 0;
+    return { rows: p.rows.map((r) => ({ ...r, parts: r.parts.map((x) => ({ ...x, at: 0.7 + 0.4 * i++ })) })) };
+  },
 };
 
 export function cases(logo) {

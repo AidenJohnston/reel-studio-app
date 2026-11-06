@@ -340,6 +340,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .nt-res .t { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; min-width: 0; flex: 0 1 auto; }
 .nt-res .sep { color: var(--ink-4); flex: none; margin: 0 -2px; }
 .nt-res .t.wrap { white-space: normal; overflow-wrap: anywhere; }
+/* a question waits on the person: all of it, its line under it ("I'll check this on every reel") and its buttons */
+.nt-res.reply.asks > .t { display: block; -webkit-line-clamp: unset; overflow: visible; }
 /* a version's few words from its rows: short by design, so never cut; at the narrowest column they wrap */
 .nt-res .t.fact { display: block; -webkit-line-clamp: unset; overflow: visible; text-wrap: pretty; }
 /* a pause says why and when it goes on: all of it, on as many lines as it needs, with its button under it */
