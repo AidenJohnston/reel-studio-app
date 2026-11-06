@@ -12,6 +12,7 @@ import { MODEL_ROLES, type DataSharing, type ModelChoice, type PhoneView } from 
 import type { TikTokSettings } from '../shared/tiktok'
 import type { InstagramSettings } from '../shared/instagram'
 import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
+import type { SavedSource } from './footage-sources'
 
 // Instagram and TikTok (insights-data): off until a developer configures them, with no UI yet
 export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemory, UpdateKeyState {
@@ -42,6 +43,8 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   soundEffects: boolean
   /** Settings › Editor › "Let other AI apps use Reel Studio" (main/outside-access.ts): off until the person turns it on */
   outsideApps: boolean
+  /** Library › Videos › Footage folders (footage-sources.ts) */
+  footageSources: SavedSource[]
 }
 
 const DEFAULTS: Settings = {
@@ -61,6 +64,7 @@ const DEFAULTS: Settings = {
   timeline: true,
   soundEffects: true,
   outsideApps: false,
+  footageSources: [],
   // Connection and publishing stay opt-in until the broker and Meta app have been configured.
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],
   // Posting requires explicit developer configuration and approval of the requested scopes.

@@ -19,6 +19,9 @@ const TYPES: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.mp3': 'audio/mpeg',
+  // Library › Fonts draws each font in its own face (renderer FontFace)
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
   '.m4a': 'audio/mp4',
   '.wav': 'audio/wav',
   '.aac': 'audio/aac',
@@ -42,7 +45,8 @@ function allowedNetworkPath(file: string, roots: string[]): boolean {
 
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+    // corsEnabled: a font is loaded in CORS mode, and only a scheme that allows CORS can answer one (fonts only, below)
+    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
   ])
 }
 
@@ -78,6 +82,8 @@ export function handleMediaProtocol(allowedRoots: () => string[]): void {
       const size = opened.size
       const type = TYPES[extname(checked).toLowerCase()] ?? 'application/octet-stream'
       const headers: Record<string, string> = { 'Content-Type': type, 'Content-Length': String(size), 'Accept-Ranges': 'bytes' }
+      // the page's own fonts are the only cross-origin reads it makes from here; nothing else gets the header
+      if (type.startsWith('font/')) headers['Access-Control-Allow-Origin'] = '*'
       const range = req.headers.get('range')
       const m = range && /bytes=(\d*)-(\d*)/.exec(range)
       let start = 0

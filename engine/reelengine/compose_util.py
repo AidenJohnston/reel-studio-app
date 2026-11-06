@@ -25,7 +25,7 @@ import numpy as np
 PKG_DIR = Path(__file__).resolve().parent
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif", ".avif"}
-VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
+VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".3gp"}
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 
 
@@ -311,8 +311,10 @@ SYSTEM_FONTS = [
 
 def font_dirs() -> list[Path]:
     dirs = []
-    if os.environ.get("REELENGINE_FONTS"):
-        dirs.append(Path(os.environ["REELENGINE_FONTS"]))
+    # a path list, like tools.font_dirs: the person's Library › Fonts, then the bundled fonts (app paths.ts engineEnv)
+    for p in os.environ.get("REELENGINE_FONTS", "").split(os.pathsep):
+        if p:
+            dirs.append(Path(p))
     dirs += [PKG_DIR / "fonts", PKG_DIR.parent.parent / "resources" / "fonts",
              PKG_DIR.parent.parent / "app" / "resources" / "fonts"]
     return [d for d in dirs if d.is_dir()]

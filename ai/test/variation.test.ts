@@ -3,13 +3,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { executeTool, loadProject, newToolState, StyleStore, ToolContext } from '../src';
+import { createAI, executeTool, loadProject, newToolState, StyleStore, ToolContext } from '../src';
 import { saveProject } from '../src/project';
-import { FakeHost, makeProject } from './helpers';
+import { FakeHost, ScriptedModel, call, firstVersion, makeProject, tmpDir } from './helpers';
 
 class RealVariantHost extends FakeHost {
   override async runEngine(command: string, args: string[]) {
     if (command !== 'make-variant') return super.runEngine(command, args);
+    this.calls.push({ command, args });
     const { stdout } = await promisify(execFile)('uv', ['run', '--no-project', '--python', '3.11',
       '--with-editable', './engine[dev]', 'python', '-m', 'reelengine', command, ...args],
       { cwd: path.resolve(__dirname, '../..') });
@@ -46,6 +47,25 @@ it.each([
   expect(await loadProject(dir)).toEqual(ctx.project);
   expect(JSON.parse(await fsp.readFile(path.join(dir, 'trials.json'), 'utf8'))).toEqual([output.trial]);
   expect(ctx.state.changed.has(args.variable === 'caption' ? 'post' : args.variable)).toBe(true);
+});
+
+// fails if a trial inside a note writes project.json instead of the note's copy: the note then finds
+// project.json changed under it and is not saved
+it('saves a note whose editor made a trial', async () => {
+  const { root, dir } = await makeProject();
+  const host = new RealVariantHost(root);
+  await firstVersion(dir, host);
+  const model = new ScriptedModel([
+    { toolCalls: [call('make_variant', { variable: 'caption', caption: 'Try a slower rise' })] },
+    { toolCalls: [call('finish', { summary_for_user: 'I made a trial with a new post line.' })] },
+  ]);
+  await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model })
+    .applyNote(dir, 'make a trial with a different post line', () => undefined);
+  const trial = host.calls.find((c) => c.command === 'make-variant')!;
+  expect(trial.args[trial.args.indexOf('--project-file') + 1]).toMatch(/[\\/]work[\\/]notes[\\/][^\\/]+[\\/]edit\.json$/);
+  expect((await loadProject(dir)).post.caption).toBe('Try a slower rise');
+  const trials = JSON.parse(await fsp.readFile(path.join(dir, 'trials.json'), 'utf8'));
+  expect(trials).toMatchObject([{ variable: 'caption', to: 'Try a slower rise' }]);
 });
 
 it('renders a fresh preview after a seed change', async () => {
