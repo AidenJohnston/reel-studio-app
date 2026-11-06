@@ -94,6 +94,12 @@ def cmd_footage(args):
     return footage.search(root, args.query, limit=args.limit)
 
 
+def cmd_measure_reel(args):
+    """A reference reel's pace, opening line and cut rhythm (measure.py), for My style's reference reels."""
+    from . import measure
+    return measure.measure(Path(args.file), Path(args.poster) if args.poster else None)
+
+
 def cmd_download_model(args):
     from . import transcribe
     return transcribe.download_model(args.name or transcribe.default_model())
@@ -135,12 +141,65 @@ def cmd_lint_edit(args):
     return prepare(ctx, tl)
 
 
+def cmd_match_joins(args):
+    from . import project
+    pdir = _project(args)
+    # inside a note, the note's private copy of the edit (render does the same)
+    note = _in_work(args, "project_file")
+    edit = project.load(pdir, file=note) if note else project.load(pdir)
+    if args.keep is not None:
+        try:
+            edit["cut"]["keep"] = json.loads(args.keep)
+        except (ValueError, TypeError):
+            raise EngineError("BAD_ARGS", "--keep must be JSON", "Reel Studio sent a cut the engine couldn't read.")
+    keep = edit["cut"]["keep"]
+    if args.every and isinstance(keep, list):
+        # ask the question for every join that could hold one: after the first range, never next to a clip
+        for i, item in enumerate(keep):
+            if i and isinstance(item, dict) and "clip" not in item and isinstance(keep[i - 1], dict) and "clip" not in keep[i - 1]:
+                item["join"] = {"transition": "match", "frames": 0}
+    problems = project.validate(edit)
+    if problems:
+        raise EngineError("BAD_PROJECT", "; ".join(problems[:8]), "This cut can't be checked. Undo the last change and try again.")
+    tl = project.timeline(pdir, edit)
+    return {"joins": [{"keep": m["keep"], "matched": m["played"] == "match",
+                       "at": round(tl.segments[m["in"]].out_start, 3) if "in" in m else None,
+                       **{k: m[k] for k in ("why", "look", "move") if k in m}} for m in tl.match_joins]}
+
+
+def cmd_pace_preview(args):
+    """How often the picture would change under each pace, from the plan a render would make (no encode)."""
+    import copy
+    from . import project, render, tools
+    from .cut_style import CUT_STYLES, OPENING, OPENING_MAX_UNSTYLED, visual_change_meter
+    from .lint_edit import prepare
+    pdir = _project(args)
+    base = project.load(pdir)
+    seed = (base.get("cutStyle") or {}).get("seed", 1)
+    paces = {}
+    for preset in [None, *CUT_STYLES]:
+        edit = copy.deepcopy(base)
+        if preset:
+            edit["cutStyle"] = {"preset": preset, "seed": seed}
+        else:
+            edit.pop("cutStyle", None)
+        tl = project.timeline(pdir, edit)
+        ctx = render.make_ctx(pdir, edit, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
+        lint = prepare(ctx, tl)
+        meter = visual_change_meter(tl.duration, tl.segments, ctx.lint_visuals, ctx.lint_zooms, fps=float(edit["format"]["fps"]))
+        paces[preset or "none"] = {"perMinute": meter["overall"]["perMinute"], "opening": meter["first5"]["total"],
+                                   "openingMax": CUT_STYLES[preset]["openingMax"] if preset else OPENING_MAX_UNSTYLED,
+                                   "issues": sorted({i["rule"] for i in lint["issues"]})}
+    return {"seconds": OPENING, "paces": paces}
+
+
 def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
                       first_look=args.first_look, music=args.music, cover=not args.no_cover,
-                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent)
+                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent,
+                      rules=args.rules)
 
 
 def cmd_proxy(args):
@@ -167,6 +226,11 @@ def cmd_verify(args):
     from . import verify
     return verify.run(Path(args.file), expect_duration=args.expect_duration,
                       project_dir=Path(args.project) if args.project else None)
+
+
+def cmd_score(args):
+    from . import score
+    return score.run(_project(args), args.version)
 
 
 def cmd_frames(args):
@@ -429,9 +493,10 @@ def cmd_reference_scan(args):
 # Commands that change nothing in the project, `attach`, which only adds its own uniquely named file,
 # and `proxy`, which writes only work/proxy/ under its own per-take lock (proxy.py) and outlives the job
 # that starts it: they run even while Reel Studio has the project open. Every other command given
-# --project is refused then unless Reel Studio runs it (owner.py).
+# --project is refused then unless Reel Studio runs it (owner.py). `score` only reads a saved version's
+# folder, which no job rewrites.
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
-                      "classify", "attach", "proxy"}
+                      "classify", "attach", "proxy", "score"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -486,6 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
+    sp = add("measure-reel", cmd_measure_reel, "how fast a finished reel talks and cuts, and its opening line")
+    sp.add_argument("--file", required=True)
+    sp.add_argument("--poster", help="save one still of the reel here (jpg)")
     sp = add("download-model", cmd_download_model, "download the speech model")
     sp.add_argument("--name")
     sp = add("speech-check", cmd_speech_check, "time the speech model at a few thread counts on a short sample")
@@ -499,6 +567,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--gap-cap", type=float)
     sp = add("lint-edit", cmd_lint_edit, "check the edit without rendering")
     sp.add_argument("--root")
+    sp = add("match-joins", cmd_match_joins, "say which joins of the cut can be match cuts")
+    sp.add_argument("--keep", help="cut.keep to check instead of the project's, as JSON")
+    sp.add_argument("--every", action="store_true", help="check every join that could hold a match, not only the ones that ask for it")
+    sp.add_argument("--project-file", help="the edit to read instead of project.json, inside work/ (a note's private copy)")
+    sp = add("pace-preview", cmd_pace_preview, "count the picture changes each pace would make, without rendering")
+    sp.add_argument("--root")
     sp = add("render", cmd_render, "render project.json")
     sp.add_argument("--draft", action="store_true")
     sp.add_argument("--window", help="a:b output seconds")
@@ -509,6 +583,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
     sp.add_argument("--project-file", help="render this project document instead of project.json")
+    sp.add_argument("--rules", help="JSON file of checkable My style rules (rule_checks.py); the result's "
+                                    "`ruleChecks` lists the ones this render breaks")
     sp.add_argument("--parent", type=int, help="saved version this edit is based on (default: latest)")
     sp.add_argument("--merge-parent", type=int, help="second saved parent; always makes a new final version")
     sp.add_argument("--out", help="folder for a draft (default versions/preview)")
@@ -525,6 +601,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
+    sp = add("score", cmd_score, "the mechanical checks one saved version passes (score.py); reads its reports, renders nothing")
+    sp.add_argument("--version", type=int, required=True)
     sp = add("frames", cmd_frames, "stills: of one render, or of the edit (from a render that is up to date, else drawn directly)")
     sp.add_argument("--render-id")
     sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to show")

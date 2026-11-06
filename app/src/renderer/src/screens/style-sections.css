@@ -1,0 +1,99 @@
+/* ---- My style: Your niche and Reference reels (NicheSection.tsx, ReferenceReels.tsx, NicheSheet.tsx) ----
+   Two sections under the rules, on the canvas like them: a title with one line under it, then rows split by hairlines.
+   Only tokens from styles.css; nothing here restyles a shared component. */
+.ss { position: relative; margin-top: var(--space-l); }
+.ss-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.ss-t { min-width: 0; display: grid; gap: 2px; }
+.ss-t > p { max-width: 54ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.ss-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+/* real borders: two stacked inset shadows drew faint side edges on Windows */
+.ss-empty { padding: 12px 0; border-block: 1px solid var(--line); color: var(--ink-3); }
+.ss-error { margin: 0 0 10px; color: var(--pencil); overflow-wrap: anywhere; }
+.ss-note { margin: 0 0 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
+.ss > .banner { margin-bottom: 10px; }
+/* a file dragged over the section: one hairline ring where it will land, no fill */
+.ss::after {
+  content: ''; position: absolute; inset: -8px -10px; border-radius: var(--r-lg); pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3); opacity: 0; transition: opacity 150ms ease;
+}
+.ss.over::after { opacity: 1; }
+
+/* ---- the niche, as label and line ---- */
+.nl { margin: 0; }
+.nl > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 16px; padding: 10px 0; box-shadow: inset 0 1px 0 var(--line); }
+.nl > div:last-child { box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line); }
+.nl dt { padding-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.nl dd { margin: 0; min-width: 0; font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink); overflow-wrap: anywhere; }
+.nl ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.nl-avoid { color: var(--ink-2); }
+
+/* editing it: labels above their fields, Save and Cancel under them */
+.nf { display: grid; gap: 6px; max-width: 560px; padding: 12px 0 4px; box-shadow: inset 0 1px 0 var(--line); }
+.nf > label { margin-top: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); font-weight: 560; }
+.nf > label:first-child { margin-top: 0; }
+.nf > .textarea { height: auto; min-height: 88px; padding: 8px 12px; line-height: var(--lh-base); resize: vertical; }
+.nf-acts { display: flex; gap: 8px; margin-top: 8px; }
+.ns-removed { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-block: 1px solid var(--line); color: var(--ink-3); }
+
+/* ---- reference reels ---- */
+.rr-link { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+.rr-link .input { flex: 1; min-width: 0; height: 32px; }
+.rr-rows { list-style: none; margin: 0; padding: 0; }
+.rr-row {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 12px; align-items: center;
+  padding: 8px 0; box-shadow: inset 0 1px 0 var(--line);
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+  @starting-style { opacity: 0; transform: translateY(4px); }
+}
+.rr-row:last-child { box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line); }
+/* a 9:16 still of the reel, the one filled tile: it is the media itself */
+.rr-poster { width: 36px; height: 64px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; background: var(--sunk); color: var(--ink-3); }
+.rr-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rr-t { min-width: 0; display: grid; gap: 2px; }
+.rr-t > b { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-t > span { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.rr-busy { display: inline-flex; align-items: center; gap: 6px; }
+.rr-problem { color: var(--pencil) !important; }
+/* amber is "needs you" (ux-foundation-b.md section 9): the file to add */
+.rr-needs { color: var(--amber) !important; }
+.rr-acts { display: flex; align-items: center; gap: 4px; }
+
+/* what they have in common: three measured numbers, then the app's sentences, then what was not measured */
+.rr-readout {
+  margin: 0 0 20px; padding: 14px 0 16px; box-shadow: inset 0 1px 0 var(--line);
+  transition: opacity 200ms var(--ease-out);
+  @starting-style { opacity: 0; }
+}
+.rr-readout h3 { margin-bottom: 10px; }
+.rr-stats { display: flex; flex-wrap: wrap; gap: 8px 40px; margin-bottom: 12px; }
+.rr-stat { display: grid; gap: 2px; min-width: 0; }
+.rr-stat > b { font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 620; font-stretch: 112%; letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.rr-unit { font-size: var(--fs-md); font-weight: 560; color: var(--ink-2); }
+.rr-stat > span { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.rr-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-width: 64ch; color: var(--ink-2); }
+.rr-limits { margin-top: 10px; max-width: 64ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+
+/* ---- the niche chat (NicheSheet) ---- */
+.ns-head { display: grid; gap: 4px; }
+.ns-chat { display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.ns-chat > p { transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); @starting-style { opacity: 0; transform: translateY(4px); } }
+.ns-ed { max-width: 90%; color: var(--ink); overflow-wrap: anywhere; }
+/* the person's own words: the notes log's light bubble on the right */
+.ns-you {
+  align-self: flex-end; max-width: 86%; background: var(--sunk); border-radius: 14px 14px 4px 14px; padding: 7px 11px;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.ns-wait { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); }
+.ns-draft { padding-top: 4px; }
+.ns-compose { display: flex; gap: 8px; align-items: center; }
+.ns-compose .input { flex: 1; min-width: 0; }
+.ns-foot { display: flex; justify-content: flex-end; gap: 8px; }
+
+html.kb .rr-row, html.kb .rr-readout, html.kb .ns-chat > p { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rr-row, .ns-chat > p { @starting-style { transform: none; } }
+}
+@media (max-width: 1180px) {
+  .nl > div { grid-template-columns: 96px minmax(0, 1fr); }
+  .rr-stats { gap: 8px 28px; }
+}

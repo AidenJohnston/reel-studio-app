@@ -4,7 +4,7 @@
 // "Remember this for next time?", undoes any rule saved without asking, and drops the announcement.
 // A typed rule (`proposal`, lowercase captions) is asked about the same way and saved with its own consent.
 // No Electron, no files: main passes in the app state and the AI.
-import type { ChatMessage, StyleProposal, StyleRule } from '../shared/api'
+import type { ChatMessage, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 
 /** A chat message before it gets its id and time (store.ts). */
 export type ChatLine = Omit<ChatMessage, 'id' | 'at'>
@@ -45,12 +45,17 @@ export function styleConsent(summary: string, saved: string[] = [], suggested?: 
 
 export const rememberQuestion = (rule: string): string => `Remember this for next time? "${rule.replace(/^"|"$/g, '')}"`
 
-/** The editor's reply into the chat, then one "Remember this for next time?" per rule, and one for a typed rule
- * (`proposal`) the note's change suggests. */
-export function replyChat(c: StyleConsent, version?: number, proposal?: StyleProposal): ChatLine[] {
+/** The editor's reply into the chat, then one "Remember this for next time?" per rule, one per checked rule (`checks`,
+ * whose words and number the app took from the finished reel), and one for a typed rule (`proposal`) the note's
+ * change suggests. */
+export function replyChat(c: StyleConsent, version?: number, proposal?: StyleProposal, checks: { text: string; check: RuleCheck }[] = []): ChatLine[] {
+  const asked = new Set(checks.map((x) => normalize(x.text)))
   return [
     { from: 'editor', text: c.summary, version },
-    ...c.suggestions.map((rule): ChatLine => ({ from: 'editor', text: rememberQuestion(rule), actions: ['remember-yes', 'remember-no'], suggestion: rule })),
+    ...c.suggestions
+      .filter((rule) => !asked.has(normalize(rule)))
+      .map((rule): ChatLine => ({ from: 'editor', text: rememberQuestion(rule), actions: ['remember-yes', 'remember-no'], suggestion: rule })),
+    ...checks.map((x): ChatLine => ({ from: 'editor', text: rememberQuestion(x.text), actions: ['remember-yes', 'remember-no'], suggestion: x.text, check: x.check })),
     ...(proposal ? [{ from: 'editor', text: rememberQuestion(proposal.text), actions: ['remember-yes', 'remember-no'], proposal } satisfies ChatLine] : [])
   ]
 }
@@ -62,7 +67,7 @@ export function replyChat(c: StyleConsent, version?: number, proposal?: StylePro
  */
 export async function askAboutStyle(
   d: { styleRules(): Promise<StyleRule[]>; removeStyleRule(id: string, options?: { forget?: boolean }): Promise<unknown> },
-  r: { summary: string; version?: number; styleRulesAdded?: string[]; styleSuggestions?: string[]; styleProposal?: StyleProposal },
+  r: { summary: string; version?: number; styleRulesAdded?: string[]; styleSuggestions?: string[]; styleProposal?: StyleProposal; styleChecks?: { text: string; check: RuleCheck }[] },
   summary: string
 ): Promise<{ summary: string; version?: number; chat: ChatLine[] }> {
   const c = styleConsent(summary, r.styleRulesAdded, r.styleSuggestions, r.styleProposal)
@@ -70,12 +75,12 @@ export async function askAboutStyle(
     const rules = await d.styleRules().catch((): StyleRule[] => [])
     for (const rule of rules) if (c.undo.includes(rule.text) && !rule.payload) await d.removeStyleRule(rule.id, { forget: false }).catch(() => undefined)
   }
-  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version, r.styleProposal) }
+  return { summary: c.summary, version: r.version, chat: replyChat(c, r.version, r.styleProposal, r.styleChecks) }
 }
 
 export interface AnswerDeps {
   chat(slug: string): Promise<ChatMessage[]>
-  addStyleRule?(text: string, from?: Pick<StyleRule, 'source'>): Promise<unknown>
+  addStyleRule?(text: string, from?: Pick<StyleRule, 'source'>, check?: RuleCheck): Promise<unknown>
   /** The reel's title, for where a rule was learned. */
   title(slug: string): Promise<string>
   approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
@@ -87,6 +92,7 @@ export interface AnswerDeps {
 
 const NOT_READY = { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
 const NOT_SAVED = { code: 'NOT_SAVED', userMessage: 'That could not be saved to My style. Try again.' }
+const CHECKED_REPLY = "Saved. I'll check this on every new reel. You can pause or forget it in My style."
 const TYPED_REPLY = {
   saved: 'Saved. Your next reels will start with lowercase subtitles. You can pause or forget it in My style.',
   exists: 'That is already in My style.',
@@ -118,7 +124,12 @@ export function answerStyleQuestion(d: AnswerDeps, slug: string, messageId: stri
       reply = TYPED_REPLY[r.status]
     } else if (yes) {
       if (!d.addStyleRule) throw NOT_READY
-      await d.addStyleRule(m.suggestion!, { source: await learnedFrom(d, slug, messageId) })
+      if (m.check) {
+        await d.addStyleRule(m.suggestion!, { source: await learnedFrom(d, slug, messageId) }, m.check).catch(() => {
+          throw NOT_SAVED
+        })
+        reply = CHECKED_REPLY
+      } else await d.addStyleRule(m.suggestion!, { source: await learnedFrom(d, slug, messageId) })
     } else if (m.proposal && d.declineStyleProposal) {
       // a Yes saved just before a crash, then No: the No wins
       await d.declineStyleProposal(m.proposal).catch(() => {
