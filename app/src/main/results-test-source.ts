@@ -35,12 +35,14 @@ export function testResultsSources(file: string, projectsRoot: () => string, now
       const numbers = f.posts[postId]
       if (!numbers) throw failure('TEST_POST', 'No such post.')
       const out = join(projectsRoot(), slug, 'outcomes.json')
-      await withSocialFile(out, async () => {
+      // like the services' insights(): the saved post with its new numbers
+      return withSocialFile(out, async () => {
         const saved = JSON.parse(await fs.readFile(out, 'utf8'))
         const record = saved.versions[`v${version}`][`${KEY[platform]}${postId}`]
         record.observedAt = new Date(now()).toISOString()
         record.metrics = { ...EMPTY, ...numbers }
         await atomicSocialFile(out, JSON.stringify(saved, null, 2) + '\n')
+        return record
       })
     },
     ...(platform === 'instagram' ? {

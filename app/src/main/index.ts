@@ -87,7 +87,7 @@ import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { USAGE_ENDPOINT } from '../shared/config'
-import { createUsage, editScore, usageCode } from './usage'
+import { createUsage, editScore, postViews, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -324,6 +324,8 @@ const usage = createUsage({
   endpoint: USAGE_ENDPOINT
 })
 const recordUsage = (e: UsageEvent): void => void usage.record(e).catch((err) => log(`[usage] ${String(err?.message ?? err)}`))
+// Once a day to the collection address. There is none in any build yet (USAGE_ENDPOINT null), so nothing is scheduled.
+if (USAGE_ENDPOINT) setInterval(() => void usage.send().catch((err) => log(`[usage] send: ${String(err?.message ?? err)}`)), 24 * 3_600_000).unref()
 // Each version an edit made is scored once per run of the app, by the next thing done to its reel (usage.ts editScore).
 const scoredEdits = new Set<string>()
 function scoreEdit(slug: string, made: number, next: Parameters<typeof editScore>[0]): void {
@@ -865,7 +867,14 @@ function registerIpc(): void {
         { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
           read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
       ]
-  const results = new ResultsRefresh({ projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null) })
+  const results = new ResultsRefresh({
+    projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null),
+    // Post results go into usage data only when sharing and its Post results part are both on (usage.ts record)
+    onRead: (post, outcome) => {
+      const views = postViews(post, outcome)
+      if (views) recordUsage(views)
+    }
+  })
   registerInsightsIpc({
     handle, projectsRoot: projectsDir, refresh: results,
     describe: async (slug, version) => {

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DataSharing, UsageEvent } from '../src/shared/api'
-import { createUsage, editScore, invalidEvent, usageCode } from '../src/main/usage'
+import { createUsage, editScore, invalidEvent, postViews, usageCode } from '../src/main/usage'
 
 const ON: DataSharing = { asked: true, on: true, usage: true, quality: true, posts: true }
 const JOB: UsageEvent = { part: 'usage', name: 'job', job: 'note', outcome: 'done', seconds: 42 }
@@ -126,5 +126,49 @@ describe('usage data', () => {
   it('fails if an error code that is not a constant reaches a line', () => {
     expect(usageCode('ENGINE_STUCK')).toBe('ENGINE_STUCK')
     expect(usageCode('ENOENT: no such file, open C:\\Users\\me\\take.mov')).toBe('OTHER')
+  })
+
+  // One correct answer per combination: a line is kept only with the main switch and its own part on. Post results
+  // in particular go out only when sharing and Post results are both on.
+  it('fails if any switch combination keeps a part it should not, or drops one it should keep', async () => {
+    const VIEWS: UsageEvent = { part: 'posts', name: 'views', platform: 'tiktok', views: 900, hours: 72 }
+    for (const on of [false, true]) for (const usage of [false, true]) for (const quality of [false, true]) for (const posts of [false, true]) {
+      const sharing: DataSharing = { asked: true, on, usage, quality, posts }
+      const t = setup(sharing)
+      for (const e of [JOB, EDIT, VIEWS]) await t.usage.record(e)
+      const expected = on ? (['usage', 'quality', 'posts'] as const).filter((k) => sharing[k]) : []
+      expect((await t.usage.read()).map((l) => l.part), JSON.stringify(sharing)).toEqual(expected)
+    }
+  })
+})
+
+describe('post views from a results read', () => {
+  const H = 3_600_000
+  const PUBLISHED = Date.parse('2026-11-01T00:00:00.000Z')
+  const read = (hours: number, plays: unknown = 1204) => ({
+    version: 1, platform: 'instagram', postId: '9001', accountId: '17', publishedAt: new Date(PUBLISHED).toISOString(),
+    observedAt: new Date(PUBLISHED + hours * H).toISOString(), metrics: { plays, reach: 900, likes: 3 }
+  })
+  const post = (lastReadHours: number | null) => ({ platform: 'instagram', publishedAt: PUBLISHED, observedAt: lastReadHours === null ? null : PUBLISHED + lastReadHours * H })
+
+  // fails if every hourly read becomes a line, or a snapshot age is skipped
+  it('keeps one line at the first read past each age', () => {
+    expect(postViews(post(null), read(5))).toBeNull()
+    expect(postViews(post(20), read(25))).toEqual({ part: 'posts', name: 'views', platform: 'instagram', views: 1204, hours: 25 })
+    expect(postViews(post(25), read(26))).toBeNull()
+    expect(postViews(post(70), read(80))).toMatchObject({ hours: 80 })
+    expect(postViews(post(null), read(200))).toMatchObject({ hours: 200 })
+    expect(postViews(post(800), read(900))).toBeNull()
+  })
+
+  // fails if a post, account or reel id reaches the line, or a read without a whole view count makes one
+  it('holds only the platform, the count and the age', () => {
+    const line = postViews(post(null), read(30))
+    expect(Object.keys(line ?? {}).sort()).toEqual(['hours', 'name', 'part', 'platform', 'views'])
+    expect(JSON.stringify(line)).not.toMatch(/9001|17"/)
+    expect(postViews(post(null), read(30, null))).toBeNull()
+    expect(postViews(post(null), read(30, 12.5))).toBeNull()
+    expect(postViews(post(null), { metrics: { plays: 5 } })).toBeNull()
+    expect(postViews({ ...post(null), platform: 'myspace' }, read(30))).toBeNull()
   })
 })

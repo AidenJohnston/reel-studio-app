@@ -146,6 +146,8 @@ export class ResultsRefresh {
     now?: () => number
     /** after every run, once it is no longer running: Insights reloads */
     changed?: () => void
+    /** after each post read, with what the source returned (Settings › Privacy › Post results, main/usage.ts postViews) */
+    onRead?: (post: SavedPostRef, outcome: unknown) => void
   }) {}
 
   private now(): number { return this.o.now?.() ?? Date.now() }
@@ -225,8 +227,9 @@ export class ResultsRefresh {
       let stopped: ResultsPlatformState | null = null
       for (const p of due) {
         try {
-          await source.read(p.slug, p.version, p.postId)
+          const outcome = await source.read(p.slug, p.version, p.postId)
           delete s.tried[postKey(p)]
+          this.o.onRead?.(p, outcome)
         } catch (e) {
           const kind = errorKind(e)
           if (kind === 'post') {

@@ -62,6 +62,29 @@ export function editScore(next: { type: 'export' } | { type: 'note'; on: number 
   return next.on < made ? 'undone' : 'changed'
 }
 
+/**
+ * Post results are kept as a few snapshots per post, not one line per read: at the first read after each of these ages
+ * (a day, three days, a week, a month), which is when a reel's views are worth comparing. Hours since posting.
+ */
+export const VIEW_AGES_HOURS = [24, 72, 168, 720] as const
+
+/**
+ * The views line for a read of one post (main/results-refresh.ts), or null when this read crosses no snapshot age or
+ * has no view count. It holds the platform, the count and the hours since posting; no post, account or reel id.
+ */
+export function postViews(post: { platform: string; publishedAt: number; observedAt: number | null }, outcome: unknown): UsageEvent | null {
+  if (!outcome || typeof outcome !== 'object') return null
+  const o = outcome as { observedAt?: unknown; metrics?: { plays?: unknown } | null }
+  const observed = typeof o.observedAt === 'string' ? Date.parse(o.observedAt) : NaN
+  const views = o.metrics?.plays
+  if (!Number.isFinite(observed) || typeof views !== 'number' || !Number.isInteger(views) || views < 0) return null
+  const hours = Math.floor((observed - post.publishedAt) / 3_600_000)
+  const before = post.observedAt === null ? -1 : (post.observedAt - post.publishedAt) / 3_600_000
+  if (!VIEW_AGES_HOURS.some((age) => before < age && hours >= age)) return null
+  const e = { part: 'posts', name: 'views', platform: post.platform, views, hours }
+  return invalidEvent(e) === null ? (e as UsageEvent) : null
+}
+
 /** The most lines kept waiting; the oldest go first. About 200 bytes each. */
 export const MAX_LINES = 2000
 

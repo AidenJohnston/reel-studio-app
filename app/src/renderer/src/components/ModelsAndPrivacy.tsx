@@ -46,8 +46,14 @@ export function Privacy({ info, onInfo, onError }: { info: AppInfo; onInfo: (i: 
       {PARTS.map(([k, id, line]) => (
         <SettingRow key={k} id={id} sub line={line} control={<Switch on={s.on && s[k]} disabled={!s.on} labelledBy={`set-${id}`} onToggle={() => void set({ [k]: !s[k] })} testid={`share-${k}`} />} />
       ))}
-      {s.on && <Kept sharing={s} onError={onError} />}
-      {master && <p className="srow-foot">{s.on ? 'Nothing is sent yet. When it is, it goes with no account or name attached.' : 'Nothing is shared. Turn this on to choose what to share.'}</p>}
+      {s.on ? <Kept sharing={s} onError={onError} /> : <Sample sharing={s} />}
+      {master && (
+        <p className="srow-foot">
+          {s.on
+            ? 'Nothing is sent: this version of Reel Studio has nowhere to send it yet. When it does, it goes with no account or name attached.'
+            : 'Nothing is kept or shared. Turn this on to choose what to share.'}
+        </p>
+      )}
     </div>
   )
 }
@@ -61,6 +67,30 @@ export function usageWords(l: UsageLine): string {
   if (l.name === 'job') return `${JOB_WORDS[l.job]} ${OUTCOME_WORDS[l.outcome]}${l.code ? ` (${l.code})` : ''}, ${l.seconds} s`
   if (l.name === 'edit') return `An edit was ${l.outcome}`
   return `${PLATFORM_WORDS[l.platform]}: ${l.views.toLocaleString()} views after ${l.hours} h`
+}
+
+/** One made-up line of each part, so the person can see what a line holds before turning sharing on. */
+const SAMPLES: Record<keyof Omit<DataSharing, 'asked' | 'on'>, UsageLine> = {
+  usage: { part: 'usage', name: 'job', job: 'note', outcome: 'done', seconds: 42, day: '', app: '', os: '', install: '' },
+  quality: { part: 'quality', name: 'edit', outcome: 'kept', day: '', app: '', os: '', install: '' },
+  posts: { part: 'posts', name: 'views', platform: 'instagram', views: 1204, hours: 72, day: '', app: '', os: '', install: '' }
+}
+
+/** Sharing off: what a line would look like for each part chosen, and that nothing is kept until it is on. */
+function Sample({ sharing }: { sharing: DataSharing }) {
+  const parts = (Object.keys(SAMPLES) as (keyof typeof SAMPLES)[]).filter((k) => sharing[k])
+  return (
+    <SettingRow id="sharing-sample" sub line={parts.length ? 'Nothing is kept while sharing is off. With it on, lines like these:' : 'Choose at least one kind of data above.'}>
+      {parts.length > 0 && (
+        <div className="srow-more">
+          <ol className="usage-lines" data-testid="usage-sample">
+            {parts.map((k) => <li key={k}>{usageWords(SAMPLES[k])}</li>)}
+          </ol>
+          <p className="srow-foot">Each also carries the day, Reel Studio’s version, your system and a random number made when you turn sharing on.</p>
+        </div>
+      )}
+    </SettingRow>
+  )
 }
 
 /**

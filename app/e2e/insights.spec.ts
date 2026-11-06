@@ -76,6 +76,8 @@ test('Insights: results read, explained and opened at the posted version', async
       tiktok: { accountId: 'tt-1', posts: { '7001': { plays: 980, likes: 70, comments: 4, shares: 6 } } }
     }
     writeFileSync(FIXTURE, JSON.stringify(platforms))
+    // usage data with Post results on: each read past a snapshot age becomes one views line (main/usage.ts postViews)
+    await page.evaluate(() => window.reel.app.setSharing({ asked: true, on: true, usage: false, quality: false, posts: true }))
 
     // ---- opening Insights reads the results on its own (connected, never read) ----
     // fails if a connected account's first visit shows "Connect" or no numbers until the hourly read
@@ -97,6 +99,10 @@ test('Insights: results read, explained and opened at the posted version', async
     await expect(page.getByTestId('insights-audience')).toContainText('Most of your Instagram followers are 25-34')
     await expect(page.getByTestId('insights-audience')).toContainText('Top places: United States, United Kingdom and Canada.')
     await shot(page, 'insights-02-results')
+    // fails if post results stop reaching usage data, or a line carries a post or account id
+    const views = (await page.evaluate(() => window.reel.app.usage())).filter((l) => l.name === 'views')
+    expect(views.map((l) => 'views' in l && l.views).sort()).toEqual([2300, 410, 640, 980].sort())
+    for (const l of views) expect(Object.keys(l).sort()).toEqual(['app', 'day', 'hours', 'install', 'name', 'os', 'part', 'platform', 'views'])
     // the trial tag survives the read, so the pair stays a pair on the next visit
     const saved = JSON.parse(readFileSync(join(first, 'outcomes.json'), 'utf8'))
     expect(saved.versions.v1['9002']).toMatchObject({ trial: { group: 'cap-test', try: 2 }, metrics: { plays: 640 } })

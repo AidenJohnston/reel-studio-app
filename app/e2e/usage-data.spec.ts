@@ -18,6 +18,10 @@ test('usage data is kept only while shared, shown in plain words, and deleted wh
     await openSettings(page)
     await page.getByTestId('settings-search').fill('telemetry')
     await expect(page.locator('[data-setting="sharing-kept"]')).toHaveCount(0)
+    // before turning it on, the person can read what a line of each kind would hold
+    await expect(page.getByTestId('usage-sample')).toContainText('Note finished, 42 s')
+    await expect(page.getByTestId('usage-sample')).toContainText('Instagram: 1,204 views after 72 h')
+    await shot(page, 'usage-sample')
     await page.getByTestId('share-on').click()
     const row = page.locator('[data-setting="sharing-kept"]')
     await expect(row).toContainText('Nothing yet.')
