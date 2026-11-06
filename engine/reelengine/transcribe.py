@@ -414,8 +414,9 @@ def speech_check(name: Optional[str] = None) -> dict:
     name = name or default_model()
     path = str(require_model(name))
     default = default_threads()
-    if cuda_available():
-        # The GPU ignores the CPU thread count; leave it to load_model's own GPU check.
+    if uses_gpu(path):
+        # The GPU ignores the CPU thread count. A computer load_model keeps on the CPU (asked for it, or
+        # its GPU fails the self-test) is measured like any other.
         return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
@@ -448,13 +449,19 @@ def speech_check(name: Optional[str] = None) -> dict:
                       "sameWords": r["words"] == runs[0]["words"]} for r in runs]}
 
 
+def uses_gpu(path: str, prefer: Optional[str] = None) -> bool:
+    """Whether load_model tries the GPU for this model: REELENGINE_ASR_DEVICE allows it, a GPU is
+    there, and it passes the self-test."""
+    want = (prefer or os.environ.get("REELENGINE_ASR_DEVICE") or "auto").lower()
+    return want in ("auto", "cuda") and cuda_available() and cuda_selftest(path)
+
+
 def load_model(name: str, prefer: Optional[str] = None):
     """(WhisperModel, device, compute_type). The GPU is a speed choice, never a failure."""
     from faster_whisper import WhisperModel
     path = str(require_model(name))
-    want = (prefer or os.environ.get("REELENGINE_ASR_DEVICE") or "auto").lower()
     order = []
-    if want in ("auto", "cuda") and cuda_available() and cuda_selftest(path):
+    if uses_gpu(path, prefer):
         order.append(("cuda", "float16"))
     order.append(("cpu", "int8"))
     last = None
