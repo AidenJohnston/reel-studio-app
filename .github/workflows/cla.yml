@@ -10,7 +10,8 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize]
   issue_comment:
-    types: [created, edited]
+    # deleted too: removing the acceptance turns the check red again
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
