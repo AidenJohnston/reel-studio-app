@@ -1898,6 +1898,7 @@ def cover_only(project_dir: Path, root: Optional[Path] = None) -> dict:
     src_meta = {s["id"]: s for s in proj["sources"]}
     src_paths = {s["id"]: projmod.source_path(project_dir, s, root=root) for s in proj["sources"]}
     warnings: list = []
+    use_angles(ctx, tl, warnings)              # the cover shows the camera the reel shows
     progress("cover", 10, "Making your cover", force=True)
     p = render_cover(ctx, proj, tl, src_meta, src_paths, source_faces(project_dir, proj),
                      vdir / "cover.png", warnings)

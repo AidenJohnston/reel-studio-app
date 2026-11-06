@@ -207,6 +207,19 @@ def test_a_caption_style_change_is_the_whole_video(tmp_path):
     assert found["changes"][0]["kind"] == "all"
 
 
+def test_choosing_another_camera_is_a_new_picture_though_no_cut_moved(tmp_path):
+    """Fails if setting a range to another camera (or turning camera switching on) reports nothing
+    changed: no cut moves, but the frames do."""
+    old = base_project(keep=(("w0", "w9"), ("w12", "w31")), captions_on=False)
+    old["sources"].append({**old["sources"][0], "id": "s2", "path": "media/b.mp4", "angleOf": {"source": "s1", "offset": 0.5}})
+    for change in (lambda p: p["cut"]["keep"][1].update(angle="s2"), lambda p: p["cut"].update(angles="auto")):
+        new = copy.deepcopy(old)
+        change(new)
+        found = diff(tmp_path, old, new)
+        assert found["changes"][0]["kind"] == "all"
+        assert found["intervals"] == approx([[0.0, timeline(tmp_path, new).duration]])
+
+
 def test_a_cut_change_is_everything_after_the_first_moved_segment(tmp_path):
     old = base_project(keep=(("w0", "w9"), ("w12", "w31")), captions_on=False)
     new = base_project(keep=(("w0", "w9"), ("w16", "w31")), captions_on=False)

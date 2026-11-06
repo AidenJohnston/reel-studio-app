@@ -3,6 +3,7 @@ main take's sound. Both cameras are made from one take: the other is its centre 
 1 s later, with no sound."""
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 
@@ -19,9 +20,8 @@ def bar_at(t: float) -> float:         # the main take's bar: a white column swe
     return 100 + 100 * t
 
 
-def test_a_range_on_the_other_camera_shows_it_in_sync_and_keeps_the_main_sound(tmp_path):
-    """Fails if the other camera is shown at the wrong moment (the offset's sign or size), the main
-    camera is shown instead, or the sound switches to the other camera's (silent) track."""
+def two_camera_project(tmp_path, angles: tuple):
+    """The take and its other camera; keep range k shows camera angles[k] (None: the main one)."""
     main = tmp_path / "main.mp4"
     subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
                     f"color=c=0x202020:s={W}x{H}:r={FPS}:d=8,drawbox=x='100+100*t':y=0:w=20:h={H}:color=white:t=fill",
@@ -38,8 +38,18 @@ def test_a_range_on_the_other_camera_shows_it_in_sync_and_keeps_the_main_sound(t
     p = project.load(pdir)
     p["sources"].append({"id": "s2", "path": "media/other.mp4", "duration": 7.0, "fps": FPS, "width": W, "height": H,
                          "rotation": 0, "angleOf": {"source": "s1", "offset": OFFSET}})
-    p["cut"]["keep"][1]["angle"] = "s2"
+    for item, cam in zip(p["cut"]["keep"], angles):
+        if cam:
+            item["angle"] = cam
+    p["cover"] = {"atSourceTime": None, "source": None, "text": None}       # the engine picks the frame
     project.save(pdir, p)
+    return pdir
+
+
+def test_a_range_on_the_other_camera_shows_it_in_sync_and_keeps_the_main_sound(tmp_path):
+    """Fails if the other camera is shown at the wrong moment (the offset's sign or size), the main
+    camera is shown instead, or the sound switches to the other camera's (silent) track."""
+    pdir = two_camera_project(tmp_path, (None, "s2"))
     res = render.run(pdir, draft=False, root=tmp_path, verify=False, cover=False)
     assert res["angles"][1]["angle"] == "s2" and res["angles"][0]["angle"] == "s1"
     seg = project.timeline(pdir, project.load(pdir)).segments[1]
@@ -55,3 +65,14 @@ def test_a_range_on_the_other_camera_shows_it_in_sync_and_keeps_the_main_sound(t
     pcm = subprocess.run([fx.FFMPEG, "-v", "error", "-ss", f"{t:.3f}", "-t", "0.3", "-i", res["file"], "-vn", "-ac", "1",
                           "-f", "f32le", "-"], capture_output=True, check=True).stdout
     assert np.sqrt(np.mean(np.frombuffer(pcm, np.float32) ** 2)) > 0.01, "the sound went silent with the other camera"
+
+
+def test_the_cover_comes_from_the_camera_the_reel_shows(tmp_path):
+    """Fails if a reel shown wholly on the other camera gets its cover from the main camera."""
+    pdir = two_camera_project(tmp_path, ("s2", "s2"))
+    render.run(pdir, draft=True, root=tmp_path, verify=False, cover=True)
+    chosen = json.loads((pdir / "work" / "cover.json").read_text(encoding="utf-8"))
+    assert chosen["source"] == "s2"
+    shown = [(s.src_start + OFFSET, s.src_end + OFFSET) for s in project.timeline(pdir, project.load(pdir)).segments]
+    assert any(a - 0.05 <= chosen["chosen"] <= b + 0.05 for a, b in shown), (chosen["chosen"], shown)
+

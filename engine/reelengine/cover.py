@@ -68,7 +68,9 @@ def candidate_times(ctx, sid: str, at, half: float | None = None) -> list[float]
         a, b = max(0.0, at - half), min(dur - 0.05, at + half)
         return [round(a + k * step, 3) for k in range(int((b - a) / step) + 1)]
     # no time given: spread across the kept parts of this source
-    spans = [(float(s.src_start), float(s.src_end)) for s in (ctx.out_timeline or []) if s.source == sid] \
+    # the picture's segments: with cameras switched (angles.py) a camera is searched where it is shown
+    spans = [(float(s.src_start), float(s.src_end)) for s in (getattr(ctx, "picture_timeline", None) or ctx.out_timeline or [])
+             if s.source == sid] \
         or [(0.0, dur)]
     total = sum(b - a for a, b in spans)
     n = 24 if getattr(ctx, "draft", False) else 48
@@ -161,7 +163,8 @@ def render(ctx, out_png) -> Path:
     sources = ctx.project.get("sources") or []
     if not sources:
         raise EngineError("NO_SOURCE", "project has no sources", "Add a video first.")
-    sid = cov.get("source") or (ctx.out_timeline[0].source if ctx.out_timeline else sources[0]["id"])
+    shown = getattr(ctx, "picture_timeline", None) or ctx.out_timeline
+    sid = cov.get("source") or (shown[0].source if shown else sources[0]["id"])
     if source_path(ctx, sid) is None:
         sid = sources[0]["id"]
     at = cov.get("atSourceTime")

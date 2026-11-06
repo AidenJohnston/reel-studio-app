@@ -160,6 +160,10 @@ def _whole_picture(old: dict, new: dict) -> Optional[str]:
     for k in WHOLE:
         if _key(old.get(k)) != _key(new.get(k)):
             return f"{k} changed"
+    if _cameras(old) != _cameras(new):
+        # which camera each segment shows (angles.py) moves no cut, so the segments compared below can't
+        # see it; working it out means decoding every camera, so any change counts as a new picture
+        return "the camera choice changed"
     if _beats(old) or _beats(new):
         # the beats come from the song and its start, and a sound effect on a word is an event a snap may not cross
         for k in ("music", "sfx"):
@@ -176,6 +180,12 @@ def _whole_picture(old: dict, new: dict) -> Optional[str]:
         if k not in WHOLE + DIFFED + NOT_SEEN and _key(old.get(k)) != _key(new.get(k)):
             return f"{k} changed (not a field compared moment by moment)"
     return None
+
+
+def _cameras(p: dict) -> tuple:
+    cut = p.get("cut") or {}
+    return (cut.get("angles"), tuple((k.get("from"), k.get("angle")) for k in cut.get("keep") or []
+                                     if isinstance(k, dict) and k.get("angle")))
 
 
 def _seg_key(s) -> tuple:
