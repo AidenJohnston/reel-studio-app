@@ -58,12 +58,31 @@ test('dialogs: Tab stays inside, the page behind is inert, toasts stay usable, t
       await expect(exportDialog).toContainText('Saved to your computer', { timeout: 120_000 })
     }
 
-    await test.step('an error toast shown before the dialog stays closable', async () => {
+    await test.step('an error toast shown before the dialog stays closable, by mouse and by keyboard', async () => {
       await dragFiles(page, 'main', [media.picture], true)
       await expect(toast).toContainText('Drop a video file')
       await openDelete()
       expect(await inert(page, 'toast')).toBe(false)
       await toast.getByRole('button', { name: 'Close' }).click()
+      await expect(toast).toHaveCount(0)
+      await expect(confirm).toBeVisible()
+      await page.getByTestId('confirm-no').click()
+      await expect(confirm).toHaveCount(0)
+
+      // Tab and Shift+Tab reach the toast's Close button and come back into the dialog.
+      await dragFiles(page, 'main', [media.picture], true)
+      await expect(toast).toContainText('Drop a video file')
+      await openDelete()
+      const close = toast.getByRole('button', { name: 'Close' })
+      await page.keyboard.press('Shift+Tab')
+      await expect(close).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(page.getByTestId('confirm-no')).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(page.getByTestId('confirm-yes')).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(close).toBeFocused()
+      await page.keyboard.press('Enter')
       await expect(toast).toHaveCount(0)
       await expect(confirm).toBeVisible()
     })

@@ -93,9 +93,15 @@ function tabbable(root: HTMLElement): HTMLElement[] {
   })
 }
 
+/** Controls of toasts over the dialogs (data-over-dialogs), in document order. */
+function toastControls(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-over-dialogs]')).flatMap(tabbable)
+}
+
 /**
  * A dialog. Esc and a click outside close it (when it can be closed); focus moves into it, Tab and
- * Shift+Tab wrap inside it, and everything behind it is inert until the last open dialog closes.
+ * Shift+Tab cycle through it and an error toast's Close button, and everything behind it is inert
+ * until the last open dialog closes.
  * The Windows title bar strip stays dimmed for as long as any dialog is open.
  */
 export function Modal({ children, onClose, wide, testid, labelledBy }: { children: ReactNode; onClose?: () => void; wide?: boolean; testid?: string; labelledBy?: string }) {
@@ -117,6 +123,26 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
       prev?.focus()
     }
   }, [])
+  // On window, not the dialog: a toast is outside the dialog, and Tab from its Close button must come back.
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    const tab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || openDialogs.at(-1) !== dialog) return
+      const own = tabbable(dialog)
+      const at = document.activeElement
+      // Inside the dialog, short of its first or last control, the browser's own order applies.
+      if (at instanceof HTMLElement && at !== dialog && dialog.contains(at) && at !== (e.shiftKey ? own[0] : own.at(-1))) return
+      e.preventDefault()
+      // With no controls, focus stays on the dialog.
+      const cycle = [...own, ...toastControls()]
+      const i = at instanceof HTMLElement ? cycle.indexOf(at) : -1
+      const next = i < 0 ? (e.shiftKey ? cycle.at(-1) : cycle[0]) : cycle[(i + (e.shiftKey ? cycle.length - 1 : 1)) % cycle.length]
+      next?.focus()
+    }
+    window.addEventListener('keydown', tab)
+    return () => window.removeEventListener('keydown', tab)
+  }, [])
   useEffect(() => {
     if (!onClose) return
     const key = (e: KeyboardEvent) => {
@@ -134,14 +160,6 @@ export function Modal({ children, onClose, wide, testid, labelledBy }: { childre
         ref={ref}
         className={`modal${wide ? ' wide' : ''}`}
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key !== 'Tab') return
-          const controls = tabbable(e.currentTarget)
-          // From the dialog itself, or past either end: wrap. With no controls, focus stays on the dialog.
-          if (e.target !== e.currentTarget && e.target !== (e.shiftKey ? controls[0] : controls.at(-1))) return
-          e.preventDefault()
-          ;(e.shiftKey ? controls.at(-1) : controls[0])?.focus()
-        }}
         tabIndex={-1}
         role="dialog"
         aria-modal
