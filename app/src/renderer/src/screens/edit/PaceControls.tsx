@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { PacePreview } from '../../../../shared/api'
 import { CUT_PRESETS, kindOf, nextSeed, PACE_BANDS, paceLine, PACE_LABELS, withKind, ZOOM_KIND_LABELS, ZOOM_KINDS, zoomKey, type CutPreset, type Zoom } from '../../../../shared/cut-style'
 import { clock } from '../../../../shared/progress'
-import { reel } from '../../api'
 import { Icon } from '../../components/icons'
 import { Segmented } from '../../components/ui'
+import { reel, userMessage } from '../../api'
+import { variations, type VariationKind } from '../../../../shared/variations'
 import { setP, type TabProps } from './controls'
 
 const KINDS = ZOOM_KINDS.map((key) => ({ key, label: ZOOM_KIND_LABELS[key] }))
@@ -78,6 +79,21 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
   // a choice that matches the pace is stored as no choice, so a later pace still decides
   const setBeats = (on: boolean) => change(setP(() => ({ beatAccents: on === paceBeats ? undefined : on })))
 
+  // Versions to compare: queued as hand edits of the version on screen's pace alone (shared/variations.ts)
+  const [making, setMaking] = useState<{ said: string; busy?: boolean } | null>(null)
+  const makeVersions = async (kind: VariationKind) => {
+    const list = variations(base.p, kind)
+    if (!list?.length) return
+    setMaking({ said: 'Adding them to the queue…', busy: true })
+    try {
+      for (const v of list) await reel.projects.handEdit(d.slug, v.edit, v.summary, 1)
+      const last = next + list.length - 1
+      setMaking({ said: `Versions ${next} to ${last} are on their way, each with only its pace changed. When they're made, open one in the notes and Compare it with the one before.` })
+    } catch (e) {
+      setMaking({ said: userMessage(e) })
+    }
+  }
+
   const value = style?.preset ?? NONE
   const reseeded = !!style && style.preset === base.p.cutStyle?.preset && style.seed !== base.p.cutStyle?.seed
 
@@ -144,6 +160,26 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
               : now.p.beatAccents
                 ? 'On for this reel, whatever the pace.'
                 : 'Off for this reel, even at the fast pace.'}
+        </p>
+      </div>
+
+      <div className="edit-field">
+        <h3 className="edit-label" id="compare-h">
+          Versions to compare
+        </h3>
+        <p className="edit-hint">Makes new versions from Version {base.p.version ?? next - 1} that change only the pace, so you can play them against each other.</p>
+        <div className="edit-actions" role="group" aria-labelledby="compare-h">
+          <button className="btn small" onClick={() => void makeVersions('paces')} disabled={!!making?.busy} data-testid="variations-paces">
+            One at each pace
+          </button>
+          {base.p.cutStyle && (
+            <button className="btn small" onClick={() => void makeVersions('moments')} disabled={!!making?.busy} data-testid="variations-moments">
+              3 sets of moments
+            </button>
+          )}
+        </div>
+        <p className="edit-hint" role="status" data-testid="variations-said">
+          {making?.said}
         </p>
       </div>
 

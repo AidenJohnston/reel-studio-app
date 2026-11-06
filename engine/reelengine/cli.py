@@ -94,6 +94,12 @@ def cmd_footage(args):
     return footage.search(root, args.query, limit=args.limit)
 
 
+def cmd_measure_reel(args):
+    """A reference reel's pace, opening line and cut rhythm (measure.py), for My style's reference reels."""
+    from . import measure
+    return measure.measure(Path(args.file), Path(args.poster) if args.poster else None)
+
+
 def cmd_download_model(args):
     from . import transcribe
     return transcribe.download_model(args.name or transcribe.default_model())
@@ -192,7 +198,8 @@ def cmd_render(args):
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
                       first_look=args.first_look, music=args.music, cover=not args.no_cover,
-                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent)
+                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent,
+                      rules=args.rules)
 
 
 def cmd_proxy(args):
@@ -219,6 +226,11 @@ def cmd_verify(args):
     from . import verify
     return verify.run(Path(args.file), expect_duration=args.expect_duration,
                       project_dir=Path(args.project) if args.project else None)
+
+
+def cmd_score(args):
+    from . import score
+    return score.run(_project(args), args.version)
 
 
 def cmd_frames(args):
@@ -481,9 +493,10 @@ def cmd_reference_scan(args):
 # Commands that change nothing in the project, `attach`, which only adds its own uniquely named file,
 # and `proxy`, which writes only work/proxy/ under its own per-take lock (proxy.py) and outlives the job
 # that starts it: they run even while Reel Studio has the project open. Every other command given
-# --project is refused then unless Reel Studio runs it (owner.py).
+# --project is refused then unless Reel Studio runs it (owner.py). `score` only reads a saved version's
+# folder, which no job rewrites.
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
-                      "classify", "attach", "proxy"}
+                      "classify", "attach", "proxy", "score"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -538,6 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
+    sp = add("measure-reel", cmd_measure_reel, "how fast a finished reel talks and cuts, and its opening line")
+    sp.add_argument("--file", required=True)
+    sp.add_argument("--poster", help="save one still of the reel here (jpg)")
     sp = add("download-model", cmd_download_model, "download the speech model")
     sp.add_argument("--name")
     sp = add("speech-check", cmd_speech_check, "time the speech model at a few thread counts on a short sample")
@@ -567,6 +583,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
     sp.add_argument("--project-file", help="render this project document instead of project.json")
+    sp.add_argument("--rules", help="JSON file of checkable My style rules (rule_checks.py); the result's "
+                                    "`ruleChecks` lists the ones this render breaks")
     sp.add_argument("--parent", type=int, help="saved version this edit is based on (default: latest)")
     sp.add_argument("--merge-parent", type=int, help="second saved parent; always makes a new final version")
     sp.add_argument("--out", help="folder for a draft (default versions/preview)")
@@ -583,6 +601,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
+    sp = add("score", cmd_score, "the mechanical checks one saved version passes (score.py); reads its reports, renders nothing")
+    sp.add_argument("--version", type=int, required=True)
     sp = add("frames", cmd_frames, "stills: of one render, or of the edit (from a render that is up to date, else drawn directly)")
     sp.add_argument("--render-id")
     sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to show")

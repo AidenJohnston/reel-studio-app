@@ -4,6 +4,7 @@ import * as fsp from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { styleFile, writeFileAtomic } from './project';
+import { CheckedRule, RuleCheck, parseCheck, ruleText } from './rules';
 
 /** A rule the app applies itself, through the caption tool, when a new video is made. Only lowercase for now:
  * the caption tool and the engine schema agree on `lower`, but not on sentence case. */
@@ -18,6 +19,8 @@ export interface StyleRule {
   /** listed in My style, but left out of what the AI reads and of new videos */
   paused?: boolean;
   payload?: CaptionCaseRule;
+  /** The engine measures this on every render (rules.ts); the rule's words are ruleText(check). */
+  check?: RuleCheck;
   source?: StyleSource;
   /** Learned from another editor's export ("Learn from my past edits"): its file name. */
   imported?: { file: string };
@@ -27,7 +30,12 @@ export interface StyleRule {
   updatedAt?: string;
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
   byYou?: true;
+  /** Kept from a suggestion My style made from post results or the person's own hand edits: what it was read from. */
+  learned?: { from: 'results' | 'edits'; evidence: string };
 }
+/** The active checked rules, and rules whose check this version can't read (saved by a newer Reel Studio):
+ * those are named in every note's reply rather than skipped without a word. */
+export interface StyleChecks { active: CheckedRule[]; unreadable: StyleRule[] }
 /** `damaged`: the file name of a damaged My style.json kept next to this one when My style started over.
  * `forgotten`: questions whose rule was removed, so answering one again cannot bring it back, and the words of
  * removed rules and dismissed memories, which learning never proposes again: ids and normalized words, no notes. */
@@ -43,7 +51,9 @@ export interface TrialLink {
 export interface MemoryProposal {
   id: string; kind: MemoryKind; line: string; text: string; proposedAt: string;
   from: { kind: 'note'; project: string; title: string; version: number; note?: string }
-    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string; trials: TrialLink[] };
+    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string; trials: TrialLink[] }
+    /** The same change made by hand in several reels (the app's memory-loop.ts finds them). */
+    | { kind: 'edits'; reels: string[]; n: number; evidence: string };
 }
 export type ProposalDraft = Omit<MemoryProposal, 'id' | 'proposedAt'>;
 export type ProposalStatus = 'added' | 'duplicate' | 'forgotten' | 'full';
@@ -60,6 +70,10 @@ function isProposal(value: unknown): value is MemoryProposal {
     || typeof value.text !== 'string' || typeof value.line !== 'string' || value.line.length > 60
     || typeof value.kind !== 'string' || !['captions', 'pacing', 'music', 'cuts', 'look'].includes(value.kind) || !record(value.from)) return false;
   const source = value.from;
+  if (source.kind === 'edits') {
+    return Array.isArray(source.reels) && source.reels.every((r) => typeof r === 'string')
+      && typeof source.n === 'number' && Number.isSafeInteger(source.n) && source.n > 0 && typeof source.evidence === 'string';
+  }
   return source.kind === 'note'
     ? typeof source.project === 'string' && typeof source.title === 'string' && typeof source.version === 'number'
       && (source.note === undefined || typeof source.note === 'string')
@@ -77,6 +91,9 @@ export const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.';
 /** The typed rule's words before the app said "subtitles": saved rules and questions still on screen may carry them. */
 const OLD_LOWERCASE_TEXT = 'Use lowercase captions.';
 const isCaptionCase = (x: unknown): x is CaptionCaseRule => (x as CaptionCaseRule)?.kind === 'caption-case' && (x as CaptionCaseRule).case === 'lower';
+
+/** A stored check's words, or null when this version can't read the check. */
+const checkedText = (c: unknown): string | null => { try { return ruleText(parseCheck(c)); } catch { return null; } };
 
 const CAPTION_CASE_PROMPT = 'New reels start with lowercase subtitles (the app sets this). Use another case only when the note asks for it.';
 
@@ -200,6 +217,42 @@ export class StyleStore {
     });
   }
 
+  /** The memories waiting for the person, oldest first. Nothing when the file can't be read. */
+  async proposals(): Promise<MemoryProposal[]> {
+    return (await this.serial(() => this.read()).catch(() => null))?.proposals ?? [];
+  }
+
+  /** The person kept a waiting memory, with its words or theirs: it becomes a rule in the same write that takes it
+   * off the list. An equivalent rule already there is kept instead (and turned back on). Null when it is gone. */
+  async accept(id: string, words?: string): Promise<StyleRule | null> {
+    return this.serial(async () => {
+      const data = await this.readForLearning();
+      const proposal = data.proposals?.find((p) => p.id === id);
+      if (!proposal) return null;
+      const text = cleanRuleText(words ?? proposal.text);
+      const proposals = data.proposals!.filter((p) => p.id !== id);
+      // kept in other words, its own words are neither a rule nor turned down: without this the next look
+      // suggests them again
+      const forgotten = normalize(text) === normalize(proposal.text) ? data.forgotten
+        : [...new Set([...(data.forgotten ?? []), id, normalize(proposal.text)])];
+      const dup = data.rules.find((r) => normalize(r.text) === normalize(text));
+      if (dup) {
+        delete dup.paused;
+        await this.write({ ...data, proposals, ...(forgotten ? { forgotten } : {}) });
+        return dup;
+      }
+      const from = proposal.from;
+      const rule: StyleRule = {
+        id: randomUUID(), text, createdAt: new Date().toISOString(),
+        ...(from.kind === 'note'
+          ? { source: { project: from.project, title: from.title, version: from.version, ...(from.note ? { note: from.note } : {}) } }
+          : { learned: { from: from.kind, evidence: from.evidence } }),
+      };
+      await this.write({ ...data, rules: [...data.rules, rule], proposals, ...(forgotten ? { forgotten } : {}) });
+      return rule;
+    });
+  }
+
   /** The person said no to a waiting memory: it, and the same words, are never proposed again. */
   async dismiss(id: string): Promise<void> {
     return this.serial(async () => {
@@ -228,9 +281,26 @@ export class StyleStore {
 
   /** Adds a rule unless an equivalent one already exists. Every caller is the person asking for the rule (Yes to a
    * suggestion, an "always..." note, a rule typed in My style or kept from an export), so an equivalent paused rule
-   * is turned back on (PR #83 review, option A). `from`: where it was learned. */
-  async add(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<{ added: boolean; rule: StyleRule }> {
-    return this.serial(() => this.addNow(text, from));
+   * is turned back on (PR #83 review, option A). `from`: where it was learned.
+   * `check`: a checked rule. Its words must be its check's (the question showed them), and it replaces any rule
+   * checking the same kind: "at most 2 words" and "at most 3 words" can't both hold. */
+  async add(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> {
+    if (check === undefined) return this.serial(() => this.addNow(text, from));
+    const c = parseCheck(check);
+    const words = ruleText(c);
+    if (cleanRuleText(text) !== words) throw new Error('the question does not match the rule it would save');
+    return this.serial(async () => {
+      const data = await this.read();
+      const same = data.rules.find((r) => normalize(r.text) === normalize(words));
+      if (same && JSON.stringify(same.check) === JSON.stringify(c) && !same.paused) return { added: false, rule: same };
+      const rule: StyleRule = {
+        id: randomUUID(), text: words, createdAt: new Date().toISOString(), check: c,
+        ...(from?.source ? { source: from.source } : {}), ...(from?.byYou ? { byYou: true as const } : {}),
+      };
+      const rest = data.rules.filter((r) => r.check?.kind !== c.kind && normalize(r.text) !== normalize(words));
+      await this.write({ ...data, rules: [...rest, rule] });
+      return { added: true, rule };
+    });
   }
 
   /** Undo of a remove: the same rule back where it was, and its question no longer counts as forgotten. */
@@ -320,6 +390,8 @@ export class StyleStore {
         rule.text = cleanRuleText(patch.text);
         rule.updatedAt = new Date().toISOString();
         if (rule.payload && rule.text !== LOWERCASE_CAPTIONS) delete rule.payload;
+        // the same for a checked rule: "at most 2 words, except in tutorials" is not what is measured
+        if (rule.check && rule.text !== checkedText(rule.check)) delete rule.check;
       }
       if (patch.paused === true) rule.paused = true;
       if (patch.paused === false) delete rule.paused;
@@ -354,8 +426,23 @@ export class StyleStore {
     return (await this.list()).some((r) => isCaptionCase(r.payload));
   }
 
-  async asPromptText(): Promise<string> {
+  /** The checked rules every render in an AI edit measures. A paused rule is not checked. */
+  async checks(): Promise<StyleChecks> {
+    const out: StyleChecks = { active: [], unreadable: [] };
+    for (const r of await this.list()) {
+      if (r.paused || r.check === undefined) continue;
+      try { out.active.push({ id: r.id, text: r.text, check: parseCheck(r.check) }); } catch { out.unreadable.push(r); }
+    }
+    return out;
+  }
+
+  /** `brokenBefore`: ids of checked rules the version being edited already broke. A note leaves those alone (editor.ts). */
+  async asPromptText(brokenBefore?: Set<string>): Promise<string> {
     const rules = (await this.list()).filter((r) => !r.paused);
-    return rules.length ? rules.map((r) => `- ${isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT : r.text}`).join('\n') : '(none yet)';
+    const line = (r: StyleRule) => isCaptionCase(r.payload) ? CAPTION_CASE_PROMPT
+      : checkedText(r.check) === null ? r.text
+      : brokenBefore?.has(r.id) ? `${r.text} (this reel already broke it before this note: leave that alone unless the note is about it)`
+      : `${r.text} (the app measures this on every render; a note can't finish while it fails)`;
+    return rules.length ? rules.map((r) => `- ${line(r)}`).join('\n') : '(none yet)';
   }
 }

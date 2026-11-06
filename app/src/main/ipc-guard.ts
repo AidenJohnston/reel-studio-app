@@ -28,6 +28,8 @@ const paths = (v: unknown): v is string[] => Array.isArray(v) && v.every(path)
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(text)
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+/** A reference reel's id (main references.ts: a UUID). */
+const referenceId = (v: unknown): v is string => text(v) && /^[0-9a-f-]{8,64}$/.test(v)
 const anchor = (v: unknown): boolean => object(v) && text(v.from) && text(v.to)
 
 function validPatch(patch: unknown): boolean {
@@ -101,6 +103,14 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break
     case 'ai:vendorStatus': case 'ai:vendorConnect': case 'ai:vendorCancel': case 'ai:vendorSignInAgain': case 'ai:vendorSignInWithCode': case 'ai:vendorSignIn': ok = first === 'claude' || first === 'chatgpt'; break
     case 'ai:setStockKey': ok = (first === 'pexels' || first === 'pixabay') && (second === null || text(second)); break
+    // My style › Reference reels (references-ipc.ts) and Your niche (niche-ipc.ts)
+    case 'refs:add': ok = paths(first) && first.length > 0; break
+    case 'refs:addLink': ok = text(first) && first.length > 0 && first.length <= 4000; break
+    case 'refs:attach': ok = referenceId(first) && path(second); break
+    case 'refs:remove': case 'refs:openLink': case 'refs:reveal': ok = referenceId(first); break
+    case 'niche:save': ok = object(first) && (second === 'chat' || second === 'typed'); break
+    case 'niche:say': ok = Array.isArray(first) && first.length > 0 && first.length <= 24 && finite(second) && Number.isInteger(second) && second >= 0 &&
+      (third === null || third === undefined || object(third)); break
     case 'dev:renderTestAnimation': ok = path(first) && (second === undefined || typeof second === 'boolean') &&
       (third === undefined || text(third)) && (args[3] === undefined || object(args[3])); break
   }
