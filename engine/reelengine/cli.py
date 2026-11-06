@@ -195,6 +195,11 @@ def cmd_render(args):
                       project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent)
 
 
+def cmd_proxy(args):
+    from . import proxy
+    return proxy.run(_project(args))
+
+
 def cmd_cover(args):
     from . import render
     return render.cover_only(_project(args), root=Path(args.root) if args.root else None)
@@ -473,11 +478,12 @@ def cmd_reference_scan(args):
     return reference_import.scan([Path(f) for f in args.files])
 
 
-# Commands that change nothing in the project, and `attach`, which only adds its own uniquely named
-# file: they run even while Reel Studio has the project open. Every other command given --project is
-# refused then unless Reel Studio runs it (owner.py).
+# Commands that change nothing in the project, `attach`, which only adds its own uniquely named file,
+# and `proxy`, which writes only work/proxy/ under its own per-take lock (proxy.py) and outlives the job
+# that starts it: they run even while Reel Studio has the project open. Every other command given
+# --project is refused then unless Reel Studio runs it (owner.py).
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
-                      "classify", "attach"}
+                      "classify", "attach", "proxy"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -565,6 +571,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--merge-parent", type=int, help="second saved parent; always makes a new final version")
     sp.add_argument("--out", help="folder for a draft (default versions/preview)")
     sp.add_argument("--job-id", help="the app job this render belongs to (recorded in its receipt)")
+    add("proxy", cmd_proxy, "make the 1080p copy of each 4K or HDR take that previews read")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")

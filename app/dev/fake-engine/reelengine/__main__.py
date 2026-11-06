@@ -666,6 +666,11 @@ def cmd_pace_preview(args: list[str]) -> dict:
     return {"seconds": 5.0, "paces": {k: {"perMinute": a, "opening": b, "openingMax": c, "issues": []} for k, (a, b, c) in rows.items()}}
 
 
+def cmd_proxy(_args: list[str]) -> dict:
+    """The real engine makes preview copies of 4K/HDR takes; the fake one's takes are small."""
+    return {"sources": {}}
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -673,7 +678,7 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach,
+    "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach, "proxy": cmd_proxy,
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
     "reference-scan": cmd_reference_scan, "moments": cmd_moments, "match-joins": cmd_match_joins,
