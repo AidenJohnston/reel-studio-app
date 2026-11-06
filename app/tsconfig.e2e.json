@@ -11,5 +11,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["e2e/**/*", "playwright.config.ts", "src/shared/**/*", "src/preload/api.d.ts"]
+  "include": ["e2e/**/*", "perf/**/*", "playwright.config.ts", "src/shared/**/*", "src/preload/api.d.ts"]
 }

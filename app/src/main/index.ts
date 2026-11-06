@@ -86,6 +86,8 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createProxyBuilds } from './proxy-builds'
+import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
 import { createUsage, editScore, postViews, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
@@ -236,6 +238,25 @@ const renderSlot = withRenderSlot(
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
 const runEngine: RunEngine = renderSlot.run
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid, project) => {
+        pidRegistry?.add(pid, project)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,
@@ -295,8 +316,12 @@ let sleptAt = 0
 const editorName = (p: { id: string } | null): string | null =>
   p?.id === 'claude-cli' || p?.id === 'claude' ? 'Claude' : p?.id === 'chatgpt' ? 'ChatGPT' : null
 const pauseCtx = (kind: 'first-edit' | 'note', startedAt: number, editor: string | null) => ({ kind, online: net.isOnline(), slept: sleptAt > startedAt, editor })
-/** Reels being deleted: nothing continues them (continuePaused). */
+/** Reels being deleted: nothing continues them (continuePaused) or starts their preview copies. */
 const removing = new Set<string>()
+/** Starts the reel's preview copy build (proxy-builds.ts) unless the reel is being deleted. */
+function startProxy(slug: string, dir: string): void {
+  if (!removing.has(slug)) proxies.start(slug, dir)
+}
 
 /** Continues a paused reel: Version 1 starts again where it stopped (listening kept); waiting notes run on. */
 async function continuePaused(slug: string): Promise<void> {
@@ -405,6 +430,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
+      startProxy(slug, dir) // a project from before preview copies existed gets them now
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
@@ -693,6 +719,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -1561,8 +1588,12 @@ function registerIpc(): void {
     try {
       await coverScans.stop(slug)
       await noteQueue.remove(slug, async () => {
+        // after the reel's jobs have ended, so none can start a build behind this; a build that won't stop refuses
+        await proxies.stop(slug)
         await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
-        await fs.rm(projectDir(slug), { recursive: true, force: true })
+        // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+        // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+        await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
       })
     } finally {
       removing.delete(slug)
@@ -1909,7 +1940,10 @@ function createWindow(): BrowserWindow {
     }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
   )
   void loadSettings().then((s) => showTimelineInMenu(s.timeline), () => undefined)
-  created.once('ready-to-show', () => created.show())
+  created.once('ready-to-show', () => {
+    performance.mark(WINDOW_SHOWN) // app/perf times launch to here
+    created.show()
+  })
   // Stop flashing the taskbar once the person is back.
   created.on('focus', () => created.flashFrame(false))
   // The animation renderer keeps a hidden offscreen window; it must not keep the app alive.

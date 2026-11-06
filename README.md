@@ -210,8 +210,8 @@ Set up the engine (the app uses `engine/.venv` automatically when it exists):
 
 ```
 cd engine
-python -m venv .venv
-# Windows:  .venv\Scripts\pip install -e ".[dev]"      macOS:  .venv/bin/pip install -e ".[dev]"
+uv venv --python 3.11 --managed-python
+uv pip install --python .venv -c requirements.txt -e ".[dev]"
 cd ..
 ```
 
