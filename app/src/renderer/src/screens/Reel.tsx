@@ -1091,6 +1091,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
               ) : notesView === 'versions' && d.versions.length > 1 ? (
                 <VersionTree
                   versions={d.versions}
+                  queue={d.queue}
                   shown={onScreen?.n ?? version?.n ?? null}
                   nameOf={nameOf}
                   busy={!!job}

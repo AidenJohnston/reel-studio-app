@@ -151,6 +151,8 @@ export function NotesLog({
   const waiting = waitingRows(queue, entries)
   // a waiting note can go into a note being made now (Add now), never into a change made by hand
   const noteRunning = entries.some((e) => e.ask.kind === 'note' && e.result?.kind === 'making')
+  // only into the same line of versions: a note for another version waits and branches from that one
+  const runningBranch = queue.find((x) => x.attempt)?.branch
 
   // The newest version shows what changed until the person folds it. Every version line says what its rows changed,
   // so each one's rows are read once.
@@ -453,7 +455,7 @@ export function NotesLog({
         </article>
       ))}
       {waiting.map((q, i) => (
-        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} on={latest + (making ? 1 : 0) + i} canAdd={noteRunning} onEditHand={onEditHand} onError={onError} />
+        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} on={latest + (making ? 1 : 0) + i} canAdd={noteRunning && q.branch === runningBranch} onEditHand={onEditHand} onError={onError} />
       ))}
     </div>
   )

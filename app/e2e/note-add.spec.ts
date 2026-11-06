@@ -42,6 +42,12 @@ test('fails if a note added while a version is made is lost, waits for its own v
     await page.getByTestId('note-input').fill('warmer colors')
     await page.getByTestId('send').click()
     await expect(page.getByTestId('note-progress')).toBeVisible()
+    // the Versions view shows the version being made, dashed, hanging from the one it changes
+    await page.getByTestId('notes-view-versions').click()
+    await expect(page.getByTestId('vt-ghost')).toHaveCount(1)
+    await expect(page.getByTestId('vt-ghost')).toContainText('Making it from Version 2')
+    await shot(page, 'add-now-04-ghost-in-versions')
+    await page.getByTestId('notes-view-notes').click()
     await page.getByTestId('note-input').fill('and quieter music')
     await page.getByTestId('note-input').press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter')
     await expect(page.getByTestId('note-added').last()).toHaveText(/and quieter music/)

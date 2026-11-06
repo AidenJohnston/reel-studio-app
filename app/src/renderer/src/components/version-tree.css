@@ -48,3 +48,11 @@
 .cb-part { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }
 .cb-part > span { font-weight: 600; }
 .cb-same { font-size: var(--fs-sm); }
+
+/* a note not saved yet: where its version will hang */
+.vt-row.ghost .vt-main { cursor: default; }
+.vt-row.ghost .vt-l1 b, .vt-row.ghost .vt-name { color: var(--ink-3); }
+.vt-row.ghost .vt-lanes circle { stroke-dasharray: 2.5 2; fill: var(--surface); }
+.vt-row.ghost.now .vt-lanes circle { stroke: var(--ink-2); animation: vt-breathe 1.6s ease-in-out infinite; }
+@keyframes vt-breathe { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .vt-row.ghost.now .vt-lanes circle { animation: none; } }

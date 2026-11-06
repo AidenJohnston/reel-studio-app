@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { MERGE_LAYERS, type MergeLayer, type MergeRequest, type VersionInfo } from '../../../shared/api'
+import { MERGE_LAYERS, type MergeLayer, type MergeRequest, type QueuedNote, type VersionInfo } from '../../../shared/api'
 import { versionGraph, type GraphRow } from '../../../shared/version-graph'
 import { LAYER_WORDS, mergeWords } from '../../../shared/combine'
 import { ago } from '../../../shared/memory'
@@ -45,6 +45,7 @@ function fromWords(v: VersionInfo): string | null {
  */
 export function VersionTree({
   versions,
+  queue,
   shown,
   nameOf,
   busy,
@@ -54,6 +55,8 @@ export function VersionTree({
   onCombine
 }: {
   versions: VersionInfo[]
+  /** notes not saved yet: each shows where its version will hang, dashed, until it is made */
+  queue: QueuedNote[]
   shown: number | null
   nameOf: (v: VersionInfo) => string
   /** a job runs on the reel: Combine waits for it (a note can still be written and waits its turn) */
@@ -64,12 +67,41 @@ export function VersionTree({
   onChange: (n: number) => void
   onCombine: (n: number) => void
 }) {
-  const rows = versionGraph(versions)
+  // Notes run in turn, each from its own version. A note for the newest builds on the one before it in line.
+  const latest = versions[versions.length - 1]?.n ?? 0
+  const ghosts = new Map<number, { q: QueuedNote; from: number }>()
+  let head = latest
+  for (const q of queue.filter((x) => !x.hand)) {
+    const n = latest + ghosts.size + 1
+    const from = q.branch ?? head
+    if (q.branch === undefined) head = n
+    ghosts.set(n, { q, from })
+  }
+  const rows = versionGraph([...versions, ...[...ghosts].map(([n, g]) => ({ n, parent: g.from }))])
   const byN = new Map(versions.map((v) => [v.n, v]))
   const now = Date.now()
+  const fromNumber = (n: number): string => (ghosts.has(n) ? 'the one before it' : `Version ${n}`)
   return (
     <ol className="vt" aria-label="Versions of this reel" data-testid="version-tree">
       {rows.map((row) => {
+        const ghost = ghosts.get(row.n)
+        if (ghost) {
+          const running = !!ghost.q.attempt
+          return (
+            <li key={`g${ghost.q.id}`} className={`vt-row ghost${running ? ' now' : ''}`} data-testid="vt-ghost">
+              <Lanes row={row} />
+              <span className="vt-main">
+                <span className="vt-l1">
+                  <b>New version</b>
+                  <span className="vt-name">{ghost.q.text}</span>
+                </span>
+                <span className="vt-l2">
+                  {running ? `Making it from ${fromNumber(ghost.from)}` : `Waits its turn, then changes ${fromNumber(ghost.from)}`}
+                </span>
+              </span>
+            </li>
+          )
+        }
         const v = byN.get(row.n)!
         const name = nameOf(v)
         const from = fromWords(v)
