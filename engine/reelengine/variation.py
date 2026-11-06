@@ -10,6 +10,7 @@ import secrets
 from pathlib import Path
 
 from . import project as projects
+from .cut import MATCH_HOLD
 from .cut_style import CUT_STYLES
 from .proto import EngineError
 
@@ -61,7 +62,10 @@ def resolve(project: dict, timeline) -> tuple[dict, dict | None]:
         if band:
             cadence = sum(band) / 2
             target = cadence + phase
-            boundaries = sorted({float(w["s"]) for w in timeline.words_out if w["s"] > 0})
+            # a framing switch on a match cut would show its two sides differently
+            held = [s.out_start for s in timeline.segments if s.join_transition == "match"]
+            boundaries = sorted({float(w["s"]) for w in timeline.words_out
+                                 if w["s"] > 0 and all(abs(w["s"] - h) >= MATCH_HOLD for h in held)})
             while target < timeline.duration:
                 candidates = [t for t in boundaries if t > changes[-1] and abs(t - target) <= .5]
                 if candidates:

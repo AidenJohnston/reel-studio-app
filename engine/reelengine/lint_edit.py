@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import math
 
 from .cut_style import CUT_STYLES
+from .cut import MATCH_HOLD
 from .placement import SAFE_BOTTOM, SAFE_TOP
 
 
@@ -17,6 +18,7 @@ class LintTimeline:
     snaps: list = field(default_factory=list)
     captions: list = field(default_factory=list)
     event_times: list | None = None
+    match_joins: list = field(default_factory=list)   # cut.Timeline.match_joins
 
 
 def snap_crosses(start, end, events):
@@ -93,6 +95,17 @@ def lint_edit(edit: dict, timeline: LintTimeline) -> dict:
         if seg.join_transition in ('j', 'l') and any(abs(s['snapped'] - seg.out_start) <= 1 / fps for s in accepted):
             issue('join-beat', seg.out_start, 'A J or L bridge shares this join with a beat accent.', 'Remove the bridge or move the beat accent.')
 
+    for m in timeline.match_joins:
+        if m.get('played') != 'match':
+            at = timeline.segments[m['in']].out_start if 'in' in m else 0
+            issue('match-unmet', at, f"cut.keep[{m['keep']}] asks for a match cut, but {m.get('why') or 'its frames were not compared'}; it plays as a plain cut.",
+                  'Choose another join here, or move the cut to where the two sides line up.')
+    for seg in timeline.segments:
+        # a framing change on a match cut undoes it: the two sides no longer sit the same way
+        if seg.join_transition == 'match' and any(abs(t - seg.out_start) < MATCH_HOLD for z in timeline.zooms for t in (z.t0, z.t1)):
+            issue('match-framing', seg.out_start, 'A zoom changes the framing right at this match cut, so the two sides no longer line up.',
+                  'Move the zoom off this join, or use a plain cut here.')
+
     style = edit.get('cutStyle')
     preset = CUT_STYLES.get(style['preset']) if style else None
     if preset:
@@ -149,7 +162,8 @@ def prepare(ctx, tl):
     if (ctx.project.get('captions') or {}).get('enabled', True):
         _, cues, *_ = captions.build_for_timeline(tl, ctx.project, ctx.fmt['width'], ctx.fmt['height'])
     # Compare against unsnapped events so an event cannot collide with its own target.
-    plan = LintTimeline(tl.segments, tl.duration, visuals, zooms, ctx._lint_snap_requests, cues, ctx._lint_events)
+    plan = LintTimeline(tl.segments, tl.duration, visuals, zooms, ctx._lint_snap_requests, cues, ctx._lint_events,
+                        getattr(tl, 'match_joins', []))
     result = lint_edit(ctx.project, plan)
     for fix in result['fixed']:
         if fix['rule'] == 'zoom-ramp':

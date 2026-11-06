@@ -135,6 +135,30 @@ def cmd_lint_edit(args):
     return prepare(ctx, tl)
 
 
+def cmd_match_joins(args):
+    from . import project
+    pdir = _project(args)
+    edit = project.load(pdir)
+    if args.keep is not None:
+        try:
+            edit["cut"]["keep"] = json.loads(args.keep)
+        except (ValueError, TypeError):
+            raise EngineError("BAD_ARGS", "--keep must be JSON", "Reel Studio sent a cut the engine couldn't read.")
+    keep = edit["cut"]["keep"]
+    if args.every and isinstance(keep, list):
+        # ask the question for every join that could hold one: after the first range, never next to a clip
+        for i, item in enumerate(keep):
+            if i and isinstance(item, dict) and "clip" not in item and isinstance(keep[i - 1], dict) and "clip" not in keep[i - 1]:
+                item["join"] = {"transition": "match", "frames": 0}
+    problems = project.validate(edit)
+    if problems:
+        raise EngineError("BAD_PROJECT", "; ".join(problems[:8]), "This cut can't be checked. Undo the last change and try again.")
+    tl = project.timeline(pdir, edit)
+    return {"joins": [{"keep": m["keep"], "matched": m["played"] == "match",
+                       "at": round(tl.segments[m["in"]].out_start, 3) if "in" in m else None,
+                       **{k: m[k] for k in ("why", "look", "move") if k in m}} for m in tl.match_joins]}
+
+
 def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
@@ -493,6 +517,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--gap-cap", type=float)
     sp = add("lint-edit", cmd_lint_edit, "check the edit without rendering")
     sp.add_argument("--root")
+    sp = add("match-joins", cmd_match_joins, "say which joins of the cut can be match cuts")
+    sp.add_argument("--keep", help="cut.keep to check instead of the project's, as JSON")
+    sp.add_argument("--every", action="store_true", help="check every join that could hold a match, not only the ones that ask for it")
     sp = add("render", cmd_render, "render project.json")
     sp.add_argument("--draft", action="store_true")
     sp.add_argument("--window", help="a:b output seconds")

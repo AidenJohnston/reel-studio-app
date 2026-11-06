@@ -279,7 +279,7 @@
       "type": "object",
       "required": ["transition", "frames"],
       "properties": {
-        "transition": { "enum": ["hard", "j", "l", "smash"] },
+        "transition": { "enum": ["hard", "j", "l", "smash", "match"] },
         "frames": { "type": "integer", "minimum": 0 }
       }
     },

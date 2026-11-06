@@ -236,3 +236,24 @@ def test_cut_at_second_zoom_start_is_another_visual_change():
     tl.segments.append(Segment('s2', 0, 6, 6))
     tl.zooms = [z(2, 4), z(6, 8)]
     assert 'successive-zooms' not in rules(lint_edit(edit(), tl))
+
+
+def test_a_match_that_did_not_line_up_is_reported_with_its_reason():
+    p, tl = edit(), plan()
+    tl.segments.append(Segment('s1', 6, 9, 12, join_transition='hard'))
+    tl.match_joins = [{'keep': 1, 'out': 0, 'in': 1, 'played': 'hard', 'matched': False, 'why': 'the speaker moves too much across the cut'}]
+    (issue,) = [r for r in lint_edit(p, tl)['issues'] if r['rule'] == 'match-unmet']
+    assert issue['at_seconds'] == 12
+    assert 'moves too much' in issue['message']
+    tl.match_joins[0].update(played='match', matched=True)
+    tl.segments[1].join_transition = 'match'
+    assert 'match-unmet' not in rules(lint_edit(p, tl))
+
+
+def test_a_zoom_on_a_match_cut_is_flagged_and_one_clear_of_it_is_not():
+    p, tl = edit(), plan()
+    tl.segments.append(Segment('s1', 6, 9, 12, join_transition='match'))
+    tl.zooms = [z(12.1, 14)]
+    assert 'match-framing' in rules(lint_edit(p, tl))
+    tl.zooms = [z(12.4, 14)]
+    assert 'match-framing' not in rules(lint_edit(p, tl))

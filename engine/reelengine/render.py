@@ -178,12 +178,10 @@ def source_faces(project_dir: Path, proj: dict) -> dict:
     return faces
 
 
-def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
-    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
-    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
-    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
-    rot = int(src.get("rotation") or 0) % 360
-    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+def display_crop(disp: tuple, out_w: int, out_h: int, face: Optional[tuple]) -> tuple:
+    """(x, y, cw, ch): the part of the upright picture (disp = its width, height) that fills
+    out_w x out_h, centred on the face when known. Match cuts compare frames through it (match.py)."""
+    w, h = disp
     target = out_w / out_h
     if w / h > target + 1e-3:          # too wide: crop the sides
         cw, ch = int(round(h * target)) // 2 * 2, h // 2 * 2
@@ -197,6 +195,16 @@ def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> di
         x = 0
     else:
         cw, ch, x, y = w // 2 * 2, h // 2 * 2, 0, 0
+    return x, y, cw, ch
+
+
+def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
+    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
+    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
+    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
+    rot = int(src.get("rotation") or 0) % 360
+    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+    x, y, cw, ch = display_crop((w, h), out_w, out_h, face)
     if rot == 90:
         rx, ry, rcw, rch = y, rh - x - cw, ch, cw
     elif rot == 270:
@@ -1144,6 +1152,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     ctx.window = win
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
+    for m in tl.match_joins:
+        if m.get("played") != "match":
+            warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
     # 1. audio (always the full cut, then sliced for a window, so the music sits where it will)
