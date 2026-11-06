@@ -64,5 +64,6 @@ Reply ONLY with JSON, no other text:
 
 "hook" is the first spoken line. "script" is the full spoken script including the hook, one line per sentence, separated by newlines. "onScreenText" is the list of overlays in order.
 
+{{niche}}
 ## The user's saved style rules (always follow these; they override defaults)
 {{styleRules}}

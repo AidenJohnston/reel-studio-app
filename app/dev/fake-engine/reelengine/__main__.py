@@ -638,6 +638,45 @@ def cmd_reference_scan(args: list[str]) -> dict:
     return {"files": files}
 
 
+def cmd_score(args: list[str]) -> dict:
+    """The real engine reads a version's reports (reelengine/score.py). This stand-in plays the source straight through
+    and never normalizes its sound, so it says the file plays and the loudness is off target."""
+    # take() consumes each flag, so each is read once
+    project, version = take(args, "--project"), int(take(args, "--version"))
+    vdir = Path(project) / "versions" / f"v{version}"
+    if not (vdir / "project.json").exists():
+        raise Fail("NOT_FOUND", "That version isn't saved any more.")
+    cues = json.loads((vdir / "captions.json").read_text("utf-8")).get("cues", []) if (vdir / "captions.json").exists() else []
+    checks = [{"id": "subtitleSafeZone", "ok": True, "count": 0, "subtitles": len(cues)},
+              {"id": "loudness", "ok": False, "lufs": -19.6, "target": -14.0},
+              {"id": "videoFile", "ok": True, "count": 0, "failed": []}]
+    return {"version": version, "checks": checks, "passed": 2, "measured": 3}
+
+
+def cmd_measure_reel(args: list[str]) -> dict:
+    """The real engine listens and finds the cuts (reelengine/measure.py); the stand-in makes up steady numbers from
+    the length, so two reels of different lengths read differently. Its poster is a real frame."""
+    src = take(args, "--file")
+    poster = take(args, "--poster")
+    info = probe(src)
+    duration = float(info.get("duration") or 0)
+    if duration <= 0:
+        raise Fail("NOT_VIDEO", "That file isn't a video Reel Studio can read.", src)
+    count = max(1, round(duration / 2.2))
+    out = {"version": 1, "duration": round(duration, 2), "width": info.get("width") or 0, "height": info.get("height") or 0,
+           "hasAudio": bool(info.get("hasAudio")), "speechMissing": None,
+           "speech": {"words": round(duration * 2.8), "wordsPerSecond": 2.8, "firstWordAt": 0.2, "talkingSeconds": round(duration - 0.4, 2),
+                      "pausesPerMinute": 2.0, "hook": {"seconds": 2.1, "words": 6, "text": "Nobody tells you this about bread."}},
+           "shots": {"count": count, "medianSeconds": round(duration / count, 2), "perMinute": round((count - 1) * 60 / duration, 1),
+                     "cutsFirst5": min(count - 1, 2)}}
+    if poster:
+        Path(poster).parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", "0.5", "-i", src, "-frames:v", "1", "-vf", "scale=240:-2", poster],
+                           capture_output=True)
+        out["poster"] = poster if r.returncode == 0 and Path(poster).exists() else None
+    return out
+
+
 def cmd_match_joins(args: list[str]) -> dict:
     """The real engine compares frames (reelengine/match.py). This stand-in has none to compare, so a join lines up
     when the first word after it has an even number (w2, w4, ...): tests can pick a cut that matches and one that
@@ -719,8 +758,8 @@ COMMANDS = {
     "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach, "proxy": cmd_proxy,
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
-    "reference-scan": cmd_reference_scan, "moments": cmd_moments, "match-joins": cmd_match_joins,
-    "pace-preview": cmd_pace_preview, "footage": cmd_footage,
+    "reference-scan": cmd_reference_scan, "moments": cmd_moments, "score": cmd_score, "measure-reel": cmd_measure_reel,
+    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview, "footage": cmd_footage,
 }
 
 

@@ -1,7 +1,8 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
+import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
 
@@ -24,6 +25,8 @@ export interface AgentResult {
   styleSuggestions?: string[]
   /** A typed rule to ask about; Yes = approveStyleProposal(it). */
   styleProposal?: StyleProposal
+  /** Rules the app would measure on every render, measured on this version; Yes = addStyleRule(text, from, check). */
+  styleChecks?: { text: string; check: RuleCheck }[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
   /** the model that made this version ("Claude Sonnet 5.5 · High"); absent for a basic version */
@@ -163,6 +166,9 @@ export interface AI {
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
   wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult>
+  /** One turn of My style's niche chat (ai niche.ts nicheTurn): a short question back, or the whole niche. The turns
+   * start with the app's own question. Optional: older packages lack it. */
+  nicheTurn?(input: { turns: NicheTurn[]; asked: number; niche: Niche | null }, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<NicheTurnResult>
   /** Try 2 for a trial post: the one thing the editor changes, and its reason in its own voice. Optional: older packages lack it. */
   proposeTry?(req: TryRequest, signal?: AbortSignal): Promise<{ variable: unknown; value: unknown; reason: unknown }>
   /** More reels from one video. `onEvent` hears the waits for the editor's answer. Optional: older packages lack it. */
@@ -173,7 +179,7 @@ export interface AI {
    * (learn()) never proposes its words again; false when the app takes back a rule the AI saved on its own. */
   removeStyleRule(id: string, options?: { forget?: boolean }): Promise<{ rule: StyleRule; index: number } | null>
   /** Saves one My style rule (after the user said Yes, typed in My style, or learned from an export). Optional: older packages lack it. */
-  addStyleRule?(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<StyleRule>
+  addStyleRule?(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<StyleRule>
   /** Undo of removeStyleRule. */
   restoreStyleRule?(rule: StyleRule, index: number): Promise<void>
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */
@@ -181,6 +187,13 @@ export interface AI {
   /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */
   approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
   declineStyleProposal?(p: StyleProposal): Promise<void>
+  /** Memories drafted from post results (read-only); each goes to proposeMemory. Optional: older packages lack these. */
+  learnFromResults?(): Promise<unknown[]>
+  /** Keeps a drafted memory waiting in My style: 'added', or why not ('duplicate', 'forgotten', 'full'). */
+  proposeMemory?(draft: unknown): Promise<string>
+  memoryProposals?(): Promise<MemorySuggestion[]>
+  acceptMemory?(id: string, words?: string): Promise<StyleRule | null>
+  dismissMemory?(id: string): Promise<void>
   /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
   updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
   /** Stops setActive('claude-cli')'s check call, which then throws code 'cancelled'. Optional: older packages lack it. */

@@ -1,7 +1,8 @@
 export type Screen =
   | { name: 'home' }
-  /** `version`: open showing this version (Insights opens the one that was posted) instead of the newest. */
-  | { name: 'reel'; slug: string; version?: number }
+  /** `version`: open showing this version (Insights opens the one that was posted) instead of the newest. `draft`:
+   * words to put in the note box, unsent (Insights' "Try this edit"). */
+  | { name: 'reel'; slug: string; version?: number; draft?: string }
   | { name: 'library' }
   | { name: 'style' }
   | { name: 'insights' }

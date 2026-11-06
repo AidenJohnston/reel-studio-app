@@ -84,7 +84,7 @@ interface Pin {
  * editor in a column on the right. Version 1 is made here, a reel with no video is planned here, and Edit it myself
  * takes the column's place.
  */
-export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
+export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: number; go: Go; draft?: string }) {
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   // `at`: the version to show first; the newest when it's gone or not given (line ~234 keeps a version that exists)
@@ -187,7 +187,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     }
   }, [transport, playhead])
   const [shownSrc, setShownSrc] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(startDraft ?? '')
   const [chip, setChip] = useState<Chip>(null)
   const [alert, setAlert] = useState<string | null>(null)
   const [notifyAsk, setNotifyAsk] = useState(false)

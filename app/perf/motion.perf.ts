@@ -65,6 +65,43 @@ interface Run {
   load: { before: Load; after: Load }
   flyIn: Moment
   useClaude: Moment
+  /** the longest tasks Chromium traced around "Use it", with the process and thread each ran on */
+  useClaudeTasks: Task[]
+}
+interface Task {
+  process: string
+  thread: string
+  name: string
+  ms: number
+  at: number
+}
+
+/** Chromium trace events (Tracing.dataCollected) */
+interface TraceEvent {
+  ph: string
+  name: string
+  pid: number
+  tid: number
+  ts: number
+  dur?: number
+  args?: { name?: string }
+}
+
+/** The longest complete tasks of a trace, longest first, each named by its process and thread (GPU, renderer...). */
+function longestTasks(events: TraceEvent[], top = 12, minMs = 16): Task[] {
+  const proc = new Map<number, string>()
+  const thread = new Map<string, string>()
+  for (const e of events) {
+    if (e.ph !== 'M') continue
+    if (e.name === 'process_name') proc.set(e.pid, e.args?.name ?? String(e.pid))
+    if (e.name === 'thread_name') thread.set(`${e.pid}:${e.tid}`, e.args?.name ?? String(e.tid))
+  }
+  const t0 = Math.min(...events.filter((e) => e.ph === 'X').map((e) => e.ts))
+  return events
+    .filter((e) => e.ph === 'X' && (e.dur ?? 0) >= minMs * 1000)
+    .sort((a, b) => (b.dur ?? 0) - (a.dur ?? 0))
+    .slice(0, top)
+    .map((e) => ({ process: proc.get(e.pid) ?? String(e.pid), thread: thread.get(`${e.pid}:${e.tid}`) ?? String(e.tid), name: e.name, ms: Math.round((e.dur ?? 0) / 100) / 10, at: Math.round((e.ts - t0) / 1000) }))
 }
 
 async function measure(page: Page, act: () => Promise<void>): Promise<Moment> {
@@ -104,8 +141,20 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
       await expect(skip.or(use)).toBeVisible()
       if (await skip.isVisible()) await skip.click()
       await expect(use).toBeVisible()
+      // a trace beside the frame timing, so a long frame can be put down to its process and task
+      const cdp = await page.context().newCDPSession(page)
+      const events: TraceEvent[] = []
+      // the protocol types a trace event as a string map; its fields are numbers and objects too (TraceEvent)
+      cdp.on('Tracing.dataCollected', (e) => void events.push(...(e.value as unknown as TraceEvent[])))
+      await cdp.send('Tracing.start', {
+        categories: 'toplevel,devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,gpu,viz,media',
+        transferMode: 'ReportEvents'
+      })
       const useClaude = await measure(page, () => use.click())
-      runs.push({ run, load: { before, after: machineLoad() }, flyIn, useClaude })
+      const ended = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()))
+      await cdp.send('Tracing.end')
+      await ended
+      runs.push({ run, load: { before, after: machineLoad() }, flyIn, useClaude, useClaudeTasks: longestTasks(events) })
     } finally {
       await app.close()
     }

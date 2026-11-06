@@ -1,5 +1,7 @@
-"""`render [--draft] [--window a:b]`: project.json -> versions/vN/{export.mp4, cover.png, verify.json}
-for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+"""`render [--draft] [--window a:b] [--rules file]`: project.json -> versions/vN/{export.mp4, cover.png,
+verify.json} for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+With --rules, the result's `ruleChecks` says which checkable My style rules this render breaks
+(rule_checks.py), and a final render that breaks one the rules file lists in `stopOn` returns before its encode.
 
 Order of operations (docs/architecture.md section 5): cut video (+ zooms) -> overlay layers by z -> captions burned
 last -> mux the audio. The audio is built FIRST, as its own file: the cut voice, then the music
@@ -32,7 +34,7 @@ from typing import Optional
 
 import reelengine
 
-from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, rule_checks, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
@@ -1043,6 +1045,29 @@ def read_broll_report(items: list) -> list:
     return out
 
 
+def mix_measured(audio: Path) -> Optional[dict]:
+    """The mix report beside the audio this render used (music.build_audio), or None when it is missing.
+    The voice-only fallback (no music module, or the mix failed) has no music in it."""
+    audio = Path(audio)
+    if not audio.name.startswith("mix-"):
+        return {"music": None}
+    try:
+        return json.loads(audio.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def read_rules(path: Optional[str]) -> Optional[tuple]:
+    """`--rules`: the rules file (rule_checks.py), parsed strictly before any work starts."""
+    if path is None:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise EngineError("BAD_RULE", f"rules file: {exc}", "I couldn't read your My style rules. Please try again.") from None
+    return rule_checks.parse_rules(text)
+
+
 def check_fontselect(stderr: str, font_path: Path) -> Optional[str]:
     """libass logs which file it actually used. Anything other than our font = silent substitution."""
     hits = [ln for ln in stderr.splitlines() if "fontselect:" in ln]
@@ -1074,8 +1099,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
         music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
         out: Optional[Path] = None, job_id: Optional[str] = None, parent: Optional[int] = None,
-        merge_parent: Optional[int] = None) -> dict:
+        merge_parent: Optional[int] = None, rules: Optional[str] = None) -> dict:
     t_start = time.time()
+    checks = read_rules(rules)
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir, file=project_file)
     committed = int(proj.get("version") or 0)
@@ -1201,6 +1227,21 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if win:
         cap_report = [r for r in cap_report if r["e"] > win[0] and r["s"] < win[1]]
 
+    # Every rule is measured on what was just built, before the encode: a final render that breaks
+    # one the app asked to stop on returns now, without spending a minute or two on a video.
+    rule_report = None
+    if checks is not None and not win:
+        gone = {r["id"] for r in broll_report if r.get("skipped")}
+        rule_report = rule_checks.check(checks[0], cues=cap_report, fmt=(W, H), mix=mix_measured(audio),
+                                        broll=[r for r in layer_items if r.get("id") not in gone], duration=tl.duration)
+        if not preview and any(f["id"] in checks[1] for f in rule_report["failures"]):
+            # the version folder made above holds nothing yet: no number is used up
+            shutil.rmtree(vdir, ignore_errors=True)
+            progress(STAGE, 100, "Checking your rules", force=True)
+            timings["total"] = round(time.time() - t_start, 2)
+            return {"version": version, "preview": preview, "draft": draft, "encoded": False,
+                    "ruleChecks": rule_report, "warnings": warnings, "timings": timings}
+
     # 4. the picture
     if win:
         a, b = win
@@ -1281,7 +1322,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     os.replace(out_part, out)
 
     visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
-    result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps,
+    result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps, "encoded": True,
               "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
@@ -1290,6 +1331,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
               "expectedSilence": ctx.expected_silence,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
     result.update(lint)
+    if rule_report is not None:
+        result["ruleChecks"] = rule_report
     if ctx.variation is not None:
         result["variation"] = ctx.variation
 

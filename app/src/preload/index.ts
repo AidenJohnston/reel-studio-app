@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -26,6 +26,7 @@ const api: ReelApi = {
     refresh: (options) => call('insights:refresh', options),
     onChange: (cb) => on<void>('insights:changed', () => cb())
   },
+  wrapped: { report: () => call('wrapped:report') },
   tiktok: {
     configure: (settings) => call('tiktok:configure', settings),
     session: () => call('tiktok:session'),
@@ -118,6 +119,7 @@ const api: ReelApi = {
     list: () => call('projects:list'),
     search: (query) => call('projects:search', query),
     get: (slug) => call('projects:get', slug),
+    score: (slug, version) => call('projects:score', slug, version),
     create: (files) => call('projects:create', files),
     plan: () => call('projects:plan'),
     leave: (slug) => call('projects:leave', slug),
@@ -169,6 +171,15 @@ const api: ReelApi = {
     cancel: (id) => call('cloud:cancel', id),
     onProgress: (cb) => on<{ id: string; pct: number }>('cloud:progress', cb)
   },
+  devices: {
+    status: () => call('devices:status'),
+    setOn: (on) => call('devices:setOn', on),
+    pair: (kind, notes) => call('devices:pair', kind, notes),
+    cancelPair: () => call('devices:cancelPair'),
+    openInBrowser: (notes) => call('devices:openInBrowser', notes),
+    remove: (id) => call('devices:remove', id),
+    onChange: (cb) => on<DevicesStatus>('devices:change', cb)
+  },
   phone: {
     start: (video, caption, address) => call('phone:start', video, caption, address),
     startPlan: (slug, address) => call('phone:startPlan', slug, address),
@@ -204,7 +215,28 @@ const api: ReelApi = {
     keepLearned: (rules, from) => call('style:keepLearned', rules, from),
     update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
-    rememberLowercase: (slug) => call('style:rememberLowercase', slug)
+    rememberLowercase: (slug) => call('style:rememberLowercase', slug),
+    suggestions: () => call('style:suggestions'),
+    keepSuggestion: (id, text) => call('style:keepSuggestion', id, text),
+    dismissSuggestion: (id) => call('style:dismissSuggestion', id)
+  },
+  references: {
+    list: () => call('refs:list'),
+    add: (paths) => call('refs:add', paths),
+    addLink: (url) => call('refs:addLink', url),
+    attach: (id, path) => call('refs:attach', id, path),
+    remove: (id) => call('refs:remove', id),
+    openLink: (id) => call('refs:openLink', id),
+    reveal: (id) => call('refs:reveal', id),
+    onChange: (cb) => on<void>('refs:changed', () => cb())
+  },
+  niche: {
+    get: () => call('niche:get'),
+    save: (niche, from) => call('niche:save', niche, from),
+    remove: () => call('niche:remove'),
+    say: (turns, asked, draft) => call('niche:say', turns, asked, draft),
+    stop: () => call('niche:stop'),
+    onStatus: (cb) => on<{ message: string; waiting?: boolean }>('niche:status', cb)
   },
   sfx: {
     pack: () => call('sfx:pack')
