@@ -110,6 +110,18 @@ def test_preview_times_sit_on_the_frame_grid():
     assert p["window"] == [2.4, 4.4] and p["stills"] == [3.4, 3.9]
 
 
+@pytest.mark.parametrize("fps,window,stills", [(29.97, [73, 133], [103, 118]),
+                                             (23.976, [58, 106], [83, 95]),
+                                             (59.94, [147, 267], [207, 237])])
+def test_fractional_preview_plans_keep_exact_frame_times(fps, window, stills):
+    plan = replay.plan_previews(3.47, 12.0, fps)
+    assert plan["window"] == [k / fps for k in window]
+    assert plan["stills"] == [k / fps for k in stills]
+    short = replay.plan_previews(0.0, 0.02, fps)
+    assert short["window"][0] >= 0 and short["window"][1] <= 0.02
+    assert short["stills"] == [0.0]
+
+
 def test_git_blob_id_matches_git():
     assert git_blob_id(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
 
