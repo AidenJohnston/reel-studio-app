@@ -10,7 +10,7 @@ import { readAttachment } from './attachments';
 import {
   Analysis, Broll, CaptionStyle, ClipItem, CutItem, LIBRARY_FOLDERS, LibraryKind, MusicFrozen, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor, Zoom,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS,
+  captionsUnderInstagram, nextBrollId, clipProblem, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem, PROJECT_FILE, versionDir, JOIN_TRANSITIONS, SEARCHED_JOINS,
 } from './project';
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
@@ -434,7 +434,7 @@ async function engine(ctx: ToolContext, command: string, extra: string[] = [], s
 }
 
 /** What `reelengine match-joins` says about one join (engine/reelengine/match.py). */
-export interface MatchVerdict { keep: number; matched: boolean; at: number | null; why?: string; look?: number; move?: number }
+export interface MatchVerdict { keep: number; transition?: string; matched: boolean; at: number | null; why?: string; look?: number; move?: number }
 
 /** Which joins of `keep` line up as match cuts: those asking for one, or with `every`, every join that could hold one. */
 export async function matchVerdicts(ctx: ToolContext, keep: unknown[], every: boolean): Promise<MatchVerdict[]> {
@@ -1416,7 +1416,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_cut',
-    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l, smash, match or flash. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range. A match is refused where its two sides do not line up; find_match_cuts says where they do.',
+    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l, smash, match, flash or action. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range. A match is refused where its two sides do not line up (find_match_cuts says where they do), and an action cut where nothing moves on both sides.',
     parameters: S.obj({ keep: S.arr(S.obj({
       ...ANCHOR.properties,
       join: S.opt(S.obj({
@@ -1428,12 +1428,12 @@ const tools: ToolDef[] = [
       const { t } = await load(ctx);
       const { keep, problems } = normalizeKeep(t, args.keep);
       if (problems.length) throw new ToolInputError(problems.join('; '));
-      if (keep.some((k) => k.join?.transition === 'match')) {
+      if (keep.some((k) => SEARCHED_JOINS.includes(k.join?.transition ?? ''))) {
         // checked before the cut changes, so a refused match leaves the cut as it was
         const unmet = (await matchVerdicts(ctx, keep, false)).filter((j) => !j.matched);
         if (unmet.length) {
-          throw new ToolInputError(`${unmet.map((j) => `keep[${j.keep}]: no match cut here, ${j.why ?? 'its two sides do not line up'}`).join('; ')}. `
-            + 'Call find_match_cuts to see which cuts line up, or use hard, j, l or smash here.');
+          throw new ToolInputError(`${unmet.map((j) => `keep[${j.keep}]: no ${j.transition === 'action' ? 'cut on action' : 'match cut'} here, ${j.why ?? 'its two sides do not line up'}`).join('; ')}. `
+            + 'Call find_match_cuts to see which cuts line up, or use hard, j, l, smash or flash here.');
         }
       }
       await mutate(ctx, 'cut', (p) => { p.cut.keep = keep; });

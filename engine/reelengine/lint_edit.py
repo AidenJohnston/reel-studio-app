@@ -96,14 +96,16 @@ def lint_edit(edit: dict, timeline: LintTimeline) -> dict:
             issue('join-beat', seg.out_start, 'A J or L bridge shares this join with a beat accent.', 'Remove the bridge or move the beat accent.')
 
     for m in timeline.match_joins:
+        kind = m.get('transition', 'match')
+        name = 'a match cut' if kind == 'match' else 'a cut on action'
         if m.get('played') == 'none':
             # nothing to hide: the take runs straight on, so the request does nothing on screen
-            issue('match-no-cut', 0, f"cut.keep[{m['keep']}] asks for a match cut where the take runs straight on, so there is no cut to hide.",
+            issue(f'{kind}-no-cut', 0, f"cut.keep[{m['keep']}] asks for {name} where the take runs straight on, so there is no cut to hide.",
                   'Drop the join here.')
-        elif m.get('played') != 'match':
+        elif m.get('played') != kind:
             at = timeline.segments[m['in']].out_start if 'in' in m else 0
-            issue('match-unmet', at, f"cut.keep[{m['keep']}] asks for a match cut, but {m.get('why') or 'its frames were not compared'}; it plays as a plain cut.",
-                  'Choose another join here, or move the cut to where the two sides line up.')
+            issue(f'{kind}-unmet', at, f"cut.keep[{m['keep']}] asks for {name}, but {m.get('why') or 'its frames were not compared'}; it plays as a plain cut.",
+                  'Choose another join here, or move the cut to where the two sides line up.' if kind == 'match' else 'Choose another join here.')
     for seg in timeline.segments:
         # a framing change on a match cut undoes it: the two sides no longer sit the same way
         if seg.join_transition == 'match' and any(abs(t - seg.out_start) < MATCH_HOLD for z in timeline.zooms for t in (z.t0, z.t1)):

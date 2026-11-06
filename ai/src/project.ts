@@ -17,8 +17,10 @@ export interface Source {
   capturedAt?: string;
   [k: string]: unknown;
 }
-export interface Join { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash'; frames: number }
-export const JOIN_TRANSITIONS = ['hard', 'j', 'l', 'smash', 'match', 'flash'] as const;
+export interface Join { transition: 'hard' | 'j' | 'l' | 'smash' | 'match' | 'flash' | 'action'; frames: number }
+export const JOIN_TRANSITIONS = ['hard', 'j', 'l', 'smash', 'match', 'flash', 'action'] as const;
+/** Joins whose cut the engine searches for, and refuses where it finds none (engine/reelengine/match.py). */
+export const SEARCHED_JOINS: readonly string[] = ['match', 'action'];
 export interface WordAnchor { from: string; to: string }
 export interface CutRange extends WordAnchor { join?: Join }
 /** A clip from any source, played whole (multi-source): source seconds, start included and end excluded. */
@@ -586,7 +588,7 @@ function joinProblem(join: unknown, index: number, before?: unknown): string | n
   if (!join || typeof join !== 'object') return 'needs transition and frames';
   const j = join as Partial<Join>;
   // a match is valid here; whether its two sides line up is the engine's to say (engine/reelengine/match.py)
-  if (!(JOIN_TRANSITIONS as readonly string[]).includes(j.transition ?? '')) return 'transition must be hard, j, l, smash, match or flash';
+  if (!(JOIN_TRANSITIONS as readonly string[]).includes(j.transition ?? '')) return 'transition must be hard, j, l, smash, match, flash or action';
   if (!Number.isSafeInteger(j.frames) || j.frames! < 0) return 'frames must be a non-negative integer';
   return null;
 }

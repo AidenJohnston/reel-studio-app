@@ -151,7 +151,7 @@ export class FakeHost implements EngineHost {
       case 'match-joins': {
         const keep = args.includes('--keep') ? JSON.parse(args[args.indexOf('--keep') + 1]) : p.cut.keep;
         const every = args.includes('--every');
-        return { joins: keep.flatMap((k: any, i: number) => (i && !('clip' in k) && (every || k.join?.transition === 'match')
+        return { joins: keep.flatMap((k: any, i: number) => (i && !('clip' in k) && (every || ['match', 'action'].includes(k.join?.transition))
           ? [this.matchable.has(k.from) ? { keep: i, matched: true, at: i * 2 } : { keep: i, matched: false, at: i * 2, why: 'the speaker moves too much across the cut' }]
           : [])) };
       }

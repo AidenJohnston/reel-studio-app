@@ -9,6 +9,8 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
   render warns. Older builds refuse a project with a match join (`BAD_JOIN`) rather than render something else.
 - `cut.keep[].join.transition` accepts `"flash"`: the picture dips to white for 2 frames before the cut and 3 after
   it (`render.flash_layers`), drawn as a layer so every kind of render shows it.
+- `cut.keep[].join.transition` accepts `"action"` (cut on action): the engine puts the cut, inside the same air
+  `match` searches, where the picture moves on both sides; with no such pair it plays as a plain cut and says why.
 - `beatAccents: false` now turns beat landing off even when `cutStyle.preset` is `"hyper"`. Before, false meant the
   same as absent. Neither the app nor the AI ever wrote false, so only a project edited by hand can render differently.
 - "Edit it myself" sets joins (Cut > Transitions) and `beatAccents` (Cut > Pace) through the `handEdits` queue. A

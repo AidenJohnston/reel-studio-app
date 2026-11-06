@@ -20,6 +20,12 @@ Every candidate frame is reduced to what the viewer sees: the source's crop for 
     change does not count. On a locked-off single take LOOK is high for every pair, because the room
     never changes; MOVE is what tells a match from a jump cut there.
 
+An action join (cut on action) searches the same air for the opposite: the cut lands where something is
+moving on both sides, so the eye follows the movement across and doesn't see the jump. Each side's
+motion is MOVE between the frame at the cut and its neighbour away from it (the frame before the last
+outgoing one, the frame after the first incoming one), over the whole crop, since a gesture is often
+outside the head box. The pair whose weaker side moves most wins; it needs ACTION_MIN on both.
+
 The best pair (lowest MOVE among pairs that pass LOOK, nearest the planned bounds on a tie) becomes the
 join's bounds. When no pair passes, the join plays as a plain cut and the timeline says why, so a
 "match" label never sits on a jump cut. Results are cached in work/match-joins.json, keyed by the
@@ -51,6 +57,8 @@ HEAD_GROW = 1.6              # face box -> head box, so hair and shoulders count
 LOOK_MIN = 0.80
 MOVE_MAX = 0.045
 TIE = 0.002                  # MOVE values this close are a tie, settled by the smaller shift
+# Proposed like the two above; test_match.py's moving-disc take sits well on either side of it.
+ACTION_MIN = 0.02
 CACHE_FILE = "match-joins.json"
 CACHE_LIMIT = 256
 
@@ -134,6 +142,24 @@ def best_pair(outgoing: list, incoming: list, box: Optional[tuple], planned: tup
            if best is None else
            f"the speaker moves too much across the cut ({row['move']:.3f}, a match allows {MOVE_MAX})")
     return {**row, "matched": False, "why": why}
+
+
+def best_action(outgoing: list, incoming: list, planned: tuple) -> dict:
+    """outgoing: [(end time, motion into the cut)]; incoming: [(start time, motion out of it)]. The pair
+    whose weaker side moves most, with `matched` true when both sides reach ACTION_MIN."""
+    best = None
+    for te, mo in outgoing:
+        for ts, mi in incoming:
+            shift = abs(te - planned[0]) + abs(ts - planned[1])
+            row = {"outEnd": round(te, 6), "inStart": round(ts, 6), "motion": round(min(mo, mi), 4), "shift": round(shift, 6)}
+            if best is None or row["motion"] > best["motion"] + TIE or (abs(row["motion"] - best["motion"]) <= TIE and shift < best["shift"]):
+                best = row
+    if best is None:
+        return {"matched": False, "why": "there are no frames around this join to compare"}
+    if best["motion"] >= ACTION_MIN:
+        return {**best, "matched": True}
+    return {**best, "matched": False,
+            "why": f"nothing moves on both sides of this cut ({best['motion']:.3f}, a cut on action needs {ACTION_MIN})"}
 
 
 def frame_grid(lo: float, hi: float, fps: float) -> list:
@@ -282,7 +308,8 @@ def plan(project_dir: Path, proj: dict, tl) -> dict:
             verdicts[join["keep"]] = {"matched": False, "why": f"a take could not be read ({exc.__class__.__name__})"}
             continue
         # the face track decides the head box, so a new analysis of the take is a new search
-        key = _cache_key([VERSION, LOOK_MIN, MOVE_MAX, HEAD_GROW, DESCRIPTOR, DECODE_WIDTH,
+        kind = join.get("transition", "match")
+        key = _cache_key([VERSION, kind, LOOK_MIN, MOVE_MAX, ACTION_MIN, HEAD_GROW, DESCRIPTOR, DECODE_WIDTH,
                           [(str(s["path"]), s["stat"], s["crop"], is_mirrored(s["src"]),
                             _stat(project_dir / "work" / f"face-{s['src']['id']}.json")) for s in sides],
                           win["outTimes"], win["inTimes"], win["planned"]])
@@ -293,6 +320,22 @@ def plan(project_dir: Path, proj: dict, tl) -> dict:
         # an end at te shows frame te*fps - 1 last; a start at ts shows frame ts*fps first
         out_frames = [round(t * win["outFps"]) - 1 for t in win["outTimes"]]
         in_frames = [round(t * win["inFps"]) for t in win["inTimes"]]
+        if kind == "action":
+            # each side's motion compares the frame at the cut with its neighbour away from it
+            out_k = sorted({k for f in out_frames for k in (max(0, f - 1), f)})
+            in_k = sorted({k for f in in_frames for k in (f, f + 1)})
+            try:
+                at_o = dict(zip(out_k, _descriptors(o["path"], out_k, win["outFps"], o["crop"], o["disp"], is_mirrored(o["src"]))))
+                at_i = dict(zip(in_k, _descriptors(i["path"], in_k, win["inFps"], i["crop"], i["disp"], is_mirrored(i["src"]))))
+            except Exception as exc:   # noqa: BLE001 -- an unreadable stretch only costs the cut on action
+                log(f"action join {join['keep']}: frames could not be read: {exc!r}")
+                verdicts[join["keep"]] = {"matched": False, "why": "the frames around this join could not be read"}
+                continue
+            verdict = best_action([(t, move(at_o[max(0, f - 1)], at_o[f])) for t, f in zip(win["outTimes"], out_frames)],
+                                  [(t, move(at_i[f], at_i[f + 1])) for t, f in zip(win["inTimes"], in_frames)], win["planned"])
+            verdicts[join["keep"]] = cache[key] = verdict
+            changed = True
+            continue
         try:
             da = _descriptors(o["path"], out_frames, win["outFps"], o["crop"], o["disp"], is_mirrored(o["src"]))
             db = _descriptors(i["path"], in_frames, win["inFps"], i["crop"], i["disp"], is_mirrored(i["src"]))

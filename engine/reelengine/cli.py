@@ -156,7 +156,7 @@ def cmd_match_joins(args):
     if problems:
         raise EngineError("BAD_PROJECT", "; ".join(problems[:8]), "This cut can't be checked. Undo the last change and try again.")
     tl = project.timeline(pdir, edit)
-    return {"joins": [{"keep": m["keep"], "matched": m["played"] == "match",
+    return {"joins": [{"keep": m["keep"], "transition": m.get("transition", "match"), "matched": m["played"] == m.get("transition", "match"),
                        "at": round(tl.segments[m["in"]].out_start, 3) if "in" in m else None,
                        **{k: m[k] for k in ("why", "look", "move") if k in m}} for m in tl.match_joins]}
 
