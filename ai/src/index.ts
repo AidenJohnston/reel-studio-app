@@ -8,7 +8,9 @@ import {
   AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, PlanTurnInput, PlanTurnResult, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
-import { StyleStore, StyleProposal, StyleRule } from './style';
+import { StyleStore, StyleProposal, StyleRule, type ProposalDraft } from './style';
+import { learn } from './learning';
+import type { RuleCheck } from './rules';
 import { loadProject, writeFileAtomic } from './project';
 import { planFastNote } from './fastnote';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL, SMALL_CLAUDE_MODEL } from './providers/anthropic';
@@ -26,6 +28,7 @@ import type { Harness } from './harness';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
+import { nicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 import { proposeTry, type TryProposal, type TryRequest } from './trial';
 import { proposeReels, type ProposeReelsRequest, type ReelProposal } from './propose';
 import { refuseIfOpen } from './owner';
@@ -48,6 +51,7 @@ export { CodexHarness } from './mcp/codex';
 export { SessionHarness } from './mcp/session';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
+export type { RuleCheck, StyleCheckProposal } from './rules';
 export type { MemoryKind, MemoryProposal, ProposalDraft, ProposalStatus, TrialLink } from './style';
 export { learn, MIN_LEARNING_REACH } from './learning';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
@@ -65,6 +69,7 @@ export type { CodexLoginStatus, LocalCodex, CodexState } from './providers/local
 export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
 export type { ApplyNoteOptions } from './editor';
+export type { Niche, NicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 export { checkTryProposal, TRY_VARIABLES } from './trial';
 export type { TryProposal, TryRequest, TryVariable } from './trial';
 export { checkReelProposal, proposeReels } from './propose';
@@ -1150,6 +1155,10 @@ export function createAI(opts: CreateAIOptions) {
     async planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult> {
       return editor.planTurn(deps(opts.host), await modelProvider('planner'), input, onEvent, signal);
     },
+    /** One turn of My style's niche chat: a short question back, or the whole niche to save (niche.ts nicheTurn). */
+    async nicheTurn(input: NicheTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<NicheTurnResult> {
+      return nicheTurn({ prompts, style }, await modelProvider('planner'), input, onEvent, signal);
+    },
     /** Try 2 for a trial post: the one thing the editor changes from the reel as it is, and why. */
     async proposeTry(req: TryRequest, signal?: AbortSignal): Promise<TryProposal> {
       return proposeTry(prompts, await modelProvider('trial'), req, signal);
@@ -1161,8 +1170,9 @@ export function createAI(opts: CreateAIOptions) {
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string, options?: { forget?: boolean }) { return style.remove(id, options); },
     /** The user said Yes to a proposed rule (AgentResult.styleSuggestions), typed one in My style, or kept one
-     * learned from an export. `from`: the note or the export it came from. Returns the saved rule. */
-    async addStyleRule(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>) { return (await style.add(text, from)).rule; },
+     * learned from an export. `from`: the note or the export it came from. `check`: a styleChecks entry's machine form,
+     * which the app then measures on every render. Returns the saved rule. */
+    async addStyleRule(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck) { return (await style.add(text, from, check)).rule; },
     /** Undo of removeStyleRule: the rule back at `index`. */
     async restoreStyleRule(rule: StyleRule, index: number) { return style.restore(rule, index); },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */
@@ -1171,6 +1181,15 @@ export function createAI(opts: CreateAIOptions) {
     async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
     /** The user said No to AgentResult.styleProposal. */
     async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
+    /** Memories drafted from post results (learning.ts learn(), read-only); the app passes each to proposeMemory. */
+    async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },
+    /** Keeps a drafted memory waiting for the person (at most three). Never a rule until they keep it. */
+    async proposeMemory(d: ProposalDraft) { return style.propose(d); },
+    async memoryProposals() { return style.proposals(); },
+    /** The person kept a waiting memory, with its words or `words` they typed. Null when it was already gone. */
+    async acceptMemory(id: string, words?: string) { return style.accept(id, words); },
+    /** No thanks: the memory, and its words, are never proposed again. */
+    async dismissMemory(id: string) { return style.dismiss(id); },
     /** My style: the user edited a rule's words, or paused or resumed it. */
     async updateStyleRule(id: string, patch: { text?: string; paused?: boolean }) { return style.update(id, patch); },
   };

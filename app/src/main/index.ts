@@ -81,6 +81,7 @@ import { createJobManager } from './jobs'
 import { createPauser, pauseFor, quitQuestion } from './pause'
 import { createNoteQueue, noteOutcome, type NoteToRun, type StartHand } from './note-queue'
 import { handEditJob, HAND_MESSAGE } from './hand-edit'
+import { refreshMemories } from './memory-loop'
 import { parseHandEdit } from '../shared/hand-edit'
 import { learnPicker } from '../shared/style-editors'
 import { checkPlan, planFromEditor, planReply, planTurns, titleFromTopic } from '../shared/plan'
@@ -107,6 +108,9 @@ import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
+import { registerReferencesIpc } from './references-ipc'
+import { createReferenceLibrary } from './references'
+import { registerNicheIpc } from './niche-ipc'
 import { ResultsRefresh, type ResultsSource } from './results-refresh'
 import { testResultsSources } from './results-test-source'
 import { InstagramError } from './instagram-http'
@@ -949,6 +953,14 @@ function createOutside(): OutsideAccess {
 }
 
 function registerIpc(): void {
+  // My style › Reference reels and Your niche
+  const references = createReferenceLibrary({ root: reelStudioRoot, runEngine, log, mediaUrl, onChange: () => win?.webContents.send('refs:changed') })
+  registerReferencesIpc({
+    handle, library: references, ensureRoot,
+    openExternal: (url) => (TEST ? Promise.resolve(log(`[references] test run: not opening ${url}`)) : shell.openExternal(url)),
+    showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
+  })
+  registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
   const tiktok = new TikTokService({
     dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
     secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
@@ -988,7 +1000,12 @@ function registerIpc(): void {
           read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
-    projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null),
+    projectsRoot: projectsDir, stateDir: settingsDir(), sources,
+    // new post results may make a trial's memory worth suggesting (memory-loop.ts): look now, not only when My style opens
+    changed: () => {
+      broadcast('insights:changed', null)
+      void refreshMemories(ai, projectsDir(), log)
+    },
     // Post results go into usage data only when sharing and its Post results part are both on (usage.ts record)
     onRead: (post, outcome) => {
       const views = postViews(post, outcome)
@@ -1727,6 +1744,27 @@ function registerIpc(): void {
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  // a version's edit checks (engine score.py): read-only, so it needs no job and never waits behind one
+  handle('projects:score', async (_e, slug: string, version: unknown) => {
+    if (!Number.isSafeInteger(version) || (version as number) < 1) throw { code: 'BAD_ARGS', userMessage: 'That version is not saved.' }
+    return runEngine('score', ['--project', projectDir(slug), '--version', String(version)])
+  })
+  // the learning loop (memory-loop.ts): looks again each time My style opens
+  handle('style:suggestions', async () => {
+    await refreshMemories(ai, projectsDir(), log)
+    return (await ai.memoryProposals?.().catch(() => [])) ?? []
+  })
+  handle('style:keepSuggestion', async (_e, id: string, text?: unknown) => {
+    if (!ai.acceptMemory) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
+    if (text !== undefined && (typeof text !== 'string' || !text.trim())) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press No thanks.' }
+    const rule = await ai.acceptMemory(id, text)
+    if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That suggestion is not in My style any more.' }
+    return rule
+  })
+  handle('style:dismissSuggestion', async (_e, id: string) => {
+    if (!ai.dismissMemory) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
+    await ai.dismissMemory(id)
+  })
   handle('style:update', (_e, id: string, patch: { text?: unknown; paused?: unknown }) => {
     if (!ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
     const text = typeof patch?.text === 'string' ? patch.text : undefined

@@ -103,6 +103,16 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** every rules file a render was given (`--rules`) */
+  rulesFiles: any[] = [];
+  /** where a checked rule fails on this project, or null: the stand-in for rule_checks.py's checkers */
+  ruleFails: (rule: { id: string; text: string; check: any }, p: any) => Record<string, unknown> | null = () => null;
+  /** rule_checks.py `measure` for this project */
+  measured: (p: any) => Record<string, unknown> = (p) => ({
+    'captions.maxWords': p.captions.enabled ? p.captions.style.maxWords : null, 'captions.maxSize': p.captions.enabled ? p.captions.style.size : null,
+    'captions.minSize': p.captions.enabled ? p.captions.style.size : null, 'music.underVoiceDb': p.music?.track ? 19.3 : null,
+    'broll.keepOut.face': 0, 'broll.keepOut.eyes': 0,
+  });
   /** `match-joins`: the first words of the ranges whose join lines up as a match cut */
   matchable = new Set<string>();
   /** runs after a render wrote its files, before it reports (Stop or a crash mid-render) */
@@ -176,6 +186,18 @@ export class FakeHost implements EngineHost {
         if (!draft && args.includes('--project-file') && v <= (await readEngineJson(path.join(dir, 'project.json'))).version) {
           throw { code: 'PROJECT_CHANGED', userMessage: 'Your video was changed somewhere else while I worked on your note.' };
         }
+        let ruleChecks: any;
+        if (args.includes('--rules')) {
+          const rules = JSON.parse(await fsp.readFile(args[args.indexOf('--rules') + 1], 'utf8'));
+          this.rulesFiles.push({ ...rules, draft });
+          const failures = rules.rules.flatMap((r: any) => {
+            const place = this.ruleFails(r, p);
+            return place ? [{ id: r.id, kind: r.check.kind, count: 1, places: [{ t0: 1, t1: 2, ...place }] }] : [];
+          });
+          ruleChecks = { ok: !failures.length, checked: rules.rules.length, failures, measured: this.measured(p) };
+          // render.py: a final render stops before its encode on a rule it was asked to stop on, leaving no version folder
+          if (!draft && failures.some((f: any) => rules.stopOn.includes(f.id))) return { version: v, preview: false, draft, encoded: false, ruleChecks };
+        }
         const vd = draft ? (args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', 'preview')) : path.join(dir, 'versions', `v${v}`);
         if (!draft) await fsp.rm(vd, { recursive: true, force: true });
         await fsp.mkdir(vd, { recursive: true });
@@ -199,7 +221,7 @@ export class FakeHost implements EngineHost {
         this.rendered.set(renderId, { words, layers });
         await fsp.writeFile(path.join(vd, draft ? 'render_draft.json' : 'render.json'), JSON.stringify({ renderId, file: draft ? 'draft.mp4' : 'export.mp4' }));
         const jobId = args.includes('--job-id') ? args[args.indexOf('--job-id') + 1] : null;
-        return { renderId, version: v, preview: draft, draft, file, duration: 12.3, verify: { ok: true }, receipt: { jobId, renderId, version: v, facts: [] }, ...this.renderExtra };
+        return { renderId, version: v, preview: draft, draft, encoded: true, file, duration: 12.3, verify: { ok: true }, receipt: { jobId, renderId, version: v, facts: [] }, ...(ruleChecks ? { ruleChecks } : {}), ...this.renderExtra };
       }
       case 'inspect-render': {
         const r = this.rendered.get(args[args.indexOf('--render-id') + 1]);
