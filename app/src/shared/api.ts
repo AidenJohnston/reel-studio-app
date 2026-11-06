@@ -3,7 +3,7 @@
 import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
-import type { InsightsOptions, InsightsSummary } from './insights'
+import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
@@ -633,6 +633,20 @@ export interface DataSharing {
   posts: boolean
 }
 
+/** One anonymous event of a part of DataSharing (main/usage.ts says what each holds and what it may never hold). */
+export type UsageEvent =
+  /** a job ended: which kind, how, and how long it ran */
+  | { part: 'usage'; name: 'job'; job: JobKind; outcome: 'done' | 'failed' | 'cancelled'; code?: string; seconds: number }
+  /** what the person did next with a version an edit made (main/usage.ts editScore) */
+  | { part: 'quality'; name: 'edit'; outcome: EditOutcome }
+  /** a posted reel's views, as the platform reported them */
+  | { part: 'posts'; name: 'views'; platform: 'instagram' | 'tiktok' | 'youtube' | 'facebook'; views: number; hours: number }
+
+export type EditOutcome = 'kept' | 'changed' | 'undone'
+
+/** An event as it waits on this computer: the day, the app's version, the OS and a random install id are added. */
+export type UsageLine = UsageEvent & { day: string; app: string; os: string; install: string }
+
 /** The person's own Claude Code app: not found / found but will not start / not signed in / ready. */
 export type ClaudeCodeState = 'missing' | 'broken' | 'signed_out' | 'ready'
 
@@ -869,7 +883,15 @@ export interface MergeRequest {
 }
 
 export interface ReelApi {
-  insights: { get(options?: InsightsOptions): Promise<InsightsSummary> }
+  insights: {
+    get(options?: InsightsOptions): Promise<InsightsSummary>
+    /** When results were last read, and why a platform's aren't fresh. */
+    status(): Promise<ResultsStatus>
+    /** Reads results now (rate limits allowing): every post, or with `all: false` only those due. Resolves when done. */
+    refresh(options?: { all: boolean }): Promise<ResultsStatus>
+    /** A background read saved new numbers: read the summary again. */
+    onChange(cb: () => void): () => void
+  }
   tiktok: TikTokApi
   instagram: InstagramApi
   app: {
@@ -890,6 +912,8 @@ export interface ReelApi {
     setFasterExports(on: boolean): Promise<AppInfo>
     setModels(models: ModelChoice): Promise<AppInfo>
     setSharing(sharing: DataSharing): Promise<AppInfo>
+    /** the anonymous usage data waiting on this computer (Settings › Privacy) */
+    usage(): Promise<UsageLine[]>
     setPhoneView(view: PhoneView): Promise<AppInfo>
     setSoundEffects(on: boolean): Promise<AppInfo>
     /** Shows or hides the Reel screen's timeline, remembered on this computer; the View menu's check follows. */
