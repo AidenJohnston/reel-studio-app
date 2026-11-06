@@ -458,7 +458,9 @@ def speech_check(name: Optional[str] = None) -> dict:
     name = name or default_model()
     path = str(require_model(name))
     default = default_threads()
-    if cuda_available() and cuda_selftest(path):
+    # 40 s, not the default 180: the app stops the whole check after 60 s (app main/models.ts). A self-test that runs
+    # out counts as no GPU here, which only costs a thread count the GPU would ignore.
+    if cuda_available() and cuda_selftest(path, timeout=40.0):
         # The GPU ignores the CPU thread count. An NVIDIA card it can't load a model on (the packaged runtime has no
         # CUDA libraries: packaging/README.md) still counts as a device, so it is proved first: otherwise such a
         # computer listens on the CPU at the untested default count, every time.

@@ -71,7 +71,8 @@ export function parseEngineLine(line: string): EngineEvent | null {
         stage: String(o.stage ?? ''),
         pct,
         message: typeof o.message === 'string' ? o.message : '',
-        ...(ready ? { ready } : {})
+        ...(ready ? { ready } : {}),
+        ...(typeof o.note === 'string' && o.note ? { note: o.note } : {})
       }
     }
     case 'done':
