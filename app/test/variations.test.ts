@@ -27,3 +27,33 @@ describe('versions to compare', () => {
     expect(variations(reel(), 'moments')).toBeNull()
   })
 })
+
+describe('one-thing variations beyond the pace', () => {
+  const w = (id: string, word: string, s: number) => ({ id, w: word, s, e: s + 0.3, source: 's1' })
+  const words = [
+    w('a', 'Bread', 0), w('b', 'is', 0.4), w('c', 'easy.', 0.8),
+    ...Array.from({ length: 10 }, (_, i) => w(`n${i}`, `word${i}`, 1.5 + i * 0.4))
+  ]
+  const reel = { cut: { keep: [{ from: 'a', to: 'n9' }] }, cover: { atSourceTime: 1.6, source: 's1', text: null } } as any
+
+  it('fails if brightness is not 8% each way from the reel’s own exposure, or sets anything else', () => {
+    const list = variations({ ...reel, exposure: 1.25 }, 'brightness')!
+    expect(list.map((v) => v.edit.set)).toEqual([[{ path: ['exposure'], value: 1.35 }], [{ path: ['exposure'], value: 1.15 }]])
+    expect(list.map((v) => v.summary)).toEqual(['Variation: 8% brighter', 'Variation: 8% darker'])
+  })
+
+  it('fails if the hook variation cuts anything but the first sentence, or offers one that would leave too little', () => {
+    const [v] = variations(reel, 'hook', words)!
+    expect(v.edit.words).toEqual({ cut: ['a', 'b', 'c'], keep: [] })
+    expect(v.summary).toBe('Variation: opens on “word0 word1 word2 word3 word4 word5…”')
+    // a reel whose first sentence is most of it has no second line to open on
+    expect(variations(reel, 'hook', words.slice(0, 6))).toBeNull()
+  })
+
+  it('fails if another cover lands next to the reel’s own', () => {
+    const [v] = variations(reel, 'cover', words)!
+    const at = v.edit.set.find((s) => s.path.join('.') === 'cover.atSourceTime')!.value as number
+    expect(Math.abs(at - 1.6)).toBeGreaterThanOrEqual(2)
+    expect(v.edit.set).toContainEqual({ path: ['cover', 'source'], value: 's1' })
+  })
+})
