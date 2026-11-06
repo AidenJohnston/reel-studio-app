@@ -36,9 +36,9 @@ test('first run downloads the listening model with progress', async () => {
         await again.click()
         await page.waitForTimeout(2000)
       }
-      const txt = (await page.locator('text=/Downloading\\S* \\d+%/').first().innerText().catch(() => '')) || ''
-      const m = /(\d+)%/.exec(txt)
-      if (m) seen.add(Number(m[1]))
+      // The bar, not its words: the line under it reads "x of y MB" when the model's size is known.
+      const now = await page.getByRole('progressbar', { name: 'Downloading the listening model' }).getAttribute('aria-valuenow', { timeout: 1000 }).catch(() => null)
+      if (now !== null) seen.add(Number(now))
       if (seen.size === 3) await shot(page, 'firstrun/02-progress')
       if (Date.now() - t0 > 25 * 60_000) throw new Error('download took over 25 minutes')
       await page.waitForTimeout(300)
