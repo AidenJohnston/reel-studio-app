@@ -33,6 +33,9 @@ SALT = "rsleak1"
 # part is a person's name by design), and the name of the company that owns Reel Studio.
 # The company name is split so that main's own checker, which runs on every PR, passes this line too.
 ALLOW = ("AidenJohnston/reel-studio-app", "Cur" + "ate Technologies")
+# The maintainer's GitHub handle as .github/VOUCHED.td lists it for the trust labels (pr-vouch.yml), taken from the
+# slug above so this file holds no second copy of it.
+ALLOW += ("github:" + ALLOW[0].split("/")[0],)
 
 NEVER_COMMIT = [re.compile(p, re.I) for p in (
     r"^(status|bakeoff|tools)/",
@@ -81,7 +84,7 @@ BIG_FILE_ALLOW_PREFIXES = ("packaging/fonts/", "engine/reelengine/fonts/", "temp
 TEXT_EXT = {
     ".md", ".txt", ".json", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".css", ".html", ".yml", ".yaml",
     ".py", ".sh", ".ps1", ".plist", ".toml", ".cfg", ".ini", ".svg", ".gitignore", ".gitattributes", ".lock",
-    ".in", ".mdx",
+    ".in", ".mdx", ".td",
 }
 WORD = re.compile(r"[a-z]+")
 

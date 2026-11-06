@@ -40,3 +40,12 @@ def test_other_agent_files_never_are(path):
 ])
 def test_only_the_credited_sample_media_may_be_committed(path, shipped):
     assert check.never_commit(path) is not shipped
+
+
+
+def test_the_trust_list_passes_and_its_handle_elsewhere_still_does_not():
+    terms = check.load_terms()
+    vouched = (Path(__file__).resolve().parents[2] / ".github" / "VOUCHED.td").read_bytes()
+    assert check.check_tree({".github/VOUCHED.td": vouched}, terms) == []
+    handle = check.ALLOW[0].split("/")[0]
+    assert check.check_tree({"docs/notes.md": f"ask {handle} first".encode()}, terms)
