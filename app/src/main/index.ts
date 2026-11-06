@@ -845,18 +845,20 @@ app.whenReady().then(async () => {
 })
 
 let quitting = false
+// Stop sends a job's engine SIGKILL (or taskkill) within 1.5 s; 5 s leaves room for that to finish. No
+// measurement chose the number. Before it, quit could wait 4 s for jobs and then up to 6.5 s per kill.
+const QUIT_WAIT_MS = 5000
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   if (quitting || !jobs.runningCount()) {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project.
+  // Stop running work cleanly so the next start finds a tidy project. One deadline for all of it: an
+  // engine that will not die stays on the engine list, and the next start deals with it (orphans.ts).
   e.preventDefault()
   quitting = true
-  void jobs
-    .cancelAll()
-    .then(() => killAllEngines())
+  void Promise.race([jobs.cancelAll().then(() => killAllEngines()), new Promise((r) => setTimeout(r, QUIT_WAIT_MS))])
     .finally(() => app.quit())
 })
 
