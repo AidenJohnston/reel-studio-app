@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createProxyBuilds, type ExitHooks } from '../src/main/proxy-builds'
+import { createProxyBuilds, PROXY_STILL_RUNNING, type ExitHooks } from '../src/main/proxy-builds'
 import type { RunEngine } from '../src/main/engine'
 
 interface Call {
@@ -72,5 +72,23 @@ describe('preview copy builds', () => {
     await first
     expect(calls).toHaveLength(1)
     await builds.stop('never-started')
+  })
+
+  it('fails if a build whose engine would not exit lets the project be removed, or lets a second build start', async () => {
+    const calls: { args: string[] }[] = []
+    // engine.ts when a process group survives the kill: the call rejects ENGINE_STUCK and onExit never comes
+    const stuckRunner = (hooks: ExitHooks): RunEngine =>
+      ((_c: string, args: string[], _p?: unknown, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          hooks.onSpawn(7)
+          calls.push({ args })
+          signal?.addEventListener('abort', () => reject({ code: 'ENGINE_STUCK' }), { once: true })
+        })) as unknown as RunEngine
+    const builds = createProxyBuilds(stuckRunner, () => undefined, { stopWaitMs: 20 })
+    builds.start('a', '/p/a')
+    await expect(builds.stop('a')).rejects.toBe(PROXY_STILL_RUNNING)
+    builds.start('a', '/p/a')
+    expect(calls).toHaveLength(1)
+    await expect(builds.stop('a')).rejects.toBe(PROXY_STILL_RUNNING) // a later remove waits and refuses again
   })
 })

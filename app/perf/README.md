@@ -21,9 +21,9 @@ one frame (about 17 ms at 60 Hz) before the swap is on screen.
 | Moment | Starts | Ends |
 |---|---|---|
 | Launch to usable | the test spawns Electron | the later of the window being shown (`rs:window-shown`, main process) and the first reel title on Home being painted |
-| Open a reel | the click on its card on Home | Version 2 shown in the player: its cover, or its first frame if it has none |
-| Switch version | the click on Play Version 1 in the notes, not yet shown since launch | Version 1 shown in the player |
-| Switch back | the click on Play Version 2 | Version 2 shown in the player |
+| Open a reel | the click on its card on Home | its latest version shown in the player: its cover, or its first frame if it has none |
+| Switch version | the click on Play for the version before it in the notes, not yet shown since launch | that version shown in the player |
+| Switch back | the click on Play for the latest version | the latest version shown in the player |
 | Scrub | the scrub bar's `input` event on a click | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the words in the note's progress strip being painted |
 

@@ -426,11 +426,12 @@ def cmd_reference_scan(args):
     return reference_import.scan([Path(f) for f in args.files])
 
 
-# Commands that change nothing in the project, and `attach`, which only adds its own uniquely named
-# file: they run even while Reel Studio has the project open. Every other command given --project is
-# refused then unless Reel Studio runs it (owner.py).
+# Commands that change nothing in the project, `attach`, which only adds its own uniquely named file,
+# and `proxy`, which writes only work/proxy/ under its own per-take lock (proxy.py) and outlives the job
+# that starts it: they run even while Reel Studio has the project open. Every other command given
+# --project is refused then unless Reel Studio runs it (owner.py).
 NOT_PROJECT_WRITES = {"probe", "doctor", "verify", "search-images", "analyze-music", "download-model",
-                      "classify", "attach"}
+                      "classify", "attach", "proxy"}
 
 
 def build_parser() -> argparse.ArgumentParser:

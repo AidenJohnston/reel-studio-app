@@ -247,17 +247,19 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
       const launchMs = await launchTimes(app, page, spawnedAt)
       if (run === 1) versions = await app.evaluate(() => ({ electron: process.versions.electron, chrome: process.versions.chrome }))
 
-      // the reel opens on its latest version, Version 2
+      // The reel opens on its latest version. Each run's note adds one, so it is read here, not assumed.
+      const latest = await page.evaluate(async () => (await window.reel.projects.list())[0]?.version ?? 0)
+      if (latest < 2) throw new Error(`the reel has ${latest} version(s); the setup made two`)
       await arm(page, 'open', 'click')
       await page.getByTestId('project-card').click()
-      const open = await shownAfter(page, 'open', 2)
+      const open = await shownAfter(page, 'open', latest)
 
       await arm(page, 'switch', 'click')
-      await page.getByTestId('log-play-1').click()
-      const sw = await shownAfter(page, 'switch', 1)
+      await page.getByTestId(`log-play-${latest - 1}`).click()
+      const sw = await shownAfter(page, 'switch', latest - 1)
       await arm(page, 'back', 'click')
-      await page.getByTestId('log-play-2').click()
-      const back = await shownAfter(page, 'back', 2)
+      await page.getByTestId(`log-play-${latest}`).click()
+      const back = await shownAfter(page, 'back', latest)
 
       // A person plays before scrubbing; the bar shows once the video has started. Then each click is one seek.
       await page.locator(PLAYER_SELECTOR).evaluate(async (v: HTMLVideoElement) => {

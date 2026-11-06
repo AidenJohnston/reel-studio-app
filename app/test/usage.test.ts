@@ -84,7 +84,7 @@ describe('usage data', () => {
   it('fails if the queue grows past its cap or drops the newest lines', async () => {
     const { usage } = setup(ON, null, undefined, 5)
     await Promise.all(Array.from({ length: 8 }, (_, i) => usage.record({ ...JOB, seconds: i })))
-    expect((await usage.read()).map((l) => l.seconds)).toEqual([3, 4, 5, 6, 7])
+    expect((await usage.read()).map((l) => (l.name === 'job' ? l.seconds : null))).toEqual([3, 4, 5, 6, 7])
   })
 
   it('fails if anything is sent with no endpoint, or with sharing off', async () => {

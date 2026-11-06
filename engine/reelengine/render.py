@@ -1608,11 +1608,12 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
                                   ass_name, None, 0.0, one, a, None, part, graph, fast=fast)
             return tools.text_run(cmd, 120, "still", cwd=rwork,
                                   user_message="I couldn't draw that moment of your video. Please try again.").stderr
+        used = video_from
         try:
             err = draw(True)
         except EngineError as exc:      # as a draft does: the fast path failed, the draft from before next
             log(f"# fast still failed, retrying the slow way: {exc.message[-400:]}")
-            video_from = {sid: "original" for sid in src_meta}
+            used = {sid: "original" for sid in src_meta}
             err = draw(False)
         if font_path is not None:
             bad = check_fontselect(err, Path(font_path))
@@ -1625,13 +1626,16 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
         else:
             tools.text_run([ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(part),
                             "-vf", f"scale={width}:-2", str(png)], 60, "still scale")
-        out.append({"t": round(a, 3), "file": str(png)})
+        out.append({"t": round(a, 3), "file": str(png), "videoFrom": used})
         timings["stills"].append(round(time.time() - t_still, 2))
         if on_still is not None:
             on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
-            "timings": timings, "videoFrom": video_from}
+            "timings": timings,
+            # per take: what every still read, or "mixed" when a slow retry read the original for some
+            "videoFrom": {sid: (vals.pop() if len(vals) == 1 else "mixed")
+                          for sid in src_meta for vals in [{f["videoFrom"][sid] for f in out}]}}
 
 
 def cover_key(ctx, proj: dict) -> str:

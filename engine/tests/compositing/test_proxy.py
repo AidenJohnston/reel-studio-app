@@ -123,17 +123,38 @@ def test_a_preview_reads_the_take_unless_its_copy_is_finished_and_current(tmp_pa
     assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
 
 
-def test_a_still_reads_what_a_draft_reads(tmp_path):
-    """A still stands for the draft's frame (render.stills), so it reads the finished copy when a draft would,
-    and the take when the copy is not usable."""
+def _mean_rgb(png: str) -> np.ndarray:
+    from PIL import Image
+    return np.asarray(Image.open(png).convert("RGB"), dtype=float).reshape(-1, 3).mean(axis=0)
+
+
+def test_a_still_is_drawn_from_what_a_draft_reads(tmp_path):
+    """A still stands for the draft's frame (render.stills), so it is drawn from the finished copy when a draft would
+    be, and from the take when the copy is not usable. The copy is swapped for a red picture of its size, so only a
+    still really decoded from it is red."""
     take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=6.0)
     pdir = _project(tmp_path, take, 1080, 1920, keep=((1.0, 4.0),))
-    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "original"}     # no copy yet
+    still = lambda: render.stills(pdir, [1.0], 270, root=pdir)      # noqa: E731
+    assert still()["videoFrom"] == {"s1": "original"}                 # no copy yet
     built = proxy.run(pdir, short_side=540)["sources"]["s1"]
+    copy, sidecar = Path(built["file"]), Path(built["file"]).with_suffix(".json")
+    w, h = built["size"]
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=red:s={w}x{h}:r=30:d=7",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "1", str(copy)], check=True)
+    meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    sidecar.write_text(json.dumps(dict(meta, bytes=copy.stat().st_size)), encoding="utf-8")
     assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
-    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "proxy"}
-    Path(built["file"]).with_suffix(".json").unlink()                     # no longer a finished copy
-    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "original"}
+
+    drawn = still()
+    assert drawn["videoFrom"] == {"s1": "proxy"} and drawn["frames"][0]["videoFrom"] == {"s1": "proxy"}
+    r, g, b = _mean_rgb(drawn["frames"][0]["file"])
+    assert r > 180 and g < 70 and b < 70, (r, g, b)                    # decoded from the copy
+
+    sidecar.unlink()                                                  # no longer a finished copy
+    drawn = still()
+    assert drawn["videoFrom"] == {"s1": "original"}
+    r, g, b = _mean_rgb(drawn["frames"][0]["file"])
+    assert not (r > 180 and g < 70 and b < 70), (r, g, b)             # decoded from the take
 
 
 def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):

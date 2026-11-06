@@ -306,8 +306,12 @@ let sleptAt = 0
 const editorName = (p: { id: string } | null): string | null =>
   p?.id === 'claude-cli' || p?.id === 'claude' ? 'Claude' : p?.id === 'chatgpt' ? 'ChatGPT' : null
 const pauseCtx = (kind: 'first-edit' | 'note', startedAt: number, editor: string | null) => ({ kind, online: net.isOnline(), slept: sleptAt > startedAt, editor })
-/** Reels being deleted: nothing continues them (continuePaused). */
+/** Reels being deleted: nothing continues them (continuePaused) or starts their preview copies. */
 const removing = new Set<string>()
+/** Starts the reel's preview copy build (proxy-builds.ts) unless the reel is being deleted. */
+function startProxy(slug: string, dir: string): void {
+  if (!removing.has(slug)) proxies.start(slug, dir)
+}
 
 /** Continues a paused reel: Version 1 starts again where it stopped (listening kept); waiting notes run on. */
 async function continuePaused(slug: string): Promise<void> {
@@ -407,7 +411,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
-      proxies.start(slug, dir) // a project from before preview copies existed gets them now
+      startProxy(slug, dir) // a project from before preview copies existed gets them now
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
@@ -696,7 +700,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
-    proxies.start(slug, dir)
+    startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -1469,8 +1473,9 @@ function registerIpc(): void {
     pauser.cancel(slug)
     try {
       await coverScans.stop(slug)
-      await proxies.stop(slug)
       await noteQueue.remove(slug, async () => {
+        // after the reel's jobs have ended, so none can start a build behind this; a build that won't stop refuses
+        await proxies.stop(slug)
         await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
         // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
         // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
