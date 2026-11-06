@@ -1158,7 +1158,13 @@ function registerIpc(): void {
         ...(newest > r.version ? { latest: { version: newest, timing: later ? timingOf(later) : null } } : {})
       })
     }
-    return wrappedReport(reels, Date.now())
+    // Without enough results, the newest reels made here still have their own timing to look at.
+    const made: WrappedReel[] = []
+    for (const s of (await listProjects()).filter((p) => p.version > 0).sort((a, b) => (b.versionAt ?? '').localeCompare(a.versionAt ?? '')).slice(0, 3)) {
+      const timeline = await readTimeline(s.slug, s.version).catch(() => null)
+      made.push({ project: s.slug, version: s.version, title: s.title, publishedAt: '', plays: null, averageWatchTimeMs: null, shares: null, saves: null, timing: timeline ? timingOf(timeline) : null })
+    }
+    return wrappedReport(reels, Date.now(), made)
   })
   handle('projects:search', (_e, query: string) => searchProjects(query))
   handle('projects:get', (_e, slug: string) => projectWithJob(slug))

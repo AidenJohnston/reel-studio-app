@@ -15,7 +15,13 @@ function reelOf(n: number, over: Partial<WrappedReel> = {}): WrappedReel {
 
 describe('wrappedReport', () => {
   it('fails if it compares fewer than 3 posted reels with results', () => {
-    expect(wrappedReport([reelOf(1), reelOf(2), reelOf(3, { plays: null })], NOW)).toEqual({ state: 'too-few', posted: 2 })
+    expect(wrappedReport([reelOf(1), reelOf(2), reelOf(3, { plays: null })], NOW)).toEqual({ state: 'too-few', posted: 2, edit: null })
+  })
+
+  it('fails if a creator with no post results gets no edit to try from the reels made here', () => {
+    const made = [reelOf(7, { plays: null, averageWatchTimeMs: null }), reelOf(8, { plays: null, averageWatchTimeMs: null, timing: { ...tidy, lastWord: 16 } })]
+    const r = wrappedReport([], NOW, made)
+    expect(r).toMatchObject({ state: 'too-few', posted: 0, edit: { kind: 'long-ending', project: 'reel-8' } })
   })
 
   it('fails if it compares older reels instead of the newest 3 posted', () => {

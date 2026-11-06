@@ -170,6 +170,25 @@ html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit
 .cp-here { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-right: auto; cursor: pointer; font-weight: 560; font-variant-numeric: tabular-nums; animation: fade .15s ease-out; }
 .cp-send { min-width: 104px; }
 
+/* ---- a wide window: the same page in a desktop browser ----
+   The phone's one column keeps its order. From 960 px the reel screen puts the player and its versions beside the
+   notes, as the desktop app's Reel screen does, and the list shows more covers across. */
+.cp-reel, .cp-reel-watch, .cp-reel-talk { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 720px) and (max-width: 959px) {
+  .cp-col:has(.cp-grid) { max-width: 720px; }
+  .cp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 960px) {
+  .cp-col:has(.cp-grid), .cp-col:has(.cp-reel) { max-width: 1040px; }
+  .cp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 20px; }
+  .cp-reel { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 40px; align-items: start; }
+  /* the player stays in view while the notes scroll */
+  .cp-reel-watch { position: sticky; top: 24px; }
+  /* versions wrap under the player instead of scrolling sideways past the column */
+  .cp-reel-watch .cp-strip { flex-wrap: wrap; overflow-x: visible; margin-inline: 0; padding-inline: 0; }
+  .cp-reel-talk .cp-notes { margin-top: 0; padding-top: 0; box-shadow: none; }
+}
+
 /* ---- what never moves ---- */
 html.kb :is(.cp-layer, .cp-card, .cp-ver, .cp-tap) { transition: none; }
 html.kb :is(.cp-card, .cp-ver, .cp-tap):active { transform: none; }

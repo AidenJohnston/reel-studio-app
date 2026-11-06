@@ -83,7 +83,8 @@ export interface WrappedEdit {
 }
 
 export type WrappedReport =
-  | { state: 'too-few'; posted: number }
+  /** Not enough posted results to compare; `edit` still comes from the timing of the newest reels made here. */
+  | { state: 'too-few'; posted: number; edit: WrappedEdit | null }
   | { state: 'ready'; reels: WrappedReel[]; strength: WrappedStrength; edit: WrappedEdit | null; notes: string[] }
 
 /** The render's own timing: first and last word, and the first cut (two spans in a row are a cut). */
@@ -280,11 +281,12 @@ function edit(reels: WrappedReel[]): WrappedEdit | null {
 
 /**
  * The report from posted reels, newest first by publication. Fewer than WRAPPED_RULES.reels with plays is too few to
- * compare, and the report says so instead of guessing.
+ * compare, and the report says so instead of guessing; it still looks at the timing of `made` (the newest reels on
+ * this computer, newest first, no results needed) for one edit to try.
  */
-export function wrappedReport(all: WrappedReel[], now: number): WrappedReport {
+export function wrappedReport(all: WrappedReel[], now: number, made: WrappedReel[] = []): WrappedReport {
   const usable = all.filter((r) => r.plays !== null).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-  if (usable.length < WRAPPED_RULES.reels) return { state: 'too-few', posted: usable.length }
+  if (usable.length < WRAPPED_RULES.reels) return { state: 'too-few', posted: usable.length, edit: edit(made.slice(0, WRAPPED_RULES.reels)) }
   const reels = usable.slice(0, WRAPPED_RULES.reels)
   const notes: string[] = []
   for (const r of reels) {

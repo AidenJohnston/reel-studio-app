@@ -135,30 +135,36 @@ export function ReelScreen({
         </p>
       )}
 
-      <Stage version={shown} cover={summary?.cover ?? reel?.cover ?? null} title={title} waiting={!!reel && versions.length === 0} onMoment={setMoment} />
+      {/* one column on a phone; on a wide window the player and versions sit beside the notes (companion.css) */}
+      <div className="cp-reel">
+        <div className="cp-reel-watch">
+          <Stage version={shown} cover={summary?.cover ?? reel?.cover ?? null} title={title} waiting={!!reel && versions.length === 0} onMoment={setMoment} />
 
-      {fresh !== null && shown && fresh !== shown.n && (
-        <Button kind="tertiary" size="big" className="cp-fresh" onClick={() => pick(fresh)}>
-          <span className="badge ready">Version {fresh} is ready</span>
-          Watch it
-        </Button>
-      )}
+          {fresh !== null && shown && fresh !== shown.n && (
+            <Button kind="tertiary" size="big" className="cp-fresh" onClick={() => pick(fresh)}>
+              <span className="badge ready">Version {fresh} is ready</span>
+              Watch it
+            </Button>
+          )}
 
-      {versions.length > 0 && shown && <VersionStrip versions={versions} shown={shown.n} onPick={pick} />}
-      {shown && <SaveVideo v={shown} several={versions.length > 1} />}
-
-      {reel && (
-        <Notes
-          id={id}
-          reel={reel}
-          info={info}
-          job={job}
-          version={shown?.n ?? null}
-          moment={moment}
-          onSent={() => void load()}
-          onOffline={onOffline}
-        />
-      )}
+          {versions.length > 0 && shown && <VersionStrip versions={versions} shown={shown.n} onPick={pick} />}
+          {shown && <SaveVideo v={shown} several={versions.length > 1} />}
+        </div>
+        <div className="cp-reel-talk">
+          {reel && (
+            <Notes
+              id={id}
+              reel={reel}
+              info={info}
+              job={job}
+              version={shown?.n ?? null}
+              moment={moment}
+              onSent={() => void load()}
+              onOffline={onOffline}
+            />
+          )}
+        </div>
+      </div>
     </>
   )
 }
