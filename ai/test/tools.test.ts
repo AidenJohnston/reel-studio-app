@@ -586,8 +586,11 @@ describe('read_references', () => {
     await fsp.writeFile(path.join(root, 'References', 'references.json'), JSON.stringify({ version: 1, references, readout: readout(references) }));
     const r = await executeTool(ctx, 'read_references', {});
     expect(r.isError).toBe(false);
-    expect(r.content).not.toMatch(/<system>|<b>/);
-    const out = JSON.parse(r.content);
+    const fenced = /<reference_data>\n([\s\S]*)\n<\/reference_data>$/.exec(r.content);
+    expect(fenced).not.toBeNull();
+    // nothing inside can close the fence or open a tag of its own
+    expect(fenced![1]).not.toMatch(/[<>]/);
+    const out = JSON.parse(fenced![1]);
     expect(out.readout.summary).toEqual(readout(references).lines);
     expect(out.readout.matchingCutStyle).toBe('hyper');
     expect(out.references[0]).toMatchObject({ measured: true, wordsPerSecond: 2.8, secondsPerShot: 2.2 });

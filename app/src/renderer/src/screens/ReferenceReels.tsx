@@ -67,10 +67,14 @@ export function ReferenceReels() {
   const [removing, setRemoving] = useState<ReferenceView | null>(null)
   const [said, setSaid] = useState('')
   const states = useRef(new Map<string, ReferenceView['state']>())
+  // loads overlap (a reel measured while an add finishes); only the newest one may set the list
+  const loads = useRef(0)
 
   const load = useCallback(async () => {
+    const mine = ++loads.current
     try {
       const next = await reel.references.list()
+      if (mine !== loads.current) return
       // say out loud when a reel finishes measuring, so a screen reader hears what changed
       const done = next.references.filter((r) => states.current.get(r.id) === 'measuring' && r.state !== 'measuring')
       if (done.length) setSaid(done.map((r) => (r.state === 'measured' ? `Measured ${r.title}.` : `Could not measure ${r.title}.`)).join(' '))

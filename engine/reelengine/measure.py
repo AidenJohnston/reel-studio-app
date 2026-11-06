@@ -21,6 +21,9 @@ HOOK_MAX_WORDS = 25
 # A gap between words this long counts as a pause: the "long pause" analyze.run reports for the person's own takes.
 PAUSE_SECONDS = 1.0
 STAGE = "measure"
+# A reel, not a film: past this the engine would listen for many minutes. The app refuses longer files first
+# (app shared/references.ts MAX_REFERENCE_SECONDS).
+MAX_SECONDS = 600
 
 
 def _r(x: float, places: int = 2) -> float:
@@ -48,15 +51,17 @@ def hook_of(words: list) -> Optional[dict]:
 
 
 def speech_stats(words: list) -> Optional[dict]:
-    """Words a second over the talking span (first word to last), where talking starts, the opening line, and the
-    pauses a minute inside that span. None when nothing was said."""
+    """How fast they talk while talking: words a second over the time from the first word to the last, less every
+    long pause (PAUSE_SECONDS or more), so a held beat doesn't read as slow speech. Also where talking starts, the
+    opening line, and the long pauses a minute over the whole span. None when nothing was said."""
     words = sorted((w for w in words if w.get("w", "").strip()), key=lambda w: (w["s"], w["e"]))
     if not words:
         return None
     span = max(words[-1]["e"] - words[0]["s"], 1e-6)
-    pauses = sum(1 for a, b in zip(words, words[1:]) if b["s"] - a["e"] >= PAUSE_SECONDS)
-    return {"words": len(words), "wordsPerSecond": _r(len(words) / span), "firstWordAt": _r(words[0]["s"]),
-            "talkingSeconds": _r(span), "pausesPerMinute": _r(pauses * 60 / span, 1), "hook": hook_of(words)}
+    gaps = [b["s"] - a["e"] for a, b in zip(words, words[1:]) if b["s"] - a["e"] >= PAUSE_SECONDS]
+    talking = max(span - sum(gaps), 1e-6)
+    return {"words": len(words), "wordsPerSecond": _r(len(words) / talking), "firstWordAt": _r(words[0]["s"]),
+            "talkingSeconds": _r(talking), "pausesPerMinute": _r(len(gaps) * 60 / span, 1), "hook": hook_of(words)}
 
 
 def shot_stats(edges: list, duration: float) -> dict:
@@ -89,6 +94,8 @@ def measure(src: Path, poster: Optional[Path] = None, model_name: Optional[str] 
     duration = float(info["duration"] or 0)
     if duration <= 0:
         raise EngineError("NOT_VIDEO", f"{src.name} has no duration", "That file isn't a video Reel Studio can read.")
+    if duration > MAX_SECONDS:
+        raise EngineError("TOO_LONG", f"{src.name} is {duration:.0f} s", "That video is longer than 10 minutes. Add a reel, or a short part of the video.")
     progress(STAGE, 5, "Looking at the cuts", force=True)
     has_video = int(info.get("width") or 0) > 0
     shots = shot_stats(footage._shots(src, duration, has_video), duration)

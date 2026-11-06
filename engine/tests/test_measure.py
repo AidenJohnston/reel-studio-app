@@ -24,13 +24,14 @@ def test_hook_ends_at_the_first_sentence_end_pause_or_cap(words, seconds, count)
     assert hook["text"] == " ".join(x["w"] for x in words[:count])
 
 
-def test_pace_counts_only_the_talking_span_and_long_pauses():
-    # 3 s of silence before the first word must not slow the pace down
+def test_pace_leaves_out_silence_before_talking_and_long_pauses():
+    # 3 s of silence before the first word, and one held beat of 1.3 s, must not read as slow talking
     words = [w("one", 3.0, 3.4), w("two", 3.5, 3.9), w("three", 5.2, 5.6), w("four.", 5.6, 6.0)]
     s = measure.speech_stats(words)
-    assert s["wordsPerSecond"] == round(4 / 3.0, 2)
+    assert s["talkingSeconds"] == round(3.0 - 1.3, 2)
+    assert s["wordsPerSecond"] == round(4 / 1.7, 2)
     assert s["firstWordAt"] == 3.0
-    # one gap of 1.3 s is a long pause; the 0.1 s gaps are not
+    # the 0.1 s gap is not a pause
     assert s["pausesPerMinute"] == round(60 / 3.0, 1)
     assert measure.speech_stats([]) is None
 

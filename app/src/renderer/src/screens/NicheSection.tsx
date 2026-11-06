@@ -174,7 +174,8 @@ export function NicheSection() {
             setSheet(null)
             setRemoved(null)
             setSaid('Saved your niche.')
-            void load()
+            // the sheet's Save is gone with it: the keyboard lands on Edit, which the saved niche brings
+            void load().then(() => requestAnimationFrame(() => editButton.current?.focus()))
           }}
           onWriteYourself={() => {
             setSheet(null)

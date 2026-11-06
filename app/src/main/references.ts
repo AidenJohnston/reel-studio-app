@@ -2,7 +2,7 @@
 // and one still per reel under .posters/. The app writes the readout into references.json with every change, so the
 // editor's read_references tool (ai/src/tools.ts) reads the same numbers and sentences the page shows.
 import { randomUUID } from 'node:crypto'
-import { existsSync, promises as fs } from 'node:fs'
+import { constants as fsConstants, existsSync, promises as fs } from 'node:fs'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { serialized, writeJson } from './store'
 import { toUserError } from './engine'
@@ -70,8 +70,23 @@ export function createReferenceLibrary(d: ReferenceDeps) {
     return list.map(readEntry).filter((e): e is ReferenceEntry => !!e)
   }
 
+  /** References/ and one folder in it, made if missing. A folder that is a link to somewhere else is refused: the app
+   * copies into, writes stills into and deletes from these, and must never do that outside the library folder. */
+  async function folder(sub?: 'files' | '.posters'): Promise<string> {
+    const top = dir()
+    const path = sub ? join(top, sub) : top
+    await fs.mkdir(path, { recursive: true })
+    const realRoot = await fs.realpath(d.root())
+    for (const p of sub ? [top, path] : [top]) {
+      if ((await fs.lstat(p)).isSymbolicLink() || !inside(await fs.realpath(p), realRoot)) {
+        throw userError('UNSAFE_PATH', `The ${REFERENCES_FOLDER} folder in your library points somewhere else. Remove that link, then try again.`)
+      }
+    }
+    return path
+  }
+
   async function write(entries: ReferenceEntry[]): Promise<void> {
-    await fs.mkdir(dir(), { recursive: true })
+    await folder()
     await writeJson(file(), { version: 1, references: entries, readout: readout(entries) })
   }
 
@@ -84,6 +99,8 @@ export function createReferenceLibrary(d: ReferenceDeps) {
 
   // ---- measuring, one reel at a time --------------------------------------------------------------------------
   let measuring: Promise<void> | null = null
+  /** the reel the engine has open now: Remove waits for it, since Windows can't delete a file another process holds */
+  let current: { id: string; done: Promise<void> } | null = null
   /** reels that failed in this run of the app are not tried again until the person adds them again */
   const failed = new Set<string>()
 
@@ -93,7 +110,13 @@ export function createReferenceLibrary(d: ReferenceDeps) {
         for (;;) {
           const next = (await serial(read)).find((e) => stateOf(e) === 'measuring' && !failed.has(e.id))
           if (!next) return
-          await measureOne(next)
+          const done = measureOne(next)
+          current = { id: next.id, done: done.catch(() => undefined) }
+          try {
+            await done
+          } finally {
+            current = null
+          }
           d.onChange()
         }
       } finally {
@@ -106,6 +129,7 @@ export function createReferenceLibrary(d: ReferenceDeps) {
     const src = abs(entry)!
     let patch: Partial<ReferenceEntry>
     try {
+      await folder('.posters')
       const m = checkMeasure(await d.runEngine('measure-reel', ['--file', src, '--poster', poster(entry.id)]))
       delete m.poster // the still has a fixed place; a stored path would break when the library folder moves
       patch = { measure: m }
@@ -117,16 +141,20 @@ export function createReferenceLibrary(d: ReferenceDeps) {
     await change((all) => all.map((x) => (x.id === entry.id ? { ...x, ...patch } : x)))
   }
 
+  /** Refuses what is not a video with a picture, or is too long to be a reel. `name`: what the person calls it. */
+  async function checkVideo(path: string, name: string): Promise<void> {
+    const ext = extname(path).slice(1).toLowerCase()
+    if (!(VIDEO_EXTENSIONS as readonly string[]).includes(ext)) throw userError('NOT_VIDEO', `${name} isn't a video. Add an MP4, MOV, M4V, WebM or MKV file.`)
+    const info = await d.runEngine('probe', [path])
+    if (!(Number(info?.duration) > 0) || !(Number(info?.width) > 0)) throw userError('NOT_VIDEO', `${name} isn't a video Reel Studio can read.`)
+    if (Number(info.duration) > MAX_REFERENCE_SECONDS) throw userError('TOO_LONG', `${name} is longer than 10 minutes. Add a reel, or a short part of the video.`)
+  }
+
   /** A copy of `src` in files/, after checking it is a video short enough to be a reel. */
   async function copyIn(src: string, id: string): Promise<string> {
-    const ext = extname(src).slice(1).toLowerCase()
-    if (!(VIDEO_EXTENSIONS as readonly string[]).includes(ext)) throw userError('NOT_VIDEO', `${basename(src)} isn't a video. Add an MP4, MOV, M4V, WebM or MKV file.`)
-    const info = await d.runEngine('probe', [src])
-    if (!(Number(info?.duration) > 0)) throw userError('NOT_VIDEO', `${basename(src)} isn't a video Reel Studio can read.`)
-    if (Number(info.duration) > MAX_REFERENCE_SECONDS) throw userError('TOO_LONG', `${basename(src)} is longer than 10 minutes. Add a reel, or a short part of the video.`)
-    await fs.mkdir(join(dir(), 'files'), { recursive: true })
-    const name = `${id}.${ext}`
-    await fs.copyFile(src, join(dir(), 'files', name))
+    await checkVideo(src, basename(src))
+    const name = `${id}.${extname(src).slice(1).toLowerCase()}`
+    await fs.copyFile(src, join(await folder('files'), name), fsConstants.COPYFILE_EXCL)
     return `files/${name}`
   }
 
@@ -190,11 +218,17 @@ export function createReferenceLibrary(d: ReferenceDeps) {
       let entry: ReferenceEntry
       if (policy.kind === 'ask-file') entry = { ...base, needsFile: policy.why }
       else {
-        const files = join(dir(), 'files')
-        await fs.mkdir(files, { recursive: true })
+        const files = await folder('files')
         const r = await d.runEngine('download-media', ['--url', policy.url, '--kind', 'video', '--dest', files, '--name', id])
         const saved = typeof r?.path === 'string' ? resolve(r.path) : ''
         if (!saved || !inside(saved, files) || !basename(saved).startsWith(`${id}.`)) throw userError('DOWNLOAD_FAILED', 'The download did not finish. Try again, or save the video and add the file.')
+        // a downloaded file passes the same checks as a picked one, and goes when it fails them
+        try {
+          await checkVideo(saved, policy.title)
+        } catch (e) {
+          await fs.rm(saved, { force: true })
+          throw e
+        }
         entry = { ...base, file: `files/${basename(saved)}`, original: basename(new URL(policy.url).pathname) }
       }
       await change((all) => [entry, ...all])
@@ -226,9 +260,10 @@ export function createReferenceLibrary(d: ReferenceDeps) {
       })
       if (!gone) return
       failed.delete(id)
+      if (current?.id === id) await current.done
       const copy = abs(gone)
-      if (copy && inside(copy, join(dir(), 'files'))) await fs.rm(copy, { force: true })
-      await fs.rm(poster(id), { force: true })
+      if (copy) await fs.rm(join(await folder('files'), basename(copy)), { force: true })
+      await fs.rm(join(await folder('.posters'), `${id}.jpg`), { force: true })
     },
 
     async get(id: string): Promise<{ entry: ReferenceEntry; file: string | null } | null> {

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -107,7 +107,7 @@ describe('the reference library', () => {
   // fails if an added reel is not copied in, measured and written with the readout the editor's tool reads
   it('copies a video in, measures it, and stores the readout beside it', async () => {
     const { root, lib, src, changed } = setup(async (cmd, args) => {
-      if (cmd === 'probe') return { duration: 30 }
+      if (cmd === 'probe') return { duration: 30, width: 1080 }
       if (cmd === 'measure-reel') {
         const still = args[args.indexOf('--poster') + 1]
         mkdirSync(dirname(still), { recursive: true })
@@ -136,7 +136,7 @@ describe('the reference library', () => {
   it('keeps the engine’s words when a reel cannot be measured', async () => {
     let tries = 0
     const { lib, src, changed } = setup(async (cmd) => {
-      if (cmd === 'probe') return { duration: 12 }
+      if (cmd === 'probe') return { duration: 12, width: 1080 }
       tries++
       throw { code: 'NOT_VIDEO', userMessage: 'That file isn’t a video Reel Studio can read.' }
     })
@@ -153,7 +153,7 @@ describe('the reference library', () => {
     const commands: string[] = []
     const { lib, src } = setup(async (cmd) => {
       commands.push(cmd)
-      return cmd === 'probe' ? { duration: 20 } : measure({ shot: 3 })
+      return cmd === 'probe' ? { duration: 20, width: 1080 } : measure({ shot: 3 })
     })
     const link = await lib.addLink('https://www.tiktok.com/@maker/video/1')
     expect(link).toMatchObject({ link: { platform: 'TikTok' }, needsFile: expect.stringContaining('Save video') })
@@ -169,13 +169,42 @@ describe('the reference library', () => {
 
   // fails if removing a reference deletes the person's own file, or leaves the app's copy behind
   it('removes the app’s copy and never the original', async () => {
-    const { root, lib, src } = setup(async (cmd) => (cmd === 'probe' ? { duration: 20 } : measure({ shot: 3 })))
+    const { root, lib, src } = setup(async (cmd) => (cmd === 'probe' ? { duration: 20, width: 1080 } : measure({ shot: 3 })))
     writeFileSync(join(src, 'mine.mp4'), 'x')
     await lib.addFiles([join(src, 'mine.mp4')])
     const [r] = (await lib.list()).references
     await lib.remove(r.id)
     expect(existsSync(join(root, 'References', r.file!))).toBe(false)
     expect(existsSync(join(src, 'mine.mp4'))).toBe(true)
+    expect((await lib.list()).references).toEqual([])
+  })
+
+  // fails if a References/files that links elsewhere lets the app copy into, or delete from, outside the library
+  it('refuses a files folder that is a link to somewhere else', async () => {
+    const { root, lib, src } = setup(async (cmd) => (cmd === 'probe' ? { duration: 20, width: 1080 } : measure({ shot: 3 })))
+    const outside = mkdtempSync(join(tmpdir(), 'rs-outside-'))
+    mkdirSync(join(root, 'References'), { recursive: true })
+    symlinkSync(outside, join(root, 'References', 'files'), 'junction')
+    writeFileSync(join(src, 'mine.mp4'), 'x')
+    const r = await lib.addFiles([join(src, 'mine.mp4')])
+    expect(r.added).toBe(0)
+    expect(r.skipped[0].reason).toMatch(/points somewhere else/)
+    expect(readdirSync(outside)).toEqual([])
+  })
+
+  // fails if a downloaded link skips the checks a picked file gets, or keeps a file it refused
+  it('checks a downloaded video like a picked one, and deletes it when it is too long', async () => {
+    const { root, lib } = setup(async (cmd, args) => {
+      if (cmd === 'download-media') {
+        const out = join(args[args.indexOf('--dest') + 1], `${args[args.indexOf('--name') + 1]}.mp4`)
+        writeFileSync(out, 'x')
+        return { path: out }
+      }
+      if (cmd === 'probe') return { duration: 1800, width: 1080 }
+      throw new Error(cmd)
+    })
+    await expect(lib.addLink('https://media.example.org/talk.mp4')).rejects.toMatchObject({ code: 'TOO_LONG' })
+    expect(readdirSync(join(root, 'References', 'files'))).toEqual([])
     expect((await lib.list()).references).toEqual([])
   })
 
