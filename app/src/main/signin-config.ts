@@ -6,6 +6,7 @@
 // This file never imports electron: index.ts wires it, tests drive it with a fake fetch.
 import type { InstagramSettings } from '../shared/instagram'
 import type { TikTokSettings } from '../shared/tiktok'
+import type { FacebookSettings } from './facebook'
 import type { PlatformAvailability, SigninPlatformId } from '../shared/social'
 
 export interface SigninPlatforms {
@@ -100,6 +101,11 @@ export class SigninDirectory {
 export function instagramFrom(d: Directory, baseUrl: string): InstagramSettings {
   const ig = d.reached ? d.platforms.instagram : undefined
   return { instagramEnabled: !!ig, instagramAppId: ig?.clientId ?? null, instagramBrokerUrl: ig ? baseUrl : null, instagramUploadOrigins: ig?.mediaOrigins ?? [] }
+}
+
+export function facebookFrom(d: Directory, baseUrl: string): FacebookSettings {
+  const fb = d.reached ? d.platforms.facebook : undefined
+  return { appId: fb?.clientId ?? null, brokerUrl: fb ? baseUrl : null }
 }
 
 export function tiktokFrom(d: Directory, baseUrl: string): TikTokSettings {

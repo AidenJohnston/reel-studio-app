@@ -1,4 +1,4 @@
-// "Post to Instagram" and "Post to TikTok" from Share: connect once, check what goes up, then wait for the platform.
+// "Post to Instagram", "Post to TikTok" and "Post to Facebook" from Share: connect once, check what goes up, then wait for the platform.
 // Laid out like the YouTube sheet (PostSheet.tsx) and sharing its styles. The work runs in main (main/instagram.ts,
 // main/tiktok.ts): Instagram checks the video for a few minutes before it posts, so the sheet stays until it answers.
 //
@@ -6,17 +6,25 @@
 // who can see it with nothing picked until the person picks, comments, duets and stitches off until turned on, the
 // brand disclosure, and the consent line above Post.
 import { useEffect, useState, type ReactNode } from 'react'
+import type { FacebookPost } from '../../../shared/facebook'
 import type { InstagramPost } from '../../../shared/instagram'
 import { BRANDED_TERMS_URL, MUSIC_TERMS_URL, PLATFORM_NAMES, SOCIAL_COPY, TIKTOK_PRIVACY_LABELS, availabilityLine, type SocialStatus } from '../../../shared/social'
 import type { TikTokCreator, TikTokPrivacy, TikTokPublishResult } from '../../../shared/tiktok'
 import { errorCode, reel, userMessage } from '../api'
 import { Icon } from './icons'
-import { accountName } from './SocialSettings'
+import { accountName, PagePicker } from './SocialSettings'
 import { Spinner } from './ui'
 import './PostSheet.css'
 
-type Id = 'instagram' | 'tiktok'
-type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult } | { failed: string }
+type Id = 'instagram' | 'tiktok' | 'facebook'
+type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult | FacebookPost } | { failed: string }
+
+const HEADINGS: Record<Id, [string, string]> = {
+  instagram: [SOCIAL_COPY.igHeading, SOCIAL_COPY.igDoneHeading],
+  tiktok: [SOCIAL_COPY.ttHeading, SOCIAL_COPY.ttDoneHeading],
+  facebook: [SOCIAL_COPY.fbHeading, SOCIAL_COPY.fbDoneHeading]
+}
+const WAIT: Record<Id, string> = { instagram: SOCIAL_COPY.igWait, tiktok: SOCIAL_COPY.ttWait, facebook: SOCIAL_COPY.fbWait }
 
 const PRIVACY_ORDER: TikTokPrivacy[] = ['PUBLIC_TO_EVERYONE', 'FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY']
 
@@ -109,6 +117,8 @@ export function SocialPostSheet({
           ...(trial ? { trial: { graduation: 'MANUAL' as const } } : {})
         })
         setPhase({ done })
+      } else if (platform === 'facebook') {
+        setPhase({ done: await reel.facebook.publish({ slug, version, description: caption }) })
       } else {
         const direct = creator !== 'inbox' && creator !== null
         const done = await reel.tiktok.publish({
@@ -127,7 +137,7 @@ export function SocialPostSheet({
 
   const head = (
     <div className="row" style={{ justifyContent: 'space-between' }}>
-      <h2>{typeof phase === 'object' && 'done' in phase ? (platform === 'instagram' ? SOCIAL_COPY.igDoneHeading : SOCIAL_COPY.ttDoneHeading) : platform === 'instagram' ? SOCIAL_COPY.igHeading : SOCIAL_COPY.ttHeading}</h2>
+      <h2>{HEADINGS[platform][typeof phase === 'object' && 'done' in phase ? 1 : 0]}</h2>
       {!sending && !(typeof phase === 'object' && 'done' in phase) && (
         <button className="btn ghost small" onClick={onBack} data-testid="social-back">
           <Icon name="back" size={16} /> Back
@@ -182,7 +192,7 @@ export function SocialPostSheet({
         <p className="row" data-testid="social-sending">
           <Spinner /> <span>{SOCIAL_COPY.sending(name)}</span>
         </p>
-        <p className="muted-sm">{platform === 'instagram' ? SOCIAL_COPY.igWait : SOCIAL_COPY.ttWait}</p>
+        <p className="muted-sm">{WAIT[platform]}</p>
       </>
     )
   } else if (typeof phase === 'object' && 'failed' in phase) {
@@ -204,7 +214,9 @@ export function SocialPostSheet({
     const r = phase.done
     body = (
       <>
-        <p data-testid="social-done">{'message' in r ? r.message : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}</p>
+        <p data-testid="social-done">
+          {'message' in r ? r.message : platform === 'facebook' ? SOCIAL_COPY.fbDone(account ?? 'your Page') : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}
+        </p>
         <div className="row">
           <button className="btn primary" onClick={onClose} data-autofocus data-testid="social-done-close">
             Done
@@ -246,6 +258,9 @@ export function SocialPostSheet({
           Posting to <strong>{platform === 'instagram' ? `@${account}` : direct ? tt.displayName : account}</strong>
         </p>
         {a.review !== 'approved' && a.review !== 'own' && <p className="muted-sm" style={{ margin: 0 }}>{availabilityLine(platform, a)}</p>}
+        {platform === 'facebook' && status.facebook.session.connected && status.facebook.session.pages.length > 1 && (
+          <PagePicker session={status.facebook.session} onPicked={() => void reload()} onError={setNote} />
+        )}
 
         <div className="stack" style={{ gap: 6 }}>
           <label className="field-label" htmlFor="social-caption">

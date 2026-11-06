@@ -3,6 +3,7 @@
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { SocialStatus } from './social'
+import type { FacebookApi } from './facebook'
 import type { InsightsOptions, InsightsSummary } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
@@ -773,7 +774,8 @@ export interface ExportResult {
 export interface PlatformExportResult {
   folder: string
   /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
-  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `version`: the version each file was made from (Try 2 can be another version). */
+  files: { platform: Platform; try?: 1 | 2; version: number; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */
@@ -849,6 +851,7 @@ export interface ReelApi {
   instagram: InstagramApi
   /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
   social: { status(fresh?: boolean): Promise<SocialStatus> }
+  facebook: FacebookApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>

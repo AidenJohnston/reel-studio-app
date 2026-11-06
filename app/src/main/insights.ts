@@ -6,13 +6,13 @@ import type {
 } from '../shared/insights'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook']
 const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'shares', 'saves', 'comments']
 const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
   shares: 'Shares', saves: 'Saves', comments: 'Comments'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok' }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
 // Repeated posts and a 20% margin suppress small comparisons; 100 plays limits tiny samples.
@@ -89,9 +89,10 @@ function parsePost(value: unknown, project: string, version: number, key: string
   const file = `${project}/outcomes.json`
   if (!object(value) || value.version !== version || !text(value.postId) || !text(value.accountId)
     || !isoDate(value.publishedAt) || (value.observedAt !== null && !isoDate(value.observedAt))
-    || (value.platform !== 'instagram' && value.platform !== 'tiktok')) return badData(file)
-  const expectedKey = value.platform === 'tiktok' ? `tiktok:${value.postId}` : value.postId
-  if (key !== expectedKey || (value.platform === 'instagram' ? value.apiVersion !== 'v26.0' : value.apiVersion !== 'v2')) return badData(file)
+    || (value.platform !== 'instagram' && value.platform !== 'tiktok' && value.platform !== 'facebook')) return badData(file)
+  // Facebook reels (main/facebook.ts) are kept as facebook:<id>, like TikTok's, so ids from two platforms never collide
+  const expectedKey = value.platform === 'instagram' ? value.postId : `${value.platform}:${value.postId}`
+  if (key !== expectedKey || (value.platform === 'tiktok' ? value.apiVersion !== 'v2' : value.apiVersion !== 'v26.0')) return badData(file)
   if (value.observedAt !== null && Date.parse(value.observedAt) < Date.parse(value.publishedAt)) return badData(file)
   const metrics = emptyValues()
   if (value.metrics !== null) {

@@ -19,6 +19,9 @@ export type InstagramSession =
  */
 export interface InstagramTrial {
   graduation: 'MANUAL' | 'SS_PERFORMANCE'
+  /** Posted as Try 1 or Try 2 of Share › Other platforms; both carry the same `group`, so results can compare them. */
+  try?: 1 | 2
+  group?: string
 }
 
 export interface InstagramPublishInput {
@@ -27,6 +30,11 @@ export interface InstagramPublishInput {
   caption: string
   cover: { kind: 'frame'; offsetMs: number } | { kind: 'image' }
   trial?: InstagramTrial
+  /**
+   * Instead of the version's own export: a Try 1 or Try 2 file Share › Other platforms saved in Library › Finished
+   * videos (its video and JPEG cover). Needs trial.try. `cover` is then always that file's cover.
+   */
+  file?: { video: string; cover: string }
 }
 
 export interface InstagramPost {

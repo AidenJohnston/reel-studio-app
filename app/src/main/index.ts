@@ -99,7 +99,8 @@ import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
-import { instagramFrom, SigninDirectory, signinUrl, tiktokFrom } from './signin-config'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, tiktokFrom } from './signin-config'
+import { FacebookService } from './facebook'
 import { registerSocialIpc } from './social-ipc'
 import { testPlatformFetch } from './test-platforms'
 import { SIGNIN_URL } from '../shared/config'
@@ -828,6 +829,7 @@ function registerIpc(): void {
     settings: async () => (await ownApps()).instagram ?? instagramFrom(await signin.get(), signin.baseUrl),
     settingsDir: settingsDir(),
     projectsDir,
+    exportsDir: () => binDir('exports'),
     secrets: safeStorage,
     fetch: platformFetch,
     openExternal: openSignin,
@@ -846,8 +848,19 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
+  const facebook = new FacebookService({
+    settings: async () => facebookFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('facebook:session', () => facebook.session())
+  handle('facebook:connect', () => facebook.connect())
+  handle('facebook:cancelConnect', () => facebook.cancelConnect())
+  handle('facebook:disconnect', () => facebook.disconnect())
+  handle('facebook:choosePage', (_e, pageId) => facebook.choosePage(pageId))
+  handle('facebook:publish', (_e, input) => facebook.publish(input))
+  app.on('before-quit', () => { facebook.stop() })
   registerSocialIpc({
-    handle, directory: signin, instagram, tiktok,
+    handle, directory: signin, instagram, tiktok, facebook,
     own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
   })
   handle('app:info', () => appInfo())

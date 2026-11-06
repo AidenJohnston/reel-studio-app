@@ -90,17 +90,23 @@ function post(value: unknown): InstagramPost {
   const publishedAt = text(p.publishedAt)
   if (!Number.isFinite(Date.parse(publishedAt))) return localDataError()
   if (p.trial === undefined) return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt }
-  const g = object(p.trial).graduation
+  const t = object(p.trial)
+  const g = t.graduation
   if (g !== 'MANUAL' && g !== 'SS_PERFORMANCE') return localDataError()
-  return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt, trial: { graduation: g } }
+  if ((t.try !== undefined && t.try !== 1 && t.try !== 2) || (t.group !== undefined && typeof t.group !== 'string')) return localDataError()
+  const trial = { graduation: g, ...(t.try ? { try: t.try as 1 | 2 } : {}), ...(typeof t.group === 'string' ? { group: t.group } : {}) }
+  return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt, trial }
 }
 
-export async function receipt(dir: string, version: number): Promise<PublishReceipt | null> {
+/** Where a version's post is kept: `v3`, or `v3-try2` for a Try 2 file posted as a trial reel. */
+export const receiptSlot = (version: number, tryN?: 1 | 2): string => (tryN ? `v${version}-try${tryN}` : `v${version}`)
+
+export async function receipt(dir: string, version: number, tryN?: 1 | 2): Promise<PublishReceipt | null> {
   const saved = await readObject(join(dir, 'instagram-publish.json'))
   if (!saved) return null
   if (saved.schemaVersion !== 1) return localDataError()
   const versions = object(saved.versions)
-  const value = versions[`v${version}`]
+  const value = versions[receiptSlot(version, tryN)]
   if (value === undefined) return null
   const r = object(value)
   const inputHash = text(r.inputHash)
@@ -115,12 +121,12 @@ export async function receipt(dir: string, version: number): Promise<PublishRece
   return localDataError()
 }
 
-export async function saveReceipt(dir: string, version: number, value: PublishReceipt): Promise<void> {
+export async function saveReceipt(dir: string, version: number, value: PublishReceipt, tryN?: 1 | 2): Promise<void> {
   const file = join(dir, 'instagram-publish.json')
   const saved = await readObject(file)
   if (saved && saved.schemaVersion !== 1) return localDataError()
   const versions = saved ? object(saved.versions) : {}
-  await atomicSocialFile(file, JSON.stringify({ schemaVersion: 1, versions: { ...versions, [`v${version}`]: value } }, null, 2) + '\n')
+  await atomicSocialFile(file, JSON.stringify({ schemaVersion: 1, versions: { ...versions, [receiptSlot(version, tryN)]: value } }, null, 2) + '\n')
 }
 
 export async function saveOutcome(dir: string, value: InstagramOutcome): Promise<void> {

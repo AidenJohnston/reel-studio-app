@@ -28,6 +28,8 @@ interface Options {
   settings: () => Promise<InstagramSettings>
   settingsDir: string
   projectsDir: () => string
+  /** Library › Finished videos: where Share › Other platforms saves Try 1 and Try 2 (InstagramPublishInput.file). */
+  exportsDir?: () => string
   secrets: InstagramSecretStore
   fetch: InstagramFetch
   openExternal: (url: string) => Promise<void>
@@ -63,9 +65,18 @@ function publishInput(value: unknown): InstagramPublishInput {
   if (p.trial !== undefined) {
     const t = object(p.trial)
     if (t.graduation !== 'MANUAL' && t.graduation !== 'SS_PERFORMANCE') throw new InstagramError('IG_INPUT', 'Choose how the trial reel is shared to your followers.')
-    trial = { graduation: t.graduation }
+    if ((t.try !== undefined && t.try !== 1 && t.try !== 2) || (t.group !== undefined && (typeof t.group !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(t.group))))
+      throw new InstagramError('IG_INPUT', 'Choose Try 1 or Try 2.')
+    trial = { graduation: t.graduation, ...(t.try ? { try: t.try as 1 | 2 } : {}), ...(t.group ? { group: t.group as string } : {}) }
   }
-  const base = { slug: p.slug, version: p.version, caption: p.caption, ...(trial ? { trial } : {}) }
+  let file: InstagramPublishInput['file']
+  if (p.file !== undefined) {
+    const f = object(p.file)
+    if (!trial?.try || typeof f.video !== 'string' || typeof f.cover !== 'string' || !/\.mp4$/i.test(f.video) || !/\.jpe?g$/i.test(f.cover))
+      throw new InstagramError('IG_INPUT', 'Choose a Try 1 or Try 2 video and its cover from Finished videos.')
+    file = { video: f.video, cover: f.cover }
+  }
+  const base = { slug: p.slug, version: p.version, caption: p.caption, ...(trial ? { trial } : {}), ...(file ? { file } : {}) }
   const c = object(p.cover)
   if (c.kind === 'image') return { ...base, cover: { kind: 'image' } }
   if (c.kind === 'frame' && typeof c.offsetMs === 'number' && Number.isSafeInteger(c.offsetMs) && c.offsetMs >= 0)
@@ -281,12 +292,19 @@ export class InstagramService {
   }
   private async stagedMedia(dir: string, input: InstagramPublishInput, signal: AbortSignal): Promise<{ videoUrl: string; coverUrl?: string }> {
     const config = await this.config()
-    const video = await this.openFile(dir, join(dir, 'versions', `v${input.version}`, 'export.mp4'), 300_000_000)
+    // a Try file comes only from Finished videos, and its cover is already the JPEG Instagram wants
+    const exportsRoot = input.file ? await fs.realpath(this.o.exportsDir?.() ?? invalidResponse()) : null
+    const video = input.file && exportsRoot
+      ? await this.openFile(exportsRoot, input.file.video, 300_000_000)
+      : await this.openFile(dir, join(dir, 'versions', `v${input.version}`, 'export.mp4'), 300_000_000)
     try {
-      if (await fs.stat(join(dir, 'versions', `v${input.version}`, '.rendering')).then(() => true, () => false))
+      if (!input.file && await fs.stat(join(dir, 'versions', `v${input.version}`, '.rendering')).then(() => true, () => false))
         throw new InstagramError('IG_RENDERING', 'Wait for this version to finish exporting before publishing.')
       let cover: Buffer | undefined
-      if (input.cover.kind === 'image') {
+      if (input.file && exportsRoot) {
+        const source = await this.openFile(exportsRoot, input.file.cover, 8_000_000)
+        try { cover = await source.handle.readFile() } finally { await source.handle.close() }
+      } else if (input.cover.kind === 'image') {
         const source = await this.openFile(dir, join(dir, 'versions', `v${input.version}`, 'cover.png'), 32_000_000)
         try { cover = this.o.coverJpeg(await source.handle.readFile()) } finally { await source.handle.close() }
         if (!cover.length || cover.length > 8_000_000) throw new InstagramError('IG_COVER', 'The JPEG cover must be smaller than 8 MB.')
@@ -331,8 +349,11 @@ export class InstagramService {
       const account = this.parseProfile(object(await this.graph('me?fields=user_id,username,account_type', { method: 'GET' }, signal)))
       if (account.accountId !== c.accountId) throw new InstagramError('IG_ACCOUNT', 'Instagram returned another account. Connect again in Settings.')
       // a trial is part of what was asked: posting the same version again as a normal reel is a different post
-      const inputHash = createHash('sha256').update(JSON.stringify(input.trial ? { caption: input.caption, cover: input.cover, trial: input.trial } : { caption: input.caption, cover: input.cover })).digest('hex')
-      let saved = await receipt(dir, input.version)
+      const asked = { caption: input.caption, cover: input.cover, ...(input.trial ? { trial: input.trial } : {}), ...(input.file ? { file: input.file } : {}) }
+      const inputHash = createHash('sha256').update(JSON.stringify(input.trial || input.file ? asked : { caption: input.caption, cover: input.cover })).digest('hex')
+      // Try 1 and Try 2 of one version are two posts, each kept apart from the version's own (receiptSlot)
+      const slot = input.file ? input.trial?.try : undefined
+      let saved = await receipt(dir, input.version, slot)
       if (saved && saved.accountId !== c.accountId) throw new InstagramError('IG_ACCOUNT', 'This version already has a publish attempt for another Instagram account.')
       if (saved?.state === 'published') {
         await this.ensureOutcome(dir, saved.post)
@@ -348,7 +369,7 @@ export class InstagramService {
         if (input.trial) fields.set('trial_params', JSON.stringify({ graduation_strategy: input.trial.graduation }))
         const data = object(await this.graph(`${c.accountId}/media`, { method: 'POST', body: fields }, signal))
         saved = { state: 'processing', accountId: c.accountId, containerId: id(data.id), inputHash }
-        await saveReceipt(dir, input.version, saved)
+        await saveReceipt(dir, input.version, saved, slot)
       }
       let finished = false
       // Meta recommends once per minute, for at most five minutes. No busy polling.
@@ -362,7 +383,7 @@ export class InstagramService {
       }
       if (!finished) throw new InstagramError('IG_PROCESSING', 'Instagram is still processing the video. Try this version again later to resume checking it.')
       signal.throwIfAborted()
-      await saveReceipt(dir, input.version, { ...saved, state: 'publishing' })
+      await saveReceipt(dir, input.version, { ...saved, state: 'publishing' }, slot)
       let postId: string
       let dispatched = false
       try {
@@ -370,14 +391,14 @@ export class InstagramService {
       } catch (e) {
         // A definite rejection did not publish. A lost response may have, so keep the publishing receipt.
         if (!dispatched || (e instanceof InstagramError && ['IG_RATE_LIMIT', 'IG_TOKEN', 'IG_PERMISSION', 'IG_INPUT'].includes(e.code))) {
-          await saveReceipt(dir, input.version, { ...saved, state: 'processing' })
+          await saveReceipt(dir, input.version, { ...saved, state: 'processing' }, slot)
           throw e
         }
         throw new InstagramError('IG_PUBLISH_UNKNOWN', 'Instagram did not confirm whether this reel was published. Check Instagram before retrying. This version is blocked to prevent a duplicate post.')
       }
       const post: InstagramPost = { version: input.version, accountId: c.accountId, postId, publishedAt: new Date(this.now()).toISOString(), ...(input.trial ? { trial: input.trial } : {}) }
       try {
-        await saveReceipt(dir, input.version, { ...saved, state: 'published', post })
+        await saveReceipt(dir, input.version, { ...saved, state: 'published', post }, slot)
         await this.ensureOutcome(dir, post)
       } catch {
         throw new InstagramError('IG_PUBLISHED_UNSAVED', `Instagram published post ${postId}, but its local record could not be saved. Do not publish it again. Restore disk access and keep this post ID.`)
@@ -397,7 +418,9 @@ export class InstagramService {
       id(postId)
       const dir = await this.project(slug, version)
       const c = await this.credentials()
-      const saved = await receipt(dir, version)
+      // the version's own post, or its Try 1 or Try 2 posted as a trial reel
+      const slots = [await receipt(dir, version), await receipt(dir, version, 1), await receipt(dir, version, 2)]
+      const saved = slots.find((r) => r?.state === 'published' && r.post.postId === postId) ?? null
       if (saved?.state !== 'published' || saved.accountId !== c.accountId || saved.post.postId !== postId)
         throw new InstagramError('IG_POST', 'This post is not linked to that project version and Instagram account.')
       const query = new URLSearchParams({ metric: Object.values(METRICS).join(','), period: 'lifetime' })

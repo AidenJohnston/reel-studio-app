@@ -13,6 +13,8 @@ import { errorCode, reel, userMessage } from '../api'
 import { Icon } from './icons'
 import { FOLDER_APP } from './ui'
 import { Strip, type Work } from './ShareStrip'
+import { useSocialStatus } from './social'
+import { SOCIAL_COPY } from '../../../shared/social'
 
 const andList = (names: string[]): string => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0])
 // Try 2 never changes the version, so the frame rate only matters for a cover change, which is never the same frame.
@@ -302,12 +304,12 @@ export function SharePlatforms({ slug, version, caption, open, disabled, onWork,
           </button>
         )
       )}
-      {state.kind === 'saved' && <Saved result={state.result} />}
+      {state.kind === 'saved' && <Saved slug={slug} result={state.result} />}
     </div>
   )
 }
 
-function Saved({ result }: { result: PlatformExportResult }) {
+function Saved({ slug, result }: { slug: string; result: PlatformExportResult }) {
   const platforms = [...new Set(result.files.map((f) => f.platform))]
   const two = result.files.some((f) => f.try)
   const firstOnly = platforms.filter((p) => !platformRule(p).tryTwo).map((p) => platformRule(p).label)
@@ -326,6 +328,7 @@ function Saved({ result }: { result: PlatformExportResult }) {
               </span>
             </p>
             {two && test && own.length === 2 && <p className="muted-sm sp-steps">{test.steps}{own[0].video === own[1].video && test.tests === 'video' ? ' Both use the same video.' : ''}</p>}
+            {p === 'instagram' && own.length === 2 && <TrialPair slug={slug} files={own} />}
           </div>
         )
       })}
@@ -334,6 +337,45 @@ function Saved({ result }: { result: PlatformExportResult }) {
           {andList(firstOnly)} {firstOnly.length === 1 ? "gets Try 1 only. It can't" : "get Try 1 only. They can't"} test two versions of a post, and posting both would show your followers the same reel twice.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Try 1 and Try 2 for Instagram, posted from here as two trial reels (main/instagram.ts InstagramPublishInput.file):
+ * one after the other, each kept as its own post with the same group, so results can say which did better. Shown
+ * only while Instagram is connected; otherwise the steps above say how to post them in Instagram.
+ */
+function TrialPair({ slug, files }: { slug: string; files: PlatformExportResult['files'] }) {
+  const [social] = useSocialStatus()
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'posting'; n: 1 | 2 } | { kind: 'done' } | { kind: 'failed'; message: string; n: 1 | 2 }>({ kind: 'idle' })
+  const [group] = useState(() => `try-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
+  const ig = social?.instagram
+  if (!ig?.availability.open || !ig.session.connected) return null
+  const who = ig.session.username
+  const post = async (from: 1 | 2) => {
+    for (const f of files) {
+      const n = (f.try ?? 1) as 1 | 2
+      if (n < from) continue
+      setState({ kind: 'posting', n })
+      try {
+        await reel.instagram.publish({ slug, version: f.version, caption: f.caption, cover: { kind: 'image' }, trial: { graduation: 'MANUAL', try: n, group }, file: { video: f.video, cover: f.cover } })
+      } catch (e) {
+        setState({ kind: 'failed', message: userMessage(e), n })
+        return
+      }
+    }
+    setState({ kind: 'done' })
+  }
+  if (state.kind === 'done') return <p className="sp-done" data-testid="trial-pair-done"><Icon name="check" size={14} /><span>{SOCIAL_COPY.pairDone}</span></p>
+  if (state.kind === 'posting') return <p className="muted-sm" data-testid="trial-pair-posting">{SOCIAL_COPY.pairSending(state.n)} {SOCIAL_COPY.igWait}</p>
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {state.kind === 'failed' && <p className="post-error" role="alert" data-testid="trial-pair-error">{state.message}</p>}
+      <p className="muted-sm sp-steps">{SOCIAL_COPY.pairHelp(who)}</p>
+      <button type="button" className="btn small" onClick={() => void post(state.kind === 'failed' ? state.n : 1)} data-testid="trial-pair-post">
+        <Icon name="instagram" size={14} /> {state.kind === 'failed' ? `Try again from Try ${state.n}` : SOCIAL_COPY.pairPost}
+      </button>
     </div>
   )
 }

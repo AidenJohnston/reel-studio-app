@@ -3,6 +3,7 @@
 // own errors are worded in main/instagram-http.ts and main/tiktok-http.ts.
 import type { InstagramSession } from './instagram'
 import type { TikTokSession } from './tiktok'
+import type { FacebookSession } from './facebook'
 
 export type SigninPlatformId = 'instagram' | 'facebook' | 'tiktok'
 
@@ -19,6 +20,7 @@ export type PlatformAvailability =
 export interface SocialStatus {
   instagram: { availability: PlatformAvailability; session: InstagramSession }
   tiktok: { availability: PlatformAvailability; session: TikTokSession }
+  facebook: { availability: PlatformAvailability; session: FacebookSession }
 }
 
 export const PLATFORM_NAMES: Record<SigninPlatformId, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok' }
@@ -41,6 +43,7 @@ export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability):
 
 /** The connected account's line in Settings › Posting. */
 export function connectedLine(id: SigninPlatformId, name: string): string {
+  if (id === 'facebook') return `Posting to ${name}.`
   return `Connected as ${id === 'instagram' ? `@${name}` : name}.`
 }
 
@@ -51,6 +54,11 @@ export const SOCIAL_COPY = {
     name === 'TikTok'
       ? `Reel Studio forgets ${account} on this computer and asks TikTok to end its access. Posts already made stay on TikTok.`
       : `Reel Studio forgets ${account} on this computer. Posts already made stay on ${name}. To remove Reel Studio’s access completely, remove it in ${name}’s settings too.`,
+  fbHeading: 'Post to Facebook',
+  fbDoneHeading: 'Posted to Facebook',
+  fbPage: 'Page',
+  fbDone: (page: string) => `Your reel is on ${page}. Facebook may take a few minutes to show it.`,
+  fbWait: 'Keep Reel Studio open until Facebook answers.',
   igHeading: 'Post to Instagram',
   igDoneHeading: 'Posted to Instagram',
   ttHeading: 'Post to TikTok',
@@ -62,6 +70,10 @@ export const SOCIAL_COPY = {
   igTrial: 'Post as a trial reel',
   igTrialHelp: 'Instagram shows a trial reel to people who don’t follow you first. Share it to your followers from Instagram once you see how it does.',
   igDone: 'Your reel is on Instagram.',
+  pairPost: 'Post both to Instagram as trial reels',
+  pairHelp: (who: string) => `Posts Try 1 and Try 2 to @${who} as trial reels, shown first to people who don’t follow you. Compare their views in Insights after a day, then share the better one with your followers from Instagram.`,
+  pairSending: (n: 1 | 2) => `Posting Try ${n} to Instagram…`,
+  pairDone: 'Both are on Instagram as trial reels.',
   igDoneTrial: 'Your trial reel is on Instagram. It goes to people who don’t follow you first.',
   ttPrivacy: 'Who can see it',
   ttPrivacyPick: 'Choose who can see it.',

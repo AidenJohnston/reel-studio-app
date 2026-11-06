@@ -89,7 +89,7 @@ export function Outs({
   const [postSheet, setPostSheet] = useState<{ video: string; version: number; durationSec: number | null } | null>(null)
   // Post to Instagram and Post to TikTok (SocialPostSheet): rows only while the sign-in service can connect them
   const [social, reloadSocial] = useSocialStatus()
-  const [socialSheet, setSocialSheet] = useState<{ platform: 'instagram' | 'tiktok'; version: number; hasCover: boolean; durationSec: number | null } | null>(null)
+  const [socialSheet, setSocialSheet] = useState<{ platform: 'instagram' | 'tiktok' | 'facebook'; version: number; hasCover: boolean; durationSec: number | null } | null>(null)
   // a post is being sent: Stop is the way out, not Esc or a click outside. A ref read when Esc comes, set in the
   // sheet's layout effect: state passed up through a passive effect let an Esc pressed just as Sending showed close it
   const postBusy = useRef(false)
@@ -270,7 +270,7 @@ export function Outs({
   }
 
   /** Opens a platform's post sheet for the exported version; Share steps aside for it, and Back returns to it. */
-  const openSocial = (platform: 'instagram' | 'tiktok') =>
+  const openSocial = (platform: 'instagram' | 'tiktok' | 'facebook') =>
     void run(platform, async (files) => {
       const n = files.version
       const timeline = await reel.projects.timeline(slug, n).catch(() => null)
@@ -278,12 +278,12 @@ export function Outs({
       setSocialSheet({ platform, version: n, hasCover: !!files.cover, durationSec: timeline?.duration ?? null })
       return null
     })
-  const socialRow = (platform: 'instagram' | 'tiktok') => {
+  const socialRow = (platform: 'instagram' | 'tiktok' | 'facebook') => {
     const who = social && accountName(social, platform)
     return {
       id: platform,
-      icon: platform === 'instagram' ? <Icon name="instagram" size={16} /> : <BrandMark name="tiktok" size={16} />,
-      label: platform === 'instagram' ? 'Post to Instagram' : 'Post to TikTok',
+      icon: platform === 'instagram' ? <Icon name="instagram" size={16} /> : <BrandMark name={platform} size={16} />,
+      label: platform === 'instagram' ? 'Post to Instagram' : platform === 'tiktok' ? 'Post to TikTok' : 'Post to Facebook',
       hint: who ? `To ${platform === 'instagram' ? `@${who}` : who}` : 'Connect your account once',
       testid: `share-post-${platform}`,
       go: () => openSocial(platform)
@@ -325,6 +325,7 @@ export function Outs({
         }]
       : []),
     ...(social?.tiktok.availability.open ? [socialRow('tiktok')] : []),
+    ...(social?.facebook.availability.open ? [socialRow('facebook')] : []),
     {
       id: 'phone',
       icon: <Icon name="phone" size={16} />,

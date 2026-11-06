@@ -41,6 +41,14 @@ const api: ReelApi = {
     insights: (slug, version, postId) => call('instagram:insights', slug, version, postId)
   },
   social: { status: (fresh) => call('social:status', fresh === true) },
+  facebook: {
+    session: () => call('facebook:session'),
+    connect: () => call('facebook:connect'),
+    cancelConnect: () => call('facebook:cancelConnect'),
+    disconnect: () => call('facebook:disconnect'),
+    choosePage: (pageId) => call('facebook:choosePage', pageId),
+    publish: (input) => call('facebook:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),

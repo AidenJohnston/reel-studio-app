@@ -21,6 +21,8 @@ interface Seen {
   published: number
   tiktokInit: Record<string, unknown> | null
   tiktokBytes: number
+  facebookBytes: number
+  facebookFinish: URLSearchParams | null
 }
 
 /** Instagram, TikTok and the storage, as they answer the app and the sign-in service. */
@@ -50,6 +52,24 @@ function platforms(seen: Seen) {
       seen.published++
       return json({ id: '789' })
     }
+    // Facebook: the sign-in service's exchange, then the app's Graph calls
+    const fb = 'graph.facebook.com/v26.0'
+    if (at === `${fb}/oauth/access_token`) return json({ access_token: u.searchParams.get('code') ? 'fb-short' : 'fb-long', token_type: 'bearer', expires_in: 5_000_000 })
+    if (at === `${fb}/me/permissions`)
+      return init.method === 'DELETE' ? json({ success: true }) : json({ data: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'].map((permission) => ({ permission, status: 'granted' })) })
+    if (at === `${fb}/me`) return json({ name: 'E2E Person' })
+    if (at === `${fb}/me/accounts`) return json({ data: [{ id: '77', name: 'E2E Page', access_token: 'page-token', tasks: ['CREATE_CONTENT'] }, { id: '78', name: 'Second Page', access_token: 'page-token-2', tasks: ['CREATE_CONTENT'] }] })
+    if (at === `${fb}/78/video_reels`) {
+      const f = new URLSearchParams(String(init.body))
+      if (f.get('upload_phase') === 'start') return json({ video_id: '555', upload_url: 'https://rupload.facebook.com/video-upload/555' })
+      seen.facebookFinish = f
+      return json({ success: true })
+    }
+    if (at === `${fb}/555`) return json({ status: { video_status: 'uploading', uploading_phase: { status: 'not_started', bytes_transfered: 0 } } })
+    if (at === 'rupload.facebook.com/video-upload/v26.0/555') {
+      seen.facebookBytes += (await new Response(init.body).arrayBuffer()).byteLength
+      return json({ success: true })
+    }
     // TikTok
     if (at === 'open.tiktokapis.com/v2/oauth/token/')
       return json({ access_token: 'tt-token', refresh_token: 'tt-refresh', token_type: 'Bearer', expires_in: 86400, refresh_expires_in: 31536000, open_id: 'tt-open-id', scope: 'user.info.basic,video.list,video.upload,video.publish' })
@@ -76,11 +96,12 @@ function platforms(seen: Seen) {
 }
 
 async function world(): Promise<{ server: Server; url: string; seen: Seen }> {
-  const seen: Seen = { stored: 0, containers: [], published: 0, tiktokInit: null, tiktokBytes: 0 }
+  const seen: Seen = { stored: 0, containers: [], published: 0, tiktokInit: null, tiktokBytes: 0, facebookBytes: 0, facebookFinish: null }
   let fake!: (url: string, init: RequestInit) => Promise<Response>
   const handler = createSigninHandler(configFromEnv({
     SIGNIN_PUBLIC_URL: SIGNIN, SIGNIN_SECRET: randomBytes(32).toString('base64url'),
     INSTAGRAM_APP_ID: '1111', INSTAGRAM_APP_SECRET: 'ig-secret',
+    FACEBOOK_APP_ID: '2222', FACEBOOK_APP_SECRET: 'fb-secret',
     TIKTOK_CLIENT_KEY: 'tt-key', TIKTOK_CLIENT_SECRET: 'tt-secret', TIKTOK_DIRECT_POST: '1',
     MEDIA_BUCKET_URL: 'https://media.e2e.test/reels', MEDIA_ACCESS_KEY_ID: 'AKID', MEDIA_SECRET_ACCESS_KEY: 'media-secret'
   }, (u, init) => fake(u, init)))
@@ -219,6 +240,47 @@ test('connect TikTok from Share and post with the choices TikTok requires', asyn
     await shot(page, 'social-6-tiktok-done')
     expect(seen.tiktokInit).toMatchObject({ post_info: { privacy_level: 'SELF_ONLY', disable_comment: true, disable_duet: true, disable_stitch: true, brand_content_toggle: false } })
     expect(seen.tiktokBytes).toBe((seen.tiktokInit!.source_info as { video_size: number }).video_size)
+  } finally {
+    await app.close()
+    server.close()
+  }
+})
+
+test('connect Facebook, choose the Page and post a reel to it', async () => {
+  test.setTimeout(15 * 60_000)
+  const media = makeMedia()
+  const { server, url, seen } = await world()
+  const { app, page } = await launch({ REELSTUDIO_SIGNIN_URL: SIGNIN, REELSTUDIO_TEST_PLATFORMS: url })
+  try {
+    await passFirstRun(page)
+    await openSettings(page)
+    const row = page.locator('[data-setting="facebook"]')
+    await row.getByTestId('facebook-connect').click()
+    const link = await opened(app)
+    expect(link.origin + link.pathname).toBe('https://www.facebook.com/v26.0/dialog/oauth')
+    const back = await fetch(`${url}/signin.e2e.test/v1/facebook/callback?${new URLSearchParams({ code: 'fb-code', state: link.searchParams.get('state')! })}`, { redirect: 'manual' })
+    expect((await fetch(back.headers.get('location')!)).status).toBe(200)
+    await expect(row).toContainText('Posting to E2E Page')
+    // two Pages: choose where reels go
+    await row.getByTestId('facebook-page').selectOption('78')
+    await expect(row).toContainText('Posting to Second Page')
+    await shot(page, 'social-7-facebook-settings')
+
+    await startReel(page, media.video)
+    await expect(page.getByTestId('share')).toBeEnabled({ timeout: 10 * 60_000 })
+    await page.getByTestId('share').click()
+    await page.getByTestId('share-pop').getByTestId('share-post-facebook').click()
+    const sheet = page.getByTestId('social-sheet')
+    await expect(sheet).toHaveAttribute('data-state', 'form', { timeout: 5 * 60_000 })
+    await expect(page.getByTestId('social-account')).toHaveText('Posting to Second Page')
+    await page.getByTestId('social-caption').fill('From the e2e #reel')
+    await page.getByTestId('social-submit').click()
+    await expect(sheet).toHaveAttribute('data-state', 'done', { timeout: 3 * 60_000 })
+    await expect(page.getByTestId('social-done')).toContainText('Second Page')
+    await shot(page, 'social-8-facebook-done')
+    expect(seen.facebookBytes).toBeGreaterThan(1000)
+    expect(seen.facebookFinish?.get('video_state')).toBe('PUBLISHED')
+    expect(seen.facebookFinish?.get('description')).toBe('From the e2e #reel')
   } finally {
     await app.close()
     server.close()
