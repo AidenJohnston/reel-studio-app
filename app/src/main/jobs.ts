@@ -77,7 +77,9 @@ export function createJobManager(
   /** Background work that yields while any job runs (footage-index.ts: indexing Library footage). */
   idleWork?: IdleWork,
   /** Pictures of what the AI just changed, before its draft: a playable URL of each (live-video.ts). */
-  toMoment?: ToMoment
+  toMoment?: ToMoment,
+  /** Each job's last event (not a pause, which continues), with how long the job ran (main/usage.ts). */
+  onEnded?: (kind: JobKind, last: Extract<JobEvent, { type: 'done' | 'error' | 'cancelled' }>, seconds: number) => void
 ) {
   const jobs = new Map<string, Running>()
 
@@ -123,6 +125,7 @@ export function createJobManager(
     if (slug) refuseIfBusy(slug)
     const id = randomUUID()
     const abort = new AbortController()
+    const startedAt = Date.now()
     const job: Running = { id, slug, kind, abort, message: 'Getting started', pct: 0, overall: 0, secondsLeft: null, overdue: false, thinking: false, waiting: false, owner: null, waitingForRender: false, setWaitingForRender: () => undefined, done: Promise.resolve() }
     jobs.set(id, job)
     const send = (e: JobEvent): void => broadcast(e)
@@ -316,6 +319,7 @@ export function createJobManager(
         // The job's last event goes out only now: a screen that reloads on it must find no job running
         // (projects:get reads forSlug), or it shows the progress row again after the note is done.
         if (ended) send(ended)
+        if (ended?.type === 'done' || ended?.type === 'error' || ended?.type === 'cancelled') onEnded?.(kind, ended, (Date.now() - startedAt) / 1000)
         if (slug) freed(slug)
         // the last job is done: background indexing may go on
         if (!jobs.size) idleWork?.resume()

@@ -3,7 +3,7 @@
 // safeStorage, Electron 44: https://www.electronjs.org/docs/latest/api/safe-storage
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import type { InstagramSecretStore } from './instagram-store'
+import { keptTag, type InstagramSecretStore } from './instagram-store'
 import type { TikTokOutcome, TikTokPublishResult } from '../shared/tiktok'
 import { atomicSocialFile, withSocialFile } from './social-store'
 import { count, fail, httpsUrl, invalid, object, positive, text } from './tiktok-http'
@@ -119,8 +119,9 @@ export async function saveOutcome(dir: string, value: TikTokOutcome, preserve = 
     // IDs are platform-local. A TikTok ID must never overwrite an Instagram post with the same ID.
     const postKey = `tiktok:${value.postId}`
     if (preserve && posts[postKey] !== undefined) return
+    const before = posts[postKey] === undefined ? {} : object(posts[postKey])
     await atomicSocialFile(file, JSON.stringify({ ...saved, schemaVersion: 1,
-      versions: { ...versions, [key]: { ...posts, [postKey]: value } } }, null, 2) + '\n')
+      versions: { ...versions, [key]: { ...posts, [postKey]: { ...keptTag(before), ...value } } } }, null, 2) + '\n')
   })
 }
 
