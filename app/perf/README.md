@@ -28,7 +28,10 @@ one frame (about 17 ms at 60 Hz) before the swap is on screen.
 | Scrub | the `pointerup` of a click on the timeline under the phone, which seeks there | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the words in the note's progress strip being painted |
 
-Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
+Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A position covered by a
+note's mark (a button that opens that note's version; each run's note adds one) or by the playhead moves to the nearest
+bare spot, and each run records where it clicked (`scrubAt`), so compare a position's numbers only across runs that
+clicked the same place. A seek decodes from the keyframe before it,
 so its time depends on where it lands in the encode, and the first click after opening also loads data the player had
 not fetched yet. The fake engine encodes with x264's default keyframe spacing, so scrub numbers describe that encode,
 not the real engine's exports.
@@ -65,7 +68,9 @@ frame (`PerformanceObserver` type `long-animation-frame`, with the scripts that 
 It reports, per moment and run, the median gap (the display's frame time), the longest gap, the 95th percentile and
 the frames longer than 50 ms. Around "Use it" it also records a Chromium trace and reports its longest tasks with the process and thread
 each ran on (the renderer's main thread, the GPU process, the compositor), so a long frame can be put down to its
-cause, and what the page painted in the 600 ms after the click, by element and area: the raster a GPU task
-then does. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
+cause, and what the page painted in the 600 ms after the click, by element and area. The same trace covers the
+600 ms before the click (`stillTasks`, `stillPaints`): what the step does with nobody touching it, so the work the click
+adds is the difference. A Paint's area is what Chromium re-recorded, not what the GPU rastered; the GPU tasks' time is
+the raster. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
 report's path.
 

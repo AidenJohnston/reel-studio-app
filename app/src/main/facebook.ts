@@ -18,6 +18,8 @@ import { serviceOrigin } from './instagram-http'
 import { signinCallback } from './signin-callback'
 import { metaApi, SocialError, type MetaFetch } from './meta-http'
 import { atomicSocialFile, withSocialFile } from './social-store'
+import { readFacebookReel } from './facebook-insights'
+import { keptTag } from './instagram-store'
 
 export const FACEBOOK_VERSION = 'v26.0'
 export const FACEBOOK_GRAPH = `https://graph.facebook.com/${FACEBOOK_VERSION}`
@@ -132,6 +134,21 @@ async function saveOutcome(dir: string, value: FacebookOutcome): Promise<void> {
     const postKey = `facebook:${value.postId}`
     if (posts[postKey] !== undefined) return
     await atomicSocialFile(file, JSON.stringify({ ...saved, schemaVersion: 1, versions: { ...versions, [key]: { ...posts, [postKey]: value } } }, null, 2) + '\n')
+  })
+}
+
+/** A reading of a posted reel's numbers replaces its entry (saveOutcome above never overwrites), keeping any trial tag. */
+async function saveReading(dir: string, value: FacebookOutcome): Promise<void> {
+  const file = join(dir, 'outcomes.json')
+  return withSocialFile(file, async () => {
+    const saved = await readJson(file)
+    if (saved && saved.schemaVersion !== 1) return localError()
+    const versions = saved?.versions && typeof saved.versions === 'object' ? (saved.versions as Record<string, unknown>) : {}
+    const key = `v${value.version}`
+    const posts = versions[key] && typeof versions[key] === 'object' ? (versions[key] as Record<string, unknown>) : {}
+    const postKey = `facebook:${value.postId}`
+    const before = posts[postKey] && typeof posts[postKey] === 'object' ? (posts[postKey] as Record<string, unknown>) : {}
+    await atomicSocialFile(file, JSON.stringify({ ...saved, schemaVersion: 1, versions: { ...versions, [key]: { ...posts, [postKey]: { ...keptTag(before), ...value } } } }, null, 2) + '\n')
   })
 }
 
@@ -317,6 +334,29 @@ export class FacebookService {
       if (checked.dev !== stat.dev || checked.ino !== stat.ino) return fail('PATH', 'The export changed while opening it. Try again.')
       return { handle, size: Number(stat.size) }
     } catch (e) { await handle.close(); throw e }
+  }
+
+  /**
+   * Reads one posted reel's lifetime numbers (facebook-insights.ts) with the token of the Page it went to, and saves
+   * them beside the post in outcomes.json. The results refresh (results-refresh.ts) calls it on its schedule.
+   */
+  insights(slug: string, version: number, postId: string): Promise<FacebookOutcome> {
+    return this.run(async (signal) => {
+      id(postId)
+      const dir = await this.project(slug, version)
+      const c = await this.credentials()
+      const saved = await receipt(dir, version)
+      if (saved?.state !== 'published' || saved.post.postId !== postId) return fail('POST', 'This reel is not linked to that project version.')
+      const page = c.pages.find((p) => p.id === saved.post.accountId)
+      if (!page) return fail('POST', 'The Page this reel was posted to is no longer connected.')
+      // declined at sign-in, or a Page this person can post to but not analyze: no read is attempted
+      if (!page.canRead) return fail('PERMISSION', 'Connect Facebook again and allow Reel Studio to read your Page’s results.')
+      const metrics = await readFacebookReel(this.o.fetch, page.token, postId, signal)
+      const outcome: FacebookOutcome = { ...saved.post, platform: 'facebook', apiVersion: FACEBOOK_VERSION, observedAt: new Date(this.now()).toISOString(), metrics }
+      signal.throwIfAborted()
+      await saveReading(dir, outcome)
+      return outcome
+    })
   }
 
   publish(value: unknown): Promise<FacebookPost> {

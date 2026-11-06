@@ -1016,14 +1016,16 @@ function registerIpc(): void {
     handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
     own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
   })
-  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  // Facebook reads the Page posts go to; a reel on another of the person's Pages is read when that Page is chosen again.
   const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
     ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
     : [
         { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
           read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
         { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
-          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) },
+        { platform: 'facebook', account: async () => { const s = await facebook.session(); return s.connected ? s.page.id : null },
+          read: (slug, version, postId) => facebook.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
     projectsRoot: projectsDir, stateDir: settingsDir(), sources,

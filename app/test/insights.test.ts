@@ -145,7 +145,8 @@ it('keeps platform-local post IDs separate and reports unavailable TikTok values
     { platform: 'instagram', totals: { metrics: { plays: 100, reach: 100 } } },
     { platform: 'tiktok', totals: { metrics: { plays: 50, reach: null, saves: null, averageWatchTimeMs: null, completionEstimate: null } } }
   ])
-  expect(result.totals).toMatchObject({ metrics: { plays: 150, reach: 100, averageWatchTimeMs: null }, coverage: { reach: 1 } })
+  // a rate rests on the posts that report it (Instagram's here); coverage says how many that is
+  expect(result.totals).toMatchObject({ metrics: { plays: 150, reach: 100, averageWatchTimeMs: 10_000 }, coverage: { reach: 1, averageWatchTimeMs: 1 } })
 })
 
 it('weights watch time and completion estimates by plays, using rendered duration', async () => {
