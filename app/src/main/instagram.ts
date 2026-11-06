@@ -191,12 +191,13 @@ export class InstagramService {
         if (String(data.token_type).toLowerCase() !== 'bearer' || !Array.isArray(permissions) || !INSTAGRAM_SCOPES.every((s) => permissions.includes(s)))
           throw new InstagramError('IG_PERMISSION', 'Allow publishing and insights when connecting your Instagram account.')
         const accessToken = text(data.access_token)
+        const uploadPass = text(data.upload_pass)
         const expiresAt = this.now() + positive(data.expires_in) * 1000
         const account = await this.profile(accessToken, signal)
         signal.throwIfAborted()
         const previous = await this.tokens.load()
         signal.throwIfAborted()
-        await this.tokens.save({ accessToken, expiresAt, issuedAt: this.now(), ...account, appId: config.instagramAppId, brokerUrl: config.instagramBrokerUrl })
+        await this.tokens.save({ accessToken, expiresAt, issuedAt: this.now(), ...account, appId: config.instagramAppId, brokerUrl: config.instagramBrokerUrl, uploadPass })
         if (signal.aborted) {
           if (previous) await this.tokens.save(previous)
           else await this.tokens.clear()
@@ -310,8 +311,10 @@ export class InstagramService {
         if (!cover.length || cover.length > 8_000_000) throw new InstagramError('IG_COVER', 'The JPEG cover must be smaller than 8 MB.')
       }
       const credentials = await this.credentials()
+      // connections made before the pass existed have none: connecting again gets one
+      if (!credentials.uploadPass) throw new InstagramError('IG_TOKEN', 'Connect Instagram again in Settings.')
       const upload = object(await request(this.o.fetch, `${config.instagramBrokerUrl}/v1/instagram/uploads`, {
-        ...jsonPost({ video_size: video.size, cover_size: cover?.length ?? null }),
+        ...jsonPost({ video_size: video.size, cover_size: cover?.length ?? null, upload_pass: credentials.uploadPass }),
         headers: { 'content-type': 'application/json', authorization: `Bearer ${credentials.accessToken}` }
       }, signal))
       const parseUpload = (value: unknown) => {

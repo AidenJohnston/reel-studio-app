@@ -124,12 +124,25 @@ describe('Facebook', () => {
 
   it('carries on from what Facebook already has after a stopped upload', async () => {
     const w = await world(); w.connect(w.PAGES); await w.service.connect()
-    await fs.writeFile(join(w.project, 'facebook-publish.json'), JSON.stringify({ schemaVersion: 1, versions: { v1: {
-      state: 'uploading', pageId: '77', videoId: '555', inputHash: createHash('sha256').update(JSON.stringify({ page: '77', description: INPUT.description })).digest('hex')
-    } } }))
+    // a post that stopped part way: start went through, and Facebook has the first 10 bytes
+    w.publishSteps(0, {})
+    w.steps.splice(1)
+    w.steps.push({ url: `${FACEBOOK_GRAPH}/555?fields=status`, respond: async () => { throw new Error('connection reset') } })
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'FB_NETWORK' })
     w.resume(10)
     w.steps.push({ url: `${FACEBOOK_GRAPH}/77/video_reels`, method: 'POST', body: { success: true } })
     expect(await w.service.publish(INPUT)).toMatchObject({ postId: '555' }); w.done()
+  })
+
+  it('won’t carry a stopped upload on with a different video', async () => {
+    const w = await world(); w.connect(w.PAGES); await w.service.connect()
+    w.publishSteps(0, {})
+    w.steps.splice(1)
+    w.steps.push({ url: `${FACEBOOK_GRAPH}/555?fields=status`, respond: async () => { throw new Error('connection reset') } })
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'FB_NETWORK' })
+    // the export was made again in between, the same size
+    await fs.writeFile(join(w.project, 'versions', 'v1', 'export.mp4'), VIDEO.split('').reverse().join(''))
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'FB_PUBLISH_CHANGED' }); w.done()
   })
 
   it('never posts again after Facebook’s answer to Post was lost', async () => {

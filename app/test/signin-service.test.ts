@@ -71,6 +71,7 @@ describe('Instagram sign-in through the service', () => {
       expect(u.searchParams.get('access_token')).toBe('short-token')
       return Response.json({ access_token: 'long-token', token_type: 'bearer', expires_in: 5_184_000 })
     }
+    if (u.href === 'https://graph.instagram.com/v26.0/me?fields=user_id,account_type') return Response.json({ user_id: '42', account_type: 'MEDIA_CREATOR' })
   }
 
   it('sends the person to Instagram and back to the app, and gives the token only for the right verifier', async () => {
@@ -95,7 +96,7 @@ describe('Instagram sign-in through the service', () => {
     const ok = await w.post('/v1/instagram/complete', { handoff, code_verifier: verifier })
     expect(ok.status).toBe(200)
     expect(ok.headers.get('cache-control')).toBe('no-store')
-    expect(await ok.json()).toEqual({ access_token: 'long-token', token_type: 'bearer', expires_in: 5_184_000, permissions: INSTAGRAM_SCOPES })
+    expect(await ok.json()).toEqual({ access_token: 'long-token', token_type: 'bearer', expires_in: 5_184_000, permissions: INSTAGRAM_SCOPES, upload_pass: expect.any(String) })
   })
 
   it('refuses a state passed off as a handoff, and a handoff after five minutes', async () => {
@@ -137,34 +138,64 @@ describe('Instagram sign-in through the service', () => {
 })
 
 describe('Instagram video links', () => {
-  const me = (account_type: string): Answer => (u, init) => {
+  /** Instagram as two accounts see it: the code says who signs in, the token says who is asking. */
+  const accounts = (type: Record<string, string>): Answer => (u, init) => {
+    if (u.href === 'https://api.instagram.com/oauth/access_token') {
+      const code = new URLSearchParams(String(init.body)).get('code')
+      return Response.json({ access_token: `short-${code}`, user_id: '1', permissions: INSTAGRAM_SCOPES.join(',') })
+    }
+    if (u.origin + u.pathname === 'https://graph.instagram.com/access_token')
+      return Response.json({ access_token: u.searchParams.get('access_token')!.replace('short-', 'token-'), token_type: 'bearer', expires_in: 5_184_000 })
     if (u.href === 'https://graph.instagram.com/v26.0/me?fields=user_id,account_type') {
-      if ((init.headers as Record<string, string>).authorization !== 'Bearer ig-user-token') return Response.json({ error: { code: 190 } }, { status: 401 })
-      return Response.json({ user_id: '42', account_type })
+      const who = /^Bearer token-(\d+)$/.exec((init.headers as Record<string, string>).authorization)?.[1]
+      if (!who) return Response.json({ error: { code: 190 } }, { status: 401 })
+      return Response.json({ user_id: who, account_type: type[who] ?? 'MEDIA_CREATOR' })
     }
   }
+  /** Signs account `who` in through the service: its token and its storage pass. */
+  const connected = async (w: ReturnType<typeof world>, who: string) => {
+    const verifier = randomBytes(32).toString('base64url')
+    const { to } = await signIn(w, 'instagram', verifier, who)
+    const r = (await (await w.post('/v1/instagram/complete', { handoff: to!.searchParams.get('handoff'), code_verifier: verifier })).json()) as { access_token: string; upload_pass: string }
+    return { token: r.access_token, pass: r.upload_pass }
+  }
 
-  it('makes upload links only for a connected professional account, signed for the size asked', async () => {
-    const w = world(me('MEDIA_CREATOR'))
-    expect((await w.post('/v1/instagram/uploads', { video_size: 10, cover_size: null })).status).toBe(401)
-    expect((await w.post('/v1/instagram/uploads', { video_size: 10, cover_size: null }, { authorization: 'Bearer stolen' })).status).toBe(401)
-    expect((await w.post('/v1/instagram/uploads', { video_size: 300_000_001, cover_size: null }, { authorization: 'Bearer ig-user-token' })).status).toBe(400)
-    const r = await w.post('/v1/instagram/uploads', { video_size: 1234, cover_size: 56 }, { authorization: 'Bearer ig-user-token' })
+  it('makes upload links only for an account signed in through the service, signed for the size asked', async () => {
+    const w = world(accounts({}))
+    const a = await connected(w, '42')
+    const b = await connected(w, '43')
+    const ask = (body: Record<string, unknown>, token?: string) => w.post('/v1/instagram/uploads', body, token ? { authorization: `Bearer ${token}` } : {})
+    expect((await ask({ video_size: 10, cover_size: null, upload_pass: a.pass })).status).toBe(401)
+    // a working Instagram token from anywhere else has no pass
+    expect((await ask({ video_size: 10, cover_size: null }, a.token)).status).toBe(401)
+    // nor does one account's token with another's pass
+    expect((await ask({ video_size: 10, cover_size: null, upload_pass: b.pass }, a.token)).status).toBe(401)
+    expect((await ask({ video_size: 300_000_001, cover_size: null, upload_pass: a.pass }, a.token)).status).toBe(400)
+    const r = await ask({ video_size: 1234, cover_size: 56, upload_pass: a.pass }, a.token)
     expect(r.status).toBe(200)
-    const b = (await r.json()) as Record<string, { upload_url: string; public_url: string }>
-    const put = new URL(b.video.upload_url)
+    const links = (await r.json()) as Record<string, { upload_url: string; public_url: string }>
+    const put = new URL(links.video.upload_url)
     expect(put.origin + put.pathname).toMatch(/^https:\/\/acct\.r2\.example\/reels\/instagram\/42\/[A-Za-z0-9_-]{24}\.mp4$/)
     expect(put.searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host')
     expect(put.searchParams.get('X-Amz-Expires')).toBe('600')
-    const read = new URL(b.video.public_url)
+    const read = new URL(links.video.public_url)
     expect(read.pathname).toBe(put.pathname)
     expect(read.searchParams.get('X-Amz-SignedHeaders')).toBe('host')
-    expect(new URL(b.cover.upload_url).pathname).toMatch(/\.jpg$/)
+    expect(new URL(links.cover.upload_url).pathname).toMatch(/\.jpg$/)
   })
 
-  it('refuses a personal account', async () => {
-    const w = world(me('PERSONAL'))
-    expect((await w.post('/v1/instagram/uploads', { video_size: 10, cover_size: null }, { authorization: 'Bearer ig-user-token' })).status).toBe(403)
+  it('signs a personal account in, but gives it no storage', async () => {
+    const w = world(accounts({ '44': 'PERSONAL' }))
+    const c = await connected(w, '44')
+    expect(c.pass).toEqual(expect.any(String))
+    expect((await w.post('/v1/instagram/uploads', { video_size: 10, cover_size: null, upload_pass: c.pass }, { authorization: `Bearer ${c.token}` })).status).toBe(403)
+  })
+
+  it('stops reading a body past 16 KB, however it is sent', async () => {
+    const w = world()
+    const endless = new ReadableStream<Uint8Array>({ pull: (ctl) => ctl.enqueue(new Uint8Array(4096).fill(32)) })
+    const r = await w.handler(new Request(`${ORIGIN}/v1/instagram/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: endless, duplex: 'half' } as RequestInit))
+    expect(r.status).toBe(413)
   })
 })
 
@@ -206,13 +237,14 @@ describe('Threads sign-in through the service', () => {
         expect(u.searchParams.get('grant_type')).toBe('th_exchange_token')
         return Response.json({ access_token: 'th-long', token_type: 'bearer', expires_in: 5_184_000 })
       }
+      if (u.href === 'https://graph.threads.com/v1.0/me?fields=id') return Response.json({ id: '4242' })
     })
     const verifier = randomBytes(32).toString('base64url')
     const { link, to } = await signIn(w, 'threads', verifier)
     expect(link.origin + link.pathname).toBe('https://threads.com/oauth/authorize')
     expect(link.searchParams.get('scope')?.split(',')).toEqual(THREADS_SCOPES)
     const r = await w.post('/v1/threads/complete', { handoff: to!.searchParams.get('handoff'), code_verifier: verifier })
-    expect(await r.json()).toEqual({ access_token: 'th-long', token_type: 'bearer', expires_in: 5_184_000, permissions: [] })
+    expect(await r.json()).toEqual({ access_token: 'th-long', token_type: 'bearer', expires_in: 5_184_000, permissions: [], upload_pass: expect.any(String) })
   })
 })
 

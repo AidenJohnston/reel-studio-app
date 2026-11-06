@@ -24,10 +24,15 @@ app through it. It is not deployed.
 Instagram and Threads tokens refresh without the secret, so the app does that itself. Disconnect for Instagram and Threads forgets
 the token on the computer (the person removes the app in the platform's settings to end the grant there); for Facebook it also ends the access at Facebook.
 
+Storage links go only to accounts that signed in through the service. At `complete` for Instagram and Threads the
+service also returns an `upload_pass`: the account id, sealed with its own purpose and a 90-day expiry. The uploads call
+needs the pass and a token for that same account, so an Instagram token from any other app gets nothing. After 90
+days, Connect again.
+
 ### Why nothing is stored
 
 The state sent to the platform and the handoff sent to the app are sealed: AES-256-GCM under a key derived from
-`SIGNIN_SECRET`, bound to their purpose ("state" or "handoff") and with their own expiry (10 and 5 minutes). The
+`SIGNIN_SECRET`, bound to their purpose ("state", "handoff" or "upload") and with their own expiry (10 and 5 minutes). The
 service needs no database, so it runs as a single stateless function. The authorization code inside a handoff is
 encrypted, so the loopback address never carries a readable code or a token. A platform code is single-use, so a
 replayed handoff fails at the platform.

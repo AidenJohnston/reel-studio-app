@@ -24,6 +24,8 @@ export interface InstagramCredentials {
   picture?: string
   appId: string
   brokerUrl: string
+  /** The sign-in service's pass for storage links (docs/signin.md), sealed to this account at sign-in. */
+  uploadPass?: string
 }
 
 const PICTURE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/
@@ -70,7 +72,7 @@ export class InstagramTokenStore {
       return {
         accessToken: text(c.accessToken), expiresAt: positive(c.expiresAt), issuedAt: positive(c.issuedAt),
         accountId: id(c.accountId), username: text(c.username), ...(c.picture === undefined ? {} : { picture: picture(c.picture) }),
-        appId: id(c.appId), brokerUrl: text(c.brokerUrl)
+        appId: id(c.appId), brokerUrl: text(c.brokerUrl), ...(c.uploadPass === undefined ? {} : { uploadPass: text(c.uploadPass) })
       }
     } catch { return localDataError() }
   }

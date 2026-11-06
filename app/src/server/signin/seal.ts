@@ -6,7 +6,8 @@
 // data, so a state can never be redeemed as a handoff or the other way round. Every value carries its own expiry.
 // WebCrypto only: the same code runs on Workers, Vercel and Node.
 
-export type Purpose = 'state' | 'handoff'
+/** What a sealed value is for: the OAuth state, the handoff to the app, or the app's pass for storage links. */
+export type Purpose = 'state' | 'handoff' | 'upload'
 /** WebCrypto's key type, named without the DOM library (tsconfig.node.json has none). */
 export type SealKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>
 

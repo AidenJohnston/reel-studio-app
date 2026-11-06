@@ -57,12 +57,15 @@ async function world() {
       cb.search = new URLSearchParams({ state, handoff: 'sealed-handoff-from-the-service' }).toString()
       expect((await fetch(cb)).status).toBe(200)
     }
-    steps.push({ url: `${BROKER}/v1/threads/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 5_184_000, permissions: [] } })
+    steps.push({ url: `${BROKER}/v1/threads/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 5_184_000, permissions: [], upload_pass: 'sealed-pass' } })
     steps.push({ url: `${THREADS_GRAPH}/me?fields=id,username`, body: { id: '4242', username: 'e2e.threads' } })
   }
   const upload = () => {
     steps.push({ url: `${BROKER}/v1/threads/uploads`, method: 'POST', body: { video: { upload_url: 'https://media.example/th/1.mp4?sig=put', public_url: 'https://media.example/th/1.mp4?sig=get' } },
-      inspect: (init) => { expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`) } })
+      inspect: (init) => {
+        expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
+        expect(JSON.parse(String(init.body))).toEqual({ video_size: VIDEO.length, cover_size: null, upload_pass: 'sealed-pass' })
+      } })
     steps.push({ url: 'https://media.example/th/1.mp4?sig=put', method: 'PUT', inspect: async (init) => { expect(await new Response(init.body).text()).toBe(VIDEO) } })
     steps.push({ url: `${THREADS_GRAPH}/4242/threads`, method: 'POST', body: { id: '600' }, inspect: (init) => {
       expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({ media_type: 'VIDEO', video_url: 'https://media.example/th/1.mp4?sig=get', text: 'On Threads #reel' })

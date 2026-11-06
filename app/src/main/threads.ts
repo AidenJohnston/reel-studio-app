@@ -43,6 +43,8 @@ interface Credentials {
   username: string
   appId: string
   brokerUrl: string
+  /** The sign-in service's pass for storage links, sealed to this account at sign-in. */
+  uploadPass: string
 }
 
 type Receipt =
@@ -134,7 +136,7 @@ export class ThreadsService {
     try {
       const c = object(JSON.parse(this.o.secrets.decryptString(bytes)))
       if (typeof c.expiresAt !== 'number' || typeof c.issuedAt !== 'number') return localError()
-      return { token: text(c.token), expiresAt: c.expiresAt, issuedAt: c.issuedAt, userId: id(c.userId), username: text(c.username), appId: id(c.appId), brokerUrl: text(c.brokerUrl) }
+      return { token: text(c.token), expiresAt: c.expiresAt, issuedAt: c.issuedAt, userId: id(c.userId), username: text(c.username), appId: id(c.appId), brokerUrl: text(c.brokerUrl), uploadPass: text(c.uploadPass) }
     } catch { return localError() }
   }
   private async save(c: Credentials): Promise<void> {
@@ -219,7 +221,7 @@ export class ThreadsService {
         const token = text(data.access_token)
         const expiresIn = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : invalid()
         const me = await request(this.o.fetch, `${THREADS_GRAPH}/me?fields=id,username`, { method: 'GET', headers: { authorization: `Bearer ${token}` } }, signal)
-        const c: Credentials = { token, expiresAt: this.now() + expiresIn * 1000, issuedAt: this.now(), userId: id(me.id), username: text(me.username), appId: cfg.appId, brokerUrl: cfg.brokerUrl }
+        const c: Credentials = { token, expiresAt: this.now() + expiresIn * 1000, issuedAt: this.now(), userId: id(me.id), username: text(me.username), appId: cfg.appId, brokerUrl: cfg.brokerUrl, uploadPass: text(data.upload_pass) }
         signal.throwIfAborted()
         await this.save(c)
         return { connected: true, accountId: c.userId, username: c.username, expiresAt: c.expiresAt }
@@ -264,7 +266,7 @@ export class ThreadsService {
       if (checked.dev !== stat.dev || checked.ino !== stat.ino) return fail('PATH', 'The export changed while opening it. Try again.')
       const size = Number(stat.size)
       const up = await request(this.o.fetch, `${cfg.brokerUrl}/v1/threads/uploads`, {
-        ...jsonPost({ video_size: size, cover_size: null }), headers: { 'content-type': 'application/json', authorization: `Bearer ${c.token}` }
+        ...jsonPost({ video_size: size, cover_size: null, upload_pass: c.uploadPass }), headers: { 'content-type': 'application/json', authorization: `Bearer ${c.token}` }
       }, signal)
       const v = object(up.video)
       const put = new URL(text(v.upload_url))

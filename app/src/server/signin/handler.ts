@@ -35,6 +35,8 @@ const UPLOAD_GET_SEC = 6 * 3600
 const MAX_BODY = 16_384
 const MAX_VIDEO = 300_000_000
 const MAX_COVER = 8_000_000
+/** How long a storage pass lasts: past the 60-day token, so a refreshed connection keeps it; then Connect again. */
+const PASS_MS = 90 * 86_400_000
 
 type Platform = 'instagram' | 'facebook' | 'threads'
 
@@ -54,10 +56,34 @@ const json = (status: number, body: unknown): Response =>
 const page = (status: number, text: string): Response =>
   new Response(text, { status, headers: { ...NO_STORE, 'content-type': 'text/plain; charset=utf-8', 'content-security-policy': "default-src 'none'" } })
 
+/** The body as text, never more than MAX_BODY bytes of it in memory, whatever runtime serves this. */
+async function capped(req: Request): Promise<string> {
+  const declared = Number(req.headers.get('content-length') ?? '0')
+  if (!Number.isFinite(declared) || declared > MAX_BODY) throw new Refused(413, 'too_large')
+  if (!req.body) return ''
+  const reader = req.body.getReader()
+  const parts: Uint8Array[] = []
+  let size = 0
+  for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    size += r.value.byteLength
+    if (size > MAX_BODY) {
+      await reader.cancel()
+      throw new Refused(413, 'too_large')
+    }
+    parts.push(r.value)
+  }
+  const all = new Uint8Array(size)
+  let at = 0
+  for (const p of parts) {
+    all.set(p, at)
+    at += p.byteLength
+  }
+  return new TextDecoder().decode(all)
+}
+
 async function body(req: Request): Promise<Record<string, unknown>> {
   if (!req.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new Refused(415, 'json_only')
-  const raw = await req.text()
-  if (raw.length > MAX_BODY) throw new Refused(413, 'too_large')
+  const raw = await capped(req)
   let v: unknown
   try {
     v = JSON.parse(raw)
@@ -240,7 +266,24 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     if (!sameText(await s256(verifier), h.challenge)) throw new Refused(401, 'wrong_verifier')
     const redirect = `${c.publicUrl}/v1/${p}/callback`
     const exchange = p === 'instagram' ? instagramExchange : p === 'facebook' ? facebookExchange : threadsExchange
-    return json(200, await exchange(c, app, h.code, redirect))
+    const granted = await exchange(c, app, h.code, redirect)
+    if (p === 'facebook') return json(200, granted)
+    // Storage links are only for accounts signed in through this service: a pass bound to the account, which
+    // POST /v1/<p>/uploads checks against the token it comes with.
+    // a personal Instagram account still gets its token: the app says plainly that posting needs a professional one
+    const uid = await accountOf(p, granted.access_token, false)
+    return json(200, { ...granted, upload_pass: await seal(await keyP, 'upload', { p, uid }, c.now() + PASS_MS) })
+  }
+
+  /** The account a token belongs to: Instagram's professional account id, or the Threads user id. */
+  const accountOf = async (p: 'instagram' | 'threads', bearer: string, professional: boolean): Promise<string> => {
+    const url = p === 'instagram' ? `https://graph.instagram.com/${META_VERSION}/me?fields=user_id,account_type` : `${THREADS_GRAPH}/v1.0/me?fields=id`
+    const me = await upstream(c, url, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
+    const uid = p === 'instagram' ? me.user_id : me.id
+    if ((typeof uid !== 'string' && typeof uid !== 'number') || !/^\d{1,32}$/.test(String(uid))) throw new Refused(502, 'upstream_failed')
+    if (professional && p === 'instagram' && (typeof me.account_type !== 'string' || !['BUSINESS', 'MEDIA_CREATOR'].includes(me.account_type.toUpperCase())))
+      throw new Refused(403, 'not_professional')
+    return String(uid)
   }
 
   /** Upload links for one video (and cover), for a platform that fetches media from a link: Instagram or Threads. */
@@ -258,19 +301,12 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     }
     const videoSize = size(b.video_size, MAX_VIDEO)
     const coverSize = b.cover_size === null || b.cover_size === undefined ? null : size(b.cover_size, MAX_COVER)
-    // Only a connected account gets storage (on Instagram, a professional one): anyone else is refused before a link is made.
-    let owner: string
-    if (p === 'instagram') {
-      const me = await upstream(c, `https://graph.instagram.com/${META_VERSION}/me?fields=user_id,account_type`, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
-      if (typeof me.user_id !== 'string' && typeof me.user_id !== 'number') throw new Refused(502, 'upstream_failed')
-      if (typeof me.account_type !== 'string' || !['BUSINESS', 'MEDIA_CREATOR'].includes(me.account_type.toUpperCase())) throw new Refused(403, 'not_professional')
-      owner = String(me.user_id)
-    } else {
-      const me = await upstream(c, `${THREADS_GRAPH}/v1.0/me?fields=id`, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
-      if (typeof me.id !== 'string' && typeof me.id !== 'number') throw new Refused(502, 'upstream_failed')
-      owner = String(me.id)
-    }
-    owner = owner.replace(/[^0-9]/g, '').slice(0, 32) || 'x'
+    // Only an account signed in through this service gets storage: its pass, sealed here at sign-in, has to name
+    // the account the token belongs to (on Instagram, a professional one). Anyone else is refused before a link is made.
+    const pass = typeof b.upload_pass === 'string' ? await unseal(await keyP, 'upload', b.upload_pass, c.now()) : null
+    if (!pass || pass.p !== p) throw new Refused(401, 'no_pass')
+    const owner = await accountOf(p, bearer, true)
+    if (pass.uid !== owner) throw new Refused(401, 'no_pass')
     const one = async (ext: 'mp4' | 'jpg', type: string, length: number) => {
       const id = b64url(crypto.getRandomValues(new Uint8Array(18)))
       const url = `${media.bucketUrl}/${p}/${owner}/${id}.${ext}`

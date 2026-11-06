@@ -95,7 +95,7 @@ async function world(opts: { enabled?: boolean; backend?: string; secure?: boole
   })
   activeService = service
   cleanup.push({ dir, service })
-  const seed = (extra = {}) => store.save({ accessToken: TOKEN, expiresAt: now + 30 * DAY, issuedAt: now - 2 * DAY, accountId: '123', username: 'fixture_creator', appId: '456', brokerUrl: BROKER, ...extra })
+  const seed = (extra = {}) => store.save({ accessToken: TOKEN, expiresAt: now + 30 * DAY, issuedAt: now - 2 * DAY, accountId: '123', username: 'fixture_creator', appId: '456', brokerUrl: BROKER, uploadPass: 'sealed-pass', ...extra })
   const finished = () => steps.push({ url: `${GRAPH}/900?fields=status_code`, body: { status_code: 'FINISHED' } })
   const profile = (body: unknown = PROFILE) => steps.push({ url: `${GRAPH}/me?fields=user_id,username,account_type`, body })
   const stage = (image = false, trial?: string) => {
@@ -104,7 +104,7 @@ async function world(opts: { enabled?: boolean; backend?: string; secure?: boole
       ...(image ? { cover: { upload_url: 'https://storage.example/cover?signature=fake', public_url: 'https://storage.example/cover.jpg' } } : {})
     }, inspect: (init) => {
       expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
-      expect(JSON.parse(String(init.body))).toEqual({ video_size: 19, cover_size: image ? 24 : null })
+      expect(JSON.parse(String(init.body))).toEqual({ video_size: 19, cover_size: image ? 24 : null, upload_pass: 'sealed-pass' })
     } })
     steps.push({ url: 'https://storage.example/video?signature=fake', method: 'PUT', inspect: async (init) => {
       expect(new Headers(init.headers).has('authorization')).toBe(false)
@@ -163,7 +163,7 @@ async function world(opts: { enabled?: boolean; backend?: string; secure?: boole
       callback.searchParams.set('state', state)
       expect((await fetch(callback)).status).toBe(200)
     }
-    steps.push({ url: `${BROKER}/v1/instagram/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 60 * DAY / 1000, permissions }, inspect: (init) => {
+    steps.push({ url: `${BROKER}/v1/instagram/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 60 * DAY / 1000, permissions, upload_pass: 'sealed-pass' }, inspect: (init) => {
       const body = JSON.parse(String(init.body))
       expect(body.handoff).toBe('fabricated-handoff-123456')
       expect(createHash('sha256').update(body.code_verifier).digest('base64url')).toBe(challenge)

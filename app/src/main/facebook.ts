@@ -65,6 +65,19 @@ type Receipt =
   | { state: 'uploading' | 'publishing'; pageId: string; videoId: string; inputHash: string }
   | { state: 'published'; pageId: string; videoId: string; inputHash: string; post: FacebookPost }
 
+/** SHA-256 of the opened file, read in 1 MB pieces. */
+async function fileHash(handle: fs.FileHandle, size: number): Promise<string> {
+  const hash = createHash('sha256')
+  const buffer = Buffer.alloc(1024 * 1024)
+  for (let at = 0; at < size;) {
+    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size - at), at)
+    if (!bytesRead) return fail('FILE', 'The export changed while reading it. Export it again.')
+    hash.update(buffer.subarray(0, bytesRead))
+    at += bytesRead
+  }
+  return hash.digest('hex')
+}
+
 function inside(root: string, target: string): boolean {
   const rel = relative(root, target)
   return rel !== '' && rel !== '..' && !rel.startsWith('../') && !rel.startsWith('..\\') && !isAbsolute(rel)
@@ -308,7 +321,6 @@ export class FacebookService {
       const dir = await this.project(input.slug, input.version)
       const c = await this.credentials()
       const page = c.pages.find((x) => x.id === c.pageId) ?? c.pages[0]
-      const inputHash = createHash('sha256').update(JSON.stringify({ page: page.id, description: input.description })).digest('hex')
       let saved = await receipt(dir, input.version)
       if (saved?.state === 'published') {
         await saveOutcome(dir, { ...saved.post, platform: 'facebook', apiVersion: FACEBOOK_VERSION, observedAt: null, metrics: null })
@@ -316,9 +328,12 @@ export class FacebookService {
       }
       if (saved?.state === 'publishing')
         return fail('PUBLISH_UNKNOWN', 'Facebook didn’t confirm whether this reel was posted. Check your Page before posting this version again.')
-      if (saved && saved.inputHash !== inputHash) return fail('PUBLISH_CHANGED', 'This version started posting with another Page or description. Post it with those, or export a new version.')
       const video = await this.openVideo(dir, input.version)
       try {
+        // the bytes are part of what was asked: a resumed upload must carry on with the very same file
+        const inputHash = createHash('sha256').update(JSON.stringify({ page: page.id, description: input.description })).update(await fileHash(video.handle, video.size)).digest('hex')
+        if (saved && saved.inputHash !== inputHash)
+          return fail('PUBLISH_CHANGED', 'This version started posting with another Page, description or video. Post it as it was, or export a new version.')
         if (!saved) {
           const started = await request(this.o.fetch, `${FACEBOOK_GRAPH}/${page.id}/video_reels`, form({ upload_phase: 'start' }, page.token), signal)
           saved = { state: 'uploading', pageId: page.id, videoId: id(started.video_id), inputHash }
