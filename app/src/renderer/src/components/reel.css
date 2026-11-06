@@ -299,9 +299,10 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .ncol { min-width: 0; min-height: 0; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 var(--line); padding: 8px var(--gutter) 16px 24px; position: relative; }
 .notes-h { height: 32px; display: flex; align-items: center; flex: none; }
 .notes-h h2 { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
-/* the log starts at the top, as a thread does (T3 Code): a short one leaves the room under it, not a band above it,
-   with the note box at the column's foot; a long one folds its oldest entries behind one line */
+/* a short log sits just above the note box, as the prototype's does, so a version's words and the box that answers
+   them stay together; a long one folds its oldest entries behind one line */
 .log { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 12px; padding: 6px 2px 16px; margin: 0 -2px; }
+.log > :first-child { margin-top: auto; }
 .log-empty { margin: auto 0; padding: 0 12px; text-align: center; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); }
 .fold {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 0; background: none; padding: 0 8px 0 2px;

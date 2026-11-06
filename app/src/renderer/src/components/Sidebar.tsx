@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { ProviderInfo } from '../../../shared/api'
+import type { ProjectSummary, ProviderInfo } from '../../../shared/api'
+import { reel } from '../api'
+import { stateOf } from '../screens/home-state'
 import type { Go } from '../nav'
 import { Icon, type IconName } from './icons'
 import { UpdateButton } from './UpdateButton'
@@ -184,14 +186,72 @@ function SideResizer() {
   )
 }
 
+/** How many reels the sidebar lists: enough to move between the ones in hand, not a second Reels page. */
+const RECENT_MAX = 6
+
+/**
+ * The reels in hand, newest first, under the nav (as T3 Code lists its threads), so moving from one reel to another
+ * doesn't go through Reels. A dot says which are being made or need you; the open one is marked. Folded to the rail,
+ * it hides with the labels.
+ */
+function SideRecent({ current, go }: { current: string | null; go: Go }) {
+  const [list, setList] = useState<ProjectSummary[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      reel.projects.list().then(
+        (p) => alive && setList([...p].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX)),
+        () => alive && setList([])
+      )
+    void load()
+    // a reel made, renamed, finished or stopped anywhere changes its line here too
+    const off = reel.jobs.onEvent((e) => {
+      if (e.type !== 'status') void load()
+    })
+    const offQueue = reel.queue.onChange(() => void load())
+    return () => {
+      alive = false
+      off()
+      offQueue()
+    }
+  }, [current])
+  if (!list?.length) return null
+  return (
+    <nav className="side-recent" aria-label="Recent reels" data-testid="side-recent">
+      <h2 className="side-h">Recent</h2>
+      {list.map((p) => {
+        const s = stateOf(p)
+        const dot = s === 'making' ? 'making' : s === 'failed' || (s === 'paused' && !p.pausedFor) ? 'needs' : null
+        return (
+          <button
+            key={p.slug}
+            className={p.slug === current ? 'on' : undefined}
+            aria-current={p.slug === current ? 'page' : undefined}
+            onClick={() => go({ name: 'reel', slug: p.slug })}
+            title={p.title}
+            data-testid="side-reel"
+          >
+            {/* the nav's 16 px icon slot holds the state dot, so the names start where the nav's labels do */}
+            <span className="side-slot">{dot && <span className={`side-dot ${dot}`} role="img" aria-label={dot === 'making' ? 'Being made' : 'Needs you'} />}</span>
+            <span className="lbl">{p.title}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
 export function Sidebar({
   section,
+  current,
   go,
   provider,
   userName,
   onNewReel
 }: {
   section: string
+  /** the reel on screen, marked in Recent */
+  current: string | null
   go: Go
   provider: ProviderInfo | null
   userName: string | null
@@ -227,6 +287,7 @@ export function Sidebar({
           </button>
         ))}
       </nav>
+      <SideRecent current={current} go={go} />
       <div className="side-foot">
         <div className="side-update">
           <UpdateButton />

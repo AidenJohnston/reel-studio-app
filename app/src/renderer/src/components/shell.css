@@ -70,6 +70,23 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .nav .new-reel { margin-bottom: 8px; color: var(--ink); }
 .nav .new-reel .icon { color: var(--ink-2); }
 
+/* Recent: the reels in hand, as rows like the nav's, under a caption; a long name ends in an ellipsis, a dot says it is
+   being made (ink) or needs you (pencil). Below the nav by a group's gap, scrolling on its own when the window is short. */
+.side-recent { display: grid; gap: 2px; margin-top: var(--space-s); min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.side-h { margin: 0 0 6px; padding: 0 12px 0 36px; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 650; color: var(--ink-3); }
+.side-recent button {
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; min-width: 0;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 540; color: var(--ink-2); text-align: left; cursor: pointer;
+}
+.side-recent .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-recent button.on { background: rgba(22, 30, 26, .07); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .side-recent button:not(.on):hover { background: rgba(22, 30, 26, .04); color: var(--ink); } }
+.side-slot { flex: none; width: 16px; display: grid; place-items: center; }
+.side-dot { width: 6px; height: 6px; border-radius: 50%; }
+.side-dot.making { background: var(--ink-3); }
+.side-dot.needs { background: var(--pencil); }
+.rail .side-recent { display: none; }
+
 /* minmax(0, 1fr): an auto track grows to its widest unwrapped line, which pushed the update item's text across the page */
 .side-foot { margin-top: auto; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .side-update { min-width: 0; }

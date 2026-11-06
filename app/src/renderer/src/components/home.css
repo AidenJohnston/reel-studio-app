@@ -45,7 +45,7 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
   transition: background-color 120ms ease, color 120ms ease, transform 180ms var(--ease-out);
 }
 /* no picture, so none of a picture's shading */
-.new-card .im::after { content: none; }
+.rcard.new-card .im::after { content: none; }
 @media (hover: hover) and (pointer: fine) { .new-card .im:hover { background: var(--surface); color: var(--ink); } }
 .new-card .im:active { transform: scale(.98); }
 html.kb .new-card .im:active { transform: none; }
@@ -113,10 +113,10 @@ html.kb .new-card .im:active { transform: none; }
 /* Needs you and Making (Home.tsx Row): rows, not cards, side by side when both have reels. A column is never wider
    than about a third of a big window, so a row's pill stays near its words. No container: a hover wash marks the
    row you would open, as the sidebar's rows do. */
-/* auto-fit: a lone section (only Needs you) takes the row, so its why has room; a section stops at 720 px, so its
-   action stays within reach of the words it acts on, as Settings' rows do */
+/* auto-fit: a lone section (only Needs you) takes the row, so its why has room; a section stops at 640 px, a Settings
+   row's width, so its action stays within reach of the words it acts on */
 .home .now { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 0 var(--space-m); margin-bottom: var(--space-m); }
-.home .now > section { max-width: 720px; }
+.home .now > section { max-width: 640px; }
 .rrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .rrow {
   position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; column-gap: 12px;

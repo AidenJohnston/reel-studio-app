@@ -66,12 +66,9 @@
 .lib-wave.pending { background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; }
 .lib-wave.none { display: flex; align-items: center; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
 
-/* an empty tab is where its files will go: the room under the tabs, framed as the drop target it is (the window takes
-   the drop anywhere), as a new reel's stage is the phone's slot */
-.lib-empty {
-  display: grid; justify-items: center; align-content: center; gap: 8px; min-height: max(360px, calc(100vh - var(--titlebar) - 120px)); text-align: center;
-  border-radius: var(--r-lg); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong);
-}
+/* An empty page starts where its content will (Library's first file, Insights' first reel, My style's first rule):
+   at the top, from the gutter, compact. Centred in the middle of an empty page, it read as floating. */
+.lib-empty { display: grid; justify-items: start; gap: 8px; max-width: 560px; padding-top: var(--space-s); text-align: left; }
 .lib-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .lib-empty p { max-width: 40ch; color: var(--ink-2); }
 
@@ -90,21 +87,13 @@
 .style-form .input { flex: 1; min-width: 0; }
 /* Like My style's empty page: the column is at least as tall as the window, so the empty state centres in it */
 .page.insights-page { min-height: 100%; display: flex; flex-direction: column; }
-.insights-empty {
-  flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 320px;
-  padding-bottom: 64px; text-align: center;
-}
-.insights-empty .style-example { margin-top: var(--space-s); }
+.insights-empty { display: grid; justify-items: start; gap: 8px; max-width: 560px; padding-top: var(--space-s); text-align: left; }
 .insights-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .insights-empty p { max-width: 44ch; color: var(--ink-2); }
-/* Empty My style fills the column's height and sits a little above its middle, where the eye expects a centre */
-.style-empty {
-  flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 0;
-  padding: var(--space-m) 0 64px; text-align: center;
-}
-.style-empty h2 { font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 620; }
+.style-empty { display: grid; justify-items: start; gap: 8px; max-width: 560px; padding-top: var(--space-s); text-align: left; }
+.style-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .style-empty > p { max-width: 46ch; color: var(--ink-2); }
-.style-example { width: min(400px, 100%); margin: var(--space-m) 0 0; text-align: left; }
+.style-example { width: min(480px, 100%); margin: var(--space-s) 0 0; text-align: left; }
 .style-example figcaption { margin-bottom: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .style-example ul { list-style: none; margin: 0; padding: 0; }
 .style-example li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; box-shadow: inset 0 1px 0 var(--line); color: var(--ink-3); }

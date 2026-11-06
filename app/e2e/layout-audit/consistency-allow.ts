@@ -38,6 +38,12 @@ export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason:
   },
   {
     rule: 'off-scale',
+    selector: '.side-h',
+    props: ['padding-left'],
+    reason: "The sidebar's Recent caption starts where its rows' names do: the row's 12 px inset, the 16 px icon slot and the 8 px gap (shell.css .side-recent), a sum of steps on the scale."
+  },
+  {
+    rule: 'off-scale',
     selector: '.tb-main',
     props: ['padding-right'],
     reason: "The page's gutter plus its scroll bar's (--gutter + --sbw, shell.css): the title bar's actions end where the page's content does, beside the scroll bar the page always keeps room for."

@@ -27,7 +27,7 @@ const VIEW_KEY = 'rs.home-view'
 const SERIES_FROM = 12
 /** Recent and All reels add a column only once every card can be this wide, so cards grow with the window instead of
  * staying 140 px wide in a third of it (audit-1028 finding 19, the 1600 px shot). */
-const CARD_MIN = 168
+const CARD_MIN = 180
 const GAP = 18
 
 /** A version being made, from the job's own events: how far it is, the time left and the step it is on. */
