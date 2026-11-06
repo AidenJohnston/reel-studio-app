@@ -19,7 +19,7 @@
 :root {
   --paper: #F1F2EF; --paper-2: #F7F8F6; --side: #E9EBE6; --surface: #FFFFFF; --sunk: #E8EAE6; --sunk-2: #F6F7F5;
   --line: #E0E2DD; --line-strong: #CBCFC9;
-  --ink: #161917; --ink-2: #474D49; --ink-3: #626963; --ink-4: #9CA29D;
+  --ink: #161917; --ink-2: #474D49; --ink-3: #5A615B; --ink-4: #9CA29D;
   --green: #1E5E4B; --green-hover: #184F3F; --green-press: #133F33; --green-tint: #E2EDE7; --green-ink: #164A3B;
   --marker: #F4DF6E; --marker-soft: #FAEFB4; --marker-ink: #4A3E00;
   --pencil: #BF3626; --pencil-tint: #FBEAE6; --amber: #8A5A00; --amber-tint: #FBF0D9;
@@ -28,7 +28,9 @@
   --wash: rgba(22, 30, 26, .06);
   --e1: 0 1px 2px rgba(22, 30, 26, .06), 0 0 0 1px rgba(22, 30, 26, .06);
   --e2: 0 10px 28px -12px rgba(22, 30, 26, .22), 0 0 0 1px rgba(22, 30, 26, .07);
-  --e3: 0 28px 70px -20px rgba(22, 30, 26, .35), 0 0 0 1px rgba(22, 30, 26, .08);
+  /* menus and panels that float: a hairline, a tight contact shadow and a soft wide one, so the surface lifts without a
+     dark halo (Craft, goal 4: the single 70 px shadow at .35 read as heavy around small menus) */
+  --e3: 0 0 0 1px rgba(22, 30, 26, .08), 0 2px 6px rgba(22, 30, 26, .06), 0 16px 40px -12px rgba(22, 30, 26, .24);
   --focus: 0 0 0 3px rgba(22, 25, 23, .14);
   --r-sm: 8px; --r-md: 10px; --r-lg: 14px;
   --ease-out: cubic-bezier(.23, 1, .32, 1);
@@ -70,6 +72,10 @@
   /* Native radios and sliders in ink, never the OS blue (the checkbox is drawn: see "The one checkbox"). */
   accent-color: var(--ink);
 }
+/* Headings break into even lines, and no paragraph or menu description ends on one word alone (Craft, goal 4: the View
+   menu's "…about 5% off each / side." was the climb's example). Screens that set their own text-wrap keep it. */
+h1, h2, h3 { text-wrap: balance; }
+p, li, figcaption, .shape-mi-fit { text-wrap: pretty; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }

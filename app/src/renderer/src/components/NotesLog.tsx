@@ -273,7 +273,7 @@ export function NotesLog({
       return (
         <div className="nt-res paused" data-testid="first-paused">
           <span className="nk pause">
-            <Icon name="pause" size={11} stroke={2.4} />
+            <Icon name="pause" size={10} stroke={2.4} />
           </span>
           <span className="t wrap full" data-testid="first-paused-why">
             Paused. {f.why ?? 'Resume continues where it stopped.'}
@@ -368,7 +368,7 @@ export function NotesLog({
         return (
           <div className="nt-res paused" data-testid="log-paused">
             <span className="nk pause">
-              <Icon name="pause" size={11} stroke={2.4} />
+              <Icon name="pause" size={10} stroke={2.4} />
             </span>
             <span className="t wrap full">Paused. {pausedWhy ?? 'It waits below.'}</span>
           </div>
@@ -377,7 +377,7 @@ export function NotesLog({
         return (
           <div className="nt-res" data-testid="log-stopped">
             <span className="nk stop">
-              <Icon name="stop" size={11} stroke={2.4} />
+              <Icon name="stop" size={10} stroke={2.4} />
             </span>
             <span className="t">Stopped. {r.kept ? `Version ${r.kept} is unchanged.` : 'Nothing changed.'}</span>
             {e.ask.kind === 'note' && aiOn && (

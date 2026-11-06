@@ -391,7 +391,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .drow .ba s { color: var(--ink-3); text-decoration: none; }
 .drow .ba b { color: var(--ink); font-weight: 650; }
 .drow .ba .arr { color: var(--ink-3); margin: 0 6px; }
-.detail .said { font-size: var(--fs-sm); color: var(--ink-2); line-height: var(--lh-sm); }
+/* the editor's words at the size of the person's own notes (13 px): at 12 px they read as small print */
+.detail .said { font-size: var(--fs-base); color: var(--ink-2); line-height: var(--lh-base); }
 .dacts { padding: 2px 0 6px 24px; }
 
 /* ---- the note box, with the progress strip on its top edge ---- */

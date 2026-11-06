@@ -198,7 +198,7 @@ function Lines({
           <li key={i} className={`pl-row${l.done ? ' done' : ''}`}>
             <label className="pl-tick">
               <input type="checkbox" checked={!!l.done} disabled={readOnly} onChange={() => onTick(kind, i)} aria-label={`${one} ${i + 1} done`} data-testid={`plan-${kind}-tick-${i}`} />
-              <span aria-hidden>{l.done ? <Icon name="check" size={11} stroke={2.6} /> : numbered ? i + 1 : null}</span>
+              <span aria-hidden>{l.done ? <Icon name="check" size={10} stroke={2.6} /> : numbered ? i + 1 : null}</span>
             </label>
             <PlanField value={l.text} label={`${one} ${i + 1}`} readOnly={readOnly} onCommit={(t) => onCommit(kind, i, t)} />
           </li>

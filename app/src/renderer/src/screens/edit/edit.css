@@ -1,10 +1,14 @@
 /* Edit it myself (ShowMeHow.tsx), in the notes column's place. The column's dense type (13/18) and one left
    inset; hairlines, not boxes; green only on Make Version; marker yellow on what the person changed. */
 
-.edit { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: edit-in 150ms cubic-bezier(.2, .8, .2, 1); }
+/* comes in from the right, the side it opens on, as it fades: in place it read as a cross-fade from nowhere */
+.edit { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: edit-in 200ms cubic-bezier(.2, .8, .2, 1); }
 .edit.leaving { opacity: 0; transition: opacity 150ms cubic-bezier(.2, .8, .2, 1); pointer-events: none; }
 html.kb .edit { animation: none; }
-@keyframes edit-in { from { opacity: 0; } }
+@keyframes edit-in { from { opacity: 0; transform: translateX(12px); } }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes edit-in { from { opacity: 0; } }
+}
 
 .edit-h { height: 32px; display: flex; align-items: center; justify-content: space-between; flex: none; }
 .edit-h h2 { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }

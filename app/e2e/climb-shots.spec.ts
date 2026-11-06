@@ -10,7 +10,7 @@
 // and the practice editor makes the first edit an editor makes: the screens read as they do for a person, not a test.
 import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TRANSCRIPT } from '../src/renderer/src/components/first-run/sample'
 import { SIZE_PER_EM } from '../src/shared/caption-fit'
@@ -35,6 +35,9 @@ interface Scene {
   enter: (c: Ctx) => Promise<void>
   /** On screen when the scene is: checked after each resize, and the scene is entered again if it went away. */
   ready: (page: Page) => Locator
+  /** A state the shot must keep (focus, the pointer over something): set again after each resize, in place of the
+   * blur and the pointer parked in the corner every other shot gets. */
+  pose?: (page: Page) => Promise<void>
 }
 
 async function setSize(c: Ctx, [w, h]: [number, number]): Promise<void> {
@@ -111,6 +114,11 @@ function spaceMetrics(): Record<string, unknown> {
 
 const byTestId = (id: string) => (page: Page) => page.getByTestId(id).first()
 async function closeAll(page: Page): Promise<void> {
+  // a menu opened with the pointer keeps focus on its trigger, where Escape does not reach it: its trigger closes it
+  for (const trigger of ['view-menu', 'more']) {
+    const t = page.getByTestId(trigger)
+    if ((await t.count()) && (await t.getAttribute('aria-expanded')) === 'true') await t.click()
+  }
   for (let i = 0; i < 3; i++) {
     if (!(await page.locator('[role="menu"], [aria-modal="true"], [data-testid="full-stage"], [data-testid="share-pop"], [data-testid="drawer"]').count())) return
     await page.keyboard.press('Escape')
@@ -185,6 +193,43 @@ async function drawSubtitles(page: Page, dir: string, lines: string[], sizes: nu
     for (const el of [document.documentElement, document.body]) el.style.removeProperty('background')
     document.body.style.visibility = ''
   })
+}
+/**
+ * Motion as a frame strip (Craft, goal 4): the page's animations at a tenth of their speed (DevTools Animation domain),
+ * `go` starts one, and FRAMES pictures of `clip` are taken across it, left to right in one PNG, so a judge sees how it
+ * moves. Twice: as it is, and with reduced motion asked for.
+ */
+const FRAMES = 6
+async function motionStrip(page: Page, name: string, clip: () => Promise<{ x: number; y: number; width: number; height: number }>, go: () => Promise<void>, reset: () => Promise<void>): Promise<void> {
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Animation.enable')
+  for (const reduced of [false, true]) {
+    await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' })
+    await reset()
+    await page.mouse.move(2, 2)
+    const box = await clip()
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 })
+    const frames: string[] = []
+    const start = Date.now()
+    await go()
+    for (let i = 0; i < FRAMES; i++) {
+      // 0, 40, 80 … 200 ms of the animation's own time, and the last one once it has ended
+      const at = i === FRAMES - 1 ? 4000 : i * 400
+      await page.waitForTimeout(Math.max(0, start + at - Date.now()))
+      const f = join(OUT!, `.frame-${i}.png`)
+      await page.screenshot({ path: f, clip: box, scale: 'css', animations: 'allow' })
+      frames.push(f)
+    }
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 })
+    const out = join(OUT!, `motion-${name}${reduced ? '-reduced' : ''}.png`)
+    const inputs = frames.flatMap((f) => ['-i', f])
+    const pad = frames.map((_, i) => `[${i}]pad=iw+12:ih:0:0:white[p${i}]`).join(';')
+    execFileSync('ffmpeg', ['-y', '-v', 'error', ...inputs, '-filter_complex', `${pad};${frames.map((_, i) => `[p${i}]`).join('')}hstack=inputs=${frames.length}`, out])
+    for (const f of frames) rmSync(f, { force: true })
+  }
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await reset()
+  await cdp.detach()
 }
 /** The main process's environment reaches every engine run it starts (main/engine.ts cfg.env). */
 async function engineEnv(app: ElectronApplication, patch: Record<string, string>): Promise<void> {
@@ -332,7 +377,48 @@ const SCENES: Scene[] = [
   { id: 'insights', enter: async ({ page }) => page.getByTestId('nav-insights').click(), ready: (page) => page.locator('main.main') },
   { id: 'settings-editor', enter: async ({ page }) => settingsAt(page, 'editor'), ready: (page) => page.locator('[data-testid="settings-nav-editor"][aria-current="true"]') },
   { id: 'settings-reels', enter: async ({ page }) => settingsAt(page, 'reels'), ready: (page) => page.locator('[data-testid="settings-nav-reels"][aria-current="true"]') },
-  { id: 'settings-about', enter: async ({ page }) => settingsAt(page, 'about'), ready: (page) => page.locator('[data-testid="settings-nav-about"][aria-current="true"]') }
+  { id: 'settings-about', enter: async ({ page }) => settingsAt(page, 'about'), ready: (page) => page.locator('[data-testid="settings-nav-about"][aria-current="true"]') },
+  // Craft (goal 4): the states a still screen hides. The View menu and the reel's menu open, a keyboard focus ring,
+  // a row under the pointer.
+  {
+    id: 'menu-view',
+    enter: async ({ page }) => openReel(page),
+    ready: byTestId('view-menu'),
+    pose: async (page) => {
+      if ((await page.getByTestId('view-menu').getAttribute('aria-expanded')) !== 'true') await page.getByTestId('view-menu').click()
+      await expect(page.getByTestId('view-menu-list')).toBeVisible()
+    }
+  },
+  {
+    id: 'menu-more',
+    enter: async ({ page }) => openReel(page),
+    ready: byTestId('more'),
+    pose: async (page) => {
+      if ((await page.getByTestId('more').getAttribute('aria-expanded')) !== 'true') await page.getByTestId('more').click()
+      await expect(page.getByRole('menu', { name: 'More for this reel' })).toBeVisible()
+    }
+  },
+  {
+    id: 'focus-ring',
+    enter: async ({ page }) => (await closeAll(page), await openReel(page)),
+    ready: byTestId('share'),
+    // reached from the keyboard, as focus rings are drawn only then
+    pose: async (page) => {
+      await page.getByTestId('edit-myself').focus()
+      await page.keyboard.press('Tab')
+      await expect(page.locator('[data-testid="share"]:focus-visible')).toBeVisible()
+    }
+  },
+  {
+    // a sidebar row under the pointer (a card's hover is a 2 px lift a still does not show)
+    id: 'hover-row',
+    enter: async ({ page }) => (await closeAll(page), await page.getByTestId('nav-home').click()),
+    ready: byTestId('nav-library'),
+    pose: async (page) => {
+      await page.mouse.move(600, 600)
+      await page.getByTestId('nav-library').hover()
+    }
+  }
 ]
 
 let MEDIA: ReturnType<typeof makeMedia>
@@ -399,14 +485,31 @@ test('climb scenes at two sizes', async () => {
           continue
         }
         const name = `${scene.id}@${size[0]}x${size[1]}`
-        // the text caret blinks: keep it out of the picture so two runs match
-        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
-        await page.mouse.move(size[0] - 2, size[1] - 2)
+        if (scene.pose) await scene.pose(page)
+        else {
+          // the text caret blinks: keep it out of the picture so two runs match
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+          await page.mouse.move(size[0] - 2, size[1] - 2)
+        }
         await settle(page)
         await page.screenshot({ path: join(OUT!, `${name}.png`), scale: 'css' })
         audit[name] = await page.evaluate(auditConsistency, { allow: CONSISTENCY_ALLOW.filter((a) => !a.scenes || a.scenes.includes(scene.id)), scale: SCALE })
         metrics[name] = await page.evaluate(spaceMetrics)
       }
+    }
+    if (!ONLY || ONLY.has('motion')) {
+      await setSize(ctx, SIZES[0])
+      await openReel(page)
+      const around = (testid: string, w: number, h: number, dx = 0, dy = 0) => async () => {
+        const b = (await page.getByTestId(testid).boundingBox())!
+        return { x: Math.max(0, b.x + b.width / 2 - w / 2 + dx), y: Math.max(0, b.y + dy), width: w, height: h }
+      }
+      // a menu opening from its trigger, above the transport
+      await motionStrip(page, 'view-menu', around('view-menu', 360, 560, -120, -520), () => page.getByTestId('view-menu').click(), () => closeAll(page))
+      // Share's panel dropping from its button
+      await motionStrip(page, 'share', around('share', 420, 480, -150, -12), () => page.getByTestId('share').click(), () => openReel(page))
+      // the hands-on drawer taking the notes column
+      await motionStrip(page, 'drawer', async () => ({ x: 560, y: 0, width: 880, height: 900 }), () => page.getByTestId('edit-myself').click(), () => openReel(page))
     }
   } finally {
     writeFileSync(join(OUT!, 'audit.json'), JSON.stringify(audit, null, 1))
