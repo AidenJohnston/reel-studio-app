@@ -14,15 +14,15 @@ app through it. It is not deployed.
 | Call | For | What happens |
 | --- | --- | --- |
 | `GET /v1/platforms` | the app, on Settings › Posting and Share | Which platforms it has an app for, each app's public id, and where approval stands (`testers` until Meta approves; TikTok `audited`). |
-| `POST /v1/{instagram,facebook}/start` | the app | Takes the app's state, its loopback address (`http://127.0.0.1:<port>/<platform>/callback`, nothing else) and a PKCE S256 challenge. Returns the platform's sign-in link. |
-| `GET /v1/{instagram,facebook}/callback` | the platform | The registered redirect. Sends the person on to the app's loopback address with the app's state and a sealed handoff. A link it can't read gets a plain page, never a redirect. |
-| `POST /v1/{instagram,facebook}/complete` | the app | Handoff and PKCE verifier in, token out. Instagram's short-lived token is traded for the 60-day one; Facebook's for a long-lived user token. Only the holder of the verifier can redeem a handoff. |
-| `POST /v1/instagram/uploads` | the app | Instagram fetches a reel from a link, so this makes a 10-minute upload link and a 6-hour read link for one video (and cover) in object storage, after checking the Instagram token belongs to a Business or Creator account. |
+| `POST /v1/{instagram,facebook,threads}/start` | the app | Takes the app's state, its loopback address (`http://127.0.0.1:<port>/<platform>/callback`, nothing else) and a PKCE S256 challenge. Returns the platform's sign-in link. |
+| `GET /v1/{instagram,facebook,threads}/callback` | the platform | The registered redirect. Sends the person on to the app's loopback address with the app's state and a sealed handoff. A link it can't read gets a plain page, never a redirect. |
+| `POST /v1/{instagram,facebook,threads}/complete` | the app | Handoff and PKCE verifier in, token out. Instagram's and Threads' short-lived tokens are traded for 60-day ones; Facebook's for a long-lived user token. Only the holder of the verifier can redeem a handoff. |
+| `POST /v1/{instagram,threads}/uploads` | the app | Instagram and Threads fetch a video from a link, so this makes a 10-minute upload link and a 6-hour read link for one video (and cover) in object storage, after checking the token (on Instagram, that it belongs to a Business or Creator account). |
 | `POST /v1/tiktok/token` | the app | TikTok signs a desktop app in on its own loopback address with its own PKCE (docs/tiktok.md); this adds the secret to the code or refresh-token exchange. |
 | `POST /v1/tiktok/revoke` | the app | Disconnect asks TikTok to end the grant. |
 
-Instagram tokens refresh without the secret, so the app does that itself. Disconnect for Instagram and Facebook forgets
-the token on the computer; the person removes the app in the platform's settings to end the grant there.
+Instagram and Threads tokens refresh without the secret, so the app does that itself. Disconnect for Instagram and Threads forgets
+the token on the computer (the person removes the app in the platform's settings to end the grant there); for Facebook it also ends the access at Facebook.
 
 ### Why nothing is stored
 
@@ -40,10 +40,11 @@ replayed handoff fails at the platform.
 | `SIGNIN_SECRET` | base64url of at least 32 random bytes: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Changing it ends every sign-in in progress, nothing else. |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_REVIEW` | The Instagram app (Instagram API with Instagram Login). `INSTAGRAM_REVIEW=approved` once Meta approves it; until then only accounts added to the app as testers can connect, and the app says so. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, `FACEBOOK_REVIEW` | The Facebook app (Facebook Login, Pages). |
+| `THREADS_APP_ID`, `THREADS_APP_SECRET`, `THREADS_REVIEW` | The Threads app (`threads_basic`, `threads_content_publish`). Until Meta gives it advanced access, only Threads testers can connect. Needs the storage below. |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_AUDITED`, `TIKTOK_DIRECT_POST` | `1` or `0`. Until TikTok audits the app, posts are Only me and the app says so. |
 | `MEDIA_BUCKET_URL`, `MEDIA_ACCESS_KEY_ID`, `MEDIA_SECRET_ACCESS_KEY`, `MEDIA_REGION` | S3-compatible storage for Instagram's copy, as `https://<host>/<bucket>`. `MEDIA_REGION` is `auto` for R2. Instagram stays off without it. |
 
-A platform is on when its id and secret are both set. One without the other, or Instagram without storage, stops the
+A platform is on when its id and secret are both set. One without the other, or Instagram or Threads without storage, stops the
 service from starting with the name of the missing setting.
 
 ## Run it on this computer

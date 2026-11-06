@@ -6,13 +6,13 @@ import type {
 } from '../shared/insights'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads']
 const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'shares', 'saves', 'comments']
 const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
   shares: 'Shares', saves: 'Saves', comments: 'Comments'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads' }
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
 // Repeated posts and a 20% margin suppress small comparisons; 100 plays limits tiny samples.
@@ -85,14 +85,16 @@ function parseTrials(value: unknown, project: string): InsightTrial[] {
     return { project, index, parentVersion: row.parent_version, variable, from: row.from, to: row.to }
   })
 }
+const isPlatform = (v: unknown): v is InsightPlatform => (PLATFORMS as unknown[]).includes(v)
 function parsePost(value: unknown, project: string, version: number, key: string): SavedPost {
   const file = `${project}/outcomes.json`
   if (!object(value) || value.version !== version || !text(value.postId) || !text(value.accountId)
     || !isoDate(value.publishedAt) || (value.observedAt !== null && !isoDate(value.observedAt))
-    || (value.platform !== 'instagram' && value.platform !== 'tiktok' && value.platform !== 'facebook')) return badData(file)
+    || !isPlatform(value.platform)) return badData(file)
   // Facebook reels (main/facebook.ts) are kept as facebook:<id>, like TikTok's, so ids from two platforms never collide
   const expectedKey = value.platform === 'instagram' ? value.postId : `${value.platform}:${value.postId}`
-  if (key !== expectedKey || (value.platform === 'tiktok' ? value.apiVersion !== 'v2' : value.apiVersion !== 'v26.0')) return badData(file)
+  const apiVersion = { instagram: 'v26.0', facebook: 'v26.0', tiktok: 'v2', threads: 'v1.0' }[value.platform]
+  if (key !== expectedKey || value.apiVersion !== apiVersion) return badData(file)
   if (value.observedAt !== null && Date.parse(value.observedAt) < Date.parse(value.publishedAt)) return badData(file)
   const metrics = emptyValues()
   if (value.metrics !== null) {

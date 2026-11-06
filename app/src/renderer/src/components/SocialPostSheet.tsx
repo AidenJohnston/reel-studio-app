@@ -8,6 +8,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { FacebookPost } from '../../../shared/facebook'
 import type { InstagramPost } from '../../../shared/instagram'
+import type { ThreadsPost } from '../../../shared/threads'
 import { BRANDED_TERMS_URL, MUSIC_TERMS_URL, PLATFORM_NAMES, SOCIAL_COPY, TIKTOK_PRIVACY_LABELS, availabilityLine, type SocialStatus } from '../../../shared/social'
 import type { TikTokCreator, TikTokPrivacy, TikTokPublishResult } from '../../../shared/tiktok'
 import { errorCode, reel, userMessage } from '../api'
@@ -16,15 +17,18 @@ import { accountName, PagePicker } from './SocialSettings'
 import { Spinner } from './ui'
 import './PostSheet.css'
 
-type Id = 'instagram' | 'tiktok' | 'facebook'
-type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult | FacebookPost } | { failed: string }
+type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads'
+type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult | FacebookPost | ThreadsPost } | { failed: string }
 
 const HEADINGS: Record<Id, [string, string]> = {
   instagram: [SOCIAL_COPY.igHeading, SOCIAL_COPY.igDoneHeading],
   tiktok: [SOCIAL_COPY.ttHeading, SOCIAL_COPY.ttDoneHeading],
-  facebook: [SOCIAL_COPY.fbHeading, SOCIAL_COPY.fbDoneHeading]
+  facebook: [SOCIAL_COPY.fbHeading, SOCIAL_COPY.fbDoneHeading],
+  threads: [SOCIAL_COPY.thHeading, SOCIAL_COPY.thDoneHeading]
 }
-const WAIT: Record<Id, string> = { instagram: SOCIAL_COPY.igWait, tiktok: SOCIAL_COPY.ttWait, facebook: SOCIAL_COPY.fbWait }
+const WAIT: Record<Id, string> = { instagram: SOCIAL_COPY.igWait, tiktok: SOCIAL_COPY.ttWait, facebook: SOCIAL_COPY.fbWait, threads: SOCIAL_COPY.thWait }
+/** Each platform's caption limit: Threads counts 500, the rest 2,200. */
+const LIMIT: Record<Id, number> = { instagram: 2200, tiktok: 2200, facebook: 2200, threads: 500 }
 
 const PRIVACY_ORDER: TikTokPrivacy[] = ['PUBLIC_TO_EVERYONE', 'FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY']
 
@@ -117,6 +121,8 @@ export function SocialPostSheet({
           ...(trial ? { trial: { graduation: 'MANUAL' as const } } : {})
         })
         setPhase({ done })
+      } else if (platform === 'threads') {
+        setPhase({ done: await reel.threads.publish({ slug, version, text: caption }) })
       } else if (platform === 'facebook') {
         setPhase({ done: await reel.facebook.publish({ slug, version, description: caption }) })
       } else {
@@ -215,7 +221,7 @@ export function SocialPostSheet({
     body = (
       <>
         <p data-testid="social-done">
-          {'message' in r ? r.message : platform === 'facebook' ? SOCIAL_COPY.fbDone(account ?? 'your Page') : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}
+          {'message' in r ? r.message : platform === 'facebook' ? SOCIAL_COPY.fbDone(account ?? 'your Page') : platform === 'threads' ? SOCIAL_COPY.thDone : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}
         </p>
         <div className="row">
           <button className="btn primary" onClick={onClose} data-autofocus data-testid="social-done-close">
@@ -242,7 +248,8 @@ export function SocialPostSheet({
     const tooLong = maxSec !== null && durationSec !== null && durationSec > maxSec
     const noDuration = platform === 'tiktok' && durationSec === null
     // TikTok: Post waits for a privacy choice, and for a disclosure choice once disclosure is turned on
-    const ready = platform === 'instagram' || (!tooLong && !noDuration && (!direct || privacy !== null) && (!disclose || own || branded))
+    const fits = [...caption].length <= LIMIT[platform]
+    const ready = fits && (platform !== 'tiktok' || (!tooLong && !noDuration && (!direct || privacy !== null) && (!disclose || own || branded)))
     const choices = direct ? PRIVACY_ORDER.filter((p) => tt.privacyOptions.includes(p)) : []
     body = (
       <form
@@ -255,7 +262,7 @@ export function SocialPostSheet({
         }}
       >
         <p style={{ margin: 0 }} data-testid="social-account">
-          Posting to <strong>{platform === 'instagram' ? `@${account}` : direct ? tt.displayName : account}</strong>
+          Posting to <strong>{platform === 'instagram' || platform === 'threads' ? `@${account}` : direct ? tt.displayName : account}</strong>
         </p>
         {a.review !== 'approved' && a.review !== 'own' && <p className="muted-sm" style={{ margin: 0 }}>{availabilityLine(platform, a)}</p>}
         {platform === 'facebook' && status.facebook.session.connected && status.facebook.session.pages.length > 1 && (
@@ -266,9 +273,9 @@ export function SocialPostSheet({
           <label className="field-label" htmlFor="social-caption">
             Caption
           </label>
-          <textarea id="social-caption" className="textarea" style={{ minHeight: 84 }} value={caption} maxLength={2200} onChange={(e) => setCaption(e.target.value)} data-autofocus data-testid="social-caption" />
+          <textarea id="social-caption" className="textarea" style={{ minHeight: 84 }} value={caption} maxLength={LIMIT[platform]} onChange={(e) => setCaption(e.target.value)} data-autofocus data-testid="social-caption" />
           <p className="muted-sm" style={{ margin: 0 }}>
-            A change here is for this post only. {caption.length.toLocaleString()}/2,200
+            A change here is for this post only. {caption.length.toLocaleString()}/{LIMIT[platform].toLocaleString()}
           </p>
         </div>
 
@@ -367,6 +374,7 @@ export function SocialPostSheet({
         )}
         {tooLong && <p className="post-note">{SOCIAL_COPY.ttTooLong(maxSec)}</p>}
         {noDuration && <p className="post-note">{SOCIAL_COPY.noDuration}</p>}
+        {!fits && <p className="post-note" data-testid="social-too-long">{SOCIAL_COPY.captionTooLong(name, LIMIT[platform])}</p>}
         {noteLine}
 
         <div className="row">

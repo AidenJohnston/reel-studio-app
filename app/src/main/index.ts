@@ -99,7 +99,8 @@ import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
-import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, tiktokFrom } from './signin-config'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom } from './signin-config'
+import { ThreadsService } from './threads'
 import { FacebookService } from './facebook'
 import { registerSocialIpc } from './social-ipc'
 import { testPlatformFetch } from './test-platforms'
@@ -859,8 +860,18 @@ function registerIpc(): void {
   handle('facebook:choosePage', (_e, pageId) => facebook.choosePage(pageId))
   handle('facebook:publish', (_e, input) => facebook.publish(input))
   app.on('before-quit', () => { facebook.stop() })
+  const threads = new ThreadsService({
+    settings: async () => threadsFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('threads:session', () => threads.session())
+  handle('threads:connect', () => threads.connect())
+  handle('threads:cancelConnect', () => threads.cancelConnect())
+  handle('threads:disconnect', () => threads.disconnect())
+  handle('threads:publish', (_e, input) => threads.publish(input))
+  app.on('before-quit', () => { threads.stop() })
   registerSocialIpc({
-    handle, directory: signin, instagram, tiktok, facebook,
+    handle, directory: signin, instagram, tiktok, facebook, threads,
     own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
   })
   handle('app:info', () => appInfo())

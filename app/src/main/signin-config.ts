@@ -7,12 +7,14 @@
 import type { InstagramSettings } from '../shared/instagram'
 import type { TikTokSettings } from '../shared/tiktok'
 import type { FacebookSettings } from './facebook'
+import type { ThreadsSettings } from './threads'
 import type { PlatformAvailability, SigninPlatformId } from '../shared/social'
 
 export interface SigninPlatforms {
   instagram?: { clientId: string; review: 'testers' | 'approved'; mediaOrigins: string[] }
   facebook?: { clientId: string; review: 'testers' | 'approved' }
   tiktok?: { clientKey: string; audited: boolean; directPost: boolean }
+  threads?: { clientId: string; review: 'testers' | 'approved'; mediaOrigins: string[] }
 }
 
 export type Directory = { reached: true; platforms: SigninPlatforms } | { reached: false }
@@ -43,10 +45,15 @@ export function readPlatforms(value: unknown): SigninPlatforms {
   const p = root.v === 1 && root.platforms && typeof root.platforms === 'object' ? (root.platforms as Record<string, Record<string, unknown> | undefined>) : {}
   const out: SigninPlatforms = {}
   const review = (v: unknown) => (v === 'approved' ? 'approved' : v === 'testers' ? 'testers' : null)
-  const ig = p.instagram
-  if (ig && isId(ig.clientId, /^\d{1,32}$/) && review(ig.review) && Array.isArray(ig.mediaOrigins) &&
-      ig.mediaOrigins.length > 0 && ig.mediaOrigins.every((o) => typeof o === 'string' && /^https:\/\/[^/?#]+$/.test(o)))
-    out.instagram = { clientId: ig.clientId, review: review(ig.review)!, mediaOrigins: ig.mediaOrigins as string[] }
+  const linked = (x: Record<string, unknown> | undefined) =>
+    x && isId(x.clientId, /^\d{1,32}$/) && review(x.review) && Array.isArray(x.mediaOrigins) &&
+    x.mediaOrigins.length > 0 && x.mediaOrigins.every((o) => typeof o === 'string' && /^https:\/\/[^/?#]+$/.test(o))
+      ? { clientId: x.clientId as string, review: review(x.review)!, mediaOrigins: x.mediaOrigins as string[] }
+      : undefined
+  const ig = linked(p.instagram)
+  if (ig) out.instagram = ig
+  const th = linked(p.threads)
+  if (th) out.threads = th
   const fb = p.facebook
   if (fb && isId(fb.clientId, /^\d{1,32}$/) && review(fb.review)) out.facebook = { clientId: fb.clientId, review: review(fb.review)! }
   const tt = p.tiktok
@@ -106,6 +113,11 @@ export function instagramFrom(d: Directory, baseUrl: string): InstagramSettings 
 export function facebookFrom(d: Directory, baseUrl: string): FacebookSettings {
   const fb = d.reached ? d.platforms.facebook : undefined
   return { appId: fb?.clientId ?? null, brokerUrl: fb ? baseUrl : null }
+}
+
+export function threadsFrom(d: Directory, baseUrl: string): ThreadsSettings {
+  const th = d.reached ? d.platforms.threads : undefined
+  return { appId: th?.clientId ?? null, brokerUrl: th ? baseUrl : null, mediaOrigins: th?.mediaOrigins ?? [] }
 }
 
 export function tiktokFrom(d: Directory, baseUrl: string): TikTokSettings {

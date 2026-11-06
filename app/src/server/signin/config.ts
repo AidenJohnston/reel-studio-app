@@ -18,6 +18,7 @@ export interface SigninConfig {
   secret: Uint8Array<ArrayBuffer>
   instagram?: MetaApp
   facebook?: MetaApp
+  threads?: MetaApp
   tiktok?: { clientKey: string; clientSecret: string; audited: boolean; directPost: boolean }
   /** S3-compatible storage for the temporary copy Instagram fetches by URL. Without it Instagram stays off. */
   media?: { bucketUrl: string; region: string; accessKeyId: string; secretAccessKey: string }
@@ -67,13 +68,15 @@ export function configFromEnv(env: Env, fetcher: SigninConfig['fetch'], now: () 
   if (!secret) throw new Error('Set SIGNIN_SECRET')
   const ig = pair(env, 'INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET')
   const fb = pair(env, 'FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET')
+  const th = pair(env, 'THREADS_APP_ID', 'THREADS_APP_SECRET')
   const tt = pair(env, 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET')
   const bucket = get(env, 'MEDIA_BUCKET_URL')
   const keys = pair(env, 'MEDIA_ACCESS_KEY_ID', 'MEDIA_SECRET_ACCESS_KEY')
   if (!!bucket !== !!keys) throw new Error('Set MEDIA_BUCKET_URL with MEDIA_ACCESS_KEY_ID and MEDIA_SECRET_ACCESS_KEY, or none of them')
   if (ig && !bucket) throw new Error('Instagram needs MEDIA_BUCKET_URL: Instagram fetches the video from a link')
+  if (th && !bucket) throw new Error('Threads needs MEDIA_BUCKET_URL: Threads fetches the video from a link')
   if (bucket && !/^https:\/\/[^/?#]+\/[^/?#]+$/.test(bucket)) throw new Error('MEDIA_BUCKET_URL must be https://<host>/<bucket>')
-  for (const [name, id] of [['INSTAGRAM_APP_ID', ig?.[0]], ['FACEBOOK_APP_ID', fb?.[0]]] as const)
+  for (const [name, id] of [['INSTAGRAM_APP_ID', ig?.[0]], ['FACEBOOK_APP_ID', fb?.[0]], ['THREADS_APP_ID', th?.[0]]] as const)
     if (id && !/^\d{1,32}$/.test(id)) throw new Error(`${name} must be the numeric app ID`)
   if (tt && !/^[A-Za-z0-9_-]{1,128}$/.test(tt[0])) throw new Error('TIKTOK_CLIENT_KEY has unexpected characters')
   return {
@@ -81,6 +84,7 @@ export function configFromEnv(env: Env, fetcher: SigninConfig['fetch'], now: () 
     secret: secretBytes(secret),
     ...(ig ? { instagram: { appId: ig[0], appSecret: ig[1], review: review(env, 'INSTAGRAM_REVIEW') } } : {}),
     ...(fb ? { facebook: { appId: fb[0], appSecret: fb[1], review: review(env, 'FACEBOOK_REVIEW') } } : {}),
+    ...(th ? { threads: { appId: th[0], appSecret: th[1], review: review(env, 'THREADS_REVIEW') } } : {}),
     ...(tt ? { tiktok: { clientKey: tt[0], clientSecret: tt[1], audited: flag(env, 'TIKTOK_AUDITED'), directPost: flag(env, 'TIKTOK_DIRECT_POST') } } : {}),
     ...(bucket && keys ? { media: { bucketUrl: bucket, region: get(env, 'MEDIA_REGION') ?? 'auto', accessKeyId: keys[0], secretAccessKey: keys[1] } } : {}),
     fetch: fetcher,

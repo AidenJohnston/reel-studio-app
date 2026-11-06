@@ -16,6 +16,7 @@ import type { FacebookOutcome, FacebookPage, FacebookPost, FacebookPublishInput,
 import type { InstagramSecretStore } from './instagram-store'
 import { serviceOrigin } from './instagram-http'
 import { signinCallback } from './signin-callback'
+import { metaApi, SocialError, type MetaFetch } from './meta-http'
 import { atomicSocialFile, withSocialFile } from './social-store'
 
 export const FACEBOOK_VERSION = 'v26.0'
@@ -24,55 +25,9 @@ const RUPLOAD = `https://rupload.facebook.com/video-upload/${FACEBOOK_VERSION}`
 export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts']
 const MAX_VIDEO = 1_000_000_000
 
-export class FacebookError extends Error {
-  constructor(readonly code: string, readonly userMessage: string) {
-    super(userMessage)
-  }
-}
-const fail = (code: string, message: string): never => { throw new FacebookError(code, message) }
-const invalid = (): never => fail('FB_RESPONSE', 'Facebook returned incomplete data. Try again later.')
-const localError = (): never => fail('FB_LOCAL_DATA', 'The saved Facebook data could not be read. Connect Facebook again in Settings.')
-
-function object(v: unknown): Record<string, unknown> {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return invalid()
-  return v as Record<string, unknown>
-}
-function text(v: unknown): string {
-  if (typeof v !== 'string' || !v || v.length > 10_000) return invalid()
-  return v
-}
-function id(v: unknown): string {
-  const t = typeof v === 'number' && Number.isSafeInteger(v) ? String(v) : text(v)
-  if (!/^\d{1,32}$/.test(t)) return invalid()
-  return t
-}
-
-export type FacebookFetch = (url: string, init: RequestInit) => Promise<Response>
-
-/** One Graph call. Meta's error codes become plain words; anything else is "try again later". */
-export async function request(fetcher: FacebookFetch, url: string, init: RequestInit, signal: AbortSignal, onDispatch?: () => void): Promise<Record<string, unknown>> {
-  signal.throwIfAborted()
-  let res: Response
-  try {
-    onDispatch?.()
-    res = await fetcher(url, { ...init, redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) })
-  } catch {
-    signal.throwIfAborted()
-    return fail('FB_NETWORK', 'Facebook could not be reached. Check your connection and try again.')
-  }
-  let data: unknown = null
-  try { data = await res.json() } catch { /* handled below */ }
-  const err = data && typeof data === 'object' && 'error' in data ? (data as { error: unknown }).error : undefined
-  if (res.ok && data && typeof data === 'object' && !err) return data as Record<string, unknown>
-  const code = err && typeof err === 'object' ? (err as Record<string, unknown>).code : undefined
-  if (res.status === 429 || code === 4 || code === 17 || code === 32 || code === 613 || code === 80001)
-    return fail('FB_RATE_LIMIT', 'Facebook has reached a request limit. Wait a few minutes before trying again.')
-  if (res.status === 401 || code === 190) return fail('FB_TOKEN', 'Your Facebook connection has ended. Connect Facebook again in Settings.')
-  if (code === 10 || code === 200 || res.status === 403)
-    return fail('FB_PERMISSION', 'Facebook did not allow this. Check that you can post to the Page, then connect again in Settings.')
-  if (code === 100 || code === 6000) return fail('FB_INPUT', 'Facebook could not use this video. Reels need to be 3 to 90 seconds and vertical.')
-  return fail('FB_API', 'Facebook could not finish this request. Try again later.')
-}
+const { fail, invalid, object, text, id, request } = metaApi('Facebook', 'FB_')
+const localError = (): never => fail('LOCAL_DATA', 'The saved Facebook data could not be read. Connect Facebook again in Settings.')
+type FacebookFetch = MetaFetch
 
 const form = (fields: Record<string, string>, token: string): RequestInit => ({
   method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: `Bearer ${token}` }, body: new URLSearchParams(fields)
@@ -173,7 +128,7 @@ export class FacebookService {
 
   private secure(): void {
     if (!this.o.secrets.isEncryptionAvailable() || this.o.secrets.getSelectedStorageBackend?.() === 'basic_text')
-      fail('FB_SECURE_STORAGE', 'This computer cannot store the Facebook connection securely. Turn on its system keychain and try again.')
+      fail('SECURE_STORAGE', 'This computer cannot store the Facebook connection securely. Turn on its system keychain and try again.')
   }
   private async load(): Promise<Credentials | null> {
     let bytes: Buffer
@@ -198,20 +153,20 @@ export class FacebookService {
 
   private async config(): Promise<{ appId: string; brokerUrl: string }> {
     const s = await this.o.settings()
-    if (!s.appId || !s.brokerUrl) return fail('FB_DISABLED', 'Posting to Facebook isn’t open yet. Settings › Posting says what’s missing.')
+    if (!s.appId || !s.brokerUrl) return fail('DISABLED', 'Posting to Facebook isn’t open yet. Settings › Posting says what’s missing.')
     return { appId: s.appId, brokerUrl: serviceOrigin(s.brokerUrl) }
   }
   private async credentials(): Promise<Credentials> {
     const c = await this.config()
     const saved = await this.load()
-    if (!saved || saved.appId !== c.appId || saved.brokerUrl !== c.brokerUrl) return fail('FB_TOKEN', 'Connect Facebook again in Settings.')
+    if (!saved || saved.appId !== c.appId || saved.brokerUrl !== c.brokerUrl) return fail('TOKEN', 'Connect Facebook again in Settings.')
     return saved
   }
   private run<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const signal = AbortSignal.any([this.connection.signal, AbortSignal.timeout(30 * 60_000)])
     const work = async () => {
       try { signal.throwIfAborted(); return await fn(signal) } catch (e) {
-        if (signal.aborted) fail('FB_CANCELLED', 'The Facebook action was cancelled. Check your Page before posting again.')
+        if (signal.aborted) fail('CANCELLED', 'The Facebook action was cancelled. Check your Page before posting again.')
         throw e
       }
     }
@@ -228,7 +183,7 @@ export class FacebookService {
   session(): Promise<FacebookSession> {
     return this.run(async () => {
       const c = await this.config().catch((e: unknown) => {
-        if (e instanceof FacebookError && e.code === 'FB_DISABLED') return null
+        if (e instanceof SocialError && e.code === 'FB_DISABLED') return null
         throw e
       })
       if (!c) return { connected: false }
@@ -249,9 +204,9 @@ export class FacebookService {
       const state = randomBytes(32).toString('base64url')
       const verifier = randomBytes(32).toString('base64url')
       const listener = await signinCallback('Facebook', '/facebook/callback', state, signal, {
-        declined: () => new FacebookError('FB_DECLINED', 'Facebook was not connected. You can try again in Settings.'),
-        cancelled: () => new FacebookError('FB_CANCELLED', 'Facebook connection was cancelled.'),
-        failed: () => new FacebookError('FB_CALLBACK', 'Could not open the Facebook callback. Try again.')
+        declined: () => new SocialError('FB_DECLINED', 'Facebook was not connected. You can try again in Settings.'),
+        cancelled: () => new SocialError('FB_CANCELLED', 'Facebook connection was cancelled.'),
+        failed: () => new SocialError('FB_CALLBACK', 'Could not open the Facebook callback. Try again.')
       })
       try {
         const started = await request(this.o.fetch, `${config.brokerUrl}/v1/facebook/start`, jsonPost({
@@ -269,7 +224,7 @@ export class FacebookService {
         const data = await request(this.o.fetch, `${config.brokerUrl}/v1/facebook/complete`, jsonPost({ handoff, code_verifier: verifier }), signal)
         const granted = Array.isArray(data.permissions) ? data.permissions : []
         if (String(data.token_type).toLowerCase() !== 'bearer' || !FACEBOOK_SCOPES.every((s) => granted.includes(s)))
-          return fail('FB_PERMISSION', 'Allow Reel Studio to see your Pages and post to them when you connect Facebook.')
+          return fail('PERMISSION', 'Allow Reel Studio to see your Pages and post to them when you connect Facebook.')
         const userToken = text(data.access_token)
         const expiresIn = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : invalid()
         const me = await request(this.o.fetch, `${FACEBOOK_GRAPH}/me?fields=name`, get(userToken), signal)
@@ -279,7 +234,7 @@ export class FacebookService {
           return Array.isArray(x.tasks) && x.tasks.includes('CREATE_CONTENT') ? [{ id: id(x.id), name: text(x.name), token: text(x.access_token) }] : []
         })
         if (!pages.length)
-          return fail('FB_NO_PAGE', 'Reel Studio posts reels to a Facebook Page, and this account can’t post to one. Make a Page, or ask its admin to let you post, then connect again.')
+          return fail('NO_PAGE', 'Reel Studio posts reels to a Facebook Page, and this account can’t post to one. Make a Page, or ask its admin to let you post, then connect again.')
         const previous = await this.load().catch(() => null)
         const keep = previous && pages.some((p) => p.id === previous.pageId) ? previous.pageId : pages[0].id
         const c: Credentials = { userToken, userName: text(me.name), expiresAt: this.now() + expiresIn * 1000, pages, pageId: keep, appId: config.appId, brokerUrl: config.brokerUrl }
@@ -312,7 +267,7 @@ export class FacebookService {
   choosePage(pageId: unknown): Promise<FacebookSession> {
     return this.run(async () => {
       const c = await this.credentials()
-      if (typeof pageId !== 'string' || !c.pages.some((p) => p.id === pageId)) return fail('FB_INPUT', 'Choose one of your Pages.')
+      if (typeof pageId !== 'string' || !c.pages.some((p) => p.id === pageId)) return fail('INPUT', 'Choose one of your Pages.')
       const next = { ...c, pageId }
       await this.save(next)
       return this.toSession(next)
@@ -320,26 +275,26 @@ export class FacebookService {
   }
 
   private async project(slug: string, version: number): Promise<string> {
-    if (!/^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u.test(slug) || !Number.isSafeInteger(version) || version < 1) return fail('FB_INPUT', 'Choose a finished version.')
+    if (!/^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u.test(slug) || !Number.isSafeInteger(version) || version < 1) return fail('INPUT', 'Choose a finished version.')
     const root = await fs.realpath(this.o.projectsDir())
     const dir = await fs.realpath(join(root, slug))
-    if (!inside(root, dir)) return fail('FB_PATH', 'This project is outside the Reel Studio projects folder.')
+    if (!inside(root, dir)) return fail('PATH', 'This project is outside the Reel Studio projects folder.')
     await fs.access(join(dir, 'project.json'))
     return dir
   }
 
   private async openVideo(dir: string, version: number) {
     const vdir = join(dir, 'versions', `v${version}`)
-    if (await fs.stat(join(vdir, '.rendering')).then(() => true, () => false)) return fail('FB_RENDERING', 'Wait for this version to finish exporting before posting.')
+    if (await fs.stat(join(vdir, '.rendering')).then(() => true, () => false)) return fail('RENDERING', 'Wait for this version to finish exporting before posting.')
     const file = join(vdir, 'export.mp4')
     const handle = await fs.open(file, constants.O_RDONLY | constants.O_NONBLOCK)
     try {
       const stat = await handle.stat({ bigint: true })
-      if (!stat.isFile() || stat.size < 1n || stat.size > BigInt(MAX_VIDEO)) return fail('FB_FILE', 'The exported video is empty or too large for Facebook.')
+      if (!stat.isFile() || stat.size < 1n || stat.size > BigInt(MAX_VIDEO)) return fail('FILE', 'The exported video is empty or too large for Facebook.')
       const resolved = await fs.realpath(file)
-      if (!inside(dir, resolved)) return fail('FB_PATH', 'The exported video is outside this project.')
+      if (!inside(dir, resolved)) return fail('PATH', 'The exported video is outside this project.')
       const checked = await fs.stat(resolved, { bigint: true })
-      if (checked.dev !== stat.dev || checked.ino !== stat.ino) return fail('FB_PATH', 'The export changed while opening it. Try again.')
+      if (checked.dev !== stat.dev || checked.ino !== stat.ino) return fail('PATH', 'The export changed while opening it. Try again.')
       return { handle, size: Number(stat.size) }
     } catch (e) { await handle.close(); throw e }
   }
@@ -348,7 +303,7 @@ export class FacebookService {
     return this.run(async (signal) => {
       const p = object(value)
       if (typeof p.slug !== 'string' || typeof p.version !== 'number' || typeof p.description !== 'string' || p.description.length > 2200)
-        return fail('FB_INPUT', 'Choose a finished version and a description of at most 2,200 characters.')
+        return fail('INPUT', 'Choose a finished version and a description of at most 2,200 characters.')
       const input: FacebookPublishInput = { slug: p.slug, version: p.version, description: p.description }
       const dir = await this.project(input.slug, input.version)
       const c = await this.credentials()
@@ -360,8 +315,8 @@ export class FacebookService {
         return saved.post
       }
       if (saved?.state === 'publishing')
-        return fail('FB_PUBLISH_UNKNOWN', 'Facebook didn’t confirm whether this reel was posted. Check your Page before posting this version again.')
-      if (saved && saved.inputHash !== inputHash) return fail('FB_PUBLISH_CHANGED', 'This version started posting with another Page or description. Post it with those, or export a new version.')
+        return fail('PUBLISH_UNKNOWN', 'Facebook didn’t confirm whether this reel was posted. Check your Page before posting this version again.')
+      if (saved && saved.inputHash !== inputHash) return fail('PUBLISH_CHANGED', 'This version started posting with another Page or description. Post it with those, or export a new version.')
       const video = await this.openVideo(dir, input.version)
       try {
         if (!saved) {
@@ -384,7 +339,7 @@ export class FacebookService {
               duplex: 'half'
             } satisfies RequestInit & { duplex: 'half' }
             const up = await request(this.o.fetch, `${RUPLOAD}/${saved.videoId}`, init, signal)
-            if (up.success !== true) return fail('FB_UPLOAD', 'Facebook didn’t take the whole video. Post this version again to carry on.')
+            if (up.success !== true) return fail('UPLOAD', 'Facebook didn’t take the whole video. Post this version again to carry on.')
           } finally { stream.destroy() }
         }
         signal.throwIfAborted()
@@ -398,18 +353,18 @@ export class FacebookService {
           if (done.success !== true) return invalid()
         } catch (e) {
           // A definite rejection posted nothing; a lost answer may have, so the version stays blocked.
-          if (!dispatched || (e instanceof FacebookError && ['FB_RATE_LIMIT', 'FB_TOKEN', 'FB_PERMISSION', 'FB_INPUT'].includes(e.code))) {
+          if (!dispatched || (e instanceof SocialError && ['FB_RATE_LIMIT', 'FB_TOKEN', 'FB_PERMISSION', 'FB_INPUT'].includes(e.code))) {
             await saveReceipt(dir, input.version, { ...saved, state: 'uploading' })
             throw e
           }
-          return fail('FB_PUBLISH_UNKNOWN', 'Facebook didn’t confirm whether this reel was posted. Check your Page before posting this version again.')
+          return fail('PUBLISH_UNKNOWN', 'Facebook didn’t confirm whether this reel was posted. Check your Page before posting this version again.')
         }
         const post: FacebookPost = { version: input.version, accountId: page.id, postId: saved.videoId, publishedAt: new Date(this.now()).toISOString() }
         try {
           await saveReceipt(dir, input.version, { ...saved, state: 'published', post })
           await saveOutcome(dir, { ...post, platform: 'facebook', apiVersion: FACEBOOK_VERSION, observedAt: null, metrics: null })
         } catch {
-          return fail('FB_PUBLISHED_UNSAVED', `Facebook posted reel ${post.postId}, but Reel Studio couldn’t save that. Don’t post it again.`)
+          return fail('PUBLISHED_UNSAVED', `Facebook posted reel ${post.postId}, but Reel Studio couldn’t save that. Don’t post it again.`)
         }
         return post
       } finally { await video.handle.close() }

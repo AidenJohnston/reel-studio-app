@@ -4,8 +4,9 @@
 import type { InstagramSession } from './instagram'
 import type { TikTokSession } from './tiktok'
 import type { FacebookSession } from './facebook'
+import type { ThreadsSession } from './threads'
 
-export type SigninPlatformId = 'instagram' | 'facebook' | 'tiktok'
+export type SigninPlatformId = 'instagram' | 'facebook' | 'tiktok' | 'threads'
 
 /**
  * Whether a platform can be connected now. Closed: the sign-in service couldn't be reached, or has no app for it.
@@ -21,9 +22,10 @@ export interface SocialStatus {
   instagram: { availability: PlatformAvailability; session: InstagramSession }
   tiktok: { availability: PlatformAvailability; session: TikTokSession }
   facebook: { availability: PlatformAvailability; session: FacebookSession }
+  threads: { availability: PlatformAvailability; session: ThreadsSession }
 }
 
-export const PLATFORM_NAMES: Record<SigninPlatformId, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok' }
+export const PLATFORM_NAMES: Record<SigninPlatformId, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', threads: 'Threads' }
 
 /** The line under a platform that isn't connected: why it can't be yet, or what connecting needs. */
 export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability): string {
@@ -38,13 +40,14 @@ export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability):
       : 'Meta hasn’t approved Reel Studio yet, so only accounts added to its app as testers can connect.'
   if (a.review === 'private_only') return 'TikTok hasn’t reviewed Reel Studio yet, so posts go up as Only me until it does.'
   if (id === 'instagram') return 'Needs a Business or Creator account.'
+  if (id === 'threads') return ''
   return ''
 }
 
 /** The connected account's line in Settings › Posting. */
 export function connectedLine(id: SigninPlatformId, name: string): string {
   if (id === 'facebook') return `Posting to ${name}.`
-  return `Connected as ${id === 'instagram' ? `@${name}` : name}.`
+  return `Connected as ${id === 'instagram' || id === 'threads' ? `@${name}` : name}.`
 }
 
 export const SOCIAL_COPY = {
@@ -54,6 +57,10 @@ export const SOCIAL_COPY = {
     name === 'TikTok'
       ? `Reel Studio forgets ${account} on this computer and asks TikTok to end its access. Posts already made stay on TikTok.`
       : `Reel Studio forgets ${account} on this computer. Posts already made stay on ${name}. To remove Reel Studio’s access completely, remove it in ${name}’s settings too.`,
+  thHeading: 'Post to Threads',
+  thDoneHeading: 'Posted to Threads',
+  thDone: 'Your video is on Threads.',
+  thWait: 'Threads checks the video before it posts, usually for about half a minute. Keep Reel Studio open.',
   fbHeading: 'Post to Facebook',
   fbDoneHeading: 'Posted to Facebook',
   fbPage: 'Page',
@@ -90,6 +97,7 @@ export const SOCIAL_COPY = {
   ttInbox: 'TikTok puts this video in your TikTok inbox. Open the notification in TikTok to finish posting it.',
   ttWait: 'Keep Reel Studio open until TikTok answers.',
   noDuration: 'Reel Studio couldn’t read this video’s length. Export it again, then post.',
+  captionTooLong: (name: string, max: number) => `${name} takes up to ${max.toLocaleString('en-US')} characters. Shorten the caption above for this post.`,
   connectOnce: (name: string) => `Connect your ${name} account once. Reel Studio keeps the connection on this computer.`,
   sending: (name: string) => `Sending your video to ${name}…`
 } as const

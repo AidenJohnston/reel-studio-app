@@ -49,6 +49,13 @@ const api: ReelApi = {
     choosePage: (pageId) => call('facebook:choosePage', pageId),
     publish: (input) => call('facebook:publish', input)
   },
+  threads: {
+    session: () => call('threads:session'),
+    connect: () => call('threads:connect'),
+    cancelConnect: () => call('threads:cancelConnect'),
+    disconnect: () => call('threads:disconnect'),
+    publish: (input) => call('threads:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),

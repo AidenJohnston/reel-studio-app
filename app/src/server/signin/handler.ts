@@ -24,6 +24,8 @@ import { b64url, s256, sameText, seal, sealKey, unseal } from './seal.ts'
 export const META_VERSION = 'v26.0'
 export const INSTAGRAM_SCOPES = ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_insights']
 export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights']
+export const THREADS_SCOPES = ['threads_basic', 'threads_content_publish']
+const THREADS_GRAPH = 'https://graph.threads.com'
 const TIKTOK = 'https://open.tiktokapis.com/v2'
 const STATE_MS = 10 * 60_000
 const HANDOFF_MS = 5 * 60_000
@@ -34,7 +36,7 @@ const MAX_BODY = 16_384
 const MAX_VIDEO = 300_000_000
 const MAX_COVER = 8_000_000
 
-type Platform = 'instagram' | 'facebook'
+type Platform = 'instagram' | 'facebook' | 'threads'
 
 class Refused extends Error {
   readonly status: number
@@ -162,8 +164,23 @@ async function facebookExchange(c: SigninConfig, app: MetaApp, code: string, red
   return { access_token: access, token_type: 'bearer', expires_in: expires, permissions }
 }
 
+async function threadsExchange(c: SigninConfig, app: MetaApp, code: string, redirect: string): Promise<Granted> {
+  const short = await upstream(c, `${THREADS_GRAPH}/oauth/access_token`, form({
+    client_id: app.appId, client_secret: app.appSecret, grant_type: 'authorization_code', redirect_uri: redirect, code
+  }), 'code_rejected')
+  const q = new URLSearchParams({ grant_type: 'th_exchange_token', client_secret: app.appSecret, access_token: token(short.access_token) })
+  const long = await upstream(c, `${THREADS_GRAPH}/access_token?${q}`, { method: 'GET' }, 'code_rejected')
+  // Threads doesn't list what was granted; the app checks by posting, and asks for both permissions
+  return { access_token: token(long.access_token), token_type: 'bearer', expires_in: positive(long.expires_in), permissions: [] }
+}
+
 function authorizeUrl(c: SigninConfig, p: Platform, app: MetaApp, state: string): string {
   const redirect = `${c.publicUrl}/v1/${p}/callback`
+  if (p === 'threads') {
+    const u = new URL('https://threads.com/oauth/authorize')
+    u.search = new URLSearchParams({ client_id: app.appId, redirect_uri: redirect, response_type: 'code', scope: THREADS_SCOPES.join(','), state }).toString()
+    return u.toString()
+  }
   if (p === 'instagram') {
     const u = new URL('https://www.instagram.com/oauth/authorize')
     u.search = new URLSearchParams({ client_id: app.appId, redirect_uri: redirect, response_type: 'code', scope: INSTAGRAM_SCOPES.join(','), state, enable_fb_login: 'false' }).toString()
@@ -222,11 +239,13 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     if (!h || h.p !== p || typeof h.code !== 'string' || typeof h.challenge !== 'string') throw new Refused(401, 'handoff_expired')
     if (!sameText(await s256(verifier), h.challenge)) throw new Refused(401, 'wrong_verifier')
     const redirect = `${c.publicUrl}/v1/${p}/callback`
-    return json(200, p === 'instagram' ? await instagramExchange(c, app, h.code, redirect) : await facebookExchange(c, app, h.code, redirect))
+    const exchange = p === 'instagram' ? instagramExchange : p === 'facebook' ? facebookExchange : threadsExchange
+    return json(200, await exchange(c, app, h.code, redirect))
   }
 
-  const uploads = async (req: Request) => {
-    meta('instagram')
+  /** Upload links for one video (and cover), for a platform that fetches media from a link: Instagram or Threads. */
+  const uploads = async (p: 'instagram' | 'threads', req: Request) => {
+    meta(p)
     const media = c.media
     if (!media) throw new Refused(404, 'platform_off')
     const auth = req.headers.get('authorization') ?? ''
@@ -239,14 +258,22 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     }
     const videoSize = size(b.video_size, MAX_VIDEO)
     const coverSize = b.cover_size === null || b.cover_size === undefined ? null : size(b.cover_size, MAX_COVER)
-    // Only a connected professional account gets storage: anyone else is refused before a link is made.
-    const me = await upstream(c, `https://graph.instagram.com/${META_VERSION}/me?fields=user_id,account_type`, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
-    if (typeof me.user_id !== 'string' && typeof me.user_id !== 'number') throw new Refused(502, 'upstream_failed')
-    if (typeof me.account_type !== 'string' || !['BUSINESS', 'MEDIA_CREATOR'].includes(me.account_type.toUpperCase())) throw new Refused(403, 'not_professional')
-    const owner = String(me.user_id).replace(/[^0-9]/g, '').slice(0, 32) || 'x'
+    // Only a connected account gets storage (on Instagram, a professional one): anyone else is refused before a link is made.
+    let owner: string
+    if (p === 'instagram') {
+      const me = await upstream(c, `https://graph.instagram.com/${META_VERSION}/me?fields=user_id,account_type`, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
+      if (typeof me.user_id !== 'string' && typeof me.user_id !== 'number') throw new Refused(502, 'upstream_failed')
+      if (typeof me.account_type !== 'string' || !['BUSINESS', 'MEDIA_CREATOR'].includes(me.account_type.toUpperCase())) throw new Refused(403, 'not_professional')
+      owner = String(me.user_id)
+    } else {
+      const me = await upstream(c, `${THREADS_GRAPH}/v1.0/me?fields=id`, { method: 'GET', headers: { authorization: `Bearer ${bearer}` } }, 'token_rejected')
+      if (typeof me.id !== 'string' && typeof me.id !== 'number') throw new Refused(502, 'upstream_failed')
+      owner = String(me.id)
+    }
+    owner = owner.replace(/[^0-9]/g, '').slice(0, 32) || 'x'
     const one = async (ext: 'mp4' | 'jpg', type: string, length: number) => {
       const id = b64url(crypto.getRandomValues(new Uint8Array(18)))
-      const url = `${media.bucketUrl}/instagram/${owner}/${id}.${ext}`
+      const url = `${media.bucketUrl}/${p}/${owner}/${id}.${ext}`
       const now = new Date(c.now())
       const keys = { accessKeyId: media.accessKeyId, secretAccessKey: media.secretAccessKey, region: media.region, now }
       return {
@@ -311,6 +338,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
       platforms: {
         ...(c.instagram && c.media ? { instagram: { clientId: c.instagram.appId, review: c.instagram.review, mediaOrigins: [new URL(c.media.bucketUrl).origin] } } : {}),
         ...(c.facebook ? { facebook: { clientId: c.facebook.appId, review: c.facebook.review } } : {}),
+        ...(c.threads && c.media ? { threads: { clientId: c.threads.appId, review: c.threads.review, mediaOrigins: [new URL(c.media.bucketUrl).origin] } } : {}),
         ...(c.tiktok ? { tiktok: { clientKey: c.tiktok.clientKey, audited: c.tiktok.audited, directPost: c.tiktok.directPost } } : {})
       }
     })
@@ -325,14 +353,15 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     const route = `${req.method} ${url.pathname}`
     try {
       if (route === 'GET /v1/platforms') return platforms()
-      const m = /^\/v1\/(instagram|facebook)\/(start|callback|complete)$/.exec(url.pathname)
+      const m = /^\/v1\/(instagram|facebook|threads)\/(start|callback|complete)$/.exec(url.pathname)
       if (m) {
         const p = m[1] as Platform
         if (m[2] === 'start' && req.method === 'POST') return await start(p, req)
         if (m[2] === 'callback' && req.method === 'GET') return await callback(p, url)
         if (m[2] === 'complete' && req.method === 'POST') return await complete(p, req)
       }
-      if (route === 'POST /v1/instagram/uploads') return await uploads(req)
+      if (route === 'POST /v1/instagram/uploads') return await uploads('instagram', req)
+      if (route === 'POST /v1/threads/uploads') return await uploads('threads', req)
       if (route === 'POST /v1/tiktok/token') return await tiktokToken(req)
       if (route === 'POST /v1/tiktok/revoke') return await tiktokRevoke(req)
       return json(404, { error: { code: 'not_found' } })

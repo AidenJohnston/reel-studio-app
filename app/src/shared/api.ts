@@ -4,6 +4,7 @@ import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { SocialStatus } from './social'
 import type { FacebookApi } from './facebook'
+import type { ThreadsApi } from './threads'
 import type { InsightsOptions, InsightsSummary } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
@@ -852,6 +853,7 @@ export interface ReelApi {
   /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
   social: { status(fresh?: boolean): Promise<SocialStatus> }
   facebook: FacebookApi
+  threads: ThreadsApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
