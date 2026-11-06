@@ -18,7 +18,6 @@ import pytest
 import fixtures as fx
 from reelengine import broll, render, segment
 from reelengine.proto import EngineError
-from reelengine.render_ctx import Segment
 
 W, H, FPS = 1080, 1920, 30
 # the "speaker": a light block from the shoulders down, centred
@@ -125,8 +124,49 @@ def test_a_model_that_is_not_the_pinned_bytes_is_never_kept(tmp_path, monkeypatc
         srv.shutdown()
 
 
-def test_the_matte_reads_the_frame_the_render_shows_across_a_cut():
-    """Fails if the cut-out for the first frames after a cut is made from the take before it."""
-    segs = [Segment("s1", 1.0, 2.0, 0.0), Segment("s1", 5.0, 6.0, 1.0)]
-    assert segment.frame_plan(segs, {"s1": {"fps": 30}}, 0.9, 1.1, 30) == [
-        ("s1", 57), ("s1", 58), ("s1", 59), ("s1", 150), ("s1", 151), ("s1", 152)]
+def _side_take(path):
+    """The light block on the left for 3 s, then on the right."""
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    f"color=c=0x282828:s={W}x{H}:r={FPS}:d=6,drawbox=x='if(lt(t,3),60,{W - 460})':y=600:w=400:h=1200:color=0xe0e0e0:t=fill",
+                    "-f", "lavfi", "-i", "sine=f=220:d=6:sample_rate=48000",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path)],
+                   check=True)
+    return path
+
+
+def test_the_cut_out_switches_sides_on_the_frame_the_cut_does(tmp_path, monkeypatch):
+    """Fails if the matte after a cut is made from the take before it (or from no frames at all): the
+    speaker would be cut out where they no longer are."""
+    monkeypatch.setattr(segment, "person_prob", light_is_person)
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, _side_take(tmp_path / "side.mp4"), keep=((0.5, 2.0), (4.0, 5.5)))
+    ctx = fx.make_ctx(pdir)
+    cut = ctx.out_timeline[1].out_start
+    t0 = 1.0
+    clip = segment.matte_clip(ctx, t0, cut + 0.6, tmp_path, "m")
+    raw = subprocess.run([fx.FFMPEG, "-v", "error", "-i", str(clip), "-vf", f"crop={W}:2:0:{H * 3 // 4}",
+                          "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    rows = np.frombuffer(raw, np.uint8).reshape(-1, 2, W)[:, 0]
+    first = int(np.ceil(t0 * FPS - 1e-6))
+    for j, row in enumerate(rows):
+        t = (first + j) / FPS
+        left, right = row[100:400].mean(), row[W - 400:W - 100].mean()
+        if t < cut - 1.5 / FPS:
+            assert left > 200 and right < 50, f"frame at {t:.3f} s (before the cut at {cut:.3f} s)"
+        elif t > cut + 0.5 / FPS:
+            assert right > 200 and left < 50, f"frame at {t:.3f} s (after the cut at {cut:.3f} s)"
+
+
+def test_an_unreadable_take_is_refused_rather_than_cut_out_as_empty(tmp_path, monkeypatch):
+    """Fails if a take that can't be decoded gives an empty (black) matte: the words would then be drawn
+    over the speaker instead of falling back to above the face."""
+    monkeypatch.setattr(segment, "person_prob", light_is_person)
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, _side_take(tmp_path / "side.mp4"), keep=((0.5, 2.0),))
+    media = pdir / "media" / "side.mp4"
+    media.unlink()                                   # the project's own link, never the shared take
+    media.write_bytes(os.urandom(200_000))
+    with pytest.raises(EngineError) as e:
+        segment.matte_clip(fx.make_ctx(pdir), 0.2, 1.0, tmp_path, "m")
+    assert e.value.code == "MATTE_DECODE"
+    assert list(tmp_path.glob("m-matte-*")) == []
