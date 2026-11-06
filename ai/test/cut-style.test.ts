@@ -154,5 +154,5 @@ it('set_beat_accents turns beat landing on or off and hands it back to the pace,
   await executeTool(ctx, 'set_beat_accents', { on: null });
   expect('beatAccents' in (await loadProject(dir))).toBe(false);
   // the test project has no song (withDefaults: track null)
-  expect((on.content as any).note).toMatch(/no song yet/);
+  expect(JSON.parse(on.content as string).note).toMatch(/no song yet/);
 });
