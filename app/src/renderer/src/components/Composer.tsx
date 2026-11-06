@@ -10,6 +10,7 @@ import { AttachmentChips, type useNoteAttachments } from './NoteAttachments'
 import { PopMenu } from './PopMenu'
 import { usePresence } from './motion'
 import { Thinking } from './ui'
+import { NOTE_STATUS } from '../../../shared/perf-marks'
 
 /** What a note is about: a moment or a range, and a numbered spot on the picture. */
 export type Chip = { at: number; to?: number; spot?: { x: number; y: number; n: number } } | null
@@ -149,11 +150,11 @@ export function Composer({
                       {left}
                     </b>
                   ) : (
-                    <b aria-hidden>Version {making}</b>
+                    <b aria-hidden elementtiming={NOTE_STATUS}>Version {making}</b>
                   )
                 ) : (
                   <>
-                    <b aria-hidden>{job.message}</b>
+                    <b aria-hidden elementtiming={NOTE_STATUS}>{job.message}</b>
                     {left && (
                       <span className="time" data-testid="note-time-left">
                         · {left}

@@ -16,6 +16,7 @@ import { useModelStatus } from '../components/connect'
 import { createFromFiles, newReel } from './create'
 import { activity, stateOf, stepWords, type CardState } from './home-state'
 import '../components/home.css'
+import { HOME_REEL } from '../../../shared/perf-marks'
 
 type View = 'activity' | 'all'
 const VIEWS = [
@@ -407,7 +408,7 @@ function Card({ p, live, now, onOpen, onAct, onVideo }: Props) {
         )}
         {l.state === 'making' && <Progress live={live} />}
       </div>
-      <div className="ttl">{p.title}</div>
+      <div className="ttl" elementtiming={HOME_REEL}>{p.title}</div>
       <div className={`cm${l.stop ? ' why' : ''}`} data-testid="card-status">
         {l.meta}
       </div>
@@ -432,7 +433,7 @@ function Row({ p, live, now, onOpen, onAct, onVideo }: Props) {
         {l.state === 'making' && <Progress live={live} />}
       </div>
       <div className="rtext">
-        <div className="ttl">{p.title}</div>
+        <div className="ttl" elementtiming={HOME_REEL}>{p.title}</div>
         <div className={`cm${l.stop || l.state === 'making' ? ' why' : ''}`} data-testid="card-status">
           {l.meta}
           {[l.left, l.step].map((w) => (w ? ` · ${w}` : '')).join('')}

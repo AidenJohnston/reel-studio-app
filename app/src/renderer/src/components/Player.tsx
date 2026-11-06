@@ -13,6 +13,7 @@ import { InstagramChrome, PhoneFill, SafeBand, shapeVars } from './Phone'
 import { announce } from './announce'
 import type { PhoneView } from '../../../shared/api'
 import { place, type Shape } from '../../../shared/phone-shapes'
+import { PLAYER as PLAYER_TIMING } from '../../../shared/perf-marks'
 
 /**
  * While our own reel is being dragged out, the window must not treat it as a new video dropped in.
@@ -693,6 +694,7 @@ export function PhonePlayer({
                   controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
                   muted={muted}
                   aria-hidden={on ? undefined : true}
+                  elementtiming={PLAYER_TIMING}
                   {...(on
                     ? {
                         onClick: toggle,
