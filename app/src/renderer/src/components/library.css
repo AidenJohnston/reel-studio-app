@@ -86,15 +86,13 @@
 .style-t > span { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
 .style-form { display: flex; align-items: center; gap: 8px; padding: 12px 0; box-shadow: inset 0 1px 0 var(--line); }
 .style-form .input { flex: 1; min-width: 0; }
-/* Like My style's empty page: the column is at least as tall as the window, so the empty state centres in it */
 /* at the gutter, under the screen's title, as every screen beside the sidebar */
 .page.insights-page { margin: 0; min-height: 100%; display: flex; flex-direction: column; }
-.insights-empty {
-  flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 320px;
-  padding-bottom: 64px; text-align: center;
-}
-.insights-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
-.insights-empty p { max-width: 44ch; color: var(--ink-2); }
+/* No results yet: a section at the top, with Your recent reels (always shown with it, Insights.tsx) under it on the
+   same edge. Centred in the window's height, as My style's empty page is, it left Recent reels at the foot with half a
+   screen of nothing between (results lane, Windows; the climb's insights scene). */
+.insights-empty { display: grid; justify-items: start; gap: 8px; width: min(640px, 100%); padding-top: 8px; }
+.insights-empty p { max-width: 60ch; color: var(--ink-2); }
 .style-empty {
   flex: 1; display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 0;
   padding: var(--space-m) 0 64px; text-align: center;

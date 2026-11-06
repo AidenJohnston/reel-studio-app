@@ -185,7 +185,7 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
           Makes new versions from Version {base.p.version ?? next - 1}, each changing one thing, so you can play them against each other. To try
           another post caption, use Share › Try 2.
         </p>
-        <div className="edit-actions" role="group" aria-labelledby="compare-h">
+        <div className="edit-actions variation-actions" role="group" aria-labelledby="compare-h">
           {VARIATION_BUTTONS.filter((b) => canVary(base.p, b.kind, d.words)).map((b) => (
             <button key={b.kind} className="btn small" onClick={() => void makeVersions(b.kind)} disabled={!!making?.busy} data-testid={`variations-${b.kind}`}>
               {b.label}

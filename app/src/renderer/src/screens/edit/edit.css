@@ -37,6 +37,9 @@ h3.edit-label { margin: 0; }
 .edit-b:has(.edit-hint-stay) { scroll-padding-top: 72px; }
 .edit-rule { height: 1px; background: var(--line); }
 .edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Up to five ways to make versions: equal columns, so the buttons of every row share edges instead of wrapping to
+   ragged lengths (the climb's consistency audit, edge-near-miss on Pace) */
+.variation-actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); }
 .edit-inline { display: flex; align-items: center; gap: 8px; }
 .edit-inline .input { flex: 1; min-width: 0; }
 .toggle.quiet { font-weight: 500; color: var(--ink-2); }
