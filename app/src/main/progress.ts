@@ -170,7 +170,9 @@ export class ProgressTracker {
       ? (done + current * (1 - 0.01 * current / phaseBudget)) / (done + current + later) * 99
       : 99 * (1 - 0.01 * projected / Math.max(projected, jobElapsed))
     const overall = Math.min(99, ceiling, (done + elapsed) / total * 100)
-    this.best = Math.max(this.best, overall, Math.min(99, this.aggregate?.pct ?? 0))
+    // An engine report of 99 or 100 while work remains (cover, check) stays under the same ceiling, or the
+    // bar would stop there.
+    this.best = Math.max(this.best, overall, Math.min(ceiling, this.aggregate?.pct ?? 0))
     const remainingPhases = this.phases.slice(this.cur)
     const approximate = remainingPhases.some((p) => !this.local(p))
     const out = { overall: this.best }

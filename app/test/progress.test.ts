@@ -77,6 +77,13 @@ describe('honest progress', () => {
     expect(early).toBeLessThan(99)
     expect(late).toBeGreaterThan(early)
     expect(late).toBeLessThan(99)
+    // The render reports 100 while the cover and check still run: the bar keeps creeping, below 99.
+    t.update('final', 100, true)
+    const reported = t.snapshot().overall
+    expect(reported).toBeLessThan(99)
+    now = 4_000_000
+    expect(t.snapshot().overall).toBeGreaterThan(reported)
+    expect(t.snapshot().overall).toBeLessThan(99)
   })
 
   it('recalibrates remaining engine defaults from a slow first step', () => {
