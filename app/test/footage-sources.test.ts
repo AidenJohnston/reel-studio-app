@@ -7,7 +7,7 @@ import { createFootageSources, sourceId, type SavedSource } from '../src/main/fo
 function setup() {
   const base = mkdtempSync(join(tmpdir(), 'rs-footage-ü '))
   const root = join(base, 'Movies', 'Reel Studio')
-  mkdirSync(root, { recursive: true })
+  mkdirSync(join(root, 'Library'), { recursive: true })
   let saved: SavedSource[] = []
   const changes: number[] = []
   const sources = createFootageSources({

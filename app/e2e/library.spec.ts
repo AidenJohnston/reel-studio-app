@@ -84,11 +84,11 @@ test('Library, My style and Insights', async () => {
   await page.getByTestId('library-tab-fonts').click()
   await expect(page.getByTestId('bin-fontpack').getByTestId('library-font')).toHaveCount(15)
   await expect(page.getByTestId('bin-fontpack').getByTestId('library-font').filter({ hasText: 'Montserrat SemiBold' })).toContainText('SIL Open Font License')
-  await dropOnWindow(page, [join(APP_DIR, '..', 'packaging', 'fonts', 'Fraunces-Bold.ttf')])
+  await dropOnWindow(page, [join(APP_DIR, '..', 'packaging', 'fonts', 'Inter-Bold.ttf')])
   await expect(page.getByTestId('library-result')).toHaveText('Added 1 font to your Library.')
   const mine = page.getByTestId('bin-fonts').getByTestId('library-font')
   await expect(mine).toHaveCount(1)
-  await expect(mine).toContainText('Fraunces Bold')
+  await expect(mine).toContainText('Inter Bold')
   await expect(mine).toContainText('Yours')
   // fails if the row draws in the app's own face: the sample's font is the file's
   await expect.poll(() => mine.locator('.lib-font-sample').evaluate((el) => {

@@ -25,7 +25,8 @@ it('fails if a caption font the engine cannot draw is saved, or the person\'s ow
   // the engine falls back to its default for an unknown name; the tool refuses it before it gets that far
   const refused = await executeTool(ctx, 'set_caption_style', { font: 'Comic Neue' });
   expect(refused.isError).toBe(true);
-  expect(refused.content).toMatch(/No caption font is called "Comic Neue"/);
+  // content is the JSON the model reads, so the name's quotes arrive escaped
+  expect(refused.content).toContain('No caption font is called \\"Comic Neue\\"');
   const set = await executeTool(ctx, 'set_caption_style', { font: 'brand sans bold' });
   expect(set.isError, set.content).toBe(false);
   expect((await loadProject(dir)).captions.style.font).toBe('Brand Sans Bold');

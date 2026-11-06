@@ -9,7 +9,8 @@ const FONTS = join(APP_DIR, '..', 'packaging', 'fonts')
 it('fails if Library › Fonts names a bundled face differently from the name a caption style uses', () => {
   // caption-presets.ts and captions.py DEFAULT_FONT name the subtitle face "Montserrat SemiBold"
   expect(fontNames(readFileSync(join(FONTS, 'Montserrat-SemiBold.ttf')))).toEqual({ family: 'Montserrat', full: 'Montserrat SemiBold' })
-  expect(fontNames(readFileSync(join(FONTS, 'Fraunces-Bold.ttf')))?.family).toBe('Fraunces')
+  // Fraunces names its optical size in the family (packaging/fonts/SOURCES.md: the 72pt cut)
+  expect(fontNames(readFileSync(join(FONTS, 'Fraunces-Bold.ttf')))?.family).toBe('Fraunces 72pt')
   // a file that only claims to be a font is not listed
   expect(fontNames(Buffer.from('not a font at all, just some text'))).toBeNull()
   expect(fontNames(readFileSync(join(FONTS, 'Inter-OFL.txt')))).toBeNull()
