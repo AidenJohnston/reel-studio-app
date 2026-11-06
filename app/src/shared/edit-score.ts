@@ -82,3 +82,8 @@ export const SCORE_SCOPE = 'These check the craft that has one right answer, not
 export function scoreRows(s: EditScore): VersionRow[] {
   return [...s.checks].sort((a, b) => Number(a.ok) - Number(b.ok)).map(checkRow).filter((r): r is VersionRow => r !== null)
 }
+
+/** Only the checks that failed: what to fix in the edit (Insights shows these beside a reel's results). */
+export function failingRows(s: EditScore): VersionRow[] {
+  return s.checks.filter((c) => !c.ok).map(checkRow).filter((r): r is VersionRow => r !== null)
+}

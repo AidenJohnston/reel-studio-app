@@ -603,11 +603,61 @@ def _fcpx_projects(root) -> list:
     return root.findall("project")[:1]
 
 
+_DRAFTS = ("draft_content.json", "draft_info.json")
+
+
+def _capcut(path: Path) -> dict | None:
+    """A CapCut project the way the real engine reads one (reelengine/reference_capcut.py), for plain drafts: video
+    lanes "0", "1"..., audio "A1"..., text "T1"..., times in microseconds. None when `path` isn't a CapCut draft."""
+    if path.is_dir() and path.suffix.lower() != ".fcpxmld":
+        found = [path / n for n in _DRAFTS if (path / n).is_file()]
+        if not found:
+            return None
+        path = found[0]
+    elif path.name.lower() not in _DRAFTS:
+        return None
+    draft = json.loads(path.read_text(encoding="utf-8"))
+    mats = {kind: {m["id"]: m for m in draft["materials"].get(kind, [])} for kind in ("videos", "audios", "texts")}
+    tracks, n = [], {"video": 0, "audio": 0, "text": 0}
+    for track in draft["tracks"]:
+        lane = track["type"]
+        if lane not in n:
+            continue
+        items = []
+        for seg in sorted(track["segments"], key=lambda g: g["target_timerange"]["start"]):
+            r = seg["target_timerange"]
+            at, dur = r["start"] / 1e6, r["duration"] / 1e6
+            if lane == "text":
+                m = mats["texts"][seg["material_id"]]
+                caption = m.get("type") == "subtitle"
+                text = json.loads(m["content"])["text"]
+                media = {"kind": "generator", "generator": "Captions" if caption else "Text", "name": "Captions" if caption else text}
+            else:
+                m = mats["videos" if lane == "video" else "audios"][seg["material_id"]]
+                media = {"kind": "file", "url": "file://" + ("/" if not m["path"].startswith("/") else "") + m["path"], "name": m.get("material_name") or m.get("name")}
+            items.append(_item("clip", media["name"], at, dur, media))
+        n[lane] += 1
+        tracks.append({"name": {"video": str(n[lane] - 1), "audio": f"A{n[lane]}", "text": f"T{n[lane]}"}[lane],
+                       "kind": "Audio" if lane == "audio" else "Video", "items": items})
+    return {"source": {"path": str(path), "adapter": "capcut", "writer": "CapCut"}, "mediaRefs": [],
+            "timelines": [{"name": draft.get("name") or path.parent.name, "tracks": tracks}], "losses": [], "rawMetadata": []}
+
+
+def _edl_events(path: Path) -> int:
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if re.match(r"^\d{1,6}\s+\S+\s+\S+\s+[CDWK]", line))
+
+
 def cmd_import_reference(args: list[str]) -> dict:
     """The real command's record shape (reelengine/reference_import.py) for simple exports, without OpenTimelineIO:
-    Final Cut's spine and connected clips, Premiere's tracks of clip, generator and transition items."""
+    Final Cut's spine and connected clips, Premiere's tracks of clip, generator and transition items, a CapCut
+    project's lanes. An EDL is counted, not read."""
     import xml.etree.ElementTree as ET
     path = Path(args[0])
+    capcut = _capcut(path)
+    if capcut is not None:
+        return capcut
+    if path.suffix.lower() == ".edl":
+        raise Fail("BAD_EDL", "The stand-in engine doesn't read edit lists.")
     try:
         root = ET.parse(path / "Info.fcpxml" if path.is_dir() else path).getroot()
     except (OSError, ET.ParseError) as e:
@@ -680,6 +730,14 @@ def cmd_reference_scan(args: list[str]) -> dict:
     files = []
     for arg in args:
         path = Path(arg)
+        if _capcut(path) is not None:
+            files.append({"path": arg, "timelines": 1})
+            continue
+        if path.suffix.lower() == ".edl":
+            n = _edl_events(path)
+            files.append({"path": arg, "timelines": 1} if n else {"path": arg, "error": {"code": "NO_TIMELINE", "message":
+                          "This edit list has no clips in it. Export the timeline itself and try again."}})
+            continue
         try:
             root = ET.parse(path / "Info.fcpxml" if path.is_dir() else path).getroot()
         except (OSError, ET.ParseError):
@@ -774,6 +832,44 @@ def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
 
+def cmd_footage(args: list[str]) -> dict:
+    """footage index: counts the videos in each --source folder (and the Library's media), with the real engine's
+    per-file progress and result shape (reelengine/footage.py), but reads nothing. footage search finds nothing.
+    FAKE_ENGINE_INDEX_STEP=<seconds> is how long each file takes (default 0.4), so a test can see the progress."""
+    action = args.pop(0) if args else ""
+    if action == "search":
+        return {"hits": [], "more": False, "backend": "none"}
+    if action != "index":
+        raise Fail("BAD_ARGS", "Reel Studio asked for something I do not know how to do.", action)
+    root = Path(take(args, "--root") or ROOT)
+    places = [("Library", root / "Library", VIDEO | AUDIO)]
+    while "--source" in args:
+        sid, _, folder = take(args, "--source").partition("=")
+        places.append((sid, Path(folder), VIDEO))
+    step = float(os.environ.get("FAKE_ENGINE_INDEX_STEP", "0.4") or 0)
+    # the real engine keeps an unplugged folder's rows; the stand-in keeps its last count
+    counts_file = root / ".index" / "fake-counts.json"
+    counts = json.loads(counts_file.read_text()) if counts_file.is_file() else {}
+    found, out = [], []
+    for pid, folder, kinds in places:
+        if pid != "Library" and not folder.is_dir():
+            out.append({"id": pid, "files": counts.get(pid, 0), "online": False})
+            continue
+        files = sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in kinds
+                       and not any(part.startswith(".") for part in p.relative_to(folder).parts))
+        out.append({"id": pid, "files": len(files), "online": True})
+        counts[pid] = len(files)
+        found += files
+    counts_file.parent.mkdir(parents=True, exist_ok=True)
+    counts_file.write_text(json.dumps(counts))
+    for k, f in enumerate(found):
+        progress("footage-file", 100 * k / len(found), f"Reading {f.name} ({k + 1} of {len(found)})")
+        time.sleep(step)
+    if found:
+        progress("footage-shots", 100, f"Reading {found[-1].name} ({len(found)} of {len(found)})")
+    return {"files": len(found), "stagesRun": 3 * len(found), "pending": 0, "filesPending": 0, "places": out}
+
+
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
@@ -781,7 +877,7 @@ COMMANDS = {
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
     "reference-scan": cmd_reference_scan, "moments": cmd_moments, "score": cmd_score, "measure-reel": cmd_measure_reel,
-    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview,
+    "match-joins": cmd_match_joins, "pace-preview": cmd_pace_preview, "footage": cmd_footage,
 }
 
 

@@ -461,8 +461,9 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 }
 
 /** Engine commands that read the edit: during a note they read its private copy (`frames` without a
- * render id shows the edit). */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins']);
+ * render id shows the edit). make-variant also writes it: given project.json, a trial inside a note
+ * changed the live edit and the note then failed as changed somewhere else. */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins', 'make-variant']);
 
 export function projectArgs(ctx: { projectDir: string; note?: { file: string } }, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
@@ -945,7 +946,25 @@ function libraryFileKind(ref: string, pictureKind: AssetKind): AssetKind | null 
 /** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
  * the user's own Library picture, clip or song frozen and recorded in the same call, and anything else
  * only once resolve_asset committed it as one of `kinds`. */
+/** The caption fonts the engine can draw (engine cli.py cmd_fonts): Library › Fonts first, then the bundled ones. */
+async function captionFonts(ctx: ToolContext): Promise<{ names: string[]; file: string; yours: boolean }[]> {
+  const r: any = await ctx.host.runEngine('fonts', [], undefined, ctx.signal);
+  if (!r || !Array.isArray(r.fonts)) throw new ToolInputError('The engine did not list its caption fonts. Try again.');
+  return r.fonts.filter((f: any) => f && Array.isArray(f.names) && typeof f.file === 'string')
+    .map((f: any) => ({ names: f.names.filter((n: unknown) => typeof n === 'string'), file: f.file, yours: f.yours === true }));
+}
+
+/** A search_footage hit in one of the person's footage folders (Footage/<folder>/<file>) is copied into the Library
+ * by the app first, so every path the engine reads stays inside the project and the Library. Other refs pass through. */
+async function fromFootage(ctx: ToolContext, ref: string): Promise<string> {
+  if (!/^Footage\//.test(ref.replace(/\\/g, '/'))) return ref;
+  if (!ctx.host.importFootage) throw new ToolInputError('Clips from footage folders can only be used in the Reel Studio app.');
+  try { return await ctx.host.importFootage(ref); }
+  catch (e: any) { throw new ToolInputError(e?.userMessage ?? e?.message ?? String(e)); }
+}
+
 async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], pictureKind: AssetKind = 'image'): Promise<string> {
+  asset = await fromFootage(ctx, asset);
   const ref = /^asset_[0-9a-f-]{36}$/.test(asset) ? asset : resolveAsset(ctx, asset)?.ref;
   if (!ref) throw new ToolInputError(`asset not found: ${asset}`);
   if (kinds.includes('video') && ctx.state.animationsMade?.has(ref)) return ref;
@@ -1065,7 +1084,7 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
 async function resolveCandidates(ctx: ToolContext, kind: AssetKind, intent: string, policy: string, provider?: StockProvider): Promise<ToolOutput> {
   if (kind === 'website_screenshot' && policy !== 'commentary') throw new ToolInputError('Website screenshots require licensePolicy commentary. The page belongs to its owner.');
   const requestId = randomUUID();
-  const text = intent.trim().replace(/\\/g, '/');
+  const text = await fromFootage(ctx, intent.trim().replace(/\\/g, '/'));
   const isUrl = /^https?:\/\//i.test(text);
   const named = /^(Library|work|media)\//.test(text);
   let local: { ref: string; abs: string } | null = null;
@@ -1412,7 +1431,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'search_footage',
-    description: 'Search indexed Library speech before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail.',
+    description: 'Search indexed speech in the Library and the person\'s footage folders before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail. A Footage/... path is a clip in a footage folder: give it to add_broll or resolve_asset as it is, and it is copied into the Library. online false means its drive is unplugged: tell the person to plug it in, and do not place it.',
     // no minLength: OpenAI's strict tool schemas refuse it (#33); an empty query is refused below
     parameters: S.obj({ query: S.str('words to find in your Library'),
       limit: S.opt(S.int('maximum hits, default 6', { minimum: 1, maximum: 8 })) }),
@@ -1596,7 +1615,7 @@ const tools: ToolDef[] = [
       const field = args.variable === 'caption' ? 'post' : args.variable;
       let result: any;
       await writeEdit(ctx, [field], async () => { result = await engine(ctx, 'make-variant', extra, 'Making a trial'); });
-      ctx.project = await loadProject(ctx.projectDir);
+      ctx.project = await loadProject(ctx.projectDir, ctx.note?.file);
       ctx.state.changed.add(field);
       (ctx.state.dirty ??= new Set()).add(field);
       return { content: { ok: true, trial: result.trial }, summary: `Made a ${args.variable} trial` };
@@ -1624,9 +1643,17 @@ const tools: ToolDef[] = [
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
+      font: S.opt(S.str('a caption font by one of the names list_library kind fonts gives (the person\'s own fonts are marked yours); null keeps the current font')),
     }),
     async run(ctx, args) {
       let warning: string | null = null;
+      let font: string | null = null;
+      if (args.font != null) {
+        const fonts = await captionFonts(ctx);
+        const want = String(args.font).trim().toLowerCase();
+        font = fonts.flatMap((f) => f.names).find((n) => n.toLowerCase() === want) ?? null;
+        if (!font) throw new ToolInputError(`No caption font is called "${args.font}". Choose a name from list_library kind fonts.`);
+      }
       await mutate(ctx, 'captions', (p) => {
         const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
         const underBefore = shownUnder();
@@ -1640,6 +1667,7 @@ const tools: ToolDef[] = [
           if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
         if (args.highlight === 'none') delete style.highlight;
+        if (font) style.font = font;
         // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
         // and without it the picker matches the look by its fields.
         if (captionLook(style) !== before) delete style.preset;
@@ -1683,9 +1711,10 @@ const tools: ToolDef[] = [
   },
   {
     name: 'list_library',
-    description: "List the user's own files. kind: music | images | broll | raw. Also returns images already fetched for this project." + READ_PAGE_HELP,
-    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw']), ...READ_PAGING }),
+    description: "List the user's own files. kind: music | images | broll | raw | fonts. Also returns images already fetched for this project. fonts lists every caption font set_caption_style can use: the person's own (yours) and the ones that come with Reel Studio." + READ_PAGE_HELP,
+    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw', 'fonts']), ...READ_PAGING }),
     async run(ctx, args) {
+      if (args.kind === 'fonts') return { content: readPage({ kind: 'fonts', fonts: await captionFonts(ctx) }, args) };
       const kind = args.kind as LibraryKind;
       const files = await listFiles(libraryDir(ctx, kind), EXT[kind], `Library/${LIBRARY_FOLDERS[kind]}`);
       const project = kind === 'images' || kind === 'broll' ? await projectAssets(ctx) : [];

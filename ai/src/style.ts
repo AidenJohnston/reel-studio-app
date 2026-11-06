@@ -22,8 +22,9 @@ export interface StyleRule {
   /** The engine measures this on every render (rules.ts); the rule's words are ruleText(check). */
   check?: RuleCheck;
   source?: StyleSource;
-  /** Learned from another editor's export ("Learn from my past edits"): its file name. */
-  imported?: { file: string };
+  /** Learned from another editor's export ("Learn from my past edits"): its file name, and its editor when one
+   * file was read. */
+  imported?: { file: string; editor?: 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL' };
   /** the question the person said Yes to */
   consent?: { proposal: string; at: string };
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in My style. */

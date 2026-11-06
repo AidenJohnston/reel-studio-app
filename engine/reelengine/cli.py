@@ -90,7 +90,14 @@ def cmd_footage(args):
     from . import footage, tools
     root = tools.root_dir(args.root)
     if args.footage_command == "index":
-        return footage.index(root, model_name=args.model, budget_seconds=args.budget_seconds)
+        sources = []
+        for item in args.source or []:
+            sid, sep, folder = item.partition("=")
+            if not sep or not folder:
+                raise EngineError("BAD_ARGS", f"--source needs ID=FOLDER, got {item!r}",
+                                  "A footage folder in your settings is damaged. Remove it and add it again.")
+            sources.append((sid, folder))
+        return footage.index(root, model_name=args.model, budget_seconds=args.budget_seconds, sources=sources)
     return footage.search(root, args.query, limit=args.limit)
 
 
@@ -128,7 +135,7 @@ def cmd_make_variant(args):
         value = json.loads(args.value) if args.value is not None else None
     except (ValueError, TypeError):
         raise EngineError("BAD_VARIANT", "--value must be JSON", "The trial choice must be valid JSON.")
-    return create_variant(_project(args), args.variable, value=value)
+    return create_variant(_project(args), args.variable, value=value, project_file=_in_work(args, "project_file"))
 
 
 def cmd_lint_edit(args):
@@ -475,6 +482,25 @@ def cmd_attach(args):
     return attach.run(_project(args), Path(args.file), name=args.name)
 
 
+def cmd_fonts(args):
+    """The caption fonts a project can name: each file's names (captions.font_index), the person's own first."""
+    from . import captions, tools
+    out, seen = [], set()
+    yours = Path(tools.root_dir(None)) / "Library" / "Fonts"
+    for folder in tools.font_dirs():
+        for path in sorted(folder.iterdir()):
+            if path.suffix.lower() not in (".ttf", ".otf") or path in seen:
+                continue
+            seen.add(path)
+            try:
+                names = captions._ttf_metrics(path)["names"]
+            except Exception:  # noqa: BLE001  a damaged file is left out, as font_index leaves it out
+                continue
+            out.append({"names": sorted(names | {path.stem}), "file": path.name,
+                        "yours": folder.resolve() == yours.resolve()})
+    return {"fonts": out, "default": captions.DEFAULT_FONT}
+
+
 def cmd_doctor(args):
     from . import doctor
     return doctor.run()
@@ -545,12 +571,14 @@ def build_parser() -> argparse.ArgumentParser:
         fp.set_defaults(fn=cmd_footage)
         fp.add_argument("--root", help="Reel Studio root")
         if action == "index":
-            fp.add_argument("--place", choices=["Library"], default="Library")
+            fp.add_argument("--source", action="append",
+                            help="ID=FOLDER: an added footage folder, indexed with the Library (repeatable)")
             fp.add_argument("--model")
             fp.add_argument("--budget-seconds", type=float, help="stop between stages after this budget")
         else:
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
+    add("fonts", cmd_fonts, "list the caption fonts a project can name")
     sp = add("measure-reel", cmd_measure_reel, "how fast a finished reel talks and cuts, and its opening line")
     sp.add_argument("--file", required=True)
     sp.add_argument("--poster", help="save one still of the reel here (jpg)")
@@ -563,6 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("make-variant", cmd_make_variant, "save a one-variable trial")
     sp.add_argument("--variable", required=True, choices=["seed", "hook", "cover", "caption", "brightness"])
     sp.add_argument("--value", help="editor's alternative, encoded as JSON; omit for a new seed or +8%% exposure")
+    sp.add_argument("--project-file", help="a note's private copy of project.json: the edit to change")
     sp = add("autocut", cmd_autocut, "write the deterministic default cut")
     sp.add_argument("--gap-cap", type=float)
     sp = add("lint-edit", cmd_lint_edit, "check the edit without rendering")
