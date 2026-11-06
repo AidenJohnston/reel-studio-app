@@ -29,7 +29,8 @@ test('fails if a note on an older version does not branch from it, or Combine do
     await expect(page.getByTestId('version-tree').locator('li')).toHaveCount(3)
     await shot(page, 'version-tree-01-line')
 
-    // a note on Version 2 makes Version 4, a branch from Version 2
+    // a note on Version 2 makes Version 4, a branch from Version 2 (a row's actions show when it is hovered)
+    await page.getByTestId('vt-2').hover()
     await page.getByTestId('vt-change-2').click()
     await expect(page.getByTestId('note-base')).toHaveText(/New version from Version 2/)
     await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', /Version 2/)
@@ -58,6 +59,9 @@ test('fails if a note on an older version does not branch from it, or Combine do
     expect(chat).toContain('Version 4, with the music from Version 3')
     await page.getByTestId('notes-view-versions').click()
     await expect(page.getByTestId('vt-5')).toContainText('from Versions 4 and 3')
+    // at rest the hidden actions leave the row's second line its whole width: it is not cut short
+    await page.mouse.move(0, 0)
+    expect(await page.getByTestId('vt-5').locator('.vt-l2').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
     await shot(page, 'version-tree-05-combined')
 
     // from the title bar: watching an older version offers Change this one, and the chip goes back to the newest
