@@ -66,8 +66,9 @@ describe('a note and the checked rules', () => {
   it('a finished reel that breaks a rule stops before its encode, gets one fix, and is made once', async () => {
     const { dir, ai, finals, host } = await setup();
     await ai().addStyleRule(ruleText(TWO_WORDS), undefined, TWO_WORDS);
-    const model = new ScriptedModel([{ toolCalls: [words(3)] }, finish('Three words at a time now.'), { toolCalls: [words(2)] }, finish('Back to two.')]);
-    const r = await ai(model).applyNote(dir, 'put three words in each subtitle', () => undefined);
+    // the project starts at 3 words a subtitle: 4 is a change, and breaks the rule
+    const model = new ScriptedModel([{ toolCalls: [words(4)] }, finish('Four words at a time now.'), { toolCalls: [words(2)] }, finish('Back to two.')]);
+    const r = await ai(model).applyNote(dir, 'put four words in each subtitle', () => undefined);
     expect(finals()).toHaveLength(2);
     expect(host.rulesFiles.filter((f) => !f.draft).map((f) => f.stopOn.length)).toEqual([1, 0]);
     expect(task(model, 2)).toContain('"Show at most 2 words in a subtitle.": 1 subtitle shows too many words');
@@ -82,18 +83,18 @@ describe('a note and the checked rules', () => {
     const { dir, ai } = await setup();
     await ai().addStyleRule(ruleText(TWO_WORDS), undefined, TWO_WORDS);
     // the fix run's first finish is refused once (nothing changed), the second stands
-    const r = await ai(new ScriptedModel([{ toolCalls: [words(3)] }, finish('Three words now.'), finish('Kept.'), finish('You asked for three words, so I kept them.')]))
-      .applyNote(dir, 'put three words in each subtitle', () => undefined);
-    expect((await loadProject(dir)).captions.style.maxWords).toBe(3);
+    const r = await ai(new ScriptedModel([{ toolCalls: [words(4)] }, finish('Four words now.'), finish('Kept.'), finish('You asked for four words, so I kept them.')]))
+      .applyNote(dir, 'put four words in each subtitle', () => undefined);
+    expect((await loadProject(dir)).captions.style.maxWords).toBe(4);
     expect(r.version).toBe(1);
-    expect(r.summary).toBe('You asked for three words, so I kept them. I couldn\'t meet your My style rule "Show at most 2 words in a subtitle": 1 subtitle shows too many words ("one two three" at 0:01). Tell me what to change, or pause the rule in My style.');
+    expect(r.summary).toBe('You asked for four words, so I kept them. I couldn\'t meet your My style rule "Show at most 2 words in a subtitle": 1 subtitle shows too many words ("one two three" at 0:01). Tell me what to change, or pause the rule in My style.');
   });
 
   it('a rule already failing in the version the note starts from is named, never chased', async () => {
     const { dir, ai, host } = await setup();
     const rule = await ai().addStyleRule(ruleText(TWO_WORDS), undefined, TWO_WORDS);
-    // Version 1 already shows three words: its render.json says so
-    await ai(new ScriptedModel([{ toolCalls: [words(3)] }, finish('Three.'), finish('Kept.'), finish('Kept three.')])).applyNote(dir, 'three words', () => undefined);
+    // Version 1 already shows four words: its render.json says so
+    await ai(new ScriptedModel([{ toolCalls: [words(4)] }, finish('Four.'), finish('Kept.'), finish('Kept four.')])).applyNote(dir, 'four words', () => undefined);
     await fsp.writeFile(path.join(dir, 'versions', 'v1', 'render.json'), JSON.stringify({ ruleChecks: { failures: [{ id: rule.id }] } }));
     host.rulesFiles = [];
     const model = new ScriptedModel([{ toolCalls: [call('set_caption_style', { color: '#3366FF' })] }, finish('The subtitles are blue.')]);

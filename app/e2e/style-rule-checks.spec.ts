@@ -41,10 +41,10 @@ test('a checked rule is asked as one the app checks, saved with its check, and s
     const rule = page.getByTestId('style-rule')
     await expect(rule).toHaveCount(1)
     await expect(rule).toContainText('Checked')
-    await rule.getByRole('button', { name: /Show at most 2 words in a subtitle/ }).click()
+    await rule.getByRole('button', { name: 'Subtitles: Show at most 2 words in a subtitle', exact: true }).click()
     await expect(rule).toContainText('The app checks this on every reel it makes')
     await shot(page, 'rule-checks-02-my-style')
-    await rule.getByRole('button', { name: /^Edit / }).click()
+    await rule.getByRole('button', { name: 'Edit "Show at most 2 words in a subtitle"' }).click()
     await expect(page.getByTestId('style-edit-input')).toHaveAccessibleDescription(
       'If you change these words, they become a sentence the AI reads, and the app no longer checks every reel for it.'
     )
