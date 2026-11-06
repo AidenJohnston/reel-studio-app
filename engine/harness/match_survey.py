@@ -25,15 +25,23 @@ from reelengine import analyze, match, project as projmod
 from reelengine.render import display_crop, source_faces
 
 
-def _frame(path: Path, t: float, crop: tuple, disp: tuple):
+def _frame(path: Path, k: int, fps: float, crop: tuple, disp: tuple):
+    """Source frame k (shown from k/fps), cropped as the output crops it, 180 x 320 BGR."""
+    import subprocess
     import cv2
-    from reelengine.compose_util import decode_frames
-    for _, bgr in decode_frames(path, 0, 360, times=[max(0.0, t)]):
-        k = bgr.shape[1] / float(disp[0])
-        x, y, cw, ch = crop
-        part = bgr[int(round(y * k)):int(round((y + ch) * k)), int(round(x * k)):int(round((x + cw) * k))]
-        return cv2.resize(part, (180, 320), interpolation=cv2.INTER_AREA)
-    return np.zeros((320, 180, 3), np.uint8)
+    from reelengine.compose_util import ffmpeg_bin
+    w = 360
+    h = max(2, int(round(disp[1] * w / disp[0])) // 2 * 2)
+    raw = subprocess.run([ffmpeg_bin(), "-v", "error", "-nostdin", "-ss", f"{max(0.0, (k - 0.5) / fps):.6f}", "-i", str(path),
+                          "-frames:v", "1", "-an", "-vf", f"scale={w}:{h}:flags=area", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+                         capture_output=True, timeout=120).stdout
+    if len(raw) < w * h * 3:
+        return np.zeros((320, 180, 3), np.uint8)
+    bgr = np.frombuffer(raw[:w * h * 3], np.uint8).reshape(h, w, 3)
+    kx, ky = w / float(disp[0]), h / float(disp[1])
+    x, y, cw, ch = crop
+    part = bgr[int(round(y * ky)):int(round((y + ch) * ky)), int(round(x * kx)):int(round((x + cw) * kx))]
+    return cv2.resize(part, (180, 320), interpolation=cv2.INTER_AREA)
 
 
 def _label(img, text: str):
@@ -77,16 +85,16 @@ def main(argv=None) -> None:
         disp_o, disp_i = (int(so["width"]), int(so["height"])), (int(si["width"]), int(si["height"]))
         co = display_crop(disp_o, fmt["width"], fmt["height"], faces.get(o.source))
         ci = display_crop(disp_i, fmt["width"], fmt["height"], faces.get(i.source))
-        fps_o = float(so.get("fps") or 30)
+        fps_o, fps_i = float(so.get("fps") or 30), float(si.get("fps") or 30)
         v = verdicts.get(m["keep"]) or {}
-        planned = [_frame(po, o.src_end - 1.0 / fps_o - 1e-4, co, disp_o), _frame(pi, i.src_start - 1e-4, ci, disp_i)]
+        planned = [_frame(po, round(o.src_end * fps_o) - 1, fps_o, co, disp_o), _frame(pi, round(i.src_start * fps_i), fps_i, ci, disp_i)]
         dp = [match.describe(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)) for f in planned]
         row = {"keep": m["keep"], "at": round(i.out_start, 3), "planned": {"look": round(match.look(*dp), 4), "move": round(match.move(*dp), 4)},
                "verdict": v, "played": next((x["played"] for x in tl.match_joins if x["keep"] == m["keep"]), None)}
         rows.append(row)
         top = np.hstack([_label(planned[0], f"planned out {o.src_end:.2f}"), _label(planned[1], f"in {i.src_start:.2f}")])
         if "outEnd" in v:
-            chosen = [_frame(po, v["outEnd"] - 1.0 / fps_o - 1e-4, co, disp_o), _frame(pi, v["inStart"] - 1e-4, ci, disp_i)]
+            chosen = [_frame(po, round(v["outEnd"] * fps_o) - 1, fps_o, co, disp_o), _frame(pi, round(v["inStart"] * fps_i), fps_i, ci, disp_i)]
             tag = "MATCH" if v.get("matched") else "no match"
             bottom = np.hstack([_label(chosen[0], f"{tag} look {v['look']:.2f}"), _label(chosen[1], f"move {v['move']:.3f}")])
         else:
