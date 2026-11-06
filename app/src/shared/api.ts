@@ -17,6 +17,8 @@ import type { HandEdit } from './hand-edit'
 import type { SoundEffect } from './sfx'
 import type { LayerItem } from './lanes'
 import type { CutStyle, Zoom } from './cut-style'
+import type { ReferenceEntry, ReferenceView, Readout } from './references'
+import type { Niche, NicheTurn, NicheTurnResult, SavedNiche } from './niche'
 export type { VersionRow } from './version-diff'
 export type { ChatAction } from './notes'
 export type { CoverCandidate } from './cover'
@@ -1152,6 +1154,33 @@ export interface ReelApi {
     keepSuggestion(id: string, text?: string): Promise<StyleRule>
     /** No thanks: the suggestion and its words are never suggested again. */
     dismissSuggestion(id: string): Promise<void>
+  }
+  /** My style › Reference reels (main references.ts): other creators' reels to learn from, and the readout. */
+  references: {
+    list(): Promise<{ references: ReferenceView[]; readout: Readout }>
+    /** Copies the videos in and measures them in the background; files it skipped come back with the reason. */
+    add(paths: string[]): Promise<{ added: number; skipped: { name: string; reason: string }[] }>
+    /** A pasted link: downloaded when it goes straight to a video file, else kept with what to do to add the file. */
+    addLink(url: string): Promise<ReferenceEntry>
+    /** The file for a link the app would not download. */
+    attach(id: string, path: string): Promise<void>
+    /** Out of the list; the app's copy is deleted, the person's own file is not. */
+    remove(id: string): Promise<void>
+    openLink(id: string): Promise<void>
+    reveal(id: string): Promise<void>
+    /** A reel was measured, or could not be. */
+    onChange(cb: () => void): () => void
+  }
+  /** My style › Your niche (main niche-ipc.ts). */
+  niche: {
+    get(): Promise<{ niche: SavedNiche | null; damaged: boolean }>
+    save(niche: Niche, from: SavedNiche['from']): Promise<SavedNiche>
+    remove(): Promise<void>
+    /** One turn of the niche chat. `turns` start after the app's own question; `asked`: the editor's questions so far. */
+    say(turns: NicheTurn[], asked: number, draft: Niche | null): Promise<NicheTurnResult>
+    stop(): Promise<void>
+    /** The editor's waits while it answers. */
+    onStatus(cb: (s: { message: string; waiting?: boolean }) => void): () => void
   }
   sfx: {
     /** Every built-in sound effect, with a URL to hear it. */
