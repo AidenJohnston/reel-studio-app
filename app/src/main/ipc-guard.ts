@@ -1,6 +1,7 @@
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { EditorName } from '../shared/api'
 import { TRY_VARIABLES } from '../shared/platforms'
 
 function sameRendererPath(actual: string, expected: string): boolean {
@@ -28,6 +29,7 @@ const paths = (v: unknown): v is string[] => Array.isArray(v) && v.every(path)
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(text)
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const EDITORS: EditorName[] = ['Final Cut Pro', 'Premiere Pro', 'DaVinci Resolve', 'CapCut', 'EDL']
 /** A reference reel's id (main references.ts: a UUID). */
 const referenceId = (v: unknown): v is string => text(v) && /^[0-9a-f-]{8,64}$/.test(v)
 const anchor = (v: unknown): boolean => object(v) && text(v.from) && text(v.to)
@@ -97,7 +99,7 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     // found edits by id (style:find); the paths stay in main
     case 'style:learn': ok = first === undefined || (Array.isArray(first) && first.length > 0 && first.every((id) => text(id) && /^[0-9a-f]{16}$/.test(id))); break
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break
-    case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second); break
+    case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second) && (third === undefined || EDITORS.includes(third as never)); break
     case 'library:preview': ok = path(first); break
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break

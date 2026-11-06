@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.9">
+    <resources>
+        <format id="r0" name="FFVideoFormat1080x1920p30" width="1080" height="1920" frameDuration="1/30s"/>
+        <asset id="r1" name="talk.mov" start="0/1s" duration="60/1s" hasVideo="1" hasAudio="1" format="r0" audioSources="1" audioChannels="2">
+            <media-rep kind="original-media" src="file:///Users/me/Movies/talk.mov"/>
+        </asset>
+    </resources>
+    <library>
+        <event name="Timeline 1 (Resolve)">
+            <project name="Timeline 1 (Resolve)">
+                <sequence format="r0" duration="8/1s" tcStart="3600/1s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+                    <spine>
+                        <asset-clip name="talk.mov" ref="r1" offset="3600/1s" start="10/1s" duration="5/2s" format="r0" tcFormat="NDF" enabled="1"/>
+                        <asset-clip name="talk.mov" ref="r1" offset="7205/2s" start="30/1s" duration="2/1s" format="r0" tcFormat="NDF" enabled="1"/>
+                        <asset-clip name="talk.mov" ref="r1" offset="7209/2s" start="40/1s" duration="7/2s" format="r0" tcFormat="NDF" enabled="1"/>
+                    </spine>
+                </sequence>
+            </project>
+        </event>
+    </library>
+</fcpxml>

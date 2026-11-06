@@ -1,5 +1,7 @@
-// "Learn from my past edits" lists the Final Cut Pro and Premiere Pro edits already on this computer, so the
-// person ticks them instead of hunting through a file dialog (Sam opened that dialog twice and cancelled both).
+// "Learn from my past edits" lists the Final Cut Pro and Premiere Pro edits and CapCut projects already on this
+// computer, so the person ticks them instead of hunting through a file dialog (Sam opened that dialog twice and
+// cancelled both). DaVinci Resolve keeps projects in its own database, so only its FCPXML exports are found (as
+// Final Cut Pro's; the engine tells them apart when it reads one) and an EDL is chosen by hand.
 // On a Mac Spotlight finds them anywhere it indexes, external drives included; a walk of the usual folders runs
 // on every system, so a Mac with Spotlight off, and Windows, still find what sits where the editors save.
 import { spawn } from 'node:child_process'
@@ -58,14 +60,23 @@ const KIND: Record<string, { kind: PastEditKind; app: PastEdit['app']; folder: b
   '.prproj': { kind: 'prproj', app: 'Premiere Pro', folder: false },
   '.xml': { kind: 'premiere-xml', app: 'Premiere Pro', folder: false }
 }
+/** A CapCut project is a folder named for it; its edit is draft_content.json, or draft_info.json on a Mac. */
+const DRAFT = /^draft_(content|info)\.json$/i
+const CAPCUT = { kind: 'capcut', app: 'CapCut', folder: false } as const
+const kindOf = (path: string) => (DRAFT.test(basename(path)) ? CAPCUT : KIND[extname(path).toLowerCase()])
+/** Where CapCut keeps projects, below the home folder (macOS Movies, Windows AppData\Local). The folder under it
+ * is not skipped for being in AppData or Library. */
+const CAPCUT_DIR = join('CapCut', 'User Data', 'Projects', 'com.lveditor.draft')
+const IN_CAPCUT = /[\\/]CapCut[\\/]User Data[\\/]Projects[\\/]com\.lveditor\.draft[\\/]/i
+
 /** What the engine's import-reference reads; a library or a Premiere project needs an XML export first. */
-const READABLE = new Set<PastEditKind>(['fcpxml', 'fcpxmld', 'premiere-xml'])
+const READABLE = new Set<PastEditKind>(['fcpxml', 'fcpxmld', 'premiere-xml', 'capcut'])
 
 // Folders the walk starts from, under the home folder. Final Cut Pro keeps libraries in Movies; Premiere Pro keeps
 // projects in Documents\Adobe\Premiere Pro\<version>; exports land wherever the person saved them, usually below.
 const START: Record<'darwin' | 'other', string[]> = {
   darwin: ['Movies', 'Documents', 'Desktop', 'Downloads'],
-  other: ['Videos', 'Documents', 'Desktop', 'Downloads', join('OneDrive', 'Documents'), join('OneDrive', 'Desktop')]
+  other: ['Videos', 'Documents', 'Desktop', 'Downloads', join('OneDrive', 'Documents'), join('OneDrive', 'Desktop'), join('AppData', 'Local', CAPCUT_DIR)]
 }
 const DEPTH = 5
 const XML_MAX_BYTES = 64 * 1024 * 1024
@@ -79,13 +90,16 @@ const INSIDE = /\.(fcpxmld|fcpbundle|prproj|app|photoslibrary|bundle)[\\/]/i
 
 const SPOTLIGHT_QUERIES = [
   ['fcpxml', 'fcpxmld', 'fcpbundle', 'prproj'].map((x) => `kMDItemFSName == "*.${x}"c`).join(' || '),
-  `kMDItemFSName == "*.xml"c && kMDItemFSSize < ${XML_MAX_BYTES}`
+  `kMDItemFSName == "*.xml"c && kMDItemFSSize < ${XML_MAX_BYTES}`,
+  'kMDItemFSName == "draft_content.json" || kMDItemFSName == "draft_info.json"'
 ]
 
 export const idOf = (path: string): string => createHash('sha256').update(path).digest('hex').slice(0, 16)
 
 function excluded(path: string, home: string): boolean {
   if (INSIDE.test(path) || /[\\/]\.Trash(es)?[\\/]/.test(path)) return true
+  // CapCut's own folder sits in AppData or Library; below it, its recycle bin and backups are still left out
+  if (IN_CAPCUT.test(path)) return path.split(IN_CAPCUT)[1].split(/[\\/]/).some((part) => SKIP_DIR.test(part))
   const rel = relative(home, path)
   return rel.startsWith('..') ? SYSTEM.test(path) : rel.split(sep).some((part) => SKIP_DIR.test(part))
 }
@@ -113,7 +127,7 @@ async function walk(home: string, platform: NodeJS.Platform, budget: number): Pr
       if (e.isDirectory()) {
         if (KIND[ext]?.folder) hits.push(full)
         else if (depth < DEPTH && !SKIP_DIR.test(e.name) && !PACKAGE.test(e.name)) queue.push({ dir: full, depth: depth + 1 })
-      } else if (e.isFile() && KIND[ext] && !KIND[ext].folder) hits.push(full)
+      } else if (e.isFile() && kindOf(full) && !kindOf(full).folder) hits.push(full)
     }
   }
   return { hits, cut: false }
@@ -163,13 +177,16 @@ export async function findPastEdits(deps: FindDeps): Promise<Look> {
   }
   const walked = await walk(deps.home, deps.platform, lim.walk)
   cut ||= walked.cut
-  const paths = [...new Set([...fromSpotlight, ...walked.hits])].filter((p) => KIND[extname(p).toLowerCase()] && !excluded(p, deps.home))
+  const paths = [...new Set([...fromSpotlight, ...walked.hits])].filter((p) => kindOf(p) && !excluded(p, deps.home))
   const seen = await mapLimit(paths, lim.concurrency, async (path) => {
     const st = await fs.stat(path)
-    const k = KIND[extname(path).toLowerCase()]
+    const k = kindOf(path)
     return st && st.isDirectory() === k.folder ? { path, st, k } : null
   })
-  const candidates = seen.filter((x) => x !== null).sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)
+  // one row per CapCut project: draft_content.json where both are there
+  const drafts = new Set(seen.filter((x) => x?.k.kind === 'capcut').map((x) => x!.path))
+  const twin = (p: string) => /draft_info\.json$/i.test(p) && drafts.has(join(dirname(p), 'draft_content.json'))
+  const candidates = seen.filter((x): x is NonNullable<typeof x> => x !== null && !twin(x.path)).sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)
   // XML is everywhere; only the newest are opened to see whether Premiere Pro wrote them
   const xml = candidates.filter((c) => c.k.kind === 'premiere-xml' && c.st.size <= XML_MAX_BYTES)
   if (xml.length > lim.sniff) cut = true
@@ -186,9 +203,10 @@ export async function findPastEdits(deps: FindDeps): Promise<Look> {
     .map(({ path, st, k }) => ({
       id: idOf(path),
       path,
-      name: basename(path, extname(path)),
-      file: basename(path),
-      where: whereOf(path, deps.home),
+      // a CapCut project by its folder's name, and the lesson's name for it (main style-learn.ts nameOf)
+      name: k.kind === 'capcut' ? basename(dirname(path)) : basename(path, extname(path)),
+      file: k.kind === 'capcut' ? `${basename(dirname(path))}/${basename(path)}` : basename(path),
+      where: k.kind === 'capcut' && IN_CAPCUT.test(path) ? 'CapCut' : whereOf(k.kind === 'capcut' ? dirname(path) : path, deps.home),
       app: k.app,
       kind: k.kind,
       modified: new Date(st.mtimeMs).toISOString(),

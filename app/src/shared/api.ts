@@ -733,8 +733,9 @@ export interface StyleRule {
   check?: RuleCheck
   /** The reel, version and note it was learned from. */
   source?: { project: string; title: string; version: number; note?: string }
-  /** Learned from another editor's export (My style, Learn from my past edits): its file name. */
-  imported?: { file: string }
+  /** Learned from another editor's export (My style, Learn from my past edits): its file name, and the editor
+   * when one file was read (a rule kept before editors were remembered has none; shared/memory.ts guesses). */
+  imported?: { file: string; editor?: EditorName }
   consent?: { proposal: string; at: string }
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in the list. */
   updatedAt?: string
@@ -772,7 +773,7 @@ export interface LearnedRule {
 /** What "Learn from my past edits" read: the exports, how much was in them, and the rules, before any is saved. */
 export interface StyleLesson {
   /** By id and name; the paths stay in main. */
-  files: { id: string; name: string; editor: 'Final Cut Pro' | 'Premiere Pro' }[]
+  files: { id: string; name: string; editor: EditorName }[]
   timelines: number
   shots: number
   rules: LearnedRule[]
@@ -780,7 +781,9 @@ export interface StyleLesson {
   skipped: { name: string; reason: string }[]
 }
 
-export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj'
+export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj' | 'capcut'
+/** The editor a lesson says a file came from; an EDL names none. */
+export type EditorName = 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL'
 
 /** An edit "Learn from my past edits" found on this computer. Its path stays in main; the page names it by id. */
 export interface PastEdit {
@@ -791,7 +794,7 @@ export interface PastEdit {
   file: string
   /** The folder it is in, below the home folder ("Movies › Exports"), or its drive and folder. */
   where: string
-  app: 'Final Cut Pro' | 'Premiere Pro'
+  app: 'Final Cut Pro' | 'Premiere Pro' | 'CapCut'
   kind: PastEditKind
   /** ISO time it last changed. */
   modified: string
@@ -1152,8 +1155,9 @@ export interface ReelApi {
     appIcons(): Promise<Partial<Record<PastEdit['app'], string>>>
     /** Show a found edit in Finder or File Explorer. */
     reveal(id: string): Promise<void>
-    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from. */
-    keepLearned(rules: LearnedRule[], from: string): Promise<StyleRule[]>
+    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from, and the editor
+     * that made it when the lesson read one file. */
+    keepLearned(rules: LearnedRule[], from: string, editor?: EditorName): Promise<StyleRule[]>
     /** Change a rule's words, or pause or resume it. */
     update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */

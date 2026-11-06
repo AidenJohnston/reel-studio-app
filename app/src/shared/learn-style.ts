@@ -1,7 +1,8 @@
 // "Learn from my past edits" (My style): reads habits out of the timelines the engine's import-reference
-// returns for Final Cut Pro and Premiere Pro exports (engine/reelengine/reference_import.py). Each rule says
-// what it was read from, and a habit is only stated when the timelines show it. Keep free of Node and DOM imports.
-import type { LearnedRule } from './api'
+// returns for Final Cut Pro, Premiere Pro and DaVinci Resolve exports and CapCut projects
+// (engine/reelengine/reference_import.py). Each rule says what it was read from, and a habit is only stated when
+// the timelines show it. Keep free of Node and DOM imports.
+import type { EditorName, LearnedRule } from './api'
 
 type Time = { value: number; rate: number } | null
 type Range = { start: Time; duration: Time } | null
@@ -9,7 +10,7 @@ export interface RefItem {
   type: 'clip' | 'stack' | 'transition'
   name?: string | null
   trackRange?: Range
-  media?: { kind: 'file' | 'generator' | 'missing'; url?: string; generator?: string | null }
+  media?: { kind: 'file' | 'generator' | 'missing'; url?: string | null; name?: string | null; generator?: string | null }
 }
 export interface RefTrack {
   name: string
@@ -20,9 +21,12 @@ export interface RefTimeline {
   name: string
   tracks: RefTrack[]
 }
-/** The parts of an import record this reads. */
+/** The engine's readers: OpenTimelineIO's FCPXML and FCP7 XML adapters, CapCut's draft, a CMX 3600 EDL. */
+export const ADAPTERS = ['fcpx_xml', 'fcp_xml', 'capcut', 'cmx_3600'] as const
+/** The parts of an import record this reads. `writer` names the app when the format alone doesn't: DaVinci Resolve
+ * for its FCPXML, CapCut or JianYing (CapCut's Chinese edition) for a draft. */
 export interface ImportRecord {
-  source: { adapter: 'fcpx_xml' | 'fcp_xml' }
+  source: { adapter: (typeof ADAPTERS)[number]; writer?: string | null }
   timelines: RefTimeline[]
 }
 
@@ -61,7 +65,9 @@ interface Read {
 function read(tl: RefTimeline): Read {
   const main = mainTrack(tl)
   const placed = tl.tracks.flatMap((t) => t.items.filter((i) => i.type !== 'transition'))
-  const length = Math.max(0, ...placed.map((i) => secs(i.trackRange?.start ?? null) + secs(i.trackRange?.duration ?? null)))
+  // times from the timeline's first clip: DaVinci Resolve starts a timeline at 01:00:00:00 and its FCPXML says so
+  const origin = placed.length ? Math.min(...placed.map((i) => secs(i.trackRange?.start ?? null))) : 0
+  const length = Math.max(0, ...placed.map((i) => secs(i.trackRange?.start ?? null) + secs(i.trackRange?.duration ?? null) - origin))
   const mainItems = main?.items ?? []
   const shots = mainItems.filter((i) => i.type !== 'transition' && i.media?.kind !== 'generator').map((i) => secs(i.trackRange?.duration ?? null)).filter((d) => d > 0)
   const others = tl.tracks.filter((t) => t !== main && t.kind === 'Video').flatMap((t) => t.items)
@@ -71,8 +77,9 @@ function read(tl: RefTimeline): Read {
     cuts: Math.max(0, shots.length - 1),
     transitions: mainItems.filter((i) => i.type === 'transition').length,
     overlays: others.filter((i) => i.type === 'stack' || i.media?.kind === 'file').length,
-    opensWithText: tl.tracks.some((t) => t.items.some((i) => i.media?.kind === 'generator' && TEXT.test(`${i.media.generator ?? ''} ${i.name ?? ''}`) && secs(i.trackRange?.start ?? null) < 3)),
-    music: tl.tracks.some((t) => t.kind === 'Audio' && t.items.some((i) => i.media?.kind === 'file' && AUDIO_FILE.test(i.media.url ?? '')))
+    opensWithText: tl.tracks.some((t) => t.items.some((i) => i.media?.kind === 'generator' && TEXT.test(`${i.media.generator ?? ''} ${i.name ?? ''}`) && secs(i.trackRange?.start ?? null) - origin < 3)),
+    // an EDL names the clip, not its file
+    music: tl.tracks.some((t) => t.kind === 'Audio' && t.items.some((i) => i.media?.kind === 'file' && AUDIO_FILE.test(i.media.url ?? i.media.name ?? i.name ?? '')))
   }
 }
 
@@ -137,4 +144,17 @@ export function learnStyle(records: ImportRecord[]): Lesson {
   return { timelines: n, shots: shots.length, rules }
 }
 
-export const editorOf = (r: ImportRecord): 'Final Cut Pro' | 'Premiere Pro' => (r.source.adapter === 'fcpx_xml' ? 'Final Cut Pro' : 'Premiere Pro')
+/** Which editor made it, as the lesson names it. FCP7 XML is taken as Premiere Pro's, though Resolve writes it too. */
+export function editorOf(r: ImportRecord): EditorName {
+  if (r.source.writer === 'DaVinci Resolve') return 'DaVinci Resolve'
+  switch (r.source.adapter) {
+    case 'fcpx_xml':
+      return 'Final Cut Pro'
+    case 'capcut':
+      return 'CapCut'
+    case 'cmx_3600':
+      return 'EDL'
+    default:
+      return 'Premiere Pro'
+  }
+}
