@@ -41,3 +41,8 @@ go through this list. In the pull request's Verification section, say which item
   the engine directly, an older or imported project. Close each one, or say in the pull request why it stays open.
 - **Docs.** Code comments cite sections of `docs/architecture.md`. Update the section when you change what it
   describes, and the README when a user would notice.
+
+## Tests
+
+Before you write, change or review a test, read [.claude/skills/test-audit/SKILL.md](.claude/skills/test-audit/SKILL.md).
+A test earns its place only when it would fail if something a person or a saved `project.json` can observe broke.

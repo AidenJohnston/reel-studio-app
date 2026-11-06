@@ -3,13 +3,13 @@ import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { cpus, homedir, platform, release, arch, totalmem } from 'node:os'
+import { cpus, platform, release, arch, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
 import { aggregate, compare, report } from './metrics.mjs'
 import { cleanupEngines } from './processes.mjs'
 import { fileHash as sha256, guard, waitForTrialLoad, maxTrialLoad, requireAdmission, createScratch } from './resources.mjs'
 import { drive } from './drive.mjs'
-import { noteFixture } from './fixtures.mjs'
+import { clipPath, noteFixture } from './fixtures.mjs'
 
 const scripts = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(scripts, '../..')
@@ -37,7 +37,7 @@ function parse(args) {
   }
   options.runs = Number(options.runs)
   if (!Number.isInteger(options.runs) || options.runs < 1) throw new Error('--runs must be a positive integer')
-  if (options.clip && !['aiden', 'long'].includes(options.clip)) throw new Error('--clip must be aiden or long')
+  if (options.clip && !['short', 'long'].includes(options.clip)) throw new Error('--clip must be short or long')
   if (options.clip && options.long) throw new Error('Choose --clip or --long')
   return options
 }
@@ -161,8 +161,8 @@ async function main() {
     guard(scratch, true)
     await command('npm', ['run', 'build'], checkout, process.env, scratch)
     result.resourcesBeforeRuns = guard(scratch)
-    const clips = [join(homedir(), options.clip === 'long' ? 'Downloads/Video/IMG_7303.mov' : 'Downloads/Video/aiden-v1-new.mp4')]
-    if (options.long) clips.push(join(homedir(), 'Downloads/Video/IMG_7303.mov'))
+    const clips = [clipPath(options.clip === 'long' ? 'long' : 'short')]
+    if (options.long) clips.push(clipPath('long'))
     const inputs = await Promise.all(clips.map(async (file) => ({ file, name: basename(file), sha256: await sha256(file) })))
     for (let run = 1; run <= options.runs; run++) for (const input of inputs) {
       guard(scratch)
