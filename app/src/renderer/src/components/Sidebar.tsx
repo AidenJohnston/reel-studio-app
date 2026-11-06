@@ -250,7 +250,15 @@ function SideRecent({ current, go }: { current: string | null; go: Go }) {
             data-testid="side-reel"
           >
             {/* the nav's 16 px icon slot holds the state dot, so the names start where the nav's labels do */}
-            <span className="side-slot">{dot && <span className={`side-dot ${dot}`} role="img" aria-label={dot === 'making' ? 'Being made' : 'Needs you'} />}</span>
+            {/* told apart by shape, not colour alone: a turning ring while it is made, the alert mark when it needs you */}
+            <span className="side-slot">
+              {dot === 'making' && <span className="spin side-making" role="img" aria-label="Being made" />}
+              {dot === 'needs' && (
+                <span className="side-needs" role="img" aria-label="Needs you">
+                  <Icon name="alert" size={14} />
+                </span>
+              )}
+            </span>
             <span className="lbl">{p.title}</span>
           </button>
         )

@@ -213,8 +213,9 @@ async function motionStrip(page: Page, name: string, clip: () => Promise<{ x: nu
     const start = Date.now()
     await go()
     for (let i = 0; i < FRAMES; i++) {
-      // 0, 40, 80 … 200 ms of the animation's own time, and the last one once it has ended
-      const at = i === FRAMES - 1 ? 4000 : i * 400
+      // 0, 15, 30, 50 and 80 ms of the animation's own time (an ease-out does most of its moving early), and the last
+      // once it has ended
+      const at = i === FRAMES - 1 ? 4000 : [0, 150, 300, 500, 800][i]
       await page.waitForTimeout(Math.max(0, start + at - Date.now()))
       const f = join(OUT!, `.frame-${i}.png`)
       await page.screenshot({ path: f, clip: box, scale: 'css', animations: 'allow' })

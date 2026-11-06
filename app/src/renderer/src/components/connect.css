@@ -190,10 +190,11 @@ html.kb .vcode-box { transition: none; }
 .mrows { list-style: none; margin: 0; padding: 0 0 6px 32px; display: grid; min-width: 0; }
 /* display: grid would otherwise beat the hidden attribute: closed means its rows are not drawn */
 .mrows[hidden] { display: none; }
-.mrow { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 0; }
+/* each model a row like Settings' own (settings.css .srow): its name at body size over its line, with room between */
+.mrow { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 8px 0; }
 .mrow + .mrow { box-shadow: inset 0 1px 0 var(--line); }
-.mrow-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink); }
+.mrow-t { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 560; color: var(--ink); }
 .mrow-line { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .mrow-line.warn { color: var(--amber); }
 .mchip {
