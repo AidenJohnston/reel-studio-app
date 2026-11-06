@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
+import { constants, mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createEngineRunner } from '../src/main/engine'
@@ -200,6 +200,56 @@ describe('platform files through the real engine', () => {
       for (const stub of stubs) stub.mockRestore()
     }
     expect(await fs.readdir(folder)).toEqual([])
+  })
+
+  // An exFAT drive (no hard links, no clones) whose plain copies never finish: only a copy Stop can interrupt returns.
+  it('fails if Stop on a drive without hard links waits for a whole copy', async () => {
+    const source = finalRender(join(scratch, 'slow copy.mp4'), 3)
+    const folder = join(scratch, 'slow copy')
+    mkdirSync(folder)
+    const stop = new AbortController()
+    const stubs = [
+      vi.spyOn(fs, 'link').mockImplementation(async () => {
+        stop.abort()
+        throw Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' })
+      }),
+      vi.spyOn(fs, 'copyFile').mockImplementation((_from, _to, mode) => ((mode ?? 0) & constants.COPYFILE_FICLONE_FORCE)
+        ? Promise.reject(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }))
+        : new Promise<void>(() => {}))
+    ]
+    try {
+      await expect(exportPlatforms({ source, chosenCover: null, folder, name: 'Slow', request: { platforms: ['tiktok'], caption: '', coverSeconds: null }, runEngine, signal: stop.signal }))
+        .rejects.toMatchObject({ code: 'CANCELLED' })
+    } finally {
+      for (const stub of stubs) stub.mockRestore()
+    }
+    expect(await fs.readdir(folder)).toEqual([])
+  }, 20_000)
+
+  it('fails if an export to a drive without hard links keeps a second copy of a placed video until it ends', async () => {
+    const source = finalRender(join(scratch, 'no links.mp4'), 3)
+    const folder = join(scratch, 'no links')
+    mkdirSync(folder)
+    const staged: string[] = []
+    const { copyFile } = fs
+    const stubs = [
+      vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' })),
+      vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+        // As the second video starts, the staging folder holds nothing of the first one.
+        if (to === join(folder, 'Space - YouTube Shorts.mp4')) {
+          const [stage] = (await fs.readdir(folder)).filter((n) => n.startsWith('.platform-export-'))
+          staged.push(...await fs.readdir(join(folder, stage)))
+        }
+        return copyFile(from, to, mode)
+      })
+    ]
+    try {
+      await exportPlatforms({ source, chosenCover: null, folder, name: 'Space', request: { platforms: ['tiktok', 'youtube'], caption: '', coverSeconds: null }, runEngine })
+    } finally {
+      for (const stub of stubs) stub.mockRestore()
+    }
+    expect(staged).toContain('Space - YouTube Shorts.mp4')
+    expect(staged.filter((n) => n.startsWith('Space - TikTok'))).toEqual([])
   })
   it.skipIf(process.platform !== 'win32')('fails if the staging folder is not hidden on Windows, where a leading dot hides nothing', async () => {
     const folder = join(scratch, 'hidden-stage')
