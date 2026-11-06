@@ -9,6 +9,7 @@ import type { TikTokSettings } from '../shared/tiktok'
 import type { FacebookSettings } from './facebook'
 import type { ThreadsSettings } from './threads'
 import type { XSettings } from './x'
+import type { LinkedInSettings } from './linkedin'
 import type { PlatformAvailability, SigninPlatformId } from '../shared/social'
 
 export interface SigninPlatforms {
@@ -17,6 +18,7 @@ export interface SigninPlatforms {
   tiktok?: { clientKey: string; audited: boolean; directPost: boolean }
   threads?: { clientId: string; review: 'testers' | 'approved'; mediaOrigins: string[] }
   x?: { clientId: string }
+  linkedin?: { clientId: string }
 }
 
 export type Directory = { reached: true; platforms: SigninPlatforms } | { reached: false }
@@ -58,6 +60,8 @@ export function readPlatforms(value: unknown): SigninPlatforms {
   if (th) out.threads = th
   const xa = p.x
   if (xa && isId(xa.clientId, /^[A-Za-z0-9_-]{1,128}$/)) out.x = { clientId: xa.clientId }
+  const li = p.linkedin
+  if (li && isId(li.clientId, /^[A-Za-z0-9_-]{1,128}$/)) out.linkedin = { clientId: li.clientId }
   const fb = p.facebook
   if (fb && isId(fb.clientId, /^\d{1,32}$/) && review(fb.review)) out.facebook = { clientId: fb.clientId, review: review(fb.review)! }
   const tt = p.tiktok
@@ -129,6 +133,11 @@ export function xFrom(d: Directory, baseUrl: string): XSettings {
   return { clientId: xa?.clientId ?? null, brokerUrl: xa ? baseUrl : null }
 }
 
+export function linkedinFrom(d: Directory, baseUrl: string): LinkedInSettings {
+  const li = d.reached ? d.platforms.linkedin : undefined
+  return { clientId: li?.clientId ?? null, brokerUrl: li ? baseUrl : null }
+}
+
 export function tiktokFrom(d: Directory, baseUrl: string): TikTokSettings {
   const tt = d.reached ? d.platforms.tiktok : undefined
   return { tiktokEnabled: !!tt, tiktokClientKey: tt?.clientKey ?? null, tiktokBrokerUrl: tt ? baseUrl : null, tiktokAudited: tt?.audited ?? false, tiktokDirectPost: tt?.directPost ?? false }
@@ -142,6 +151,6 @@ export function availability(d: Directory, id: SigninPlatformId, own: boolean): 
   if (!p) return { open: false, why: 'not_set_up' }
   if (id === 'tiktok') return { open: true, review: (p as NonNullable<SigninPlatforms['tiktok']>).audited ? 'approved' : 'private_only' }
   // X has no app review; posting through its API is paid for on the developer account
-  if (id === 'x') return { open: true, review: 'approved' }
+  if (id === 'x' || id === 'linkedin') return { open: true, review: 'approved' }
   return { open: true, review: (p as { review: 'testers' | 'approved' }).review }
 }

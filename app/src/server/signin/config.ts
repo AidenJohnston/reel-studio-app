@@ -22,6 +22,8 @@ export interface SigninConfig {
   tiktok?: { clientKey: string; clientSecret: string; audited: boolean; directPost: boolean }
   /** An X app with OAuth 2.0 (a confidential client). Posting through X's API costs credits on the developer account. */
   x?: { clientId: string; clientSecret: string }
+  /** A LinkedIn app with "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". */
+  linkedin?: { clientId: string; clientSecret: string }
   /** S3-compatible storage for the temporary copy Instagram fetches by URL. Without it Instagram stays off. */
   media?: { bucketUrl: string; region: string; accessKeyId: string; secretAccessKey: string }
   fetch: (url: string, init: RequestInit) => Promise<Response>
@@ -73,6 +75,8 @@ export function configFromEnv(env: Env, fetcher: SigninConfig['fetch'], now: () 
   const th = pair(env, 'THREADS_APP_ID', 'THREADS_APP_SECRET')
   const tt = pair(env, 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET')
   const xa = pair(env, 'X_CLIENT_ID', 'X_CLIENT_SECRET')
+  const li = pair(env, 'LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')
+  if (li && !/^[A-Za-z0-9_-]{1,128}$/.test(li[0])) throw new Error('LINKEDIN_CLIENT_ID has unexpected characters')
   if (xa && !/^[A-Za-z0-9_-]{1,128}$/.test(xa[0])) throw new Error('X_CLIENT_ID has unexpected characters')
   const bucket = get(env, 'MEDIA_BUCKET_URL')
   const keys = pair(env, 'MEDIA_ACCESS_KEY_ID', 'MEDIA_SECRET_ACCESS_KEY')
@@ -90,6 +94,7 @@ export function configFromEnv(env: Env, fetcher: SigninConfig['fetch'], now: () 
     ...(fb ? { facebook: { appId: fb[0], appSecret: fb[1], review: review(env, 'FACEBOOK_REVIEW') } } : {}),
     ...(th ? { threads: { appId: th[0], appSecret: th[1], review: review(env, 'THREADS_REVIEW') } } : {}),
     ...(xa ? { x: { clientId: xa[0], clientSecret: xa[1] } } : {}),
+    ...(li ? { linkedin: { clientId: li[0], clientSecret: li[1] } } : {}),
     ...(tt ? { tiktok: { clientKey: tt[0], clientSecret: tt[1], audited: flag(env, 'TIKTOK_AUDITED'), directPost: flag(env, 'TIKTOK_DIRECT_POST') } } : {}),
     ...(bucket && keys ? { media: { bucketUrl: bucket, region: get(env, 'MEDIA_REGION') ?? 'auto', accessKeyId: keys[0], secretAccessKey: keys[1] } } : {}),
     fetch: fetcher,

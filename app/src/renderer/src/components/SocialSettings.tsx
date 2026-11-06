@@ -9,13 +9,13 @@ import { SettingRow } from './settings-rows'
 import { useSocialStatus } from './social'
 import { Button, Confirm, Spinner } from './ui'
 
-type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x'
+type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x' | 'linkedin'
 
 /** The account a platform's row names, or null when nothing is connected. */
 export function accountName(s: SocialStatus, id: Id): string | null {
   const x = s[id].session
   if (!x.connected) return null
-  return 'username' in x ? x.username : 'displayName' in x ? x.displayName : x.page.name
+  return 'username' in x ? x.username : 'displayName' in x ? x.displayName : 'name' in x ? x.name : x.page.name
 }
 
 export function SocialRows() {
@@ -28,6 +28,7 @@ export function SocialRows() {
       <PlatformRow id="facebook" s={s} reload={reload} />
       <PlatformRow id="threads" s={s} reload={reload} />
       <PlatformRow id="x" s={s} reload={reload} />
+      <PlatformRow id="linkedin" s={s} reload={reload} />
     </>
   )
 }

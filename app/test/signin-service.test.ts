@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { createHash, randomBytes } from 'node:crypto'
 import { configFromEnv, type SigninConfig } from '../src/server/signin/config'
-import { createSigninHandler, FACEBOOK_SCOPES, INSTAGRAM_SCOPES, THREADS_SCOPES, X_SCOPES } from '../src/server/signin/handler'
+import { createSigninHandler, FACEBOOK_SCOPES, INSTAGRAM_SCOPES, THREADS_SCOPES, X_SCOPES, LINKEDIN_SCOPES } from '../src/server/signin/handler'
 import { presign } from '../src/server/signin/presign'
 
 const ORIGIN = 'https://signin.example'
@@ -24,6 +24,7 @@ function world(answer: Answer = () => undefined, env: Record<string, string> = {
     FACEBOOK_APP_ID: '2222', FACEBOOK_APP_SECRET: 'fb-app-secret', FACEBOOK_REVIEW: 'approved',
     THREADS_APP_ID: '3333', THREADS_APP_SECRET: 'th-app-secret',
     X_CLIENT_ID: 'x-client', X_CLIENT_SECRET: 'x-secret',
+    LINKEDIN_CLIENT_ID: 'li-client', LINKEDIN_CLIENT_SECRET: 'li-secret',
     TIKTOK_CLIENT_KEY: 'tt-key', TIKTOK_CLIENT_SECRET: 'tt-secret',
     MEDIA_BUCKET_URL: 'https://acct.r2.example/reels', MEDIA_ACCESS_KEY_ID: 'AKID', MEDIA_SECRET_ACCESS_KEY: 'media-secret',
     ...env
@@ -41,7 +42,7 @@ function world(answer: Answer = () => undefined, env: Record<string, string> = {
 }
 
 /** Start, then play the platform sending the person back with `code`: the redirect the browser follows to the app. */
-async function signIn(w: ReturnType<typeof world>, p: 'instagram' | 'facebook' | 'threads' | 'x', verifier: string, code = 'fab-code', back = LOOP.replace('instagram', p)) {
+async function signIn(w: ReturnType<typeof world>, p: 'instagram' | 'facebook' | 'threads' | 'x' | 'linkedin', verifier: string, code = 'fab-code', back = LOOP.replace('instagram', p)) {
   const started = await w.post(`/v1/${p}/start`, { state: 'a'.repeat(43), loopback_uri: back, code_challenge: s256(verifier), code_challenge_method: 'S256' })
   expect(started.status).toBe(200)
   const link = new URL(((await started.json()) as { authorize_url: string }).authorize_url)
@@ -272,6 +273,22 @@ describe('X sign-in through the service', () => {
   })
 })
 
+describe('LinkedIn sign-in through the service', () => {
+  it('trades the code for the 60-day token with the secret', async () => {
+    const w = world((u, init) => {
+      if (u.href !== 'https://www.linkedin.com/oauth/v2/accessToken') return
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({ grant_type: 'authorization_code', code: 'fab-code', redirect_uri: `${ORIGIN}/v1/linkedin/callback`, client_id: 'li-client', client_secret: 'li-secret' })
+      return Response.json({ access_token: 'li-token', expires_in: 5_184_000, scope: 'openid,profile,w_member_social' })
+    })
+    const verifier = randomBytes(32).toString('base64url')
+    const { link, to } = await signIn(w, 'linkedin', verifier)
+    expect(link.origin + link.pathname).toBe('https://www.linkedin.com/oauth/v2/authorization')
+    expect(link.searchParams.get('scope')?.split(' ')).toEqual(LINKEDIN_SCOPES)
+    const r = await w.post('/v1/linkedin/complete', { handoff: to!.searchParams.get('handoff'), code_verifier: verifier })
+    expect(await r.json()).toEqual({ access_token: 'li-token', token_type: 'bearer', expires_in: 5_184_000, permissions: LINKEDIN_SCOPES })
+  })
+})
+
 describe('TikTok token calls', () => {
   it('adds the secret for a code from the app on this computer, and refuses anything else without calling TikTok', async () => {
     const w = world((u, init) => {
@@ -305,7 +322,8 @@ describe('what the service offers', () => {
         instagram: { clientId: '1111', review: 'testers', mediaOrigins: ['https://acct.r2.example'] },
         tiktok: { clientKey: 'tt-key', audited: true, directPost: false },
         threads: { clientId: '3333', review: 'testers', mediaOrigins: ['https://acct.r2.example'] },
-        x: { clientId: 'x-client' }
+        x: { clientId: 'x-client' },
+        linkedin: { clientId: 'li-client' }
       }
     })
     expect((await w.post('/v1/facebook/start', {})).status).toBe(404)

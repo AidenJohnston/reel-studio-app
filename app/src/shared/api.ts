@@ -6,6 +6,7 @@ import type { SocialStatus } from './social'
 import type { FacebookApi } from './facebook'
 import type { ThreadsApi } from './threads'
 import type { XApi } from './x'
+import type { LinkedInApi } from './linkedin'
 import type { InsightsOptions, InsightsSummary } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
@@ -856,6 +857,7 @@ export interface ReelApi {
   facebook: FacebookApi
   threads: ThreadsApi
   x: XApi
+  linkedin: LinkedInApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>

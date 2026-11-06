@@ -63,6 +63,13 @@ const api: ReelApi = {
     disconnect: () => call('x:disconnect'),
     publish: (input) => call('x:publish', input)
   },
+  linkedin: {
+    session: () => call('linkedin:session'),
+    connect: () => call('linkedin:connect'),
+    cancelConnect: () => call('linkedin:cancelConnect'),
+    disconnect: () => call('linkedin:disconnect'),
+    publish: (input) => call('linkedin:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),

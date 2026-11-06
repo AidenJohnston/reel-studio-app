@@ -99,7 +99,8 @@ import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
-import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom, xFrom } from './signin-config'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom, xFrom, linkedinFrom } from './signin-config'
+import { LinkedInService } from './linkedin'
 import { XService } from './x'
 import { ThreadsService } from './threads'
 import { FacebookService } from './facebook'
@@ -881,8 +882,18 @@ function registerIpc(): void {
   handle('x:disconnect', () => xPosting.disconnect())
   handle('x:publish', (_e, input) => xPosting.publish(input))
   app.on('before-quit', () => { xPosting.stop() })
+  const linkedin = new LinkedInService({
+    settings: async () => linkedinFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('linkedin:session', () => linkedin.session())
+  handle('linkedin:connect', () => linkedin.connect())
+  handle('linkedin:cancelConnect', () => linkedin.cancelConnect())
+  handle('linkedin:disconnect', () => linkedin.disconnect())
+  handle('linkedin:publish', (_e, input) => linkedin.publish(input))
+  app.on('before-quit', () => { linkedin.stop() })
   registerSocialIpc({
-    handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting,
+    handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
     own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
   })
   handle('app:info', () => appInfo())

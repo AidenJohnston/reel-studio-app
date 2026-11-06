@@ -6,8 +6,9 @@ import type { TikTokSession } from './tiktok'
 import type { FacebookSession } from './facebook'
 import type { ThreadsSession } from './threads'
 import type { XSession } from './x'
+import type { LinkedInSession } from './linkedin'
 
-export type SigninPlatformId = 'instagram' | 'facebook' | 'tiktok' | 'threads' | 'x'
+export type SigninPlatformId = 'instagram' | 'facebook' | 'tiktok' | 'threads' | 'x' | 'linkedin'
 
 /**
  * Whether a platform can be connected now. Closed: the sign-in service couldn't be reached, or has no app for it.
@@ -25,9 +26,10 @@ export interface SocialStatus {
   facebook: { availability: PlatformAvailability; session: FacebookSession }
   threads: { availability: PlatformAvailability; session: ThreadsSession }
   x: { availability: PlatformAvailability; session: XSession }
+  linkedin: { availability: PlatformAvailability; session: LinkedInSession }
 }
 
-export const PLATFORM_NAMES: Record<SigninPlatformId, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', threads: 'Threads', x: 'X' }
+export const PLATFORM_NAMES: Record<SigninPlatformId, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', threads: 'Threads', x: 'X', linkedin: 'LinkedIn' }
 
 /** The line under a platform that isn't connected: why it can't be yet, or what connecting needs. */
 export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability): string {
@@ -42,7 +44,7 @@ export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability):
       : 'Meta hasn’t approved Reel Studio yet, so only accounts added to its app as testers can connect.'
   if (a.review === 'private_only') return 'TikTok hasn’t reviewed Reel Studio yet, so posts go up as Only me until it does.'
   if (id === 'instagram') return 'Needs a Business or Creator account.'
-  if (id === 'threads' || id === 'x') return ''
+  if (id === 'threads' || id === 'x' || id === 'linkedin') return ''
   return ''
 }
 
@@ -59,6 +61,10 @@ export const SOCIAL_COPY = {
     name === 'TikTok'
       ? `Reel Studio forgets ${account} on this computer and asks TikTok to end its access. Posts already made stay on TikTok.`
       : `Reel Studio forgets ${account} on this computer. Posts already made stay on ${name}. To remove Reel Studio’s access completely, remove it in ${name}’s settings too.`,
+  liHeading: 'Post to LinkedIn',
+  liDoneHeading: 'Posted to LinkedIn',
+  liDone: 'Your video is on LinkedIn.',
+  liWait: 'LinkedIn processes the video before it posts, which can take a few minutes. Keep Reel Studio open.',
   xHeading: 'Post to X',
   xDoneHeading: 'Posted to X',
   xDone: 'Your video is on X.',

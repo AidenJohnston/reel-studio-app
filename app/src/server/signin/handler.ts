@@ -28,6 +28,7 @@ export const THREADS_SCOPES = ['threads_basic', 'threads_content_publish']
 const THREADS_GRAPH = 'https://graph.threads.com'
 export const X_SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access']
 const X_API = 'https://api.x.com/2'
+export const LINKEDIN_SCOPES = ['openid', 'profile', 'w_member_social']
 const TIKTOK = 'https://open.tiktokapis.com/v2'
 const STATE_MS = 10 * 60_000
 const HANDOFF_MS = 5 * 60_000
@@ -40,7 +41,7 @@ const MAX_COVER = 8_000_000
 /** How long a storage pass lasts: past the 60-day token, so a refreshed connection keeps it; then Connect again. */
 const PASS_MS = 90 * 86_400_000
 
-type Platform = 'instagram' | 'facebook' | 'threads' | 'x'
+type Platform = 'instagram' | 'facebook' | 'threads' | 'x' | 'linkedin'
 
 class Refused extends Error {
   readonly status: number
@@ -219,6 +220,11 @@ async function xToken(c: SigninConfig, fields: Record<string, string>): Promise<
 
 function authorizeUrl(c: SigninConfig, p: Platform, app: { appId: string }, state: string, upstreamChallenge?: string): string {
   const redirect = `${c.publicUrl}/v1/${p}/callback`
+  if (p === 'linkedin') {
+    const u = new URL('https://www.linkedin.com/oauth/v2/authorization')
+    u.search = new URLSearchParams({ response_type: 'code', client_id: app.appId, redirect_uri: redirect, scope: LINKEDIN_SCOPES.join(' '), state }).toString()
+    return u.toString()
+  }
   if (p === 'x') {
     const u = new URL('https://x.com/i/oauth2/authorize')
     u.search = new URLSearchParams({ response_type: 'code', client_id: app.appId, redirect_uri: redirect, scope: X_SCOPES.join(' '), state,
@@ -244,7 +250,8 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
   const keyP = sealKey(c.secret)
   /** The app for a platform signed in through start/callback/complete: Meta's, or X's (its client id as appId). */
   const meta = (p: Platform): { appId: string; appSecret: string } => {
-    const app = p === 'x' ? (c.x ? { appId: c.x.clientId, appSecret: c.x.clientSecret } : undefined) : c[p]
+    const other = p === 'x' ? c.x : p === 'linkedin' ? c.linkedin : undefined
+    const app = p === 'x' || p === 'linkedin' ? (other ? { appId: other.clientId, appSecret: other.clientSecret } : undefined) : c[p]
     if (!app) throw new Refused(404, 'platform_off')
     return app
   }
@@ -291,6 +298,14 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     if (!h || h.p !== p || typeof h.code !== 'string' || typeof h.challenge !== 'string') throw new Refused(401, 'handoff_expired')
     if (!sameText(await s256(verifier), h.challenge)) throw new Refused(401, 'wrong_verifier')
     const redirect = `${c.publicUrl}/v1/${p}/callback`
+    if (p === 'linkedin') {
+      // 60-day tokens; LinkedIn gives refresh tokens only to its partner apps, so the app asks to connect again then
+      const r = await upstream(c, 'https://www.linkedin.com/oauth/v2/accessToken', form({
+        grant_type: 'authorization_code', code: h.code, redirect_uri: redirect, client_id: app.appId, client_secret: app.appSecret
+      }), 'code_rejected')
+      const scope = typeof r.scope === 'string' ? r.scope.split(/[ ,]/).filter(Boolean) : []
+      return json(200, { access_token: token(r.access_token), token_type: 'bearer', expires_in: positive(r.expires_in), permissions: scope })
+    }
     if (p === 'x') {
       if (typeof h.uv !== 'string') throw new Refused(401, 'handoff_expired')
       return json(200, await xToken(c, { grant_type: 'authorization_code', code: h.code, redirect_uri: redirect, code_verifier: h.uv, client_id: c.x!.clientId }))
@@ -420,6 +435,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
         ...(c.facebook ? { facebook: { clientId: c.facebook.appId, review: c.facebook.review } } : {}),
         ...(c.threads && c.media ? { threads: { clientId: c.threads.appId, review: c.threads.review, mediaOrigins: [new URL(c.media.bucketUrl).origin] } } : {}),
         ...(c.x ? { x: { clientId: c.x.clientId } } : {}),
+        ...(c.linkedin ? { linkedin: { clientId: c.linkedin.clientId } } : {}),
         ...(c.tiktok ? { tiktok: { clientKey: c.tiktok.clientKey, audited: c.tiktok.audited, directPost: c.tiktok.directPost } } : {})
       }
     })
@@ -434,7 +450,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     const route = `${req.method} ${url.pathname}`
     try {
       if (route === 'GET /v1/platforms') return platforms()
-      const m = /^\/v1\/(instagram|facebook|threads|x)\/(start|callback|complete)$/.exec(url.pathname)
+      const m = /^\/v1\/(instagram|facebook|threads|x|linkedin)\/(start|callback|complete)$/.exec(url.pathname)
       if (m) {
         const p = m[1] as Platform
         if (m[2] === 'start' && req.method === 'POST') return await start(p, req)
