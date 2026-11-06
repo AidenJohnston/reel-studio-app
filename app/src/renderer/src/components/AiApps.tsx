@@ -49,7 +49,7 @@ export function NoteRunnerRow({ onError }: { onError: (m: string) => void }) {
       id="note-runner"
       line={
         info.runner === 'app'
-          ? `Your ${name} app’s own agent makes each change, using Reel Studio’s tools. Notes take a little longer to start. Stop and undo work the same.`
+          ? `Your ${name} app’s own agent makes each change, using Reel Studio’s tools. Notes take a little longer to start. Stop and undo work the same. With Double-check each edit on, your ${info.app === 'codex' ? 'Claude Code' : 'Codex'} app checks each note when it’s signed in.`
           : `Reel Studio’s editor makes each change. Or let your ${name} app make it, using Reel Studio’s tools.`
       }
       control={

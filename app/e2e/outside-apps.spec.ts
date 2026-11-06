@@ -27,7 +27,7 @@ test('fails if a person cannot choose to run notes in their Claude Code app, or 
     await expect(page.getByTestId('note-runner-reelstudio')).toHaveAttribute('aria-checked', 'true')
     await page.locator('[data-setting="note-runner"]').scrollIntoViewIfNeeded()
     await evidence(page, 'note-runner-reelstudio')
-    await page.getByTestId('note-runner-claude-code').click()
+    await page.getByTestId('note-runner-app').click()
     await expect(page.getByTestId('note-runner-app')).toHaveAttribute('aria-checked', 'true')
     await expect(page.locator('[data-setting="note-runner"]')).toContainText('own agent makes each change')
     expect(await page.evaluate(() => window.reel.ai.noteRunner())).toEqual({ runner: 'app', app: 'claude-code' })
