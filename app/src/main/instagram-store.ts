@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { atomicSocialFile, withSocialFile } from './social-store'
 import { id, InstagramError, object, positive, text } from './instagram-http'
-import type { InstagramOutcome, InstagramPost } from '../shared/instagram'
+import type { InstagramOutcome, InstagramPost, InstagramTrial } from '../shared/instagram'
 
 export interface InstagramSecretStore {
   isEncryptionAvailable(): boolean
@@ -96,7 +96,7 @@ function post(value: unknown): InstagramPost {
   const g = t.graduation
   if (g !== 'MANUAL' && g !== 'SS_PERFORMANCE') return localDataError()
   if ((t.try !== undefined && t.try !== 1 && t.try !== 2) || (t.group !== undefined && typeof t.group !== 'string')) return localDataError()
-  const trial = { graduation: g, ...(t.try ? { try: t.try as 1 | 2 } : {}), ...(typeof t.group === 'string' ? { group: t.group } : {}) }
+  const trial: InstagramTrial = { graduation: g as InstagramTrial['graduation'], ...(t.try ? { try: t.try as 1 | 2 } : {}), ...(typeof t.group === 'string' ? { group: t.group } : {}) }
   return { version: p.version, accountId: id(p.accountId), postId: id(p.postId), publishedAt, trial }
 }
 

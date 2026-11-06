@@ -48,8 +48,9 @@ export function readPlatforms(value: unknown): SigninPlatforms {
   const root = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const p = root.v === 1 && root.platforms && typeof root.platforms === 'object' ? (root.platforms as Record<string, Record<string, unknown> | undefined>) : {}
   const out: SigninPlatforms = {}
-  const review = (v: unknown) => (v === 'approved' ? 'approved' : v === 'testers' ? 'testers' : null)
-  const linked = (x: Record<string, unknown> | undefined) =>
+  type Review = 'testers' | 'approved'
+  const review = (v: unknown): Review | null => (v === 'approved' ? 'approved' : v === 'testers' ? 'testers' : null)
+  const linked = (x: Record<string, unknown> | undefined): { clientId: string; review: Review; mediaOrigins: string[] } | undefined =>
     x && isId(x.clientId, /^\d{1,32}$/) && review(x.review) && Array.isArray(x.mediaOrigins) &&
     x.mediaOrigins.length > 0 && x.mediaOrigins.every((o) => typeof o === 'string' && /^https:\/\/[^/?#]+$/.test(o))
       ? { clientId: x.clientId as string, review: review(x.review)!, mediaOrigins: x.mediaOrigins as string[] }
