@@ -433,7 +433,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
               : null,
             planned: d.status === 'planned',
             plan: d.plan,
-            source: d.project.sources?.[0] ?? null,
+            sources: d.project.sources ?? [],
             now: new Date()
           })
         : [],
