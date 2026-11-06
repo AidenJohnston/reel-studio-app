@@ -63,41 +63,53 @@ it('CONNECT pins the tunnel, forwards received bytes, and blocks a later private
   }
 })
 
-it('a CONNECT client that resets while its address is checked does not crash the app', async () => {
+/** `wait`, or a rejection once the test's signal aborts (it times out): a close Windows never delivers fails the test. */
+function within<T>(wait: Promise<T>, signal: AbortSignal): Promise<T> {
+  return Promise.race([wait, new Promise<never>((_resolve, reject) => {
+    if (signal.aborted) reject(signal.reason)
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })])
+}
+
+it('a CONNECT client that resets while its address is checked does not crash the app', async ({ signal, onTestFinished }) => {
   const crashes: unknown[] = []
   const onCrash = (error: unknown) => { crashes.push(error) }
-  process.on('uncaughtException', onCrash)
   // The proxy's own end of the connection, as Node accepts it.
   let accept: (socket: Socket) => void = () => {}
   const accepted = new Promise<Socket>((resolve) => { accept = resolve })
   const onSocket = (message: unknown) => accept((message as { socket: Socket }).socket)
-  subscribe('net.server.socket', onSocket)
   let release = () => {}
+  let proxy: Awaited<ReturnType<typeof createCaptureProxy>> | undefined
+  let socket: Socket | undefined
+  // Runs even when the test times out, which a finally after a wait that never settles would not.
+  onTestFinished(async () => {
+    unsubscribe('net.server.socket', onSocket)
+    process.off('uncaughtException', onCrash)
+    release()
+    network.gate = null
+    network.asked = () => {}
+    socket?.destroy()
+    await proxy?.close()
+  })
+  process.on('uncaughtException', onCrash)
+  subscribe('net.server.socket', onSocket)
   network.gate = new Promise<void>((resolve) => { release = resolve })
   const asked = new Promise<void>((resolve) => { network.asked = resolve })
   // A refusal after the reset covers the 403 path too.
   network.address = '127.0.0.1'
-  const proxy = await createCaptureProxy()
-  try {
-    const socket = connect({ host: '127.0.0.1', port: proxy.port })
-    await once(socket, 'connect')
-    socket.write('CONNECT reset.example:443 HTTP/1.1\r\nHost: reset.example:443\r\n\r\n')
-    await asked
-    const server = await accepted
-    // Node dropped its own listener before 'connect': without one of ours, the reset below is thrown.
-    expect(server.listenerCount('error')).toBeGreaterThan(0)
-    // Only a 'close' listener: events.once would add an error listener and hide the crash.
-    const closed = new Promise<void>((resolve) => server.once('close', () => resolve()))
-    socket.resetAndDestroy()
-    release()
-    await closed
-    await new Promise((resolve) => setImmediate(resolve)) // the refusal after the lookup has run
-    expect(crashes).toEqual([])
-  } finally {
-    unsubscribe('net.server.socket', onSocket)
-    process.off('uncaughtException', onCrash)
-    network.gate = null
-    network.asked = () => {}
-    await proxy.close()
-  }
-})
+  proxy = await createCaptureProxy()
+  socket = connect({ host: '127.0.0.1', port: proxy.port })
+  await once(socket, 'connect', { signal })
+  socket.write('CONNECT reset.example:443 HTTP/1.1\r\nHost: reset.example:443\r\n\r\n')
+  await within(asked, signal)
+  const server = await within(accepted, signal)
+  // Node dropped its own listener before 'connect': without one of ours, the reset below is thrown.
+  expect(server.listenerCount('error')).toBeGreaterThan(0)
+  // Only a 'close' listener: events.once would add an error listener and hide the crash.
+  const closed = new Promise<void>((resolve) => server.once('close', () => resolve()))
+  socket.resetAndDestroy()
+  release()
+  await within(closed, signal)
+  await new Promise((resolve) => setImmediate(resolve)) // the refusal after the lookup has run
+  expect(crashes).toEqual([])
+}, 10_000)
