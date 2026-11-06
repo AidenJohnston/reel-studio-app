@@ -32,6 +32,9 @@ export interface AppState {
   title?: string
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
+  /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
+   * is open): the next start, or the next job on the project, removes them (settleInterrupted). */
+  cleanupOwed?: boolean
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -309,7 +312,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
- * to pick up where it left off.
+ * to pick up where it left off. One whose job could not remove its unfinished versions
+ * (cleanupOwed) only gets them removed.
  */
 export async function recoverInterrupted(stillRunning: string[] = []): Promise<string[]> {
   const recovered: string[] = []
@@ -344,13 +348,22 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
   const dir = projectDir(slug)
   if (!existsSync(join(dir, 'app.json'))) return 'nothing'
   const s = await readAppState(slug)
-  if (!s.job) return 'nothing'
+  if (!s.job) {
+    if (!s.cleanupOwed) return 'nothing'
+    // the job ended and said so, and only its clean-up was left: refused again, it waits for the next try
+    if (!(await cleanPartialVersions(dir).then(() => true, () => false))) return 'nothing'
+    await updateAppState(slug, (st) => {
+      delete st.cleanupOwed
+    })
+    return 'settled'
+  }
   const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
   await cleanPartialVersions(dir)
   // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
   await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
   await updateAppState(slug, (st) => {
+    delete st.cleanupOwed
     st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
     if (saved) {
       const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
