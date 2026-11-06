@@ -174,6 +174,12 @@ const api: ReelApi = {
     choose: (kind) => call('library:choose', kind),
     preview: (path) => call('library:preview', path)
   },
+  footage: {
+    sources: () => call('footage:sources'),
+    addSource: () => call('footage:addSource'),
+    removeSource: (id) => call('footage:removeSource', id),
+    status: () => call('footage:status')
+  },
   style: {
     rules: () => call('style:rules'),
     add: (text) => call('style:add', text),

@@ -62,6 +62,26 @@ async function uncommittedDownload(dir: string) {
 }
 
 describe('frozen image assets', () => {
+  it('fails if a Footage/ path from search_footage is read in place instead of through the app\'s Library copy', async () => {
+    const { ctx, dir, root, host } = await setup();
+    const asked: string[] = [];
+    host.importFootage = async (ref: string) => {
+      asked.push(ref);
+      await fs.copyFile(path.join(root, 'Library/Images/bread.png'), path.join(root, 'Library/Images/bread (2).png'));
+      return 'Library/Images/bread (2).png';
+    };
+    const ref = 'Footage/src-0123abcd/day 1/bread.png';
+    const placed = await executeTool(ctx, 'add_broll', place(ref));
+    expect(placed.isError, placed.content).toBe(false);
+    expect(asked).toEqual([ref]);
+    expect((await loadProject(dir)).broll.at(-1)!.asset).toMatch(FROZEN);
+    // without the app (the AI package on its own) nothing can reach a footage folder
+    host.importFootage = undefined;
+    const refused = await executeTool(ctx, 'add_broll', place(ref));
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toMatch(/only be used in the Reel Studio app/);
+  });
+
   it('fails if a torn ledger line or a newer record field breaks a note, drops a credit, or swallows the next commit', async () => {
     const { ctx, dir, root, host } = await setup();
     host.searchResults = [{ url: 'https://example.com/bread.png', title: 'Bread', license: 'CC BY 4.0' }];

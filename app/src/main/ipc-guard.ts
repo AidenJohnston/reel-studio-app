@@ -97,6 +97,7 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break
     case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second); break
     case 'library:preview': ok = path(first); break
+    case 'footage:removeSource': ok = text(first) && /^src-[0-9a-f]{8,32}$/.test(first); break
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break
     case 'ai:vendorStatus': case 'ai:vendorConnect': case 'ai:vendorCancel': case 'ai:vendorSignInAgain': case 'ai:vendorSignInWithCode': case 'ai:vendorSignIn': ok = first === 'claude' || first === 'chatgpt'; break

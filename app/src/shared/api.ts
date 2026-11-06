@@ -575,6 +575,19 @@ export type FootageIndexStatus =
   | { state: 'indexing'; stage: string; pct: number; message: string }
   | { state: 'error'; message: string }
 
+/** A folder or drive of someone's videos, indexed where it is (main/footage-sources.ts). */
+export interface FootageSource {
+  id: string
+  path: string
+  /** the folder's own name, as the Library shows it */
+  name: string
+  /** false: the folder isn't there now (a drive unplugged); its index is kept */
+  online: boolean
+  /** videos the last index run found in it; null before the first run */
+  files: number | null
+  addedAt: string
+}
+
 export interface AppInfo {
   version: string
   platform: string
@@ -1061,6 +1074,14 @@ export interface ReelApi {
     choose(kind: 'music' | 'images'): Promise<DropResult[]>
     /** A Library file's contact sheet or waveform (main/library-preview.ts). */
     preview(path: string): Promise<LibraryPreview>
+  }
+  /** Footage folders and the index that reads them (main/footage-sources.ts, footage-index.ts). */
+  footage: {
+    sources(): Promise<FootageSource[]>
+    /** The system folder picker, then the picked folder is added. Unchanged list = cancelled. */
+    addSource(): Promise<FootageSource[]>
+    removeSource(id: string): Promise<FootageSource[]>
+    status(): Promise<FootageIndexStatus>
   }
   style: {
     rules(): Promise<StyleRule[]>

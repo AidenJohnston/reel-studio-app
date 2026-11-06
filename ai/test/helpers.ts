@@ -99,6 +99,8 @@ export class FakeHost implements EngineHost {
   animations: { template: string; params: any; out: string; fps?: number }[] = [];
   failRender = false;
   searchResults: any[] = [];
+  /** the app's footage-folder import (EngineHost.importFootage); unset like the AI package on its own */
+  importFootage?: (ref: string) => Promise<string>;
   /** set to make `fetch-image` / `analyze-music` behave like a current engine (else: unknown command) */
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };

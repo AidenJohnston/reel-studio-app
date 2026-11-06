@@ -4,6 +4,7 @@ import { describeSorted } from '../../../shared/describe'
 import { reel, userMessage } from '../api'
 import { Button, FOLDER_APP, PickFiles, Spinner } from '../components/ui'
 import { Icon } from '../components/icons'
+import { FootageFolders } from '../components/FootageFolders'
 import { TitleBarSlot } from '../components/titlebar'
 import '../components/library.css'
 
@@ -320,6 +321,7 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
         </p>
       )}
       <div id="lib-panel" role="tabpanel" aria-labelledby={`lib-tab-${tab}`} className="lib-panel" data-testid={`library-panel-${tab}`}>
+        {tab === 'videos' && <FootageFolders say={setResult} />}
         {bins && !files.length && (
           <div className="lib-empty" data-testid="library-empty">
             <h2>{current.empty[0]}</h2>

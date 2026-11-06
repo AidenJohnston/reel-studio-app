@@ -205,96 +205,209 @@ def _shots(path, duration, has_video):
     return [(n, s, e) for n, (s, e) in enumerate(zip(edges, edges[1:])) if e > s]
 
 
-def index(root: Path, *, model_name: str | None = None, budget_seconds: float | None = None) -> dict:
+# An added footage folder's id, made by the app (main/footage-sources.ts) from the folder's path.
+SOURCE_ID = re.compile(r"src-[0-9a-f]{8,32}")
+# Folders a drive or the system keeps for itself; nothing in them is someone's footage.
+SKIP_DIRS = {"$RECYCLE.BIN", "System Volume Information", "node_modules"}
+
+
+def _places(root: Path, sources) -> list[tuple[str, Path, str]]:
+    """(id, folder, label) for the Library and each added footage folder, Library first."""
+    out = [("Library", root / "Library", "Library")]
+    seen = {"Library"}
+    for sid, folder in sources:
+        folder = Path(folder)
+        if not SOURCE_ID.fullmatch(sid) or sid in seen:
+            raise EngineError("BAD_ARGS", f"bad footage source id {sid!r}",
+                              "A footage folder in your settings is damaged. Remove it and add it again.")
+        if not folder.is_absolute():
+            raise EngineError("BAD_ARGS", f"footage source {sid} is not an absolute path",
+                              "A footage folder in your settings is damaged. Remove it and add it again.")
+        seen.add(sid)
+        out.append((sid, folder, folder.name or str(folder)))
+    return out
+
+
+def _media_in(folder: Path, kinds: set) -> list[Path]:
+    """Media files under `folder`, sorted, never through a symlink and never in a hidden or system folder."""
+    found = []
+    for top, dirs, files in os.walk(folder, onerror=lambda error: None):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+        for name in files:
+            path = Path(top) / name
+            if name.startswith(".") or path.suffix.lower() not in kinds or path.is_symlink():
+                continue
+            found.append(path)
+    return sorted(found)
+
+
+def _scan(db, place: str, folder: Path, kinds: set, stages) -> list[tuple]:
+    """Record every media file under one place; returns (place, path, digest, signature) per file."""
+    found, rels = [], set()
+    for path in _media_in(folder, kinds):
+        if not path.resolve().is_relative_to(folder.resolve()):
+            continue
+        rel = path.relative_to(folder).as_posix()
+        try:
+            signature = _signature(path)
+            old = db.execute("SELECT size, mtime_ns, hash FROM paths WHERE place=? AND rel=?", (place, rel)).fetchone()
+            # Metadata only skips completed files. Pending analysis must establish identity
+            # from bytes again, including after a replacement that kept size and mtime.
+            complete = old and all(_done(db, old[2], stage, version) for stage, version in stages)
+            digest = old[2] if complete and tuple(old[:2]) == signature else file_hash(path)
+            _unchanged(path, signature)
+        except (OSError, EngineError):
+            if place == "Library" or folder.is_dir():
+                raise
+            raise _Gone(place)
+        rels.add(rel)
+        db.execute("INSERT OR REPLACE INTO paths VALUES (?, ?, ?, ?, ?)", (place, rel, *signature, digest))
+        found.append((place, path, digest, signature))
+    if place != "Library" and not folder.is_dir():
+        raise _Gone(place)
+    for row in db.execute("SELECT rel FROM paths WHERE place=?", (place,)).fetchall():
+        if row[0] not in rels:
+            db.execute("DELETE FROM paths WHERE place=? AND rel=?", (place, row[0]))
+    return found
+
+
+class _Gone(Exception):
+    """An added footage folder that went away (a drive unplugged) during a run."""
+    def __init__(self, place: str):
+        super().__init__(place)
+        self.place = place
+
+
+def index(root: Path, *, model_name: str | None = None, budget_seconds: float | None = None,
+          sources=()) -> dict:
+    """Index the Library and each added footage folder, (id, absolute folder) in `sources`. A folder
+    that is not there (a drive unplugged) keeps what was indexed from it and is reported offline; a
+    folder no longer named loses its rows, and the analysis no other copy shares is collected."""
     if budget_seconds is not None and (not math.isfinite(budget_seconds) or budget_seconds < 0):
         raise EngineError("BAD_ARGS", "budget-seconds must be finite and nonnegative",
                           "Choose a time budget of zero seconds or more.")
     root = Path(root)
-    library = root / "Library"
+    places = _places(root, sources)
     name = model_name or transcribe.default_model()
     stages = [("probe", PROBE_VERSION), (f"transcript:{name}", TRANSCRIPT_VERSION), ("shots", SHOTS_VERSION)]
     deadline = time.monotonic() + budget_seconds if budget_seconds is not None else math.inf
-    model = None
+    model = []  # the listening model, loaded by the first file with speech to read
+    online = {}
     with closing(_open(root)) as db, _run_staging(db, root) as staging:
         found = []
         with db:
-            db.execute("INSERT OR REPLACE INTO places VALUES ('Library', 'Library', 'Library', 0)")
-            for path in sorted(library.rglob("*")):
-                if path.suffix.lower() not in probe.VIDEO_EXT | probe.AUDIO_EXT or not path.is_file():
+            named = {pid for pid, _, _ in places}
+            for row in db.execute("SELECT id FROM places").fetchall():
+                if row[0] not in named:
+                    db.execute("DELETE FROM paths WHERE place=?", (row[0],))
+                    db.execute("DELETE FROM places WHERE id=?", (row[0],))
+            for pid, folder, label in places:
+                db.execute("INSERT OR REPLACE INTO places VALUES (?, ?, ?, 0)",
+                           (pid, label, "Library" if pid == "Library" else str(folder)))
+                if pid != "Library" and not folder.is_dir():
+                    online[pid] = False
                     continue
-                if path.is_symlink() or not path.resolve().is_relative_to(library.resolve()):
-                    continue
-                rel = path.relative_to(library).as_posix()
-                signature = _signature(path)
-                old = db.execute("SELECT size, mtime_ns, hash FROM paths WHERE place='Library' AND rel=?",
-                                 (rel,)).fetchone()
-                # Metadata only skips completed files. Pending analysis must establish identity
-                # from bytes again, including after a replacement that kept size and mtime.
-                complete = old and all(_done(db, old[2], stage, version) for stage, version in stages)
-                digest = old[2] if complete and tuple(old[:2]) == signature else file_hash(path)
-                _unchanged(path, signature)
-                db.execute("INSERT OR REPLACE INTO paths VALUES ('Library', ?, ?, ?, ?)",
-                           (rel, *signature, digest))
-                found.append((path, digest, signature))
-            rels = {path.relative_to(library).as_posix() for path, _, _ in found}
-            for row in db.execute("SELECT rel FROM paths WHERE place='Library'").fetchall():
-                if row[0] not in rels:
-                    db.execute("DELETE FROM paths WHERE place='Library' AND rel=?", (row[0],))
+                # A footage folder is someone's videos; only the Library also holds songs.
+                kinds = probe.VIDEO_EXT | probe.AUDIO_EXT if pid == "Library" else probe.VIDEO_EXT
+                # A drive unplugged mid-scan undoes only its own folder's rows.
+                db.execute("SAVEPOINT place")
+                try:
+                    found += _scan(db, pid, folder, kinds, stages)
+                    online[pid] = True
+                except _Gone:
+                    db.execute("ROLLBACK TO place")
+                    online[pid] = False
+                finally:
+                    db.execute("RELEASE place")
             _collect_unreferenced(db)
         _compact(db)
 
+        # Copies share one analysis, so progress counts distinct files with work left.
+        todo, queued = [], set()
+        for entry in found:
+            if entry[2] not in queued and not all(_done(db, entry[2], s, v) for s, v in stages):
+                todo.append(entry)
+                queued.add(entry[2])
         ran = 0
-        for path, digest, signature in found:
-            for stage, version in stages:
-                if _done(db, digest, stage, version):
-                    continue
-                if time.monotonic() >= deadline:
-                    break
-                _unchanged(path, signature, digest)
-                if stage == "probe":
-                    info = probe.probe(path, quick=True)
-                    _unchanged(path, signature, digest)
-                    with db:
-                        db.execute("INSERT OR REPLACE INTO files VALUES (?, 'sha256', ?, ?, ?, ?, ?, ?)",
-                                   (digest, info["duration"], info["fps"], info["width"], info["height"],
-                                    info["rotation"], int(info["hasAudio"])))
-                        _mark_done(db, digest, stage, version)
-                else:
-                    info = db.execute("SELECT * FROM files WHERE hash=?", (digest,)).fetchone()
-                    if stage.startswith("transcript:"):
-                        words, segments, language = [], [], None
-                        if info["has_audio"]:
-                            if model is None:
-                                model, _, _ = transcribe.load_model(name)
-                            words, segments, language = _speech(path, info["duration"], model, staging)
-                        _unchanged(path, signature, digest)
-                        with db:
-                            db.execute("DELETE FROM words WHERE hash=? AND model=?", (digest, name))
-                            db.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?)",
-                                           [(digest, w["s"], w["e"], w["w"], w.get("p"), name) for w in words])
-                            # Audio gaps drive cuts; segment tags keep vocabulary joins within a segment.
-                            metadata = [{k: v for k, v in w.items() if k not in {"s", "e", "w", "p"}}
-                                        for w in words]
-                            db.execute("INSERT OR REPLACE INTO transcripts VALUES (?, ?, ?, ?, ?)",
-                                       (digest, name, language, json.dumps(segments), json.dumps(metadata)))
-                            db.execute("DELETE FROM text_fts WHERE hash=? AND model=?", (digest, name))
-                            db.executemany("INSERT INTO text_fts VALUES (?, ?, ?, ?, 'speech', ?)",
-                                           [(" ".join(w["w"] for w in win), digest, win[0]["s"], win[-1]["e"], name)
-                                            for win in _windows(words)])
-                            _mark_done(db, digest, stage, version)
-                    else:
-                        shots = _shots(path, info["duration"], info["width"] > 0)
-                        _unchanged(path, signature, digest)
-                        with db:
-                            db.execute("DELETE FROM shots WHERE hash=?", (digest,))
-                            db.executemany("INSERT INTO shots(hash, n, s, e) VALUES (?, ?, ?, ?)",
-                                           [(digest, *shot) for shot in shots])
-                            _mark_done(db, digest, stage, version)
-                ran += 1
-                progress("footage-" + stage.split(":")[0], 100, f"Indexed {path.name}", force=True)
-        pending = sum(not _done(db, digest, stage, version) for digest in {d for _, d, _ in found}
+        for k, (place, path, digest, signature) in enumerate(todo):
+            if time.monotonic() >= deadline:
+                break
+            if not online.get(place, True):
+                continue
+            progress("footage-file", 100 * k / len(todo), f"Reading {path.name} ({k + 1} of {len(todo)})", force=True)
+            try:
+                ran += _analyse(db, path, digest, signature, stages, name, staging, deadline,
+                                model, k, len(todo))
+            except (OSError, EngineError) as exc:
+                folder = next(f for pid, f, _ in places if pid == place)
+                if place == "Library" or folder.is_dir():
+                    raise
+                online[place] = False
+                log(f"Footage index: {place} went offline during indexing ({type(exc).__name__}).")
+                continue
+        pending = sum(not _done(db, digest, stage, version) for digest in {e[2] for e in found}
                       for stage, version in stages)
-        return {"files": len(found), "stagesRun": ran, "pending": pending}
+        counts = {pid: db.execute("SELECT count(*) FROM paths WHERE place=?", (pid,)).fetchone()[0]
+                  for pid, _, _ in places}
+        waiting = len({e[2] for e in found if not all(_done(db, e[2], s, v) for s, v in stages)})
+        return {"files": len(found), "stagesRun": ran, "pending": pending, "filesPending": waiting,
+                "places": [{"id": pid, "files": counts[pid], "online": online.get(pid, True)}
+                           for pid, _, _ in places]}
+
+
+def _analyse(db, path, digest, signature, stages, name, staging, deadline, model, k, total) -> int:
+    """Run one file's missing stages, each committed on its own; returns how many ran."""
+    ran = 0
+    for stage, version in stages:
+        if _done(db, digest, stage, version):
+            continue
+        if time.monotonic() >= deadline:
+            break
+        _unchanged(path, signature, digest)
+        if stage == "probe":
+            info = probe.probe(path, quick=True)
+            _unchanged(path, signature, digest)
+            with db:
+                db.execute("INSERT OR REPLACE INTO files VALUES (?, 'sha256', ?, ?, ?, ?, ?, ?)",
+                           (digest, info["duration"], info["fps"], info["width"], info["height"],
+                            info["rotation"], int(info["hasAudio"])))
+                _mark_done(db, digest, stage, version)
+        else:
+            info = db.execute("SELECT * FROM files WHERE hash=?", (digest,)).fetchone()
+            if stage.startswith("transcript:"):
+                words, segments, language = [], [], None
+                if info["has_audio"]:
+                    if not model:
+                        model.append(transcribe.load_model(name)[0])
+                    words, segments, language = _speech(path, info["duration"], model[0], staging)
+                _unchanged(path, signature, digest)
+                with db:
+                    db.execute("DELETE FROM words WHERE hash=? AND model=?", (digest, name))
+                    db.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?)",
+                                   [(digest, w["s"], w["e"], w["w"], w.get("p"), name) for w in words])
+                    # Audio gaps drive cuts; segment tags keep vocabulary joins within a segment.
+                    metadata = [{k: v for k, v in w.items() if k not in {"s", "e", "w", "p"}}
+                                for w in words]
+                    db.execute("INSERT OR REPLACE INTO transcripts VALUES (?, ?, ?, ?, ?)",
+                               (digest, name, language, json.dumps(segments), json.dumps(metadata)))
+                    db.execute("DELETE FROM text_fts WHERE hash=? AND model=?", (digest, name))
+                    db.executemany("INSERT INTO text_fts VALUES (?, ?, ?, ?, 'speech', ?)",
+                                   [(" ".join(w["w"] for w in win), digest, win[0]["s"], win[-1]["e"], name)
+                                    for win in _windows(words)])
+                    _mark_done(db, digest, stage, version)
+            else:
+                shots = _shots(path, info["duration"], info["width"] > 0)
+                _unchanged(path, signature, digest)
+                with db:
+                    db.execute("DELETE FROM shots WHERE hash=?", (digest,))
+                    db.executemany("INSERT INTO shots(hash, n, s, e) VALUES (?, ?, ?, ?)",
+                                   [(digest, *shot) for shot in shots])
+                    _mark_done(db, digest, stage, version)
+        ran += 1
+        done = sum(_done(db, digest, s, v) for s, v in stages) / len(stages)
+        progress("footage-" + stage.split(":")[0], 100 * (k + done) / total,
+                 f"Reading {path.name} ({k + 1} of {total})", force=True)
+    return ran
 
 
 def lookup(root: Path, path: Path, model: str, language: str | None = None):
@@ -363,6 +476,24 @@ def _thumbnail(root: Path, digest: str, source: Path, midpoint: float) -> str:
             Path(temporary).unlink(missing_ok=True)
 
 
+def ref_of(place: str, rel: str) -> str:
+    """How the app and the editor name an indexed file: Library/<rel>, or Footage/<folder id>/<rel> for a
+    file in an added footage folder (the app copies one into the Library before it is used)."""
+    return f"Library/{rel}" if place == "Library" else f"Footage/{place}/{rel}"
+
+
+def _current(folder: Path | None, row) -> bool:
+    """The indexed file is still there, unchanged, and really inside its folder."""
+    if folder is None:
+        return False
+    path = folder / row["rel"]
+    try:
+        return (path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(folder.resolve())
+                and _signature(path) == (row["size"], row["mtime_ns"]))
+    except OSError:
+        return False
+
+
 def search(root: Path, query: str, *, limit: int = 8) -> dict:
     if not query.strip() or not 1 <= limit <= 8:
         raise EngineError("BAD_ARGS", "search needs a query and limit between 1 and 8",
@@ -381,18 +512,22 @@ def search(root: Path, query: str, *, limit: int = 8) -> dict:
         else:
             rows = db.execute("SELECT * FROM text_fts WHERE instr(lower(text), lower(?)) > 0 ORDER BY hash, s",
                               (query,))
+        folders = {row["id"]: (root / "Library" if row["id"] == "Library" else Path(row["root"]))
+                   for row in db.execute("SELECT id, root FROM places")}
         hits, sources, seen = [], [], set()
         for row in rows:
             digest = row["hash"]
             key = (digest, row["s"], row["e"])
             if key in seen or not _done(db, digest, f"transcript:{row['model']}", TRANSCRIPT_VERSION):
                 continue
-            paths = db.execute("SELECT * FROM paths WHERE hash=? ORDER BY rel", (digest,)).fetchall()
-            current = next((p for p in paths if (root / "Library" / p["rel"]).is_file()
-                            and not (root / "Library" / p["rel"]).is_symlink()
-                            and (root / "Library" / p["rel"]).resolve().is_relative_to((root / "Library").resolve())
-                            and _signature(root / "Library" / p["rel"]) == (p["size"], p["mtime_ns"])), None)
-            if not paths or current is None:
+            paths = db.execute("SELECT * FROM paths WHERE hash=? ORDER BY place != 'Library', place, rel",
+                               (digest,)).fetchall()
+            current = next((p for p in paths if _current(folders.get(p["place"]), p)), None)
+            # A copy on a drive that is unplugged is still found, so the person can be told to plug it in.
+            away = next((p for p in paths if p["place"] in folders and p["place"] != "Library"
+                         and not folders[p["place"]].is_dir()), None)
+            chosen = current or away
+            if chosen is None:
                 continue
             info = db.execute("SELECT duration, width FROM files WHERE hash=?", (digest,)).fetchone()
             s, e = row["s"], row["e"]
@@ -402,17 +537,17 @@ def search(root: Path, query: str, *, limit: int = 8) -> dict:
                 if shot[0] is not None:
                     s, e = shot
             hits.append({"hit": f"{digest[:12]}@{s:.2f}-{e:.2f}",
-                         "file": {"name": Path(current["rel"]).name, "path": f"Library/{current['rel']}", "place": "Library",
-                                  "online": True, "duration": info[0]},
+                         "file": {"name": Path(chosen["rel"]).name, "path": ref_of(chosen["place"], chosen["rel"]),
+                                  "place": chosen["place"], "online": current is not None, "duration": info[0]},
                          "t0": s, "t1": e, "said": row["text"],
                          "thumbnail": None})
-            sources.append((digest, root / "Library" / current["rel"], info[1]))
+            sources.append((digest, folders[chosen["place"]] / chosen["rel"] if current else None, info[1]))
             seen.add(key)
             if len(hits) > limit:
                 break
     # Release the read snapshot before ffmpeg runs so indexing can commit concurrently.
     for hit, (digest, source, width) in zip(hits[:limit], sources):
-        if width > 0:
+        if width > 0 and source is not None:
             hit["thumbnail"] = _thumbnail(root, digest, source, (hit["t0"] + hit["t1"]) / 2)
     return {"hits": hits[:limit], "more": len(hits) > limit,
             "backend": "fts5" if fts else "literal"}

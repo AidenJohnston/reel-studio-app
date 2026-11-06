@@ -851,7 +851,17 @@ function libraryFileKind(ref: string, pictureKind: AssetKind): AssetKind | null 
 /** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
  * the user's own Library picture, clip or song frozen and recorded in the same call, and anything else
  * only once resolve_asset committed it as one of `kinds`. */
+/** A search_footage hit in one of the person's footage folders (Footage/<folder>/<file>) is copied into the Library
+ * by the app first, so every path the engine reads stays inside the project and the Library. Other refs pass through. */
+async function fromFootage(ctx: ToolContext, ref: string): Promise<string> {
+  if (!/^Footage\//.test(ref.replace(/\\/g, '/'))) return ref;
+  if (!ctx.host.importFootage) throw new ToolInputError('Clips from footage folders can only be used in the Reel Studio app.');
+  try { return await ctx.host.importFootage(ref); }
+  catch (e: any) { throw new ToolInputError(e?.userMessage ?? e?.message ?? String(e)); }
+}
+
 async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], pictureKind: AssetKind = 'image'): Promise<string> {
+  asset = await fromFootage(ctx, asset);
   const ref = /^asset_[0-9a-f-]{36}$/.test(asset) ? asset : resolveAsset(ctx, asset)?.ref;
   if (!ref) throw new ToolInputError(`asset not found: ${asset}`);
   if (kinds.includes('video') && ctx.state.animationsMade?.has(ref)) return ref;
@@ -971,7 +981,7 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
 async function resolveCandidates(ctx: ToolContext, kind: AssetKind, intent: string, policy: string, provider?: StockProvider): Promise<ToolOutput> {
   if (kind === 'website_screenshot' && policy !== 'commentary') throw new ToolInputError('Website screenshots require licensePolicy commentary. The page belongs to its owner.');
   const requestId = randomUUID();
-  const text = intent.trim().replace(/\\/g, '/');
+  const text = await fromFootage(ctx, intent.trim().replace(/\\/g, '/'));
   const isUrl = /^https?:\/\//i.test(text);
   const named = /^(Library|work|media)\//.test(text);
   let local: { ref: string; abs: string } | null = null;
@@ -1318,7 +1328,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'search_footage',
-    description: 'Search indexed Library speech before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail.',
+    description: 'Search indexed speech in the Library and the person\'s footage folders before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail. A Footage/... path is a clip in a footage folder: give it to add_broll or resolve_asset as it is, and it is copied into the Library. online false means its drive is unplugged: tell the person to plug it in, and do not place it.',
     // no minLength: OpenAI's strict tool schemas refuse it (#33); an empty query is refused below
     parameters: S.obj({ query: S.str('words to find in your Library'),
       limit: S.opt(S.int('maximum hits, default 6', { minimum: 1, maximum: 8 })) }),

@@ -7,7 +7,7 @@ import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, rea
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { clipboardFiles, filesFromArgv } from './intake'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { assertIpcSender, validateIpcArgs } from './ipc-guard'
 import {
@@ -22,6 +22,7 @@ import {
   ffprobePath,
   initPaths,
   legalFile,
+  libraryDir,
   libraryPreviewDir,
   noteStagingDir,
   noteStagingRoot,
@@ -86,6 +87,7 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createFootageSources } from './footage-sources'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -228,7 +230,17 @@ const host: EngineHost = {
   runEngine,
   renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
-  reelStudioRoot
+  reelStudioRoot,
+  importFootage: (ref) => importFootage(ref)
+}
+
+/** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
+async function importFootage(ref: string): Promise<string> {
+  const { abs } = await footageSources.resolve(ref)
+  await ensureRoot()
+  const [r] = await addToLibrary([abs], runEngine, log, indexLibrary)
+  if (!r?.dest) throw { code: 'IMPORT_FAILED', userMessage: r?.reason ?? 'That clip could not be added to your Library.' }
+  return 'Library/' + relative(libraryDir(), r.dest).split(sep).join('/')
 }
 
 let ai: AI
@@ -264,8 +276,21 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
-const footageIndex = createFootageIndexer({ runEngine, root: reelStudioRoot, busy: () => jobs.runningCount() > 0 })
-const indexLibrary = (): void => { if (!TEST) void footageIndex.request() }
+const footageSources = createFootageSources({
+  load: async () => (await loadSettings()).footageSources,
+  save: async (footageSources) => void (await saveSettings({ footageSources })),
+  root: reelStudioRoot,
+  changed: () => indexLibrary()
+})
+const footageIndex = createFootageIndexer({
+  runEngine,
+  root: reelStudioRoot,
+  busy: () => jobs.runningCount() > 0,
+  sources: () => footageSources.indexArgs(),
+  done: (r) => { if (r.places) footageSources.indexed(r.places) }
+})
+// Tests leave the index alone (the stand-in engine has no speech to read) unless one asks for it.
+const indexLibrary = (): void => { if (!TEST || process.env.REELSTUDIO_TEST_INDEX === '1') void footageIndex.request() }
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
 const speedHistoryFile = (): string => join(settingsDir(), 'speed-history.json')
 // Paused without you (main/pause.ts): work a plan limit, no internet, sleep or a quit stopped goes on by itself.
@@ -1453,6 +1478,15 @@ function registerIpc(): void {
 
   handle('library:preview', (_e, file: string) => libraryPreview(file))
 
+  handle('footage:sources', () => footageSources.list())
+  handle('footage:addSource', async () => {
+    const r = await showOpenDialog({ title: 'Choose a folder of your videos', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths.length) return footageSources.list()
+    return footageSources.add(r.filePaths[0])
+  })
+  handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
+  handle('footage:status', () => footageIndex.status())
+
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()
 
@@ -1952,6 +1986,7 @@ app.whenReady().then(async () => {
       awake = null
     }
   }, 5000).unref()
+  await footageSources.start()
   indexLibrary()
   await updates.init()
   updates.start() // 15 s after the window, so launch is never slower
@@ -1976,6 +2011,7 @@ app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   permissionHelper.close()
   const indexing = footageIndex.status().state === 'indexing'
+  footageSources.stop()
   if (quitting || (!jobs.runningCount() && !cloudSavesRunning() && !indexing)) {
     void footageIndex.stop()
     void killAllEngines()
