@@ -28,7 +28,10 @@ one frame (about 17 ms at 60 Hz) before the swap is on screen.
 | Scrub | the `pointerup` of a click on the timeline under the phone, which seeks there | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the words in the note's progress strip being painted |
 
-Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
+Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A position covered by a
+note's mark (a button that opens that note's version; each run's note adds one) or by the playhead moves to the nearest
+bare spot, and each run records where it clicked (`scrubAt`), so compare a position's numbers only across runs that
+clicked the same place. A seek decodes from the keyframe before it,
 so its time depends on where it lands in the encode, and the first click after opening also loads data the player had
 not fetched yet. The fake engine encodes with x264's default keyframe spacing, so scrub numbers describe that encode,
 not the real engine's exports.

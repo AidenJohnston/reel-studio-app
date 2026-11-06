@@ -12,7 +12,7 @@ const RUNS = Number(process.env.REELSTUDIO_PERF_RUNS || 6)
 const WATCH_MS = 3000
 /** the traced window on each side of the "Use it" click: before it, what the editor step does on its own */
 const TRACE_MS = 600
-/** the user-timing mark set just before the click, found in the trace to split it */
+/** the user-timing mark the click sets, found in the trace to split it */
 const CLICK_MARK = 'rs-use-claude'
 
 interface Loaf {
@@ -104,7 +104,7 @@ interface TraceEvent {
   args?: { name?: string; data?: { nodeId?: number; clip?: number[] } }
 }
 
-/** Trace time (µs) of the mark set just before the click. Without it the trace can't be split, so it fails loudly. */
+/** Trace time (µs) of the mark the click set. Without it the trace can't be split, so it fails loudly. */
 function clickAt(events: TraceEvent[]): number {
   const mark = events.find((e) => e.name === CLICK_MARK)
   if (!mark) throw new Error(`the trace has no "${CLICK_MARK}" mark: is blink.user_timing in its categories?`)
@@ -213,12 +213,11 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
         categories: 'toplevel,blink.user_timing,devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,gpu,viz,media',
         transferMode: 'ReportEvents'
       })
-      // the step on its own first, then the click, marked so the trace splits at it
+      // the step on its own first, then the click, marked by the click itself so the trace splits at it (Playwright
+      // waits for the button to be ready before clicking, so a mark set beforehand could fall well before the click)
+      await use.evaluate((el, m) => el.addEventListener('click', () => performance.mark(m), { capture: true, once: true }), CLICK_MARK)
       await page.waitForTimeout(TRACE_MS)
-      const useClaude = await measure(page, async () => {
-        await page.evaluate((m) => performance.mark(m), CLICK_MARK)
-        await use.click()
-      })
+      const useClaude = await measure(page, () => use.click())
       const ended = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()))
       await cdp.send('Tracing.end')
       await ended
