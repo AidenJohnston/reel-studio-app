@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { createAI, loadProject, AgentEvent, AIError, runAgent, newToolState, StyleStore, Prompts, pickTakes, ReplayProvider, RecordingProvider } from '../src';
 import { FakeHost, ScriptedModel, makeProject, call, tmpDir } from './helpers';
+import { writeAiRun } from '../src/provenance';
 
 const nullP = { tilt: null, scale: null, text: null };
 
@@ -123,6 +124,18 @@ describe('agent loop with a scripted model', () => {
     const r = await createAI({ host, settingsDir, providerOverride: model, finalRender: false }).applyNote(dir, 'make the hook punchier', () => undefined);
     const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', `v${r.version}`, 'ai-run.json'), 'utf8'));
     expect(record).toEqual({ calls: [first, second], usage: { input: 20, output: 400, cacheRead: 18000, cacheWrite: 'not reported' } });
+  });
+
+  it('fails if a run that keeps the current version deletes the earlier run\'s calls from its ai-run.json', async () => {
+    const { dir } = await setup();
+    const ran = { provider: 'codex-cli' as const, requestedModel: null, reportedModels: ['gpt-5'], cliVersion: '0.9.0', effort: 'low' };
+    const edit = { ...ran, usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 } };
+    const post = { ...ran, usage: { input: 7, output: 3, cacheRead: 1, cacheWrite: 'not reported' as const } };
+    await writeAiRun(dir, 1, [edit]);
+    // a note that only rewrote the post caption: the engine keeps version 1
+    await writeAiRun(dir, 1, [post]);
+    const record = JSON.parse(await fsp.readFile(path.join(dir, 'versions', 'v1', 'ai-run.json'), 'utf8'));
+    expect(record).toEqual({ calls: [edit, post], usage: { input: 107, output: 53, cacheRead: 1, cacheWrite: 'not reported' } });
   });
 
   it('model mistakes are fed back, not fatal; nudges when the model stops calling tools', async () => {
