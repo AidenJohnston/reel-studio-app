@@ -897,7 +897,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if not win:
         snap = json.loads(json.dumps(proj))
         projmod.write_json(vdir / "project.json", snap)
-        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], pictureKey=pkey)
+        manifest = dict(result, segmentsDetail=[s.__dict__ for s in tl.segments][:2000], pictureKey=pkey,
+                        animations=animation_windows(broll_report))
         projmod.write_json(vdir / ("render_draft.json" if draft else "render.json"), manifest)
         if not preview:
             projmod.write_json(vdir / "assets.json", asset_fingerprint(project_dir, proj, root))
@@ -1034,7 +1035,7 @@ def current_render(project_dir: Path, root: Optional[Path] = None) -> Optional[P
     key = picture_key(project_dir, projmod.load(project_dir), tools.root_dir(str(root) if root else None))
     renders = [f for f in vroot.glob("*/*.mp4") if f.name in ("draft.mp4", "export.mp4")]
     for f in sorted(renders, key=lambda f: f.stat().st_mtime_ns, reverse=True):
-        manifest = f.parent / ("render_draft.json" if f.name == "draft.mp4" else "render.json")
+        manifest = _manifest_path(f)
         try:
             if manifest.stat().st_mtime_ns < f.stat().st_mtime_ns:
                 continue
@@ -1045,24 +1046,46 @@ def current_render(project_dir: Path, root: Optional[Path] = None) -> Optional[P
     return None
 
 
+def _manifest_path(video: Path) -> Path:
+    return Path(video).parent / ("render_draft.json" if Path(video).name == "draft.mp4" else "render.json")
+
+
+def render_manifest(video: Path) -> dict:
+    """The manifest a full render wrote beside its mp4 (current_render's pick), or {} when it can't be read."""
+    try:
+        return projmod.read_json(_manifest_path(video))
+    except (OSError, ValueError):
+        return {}
+
+
 def frame_at(t: float, fps: float, n_frames: int) -> int:
     """The output frame a still at `t` seconds shows: the nearest one, inside the video. A still drawn
     by stills() and one taken from a render (frames.py) use this same frame."""
     return min(max(0, int(round(float(t) * fps))), max(0, n_frames - 1))
 
 
-def settle_on_animations(project_dir: Path, times: list) -> tuple:
+def animation_windows(items: list) -> list:
+    """[{id, t0, t1}] of the b-roll rows (layers.json items) a frame inside shows half drawn: animations
+    and full-screen pictures. A render records its own in its manifest, because layers.json is rewritten
+    by whatever was drawn last."""
+    return [{"id": str(r.get("id")), "t0": r["t0"], "t1": r["t1"]} for r in items if isinstance(r, dict)
+            and (r.get("treatment") == "animation" or r.get("zone") in ("animation", "full"))
+            and isinstance(r.get("t0"), (int, float)) and isinstance(r.get("t1"), (int, float)) and not r.get("skipped")]
+
+
+def settle_on_animations(project_dir: Path, times: list, windows: Optional[list] = None) -> tuple:
     """A frame in the middle of an animation shows a count-up half way or half its words (a live run read
     a count-up mid-way and reported the wrong number). A time inside an animation's window moves to its
-    settled end, 0.15 s before it ends. Reads work/layers/layers.json, so it runs after the layers of the
-    picture being looked at were built. -> (times, [{asked, sampled, id}] for each time it moved)"""
-    try:
-        items = projmod.read_json(Path(project_dir) / "work" / "layers" / "layers.json").get("items") or []
-    except (ValueError, OSError):
-        items = []
-    anims = [r for r in items if isinstance(r, dict)
-             and (r.get("treatment") == "animation" or r.get("zone") in ("animation", "full"))
-             and isinstance(r.get("t0"), (int, float)) and isinstance(r.get("t1"), (int, float)) and not r.get("skipped")]
+    settled end, 0.15 s before it ends. `windows` are a render's own (animation_windows); without them
+    this reads work/layers/layers.json, so it must run right after the layers of the picture being looked
+    at were built. -> (times, [{asked, sampled, id}] for each time it moved)"""
+    if windows is None:
+        try:
+            items = projmod.read_json(Path(project_dir) / "work" / "layers" / "layers.json").get("items") or []
+        except (ValueError, OSError):
+            items = []
+        windows = animation_windows(items)
+    anims = windows
     pick, moved = [], []
     for t in times:
         a = next((r for r in anims if r["t0"] <= t < r["t1"]), None)
@@ -1139,6 +1162,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
         timings["stills"].append(round(time.time() - t_still, 2))
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
+            "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
             "timings": timings}
 
 
