@@ -140,6 +140,32 @@ process.stdout.write(JSON.stringify({type:'result',is_error:false,result:reply})
     expect(alive(Number(fs.readFileSync(pidFile, 'utf8')))).toBe(false);
   }, 30000);
 
+  // Windows has no SIGTERM to ignore: kill() ends the process there
+  it.skipIf(process.platform === 'win32')('a run that failed to stop one session still waits for the next session to stop before it reports', async () => {
+    const dir = tmpDir();
+    const seen = path.join(dir, 'seen');
+    const pids = path.join(dir, 'pids');
+    const script = path.join(dir, 'two-claudes.js');
+    // the first process leaves a child holding its output (cli_stuck 9 s after it ends); the second ignores
+    // its closed input and SIGTERM, so only SIGKILL, 6 s after it ends, stops it
+    fs.writeFileSync(script, `const fs=require('fs');const first=!fs.existsSync(${JSON.stringify(seen)});fs.writeFileSync(${JSON.stringify(seen)},'');
+if(first){const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});fs.appendFileSync(${JSON.stringify(pids)},c.pid+' ')}
+else{process.on('SIGTERM',()=>{});fs.appendFileSync(${JSON.stringify(pids)},process.pid+' ')}
+setInterval(()=>{},1000);${ANSWER}`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    try {
+      await oneTurn(p);
+      // another conversation: the first session ends and the second starts
+      await p.complete({ system: 'SYS', tools: toolSchemas(['finish']), messages: [{ role: 'user', content: [{ type: 'text', text: 'OTHER TASK' }] }] });
+      // the second session ends more than 3 s later, so the first one's failure comes before it has stopped
+      await new Promise((r) => setTimeout(r, 4500));
+      await expect(p.dispose()).rejects.toMatchObject({ code: 'cli_stuck' });
+      expect(alive(Number(fs.readFileSync(pids, 'utf8').trim().split(' ')[1]))).toBe(false);
+    } finally {
+      for (const pid of fs.readFileSync(pids, 'utf8').trim().split(' ').map(Number)) try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
+    }
+  }, 30000);
+
   it.each([
     ['is killed', false],
     ['exits before the run ends', true],
