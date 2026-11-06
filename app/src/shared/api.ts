@@ -439,11 +439,13 @@ export interface LibraryFile {
   durationSec?: number
   /** The sound pack's job for a sound effect: whoosh, pop, click... */
   group?: string
+  /** A font's names from the file (main/fonts.ts): `full` is what a caption style names. */
+  font?: { family: string; full: string }
 }
 
 export interface LibraryBin {
-  /** sfx: the sound effects that come with Reel Studio, not a folder of yours. */
-  key: 'raw' | 'broll' | 'music' | 'images' | 'sfx'
+  /** sfx and fontpack: the sound effects and caption fonts that come with Reel Studio, not a folder of yours. */
+  key: 'raw' | 'broll' | 'music' | 'images' | 'fonts' | 'sfx' | 'fontpack'
   label: string
   dir: string
   files: LibraryFile[]
@@ -461,7 +463,7 @@ export interface LibraryPreview {
 export interface DropResult {
   file: string
   name: string
-  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | null
+  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | 'fonts' | null
   dest: string | null
   reason?: string
 }

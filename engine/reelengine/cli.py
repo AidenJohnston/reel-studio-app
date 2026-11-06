@@ -413,6 +413,25 @@ def cmd_attach(args):
     return attach.run(_project(args), Path(args.file), name=args.name)
 
 
+def cmd_fonts(args):
+    """The caption fonts a project can name: each file's names (captions.font_index), the person's own first."""
+    from . import captions, tools
+    out, seen = [], set()
+    yours = Path(tools.root_dir(None)) / "Library" / "Fonts"
+    for folder in tools.font_dirs():
+        for path in sorted(folder.iterdir()):
+            if path.suffix.lower() not in (".ttf", ".otf") or path in seen:
+                continue
+            seen.add(path)
+            try:
+                names = captions._ttf_metrics(path)["names"]
+            except Exception:  # noqa: BLE001  a damaged file is left out, as font_index leaves it out
+                continue
+            out.append({"names": sorted(names | {path.stem}), "file": path.name,
+                        "yours": folder.resolve() == yours.resolve()})
+    return {"fonts": out, "default": captions.DEFAULT_FONT}
+
+
 def cmd_doctor(args):
     from . import doctor
     return doctor.run()
@@ -488,6 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
+    add("fonts", cmd_fonts, "list the caption fonts a project can name")
     sp = add("download-model", cmd_download_model, "download the speech model")
     sp.add_argument("--name")
     sp = add("speech-check", cmd_speech_check, "time the speech model at a few thread counts on a short sample")

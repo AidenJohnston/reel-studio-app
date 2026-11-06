@@ -851,6 +851,14 @@ function libraryFileKind(ref: string, pictureKind: AssetKind): AssetKind | null 
 /** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
  * the user's own Library picture, clip or song frozen and recorded in the same call, and anything else
  * only once resolve_asset committed it as one of `kinds`. */
+/** The caption fonts the engine can draw (engine cli.py cmd_fonts): Library › Fonts first, then the bundled ones. */
+async function captionFonts(ctx: ToolContext): Promise<{ names: string[]; file: string; yours: boolean }[]> {
+  const r: any = await ctx.host.runEngine('fonts', [], undefined, ctx.signal);
+  if (!r || !Array.isArray(r.fonts)) throw new ToolInputError('The engine did not list its caption fonts. Try again.');
+  return r.fonts.filter((f: any) => f && Array.isArray(f.names) && typeof f.file === 'string')
+    .map((f: any) => ({ names: f.names.filter((n: unknown) => typeof n === 'string'), file: f.file, yours: f.yours === true }));
+}
+
 /** A search_footage hit in one of the person's footage folders (Footage/<folder>/<file>) is copied into the Library
  * by the app first, so every path the engine reads stays inside the project and the Library. Other refs pass through. */
 async function fromFootage(ctx: ToolContext, ref: string): Promise<string> {
@@ -1500,9 +1508,17 @@ const tools: ToolDef[] = [
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
+      font: S.opt(S.str('a caption font by one of the names list_library kind fonts gives (the person\'s own fonts are marked yours); null keeps the current font')),
     }),
     async run(ctx, args) {
       let warning: string | null = null;
+      let font: string | null = null;
+      if (args.font != null) {
+        const fonts = await captionFonts(ctx);
+        const want = String(args.font).trim().toLowerCase();
+        font = fonts.flatMap((f) => f.names).find((n) => n.toLowerCase() === want) ?? null;
+        if (!font) throw new ToolInputError(`No caption font is called "${args.font}". Choose a name from list_library kind fonts.`);
+      }
       await mutate(ctx, 'captions', (p) => {
         const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
         const underBefore = shownUnder();
@@ -1516,6 +1532,7 @@ const tools: ToolDef[] = [
           if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
         if (args.highlight === 'none') delete style.highlight;
+        if (font) style.font = font;
         // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
         // and without it the picker matches the look by its fields.
         if (captionLook(style) !== before) delete style.preset;
@@ -1559,9 +1576,10 @@ const tools: ToolDef[] = [
   },
   {
     name: 'list_library',
-    description: "List the user's own files. kind: music | images | broll | raw. Also returns images already fetched for this project." + READ_PAGE_HELP,
-    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw']), ...READ_PAGING }),
+    description: "List the user's own files. kind: music | images | broll | raw | fonts. Also returns images already fetched for this project. fonts lists every caption font set_caption_style can use: the person's own (yours) and the ones that come with Reel Studio." + READ_PAGE_HELP,
+    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw', 'fonts']), ...READ_PAGING }),
     async run(ctx, args) {
+      if (args.kind === 'fonts') return { content: readPage({ kind: 'fonts', fonts: await captionFonts(ctx) }, args) };
       const kind = args.kind as LibraryKind;
       const files = await listFiles(libraryDir(ctx, kind), EXT[kind], `Library/${LIBRARY_FOLDERS[kind]}`);
       const project = kind === 'images' || kind === 'broll' ? await projectAssets(ctx) : [];

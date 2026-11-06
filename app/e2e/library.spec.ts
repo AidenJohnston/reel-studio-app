@@ -48,7 +48,7 @@ test('Library, My style and Insights', async () => {
   await page.getByTestId('nav-library').click()
   await expect(page.getByTestId('titlebar-title')).toHaveText('Library')
   await expect(page.getByTestId('titlebar-actions').getByRole('button', { name: 'Add files' })).toBeVisible()
-  await expect(page.getByRole('tab')).toHaveText(['Pictures0', 'Videos0', 'Music0', 'Sound effects37'])
+  await expect(page.getByRole('tab')).toHaveText(['Pictures0', 'Videos0', 'Music0', 'Sound effects37', 'Fonts15'])
   await expect(page.getByTestId('library-tab-images')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('library-empty')).toContainText('No pictures yet')
   await expect(page.getByText('Finished videos')).toHaveCount(0)
@@ -78,6 +78,23 @@ test('Library, My style and Insights', async () => {
   await page.getByTestId('library-tab-sfx').click()
   await expect(page.getByTestId('library-sound')).toHaveCount(37)
   await expect(page.getByTestId('library-sound').first()).toContainText('CC0')
+
+  // ---- Fonts: the caption faces that come with Reel Studio, each drawn in itself, and a font of yours ----
+  await page.getByTestId('library-tab-fonts').click()
+  await expect(page.getByTestId('bin-fontpack').getByTestId('library-font')).toHaveCount(15)
+  await expect(page.getByTestId('bin-fontpack').getByTestId('library-font').filter({ hasText: 'Montserrat SemiBold' })).toContainText('SIL Open Font License')
+  await dropOnWindow(page, [join(APP_DIR, '..', 'packaging', 'fonts', 'Fraunces-Bold.ttf')])
+  await expect(page.getByTestId('library-result')).toHaveText('Added 1 font to your Library.')
+  const mine = page.getByTestId('bin-fonts').getByTestId('library-font')
+  await expect(mine).toHaveCount(1)
+  await expect(mine).toContainText('Fraunces Bold')
+  await expect(mine).toContainText('Yours')
+  // fails if the row draws in the app's own face: the sample's font is the file's
+  await expect.poll(() => mine.locator('.lib-font-sample').evaluate((el) => {
+    const family = getComputedStyle(el).fontFamily.split(',')[0].replace(/"/g, '').trim()
+    return [...document.fonts].find((f) => f.family.replace(/"/g, '') === family)?.status
+  })).toBe('loaded')
+  await shot(page, 'library-fonts')
   await shot(page, 'library-sfx')
 
   // ---- My style: add, forget, undo ----

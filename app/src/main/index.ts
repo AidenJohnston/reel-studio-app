@@ -20,6 +20,7 @@ import {
   engineMode,
   ffmpegPath,
   ffprobePath,
+  fontsDir,
   initPaths,
   legalFile,
   libraryDir,
@@ -1969,7 +1970,8 @@ app.whenReady().then(async () => {
   }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir()])
+  // fontsDir: Library › Fonts shows each bundled font in its own face
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
   registerIpc()
   createWindow()
