@@ -466,7 +466,9 @@ test('climb scenes at two sizes', async () => {
   mkdirSync(gateDir, { recursive: true })
   const { app, page } = await launch({
     REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '400', REELSTUDIO_MOCK_MOMENTS: '1', REELSTUDIO_MOCK_FIRST_EDIT: 'editor',
-    FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_MOMENTS_AT: String(MOMENT), FAKE_ENGINE_TRANSCRIPT: heard
+    FAKE_ENGINE_SLOW: '1', FAKE_ENGINE_MOMENTS_GATE: gateDir, FAKE_ENGINE_MOMENTS_AT: String(MOMENT), FAKE_ENGINE_TRANSCRIPT: heard,
+    // a real render's voice is brought to -14 LUFS (engine render.py), so its loudness check passes
+    FAKE_ENGINE_NORMALIZED: '1'
   }, { realViewport: true })
   const ctx: Ctx = { app, page, gate: (n) => writeFileSync(join(gateDir, `go-${n}`), '') }
   const kept = words.filter((w) => !w.cut).map((w) => w.w)

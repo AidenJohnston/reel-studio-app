@@ -24,6 +24,8 @@ Extra test hooks (env):
   FAKE_ENGINE_TRANSCRIPT=<file>  transcribe writes these words instead of the placeholder ones: a JSON list of
                                  {"w", "s", "e"} in seconds of the first source, with "cut": true on the words autocut
                                  drops (a screenshot set shows a real take's words and cuts this way)
+  FAKE_ENGINE_NORMALIZED=1      score reports the loudness a real render has (render.py brings the voice to -14 LUFS)
+                                 instead of this stand-in's own un-normalized sound
 """
 from __future__ import annotations
 
@@ -704,10 +706,11 @@ def cmd_score(args: list[str]) -> dict:
     if not (vdir / "project.json").exists():
         raise Fail("NOT_FOUND", "That version isn't saved any more.")
     cues = json.loads((vdir / "captions.json").read_text("utf-8")).get("cues", []) if (vdir / "captions.json").exists() else []
+    normalized = os.environ.get("FAKE_ENGINE_NORMALIZED") == "1"
     checks = [{"id": "subtitleSafeZone", "ok": True, "count": 0, "subtitles": len(cues)},
-              {"id": "loudness", "ok": False, "lufs": -19.6, "target": -14.0},
+              {"id": "loudness", "ok": normalized, "lufs": -14.1 if normalized else -19.6, "target": -14.0},
               {"id": "videoFile", "ok": True, "count": 0, "failed": []}]
-    return {"version": version, "checks": checks, "passed": 2, "measured": 3}
+    return {"version": version, "checks": checks, "passed": sum(c["ok"] for c in checks), "measured": 3}
 
 
 def cmd_measure_reel(args: list[str]) -> dict:
