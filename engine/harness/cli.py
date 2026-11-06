@@ -94,7 +94,7 @@ def setup(c: Ctx, ids=None) -> dict:
     song = corpus.ensure_song(c.root)
     made, takes, sizes = {}, {}, {}
     for entry in c.cfg["corpus"]:
-        if ids and entry["id"] not in ids:
+        if ids is not None and entry["id"] not in ids:
             continue
         d = c.take_dir(entry)
         spec = entry.get("synthetic")
@@ -118,7 +118,7 @@ def split_ids(cfg: dict, split: str, only) -> list:
         ids = [i for i in ids if i not in held]
     elif split == "held-out":
         ids = [i for i in ids if i in held]
-    if only:
+    if only is not None:
         ids = [i for i in ids if i in only]
     return ids
 
@@ -135,7 +135,10 @@ def cmd_pin(a) -> int:
 
 def cmd_setup(a) -> int:
     c = Ctx(a)
-    s = setup(c, a.takes.split(",") if a.takes else None)
+    ids = split_ids(c.cfg, "all", a.takes.split(",") if a.takes is not None else None)
+    if not ids:
+        raise Refusal(f"no takes selected for setup (requested {a.takes!r})")
+    s = setup(c, ids)
     print(json.dumps({"made": s["made"], "mediaBytes": s["mediaBytes"], "songBytes": s["songBytes"],
                       "totalBytes": sum(s["mediaBytes"].values()) + s["songBytes"]}, indent=2))
     return 0
@@ -143,7 +146,9 @@ def cmd_setup(a) -> int:
 
 def cmd_run(a) -> int:
     c = Ctx(a)
-    ids = split_ids(c.cfg, a.split, a.takes.split(",") if a.takes else None)
+    ids = split_ids(c.cfg, a.split, a.takes.split(",") if a.takes is not None else None)
+    if not ids:
+        raise Refusal(f"no takes selected in split {a.split!r} (requested {a.takes!r})")
     s = setup(c, ids)
     runs = a.runs or c.cfg["runs"]
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
