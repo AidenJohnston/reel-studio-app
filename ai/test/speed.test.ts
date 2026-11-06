@@ -123,6 +123,38 @@ process.stdout.write(JSON.stringify({type:'result',is_error:false,result:reply})
     expect(r2.toolCalls[0]?.args).toEqual({ summary_for_user: 'full' });
     p.dispose();
   });
+
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const ANSWER = `process.stdin.on('data',()=>process.stdout.write(JSON.stringify({type:'result',is_error:false,result:'{"tool_calls":[{"name":"finish","arguments":{"summary_for_user":"ok"}}]}'})+'\\n'));`;
+  const oneTurn = (p: ClaudeCliProvider) => p.complete({ system: 'SYS', tools: toolSchemas(['finish']), messages: [{ role: 'user', content: [{ type: 'text', text: 'TASK' }] }] });
+
+  // Windows has no SIGTERM to ignore: kill() ends the process there
+  it.skipIf(process.platform === 'win32')('ending a run stops a session process that ignores its closed input and SIGTERM', async () => {
+    const dir = tmpDir();
+    const pidFile = path.join(dir, 'pid');
+    const script = path.join(dir, 'stubborn-claude.js');
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},1000);${ANSWER}`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    await oneTurn(p);
+    await p.dispose();
+    expect(alive(Number(fs.readFileSync(pidFile, 'utf8')))).toBe(false);
+  }, 30000);
+
+  it('a session whose output stays open after its process is killed fails the run instead of holding Stop forever', async () => {
+    const dir = tmpDir();
+    const pidFile = path.join(dir, 'pid');
+    const script = path.join(dir, 'leaky-claude.js');
+    // a child it started shares its output and outlives it
+    fs.writeFileSync(script, `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});
+require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000);${ANSWER}`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
+    try {
+      await oneTurn(p);
+      await expect(p.dispose()).rejects.toMatchObject({ code: 'cli_stuck' });
+    } finally {
+      try { process.kill(Number(fs.readFileSync(pidFile, 'utf8'))); } catch { /* gone */ }
+    }
+  }, 30000);
 });
 
 describe('CLI reply parsing', () => {
