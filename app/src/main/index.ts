@@ -86,6 +86,8 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { USAGE_ENDPOINT } from '../shared/config'
+import { createUsage, editScore, postViews, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -100,6 +102,8 @@ import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
+import { ResultsRefresh, type ResultsSource } from './results-refresh'
+import { testResultsSources } from './results-test-source'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
 import { clearEngineCache, engineCacheSize } from './engine-cache'
@@ -110,6 +114,7 @@ import { claudeCheckWords, createVendorConnect, type CliStatus, type VendorConne
 import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
+import type { UsageEvent } from '../shared/api'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
@@ -318,6 +323,33 @@ async function continuePaused(slug: string): Promise<void> {
   startFirstEdit(slug, null)
 }
 
+// Settings › Privacy: anonymous usage data, only the parts the person switched on (main/usage.ts)
+const usage = createUsage({
+  dir: () => join(settingsDir(), 'usage'),
+  sharing: async () => (await loadSettings()).sharing,
+  version: app.getVersion(),
+  platform: process.platform,
+  log,
+  endpoint: USAGE_ENDPOINT
+})
+const recordUsage = (e: UsageEvent): void => void usage.record(e).catch((err) => log(`[usage] ${String(err?.message ?? err)}`))
+// Once a day to the collection address. There is none in any build yet (USAGE_ENDPOINT null), so nothing is scheduled.
+if (USAGE_ENDPOINT) setInterval(() => void usage.send().catch((err) => log(`[usage] send: ${String(err?.message ?? err)}`)), 24 * 3_600_000).unref()
+// Each version an edit made is scored once per run of the app, by the next thing done to its reel (usage.ts editScore).
+// A version counts as scored only once a line was really kept: with quality sharing off nothing is used up, so turning
+// it on later still scores what happens next. Cleared whenever quality sharing goes off (app:setSharing).
+const scoredEdits = new Set<string>()
+function scoreEdit(slug: string, made: number, next: Parameters<typeof editScore>[0]): void {
+  const key = `${slug}:${made}`
+  if (!(made >= 1) || scoredEdits.has(key)) return
+  scoredEdits.add(key)
+  void usage.record({ part: 'quality', name: 'edit', outcome: editScore(next, made) })
+    .then((kept) => { if (!kept) scoredEdits.delete(key) }, (err) => {
+      scoredEdits.delete(key)
+      log(`[usage] ${String(err?.message ?? err)}`)
+    })
+}
+
 const jobs = createJobManager(
   (e: JobEvent) => {
     broadcast('job:event', e)
@@ -344,7 +376,16 @@ const jobs = createJobManager(
   () => updates.assertCanStartWork(),
   footageIndex,
   // and so do the pictures of each change made before its draft
-  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments())
+  ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
+  (kind, last, seconds) =>
+    recordUsage({
+      part: 'usage',
+      name: 'job',
+      job: kind,
+      outcome: last.type === 'error' ? 'failed' : last.type,
+      ...(last.type === 'error' ? { code: usageCode(last.code) } : {}),
+      seconds: Math.round(seconds)
+    })
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
@@ -365,6 +406,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
+      scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
       const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
@@ -803,7 +845,6 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 }
 
 function registerIpc(): void {
-  registerInsightsIpc({ handle, projectsRoot: projectsDir })
   const tiktok = new TikTokService({
     dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
     secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
@@ -833,6 +874,35 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
+  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
+    ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
+    : [
+        { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
+          read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
+        { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+      ]
+  const results = new ResultsRefresh({
+    projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null),
+    // Post results go into usage data only when sharing and its Post results part are both on (usage.ts record)
+    onRead: (post, outcome) => {
+      const views = postViews(post, outcome)
+      if (views) recordUsage(views)
+    }
+  })
+  registerInsightsIpc({
+    handle, projectsRoot: projectsDir, refresh: results,
+    describe: async (slug, version) => {
+      const project = await readProject(slug).catch(() => null)
+      if (!project) return null
+      const v = (await listVersions(projectDir(slug)).catch(() => [])).find((x) => x.n === version)
+      return { title: project.title || slug, cover: v?.cover ?? null }
+    }
+  })
+  // Test runs read only when the test asks (Refresh), so what they show doesn't depend on timing.
+  if (!TEST) results.start()
+  app.on('before-quit', () => { results.stop() })
   handle('app:info', () => appInfo())
   handle('app:setModels', async (_e, m: unknown) => {
     const ok = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 200 && !v.includes('\0')
@@ -845,9 +915,14 @@ function registerIpc(): void {
     const x = (v ?? {}) as Record<string, unknown>
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
-    await saveSettings({ sharing: Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean> })
+    const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
+    await saveSettings({ sharing })
+    // off deletes what was kept; a part switched off loses its lines
+    await usage.applySharing(sharing)
+    if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
+  handle('app:usage', () => usage.read())
   handle('app:setPhoneView', async (_e, view: unknown) => {
     if (view !== 'instagram' && view !== 'clean') throw { code: 'BAD_INPUT', userMessage: 'Choose Instagram or Clean.' }
     await saveSettings({ phoneView: view })
@@ -1400,7 +1475,11 @@ function registerIpc(): void {
     updates.assertCanStartWork()
     exportsWriting++ // the updater will not restart the app while an export writes its file
     try {
-      return await exportVersion(slug, n)
+      const done = await exportVersion(slug, n)
+      // exporting the newest version keeps the edit that made it
+      const latest = (await readProject(slug)).version ?? 0
+      if (n === latest) scoreEdit(slug, n, { type: 'export' })
+      return done
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : ''
       if (code === 'ENOSPC') throw { code: 'NO_SPACE', userMessage: `There isn't enough space on this ${process.platform === 'darwin' ? 'Mac' : 'PC'}. Free some up, then try again.` }
@@ -1442,6 +1521,8 @@ function registerIpc(): void {
     await jobs.forSlug(slug)?.done
     if (failure) throw failure
     if (!result) throw { code: 'EXPORT_FAILED', userMessage: 'Saving for those platforms stopped. Try again.' }
+    // sharing the newest version keeps the edit that made it, as exporting it does (projects:export)
+    if (n === (project.version ?? 0)) scoreEdit(slug, n, { type: 'export' })
     return result
   })
   handle('projects:coverCandidates', async (_e, slug: string, moments: number[], source: string): Promise<CoverCandidate[]> => {

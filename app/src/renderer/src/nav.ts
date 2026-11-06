@@ -1,7 +1,8 @@
 export type Screen =
   | { name: 'home' }
-  /** `draft`: words to put in the note box, unsent (Insights' "Try this edit"). */
-  | { name: 'reel'; slug: string; draft?: string }
+  /** `version`: open showing this version (Insights opens the one that was posted) instead of the newest. `draft`:
+   * words to put in the note box, unsent (Insights' "Try this edit"). */
+  | { name: 'reel'; slug: string; version?: number; draft?: string }
   | { name: 'library' }
   | { name: 'style' }
   | { name: 'insights' }
@@ -10,4 +11,4 @@ export type Screen =
 
 export type Go = (s: Screen) => void
 
-export type SettingsSection = 'ai' | 'listen' | 'where' | 'notify' | 'privacy' | 'about'
+export type SettingsSection = 'ai' | 'listen' | 'where' | 'notify' | 'privacy' | 'posting' | 'about'
