@@ -174,7 +174,7 @@ export function SocialPostSheet({
     state = 'connecting'
     body = (
       <>
-        <p className="row" style={{ alignItems: 'flex-start' }}>
+        <p className="row" role="status" style={{ alignItems: 'flex-start' }}>
           <Spinner /> <span>{SOCIAL_COPY.connecting(name)}</span>
         </p>
         <div className="row">
@@ -203,7 +203,7 @@ export function SocialPostSheet({
     state = 'sending'
     body = (
       <>
-        <p className="row" data-testid="social-sending">
+        <p className="row" role="status" data-testid="social-sending">
           <Spinner /> <span>{SOCIAL_COPY.sending(name)}</span>
         </p>
         <p className="muted-sm">{WAIT[platform]}</p>

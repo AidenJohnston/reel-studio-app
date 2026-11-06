@@ -367,8 +367,8 @@ function TrialPair({ slug, files }: { slug: string; files: PlatformExportResult[
     }
     setState({ kind: 'done' })
   }
-  if (state.kind === 'done') return <p className="sp-done" data-testid="trial-pair-done"><Icon name="check" size={14} /><span>{SOCIAL_COPY.pairDone}</span></p>
-  if (state.kind === 'posting') return <p className="muted-sm" data-testid="trial-pair-posting">{SOCIAL_COPY.pairSending(state.n)} {SOCIAL_COPY.igWait}</p>
+  if (state.kind === 'done') return <p className="sp-done" role="status" data-testid="trial-pair-done"><Icon name="check" size={14} /><span>{SOCIAL_COPY.pairDone}</span></p>
+  if (state.kind === 'posting') return <p className="muted-sm" role="status" data-testid="trial-pair-posting">{SOCIAL_COPY.pairSending(state.n)} {SOCIAL_COPY.igWait}</p>
   return (
     <div className="stack" style={{ gap: 6 }}>
       {state.kind === 'failed' && <p className="post-error" role="alert" data-testid="trial-pair-error">{state.message}</p>}
