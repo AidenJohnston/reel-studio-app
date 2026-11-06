@@ -19,6 +19,7 @@ Extra test hooks (env):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -281,8 +282,15 @@ def write_captions(proj: Path, vdir: Path, data: dict) -> None:
     words = json.loads(transcript.read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
     fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
+
+    def kept(r):
+        # a clip item keeps the words of its source inside its times; a range keeps its words
+        if "clip" in r:
+            return [w for w in words if w.get("source") == r["source"] and w["s"] >= r["in"] and w["e"] <= r["out"]]
+        return words[index[r["from"]]:index[r["to"]] + 1]
+
     tokens = [{"w": fixes.get(w["id"], w["w"]), "ids": [w["id"]]}
-              for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
+              for r in (data.get("cut") or {}).get("keep") or [] for w in kept(r)]
     split = set(cap.get("split") or [])
     joins = {(j["from"], j["to"]) for j in cap.get("join") or []}
 
@@ -780,13 +788,19 @@ def cmd_footage(args: list[str]) -> dict:
     if action == "search":
         return {"hits": [], "more": False, "backend": "none"}
     if action == "digest":
-        # the files the last index run saw, each with a placeholder line every 4 s (real: footage.py digest)
+        # the videos the last index run saw, unchanged since, each with a placeholder line every 4 s and its
+        # content hash (real: footage.py digest); --ref: only those
         root = Path(take(args, "--root") or ROOT)
+        only = []
+        while "--ref" in args:
+            only.append(take(args, "--ref"))
         seen = root / ".index" / "fake-files.json"
         out = []
         for entry in (json.loads(seen.read_text()) if seen.is_file() else []):
             path = Path(entry["path"])
-            if not path.is_file():
+            if not path.is_file() or path.suffix.lower() not in VIDEO or (only and entry["ref"] not in only):
+                continue
+            if hashlib.sha1(path.read_bytes()).hexdigest() != entry["hash"]:
                 continue
             duration = float(probe(str(path)).get("duration") or 0)
             lines, t, n = [], 0.5, 0
@@ -795,7 +809,7 @@ def cmd_footage(args: list[str]) -> dict:
                               "text": " ".join(PLACEHOLDER[(n * 6) % len(PLACEHOLDER):][:6]) + "."})
                 t += 4
                 n += 1
-            out.append({"ref": entry["ref"], "name": path.name, "duration": duration, "lines": lines})
+            out.append({"ref": entry["ref"], "name": path.name, "hash": entry["hash"], "duration": duration, "lines": lines})
         return {"files": out, "truncated": False}
     if action != "index":
         raise Fail("BAD_ARGS", "Reel Studio asked for something I do not know how to do.", action)
@@ -819,7 +833,7 @@ def cmd_footage(args: list[str]) -> dict:
         counts[pid] = len(files)
         found += files
         refs += [{"ref": ("Library/" if pid == "Library" else f"Footage/{pid}/") + f.relative_to(folder).as_posix(),
-                  "path": str(f)} for f in files]
+                  "path": str(f), "hash": hashlib.sha1(f.read_bytes()).hexdigest()} for f in files]
     counts_file.parent.mkdir(parents=True, exist_ok=True)
     counts_file.write_text(json.dumps(counts))
     (root / ".index" / "fake-files.json").write_text(json.dumps(refs))

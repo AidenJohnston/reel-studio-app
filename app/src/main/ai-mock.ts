@@ -320,15 +320,18 @@ export const createMockAI: CreateAI = ({ host }) => {
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
       const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }) })
       const changed: string[] = []
-      // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
-      // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
+      // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
+      // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
+      // package does (ai editor.ts ensureAnalyzed and deterministicEdit)
       const start = await readProject(projectDir)
       const proposed = !!start.proposal && (start.cut?.keep?.length ?? 0) > 0
+      const heard = existsSync(join(projectDir, start.transcript?.file ?? 'work/transcript.json'))
 
-      if (!proposed) {
+      if (!heard) {
         status('Listening to your video', 1, 'listen')
         await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen'), signal)
-
+      }
+      if (!proposed) {
         status('Picking your best takes', 41, 'analyze')
         await host.runEngine('analyze', args, (p) => status('Picking your best takes', span(0, 50, p.pct), 'analyze'), signal)
         await host.runEngine('autocut', args, (p) => status('Picking your best takes', span(50, 100, p.pct), 'analyze'), signal)

@@ -612,12 +612,22 @@ def test_digest_lists_each_present_file_once_with_timed_lines(library, clips, tm
     drive = tmp_path / "drive"
     drive.mkdir()
     shutil.copyfile(clips[1], drive / "b.mp4")
+    # a voice note in the Library is listened to like a video, but no reel can be cut from it
+    tools.text_run([tools.ffmpeg(), "-y", "-nostdin", "-v", "error", "-i", str(clips[1]), "-vn", "-c:a", "copy",
+                    str(root / "Library" / "voice.m4a")], 60, "audio fixture")
     command(root, "index", "--source", f"{SOURCE}={drive}")
     result = command(root, "digest")
-    # fails if a copy is proposed twice, a footage folder's file loses its Footage/ name, or lines lose their times
+    # fails if a copy is proposed twice, a footage folder's file loses its Footage/ name, lines lose their times,
+    # or an audio file is offered as footage to cut from
     assert [f["ref"] for f in result["files"]] == ["Library/a.mp4", f"Footage/{SOURCE}/b.mp4"]
     assert result["files"][0]["lines"] == [{"s": .25, "e": .8, "text": "twenty bucks."}]
     assert result["truncated"] is False
+    # fails if a reel made later can't tell the file was swapped: each file names its content, and the app asks
+    # about its own files only
+    with connect(root) as db:
+        indexed = db.execute("SELECT hash FROM paths WHERE place='Library' AND rel='a.mp4'").fetchone()[0]
+    only = command(root, "digest", "--ref", "Library/a.mp4")
+    assert [(f["ref"], f["hash"]) for f in only["files"]] == [("Library/a.mp4", indexed)]
     drive.rename(tmp_path / "away")
     # an unplugged drive's files can't be made into reels, so they are not offered
     assert [f["ref"] for f in command(root, "digest")["files"]] == ["Library/a.mp4"]

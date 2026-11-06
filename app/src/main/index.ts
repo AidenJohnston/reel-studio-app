@@ -91,7 +91,7 @@ import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
 import { chooseSeries, groupReel } from './series'
-import { createArchiveReels, seedFromArchive } from './archive-reels'
+import { createArchiveReels, libraryRef, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -273,24 +273,14 @@ const host: EngineHost = {
 
 // Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
 const archiveReels = createArchiveReels({
-  jobs: { start: (...a) => jobs.start(...a) },
+  jobs: { start: (...a) => jobs.start(...a), get: (id) => jobs.get(id) },
   ai: () => ai,
   runEngine,
   root: reelStudioRoot,
   file: () => join(settingsDir(), 'archive-reels.json'),
-  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryFile(ref)),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryRef(ref, libraryDir())),
   startFirstEdit: (slug, init) => startFirstEdit(slug, init)
 })
-
-/** A Library/... path the engine's digest named, as a file on disk, refused when it is gone or leaves the Library. */
-function libraryFile(ref: string): string {
-  const rel = ref.replace(/^Library\//, '')
-  const abs = join(libraryDir(), ...rel.split('/'))
-  if (!ref.startsWith('Library/') || rel.split('/').includes('..') || !existsSync(abs)) {
-    throw { code: 'FILE_GONE', userMessage: `${basename(ref)} is not in your Library any more.` }
-  }
-  return abs
-}
 
 /** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
 async function importFootage(ref: string): Promise<string> {
@@ -733,12 +723,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
+    const st = await readAppState(slug)
     const copyIn = async (title: string, files: string[]) => {
       const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
+      // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
+      const keepOrder = st.fromArchive ? ['--keep-order'] : []
       await runEngine(
         'init',
-        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(files),
+        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
         // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
         (p) =>
@@ -752,7 +745,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
-    const st = await readAppState(slug)
     const from = st.from
     if (from) await prepareReel(slug, from, () => copyIn(from.about.title, [from.media]), { resumed: !initArgs, signal })
     else if (!existsSync(join(dir, 'project.json'))) {

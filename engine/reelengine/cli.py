@@ -77,7 +77,7 @@ def cmd_classify(args):
 def cmd_init(args):
     from . import init as initmod
     return initmod.run(_project(args), args.title, [Path(f) for f in args.files], slug=args.slug,
-                       faster_exports=args.faster_exports)
+                       faster_exports=args.faster_exports, keep_order=args.keep_order)
 
 
 def cmd_transcribe(args):
@@ -99,7 +99,7 @@ def cmd_footage(args):
             sources.append((sid, folder))
         return footage.index(root, model_name=args.model, budget_seconds=args.budget_seconds, sources=sources)
     if args.footage_command == "digest":
-        return footage.digest(root)
+        return footage.digest(root, refs=args.ref)
     return footage.search(root, args.query, limit=args.limit)
 
 
@@ -558,6 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("files", nargs="+")
     sp = add("init", cmd_init, "create a project from raw takes")
     sp.add_argument("--faster-exports", action="store_true")
+    sp.add_argument("--keep-order", action="store_true",
+                    help="number the sources in the order given, not by capture time")
     sp.add_argument("--title", default="My video")
     sp.add_argument("--slug")
     sp.add_argument("files", nargs="+")
@@ -577,6 +579,9 @@ def build_parser() -> argparse.ArgumentParser:
                             help="ID=FOLDER: an added footage folder, indexed with the Library (repeatable)")
             fp.add_argument("--model")
             fp.add_argument("--budget-seconds", type=float, help="stop between stages after this budget")
+        elif action == "digest":
+            fp.add_argument("--ref", action="append",
+                            help="only this file, as Library/... or Footage/<folder>/... (repeatable)")
         elif action == "search":
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)

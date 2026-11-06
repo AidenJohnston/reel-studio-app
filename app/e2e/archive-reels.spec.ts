@@ -54,5 +54,16 @@ test('reels found across the footage are made from the files they came from', as
   expect(p.cut.keep).toEqual([{ clip: 'c1', source: 's1', in: 0.5, out: 12 }, { clip: 'c2', source: 's2', in: 0.5, out: 4 }])
   // the files on the drive are where they were
   expect(existsSync(join(drive, 'a monday.mp4'))).toBe(true)
+
+  // ---- its first edit listens to both files and finishes, subtitled from the proposed parts only ----
+  await page.getByTestId('nav-home').click()
+  await expect(page.locator(`.rcard[data-slug="${p.slug}"]`).getByTestId('card-status')).toHaveText(/^Version 1 · /, { timeout: 5 * 60_000 })
+  const final = project()
+  expect(final.cut.keep).toEqual(p.cut.keep)
+  const words = JSON.parse(readFileSync(join(dir, 'work', 'transcript.json'), 'utf8')).words as { id: string; source: string; s: number; e: number }[]
+  const cues = JSON.parse(readFileSync(join(dir, 'versions', 'v1', 'captions.json'), 'utf8')).cues as { ids: string[] }[]
+  const shown = cues.flatMap((c) => c.ids).map((id) => words.find((w) => w.id === id)!)
+  expect(new Set(shown.map((w) => w.source))).toEqual(new Set(['s1', 's2']))
+  expect(shown.every((w) => (w.source === 's1' ? w.s >= 0.5 && w.e <= 12 : w.s >= 0.5 && w.e <= 4))).toBe(true)
   await app.close()
 })

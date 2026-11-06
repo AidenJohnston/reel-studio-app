@@ -546,10 +546,12 @@ def _current(folder: Path | None, row) -> bool:
 DIGEST_CHARS = 60_000
 
 
-def digest(root: Path, *, max_chars: int = DIGEST_CHARS) -> dict:
-    """Every indexed file that is here and was listened to, with its lines (the sentence windows search
+def digest(root: Path, *, max_chars: int = DIGEST_CHARS, refs: list[str] | None = None) -> dict:
+    """Every indexed video that is here and was listened to, with its lines (the sentence windows search
     matches) and their times, for proposing reels across the whole archive. A file on an unplugged drive
-    is left out: nothing could be made from it. Files past `max_chars` are left out and `truncated` says so."""
+    is left out: nothing could be made from it. Audio files are left out too: a reel is cut from video.
+    Files past `max_chars` are left out and `truncated` says so. Each file carries its content `hash`, so a
+    reel made later can check it is the same file (`refs`: only these files, as the app does then)."""
     root = Path(root).resolve()
     database = root / ".index" / "index.sqlite"
     if not database.is_file():
@@ -567,7 +569,9 @@ def digest(root: Path, *, max_chars: int = DIGEST_CHARS) -> dict:
             paths = db.execute("SELECT * FROM paths WHERE hash=? ORDER BY place != 'Library', place, rel",
                                (digest_,)).fetchall()
             current = next((p for p in paths if _current(folders.get(p["place"]), p)), None)
-            if current is None:
+            if current is None or Path(current["rel"]).suffix.lower() not in probe.VIDEO_EXT:
+                continue
+            if refs is not None and ref_of(current["place"], current["rel"]) not in refs:
                 continue
             model = db.execute("SELECT model FROM text_fts WHERE hash=? LIMIT 1", (digest_,)).fetchone()[0]
             if not _done(db, digest_, f"transcript:{model}", TRANSCRIPT_VERSION):
@@ -577,7 +581,7 @@ def digest(root: Path, *, max_chars: int = DIGEST_CHARS) -> dict:
             duration = db.execute("SELECT duration FROM files WHERE hash=?", (digest_,)).fetchone()[0]
             entries.append((current["place"], current["rel"], {
                 "ref": ref_of(current["place"], current["rel"]), "name": Path(current["rel"]).name,
-                "duration": duration, "lines": lines}))
+                "hash": digest_, "duration": duration, "lines": lines}))
         # a stable order the person would recognise: the Library first, then each folder, by path
         for _, _, entry in sorted(entries, key=lambda e: (e[0] != "Library", e[0], e[1])):
             size = sum(len(line["text"]) for line in entry["lines"])
