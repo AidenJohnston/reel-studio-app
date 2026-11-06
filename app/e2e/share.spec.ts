@@ -107,6 +107,15 @@ test('fails if the share panel does not show the cover beside the caption, or Ch
     await expect(page.getByTestId('drawer')).toBeVisible()
     await expect(page.getByTestId('tab-cover')).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('tab-cover')).toBeFocused()
+
+    // and with the panel already open on another tab: Change moves it to Cover
+    await page.getByTestId('tab-cut').click()
+    await expect(page.getByTestId('tab-cut')).toHaveAttribute('aria-selected', 'true')
+    await page.getByTestId('share').click()
+    await pop.getByTestId('share-cover').click()
+    await expect(pop).toBeHidden()
+    await expect(page.getByTestId('tab-cover')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('tab-cover')).toBeFocused()
   } finally {
     await app.close()
   }

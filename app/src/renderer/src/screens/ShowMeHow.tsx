@@ -152,6 +152,15 @@ export function ShowMeHow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // A tab asked for from outside while open (Share's cover Change asks for Cover): the drawer moves there and focuses it.
+  // Its own tab changes come back as this prop through onTab, equal to `tab`, so they change nothing here.
+  useEffect(() => {
+    if (initialTab === tab) return
+    setTabState(initialTab)
+    requestAnimationFrame(() => tabRefs.current[initialTab]?.focus())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab])
+
   // Esc closes; Cmd/Ctrl+Z undoes (in a text box it undoes the typing).
   const keys = useRef({ close, undo: s.undo })
   keys.current = { close, undo: s.undo }
