@@ -56,6 +56,13 @@ const api: ReelApi = {
     disconnect: () => call('threads:disconnect'),
     publish: (input) => call('threads:publish', input)
   },
+  x: {
+    session: () => call('x:session'),
+    connect: () => call('x:connect'),
+    cancelConnect: () => call('x:cancelConnect'),
+    disconnect: () => call('x:disconnect'),
+    publish: (input) => call('x:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),

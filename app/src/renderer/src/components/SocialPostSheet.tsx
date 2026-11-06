@@ -9,6 +9,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { FacebookPost } from '../../../shared/facebook'
 import type { InstagramPost } from '../../../shared/instagram'
 import type { ThreadsPost } from '../../../shared/threads'
+import type { XPost } from '../../../shared/x'
 import { BRANDED_TERMS_URL, MUSIC_TERMS_URL, PLATFORM_NAMES, SOCIAL_COPY, TIKTOK_PRIVACY_LABELS, availabilityLine, type SocialStatus } from '../../../shared/social'
 import type { TikTokCreator, TikTokPrivacy, TikTokPublishResult } from '../../../shared/tiktok'
 import { errorCode, reel, userMessage } from '../api'
@@ -17,18 +18,19 @@ import { accountName, PagePicker } from './SocialSettings'
 import { Spinner } from './ui'
 import './PostSheet.css'
 
-type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads'
-type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult | FacebookPost | ThreadsPost } | { failed: string }
+type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x'
+type Phase = 'form' | 'sending' | { done: InstagramPost | TikTokPublishResult | FacebookPost | ThreadsPost | XPost } | { failed: string }
 
 const HEADINGS: Record<Id, [string, string]> = {
   instagram: [SOCIAL_COPY.igHeading, SOCIAL_COPY.igDoneHeading],
   tiktok: [SOCIAL_COPY.ttHeading, SOCIAL_COPY.ttDoneHeading],
   facebook: [SOCIAL_COPY.fbHeading, SOCIAL_COPY.fbDoneHeading],
-  threads: [SOCIAL_COPY.thHeading, SOCIAL_COPY.thDoneHeading]
+  threads: [SOCIAL_COPY.thHeading, SOCIAL_COPY.thDoneHeading],
+  x: [SOCIAL_COPY.xHeading, SOCIAL_COPY.xDoneHeading]
 }
-const WAIT: Record<Id, string> = { instagram: SOCIAL_COPY.igWait, tiktok: SOCIAL_COPY.ttWait, facebook: SOCIAL_COPY.fbWait, threads: SOCIAL_COPY.thWait }
-/** Each platform's caption limit: Threads counts 500, the rest 2,200. */
-const LIMIT: Record<Id, number> = { instagram: 2200, tiktok: 2200, facebook: 2200, threads: 500 }
+const WAIT: Record<Id, string> = { instagram: SOCIAL_COPY.igWait, tiktok: SOCIAL_COPY.ttWait, facebook: SOCIAL_COPY.fbWait, threads: SOCIAL_COPY.thWait, x: SOCIAL_COPY.xWait }
+/** Each platform's caption limit: X 280, Threads 500, the rest 2,200. */
+const LIMIT: Record<Id, number> = { instagram: 2200, tiktok: 2200, facebook: 2200, threads: 500, x: 280 }
 
 const PRIVACY_ORDER: TikTokPrivacy[] = ['PUBLIC_TO_EVERYONE', 'FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY']
 
@@ -121,6 +123,8 @@ export function SocialPostSheet({
           ...(trial ? { trial: { graduation: 'MANUAL' as const } } : {})
         })
         setPhase({ done })
+      } else if (platform === 'x') {
+        setPhase({ done: await reel.x.publish({ slug, version, text: caption }) })
       } else if (platform === 'threads') {
         setPhase({ done: await reel.threads.publish({ slug, version, text: caption }) })
       } else if (platform === 'facebook') {
@@ -221,7 +225,7 @@ export function SocialPostSheet({
     body = (
       <>
         <p data-testid="social-done">
-          {'message' in r ? r.message : platform === 'facebook' ? SOCIAL_COPY.fbDone(account ?? 'your Page') : platform === 'threads' ? SOCIAL_COPY.thDone : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}
+          {'message' in r ? r.message : platform === 'facebook' ? SOCIAL_COPY.fbDone(account ?? 'your Page') : platform === 'threads' ? SOCIAL_COPY.thDone : platform === 'x' ? SOCIAL_COPY.xDone : trial ? SOCIAL_COPY.igDoneTrial : SOCIAL_COPY.igDone}
         </p>
         <div className="row">
           <button className="btn primary" onClick={onClose} data-autofocus data-testid="social-done-close">
@@ -262,7 +266,7 @@ export function SocialPostSheet({
         }}
       >
         <p style={{ margin: 0 }} data-testid="social-account">
-          Posting to <strong>{platform === 'instagram' || platform === 'threads' ? `@${account}` : direct ? tt.displayName : account}</strong>
+          Posting to <strong>{platform === 'instagram' || platform === 'threads' || platform === 'x' ? `@${account}` : direct ? tt.displayName : account}</strong>
         </p>
         {a.review !== 'approved' && a.review !== 'own' && <p className="muted-sm" style={{ margin: 0 }}>{availabilityLine(platform, a)}</p>}
         {platform === 'facebook' && status.facebook.session.connected && status.facebook.session.pages.length > 1 && (

@@ -26,6 +26,8 @@ export const INSTAGRAM_SCOPES = ['instagram_business_basic', 'instagram_business
 export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights']
 export const THREADS_SCOPES = ['threads_basic', 'threads_content_publish']
 const THREADS_GRAPH = 'https://graph.threads.com'
+export const X_SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access']
+const X_API = 'https://api.x.com/2'
 const TIKTOK = 'https://open.tiktokapis.com/v2'
 const STATE_MS = 10 * 60_000
 const HANDOFF_MS = 5 * 60_000
@@ -38,7 +40,7 @@ const MAX_COVER = 8_000_000
 /** How long a storage pass lasts: past the 60-day token, so a refreshed connection keeps it; then Connect again. */
 const PASS_MS = 90 * 86_400_000
 
-type Platform = 'instagram' | 'facebook' | 'threads'
+type Platform = 'instagram' | 'facebook' | 'threads' | 'x'
 
 class Refused extends Error {
   readonly status: number
@@ -200,8 +202,29 @@ async function threadsExchange(c: SigninConfig, app: MetaApp, code: string, redi
   return { access_token: token(long.access_token), token_type: 'bearer', expires_in: positive(long.expires_in), permissions: [] }
 }
 
-function authorizeUrl(c: SigninConfig, p: Platform, app: MetaApp, state: string): string {
+/** X's token answer, with the refresh token X gives for offline.access. */
+interface XGranted extends Granted {
+  refresh_token: string
+}
+
+const basic = (id: string, secret: string) => `Basic ${btoa(`${encodeURIComponent(id)}:${encodeURIComponent(secret)}`)}`
+
+async function xToken(c: SigninConfig, fields: Record<string, string>): Promise<XGranted> {
+  const x = c.x!
+  const init = form(fields)
+  const r = await upstream(c, `${X_API}/oauth2/token`, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: basic(x.clientId, x.clientSecret) } }, 'code_rejected')
+  const scope = typeof r.scope === 'string' ? r.scope.split(' ').filter(Boolean) : []
+  return { access_token: token(r.access_token), token_type: 'bearer', expires_in: positive(r.expires_in), permissions: scope, refresh_token: token(r.refresh_token) }
+}
+
+function authorizeUrl(c: SigninConfig, p: Platform, app: { appId: string }, state: string, upstreamChallenge?: string): string {
   const redirect = `${c.publicUrl}/v1/${p}/callback`
+  if (p === 'x') {
+    const u = new URL('https://x.com/i/oauth2/authorize')
+    u.search = new URLSearchParams({ response_type: 'code', client_id: app.appId, redirect_uri: redirect, scope: X_SCOPES.join(' '), state,
+      code_challenge: upstreamChallenge!, code_challenge_method: 'S256' }).toString()
+    return u.toString()
+  }
   if (p === 'threads') {
     const u = new URL('https://threads.com/oauth/authorize')
     u.search = new URLSearchParams({ client_id: app.appId, redirect_uri: redirect, response_type: 'code', scope: THREADS_SCOPES.join(','), state }).toString()
@@ -219,8 +242,9 @@ function authorizeUrl(c: SigninConfig, p: Platform, app: MetaApp, state: string)
 
 export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<Response> {
   const keyP = sealKey(c.secret)
-  const meta = (p: Platform): MetaApp => {
-    const app = c[p]
+  /** The app for a platform signed in through start/callback/complete: Meta's, or X's (its client id as appId). */
+  const meta = (p: Platform): { appId: string; appSecret: string } => {
+    const app = p === 'x' ? (c.x ? { appId: c.x.clientId, appSecret: c.x.clientSecret } : undefined) : c[p]
     if (!app) throw new Refused(404, 'platform_off')
     return app
   }
@@ -233,8 +257,10 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     if (!STATE.test(state)) throw new Refused(400, 'bad_state')
     if (b.code_challenge_method !== 'S256' || !PKCE.test(challenge)) throw new Refused(400, 'bad_challenge')
     const back = loopback(b.loopback_uri, p)
-    const sealed = await seal(await keyP, 'state', { p, back, state, challenge }, c.now() + STATE_MS)
-    return json(200, { authorize_url: authorizeUrl(c, p, app, sealed) })
+    // X wants PKCE of its own between it and this service; the verifier rides in the sealed state
+    const uv = p === 'x' ? b64url(crypto.getRandomValues(new Uint8Array(32))) : undefined
+    const sealed = await seal(await keyP, 'state', { p, back, state, challenge, ...(uv ? { uv } : {}) }, c.now() + STATE_MS)
+    return json(200, { authorize_url: authorizeUrl(c, p, app, sealed, uv ? await s256(uv) : undefined) })
   }
 
   const callback = async (p: Platform, url: URL) => {
@@ -251,7 +277,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     } else {
       // Meta adds "#_" after the code on some redirects; it is not part of the code
       const code = codes[0].replace(/#_$/, '')
-      to.searchParams.set('handoff', await seal(await keyP, 'handoff', { p, code, challenge: s.challenge }, c.now() + HANDOFF_MS))
+      to.searchParams.set('handoff', await seal(await keyP, 'handoff', { p, code, challenge: s.challenge, ...(typeof s.uv === 'string' ? { uv: s.uv } : {}) }, c.now() + HANDOFF_MS))
     }
     return new Response(null, { status: 302, headers: { ...NO_STORE, location: to.toString() } })
   }
@@ -265,8 +291,12 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     if (!h || h.p !== p || typeof h.code !== 'string' || typeof h.challenge !== 'string') throw new Refused(401, 'handoff_expired')
     if (!sameText(await s256(verifier), h.challenge)) throw new Refused(401, 'wrong_verifier')
     const redirect = `${c.publicUrl}/v1/${p}/callback`
+    if (p === 'x') {
+      if (typeof h.uv !== 'string') throw new Refused(401, 'handoff_expired')
+      return json(200, await xToken(c, { grant_type: 'authorization_code', code: h.code, redirect_uri: redirect, code_verifier: h.uv, client_id: c.x!.clientId }))
+    }
     const exchange = p === 'instagram' ? instagramExchange : p === 'facebook' ? facebookExchange : threadsExchange
-    const granted = await exchange(c, app, h.code, redirect)
+    const granted = await exchange(c, app as MetaApp, h.code, redirect)
     if (p === 'facebook') return json(200, granted)
     // Storage links are only for accounts signed in through this service: a pass bound to the account, which
     // POST /v1/<p>/uploads checks against the token it comes with.
@@ -368,6 +398,20 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     }
   }
 
+  /** X's access tokens last two hours; the refresh token (one use, X rotates it) needs the secret. */
+  const xRefresh = async (req: Request) => {
+    meta('x')
+    const b = await body(req)
+    return json(200, await xToken(c, { grant_type: 'refresh_token', refresh_token: str(b.refresh_token, 'bad_token'), client_id: c.x!.clientId }))
+  }
+  const xRevoke = async (req: Request) => {
+    meta('x')
+    const b = await body(req)
+    const init = form({ token: str(b.token, 'bad_token'), token_type_hint: 'access_token', client_id: c.x!.clientId })
+    await upstream(c, `${X_API}/oauth2/revoke`, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: basic(c.x!.clientId, c.x!.clientSecret) } }, 'token_rejected')
+    return json(200, {})
+  }
+
   const platforms = () =>
     json(200, {
       v: 1,
@@ -375,6 +419,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
         ...(c.instagram && c.media ? { instagram: { clientId: c.instagram.appId, review: c.instagram.review, mediaOrigins: [new URL(c.media.bucketUrl).origin] } } : {}),
         ...(c.facebook ? { facebook: { clientId: c.facebook.appId, review: c.facebook.review } } : {}),
         ...(c.threads && c.media ? { threads: { clientId: c.threads.appId, review: c.threads.review, mediaOrigins: [new URL(c.media.bucketUrl).origin] } } : {}),
+        ...(c.x ? { x: { clientId: c.x.clientId } } : {}),
         ...(c.tiktok ? { tiktok: { clientKey: c.tiktok.clientKey, audited: c.tiktok.audited, directPost: c.tiktok.directPost } } : {})
       }
     })
@@ -389,7 +434,7 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
     const route = `${req.method} ${url.pathname}`
     try {
       if (route === 'GET /v1/platforms') return platforms()
-      const m = /^\/v1\/(instagram|facebook|threads)\/(start|callback|complete)$/.exec(url.pathname)
+      const m = /^\/v1\/(instagram|facebook|threads|x)\/(start|callback|complete)$/.exec(url.pathname)
       if (m) {
         const p = m[1] as Platform
         if (m[2] === 'start' && req.method === 'POST') return await start(p, req)
@@ -398,6 +443,8 @@ export function createSigninHandler(c: SigninConfig): (req: Request) => Promise<
       }
       if (route === 'POST /v1/instagram/uploads') return await uploads('instagram', req)
       if (route === 'POST /v1/threads/uploads') return await uploads('threads', req)
+      if (route === 'POST /v1/x/refresh') return await xRefresh(req)
+      if (route === 'POST /v1/x/revoke') return await xRevoke(req)
       if (route === 'POST /v1/tiktok/token') return await tiktokToken(req)
       if (route === 'POST /v1/tiktok/revoke') return await tiktokRevoke(req)
       return json(404, { error: { code: 'not_found' } })

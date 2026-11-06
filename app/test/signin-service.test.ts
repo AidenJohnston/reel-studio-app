@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { createHash, randomBytes } from 'node:crypto'
 import { configFromEnv, type SigninConfig } from '../src/server/signin/config'
-import { createSigninHandler, FACEBOOK_SCOPES, INSTAGRAM_SCOPES, THREADS_SCOPES } from '../src/server/signin/handler'
+import { createSigninHandler, FACEBOOK_SCOPES, INSTAGRAM_SCOPES, THREADS_SCOPES, X_SCOPES } from '../src/server/signin/handler'
 import { presign } from '../src/server/signin/presign'
 
 const ORIGIN = 'https://signin.example'
@@ -23,6 +23,7 @@ function world(answer: Answer = () => undefined, env: Record<string, string> = {
     INSTAGRAM_APP_ID: '1111', INSTAGRAM_APP_SECRET: 'ig-app-secret',
     FACEBOOK_APP_ID: '2222', FACEBOOK_APP_SECRET: 'fb-app-secret', FACEBOOK_REVIEW: 'approved',
     THREADS_APP_ID: '3333', THREADS_APP_SECRET: 'th-app-secret',
+    X_CLIENT_ID: 'x-client', X_CLIENT_SECRET: 'x-secret',
     TIKTOK_CLIENT_KEY: 'tt-key', TIKTOK_CLIENT_SECRET: 'tt-secret',
     MEDIA_BUCKET_URL: 'https://acct.r2.example/reels', MEDIA_ACCESS_KEY_ID: 'AKID', MEDIA_SECRET_ACCESS_KEY: 'media-secret',
     ...env
@@ -40,7 +41,7 @@ function world(answer: Answer = () => undefined, env: Record<string, string> = {
 }
 
 /** Start, then play the platform sending the person back with `code`: the redirect the browser follows to the app. */
-async function signIn(w: ReturnType<typeof world>, p: 'instagram' | 'facebook' | 'threads', verifier: string, code = 'fab-code', back = LOOP.replace('instagram', p)) {
+async function signIn(w: ReturnType<typeof world>, p: 'instagram' | 'facebook' | 'threads' | 'x', verifier: string, code = 'fab-code', back = LOOP.replace('instagram', p)) {
   const started = await w.post(`/v1/${p}/start`, { state: 'a'.repeat(43), loopback_uri: back, code_challenge: s256(verifier), code_challenge_method: 'S256' })
   expect(started.status).toBe(200)
   const link = new URL(((await started.json()) as { authorize_url: string }).authorize_url)
@@ -248,6 +249,29 @@ describe('Threads sign-in through the service', () => {
   })
 })
 
+describe('X sign-in through the service', () => {
+  it('adds PKCE of its own and the secret, so the code is redeemed only by this service for the app that asked', async () => {
+    let challenge = ''
+    const w = world((u, init) => {
+      if (u.href !== 'https://api.x.com/2/oauth2/token') return
+      const f = Object.fromEntries(new URLSearchParams(String(init.body)))
+      expect((init.headers as Record<string, string>).authorization).toBe(`Basic ${Buffer.from('x-client:x-secret').toString('base64')}`)
+      expect(f).toMatchObject({ grant_type: 'authorization_code', code: 'fab-code', redirect_uri: `${ORIGIN}/v1/x/callback`, client_id: 'x-client' })
+      expect(s256(f.code_verifier)).toBe(challenge)
+      return Response.json({ access_token: 'x-token', refresh_token: 'x-refresh', token_type: 'bearer', expires_in: 7200, scope: X_SCOPES.join(' ') })
+    })
+    const verifier = randomBytes(32).toString('base64url')
+    const { link, to } = await signIn(w, 'x', verifier)
+    expect(link.origin + link.pathname).toBe('https://x.com/i/oauth2/authorize')
+    expect(link.searchParams.get('code_challenge_method')).toBe('S256')
+    // X's challenge is the service's own, not the app's
+    challenge = link.searchParams.get('code_challenge')!
+    expect(challenge).not.toBe(s256(verifier))
+    const r = await w.post('/v1/x/complete', { handoff: to!.searchParams.get('handoff'), code_verifier: verifier })
+    expect(await r.json()).toEqual({ access_token: 'x-token', refresh_token: 'x-refresh', token_type: 'bearer', expires_in: 7200, permissions: X_SCOPES })
+  })
+})
+
 describe('TikTok token calls', () => {
   it('adds the secret for a code from the app on this computer, and refuses anything else without calling TikTok', async () => {
     const w = world((u, init) => {
@@ -280,7 +304,8 @@ describe('what the service offers', () => {
       platforms: {
         instagram: { clientId: '1111', review: 'testers', mediaOrigins: ['https://acct.r2.example'] },
         tiktok: { clientKey: 'tt-key', audited: true, directPost: false },
-        threads: { clientId: '3333', review: 'testers', mediaOrigins: ['https://acct.r2.example'] }
+        threads: { clientId: '3333', review: 'testers', mediaOrigins: ['https://acct.r2.example'] },
+        x: { clientId: 'x-client' }
       }
     })
     expect((await w.post('/v1/facebook/start', {})).status).toBe(404)

@@ -9,7 +9,7 @@ import { SettingRow } from './settings-rows'
 import { useSocialStatus } from './social'
 import { Button, Confirm, Spinner } from './ui'
 
-type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads'
+type Id = 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x'
 
 /** The account a platform's row names, or null when nothing is connected. */
 export function accountName(s: SocialStatus, id: Id): string | null {
@@ -27,6 +27,7 @@ export function SocialRows() {
       <PlatformRow id="tiktok" s={s} reload={reload} />
       <PlatformRow id="facebook" s={s} reload={reload} />
       <PlatformRow id="threads" s={s} reload={reload} />
+      <PlatformRow id="x" s={s} reload={reload} />
     </>
   )
 }
@@ -102,7 +103,7 @@ function PlatformRow({ id, s, reload }: { id: Id; s: SocialStatus; reload: (fres
       {confirm && account && (
         <Confirm
           title={SOCIAL_COPY.disconnectTitle(name)}
-          body={SOCIAL_COPY.disconnectBody(name, id === 'instagram' || id === 'threads' ? `@${account}` : id === 'facebook' && s.facebook.session.connected ? s.facebook.session.userName : account)}
+          body={SOCIAL_COPY.disconnectBody(name, id === 'instagram' || id === 'threads' || id === 'x' ? `@${account}` : id === 'facebook' && s.facebook.session.connected ? s.facebook.session.userName : account)}
           yes="Disconnect"
           no="Keep it"
           danger

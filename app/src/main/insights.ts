@@ -6,13 +6,13 @@ import type {
 } from '../shared/insights'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads', 'x']
 const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'shares', 'saves', 'comments']
 const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
   shares: 'Shares', saves: 'Saves', comments: 'Comments'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads' }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads', x: 'X' }
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
 // Repeated posts and a 20% margin suppress small comparisons; 100 plays limits tiny samples.
@@ -93,7 +93,7 @@ function parsePost(value: unknown, project: string, version: number, key: string
     || !isPlatform(value.platform)) return badData(file)
   // Facebook reels (main/facebook.ts) are kept as facebook:<id>, like TikTok's, so ids from two platforms never collide
   const expectedKey = value.platform === 'instagram' ? value.postId : `${value.platform}:${value.postId}`
-  const apiVersion = { instagram: 'v26.0', facebook: 'v26.0', tiktok: 'v2', threads: 'v1.0' }[value.platform]
+  const apiVersion = { instagram: 'v26.0', facebook: 'v26.0', tiktok: 'v2', threads: 'v1.0', x: 'v2' }[value.platform]
   if (key !== expectedKey || value.apiVersion !== apiVersion) return badData(file)
   if (value.observedAt !== null && Date.parse(value.observedAt) < Date.parse(value.publishedAt)) return badData(file)
   const metrics = emptyValues()
