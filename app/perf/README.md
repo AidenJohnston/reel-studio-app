@@ -55,3 +55,13 @@ real model's does (`REELSTUDIO_MOCK_NOTE`).
 
 The report gives each moment's median over the runs, its min and max, and spread, (max - min) / median, as
 `engine/harness` does, with the machine, its load before and after each run, and the commit.
+
+## First-run motion
+
+`motion.perf.ts` (run with the rest by `npm run perf`) clicks Get started, then "Use it" on a ready Claude in the
+editor step, in a visible window at its real size, and records every animation frame's gap and every long animation
+frame (`PerformanceObserver` type `long-animation-frame`, with the scripts that ran in it) for 3 s after each click.
+It reports, per moment and run, the median gap (the display's frame time), the longest gap, the 95th percentile and
+the frames longer than 50 ms. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
+report's path.
+
