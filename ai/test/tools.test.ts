@@ -147,6 +147,20 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).captions.corrections).toContainEqual({ from: 'Claude', to: 'Claud' });
   });
 
+  it('fails if an unrelated correction is blamed for a word that was cut', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    ['hello', 'world', 'Nobody'].forEach((word, i) => { transcript.words[i].w = word; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w1' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'hello', to: 'Hallo' })).isError).toBe(false);
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Nobody', to: 'Someone' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('was cut');
+    expect(result.content).not.toContain('"hello"');
+  });
+
   it('fails if an update saves a missing b-roll asset', async () => {
     const { ctx, dir } = await ctxFor();
     const p = await loadProject(dir);

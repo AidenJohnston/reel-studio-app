@@ -344,8 +344,24 @@ export function captionCorrectionProblem(kept: readonly Word[], corrections: Cap
     if (from.length === 1 && to.length === 1) single.set(from[0], correction);
     else spans.push({ correction, from, to });
   }
+  // The words the proposed correction would replace before any other correction runs. An existing
+  // correction is reported as the conflict only when it rewrites one of these words.
+  const core = (word: string) => /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word)?.[1].toLowerCase();
+  const target = new Set<string>();
+  const want = tokens(proposed.from).map(bare);
+  if (want.length === 1 && tokens(proposed.to).length === 1) {
+    for (const word of words) {
+      const c = core(word.w);
+      if (c && (c === want[0] || c.split(/['’]/)[0] === want[0])) word.ids.forEach((id) => target.add(id));
+    }
+  } else if (want.length) {
+    for (let i = 0; i + want.length <= words.length; i++) {
+      if (want.every((word, k) => bare(words[i + k].w) === word)) words.slice(i, i + want.length).forEach((word) => word.ids.forEach((id) => target.add(id)));
+    }
+  }
   const remaining = words;
-  const applied = new Set<string>();
+  const blocking = new Set<string>();
+  const blocks = (ids: string[], correction: CaptionCorrection) => { if (ids.some((id) => target.has(id))) blocking.add(correction.from); };
   // Subtitle edits run first, merge their anchored span and protect it from global corrections.
   for (let i = 0; i < remaining.length; i++) {
     const prev = remaining[i - 1]?.ids ?? [];
@@ -354,16 +370,16 @@ export function captionCorrectionProblem(kept: readonly Word[], corrections: Cap
     const through = fix.through ? remaining.findIndex((word, k) => k >= i && word.ids.includes(fix.through!)) : i;
     const count = (through < 0 ? i : through) - i + 1;
     const merged = remaining.slice(i, i + count);
-    remaining.splice(i, count, { w: fix.to || merged.map((word) => word.w).join(' '),
-      ids: [...new Set(merged.flatMap((word) => word.ids))], fixed: true });
-    applied.add(fix.from);
+    const ids = [...new Set(merged.flatMap((word) => word.ids))];
+    remaining.splice(i, count, { w: fix.to || merged.map((word) => word.w).join(' '), ids, fixed: true });
+    blocks(ids, fix);
   }
   for (let i = 0; i < remaining.length; i++) {
     for (const span of spans) {
       if (!span.from.every((word, k) => remaining[i + k] && !remaining[i + k].fixed && bare(remaining[i + k].w) === word)) continue;
       if (span.correction === proposed) return null;
-      applied.add(span.correction.from);
       const ids = remaining.slice(i, i + span.from.length).flatMap((word) => word.ids);
+      blocks(ids, span.correction);
       remaining.splice(i, span.from.length, ...span.to.map((w) => ({ w, ids, fixed: true })));
       i += Math.max(0, span.to.length - 1);
       break;
@@ -372,14 +388,14 @@ export function captionCorrectionProblem(kept: readonly Word[], corrections: Cap
   for (const word of remaining) {
     if (word.fixed) continue;
     // Python's Unicode \w includes letters, numbers and underscore; punctuation stays in the tail.
-    const core = /^[^\p{L}\p{N}_]*([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?)/u.exec(word.w)?.[1].toLowerCase();
-    if (!core) continue;
-    const correction = single.get(core) ?? single.get(core.split(/['’]/)[0]);
+    const c = core(word.w);
+    if (!c) continue;
+    const correction = single.get(c) ?? single.get(c.split(/['’]/)[0]);
     if (correction === proposed) return null;
-    if (correction) applied.add(correction.from);
+    if (correction) blocks(word.ids, correction);
   }
-  return applied.size
-    ? `correction "${proposed.from}" has no matches after existing corrections: ${[...applied].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
+  return blocking.size
+    ? `correction "${proposed.from}" has no matches after existing corrections: ${[...blocking].map((from) => `"${from}"`).join(', ')}; remove or change the conflicting correction first`
     : `phrase not found in the part of the video that is kept: "${proposed.from}"; check whether it was cut and restore that section first`;
 }
 
