@@ -33,7 +33,7 @@ def test_missing_moments_videos_fail_only_when_required(monkeypatch, tmp_path, c
                      "format": {"width": 1080, "height": 1920}})
     monkeypatch.setattr(media, "video_packets_md5", lambda ffmpeg, path: path.read_text(encoding="utf-8"))
     passed = {"status": "pass", "failures": [], "metrics": {}}
-    monkeypatch.setattr(checks, "check_still", lambda *args: passed)
+    monkeypatch.setattr(checks, "check_still", lambda *args, **kwargs: passed)
     monkeypatch.setattr(checks, "check_preview_video", lambda *args, **kwargs: passed)
     monkeypatch.setattr(checks, "check_final", lambda *args: passed)
     long = duration > 2.0 + 1e-6

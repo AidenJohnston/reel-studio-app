@@ -31,16 +31,17 @@ def test_preview_with_missing_or_empty_candidate_audio_is_a_failed_check(monkeyp
     assert result["frames"] == 1
 
 
-def test_still_comparison_uses_the_engines_rounded_seek(monkeypatch):
+@pytest.mark.parametrize("millisecond_seek", [True, False])
+def test_still_comparison_uses_the_engines_seek_precision(monkeypatch, millisecond_seek):
     fps = 29.97
     frames = [np.full((2, 2, 3), n, dtype=np.uint8) for n in (0, 100, 200)]
-    monkeypatch.setattr(media, "read_image", lambda path: frames[2])
+    monkeypatch.setattr(media, "read_image", lambda path: frames[2 if millisecond_seek else 1])
     monkeypatch.setattr(media, "video_pts", lambda *args: [0.0, 2 / fps, 3 / fps])
     monkeypatch.setattr(media, "iter_frames", lambda *args: iter(frames))
     monkeypatch.setattr(media, "video_size", lambda *args: (2, 2))
     # 2/fps is 0.066733...; frames.py seeks to 0.067, after that frame's start.
     result = checks.check_still("ffmpeg", "ffprobe", Path("ref.mp4"), Path("still.png"), 2 / fps,
-                                [], {"otherPsnrMinDb": 30.0}, (2, 2))
+                                [], {"otherPsnrMinDb": 30.0}, (2, 2), millisecond_seek=millisecond_seek)
     assert result["status"] == "unset"
     assert result["metrics"]["otherPsnr"]["value"] == "inf"
 
