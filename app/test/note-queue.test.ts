@@ -574,12 +574,14 @@ describe('Add now: a waiting note goes into the one running', () => {
     setupPaths()
     const slug = await reel('steer-refused')
     const a = app()
-    await a.send(slug, 'first')
+    const { jobId } = await a.send(slug, 'first')
     await updateAppState(slug, (s) => {
       s.queue!.push({ ...entry('with-files', 'put this here'), attachments: [{ asset: 'work/assets/attach-1.png', name: 'a.png', kind: 'image', bytes: 1 }] })
     })
     await expect(a.queue.steer(slug, 'with-files')).rejects.toMatchObject({ code: 'HAS_FILES' })
     expect(await waitingTexts(slug)).toEqual(['first', 'put this here'])
+    a.queue.stop(jobId!)
+    await a.settled()
   }, 60000)
 })
 
