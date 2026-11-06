@@ -47,12 +47,21 @@ export type StartHand = (slug: string, entry: HandEntry, record: (s: AppState) =
 
 const STARTED = { code: 'NOT_QUEUED', userMessage: 'That note already started, so it can no longer change.' }
 
+interface Committed {
+  version: number
+  ids: Set<string>
+  /** each saved note's words as the editor saved them: its own, then any it read while it ran (ai steer.ts) */
+  texts: Map<string, string>
+}
+
 /** The saved notes' ids, or null when project.json can't be read or its notes are not a list. */
-async function committed(slug: string): Promise<{ version: number; ids: Set<string> } | null> {
-  const p = await readJson<{ version?: number; notes?: { id?: unknown }[]; handEdits?: unknown } | null>(join(projectDir(slug), 'project.json'), null)
+async function committed(slug: string): Promise<Committed | null> {
+  const p = await readJson<{ version?: number; notes?: { id?: unknown; text?: unknown }[]; handEdits?: unknown } | null>(join(projectDir(slug), 'project.json'), null)
   if (!p || (p.notes !== undefined && !Array.isArray(p.notes))) return null
   const hands = Array.isArray(p.handEdits) ? p.handEdits.filter((x): x is string => typeof x === 'string') : []
-  return { version: Number(p.version) || 0, ids: new Set([...(p.notes ?? []).map((n) => (typeof n?.id === 'string' ? n.id : '')), ...hands]) }
+  const notes = p.notes ?? []
+  const texts = new Map(notes.flatMap((n) => (typeof n?.id === 'string' && typeof n.text === 'string' ? [[n.id, n.text] as const] : [])))
+  return { version: Number(p.version) || 0, ids: new Set([...notes.map((n) => (typeof n?.id === 'string' ? n.id : '')), ...hands]), texts }
 }
 
 /** What the editor says when a Stop came too late: the note was saved (`savedAs`, its version) before it.
@@ -121,8 +130,8 @@ export function createNoteQueue(deps: {
       }
       // an entry project.json already has is done: its job's end found project.json unreadable
       const next = (await change(slug, (s) => {
-        s.queue = (s.queue ?? []).filter((q) => !head.ids.has(q.id))
-        if (s.queue[0]) s.queue[0].attempt = { base: head.version }
+        dropSaved(s, head)
+        if (s.queue?.[0]) s.queue[0].attempt = { base: head.version }
       })).queue?.[0]
       if (!next) return null
       const box = new SteerBox()
@@ -162,6 +171,21 @@ export function createNoteQueue(deps: {
     })
   }
 
+  /** Saved entries leave the queue. Words added to one that its saved note does not hold (an editor that never read
+   * them) wait first in line again as notes of their own, the same at a run's end, at the next start and after a
+   * crash, since the saved note is the proof of what was read. */
+  function dropSaved(s: AppState, head: Committed): void {
+    const back: QueuedNote[] = []
+    for (const q of s.queue ?? []) {
+      if (!head.ids.has(q.id) || !q.steers?.length) continue
+      const read = new Set((head.texts.get(q.id) ?? '').split('\n'))
+      for (const x of q.steers) if (!words(x).split('\n').every((line) => read.has(line))) back.push({ ...x, attachments: [], seenVersion: head.version })
+    }
+    const again = new Set(back.map((x) => x.id))
+    if (again.size) s.chat = s.chat.filter((m) => !(m.steerOf && again.has(m.id)))
+    s.queue = [...back, ...(s.queue ?? []).filter((q) => !head.ids.has(q.id))]
+  }
+
   /** Add now: a waiting note goes into the note running on the reel, when that one can still read it. */
   function steer(slug: string, id: string): Promise<{ added: boolean }> {
     return lane(slug, async () => {
@@ -175,7 +199,7 @@ export function createNoteQueue(deps: {
       const text = [q.text, ...(q.steers ?? []).map((x) => x.text)].join('\n')
       const said = [words(q), ...(q.steers ?? []).map(words)].join('\n')
       // a note for another version than the one being made is a branch of its own, never part of this one
-      if (!ran || !box || q.branch !== ran.branch || !box.add(q.id, said)) return { added: false }
+      if (!ran || !box || q.branch !== ran.branch || !box.add(said)) return { added: false }
       const added = { id: q.id, text, ...(q.moment ? { moment: q.moment } : {}) }
       await change(slug, (s) => {
         s.queue = (s.queue ?? []).filter((x) => x.id !== q.id)
@@ -360,16 +384,13 @@ export function createNoteQueue(deps: {
         const head = ran ? await committed(slug) : null
         const savedAs = ran && head?.ids.has(ran.id) ? head.version : null
         const runOn = e.type === 'done' && !byStop && (savedAs !== null || !ran)
-        // words added that the note never read: a saved note is done without them, so each waits first in line again
-        const box = ran ? boxes.get(ran.id) : undefined
-        if (box) boxes.delete(ran!.id)
-        const unread = new Set(box?.close() ?? [])
+        // the run is over: words added from now on run as the next note
+        if (ran) boxes.get(ran.id)?.close()
+        if (ran) boxes.delete(ran.id)
         if (!ran && runOn) return true
         await change(slug, (s) => {
           if (ran) {
-            const back = savedAs !== null ? (ran.steers ?? []).filter((x) => unread.has(x.id)) : []
-            if (back.length) s.chat = s.chat.filter((m) => !(m.steerOf === ran.id && unread.has(m.id)))
-            if (savedAs !== null) s.queue = [...back.map((x) => ({ ...x, attachments: [], seenVersion: savedAs })), ...(s.queue ?? []).filter((q) => q.id !== ran.id)]
+            if (savedAs !== null) dropSaved(s, head!)
             const line = endLine(byStop, savedAs, e.type)
             if (line) s.chat.push(stamp(line))
           }
@@ -405,7 +426,7 @@ export function createNoteQueue(deps: {
           if (st.queue?.length) {
             const head = await committed(p.slug)
             await updateAppState(p.slug, (s) => {
-              s.queue = (s.queue ?? []).filter((q) => !head?.ids.has(q.id))
+              if (head) dropSaved(s, head)
               backToWaiting(s)
             }, { durable: true })
           }

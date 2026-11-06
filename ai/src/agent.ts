@@ -234,6 +234,9 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
     }
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     steps++;
+    // this turn's request carries every result so far: the words they brought are read now (steer.ts)
+    o.ctx.state.turn = (o.ctx.state.turn ?? 0) + 1;
+    o.ctx.state.unread = [];
     let res;
     for (let attempt = 0; ; attempt++) {
       const thinking = thinkingMessage(messages);

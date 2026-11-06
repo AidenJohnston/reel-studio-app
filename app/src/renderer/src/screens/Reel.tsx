@@ -509,7 +509,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   // the moment attached by itself: the person stopped on it, and the video is still there
   const autoMoment = stoppedOn && !playing && hasVersions && !chip
 
-  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined, add: boolean) => {
+  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined, add = false) => {
     const on = !add && base !== null && base !== latestN ? base : undefined
     const r = await reel.projects.note(slug, text, files, moment, version?.n, on, add || undefined)
     setBase(null)
@@ -728,7 +728,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const nextSpot = Math.max(0, ...pins.map((p) => p.n)) + 1
   const lastResult = entries[entries.length - 1]?.result?.kind
   // a note making the next version can take more words (Add now); a change made by hand or Version 1 cannot
-  const addable = d.job?.kind === 'note' && making !== null
+  const running = d.queue.find((q) => q.attempt && !q.hand)
+  const addable = d.job?.kind === 'note' && making !== null && !!running && running.branch === undefined
   const placeholder = notePlaceholder({
     planned,
     hasPlan: !!d.plan,

@@ -550,6 +550,26 @@ describe('Add now: a waiting note goes into the one running', () => {
     expect(await replies(slug)).toEqual(['Done: "first". It is Version 2.', 'Done: "second". It is Version 3.', 'Done: "third". It is Version 4.'])
   }, 60000)
 
+  it.each([
+    ['the editor never read it', 'first', ['second']],
+    ['the editor read it', 'first\nsecond', []]
+  ])('a crash after a note was saved with a note added to it (%s): at the next start the added note waits again only if unread', async (_, savedText, waiting) => {
+    setupPaths()
+    const slug = await reel(`steer-crash-${waiting.length}`)
+    const file = join(projectDir(slug), 'project.json')
+    const p = JSON.parse(readFileSync(file, 'utf8'))
+    p.notes = [...(p.notes ?? []), { id: 'q1', version: 1, text: savedText, applied: [], at: new Date().toISOString() }]
+    writeFileSync(file, JSON.stringify(p))
+    await updateAppState(slug, (s) => {
+      s.queue = [{ ...entry('q1', 'first', true), steers: [{ id: 'q2', text: 'second' }] }]
+      s.chat.push({ id: 'q2', from: 'you', text: 'second', at: new Date().toISOString(), steerOf: 'q1' })
+    })
+    await app().queue.recover()
+    const st = await readAppState(slug)
+    expect((st.queue ?? []).map((q) => q.text)).toEqual(waiting)
+    expect(st.chat.some((m) => m.steerOf === 'q1')).toBe(waiting.length === 0)
+  }, 60000)
+
   it('a note with files cannot be added, and stays in line', async () => {
     setupPaths()
     const slug = await reel('steer-refused')

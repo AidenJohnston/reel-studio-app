@@ -1,22 +1,22 @@
 // The words a person adds to the note running now (the AI package's NoteSteer: ai/src/steer.ts). The queue makes one
 // box per run of a note. The note's tools take the words between steps; once the note has finished, the box is
-// sealed and `add` says no, so the queue runs those words as the next note instead. Words added but never taken
-// (the note ended another way) come back from `close`, so none is lost.
+// sealed and `add` says no, so the queue runs those words as the next note instead. Words added but never read
+// come back as notes of their own: the saved note shows what was read (note-queue.ts dropSaved).
 
 export class SteerBox {
-  private waiting: { id: string; text: string }[] = []
+  private waiting: string[] = []
   private sealed = false
   private closed = false
 
   /** False once the note can no longer read new words: it finished, or its run ended. */
-  add(id: string, text: string): boolean {
+  add(text: string): boolean {
     if (this.sealed || this.closed) return false
-    this.waiting.push({ id, text })
+    this.waiting.push(text)
     return true
   }
 
   take(): string[] {
-    return this.waiting.splice(0).map((w) => w.text)
+    return this.waiting.splice(0)
   }
 
   seal(): boolean {
@@ -29,9 +29,8 @@ export class SteerBox {
     if (!this.closed) this.sealed = false
   }
 
-  /** The run ended: no more words, and the ids of the ones it never read. */
-  close(): string[] {
+  /** The run ended: no more words. */
+  close(): void {
     this.closed = true
-    return this.waiting.splice(0).map((w) => w.id)
   }
 }

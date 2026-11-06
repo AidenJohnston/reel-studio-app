@@ -58,6 +58,10 @@ export interface ToolState {
   pictureEdit: number;
   /** words the person added while the note ran, as the model got them (steer.ts); saved with the note's words */
   added?: string[];
+  /** words handed over in results the model has not answered yet: finish waits for its next turn (steer.ts) */
+  unread?: string[];
+  /** our own loop's model turns so far (agent.ts); unset in Claude Code and Codex over MCP */
+  turn?: number;
 }
 
 export interface ToolContext {
@@ -2280,7 +2284,14 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   const problems = validate(tool.parameters, args);
   if (problems.length) return delivered(ctx, { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true });
   const finishing = tool.name === 'finish' && !!ctx.steer;
-  if (finishing && !ctx.steer!.seal()) return { content: finishRefused(took(ctx)), isError: true };
+  // words that came with a result of this same reply were never read: finish waits, and names them again
+  if (finishing && (ctx.state.unread?.length || !ctx.steer!.seal())) {
+    const unread = ctx.state.unread ?? [];
+    const refused = finishRefused([...unread, ...took(ctx)]);
+    // over MCP there are no turns to count: the refusal itself is what the model reads before it finishes again
+    if (ctx.state.turn === undefined) ctx.state.unread = [];
+    return { content: refused, isError: true };
+  }
   try {
     const out = await tool.run(ctx, args);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
@@ -2303,7 +2314,10 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
 /** The person's added words, recorded as given to the model. */
 function took(ctx: ToolContext): string[] {
   const added = ctx.steer?.take() ?? [];
-  if (added.length) ctx.state.added = [...(ctx.state.added ?? []), ...added];
+  if (added.length) {
+    ctx.state.added = [...(ctx.state.added ?? []), ...added];
+    ctx.state.unread = [...(ctx.state.unread ?? []), ...added];
+  }
   return added;
 }
 

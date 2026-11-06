@@ -88,6 +88,24 @@ describe('adding to a running note', () => {
     expect(box.add('one more thing')).toBe(false);
   });
 
+  it('words that came with a result in the same reply as finish are read before the note can finish', async () => {
+    const { dir, host, settingsDir } = await setup();
+    const box = new Box();
+    const model = new ScriptedModel([
+      () => {
+        // the person adds a line while this reply's edit runs; the reply already ends with finish
+        box.add('and bigger captions');
+        return { toolCalls: [call('set_gap_cap', { seconds: 0.5 }), call('finish', { summary_for_user: 'Tighter pauses.' })] };
+      },
+      { toolCalls: [call('set_caption_style', { size: 130 }), call('finish', { summary_for_user: 'Tighter pauses and bigger captions.' })] },
+    ]);
+    await createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'tighten the pauses', () => undefined, undefined, { steer: box });
+    expect(lastToolText(model.requests[1])).toMatch(/Not finished yet/);
+    const p = await saved(dir);
+    expect(p.captions.style.size).toBe(130);
+    expect(p.notes.at(-1).text).toBe('tighten the pauses\nand bigger captions');
+  });
+
   it('a direct change ("smaller captions") with words already added lets the model read them instead', async () => {
     const { dir, host, settingsDir } = await setup();
     const box = new Box();
