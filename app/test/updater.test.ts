@@ -3,7 +3,7 @@
 import { createJobManager } from '../src/main/jobs'
 import { AUTO_UPDATES_PAGE, UPDATE_PAGE, newerOnSite, type FetchLike } from '../src/main/update-check'
 import { describe, expect, it, vi } from 'vitest'
-import { createUpdater, type PageReason, type UpdateBackend } from '../src/main/updater'
+import { createUpdater, menuCheckForUpdates, type PageReason, type UpdateBackend } from '../src/main/updater'
 import { disabledReason, updateMode, type UpdateMemory } from '../src/main/update-machine'
 import { showsUpdateButton, updateAction } from '../src/shared/update'
 import type { UpdateNotice } from '../src/shared/api'
@@ -235,6 +235,21 @@ describe('"Not now"', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('fails if the Mac menu sends someone to the sidebar button after Not now hid it', async () => {
+    const { u } = setup(async () => v013)
+    await u.init()
+    await u.check('test')
+    await u.download()
+    const said: string[] = []
+    const ui = { focus: () => {}, show: async (o: { detail?: string }) => { said.push(o.detail ?? ''); return { response: 0 } } }
+    await menuCheckForUpdates(u, ui)
+    expect(said.at(-1)).toMatch(/sidebar/)
+    await u.dismiss('0.1.3')
+    await menuCheckForUpdates(u, ui)
+    expect(showsUpdateButton(u.state())).toBe(false)
+    expect(said.at(-1)).toBe('To install it, open Settings and choose Restart to update.')
   })
 })
 
