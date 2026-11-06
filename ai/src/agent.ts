@@ -29,6 +29,7 @@ export const STAGE: Record<string, { message: string; pct: number }> = {
   set_cover: { message: 'Choosing a cover', pct: 70 },
   write_post: { message: 'Writing your caption', pct: 75 },
   add_style_rule: { message: 'Saving your style', pct: 76 },
+  read_references: { message: 'Reading your reference reels', pct: 12 },
   render_draft: { message: 'Making a preview', pct: 82 },
   look_at_frames: { message: 'Checking how it looks', pct: 88 },
   finish: { message: 'Almost done', pct: 92 },
@@ -164,7 +165,7 @@ const FORMAT_CORRECTION = 'Your last reply could not be read, so nothing ran. Re
 /** Tools that only read, search, add new files or remove files they made themselves (resolve_asset): a run of them in one reply is
  * independent, so they execute together. Everything that changes project.json, renders, or makes an
  * animation (one renderer) runs alone, in the order the model wrote it. */
-export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'search_footage', 'list_library', 'search_images', 'fetch_image', 'resolve_asset', 'cover_candidates']);
+export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'search_footage', 'list_library', 'read_references', 'search_images', 'fetch_image', 'resolve_asset', 'cover_candidates']);
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);

@@ -191,6 +191,24 @@ const api: ReelApi = {
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
     rememberLowercase: (slug) => call('style:rememberLowercase', slug)
   },
+  references: {
+    list: () => call('refs:list'),
+    add: (paths) => call('refs:add', paths),
+    addLink: (url) => call('refs:addLink', url),
+    attach: (id, path) => call('refs:attach', id, path),
+    remove: (id) => call('refs:remove', id),
+    openLink: (id) => call('refs:openLink', id),
+    reveal: (id) => call('refs:reveal', id),
+    onChange: (cb) => on<void>('refs:changed', () => cb())
+  },
+  niche: {
+    get: () => call('niche:get'),
+    save: (niche, from) => call('niche:save', niche, from),
+    remove: () => call('niche:remove'),
+    say: (turns, asked, draft) => call('niche:say', turns, asked, draft),
+    stop: () => call('niche:stop'),
+    onStatus: (cb) => on<{ message: string; waiting?: boolean }>('niche:status', cb)
+  },
   sfx: {
     pack: () => call('sfx:pack')
   },

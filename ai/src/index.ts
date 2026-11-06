@@ -26,6 +26,7 @@ import type { Harness } from './harness';
 import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/localClaude';
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
+import { nicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 import { proposeTry, type TryProposal, type TryRequest } from './trial';
 import { proposeReels, type ProposeReelsRequest, type ReelProposal } from './propose';
 import { refuseIfOpen } from './owner';
@@ -65,6 +66,7 @@ export type { CodexLoginStatus, LocalCodex, CodexState } from './providers/local
 export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
 export type { ApplyNoteOptions } from './editor';
+export type { Niche, NicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 export { checkTryProposal, TRY_VARIABLES } from './trial';
 export type { TryProposal, TryRequest, TryVariable } from './trial';
 export { checkReelProposal, proposeReels } from './propose';
@@ -1103,6 +1105,10 @@ export function createAI(opts: CreateAIOptions) {
     /** One turn of a planned reel's planning chat: a short question back, or the whole plan (editor.ts planTurn). */
     async planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult> {
       return editor.planTurn(deps(opts.host), await modelProvider('planner'), input, onEvent, signal);
+    },
+    /** One turn of My style's niche chat: a short question back, or the whole niche to save (niche.ts nicheTurn). */
+    async nicheTurn(input: NicheTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<NicheTurnResult> {
+      return nicheTurn({ prompts, style }, await modelProvider('planner'), input, onEvent, signal);
     },
     /** Try 2 for a trial post: the one thing the editor changes from the reel as it is, and why. */
     async proposeTry(req: TryRequest, signal?: AbortSignal): Promise<TryProposal> {

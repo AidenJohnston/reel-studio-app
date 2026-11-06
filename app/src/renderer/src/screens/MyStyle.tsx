@@ -7,6 +7,8 @@ import { Icon, type IconName } from '../components/icons'
 import { byKeyboard, reducedMotion } from '../components/motion'
 import { TitleBarSlot } from '../components/titlebar'
 import { LearnSheet } from './LearnSheet'
+import { NicheSection } from './NicheSection'
+import { ReferenceReels } from './ReferenceReels'
 import { styleEmptyLine } from './style-words'
 import '../components/library.css'
 
@@ -448,6 +450,8 @@ export function MyStyle() {
           })}
         </ul>
       )}
+      <NicheSection />
+      <ReferenceReels />
       {sheet && <LearnSheet onClose={() => setSheet(false)} onLearned={learned} />}
     </div>
   )

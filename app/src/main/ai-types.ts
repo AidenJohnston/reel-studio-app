@@ -2,6 +2,7 @@
 // runtime when it exists; until then ai-mock.ts implements the same shape.
 import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
+import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
 
@@ -160,6 +161,9 @@ export interface AI {
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
   wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult>
+  /** One turn of My style's niche chat (ai niche.ts nicheTurn): a short question back, or the whole niche. The turns
+   * start with the app's own question. Optional: older packages lack it. */
+  nicheTurn?(input: { turns: NicheTurn[]; asked: number; niche: Niche | null }, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<NicheTurnResult>
   /** Try 2 for a trial post: the one thing the editor changes, and its reason in its own voice. Optional: older packages lack it. */
   proposeTry?(req: TryRequest, signal?: AbortSignal): Promise<{ variable: unknown; value: unknown; reason: unknown }>
   /** More reels from one video. `onEvent` hears the waits for the editor's answer. Optional: older packages lack it. */

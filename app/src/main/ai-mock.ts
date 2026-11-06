@@ -6,6 +6,7 @@ import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
+import type { NicheTurnResult } from '../shared/niche'
 import type { Phase, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -446,6 +447,27 @@ export const createMockAI: CreateAI = ({ host }) => {
         hooks: ['You do not need a mixer to make good sourdough.', 'I kneaded bread by hand for a year before I learned this.', 'Flour, water, salt. That is the whole list.'],
         beats: ['Flour, water, salt. Nothing else goes in.', 'Mix it by hand, then leave it for an hour.', 'Fold it four times, an hour apart.', 'It sleeps in the fridge overnight.', 'Bake it hot in a closed pot. No mixer, ever.'],
         shots: ['You at the kitchen counter, chest up, by the window', 'Your hands folding the dough, close up', 'The loaf coming out of the pot']
+      }
+    },
+
+    // The practice editor finds a niche as the real one does (ai niche.ts): who it is for, then what they get, then a
+    // fixed niche, each after thinking as long as over a note.
+    async nicheTurn(input, onEvent, signal): Promise<NicheTurnResult> {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find your niche together, or write it yourself.' }
+      onEvent({ type: 'status', message: 'Thinking about your niche', pct: 10, thinking: true })
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, Math.min(noteMs, 800))
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      if (!input.niche && input.asked === 0) return { kind: 'question', text: 'Who do you picture watching? Be as specific as you can.' }
+      if (!input.niche && input.asked === 1) return { kind: 'question', text: 'What do they get from you that they don’t get elsewhere?' }
+      return {
+        kind: 'niche',
+        say: input.niche ? 'I made that change.' : 'I aimed it at people baking their very first loaf.',
+        who: 'People who want to bake bread at home but have never tried sourdough',
+        promise: 'A real loaf from flour, water, salt and their own two hands',
+        angles: ['The mistake that ruins most first loaves', 'One step of the bake, start to finish', 'A question from a viewer, answered at the counter', 'Before and after: what changed in my bread this month'],
+        avoid: ['hack', 'game-changer', 'easy peasy']
       }
     },
 

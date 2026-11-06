@@ -100,6 +100,9 @@ import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
+import { registerReferencesIpc } from './references-ipc'
+import { createReferenceLibrary } from './references'
+import { registerNicheIpc } from './niche-ipc'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
 import { clearEngineCache, engineCacheSize } from './engine-cache'
@@ -795,6 +798,14 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 
 function registerIpc(): void {
   registerInsightsIpc({ handle, projectsRoot: projectsDir })
+  // My style › Reference reels and Your niche
+  const references = createReferenceLibrary({ root: reelStudioRoot, runEngine, log, mediaUrl, onChange: () => win?.webContents.send('refs:changed') })
+  registerReferencesIpc({
+    handle, library: references, ensureRoot,
+    openExternal: (url) => (TEST ? Promise.resolve(log(`[references] test run: not opening ${url}`)) : shell.openExternal(url)),
+    showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
+  })
+  registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
   const tiktok = new TikTokService({
     dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
     secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)

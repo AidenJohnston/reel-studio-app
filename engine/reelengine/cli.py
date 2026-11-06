@@ -94,6 +94,12 @@ def cmd_footage(args):
     return footage.search(root, args.query, limit=args.limit)
 
 
+def cmd_measure_reel(args):
+    """A reference reel's pace, opening line and cut rhythm (measure.py), for My style's reference reels."""
+    from . import measure
+    return measure.measure(Path(args.file), Path(args.poster) if args.poster else None)
+
+
 def cmd_download_model(args):
     from . import transcribe
     return transcribe.download_model(args.name or transcribe.default_model())
@@ -480,6 +486,9 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             fp.add_argument("--query", required=True)
             fp.add_argument("--limit", type=int, default=8)
+    sp = add("measure-reel", cmd_measure_reel, "how fast a finished reel talks and cuts, and its opening line")
+    sp.add_argument("--file", required=True)
+    sp.add_argument("--poster", help="save one still of the reel here (jpg)")
     sp = add("download-model", cmd_download_model, "download the speech model")
     sp.add_argument("--name")
     sp = add("speech-check", cmd_speech_check, "time the speech model at a few thread counts on a short sample")
