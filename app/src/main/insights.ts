@@ -1,18 +1,24 @@
 import { promises as fs } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
 import type {
-  InsightChange, InsightMetric, InsightPlatform, InsightPost, InsightPostRef, InsightReel,
-  InsightSentence, InsightTotals, InsightTrial, InsightValues, InsightsOptions, InsightsSummary
+  InsightChange, InsightMetric, InsightPlatform, InsightPost, InsightPostRef, InsightReel, InsightSentence, InsightTotals,
+  InsightTrial, InsightTrialResult, InsightValues, InsightsOptions, InsightsSummary, PlatformAudience, PostTrial
 } from '../shared/insights'
+import { decideTrial } from './trial-decision'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok']
-const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'shares', 'saves', 'comments']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook']
+const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'skipRatePercent', 'shares', 'saves', 'comments', 'likes']
+/** Rates and averages, weighted by plays when posts are combined; every other metric is a count and is summed. */
+const PER_PLAY = new Set<InsightMetric>(['averageWatchTimeMs', 'completionEstimate', 'skipRatePercent'])
 const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
-  shares: 'Shares', saves: 'Saves', comments: 'Comments'
+  skipRatePercent: 'Skip rate', shares: 'Shares', saves: 'Saves', comments: 'Comments', likes: 'Likes'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok' }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
+const KEY_PREFIX: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:' }
+const API_VERSION: Record<InsightPlatform, RegExp> = { instagram: /^v26\.0$/, tiktok: /^v2$/, facebook: /^v\d{2}\.0$/ }
+const TRIAL_CHANGES = new Set(['video', 'hook', 'caption', 'cover', 'brightness'])
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
 // Repeated posts and a 20% margin suppress small comparisons; 100 plays limits tiny samples.
@@ -51,13 +57,14 @@ function metric(value: unknown, file: string): number | null {
   return value
 }
 function emptyValues(): InsightValues {
-  return { plays: null, reach: null, averageWatchTimeMs: null, completionEstimate: null, shares: null, saves: null, comments: null }
+  return { plays: null, reach: null, averageWatchTimeMs: null, completionEstimate: null, skipRatePercent: null, shares: null, saves: null, comments: null, likes: null }
 }
 interface SavedPost extends InsightPostRef {
   publishedAt: string
   observedAt: string | null
   durationMs: number | null
   metrics: InsightValues
+  trial: PostTrial | null
 }
 interface Snapshot { posts: SavedPost[]; trials: InsightTrial[] }
 
@@ -85,22 +92,32 @@ function parseTrials(value: unknown, project: string): InsightTrial[] {
     return { project, index, parentVersion: row.parent_version, variable, from: row.from, to: row.to }
   })
 }
+function isPlatform(value: unknown): value is InsightPlatform {
+  return value === 'instagram' || value === 'tiktok' || value === 'facebook'
+}
+/** outcomes.json `trial`, written by publish on both tries of a trial post. Absent on an ordinary post. */
+function parseTrial(value: unknown, file: string): PostTrial | null {
+  if (value === undefined) return null
+  if (!object(value) || typeof value.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.id) || (value.try !== 1 && value.try !== 2)
+    || typeof value.change !== 'string' || !TRIAL_CHANGES.has(value.change)) return badData(file)
+  return { id: value.id, try: value.try, change: value.change as PostTrial['change'] }
+}
 function parsePost(value: unknown, project: string, version: number, key: string): SavedPost {
   const file = `${project}/outcomes.json`
   if (!object(value) || value.version !== version || !text(value.postId) || !text(value.accountId)
-    || !isoDate(value.publishedAt) || (value.observedAt !== null && !isoDate(value.observedAt))
-    || (value.platform !== 'instagram' && value.platform !== 'tiktok')) return badData(file)
-  const expectedKey = value.platform === 'tiktok' ? `tiktok:${value.postId}` : value.postId
-  if (key !== expectedKey || (value.platform === 'instagram' ? value.apiVersion !== 'v26.0' : value.apiVersion !== 'v2')) return badData(file)
+    || !isoDate(value.publishedAt) || (value.observedAt !== null && !isoDate(value.observedAt)) || !isPlatform(value.platform)) return badData(file)
+  if (key !== `${KEY_PREFIX[value.platform]}${value.postId}` || typeof value.apiVersion !== 'string' || !API_VERSION[value.platform].test(value.apiVersion)) return badData(file)
   if (value.observedAt !== null && Date.parse(value.observedAt) < Date.parse(value.publishedAt)) return badData(file)
   const metrics = emptyValues()
   if (value.metrics !== null) {
     if (!object(value.metrics) || value.observedAt === null) return badData(file)
-    for (const name of METRICS) if (name !== 'completionEstimate') metrics[name] = metric(value.metrics[name], file)
+    // A metric the platform doesn't report is missing from the saved record (older records have no likes or skip rate).
+    for (const name of METRICS) if (name !== 'completionEstimate') metrics[name] = value.metrics[name] === undefined ? null : metric(value.metrics[name], file)
+    if (metrics.skipRatePercent !== null && metrics.skipRatePercent > 100) return badData(file)
   }
   return { project, version, postId: value.postId, accountId: value.accountId, platform: value.platform,
     publishedAt: new Date(value.publishedAt).toISOString(), observedAt: value.observedAt === null ? null : new Date(value.observedAt).toISOString(),
-    durationMs: null, metrics }
+    durationMs: null, metrics, trial: parseTrial(value.trial, file) }
 }
 async function load(projectsRoot: string): Promise<Snapshot> {
   let entries
@@ -142,19 +159,18 @@ function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 :
 function refs(posts: InsightPost[]): InsightPostRef[] {
   return posts.map(({ project, version, platform, accountId, postId }) => ({ project, version, platform, accountId, postId }))
 }
-function weighted(posts: InsightPost[], name: 'averageWatchTimeMs' | 'completionEstimate'): number | null {
+function weighted(posts: InsightPost[], name: InsightMetric): number | null {
   if (!posts.length || posts.some((p) => p.metrics.plays === null || p.metrics[name] === null)) return null
   const plays = posts.reduce((sum, p) => sum + (p.metrics.plays ?? 0), 0)
   return plays > 0 ? posts.reduce((sum, p) => sum + (p.metrics[name] ?? 0) * (p.metrics.plays ?? 0), 0) / plays : null
 }
 function totals(posts: InsightPost[]): InsightTotals {
   const metrics = emptyValues()
-  const coverage = { plays: 0, reach: 0, averageWatchTimeMs: 0, completionEstimate: 0, shares: 0, saves: 0, comments: 0 }
+  const coverage = { plays: 0, reach: 0, averageWatchTimeMs: 0, completionEstimate: 0, skipRatePercent: 0, shares: 0, saves: 0, comments: 0, likes: 0 }
   for (const name of METRICS) {
     const known = posts.flatMap((p) => p.metrics[name] === null ? [] : [p.metrics[name]])
     coverage[name] = known.length
-    metrics[name] = name === 'averageWatchTimeMs' || name === 'completionEstimate'
-      ? weighted(posts, name) : known.length ? known.reduce((sum, n) => sum + n, 0) : null
+    metrics[name] = PER_PLAY.has(name) ? weighted(posts, name) : known.length ? known.reduce((sum, n) => sum + n, 0) : null
   }
   return { posts: posts.length, stillCounting: posts.filter((p) => p.status === 'still counting').length, metrics, coverage }
 }
@@ -163,7 +179,7 @@ function reels(posts: InsightPost[]): InsightReel[] {
   for (const p of posts) {
     const key = JSON.stringify([p.project, p.version])
     let group = groups.get(key)
-    if (!group) { group = { project: p.project, version: p.version, posts: [], totals: totals([]) }; groups.set(key, group) }
+    if (!group) { group = { project: p.project, version: p.version, title: null, cover: null, posts: [], totals: totals([]) }; groups.set(key, group) }
     group.posts.push(p)
   }
   return [...groups.values()].map((r) => ({ ...r, totals: totals(r.posts) }))
@@ -214,7 +230,30 @@ function cohortSentences(posts: InsightPost[]): InsightSentence[] {
   return sentences
 }
 
-function summarize(snapshot: Snapshot, options: InsightsOptions): InsightsSummary {
+/**
+ * Pairs each trial's two tries and decides it (trial-decision.ts). A trial is two posts on one platform account with
+ * the same trial id, one Try 1 and one Try 2; anything else is a broken record. When Try 2 is another version, the
+ * engine's log row for that version pair says what it varied.
+ */
+function trialResults(posts: InsightPost[], engine: InsightTrial[]): InsightTrialResult[] {
+  const groups = new Map<string, InsightPost[]>()
+  for (const p of posts) if (p.trial) groups.set(p.trial.id, [...(groups.get(p.trial.id) ?? []), p])
+  const results: InsightTrialResult[] = []
+  for (const [id, group] of groups) {
+    const one = group.find((p) => p.trial?.try === 1), two = group.find((p) => p.trial?.try === 2)
+    // a try still outside the date range leaves the trial out rather than half-shown
+    if (!one || !two) continue
+    if (group.length !== 2 || one.project !== two.project || one.platform !== two.platform || one.accountId !== two.accountId
+      || one.trial?.change !== two.trial?.change) return badData(`${one.project}/outcomes.json`)
+    const change = one.trial!.change
+    const row = two.version !== one.version
+      ? engine.filter((t) => t.project === one.project && t.parentVersion === one.version).at(-1) ?? null : null
+    results.push({ id, project: one.project, platform: one.platform, change, tries: [one, two], verdict: decideTrial(one, two), engine: row })
+  }
+  return results.sort((a, b) => compare(b.tries[0].publishedAt, a.tries[0].publishedAt) || compare(a.id, b.id))
+}
+
+function summarize(snapshot: Snapshot, options: InsightsOptions, audience: PlatformAudience[]): InsightsSummary {
   const since = new Date(options.since ?? 0).toISOString()
   const latest = snapshot.posts.reduce((time, p) => Math.max(time, Date.parse(p.observedAt ?? p.publishedAt)), Date.parse(since))
   const asOf = new Date(options.asOf ?? latest).toISOString()
@@ -265,11 +304,15 @@ function summarize(snapshot: Snapshot, options: InsightsOptions): InsightsSummar
       .map((platform) => ({ platform, totals: totals(posts.filter((p) => p.platform === platform)) })),
     totals: totals(posts), trends: { thisWeek: { since: weekStart, until: asOf, totals: current },
       lastWeek: { since: previousStart, until: weekStart, totals: previous }, changes, bestReel, mostImproved },
-    trials: snapshot.trials.filter((t) => posts.some((p) => p.project === t.project)), sentences }
+    trials: snapshot.trials.filter((t) => posts.some((p) => p.project === t.project)), trialResults: trialResults(posts, snapshot.trials),
+    audience, sentences }
 }
 
-/** Read-only adapter. All scoring uses saved values and explicit dates, with no clock or network. */
-export async function insightsSummary(projectsRoot: string, options: InsightsOptions = {}): Promise<InsightsSummary> {
+/**
+ * Read-only adapter. All scoring uses saved values and explicit dates, with no clock or network. `audience` is what the
+ * results refresh last saved about who follows each account (results-refresh.ts); it is passed through as it is.
+ */
+export async function insightsSummary(projectsRoot: string, options: InsightsOptions = {}, audience: PlatformAudience[] = []): Promise<InsightsSummary> {
   const parsed = insightsOptions(options)
-  return summarize(await load(projectsRoot), parsed)
+  return summarize(await load(projectsRoot), parsed, audience)
 }

@@ -100,6 +100,8 @@ import { registerTikTokIpc } from './tiktok-ipc'
 import { InstagramService } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
 import { registerInsightsIpc } from './insights-ipc'
+import { ResultsRefresh, type ResultsSource } from './results-refresh'
+import { testResultsSources } from './results-test-source'
 import { InstagramError } from './instagram-http'
 import { loadSettings, saveSettings, settleLibraryRoot, showsFirstRun, stableLibraries } from './settings'
 import { clearEngineCache, engineCacheSize } from './engine-cache'
@@ -794,7 +796,6 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 }
 
 function registerIpc(): void {
-  registerInsightsIpc({ handle, projectsRoot: projectsDir })
   const tiktok = new TikTokService({
     dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
     secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
@@ -824,6 +825,28 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
+  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
+    ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
+    : [
+        { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
+          read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
+        { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+      ]
+  const results = new ResultsRefresh({ projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null) })
+  registerInsightsIpc({
+    handle, projectsRoot: projectsDir, refresh: results,
+    describe: async (slug, version) => {
+      const project = await readProject(slug).catch(() => null)
+      if (!project) return null
+      const v = (await listVersions(projectDir(slug)).catch(() => [])).find((x) => x.n === version)
+      return { title: project.title || slug, cover: v?.cover ?? null }
+    }
+  })
+  // Test runs read only when the test asks (Refresh), so what they show doesn't depend on timing.
+  if (!TEST) results.start()
+  app.on('before-quit', () => { results.stop() })
   handle('app:info', () => appInfo())
   handle('app:setModels', async (_e, m: unknown) => {
     const ok = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 200 && !v.includes('\0')

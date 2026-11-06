@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
-import type { InsightsOptions, InsightsSummary } from './insights'
+import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
@@ -843,7 +843,15 @@ export interface MergeRequest {
 }
 
 export interface ReelApi {
-  insights: { get(options?: InsightsOptions): Promise<InsightsSummary> }
+  insights: {
+    get(options?: InsightsOptions): Promise<InsightsSummary>
+    /** When results were last read, and why a platform's aren't fresh. */
+    status(): Promise<ResultsStatus>
+    /** Reads results now (rate limits allowing): every post, or with `all: false` only those due. Resolves when done. */
+    refresh(options?: { all: boolean }): Promise<ResultsStatus>
+    /** A background read saved new numbers: read the summary again. */
+    onChange(cb: () => void): () => void
+  }
   tiktok: TikTokApi
   instagram: InstagramApi
   app: {

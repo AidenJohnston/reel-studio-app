@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { insightsSummary } from '../src/main/insights'
 import { registerInsightsIpc } from '../src/main/insights-ipc'
 import type { InstagramMetrics } from '../src/shared/instagram'
-import type { InsightPlatform, InsightsSummary } from '../src/shared/insights'
+import type { InsightPlatform, InsightsSummary, PostTrial } from '../src/shared/insights'
+import { ResultsRefresh } from '../src/main/results-refresh'
 
 const NOW = '2026-10-23T12:00:00.000Z'
 const TUESDAY = '2026-10-20T08:00:00.000Z'
@@ -21,11 +22,12 @@ async function world() {
   return dir
 }
 function post(options: { version?: number; postId?: string; platform?: InsightPlatform; publishedAt?: string;
-  observedAt?: string | null; metrics?: Partial<InstagramMetrics> | null; accountId?: string } = {}) {
+  observedAt?: string | null; metrics?: Partial<InstagramMetrics> | null; accountId?: string; trial?: PostTrial } = {}) {
   const platform = options.platform ?? 'instagram'
   return {
     version: options.version ?? 1, postId: options.postId ?? '100', platform, accountId: options.accountId ?? '123',
-    apiVersion: platform === 'instagram' ? 'v26.0' : 'v2', publishedAt: options.publishedAt ?? TUESDAY,
+    ...(options.trial ? { trial: options.trial } : {}),
+    apiVersion: platform === 'tiktok' ? 'v2' : 'v26.0', publishedAt: options.publishedAt ?? TUESDAY,
     observedAt: options.observedAt === undefined ? NOW : options.observedAt,
     metrics: options.metrics === null ? null : {
       plays: 100, reach: 100, averageWatchTimeMs: 10_000, totalWatchTimeMs: null, skipRatePercent: null,
@@ -40,7 +42,7 @@ async function seed(root: string, project: string, posts: ReturnType<typeof post
   for (const p of posts) {
     const key = `v${p.version}`
     versions[key] ??= {}
-    versions[key][p.platform === 'tiktok' ? `tiktok:${p.postId}` : p.postId] = p
+    versions[key][p.platform === 'instagram' ? p.postId : `${p.platform}:${p.postId}`] = p
     const vdir = join(dir, 'versions', key)
     await fs.mkdir(vdir, { recursive: true })
     await fs.writeFile(join(vdir, 'render.json'), JSON.stringify({ duration, preview: false, draft: false, window: null }))
@@ -258,10 +260,12 @@ it('IPC serves the configured root and validates dates without accepting caller 
   const root = await world()
   await seed(root, 'one', [post()])
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
-  registerInsightsIpc({ projectsRoot: () => root, now: () => Date.parse(NOW), handle: (channel, fn) => handlers.set(channel, (...args) => fn(undefined, ...args)) })
+  const refresh = new ResultsRefresh({ projectsRoot: () => root, stateDir: join(root, '.state'), sources: [] })
+  registerInsightsIpc({ projectsRoot: () => root, now: () => Date.parse(NOW), refresh, handle: (channel, fn) => handlers.set(channel, (...args) => fn(undefined, ...args)),
+    describe: async (slug, version) => slug === 'one' ? { title: 'My reel', cover: `cover-v${version}` } : null })
   const get = handlers.get('insights:get')
   expect(get).toBeTypeOf('function')
-  expect(await get?.({ since: '2026-10-01' })).toMatchObject({ asOf: NOW, totals: { posts: 1, metrics: { plays: 100 } } })
+  expect(await get?.({ since: '2026-10-01' })).toMatchObject({ asOf: NOW, totals: { posts: 1, metrics: { plays: 100 } }, reels: [{ title: 'My reel', cover: 'cover-v1' }] })
   await expect(Promise.resolve().then(() => get?.({ since: 'yesterday' }))).rejects.toMatchObject({ code: 'INSIGHTS_INPUT' })
   await expect(Promise.resolve().then(() => get?.({ projectsRoot: '/untrusted' }))).rejects.toMatchObject({ code: 'INSIGHTS_INPUT' })
 })
@@ -291,4 +295,53 @@ it('withholds a weekday winner if the highest day has only one post', async () =
     await seed(root, name, [post({ postId: name, publishedAt: date, metrics: { reach } })])
   await seed(root, 'outlier', [post({ postId: 'o', publishedAt: '2026-10-19T08:00:00.000Z', metrics: { reach: 1000 } })])
   expect(sentence(await summary(root), 'weekday-reach')).toBeUndefined()
+})
+
+const TRY = (n: 1 | 2, change: PostTrial['change'] = 'hook'): PostTrial => ({ id: 'trial-a', try: n, change })
+const SETTLED_AT = '2026-10-23T08:00:00.000Z' // 72 hours after TUESDAY
+
+// fails if the two tries of a trial aren't paired, or the verdict isn't the trial rule's
+it('pairs a trial’s two tries and decides it', async () => {
+  const root = await world()
+  await seed(root, 'trial', [
+    post({ postId: '1', trial: TRY(1), observedAt: SETTLED_AT, metrics: { plays: 410 } }),
+    post({ postId: '2', trial: TRY(2), observedAt: SETTLED_AT, metrics: { plays: 640 } })
+  ])
+  const [result] = (await summary(root)).trialResults
+  expect(result).toMatchObject({ id: 'trial-a', project: 'trial', platform: 'instagram', change: 'hook', engine: null, verdict: { kind: 'winner', winner: 2 } })
+  expect(result.tries.map((p) => p.postId)).toEqual(['1', '2'])
+})
+
+// fails if Try 2 on another version loses the engine's record of what it varied
+it('links the engine’s trial log when Try 2 is another version', async () => {
+  const root = await world()
+  await seed(root, 'trial', [post({ postId: '1', trial: TRY(1, 'video') }), post({ version: 2, postId: '2', trial: TRY(2, 'video') })])
+  await fs.writeFile(join(root, 'trial', 'trials.json'), JSON.stringify([{ parent_version: 1, variable: 'seed', from: 4, to: 9 }]))
+  expect((await summary(root)).trialResults[0].engine).toMatchObject({ parentVersion: 1, variable: 'seed', from: 4, to: 9 })
+})
+
+// fails if a broken trial record (two Try 1s, mixed platforms, an unknown change) is shown as a trial
+it('refuses broken trial records', async () => {
+  const root = await world()
+  await seed(root, 'trial', [post({ postId: '1', trial: TRY(1) }), post({ platform: 'tiktok', postId: '2', trial: TRY(2) })])
+  await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA' })
+  await seed(root, 'trial', [post({ postId: '1', trial: { id: 'x', try: 1, change: 'music' as PostTrial['change'] } })])
+  await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA' })
+})
+
+// fails if Facebook posts (saved under facebook:<id>) can't be read, or a key from another platform is accepted
+it('reads Facebook posts by their own key', async () => {
+  const root = await world()
+  await seed(root, 'fb', [post({ platform: 'facebook', postId: '55', metrics: { plays: 300 } })])
+  expect((await summary(root)).platforms).toMatchObject([{ platform: 'facebook', totals: { metrics: { plays: 300 } } }])
+  await fs.writeFile(join(root, 'fb', 'outcomes.json'), JSON.stringify({ schemaVersion: 1, versions: { v1: { '55': post({ platform: 'facebook', postId: '55' }) } } }))
+  await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA' })
+})
+
+// fails if a rate (skip rate) is added up across posts like a count
+it('weights skip rate by plays and sums likes', async () => {
+  const root = await world()
+  await seed(root, 'a', [post({ postId: 'a', metrics: { plays: 100, skipRatePercent: 10, likes: 5 } })])
+  await seed(root, 'b', [post({ postId: 'b', metrics: { plays: 300, skipRatePercent: 30, likes: 7 } })])
+  expect((await summary(root)).totals.metrics).toMatchObject({ skipRatePercent: 25, likes: 12 })
 })

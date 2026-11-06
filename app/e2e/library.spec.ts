@@ -38,11 +38,11 @@ test('Library, My style and Insights', async () => {
   await passFirstRun(page)
 
   // ---- Insights: in the sidebar with nothing posted, saying what it will show and what it needs ----
-  // fails if Insights hides until a post, which nothing in this version can make
+  // fails if Insights hides until a post (e2e/insights.spec.ts covers it with results)
   await page.getByTestId('nav-insights').click()
   await expect(page.getByTestId('titlebar-title')).toHaveText('Insights')
   await expect(page.getByTestId('insights-empty')).toContainText('how long people watched')
-  await expect(page.getByTestId('insights-empty')).toContainText('It needs your Instagram account connected')
+  await expect(page.getByTestId('insights-empty')).toContainText('Connect Instagram, TikTok or Facebook first.')
 
   // ---- Library: tabs, no Finished videos, an empty tab says what goes there ----
   await page.getByTestId('nav-library').click()

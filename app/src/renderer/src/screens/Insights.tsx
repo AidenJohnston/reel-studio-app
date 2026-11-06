@@ -1,19 +1,268 @@
+import { useCallback, useEffect, useState } from 'react'
 import { TitleBarSlot } from '../components/titlebar'
+import { Button, Spinner } from '../components/ui'
+import { reel } from '../api'
+import type { Go } from '../nav'
+import type { InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
+import { ago, audienceLines, bestReel, compact, percent, PLATFORM_NAMES, reelLine, seconds } from '../../../shared/insight-words'
 import '../components/library.css'
+import '../components/insights.css'
+
+const CHANGE: Record<TrialChange, string> = { video: 'Two versions', hook: 'Hook', caption: 'Caption', cover: 'Cover', brightness: 'Brightness' }
+/** The engine's sentences worth showing here: patterns across reels, not the best reel (the readout leads with it). */
+const PATTERNS = new Set(['shorter-held', 'weekday-reach', 'most-improved'])
+const STALE_MS = 60 * 60_000
+const join = (items: string[]) => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
 
 /**
- * Insights (spec section 9): each posted reel's results. Always in the sidebar, but nothing can be posted from this
- * version, so it says what it will show and what it needs, with no stand-in numbers or charts.
+ * Insights (spec section 9): how each posted reel did, for the person who made it. A sentence first, the numbers
+ * after. Each reel opens at the version that was posted. Results are read in the background (main/results-refresh.ts)
+ * and on Refresh; the last read's age is always shown, so old numbers never pass for new ones.
  */
-export function Insights() {
+export function Insights({ go }: { go: Go }) {
+  const [data, setData] = useState<InsightsSummary | null>(null)
+  const [status, setStatus] = useState<ResultsStatus | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+
+  const load = useCallback(async (): Promise<ResultsStatus | null> => {
+    try {
+      const [summary, s] = await Promise.all([reel.insights.get(), reel.insights.status()])
+      setData(summary)
+      setStatus(s)
+      setProblem(null)
+      return s
+    } catch (e) {
+      setProblem((e as { userMessage?: string }).userMessage ?? 'Post results could not be read.')
+      return null
+    } finally {
+      setNow(Date.now())
+    }
+  }, [])
+  // `all`: every post (the Refresh button); otherwise only posts due a read (opening the page)
+  const refresh = useCallback(async (all: boolean) => {
+    setReading(true)
+    try {
+      setStatus(await reel.insights.refresh({ all }))
+    } catch (e) {
+      setProblem((e as { userMessage?: string }).userMessage ?? 'Post results could not be read.')
+    }
+    setReading(false)
+    await load()
+  }, [load])
+  useEffect(() => {
+    void load().then((s) => {
+      // Opening the page reads what's due when the last read is over an hour old (or never happened), so the first
+      // visit after connecting an account shows numbers without waiting for the hourly read.
+      if (!s || s.running || !Object.values(s.platforms).some((p) => p.state !== 'not-connected')) return
+      if (!s.checkedAt || Date.now() - Date.parse(s.checkedAt) > STALE_MS) void refresh(false)
+    })
+    return reel.insights.onChange(() => void load())
+  }, [load, refresh])
+
+  const connected = status ? (Object.keys(status.platforms) as InsightPlatform[]).filter((p) => status.platforms[p].state !== 'not-connected') : []
+  const actions = (
+    <span className="ins-fresh" data-testid="insights-fresh">
+      {reading || status?.running ? (
+        <span className="faint" role="status"><Spinner /> Reading results</span>
+      ) : status?.checkedAt ? (
+        <span className="faint">Updated {ago(status.checkedAt, now)}</span>
+      ) : null}
+      {connected.length > 0 && (
+        <Button kind="tertiary" size="small" disabled={reading || status?.running} onClick={() => void refresh(true)} data-testid="insights-refresh">
+          Refresh
+        </Button>
+      )}
+    </span>
+  )
+
+  const reels = data?.reels ?? []
   return (
-    <div className="page insights-page">
-      <TitleBarSlot title="Insights" />
-      <div className="insights-empty" data-testid="insights-empty">
-        <h2>No post results yet</h2>
-        <p>This page will show how each posted reel did: its views, how long people watched and where they swiped away.</p>
-        <p>It needs your Instagram account connected, which isn’t available yet.</p>
-      </div>
+    <div className="page insights-page" data-testid="insights">
+      <TitleBarSlot title="Insights" actions={actions} />
+      {problem && <p className="banner error" role="alert" data-testid="insights-problem"><span>{problem}</span></p>}
+      {status && <PlatformNotes status={status} go={go} />}
+      {data && !reels.length ? (
+        <Empty connected={connected.length > 0} go={go} />
+      ) : data ? (
+        <>
+          <Readout reels={reels} />
+          <ReelList reels={reels} go={go} />
+          {data.trialResults.length > 0 && <Trials trials={data.trialResults} reels={reels} />}
+          <Audience data={data} />
+          <p className="faint ins-foot">Read from your connected accounts. Your results stay on this computer.</p>
+        </>
+      ) : null}
     </div>
+  )
+}
+
+function Empty({ connected, go }: { connected: boolean; go: Go }) {
+  return (
+    <div className="insights-empty" data-testid="insights-empty">
+      <h2>No post results yet</h2>
+      <p>When you post a reel, this page shows how it did: its views, how long people watched and where they swiped away.</p>
+      {connected ? (
+        <p>Post a reel from Share. Its first numbers show up here about an hour later.</p>
+      ) : (
+        <>
+          <p>Connect Instagram, TikTok or Facebook first.</p>
+          <Button className="ins-connect" onClick={() => go({ name: 'settings', section: 'posting' })} data-testid="insights-connect">
+            Open Settings › Posting
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** A platform that needs the person (connect again) or is waiting out a limit says so, once, above everything. */
+function PlatformNotes({ status, go }: { status: ResultsStatus; go: Go }) {
+  const notes = (Object.entries(status.platforms) as [InsightPlatform, ResultsPlatformState][]).flatMap(([p, s]) => {
+    const name = PLATFORM_NAMES[p]
+    if (s.state === 'reconnect') return [{ p, kind: 'amber', text: `${name}: ${s.message}`, act: true }]
+    if (s.state === 'failed') return [{ p, kind: 'error', text: `${name}: ${s.message}`, act: false }]
+    if (s.state === 'waiting') {
+      const at = new Date(s.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      return [{ p, kind: 'faint', text: `${name} asked to slow down. Reading again after ${at}.`, act: false }]
+    }
+    return []
+  })
+  if (!notes.length) return null
+  return (
+    <div className="ins-notes">
+      {notes.map((n) => (
+        <p key={n.p} className={n.kind === 'faint' ? 'faint' : `banner${n.kind === 'error' ? ' error' : ''}`} data-testid={`insights-note-${n.p}`}>
+          <span>{n.text}</span>
+          {n.act && <Button size="small" onClick={() => go({ name: 'settings', section: 'posting' })}>Open Settings</Button>}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+const versionName = (r: InsightReel) => `${r.title ?? r.project} · Version ${r.version}`
+
+/** The one sentence a creator reads first: the reel that did best and why, or why there's nothing to say yet. */
+function Readout({ reels }: { reels: InsightReel[] }) {
+  const best = bestReel(reels)
+  if (best) {
+    const views = best.totals.metrics.plays ?? 0
+    return (
+      <section className="ins-lead" data-testid="insights-readout">
+        <h2><b>{best.title ?? best.project}</b> did best, with {compact(views)} {views === 1 ? 'view' : 'views'}.</h2>
+        <p>{reelLine(best, reels)}.</p>
+      </section>
+    )
+  }
+  const counting = reels.some((r) => r.posts.some((p) => p.status === 'still counting'))
+  return (
+    <section className="ins-lead" data-testid="insights-readout">
+      <h2>{counting ? 'Your newest posts are still counting.' : 'Post one more reel to see which does best.'}</h2>
+      <p>{counting ? 'Platforms keep adding views for about two days, so results settle then.' : 'With two posted reels, this compares them for you.'}</p>
+    </section>
+  )
+}
+
+function ReelList({ reels, go }: { reels: InsightReel[]; go: Go }) {
+  const sorted = [...reels].sort((a, b) => latest(b) - latest(a))
+  return (
+    <section className="ins-sec" aria-labelledby="ins-reels-h">
+      <div className="ins-cols">
+        <h2 id="ins-reels-h" className="sec-h">Posted reels</h2>
+        {/* each number carries its own label for screen readers */}
+        {['Views', 'Watched', 'Skipped', 'Shares', 'Saves'].map((c) => <span key={c} aria-hidden>{c}</span>)}
+      </div>
+      <ul className="ins-reels" data-testid="insights-reels">
+        {sorted.map((r) => <ReelRow key={`${r.project}/${r.version}`} r={r} all={reels} go={go} />)}
+      </ul>
+    </section>
+  )
+}
+const latest = (r: InsightReel) => Math.max(...r.posts.map((p) => Date.parse(p.publishedAt)))
+
+function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go }) {
+  const t = r.totals.metrics
+  const counting = r.posts.some((p) => p.status === 'still counting')
+  const where = join([...new Set(r.posts.map((p) => PLATFORM_NAMES[p.platform]))])
+  const watched = t.completionEstimate ?? null
+  const missing = (what: string) => `${where} ${r.posts.length > 1 ? 'don’t' : 'doesn’t'} report ${what}`
+  const cell = (label: string, value: string | null, what: string) => (
+    <span className="ins-n tnum" aria-label={value === null ? `${label}: not reported` : `${label}: ${value}`} title={value === null ? missing(what) : undefined}>
+      {value ?? '–'}
+    </span>
+  )
+  const line = reelLine(r, all)
+  return (
+    <li className={`ins-reel${counting ? ' counting' : ''}`} data-testid="insights-reel" data-project={r.project} data-version={r.version}>
+      <button className="hit" onClick={() => go({ name: 'reel', slug: r.project, version: r.version })} aria-label={`Open ${versionName(r)}`} data-testid="insights-open" />
+      <div className="rthumb" aria-hidden>{r.cover && <img src={r.cover} alt="" loading="lazy" decoding="async" />}</div>
+      <div className="rtext">
+        <div className="ttl">{r.title ?? r.project}</div>
+        <div className="cm">Version {r.version} · {where} · {ago(r.posts[0].publishedAt, Date.now())}</div>
+        <div className={`ins-why${counting ? ' faint' : ''}`} data-testid="insights-why">{line}</div>
+      </div>
+      {cell('Views', t.plays === null ? null : compact(t.plays), 'views')}
+      <span className="ins-n tnum ins-watch" aria-label={watched === null ? (t.averageWatchTimeMs === null ? 'Watched: not reported' : `Watched: ${seconds(t.averageWatchTimeMs)} on average`) : `Watched: ${percent(watched)} on average`}
+        title={watched === null && t.averageWatchTimeMs === null ? missing('watch time') : undefined}>
+        {watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : '–'}
+        {watched !== null && <i className="ins-bar" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, watched)})` }} /></i>}
+      </span>
+      {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips')}
+      {cell('Shares', t.shares === null ? null : compact(t.shares), 'shares')}
+      {cell('Saves', t.saves === null ? null : compact(t.saves), 'saves')}
+    </li>
+  )
+}
+
+function Trials({ trials, reels }: { trials: InsightTrialResult[]; reels: InsightReel[] }) {
+  const title = (t: InsightTrialResult) => reels.find((r) => r.project === t.project)?.title ?? t.project
+  return (
+    <section className="ins-sec" aria-labelledby="ins-trials-h">
+      <h2 id="ins-trials-h" className="sec-h">Try 1 and Try 2</h2>
+      <ul className="ins-trials" data-testid="insights-trials">
+        {trials.map((t) => {
+          const [a, b] = t.tries.map((p) => p.metrics.plays)
+          const v = t.verdict
+          const total = (a ?? 0) + (b ?? 0)
+          return (
+            <li key={t.id} className="ins-trial" data-testid="insights-trial" data-verdict={v.kind}>
+              <div className="ins-trial-h">
+                <span className="ttl">{title(t)}</span>
+                <span className="faint">{CHANGE[t.change]} test on {PLATFORM_NAMES[t.platform]}</span>
+                <span className={`ins-verdict ${v.kind}`} data-testid="insights-verdict">
+                  {v.kind === 'winner' ? `Try ${v.winner} won` : v.kind === 'too-close' ? 'Too close to call' : v.kind === 'too-few' ? 'Too few views yet' : 'Waiting'}
+                </span>
+              </div>
+              {total > 0 && (
+                <div className="ins-split" aria-hidden>
+                  <span className={v.kind === 'winner' && v.winner === 1 ? 'won' : ''} style={{ flexGrow: a ?? 0 }}>Try 1 · {compact(a ?? 0)}</span>
+                  <span className={v.kind === 'winner' && v.winner === 2 ? 'won' : ''} style={{ flexGrow: b ?? 0 }}>Try 2 · {compact(b ?? 0)}</span>
+                </div>
+              )}
+              <p className="ins-reason">{v.reason}</p>
+              {v.kind === 'winner' && t.platform === 'instagram' && (
+                <p className="faint">Instagram only lets you share a trial reel with your followers in its app: open Try {v.winner} there and tap Share to everyone.</p>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+function Audience({ data }: { data: InsightsSummary }) {
+  const lines = [
+    ...data.audience.flatMap(audienceLines),
+    ...data.sentences.filter((s) => PATTERNS.has(s.template)).map((s) => `${s.text}.`)
+  ]
+  if (!lines.length) return null
+  return (
+    <section className="ins-sec" aria-labelledby="ins-aud-h" data-testid="insights-audience">
+      <h2 id="ins-aud-h" className="sec-h">Who's watching</h2>
+      <ul className="ins-lines">{lines.map((l) => <li key={l}>{l}</li>)}</ul>
+    </section>
   )
 }

@@ -1,0 +1,81 @@
+/* Insights (screens/Insights.tsx). No containers (spec section 1): sections sit on the canvas, spaced 32/48, a hairline
+   at most. Rows reuse Home's row shape (home.css .rrow): a 40 px picture, a title, a quiet line, a wash on hover. */
+.insights-page { --ins-col: 76px; container-type: inline-size; }
+.ins-fresh { display: inline-flex; align-items: center; gap: 12px; }
+.ins-fresh .faint { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ins-notes { display: grid; gap: 6px; margin-bottom: var(--space-s); }
+.ins-notes .banner .btn { flex: none; }
+.ins-connect { margin-top: 12px; }
+
+/* The readout: one sentence a creator reads first, the reel's name in the ink, the rest a step lighter. */
+.ins-lead { padding: var(--space-s) 0 var(--space-m); max-width: 62ch; }
+.ins-lead h2 { font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 560; color: var(--ink-2); letter-spacing: -.01em; text-wrap: balance; }
+.ins-lead h2 b { font-weight: 640; color: var(--ink); }
+.ins-lead p { margin-top: 6px; font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-3); }
+
+.ins-sec { padding-top: var(--space-m); }
+.ins-sec + .ins-sec { margin-top: var(--space-s); box-shadow: inset 0 1px 0 var(--line); }
+.ins-sec .sec-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; margin: 0; color: var(--ink); }
+
+/* Column heads ride on the section heading's line, so the numbers' labels cost no extra row. */
+.ins-cols, .ins-reel { display: grid; grid-template-columns: 40px minmax(0, 1fr) repeat(5, var(--ins-col)); column-gap: 12px; align-items: center; }
+.ins-cols { margin-bottom: 8px; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
+.ins-cols .sec-h { grid-column: 1 / 3; }
+.ins-cols span { text-align: right; }
+
+.ins-reels { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ins-reel { position: relative; margin: 0 -8px; padding: 6px 8px; border-radius: var(--r-md); transition: background-color 120ms ease; }
+@media (hover: hover) and (pointer: fine) { .ins-reel:hover { background: var(--wash); } }
+.ins-reel .hit { position: absolute; inset: 0; z-index: 2; border: 0; padding: 0; background: transparent; border-radius: inherit; cursor: pointer; }
+html.kb .ins-reel .hit:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
+.ins-reel .rthumb {
+  position: relative; width: 40px; aspect-ratio: 9 / 16; border-radius: 6px; overflow: hidden; background: var(--sunk);
+  box-shadow: var(--e1); transition: transform 160ms var(--ease-out);
+}
+.ins-reel .rthumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ins-reel .hit:active ~ .rthumb { transform: scale(.95); }
+.ins-reel .rtext { min-width: 0; }
+.ins-reel .ttl { font-size: var(--fs-base); line-height: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-reel .cm { margin-top: 1px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-why { margin-top: 3px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); text-wrap: pretty; }
+.ins-n { text-align: right; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 560; font-variant-numeric: tabular-nums; color: var(--ink); }
+.ins-reel.counting .ins-n { color: var(--ink-3); font-weight: 500; }
+
+/* Watched: the share of the reel people saw on average, as a number and a hairline under it. The one picture on the
+   page, because "how long they watched" is the number a creator can change in the edit. */
+.ins-watch { display: grid; justify-items: end; gap: 4px; }
+.ins-bar { display: block; width: 44px; height: 3px; border-radius: 2px; background: var(--sunk); overflow: hidden; }
+.ins-bar > i { display: block; height: 100%; background: var(--green); transform-origin: left; transition: transform 240ms var(--ease-out); }
+.ins-reel.counting .ins-bar > i { background: var(--ink-4); }
+
+/* Trials: the two tries' views as one split line, the winner's side in green. */
+.ins-trials { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: var(--space-s); }
+.ins-trial { display: grid; gap: 8px; max-width: 720px; }
+.ins-trial-h { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ins-trial-h .ttl { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-verdict { margin-left: auto; flex: none; font-weight: 600; font-size: var(--fs-sm); color: var(--ink-3); }
+.ins-verdict.winner { color: var(--green-ink); }
+.ins-split { display: flex; gap: 2px; height: 24px; font-size: var(--fs-xs); line-height: 24px; font-variant-numeric: tabular-nums; }
+.ins-split span {
+  flex-basis: 0; min-width: max-content; padding: 0 8px; border-radius: 6px; background: var(--sunk); color: var(--ink-2);
+  white-space: nowrap; transition: flex-grow 240ms var(--ease-out);
+}
+.ins-split span + span { text-align: right; }
+.ins-split span.won { background: var(--green-tint); color: var(--green-ink); font-weight: 600; }
+.ins-reason { color: var(--ink-2); text-wrap: pretty; }
+.ins-trial .faint { margin-top: -4px; }
+
+.ins-lines { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; max-width: 62ch; color: var(--ink-2); font-size: var(--fs-md); line-height: var(--lh-md); }
+.ins-foot { margin-top: var(--space-l); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ins-bar > i, .ins-split span, .ins-reel .rthumb { transition: none; }
+}
+html.kb .ins-reel .rthumb { transition: none; }
+html.kb .ins-reel .hit:active ~ .rthumb { transform: none; }
+
+/* A narrow column keeps the three numbers that matter most. */
+@container (max-width: 640px) {
+  .ins-cols, .ins-reel { grid-template-columns: 40px minmax(0, 1fr) repeat(3, var(--ins-col)); }
+  .ins-cols span:nth-of-type(n + 4), .ins-reel .ins-n:nth-of-type(n + 4) { display: none; }
+}

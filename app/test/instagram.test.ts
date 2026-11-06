@@ -331,6 +331,26 @@ describe('Instagram fixture HTTP', () => {
     expect(out.versions.v1['789']).toEqual(result)
     expect(out.versions.v2['555']).toEqual({ platform: 'fixture' }); w.done()
   })
+  // fails if reading results drops the trial tag publish saved, which would lose the pairing of Try 1 and Try 2
+  it('keeps a post’s trial tag when its results are read', async () => {
+    const w = await world(); await w.seed(); await w.published()
+    const trial = { id: 'trial-a', try: 2, change: 'caption' }
+    await fs.writeFile(join(w.project, 'outcomes.json'), JSON.stringify({ schemaVersion: 1, versions: { v1: { '789': { ...POST, platform: 'instagram', apiVersion: 'v26.0', observedAt: null, metrics: null, trial } } } }))
+    w.steps.push({ url: insightsUrl, body: { data: [{ name: 'views', values: [{ value: 42 }] }] } })
+    await w.service.insights('fixture', 1, '789')
+    const out = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
+    expect(out.versions.v1['789']).toMatchObject({ trial, metrics: { plays: 42 } }); w.done()
+  })
+  // fails if one breakdown Instagram won't give (error 100 under 100 followers) stops the whole audience
+  it('reads who follows the account, one breakdown at a time', async () => {
+    const w = await world(); await w.seed()
+    const ask = (breakdown: string) => `${GRAPH}/123/insights?metric=follower_demographics&period=lifetime&metric_type=total_value&breakdown=${breakdown}`
+    const one = (key: string, value: number) => ({ data: [{ name: 'follower_demographics', total_value: { breakdowns: [{ dimension_keys: ['x'], results: [{ dimension_values: [key], value }] }] } }] })
+    w.steps.push({ url: ask('age'), body: one('25-34', 9) }, { url: ask('gender'), body: one('F', 5) },
+      { url: ask('country'), status: 400, body: { error: { code: 100 } } }, { url: ask('city'), body: { data: [] } })
+    expect(await w.service.audience()).toEqual({ accountId: '123', followers: { age: [{ key: '25-34', value: 9 }], gender: [{ key: 'F', value: 5 }], country: [], city: [] } })
+    w.done()
+  })
   it('rejects another version or account post before requesting insights', async () => {
     const w = await world(); await w.seed(); await w.published()
     await expect(w.service.insights('fixture', 2, '789')).rejects.toMatchObject({ code: 'IG_POST' })

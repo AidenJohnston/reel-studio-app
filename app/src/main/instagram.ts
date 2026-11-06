@@ -11,6 +11,8 @@ import type { InstagramMetrics, InstagramOutcome, InstagramPost, InstagramPublis
 import { instagramCallback } from './instagram-oauth'
 import { httpsUrl, id, INSTAGRAM_GRAPH, INSTAGRAM_SCOPES, INSTAGRAM_VERSION, InstagramError, invalidResponse, jsonPost, object, positive, request, text, type InstagramFetch } from './instagram-http'
 import { InstagramTokenStore, readObject, receipt, saveOutcome, saveReceipt, type InstagramCredentials, type InstagramSecretStore } from './instagram-store'
+import { AUDIENCE_BREAKDOWNS, audienceQuery, parseAudience, type AudienceBreakdown } from './instagram-audience'
+import type { AudienceSlice } from '../shared/insights'
 
 const DAY = 24 * 60 * 60_000
 /** Connecting reads the profile picture too, so the Instagram preview can show the account as it is (Phone.tsx). */
@@ -413,6 +415,24 @@ export class InstagramService {
       signal.throwIfAborted()
       await saveOutcome(dir, outcome)
       return outcome
+    })
+  }
+  /**
+   * Who follows the connected account, one request per breakdown (instagram-audience.ts). The results refresh reads it
+   * at most once a day. Instagram answers an account under 100 followers with nothing, or with error 100 on some
+   * accounts; either way that breakdown is empty.
+   */
+  audience(): Promise<{ accountId: string; followers: Record<AudienceBreakdown, AudienceSlice[]> }> {
+    return this.run(async (signal) => {
+      await this.config()
+      const c = await this.credentials()
+      const followers = { age: [], gender: [], country: [], city: [] } as Record<AudienceBreakdown, AudienceSlice[]>
+      for (const breakdown of AUDIENCE_BREAKDOWNS) {
+        try { followers[breakdown] = parseAudience(await this.graph(audienceQuery(c.accountId, breakdown), { method: 'GET' }, signal)) } catch (e) {
+          if (!(e instanceof InstagramError) || e.code !== 'IG_INPUT') throw e
+        }
+      }
+      return { accountId: c.accountId, followers }
     })
   }
 }

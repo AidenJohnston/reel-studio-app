@@ -128,6 +128,13 @@ export async function saveOutcome(dir: string, value: InstagramOutcome): Promise
     const versions = saved ? object(saved.versions) : {}
     const key = `v${value.version}`
     const posts = versions[key] === undefined ? {} : object(versions[key])
-    await atomicSocialFile(file, JSON.stringify({ ...saved, schemaVersion: 1, versions: { ...versions, [key]: { ...posts, [value.postId]: value } } }, null, 2) + '\n')
+    // Publish may have tagged the post as one try of a trial (outcomes.json `trial`); a results read keeps that tag.
+    const before = posts[value.postId] === undefined ? {} : object(posts[value.postId])
+    await atomicSocialFile(file, JSON.stringify({ ...saved, schemaVersion: 1, versions: { ...versions, [key]: { ...posts, [value.postId]: { ...keptTag(before), ...value } } } }, null, 2) + '\n')
   })
+}
+
+/** What a results read must not drop from a saved post: its trial tag (shared/insights.ts PostTrial). */
+export function keptTag(before: Record<string, unknown>): Record<string, unknown> {
+  return before.trial === undefined ? {} : { trial: before.trial }
 }

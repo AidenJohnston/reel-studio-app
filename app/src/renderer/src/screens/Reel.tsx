@@ -83,10 +83,11 @@ interface Pin {
  * editor in a column on the right. Version 1 is made here, a reel with no video is planned here, and Edit it myself
  * takes the column's place.
  */
-export function Reel({ slug, go }: { slug: string; go: Go }) {
+export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
+  // `at`: the version to show first; the newest when it's gone or not given (line ~234 keeps a version that exists)
+  const [selected, setSelected] = useState<number | null>(at ?? null)
   // A version picked to watch plays with sound. The player clears the request once it has started.
   const [playRequest, setPlayRequest] = useState<{ n: number; ask: number } | null>(null)
   const playAsks = useRef(0)
@@ -271,7 +272,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   useEffect(() => () => void (toConnect.current || reel.projects.leave(slug).catch(() => {})), [slug])
 
   useEffect(() => {
-    void load(true)
+    // opened at a version (from Insights): keep it rather than jump to the newest
+    void load(at === undefined)
     reel.ai
       .active()
       .then(setProvider)
