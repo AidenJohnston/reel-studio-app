@@ -22,7 +22,10 @@ import { atomicSocialFile, withSocialFile } from './social-store'
 export const FACEBOOK_VERSION = 'v26.0'
 export const FACEBOOK_GRAPH = `https://graph.facebook.com/${FACEBOOK_VERSION}`
 const RUPLOAD = `https://rupload.facebook.com/video-upload/${FACEBOOK_VERSION}`
+// what posting needs; the sign-in service also asks for read_insights and pages_manage_engagement for Insights
+// (server/signin/handler.ts), which a person may decline and still post
 export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts']
+const INSIGHTS_SCOPES = ['read_insights', 'pages_manage_engagement']
 const MAX_VIDEO = 1_000_000_000
 
 const { fail, invalid, object, text, id, request } = metaApi('Facebook', 'FB_')
@@ -45,7 +48,9 @@ interface Credentials {
   userToken: string
   userName: string
   expiresAt: number
-  pages: (FacebookPage & { token: string })[]
+  /** canRead: this Page's numbers can be read for Insights (the read_insights and pages_manage_engagement grants, and
+   * the ANALYZE task on the Page, which Graph's video_insights requires). Saved before it existed: false. */
+  pages: (FacebookPage & { token: string; canRead: boolean })[]
   pageId: string
   appId: string
   brokerUrl: string
@@ -152,7 +157,7 @@ export class FacebookService {
     this.secure()
     try {
       const c = object(JSON.parse(this.o.secrets.decryptString(bytes)))
-      const pages = (Array.isArray(c.pages) ? c.pages : []).map((p) => { const x = object(p); return { id: id(x.id), name: text(x.name), token: text(x.token) } })
+      const pages = (Array.isArray(c.pages) ? c.pages : []).map((p) => { const x = object(p); return { id: id(x.id), name: text(x.name), token: text(x.token), canRead: x.canRead === true } })
       if (!pages.length || typeof c.expiresAt !== 'number') return localError()
       return { userToken: text(c.userToken), userName: text(c.userName), expiresAt: c.expiresAt, pages, pageId: id(c.pageId), appId: id(c.appId), brokerUrl: text(c.brokerUrl) }
     } catch { return localError() }
@@ -242,9 +247,11 @@ export class FacebookService {
         const expiresIn = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : invalid()
         const me = await request(this.o.fetch, `${FACEBOOK_GRAPH}/me?fields=name`, get(userToken), signal)
         const listed = await request(this.o.fetch, `${FACEBOOK_GRAPH}/me/accounts?fields=id,name,access_token,tasks&limit=100`, get(userToken), signal)
+        const readGranted = INSIGHTS_SCOPES.every((s) => granted.includes(s))
         const pages = (Array.isArray(listed.data) ? listed.data : []).flatMap((p) => {
           const x = object(p)
-          return Array.isArray(x.tasks) && x.tasks.includes('CREATE_CONTENT') ? [{ id: id(x.id), name: text(x.name), token: text(x.access_token) }] : []
+          if (!Array.isArray(x.tasks) || !x.tasks.includes('CREATE_CONTENT')) return []
+          return [{ id: id(x.id), name: text(x.name), token: text(x.access_token), canRead: readGranted && x.tasks.includes('ANALYZE') }]
         })
         if (!pages.length)
           return fail('NO_PAGE', 'Reel Studio posts reels to a Facebook Page, and this account can’t post to one. Make a Page, or ask its admin to let you post, then connect again.')

@@ -80,8 +80,9 @@ Not done yet. What it takes, on Cloudflare Workers (the posting server runs ther
 4. Each platform's developer app, with the redirect above:
    - Meta: an Instagram app with `instagram_business_basic`, `instagram_business_content_publish` and
      `instagram_business_manage_insights`; a Facebook app with `pages_show_list`, `pages_read_engagement`,
-     `pages_manage_posts` and `read_insights`. Both go through Meta's App Review before people outside the app's
-     testers can connect.
+     `pages_manage_posts`, `read_insights` and `pages_manage_engagement` (the last two only for reading a reel's
+     numbers in Insights; Graph's video_insights requires both). Both apps go through Meta's App Review before people
+     outside the app's testers can connect.
    - TikTok: a Desktop app with Login Kit and the Content Posting API (docs/tiktok.md). TikTok's audit lifts Only me.
 5. Logs: the service writes none itself. Keep Workers' request logging off for `/v1/*` query strings, since the
    callback's query holds the platform's code until it is sealed.
