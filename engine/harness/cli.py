@@ -261,9 +261,24 @@ def cmd_agree(a) -> int:
     cfg = load_config(Path(a.config) if a.config else HERE / "config.json")
     within = a.within if a.within is not None else cfg["agreeWithinPct"]
     r1, r2 = (json.loads(Path(p).read_text(encoding="utf-8")) for p in (a.a, a.b))
+    if set(r1["takes"]) != set(r2["takes"]):
+        raise Refusal(f"report take sets differ: only in first {sorted(set(r1['takes']) - set(r2['takes']))}, "
+                      f"only in second {sorted(set(r2['takes']) - set(r1['takes']))}")
+    fields = [("split", r1.get("split"), r2.get("split")),
+              ("flow", r1.get("flow", "drafts"), r2.get("flow", "drafts"))]
+    for key in ("engineCommit", "ffmpeg", "ffprobe"):
+        v1, v2 = r1.get("pins", {}).get(key), r2.get("pins", {}).get(key)
+        if key != "engineCommit":
+            v1, v2 = (v1 or {}).get("sha256"), (v2 or {}).get("sha256")
+        fields.append((f"pins.{key}" + (".sha256" if key != "engineCommit" else ""), v1, v2))
+    for name, v1, v2 in fields:
+        if v1 is None or v2 is None:
+            raise Refusal(f"reports must record {name}: first {v1!r}, second {v2!r}")
+        if v1 != v2:
+            raise Refusal(f"report {name} differs: first {v1!r}, second {v2!r}")
     rows = [("all takes", r1["wait"]["median"], r2["wait"]["median"])]
     rows += [(tid, r1["takes"][tid]["wait"]["median"], r2["takes"][tid]["wait"]["median"])
-             for tid in r1["takes"] if tid in r2["takes"]]
+             for tid in r1["takes"]]
     ok = True
     for name, m1, m2 in rows:
         diff = 100.0 * abs(m1 - m2) / min(m1, m2)
