@@ -8,6 +8,27 @@ import { exportPlatforms, makeStagingFolder, sweepExportStaging } from '../src/m
 import { outputGroups, type PlatformExportRequest } from '../src/shared/platforms'
 import { PYTHON } from './helpers'
 
+// Reading `stalled.path` with fs.createReadStream hands over one chunk and then nothing more, like a drive that
+// stopped answering mid-copy; `onRead` runs once that chunk is out. Every other path reads normally.
+const stalled = vi.hoisted(() => ({ path: '', onRead: () => {} }))
+vi.mock('node:fs', async (original) => {
+  const real = await original<typeof import('node:fs')>()
+  const { Readable } = await import('node:stream')
+  const createReadStream = (path: unknown, options?: unknown) => {
+    if (path !== stalled.path) return real.createReadStream(path as string, options as Parameters<typeof real.createReadStream>[1])
+    let sent = false
+    return new Readable({
+      read() {
+        if (sent) return
+        sent = true
+        this.push(Buffer.alloc(1 << 16))
+        setImmediate(stalled.onRead)
+      }
+    })
+  }
+  return { ...real, createReadStream }
+})
+
 const scratch = mkdtempSync(join(tmpdir(), 'rs-platform-export-'))
 const engine = resolve(__dirname, '../../engine')
 const runEngine = createEngineRunner({ python: () => PYTHON, env: () => ({
@@ -202,26 +223,24 @@ describe('platform files through the real engine', () => {
     expect(await fs.readdir(folder)).toEqual([])
   })
 
-  // An exFAT drive (no hard links, no clones) whose plain copies never finish: only a copy Stop can interrupt returns.
-  it('fails if Stop on a drive without hard links waits for a whole copy', async () => {
-    const source = finalRender(join(scratch, 'slow copy.mp4'), 3)
-    const folder = join(scratch, 'slow copy')
+  // An exFAT drive (no clones) that stops answering partway through the copy: only Stop can end the copy now.
+  it('fails if Stop does not end a copy that is under way on a drive without clones', async () => {
+    const source = finalRender(join(scratch, 'stalled.mp4'), 3)
+    const folder = join(scratch, 'stalled')
     mkdirSync(folder)
     const stop = new AbortController()
-    const stubs = [
-      vi.spyOn(fs, 'link').mockImplementation(async () => {
-        stop.abort()
-        throw Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' })
-      }),
-      vi.spyOn(fs, 'copyFile').mockImplementation((_from, _to, mode) => ((mode ?? 0) & constants.COPYFILE_FICLONE_FORCE)
-        ? Promise.reject(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }))
-        : new Promise<void>(() => {}))
-    ]
+    stalled.path = source
+    stalled.onRead = () => stop.abort() // the first chunk is on its way
+    // No clones here, and a plain copy from this drive never finishes either.
+    const stub = vi.spyOn(fs, 'copyFile').mockImplementation((_from, _to, mode) => ((mode ?? 0) & constants.COPYFILE_FICLONE_FORCE)
+      ? Promise.reject(Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }))
+      : new Promise<void>(() => {}))
     try {
-      await expect(exportPlatforms({ source, chosenCover: null, folder, name: 'Slow', request: { platforms: ['tiktok'], caption: '', coverSeconds: null }, runEngine, signal: stop.signal }))
+      await expect(exportPlatforms({ source, chosenCover: null, folder, name: 'Stalled', request: { platforms: ['tiktok'], caption: '', coverSeconds: null }, runEngine, signal: stop.signal }))
         .rejects.toMatchObject({ code: 'CANCELLED' })
     } finally {
-      for (const stub of stubs) stub.mockRestore()
+      stub.mockRestore()
+      stalled.path = ''
     }
     expect(await fs.readdir(folder)).toEqual([])
   }, 20_000)
