@@ -17,8 +17,3 @@ export const VENDOR_INSTALL_PAGES = {
 export const CLAUDE_PLANS_URL = 'https://claude.ai/upgrade'
 /** The posting server (main/posting.ts). Not live yet; REELSTUDIO_POSTING_URL points the app at staging or a local run. */
 export const POSTING_URL = 'https://post.getreelstudio.com'
-/**
- * Where anonymous usage data goes when the person shares it (main/usage.ts). null: there is no server for it yet, so
- * nothing is sent; what would be is kept on the computer and shown in Settings › Privacy.
- */
-export const USAGE_ENDPOINT: string | null = null

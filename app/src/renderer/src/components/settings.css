@@ -43,9 +43,6 @@ html.kb .ssearch input:focus-visible { outline: 0; }
 .srow-t > span { min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .srow.sub { padding-left: 24px; }
 .privacy.off .srow.sub .srow-t { opacity: .55; }
-/* Settings › Privacy › Kept on this computer: what sharing has recorded, newest first */
-.usage-lines { max-height: 200px; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.usage-lines span { color: var(--ink-3); margin-right: 6px; }
 .srow-more { display: grid; gap: 8px; margin-top: 10px; }
 .srow-more.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .srow-more.row > .pv-note { flex: 1; padding: 0; }

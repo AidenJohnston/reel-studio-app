@@ -34,7 +34,6 @@ export const SETTINGS = {
   'sharing-usage': { section: 'privacy', label: 'Usage', needs: 'sharing', synonyms: [...SHARING_WORDS, 'features', 'errors', 'crashes'] },
   'sharing-quality': { section: 'privacy', label: 'Quality scores', needs: 'sharing', synonyms: [...SHARING_WORDS, 'edit quality', 'scores', 'kept', 'undone'] },
   'sharing-posts': { section: 'privacy', label: 'Post results', needs: 'sharing', synonyms: [...SHARING_WORDS, 'views', 'view counts', 'results'] },
-  'sharing-kept': { section: 'privacy', label: 'Kept on this computer', needs: 'sharing', synonyms: [...SHARING_WORDS, 'what is shared', 'see my data', 'waiting', 'sent'] },
   version: { section: 'about', label: 'Version', synonyms: ['about', 'version number', 'build', 'release'] },
   licence: { section: 'about', label: 'Licence and notices', synonyms: ['license', 'AGPL', 'GNU', 'open source', 'notices', 'third party', 'credits', 'copyright'] },
   updates: { section: 'about', label: 'Check for updates', synonyms: ['update', 'updates', 'upgrade', 'new version', 'automatic updates', 'download', 'install', 'restart', 'releases'] },
