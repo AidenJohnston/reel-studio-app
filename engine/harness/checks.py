@@ -189,23 +189,25 @@ def check_preview_video(ffmpeg: str, ffprobe: str, ref: Path, cand: Path, captio
 
 
 def check_still(ffmpeg: str, ffprobe: str, ref: Path, png: Path, t: float, captions: list, th: dict,
-                want: tuple, preview_fps: Optional[float] = None) -> dict:
+                want: tuple, preview_fps: Optional[float] = None, millisecond_seek: bool = True) -> dict:
     """One still `frames --times t` made from a draft: the first draft frame at or after t (what
     ffmpeg's accurate input seek in frames.py returns), scaled to the required still size `want`.
     The draft runs at `preview_fps`, so that frame is found on the preview's clock and compared with
     the reference frame nearest it, the same rule as check_preview_video. Without a preview rate the
-    draft runs on the reference's own clock."""
+    draft runs on the reference's own clock. `millisecond_seek`: frames.py rounds its seek to the
+    millisecond; a moments still is drawn at its exact output frame (render.stills) instead."""
     b = media.read_image(png)
     h, w = b.shape[:2]
     bad = _wrong_size((w, h), want)
     if bad:
         return bad
     rp = media.video_pts(ffprobe, ref)
-    # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame.
+    # frames.py rounds its FFmpeg seek to milliseconds, which can cross a fractional-rate frame
+    seek = round(t, 3) if millisecond_seek else t
     if preview_fps is None:
-        idx = next((i for i, x in enumerate(rp) if x >= round(t, 3) - 1e-6), len(rp) - 1)
+        idx = next((i for i, x in enumerate(rp) if x >= seek - 1e-6), len(rp) - 1)
     else:
-        idx = _nearest(rp, math.ceil(round(t, 3) * preview_fps - 1e-6) / preview_fps)
+        idx = _nearest(rp, math.ceil(seek * preview_fps - 1e-6) / preview_fps)
     a: Optional[object] = None
     for i, fr in enumerate(media.iter_frames(ffmpeg, ref, w, h)):
         if i == idx:
