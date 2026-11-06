@@ -48,6 +48,17 @@ export function availabilityLine(id: SigninPlatformId, a: PlatformAvailability):
   return ''
 }
 
+/** "A, B and C" */
+export const andList = (names: string[]): string => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? '')
+
+/** One line for every platform that can't be connected now, so Settings says it once instead of once a row. */
+export function closedLine(ids: SigninPlatformId[], unreachable: boolean): string {
+  const names = andList(ids.map((id) => PLATFORM_NAMES[id]))
+  return unreachable
+    ? `${names} connect through Reel Studio’s sign-in service, which can’t be reached. Check your connection; if you’re online, it isn’t open yet.`
+    : `Reel Studio’s sign-in service isn’t set up for ${names} yet.`
+}
+
 /** The connected account's line in Settings › Posting. */
 export function connectedLine(id: SigninPlatformId, name: string): string {
   if (id === 'facebook') return `Posting to ${name}.`

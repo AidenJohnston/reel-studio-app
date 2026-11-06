@@ -3,7 +3,7 @@
 // fresh check. Same rows and controls as YouTube's (PostingSettings.tsx).
 import { useState } from 'react'
 import type { FacebookSession } from '../../../shared/facebook'
-import { PLATFORM_NAMES, SOCIAL_COPY, availabilityLine, connectedLine, type SocialStatus } from '../../../shared/social'
+import { PLATFORM_NAMES, SOCIAL_COPY, availabilityLine, closedLine, connectedLine, type SocialStatus } from '../../../shared/social'
 import { reel, userMessage } from '../api'
 import { SettingRow } from './settings-rows'
 import { useSocialStatus } from './social'
@@ -18,17 +18,39 @@ export function accountName(s: SocialStatus, id: Id): string | null {
   return 'username' in x ? x.username : 'displayName' in x ? x.displayName : 'name' in x ? x.name : x.page.name
 }
 
+const ORDER: Id[] = ['instagram', 'tiktok', 'facebook', 'threads', 'x', 'linkedin']
+
 export function SocialRows() {
   const [s, reload] = useSocialStatus()
+  const [checking, setChecking] = useState(false)
   if (!s) return null
+  // a platform that can't be connected now, and isn't connected, shares one row with the others like it
+  const open = ORDER.filter((id) => s[id].availability.open || s[id].session.connected)
+  const closed = ORDER.filter((id) => !open.includes(id))
+  const unreachable = closed.some((id) => { const a = s[id].availability; return !a.open && a.why === 'unreachable' })
   return (
     <>
-      <PlatformRow id="instagram" s={s} reload={reload} />
-      <PlatformRow id="tiktok" s={s} reload={reload} />
-      <PlatformRow id="facebook" s={s} reload={reload} />
-      <PlatformRow id="threads" s={s} reload={reload} />
-      <PlatformRow id="x" s={s} reload={reload} />
-      <PlatformRow id="linkedin" s={s} reload={reload} />
+      {open.map((id) => <PlatformRow key={id} id={id} s={s} reload={reload} />)}
+      {closed.length > 0 && (
+        <SettingRow
+          id="social-closed"
+          line={closedLine(closed, unreachable)}
+          control={
+            <Button
+              size="small"
+              kind="tertiary"
+              disabled={checking}
+              onClick={() => {
+                setChecking(true)
+                void reload(true).finally(() => setChecking(false))
+              }}
+              data-testid="social-check"
+            >
+              Check again
+            </Button>
+          }
+        />
+      )}
     </>
   )
 }
@@ -57,12 +79,6 @@ function PlatformRow({ id, s, reload }: { id: Id; s: SocialStatus; reload: (fres
       await reload()
     }
   }
-  const check = async () => {
-    setWorking(true)
-    setNote(null)
-    await reload(true)
-    setWorking(false)
-  }
 
   const line = connecting ? SOCIAL_COPY.connecting(name) : account ? connectedLine(id, account) : availabilityLine(id, a) || 'Not connected.'
   const control = connecting ? (
@@ -80,11 +96,7 @@ function PlatformRow({ id, s, reload }: { id: Id; s: SocialStatus; reload: (fres
     <Button size="small" onClick={() => void connect()} data-testid={`${id}-connect`}>
       Connect {name}
     </Button>
-  ) : (
-    <Button size="small" kind="tertiary" onClick={() => void check()} disabled={working} data-testid={`${id}-check`}>
-      Check again
-    </Button>
-  )
+  ) : null /* closed and not connected: SocialRows shows it in the shared row instead */
 
   return (
     <SettingRow id={id} line={line} control={control}>

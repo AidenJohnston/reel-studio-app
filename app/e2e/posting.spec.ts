@@ -171,7 +171,8 @@ test('posting is hidden with REELSTUDIO_POSTING=0', async () => {
     await expect(page.getByTestId('share-youtube')).toHaveCount(0)
     await page.keyboard.press('Escape')
     await openSettings(page)
-    await expect(page.locator('[data-setting="instagram"]')).toBeVisible()
+    // the other platforms go through the sign-in service, which a test run can't reach: one row says so
+    await expect(page.locator('[data-setting="social-closed"]')).toContainText('can’t be reached')
     await expect(page.locator('[data-setting="youtube"]')).toHaveCount(0)
   } finally {
     await app.close()
