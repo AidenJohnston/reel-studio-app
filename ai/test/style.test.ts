@@ -75,6 +75,15 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     expect(await new StyleStore(() => root).asPromptText()).toBe('- Put a yellow box behind the captions.');
   });
 
+  it('add() says it turned the rule back on only on the call that did, so a note undoes only its own change', async () => {
+    const style = new StyleStore(() => tmpDir('style '));
+    const rule = (await style.add('Put a yellow box behind the captions.')).rule;
+    await style.update(rule.id, { paused: true });
+    expect(await style.add('put a yellow box behind the captions')).toMatchObject({ added: false, resumed: true, rule: { id: rule.id } });
+    // turned on by someone else since: this call changed nothing
+    expect(await style.add('put a yellow box behind the captions')).toMatchObject({ added: false, resumed: false });
+  });
+
   it('when the AI proposes it for a note that says "always"', async () => {
     const { root, dir } = await makeProject();
     const style = new StyleStore(() => root);
@@ -103,5 +112,27 @@ describe('asking again for a rule paused in My style turns it back on', () => {
     await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined)).rejects.toMatchObject({ code: 'chatgpt_usage_limit' });
     expect(await style.list()).toEqual([expect.objectContaining({ id: rule.id, paused: true })]);
     expect(await style.asPromptText()).toBe('(none yet)');
+  });
+
+  it('and when My style cannot be put back after the note fails, the error says which rule to check', async () => {
+    const { root, dir } = await makeProject();
+    const style = new StyleStore(() => root);
+    const rule = (await style.add('Put a yellow box behind the captions.')).rule;
+    await style.update(rule.id, { paused: true });
+    const m = new ScriptedModel([
+      { toolCalls: [call('add_style_rule', { rule: 'Put a yellow box behind the captions.' }), call('set_gap_cap', { seconds: 0.4 })] },
+      async () => {
+        // a folder where My style.json goes: pausing the rule again fails the same way on every OS
+        await fsp.rm(style.file);
+        await fsp.mkdir(style.file);
+        throw new AIError('chatgpt_usage_limit', 'You reached your ChatGPT limit.');
+      },
+    ]);
+    const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: m });
+
+    await expect(ai.applyNote(dir, 'always put a yellow box behind the captions', () => undefined)).rejects.toMatchObject({
+      code: 'chatgpt_usage_limit',
+      userMessage: 'You reached your ChatGPT limit. I also couldn\'t undo its change to "Put a yellow box behind the captions." in My style, so please check it there.',
+    });
   });
 });
