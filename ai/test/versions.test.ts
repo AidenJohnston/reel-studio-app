@@ -24,4 +24,16 @@ describe('a saved version is never rewritten', () => {
     expect(JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8')).post.caption).toBe('Bread takes patience');
     expect(await folder(v1)).toEqual(before);
   });
+
+  it.each([['the simple edit (no AI)', false], ['the AI edit', true]])('%s run again after its version was saved (a resumed job) leaves that folder as it was', async (_, ai) => {
+    const { root, dir } = await makeProject();
+    const host = new FakeHost(root);
+    // an AI that changes nothing, so the second run makes the same video
+    const edit = () => createAI({ host, settingsDir: tmpDir('settings '), ...(ai ? { providerOverride: new ScriptedModel([]) } : {}) }).firstEdit(dir, () => undefined);
+    expect((await edit()).version).toBe(1);
+    const v1 = path.join(dir, 'versions', 'v1');
+    const before = await folder(v1);
+    expect((await edit()).version).toBe(1);
+    expect(await folder(v1)).toEqual(before);
+  });
 });

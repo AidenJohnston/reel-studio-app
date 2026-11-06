@@ -246,6 +246,8 @@ export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
   const { p } = await load(ctx);
+  // a first edit run again (a resumed job) may get back the version it already saved: never rewritten
+  const baseVersion = p.version;
   if (deps.firstLook !== false) {
     ctx.renderGate = firstLook(deps, ctx, onEvent);
   }
@@ -268,7 +270,7 @@ export async function firstEdit(deps: EditorDeps, provider: ModelProvider | null
       onEvent({ type: 'status', message: 'Finishing your video', pct: 94, phase: 'final' });
       const version = await finalize(deps, ctx, onEvent);
       const summary = withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state);
-      await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
+      if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
 
 First edit (stopped early).
 
@@ -284,7 +286,7 @@ ${summary}
   const version = await finalize(deps, ctx, onEvent);
   const summary = withStyleEcho(honestSummary(run, ctx.state, 'first')
     ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
-  await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
+  if (version > baseVersion) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
   return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
 }
@@ -484,7 +486,8 @@ export async function deterministicEdit(deps: EditorDeps, projectDir: string, on
   const summary = why
     ? `${why} So I made a simple version: ${did[0].toLowerCase()}${did.slice(1)}`
     : `${did} Connect ChatGPT to let me pick your best takes and add pictures.`;
-  await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nSimple edit (no AI).\n\n${summary}\n`);
+  // the same edit run again gets back the version it saved (engine render), which is never rewritten
+  if (version > p.version) await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nSimple edit (no AI).\n\n${summary}\n`);
   onEvent({ type: 'status', message: 'Done', pct: 100 });
   return { summary, version, styleRulesAdded: [], styleSuggestions: [], changed };
 }
