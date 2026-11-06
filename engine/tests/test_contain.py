@@ -127,12 +127,28 @@ sys.stdin.readline()
 os._exit(1)
 """
 
+# Joins a fresh job without contain.py: exit 0, or the Windows error. A test runner that is itself in a
+# job allowing no job inside it (some CI services) makes every engine run without one; that path has
+# its own test (test_on_windows_a_command_finishes_when_the_engine_cannot_join_its_job).
+NESTED_JOB_PROBE = r"""
+import ctypes, sys
+k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+k32.CreateJobObjectW.restype = ctypes.c_void_p
+k32.GetCurrentProcess.restype = ctypes.c_void_p
+k32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+job = k32.CreateJobObjectW(None, None)
+sys.exit(0 if job and k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()) else ctypes.get_last_error() or 1)
+"""
+
 SYNCHRONIZE, PROCESS_TERMINATE = 0x00100000, 0x0001
 WAIT_OBJECT_0, WAIT_TIMEOUT = 0, 0x102
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the real Job Object")
 def test_on_windows_a_crashed_engine_takes_its_child_with_it():
+    probe = subprocess.run([sys.executable, "-c", NESTED_JOB_PROBE], timeout=60)
+    if probe.returncode:
+        pytest.skip(f"this test runner's own job allows no job inside it (Windows error {probe.returncode})")
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.OpenProcess.restype = wintypes.HANDLE
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
