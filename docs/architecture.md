@@ -67,7 +67,11 @@ Projects live in `<Documents>/Reel Studio/Projects/<slug>/`. The shared **Librar
 `<Documents>/Reel Studio/My style.json`. Its rules are sentences the AI reads; a rule with `paused: true` stays
 listed in My style but the AI doesn't read it, and the app doesn't apply it. A rule may also carry a typed `payload`
 the app applies itself when a new video is made (only `{"kind":"caption-case","case":"lower"}` so far), plus `source`
-(project, title, version) and `consent` (the question the person said Yes to). `forgotten` lists the questions of
+(project, title, version) and `consent` (the question the person said Yes to). A rule may instead carry a `check`
+the engine measures on every render, such as `{"kind":"captions.maxWords","value":2}` (`ai/src/rules.ts`,
+`engine/reelengine/rule_checks.py`); its words are the app's, and a note can't finish while one fails. `proposals`
+holds at most three memories My style suggests from post results or hand edits (`app/src/main/memory-loop.ts`),
+none a rule until the person keeps it; a kept one records `learned` (where it was read from). `forgotten` lists the questions of
 removed rules, so answering one again cannot bring a rule back. All of these are optional. An older version ignores `paused`, reads a
 typed rule as a plain sentence, cannot answer a typed question, and may drop `forgotten` if it
 rewrites the file. `updatedAt` is when a rule's words last changed (a pause does not count), and `byYou` marks a
@@ -169,7 +173,8 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
-| `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `render [--draft] [--window a:b] [--rules file]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview; `--rules` measures checked My style rules (result `ruleChecks`) and a final render that breaks one listed in `stopOn` returns `encoded: false` before its encode |
+| `score --version N` | the mechanical checks saved version N passes, from the reports beside it (pauses, subtitles, loudness, the file, My style rules, the double-check); renders nothing |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
 | `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
@@ -225,7 +230,7 @@ startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, p
 backwards in the frames it looks at, or when a note says the video is mirrored), `resolve_asset(kind, intent, phase, candidateId)`, `list_assets`, `preview_asset`, `export_asset_credits`, `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_sfx` (built-in sound effects, each hitting on a word, a b-roll's appearance or a cut; the engine plays at
 most one every 2 seconds, under the voice),
-`set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
+`set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule, check)`,
 `lint_edit` (deterministic repairs and issues, see `docs/edit-lint.md`), `render_draft` (runs the same lint before encoding), `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 
 `make_variant(variable, hook?, cover?, caption?, brightness?)` saves a trial changing one of
@@ -267,6 +272,11 @@ Agent tasks:
    a cover and the post kit; render a draft, look at frames, fix obvious problems, render, summarize in one to
    three plain sentences.
 2. **Apply a note**: change only what the note asks; if the note is a lasting preference, `add_style_rule`.
+   Every render in a first edit or a note measures the checked My style rules (`render --rules`). The editor
+   sees a failing rule in `render_draft`, and `finish` refuses once while the newest render fails one and
+   nothing changed. A final render that fails a rule stops before its encode and the editor gets one short fix
+   run; then the reel is made and the reply names any rule still failing. Rules already failing in the version
+   the note started from are named, not chased.
 3. **Idea to script**: a hook, a spoken script and on-screen text in the user's voice.
 
 Prompts are plain markdown in `ai/prompts/`.
