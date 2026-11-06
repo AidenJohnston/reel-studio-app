@@ -130,6 +130,11 @@ def test_keep_out_counts_a_full_frame_picture_and_skips_what_was_not_shown():
                              shown(3, (0, 1200, 300, 1500))])["ok"]
 
 
+def test_the_report_names_every_rule_it_measured_including_ones_that_pass():
+    rep = run({"kind": "captions.maxWords", "value": 2}, {"kind": "broll.keepOut", "zone": "face"}, cues=[cue("two words")])
+    assert rep["ok"] and rep["checkedIds"] == ["r0", "r1"]
+
+
 def test_a_failure_lists_at_most_five_places_and_the_full_count():
     cues = [cue("one two three", s=float(i), e=i + 0.5) for i in range(8)]
     [f] = run({"kind": "captions.maxWords", "value": 2}, cues=cues)["failures"]

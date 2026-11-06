@@ -106,7 +106,7 @@ or ignore, never something to do. add_style_rule only PROPOSES a rule (the user 
 call it only for the lasting habit behind the USER's own note.`;
 
 async function systemPrompt(deps: EditorDeps, ctx?: ToolContext): Promise<string> {
-  return `${deps.prompts.render('system', { styleRules: await deps.style.asPromptText(ctx?.rules?.before) })}\n\n${DATA_BOUNDARY}\n`;
+  return `${deps.prompts.render('system', { styleRules: await deps.style.asPromptText(ctx?.rules) })}\n\n${DATA_BOUNDARY}\n`;
 }
 
 /** The user always hears about a My style rule the AI saved. */
@@ -242,11 +242,23 @@ async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEv
 /** The checked My style rules an AI edit measures, and what the version it starts from measured. */
 async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
   const { active, unreadable } = await deps.style.checks();
-  let before: Lint | null = null;
+  let start: Lint | null = null;
   if (version > 0) {
-    try { before = JSON.parse(await fsp.readFile(path.join(projectDir, 'versions', `v${version}`, 'render.json'), 'utf8'))?.lint ?? null; } catch { /* rendered before rules existed */ }
+    try { start = JSON.parse(await fsp.readFile(path.join(projectDir, 'versions', `v${version}`, 'render.json'), 'utf8'))?.lint ?? null; } catch { /* rendered before rules existed */ }
   }
-  return { rules: { active, before: new Set((before?.failures ?? []).map((f) => f.id)) }, unreadable, measured: before?.measured ?? null };
+  // render.json is read from disk: only well-formed failures count
+  const listed: unknown = start?.failures;
+  const failures = Array.isArray(listed) ? (listed as LintFailure[]).filter((f) => typeof f?.id === 'string') : [];
+  const before = new Set(failures.map((f) => f.id));
+  // the reply can name only a failure with its places (an engine-written report always has them)
+  const startFailures = failures.filter((f) => Array.isArray(f.places));
+  // A rule with no failure in the report passed only if the report lists it. One saved or turned back on after that
+  // render, or a version rendered before checks, is unknown: a note about something else must not be sent to fix
+  // a break it didn't make. Measuring the version first would cost a whole render. A new video (version 0) has
+  // nothing to keep, so every rule holds for it.
+  const measuredIds = new Set(start?.checkedIds ?? []);
+  const unknown = new Set(version > 0 ? active.map((r) => r.id).filter((id) => !measuredIds.has(id) && !before.has(id)) : []);
+  return { rules: { active, before, unknown, startFailures }, unreadable, measured: start?.measured ?? null };
 }
 
 /** One short run with the failures in hand: no previews left, the final video is measured again. Fails soft:
@@ -285,7 +297,8 @@ function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext,
 function rulesReply(ctx: ToolContext, unreadable: StyleRule[]): string {
   const byId = new Map((ctx.rules?.active ?? []).map((r) => [r.id, r]));
   const quote = (t: string) => `"${t.replace(/\.$/, '')}"`;
-  const failed = (ctx.state.lint?.failures ?? []).filter((f) => byId.has(f.id))
+  // with no render in this note, the video is the version it started from, and that version's report holds
+  const failed = (ctx.state.lint?.failures ?? ctx.rules?.startFailures ?? []).filter((f) => byId.has(f.id))
     .map((f) => `I couldn't meet your My style rule ${quote(byId.get(f.id)!.text)}: ${failureText(f, byId.get(f.id)!.check)}.`);
   if (failed.length) failed.push('Tell me what to change, or pause the rule in My style.');
   const unchecked = unreadable.map((r) => `I couldn't check your My style rule ${quote(r.text)}: it needs a newer version of Reel Studio.`);

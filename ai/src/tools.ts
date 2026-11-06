@@ -21,7 +21,12 @@ export interface RenderInfo { version: number; draft: boolean; result: any }
 /** A note's checked My style rules. `before`: the ones already failing in the version the note started from.
  * Those are named in the reply, never chased: "make the captions blue" must not send the AI after b-roll
  * placed three notes ago. */
-export interface NoteRules { active: CheckedRule[]; before: Set<string> }
+/** `before`: rules the version a note starts from broke. `unknown`: rules it was never measured against (rendered
+ * before checks, or before the rule was saved or turned back on). A note has to meet neither. */
+export interface NoteRules { active: CheckedRule[]; before: Set<string>; unknown: Set<string>; startFailures: LintFailure[] }
+
+/** A rule this note need not meet: the video already broke it, or may have. */
+const exempt = (rules: NoteRules | undefined, id: string) => !!rules && (rules.before.has(id) || rules.unknown.has(id));
 
 export interface ToolState {
   changed: Set<string>;
@@ -423,7 +428,7 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 
 /** The checked rules a render failed that this note has to meet (not the ones failing before it). */
 export function unmetRules(ctx: ToolContext, lint = ctx.state.lint): LintFailure[] {
-  return (lint?.failures ?? []).filter((f) => !ctx.rules?.before.has(f.id));
+  return (lint?.failures ?? []).filter((f) => !exempt(ctx.rules, f.id));
 }
 
 /** `stopOnRules`: a final render that fails a rule this note has to meet stops before its encode (the result
@@ -433,7 +438,7 @@ export async function doRender(ctx: ToolContext, draft: boolean, opts: { stopOnR
   ctx.state.dirty = new Set();
   const extra = draft ? ['--draft'] : [];
   if (ctx.rules) {
-    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !ctx.rules!.before.has(r.id)).map((r) => r.id) : [];
+    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !exempt(ctx.rules, r.id)).map((r) => r.id) : [];
     const file = rulesFilePath(ctx.projectDir);
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, rulesFile(ctx.rules.active, stopOn));

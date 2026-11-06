@@ -21,6 +21,15 @@ async function setup(opts: { finalRender?: boolean } = {}) {
   return { root, dir, host, ai, renders };
 }
 
+/** The project saved as version `v`, with the lint report its render wrote (render.json), as a note finds it. */
+async function savedAs(dir: string, v: number, lint: unknown, change: (p: any) => void = () => undefined) {
+  const p = await loadProject(dir);
+  change(p); p.version = v;
+  await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify(p));
+  await fsp.mkdir(path.join(dir, 'versions', `v${v}`), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'versions', `v${v}`, 'render.json'), JSON.stringify({ lint }));
+}
+
 const sent = (model: ScriptedModel) => model.requests.map((r) => JSON.stringify(r.messages));
 /** The task a run started with. */
 const task = (model: ScriptedModel, i: number) => (model.requests[i].messages[0] as any).content[0].text as string;
@@ -102,6 +111,37 @@ describe('a note and the checked rules', () => {
     expect(model.requests[0].system).toContain('Show at most 2 words in a caption. (this video already broke it before this note');
     expect(host.rulesFiles.at(-1).stopOn).toEqual([]);
     expect(r.summary).toMatch(/^The captions are blue\. I couldn't meet your My style rule "Show at most 2 words in a caption"/);
+  });
+
+  it('a rule the starting version was never measured against is left alone; one it was measured against still holds', async () => {
+    const { dir, ai, host } = await setup();
+    const size = { kind: 'captions.maxSize', value: 110 } as const;
+    const sizeRule = await ai().addStyleRule(ruleText(size), size);
+    // v4 was rendered with only the size rule; the words rule was saved after it, and v4 already breaks it
+    await savedAs(dir, 4, { ok: true, checked: 1, checkedIds: [sizeRule.id], failures: [], measured: {} });
+    await ai().addStyleRule(ruleText(TWO_WORDS), TWO_WORDS);
+    host.lintRule = (r, p) => r.check.kind === 'captions.maxWords' ? (p.captions.style.maxWords > r.check.value ? { text: 'one two three', words: 3 } : null)
+      : p.captions.style.size > r.check.value ? { text: 'hello', px: p.captions.style.size } : null;
+    const model = new ScriptedModel([
+      { toolCalls: [call('set_caption_style', { color: '#3366FF', size: 130 })] }, finish('Blue and bigger.'),
+      { toolCalls: [call('set_caption_style', { size: 110 })] }, finish('Blue, at your size.'),
+    ]);
+    await ai(model).applyNote(dir, 'make the captions blue and bigger', () => undefined);
+    expect(model.requests[0].system).toContain('Show at most 2 words in a caption. (this video was made before the app checked it');
+    expect(host.rulesFiles[0].stopOn).toEqual([sizeRule.id]);
+    // the fix is about the size the note broke, never the words it didn't touch
+    expect(task(model, 2)).toContain('"Keep captions at most 110 px tall."');
+    expect(task(model, 2)).not.toContain('Show at most 2 words');
+    expect((await loadProject(dir)).captions.style).toMatchObject({ maxWords: 3, size: 110 });
+  });
+
+  it('a note that changes nothing still names the rules the saved video breaks', async () => {
+    const { dir, ai } = await setup();
+    const rule = await ai().addStyleRule(ruleText(TWO_WORDS), TWO_WORDS);
+    await savedAs(dir, 4, { ok: false, checked: 1, checkedIds: [rule.id], measured: {},
+      failures: [{ id: rule.id, kind: 'captions.maxWords', count: 1, places: [{ t0: 1, t1: 2, text: 'one two three', words: 3 }] }] });
+    const r = await ai(new ScriptedModel([finish('Nothing to change.')])).applyNote(dir, 'looks good, thanks', () => undefined);
+    expect(r.summary).toBe('Nothing to change. I couldn\'t meet your My style rule "Show at most 2 words in a caption": 1 caption shows too many words ("one two three" at 0:01). Tell me what to change, or pause the rule in My style.');
   });
 
   it('finish is refused once while the newest preview breaks a rule and nothing changed since', async () => {

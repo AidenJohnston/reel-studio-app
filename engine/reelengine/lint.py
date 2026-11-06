@@ -189,4 +189,7 @@ def lint(rules: list, *, cues: list, fmt: tuple, mix: Optional[dict], broll: lis
             places = broll_places(c, broll)
         if places:
             failures.append({"id": r["id"], "kind": c["kind"], "count": len(places), "places": places[:MAX_PLACES]})
-    return {"ok": not failures, "checked": len(rules), "failures": failures, "measured": measure(cues, fmt, mix, broll)}
+    # checkedIds: a rule with no failure passed only if it is listed here. The app reads this from the version a
+    # note starts from, so a rule saved or resumed after that render is not taken for one it passed.
+    return {"ok": not failures, "checked": len(rules), "checkedIds": [r["id"] for r in rules], "failures": failures,
+            "measured": measure(cues, fmt, mix, broll)}
