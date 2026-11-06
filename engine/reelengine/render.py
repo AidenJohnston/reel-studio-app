@@ -32,7 +32,7 @@ from typing import Optional
 
 import reelengine
 
-from . import captions as capmod, cut as cutmod, project as projmod, render_identity, safepath, tools
+from . import captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, render_identity, safepath, tools
 from .cut_style import visual_change_meter
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
@@ -178,12 +178,10 @@ def source_faces(project_dir: Path, proj: dict) -> dict:
     return faces
 
 
-def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
-    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
-    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
-    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
-    rot = int(src.get("rotation") or 0) % 360
-    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+def display_crop(disp: tuple, out_w: int, out_h: int, face: Optional[tuple]) -> tuple:
+    """(x, y, cw, ch): the part of the upright picture (disp = its width, height) that fills
+    out_w x out_h, centred on the face when known. Match cuts compare frames through it (match.py)."""
+    w, h = disp
     target = out_w / out_h
     if w / h > target + 1e-3:          # too wide: crop the sides
         cw, ch = int(round(h * target)) // 2 * 2, h // 2 * 2
@@ -197,6 +195,16 @@ def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> di
         x = 0
     else:
         cw, ch, x, y = w // 2 * 2, h // 2 * 2, 0, 0
+    return x, y, cw, ch
+
+
+def reframe_plan(src: dict, out_w: int, out_h: int, face: Optional[tuple]) -> dict:
+    """Where to crop the source so it fills out_w x out_h, centred on the face when known.
+    The crop rect is in STORED (unrotated) pixels; `rot` is the clockwise turn applied last."""
+    rw, rh = int(src.get("width") or out_w), int(src.get("height") or out_h)
+    rot = int(src.get("rotation") or 0) % 360
+    w, h = (rh, rw) if rot in (90, 270) else (rw, rh)          # display size
+    x, y, cw, ch = display_crop((w, h), out_w, out_h, face)
     if rot == 90:
         rx, ry, rcw, rch = y, rh - x - cw, ch, cw
     elif rot == 270:
@@ -734,18 +742,22 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
                     audio: Optional[Path], audio_seek: float, dur: float, t_shift: float, encoder: Optional[str],
                     out_part: Path, graph_file: Path, fast: bool = True) -> list:
     """The draft/final ffmpeg command; writes the filter graph to `graph_file`. fast=False is the
-    draft path from before hardware decode for HDR: no -hwaccel, and an HDR source tonemapped before
-    the crop and scale. render.run retries a failed draft that way. audio=None is a still (stills()):
-    one PNG frame, with no sound and no encoder."""
+    draft path from before hardware decode: no -hwaccel, and an HDR source tonemapped before the
+    crop and scale. render.run retries a failed draft that way. Finals always decode in software.
+    audio=None is a still (stills()): one PNG frame, with no sound and no encoder."""
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
     lanes = video_lanes(segments)
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner"]
     fast = ctx.draft and fast
-    hw = tools.hwaccel() if fast else None
-    hdr_dec = []
-    if fast and any(src_meta[lane["source"]].get("hdr") for lane in lanes):
-        devices, hdr_dec = tools.hwaccel_to_memory(encoder)
+    cuda = fast and tools.hwaccel() == "cuda" and "scale_cuda" in tools.filters()
+
+    def on_cuda(src: dict) -> bool:     # decode and scale on an NVIDIA GPU; needs an FFmpeg with scale_cuda
+        return cuda and not src.get("hdr")
+
+    mem_dec = []
+    if fast and not all(on_cuda(src_meta[lane["source"]]) for lane in lanes):
+        devices, mem_dec = tools.hwaccel_to_memory(encoder)
         cmd += devices                         # global options: once, before the first input
     seg_input, seg_chain = {}, {}
     chains, labels = [], []
@@ -753,15 +765,11 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         src = src_meta[lane["source"]]
         face = faces.get(lane["source"])
         hdr = bool(src.get("hdr"))
-        gpu = hw == "cuda" and not hdr and "scale_cuda" in tools.filters()
-        if gpu:
+        if on_cuda(src):
             cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
-            if hdr:
-                cmd += hdr_dec
-            elif hw and hw != "cuda":
-                cmd += ["-hwaccel", hw]
+            cmd += mem_dec
             pre = None
             reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
             if hdr and "zscale" in tools.filters():
@@ -774,8 +782,15 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             else:
                 per_seg = reframe + ",format=yuv420p"
         cmd += no_rotate_args(src)
-        if lane["seek"] > 0:
-            cmd += ["-ss", _f(lane["seek"])]
+        # A preview copy's clock runs `inputOffset` behind the original's (proxy.py: it has no
+        # sound that starts before the picture). Seek on its own clock and shift what is left, so its
+        # frames reach the trims below at the original's times; for an original both are as before.
+        off = float(src.get("inputOffset") or 0.0)
+        seek_in = max(0.0, lane["seek"] - off)
+        if seek_in > 0:
+            cmd += ["-ss", _f(seek_in)]
+        if seek_in + off - lane["seek"] > 1e-9:
+            cmd += ["-itsoffset", _f(seek_in + off - lane["seek"])]
         cmd += ["-i", str(src_paths[lane["source"]])]
         n = len(lane["segs"])
         head = f"[{li}:v]" + (pre + "," if pre else "")
@@ -1136,6 +1151,12 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     src_meta, src_paths = source_files(project_dir, proj, root)
     faces = source_faces(project_dir, proj)
+    # The picture of a draft or window comes from each take's preview copy when it is finished
+    # (proxy.py); sound, the cover and every final read the originals.
+    if draft:
+        vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
+    else:
+        vmeta, vpaths, vfaces, video_from = src_meta, src_paths, faces, {sid: "original" for sid in src_meta}
 
     ctx = make_ctx(project_dir, proj, tl, draft, root, rwork)
     if preview:
@@ -1144,6 +1165,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     ctx.window = win
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
+    for m in tl.match_joins:
+        if m.get("played") == "hard":
+            warnings.append(f"A match cut plays as a plain cut: {m.get('why') or 'its frames were not compared'}.")
     timings = {}
 
     # 1. audio (always the full cut, then sliced for a window, so the music sits where it will)
@@ -1197,7 +1221,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     out = vdir / name
     out_part = rwork / (name + ".part")
     graph = rwork / ("graph_" + name.replace(".mp4", ".txt"))
-    cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+    cmd = build_video_cmd(ctx, segments, vmeta, vpaths, vfaces, out_w, out_h, layers, zooms,
                           ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
     # The cover reads only the source and the project, never the encode's output: make it on a
     # thread while ffmpeg encodes (it used to add 3-9 s after the encode), and reuse it when nothing
@@ -1220,6 +1244,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             raise
         log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
         warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+        # the originals too: a damaged preview copy must cost speed, never the preview
+        video_from = {sid: "original" for sid in src_meta}
 
         def slow(enc: str) -> str:
             return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h,
@@ -1254,12 +1280,12 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift)
+    visual_changes = visual_change_meter(dur, segments, raw_broll, zooms, visual_offset=t_shift, fps=fps)
     result = {"renderId": render_id, "inputFingerprint": input_fp, "fps": fps,
               "version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
-              "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
+              "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings, "visualChanges": visual_changes,
               "expectedSilence": ctx.expected_silence,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
@@ -1357,6 +1383,29 @@ def source_files(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
     return src_meta, src_paths
 
 
+# A flash join (Resolve's "dip to color", in white): the picture fades to white over FLASH_IN frames before the cut
+# and back over FLASH_OUT after it. It is a layer like any picture, so a draft, a window and the final draw it the
+# same, and captions stay on top of it. Frame counts judged by eye in other editors' presets (2 in, 3 out); no
+# measurement behind them.
+FLASH_IN, FLASH_OUT, FLASH_Z = 2, 3, 10_000
+
+
+def flash_layers(ctx: RenderCtx, segments: list) -> list:
+    cuts = [s.out_start for s in segments[1:] if s.join_transition == "flash"]
+    if not cuts:
+        return []
+    from PIL import Image
+    png = Path(ctx.work) / "render" / "flash.png"
+    if not png.exists():
+        png.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (16, 16), (255, 255, 255)).save(png)
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    # the project's frame rate, not a preview's, so a draft and a window flash for as long as the final does
+    fps = float(((ctx.project or {}).get("format") or {}).get("fps") or ctx.fmt["fps"])
+    return [Layer(path=png, kind="image", t0=max(0.0, t - FLASH_IN / fps), t1=t + FLASH_OUT / fps, x=0, y=0, w=W, h=H,
+                  z=FLASH_Z, fade_in=FLASH_IN / fps, fade_out=FLASH_OUT / fps) for t in cuts]
+
+
 def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
     """(layers, zooms, layer items, raw b-roll, broll_report): the b-roll layers and zooms (A2) drawn
     over the cut. The layer items are the records build_layers wrote to work/layers/layers.json, which
@@ -1392,6 +1441,7 @@ def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
         except Exception as exc:   # noqa: BLE001
             log(f"# zoom.build_zooms failed: {exc!r}")
             warnings.append(ZOOMS_FAILED)
+    layers += flash_layers(ctx, tl.segments)
     return layers, zooms, layer_items, raw_broll, broll_report
 
 
@@ -1550,6 +1600,8 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     warnings: list = []
     src_meta, src_paths = source_files(project_dir, proj, root)
     faces = source_faces(project_dir, proj)
+    # a still is the draft's frame, so it reads what the draft reads: each take's finished preview copy (proxy.py)
+    vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
     ctx = make_ctx(project_dir, proj, tl, True, root, rwork)
     ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))     # a still is the draft's frame (#146)
     times = [*times, *word_times(tl.words_out, words)]
@@ -1585,14 +1637,18 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
         graph = rwork / "graph_still.txt"
 
         def draw(fast: bool) -> str:
-            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+            # the slow retry reads the originals, as a draft's does: a damaged copy costs speed, never the still
+            meta, paths, fcs = (vmeta, vpaths, vfaces) if fast else (src_meta, src_paths, faces)
+            cmd = build_video_cmd(ctx, segments, meta, paths, fcs, out_w, out_h, layers, zooms,
                                   ass_name, None, 0.0, one, a, None, part, graph, fast=fast)
             return tools.text_run(cmd, 120, "still", cwd=rwork,
                                   user_message="I couldn't draw that moment of your video. Please try again.").stderr
+        used = video_from
         try:
             err = draw(True)
         except EngineError as exc:      # as a draft does: the fast path failed, the draft from before next
             log(f"# fast still failed, retrying the slow way: {exc.message[-400:]}")
+            used = {sid: "original" for sid in src_meta}
             err = draw(False)
         if font_path is not None:
             bad = check_fontselect(err, Path(font_path))
@@ -1605,13 +1661,16 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
         else:
             tools.text_run([ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(part),
                             "-vf", f"scale={width}:-2", str(png)], 60, "still scale")
-        out.append({"t": round(a, 3), "file": str(png)})
+        out.append({"t": round(a, 3), "file": str(png), "videoFrom": used})
         timings["stills"].append(round(time.time() - t_still, 2))
         if on_still is not None:
             on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
-            "timings": timings}
+            "timings": timings,
+            # per take: what every still read, or "mixed" when a slow retry read the original for some
+            "videoFrom": {sid: (vals.pop() if len(vals) == 1 else "mixed")
+                          for sid in src_meta for vals in [{f["videoFrom"][sid] for f in out}]}}
 
 
 def cover_key(ctx, proj: dict) -> str:

@@ -236,3 +236,41 @@ def test_cut_at_second_zoom_start_is_another_visual_change():
     tl.segments.append(Segment('s2', 0, 6, 6))
     tl.zooms = [z(2, 4), z(6, 8)]
     assert 'successive-zooms' not in rules(lint_edit(edit(), tl))
+
+
+def test_a_match_that_did_not_line_up_is_reported_with_its_reason():
+    p, tl = edit(), plan()
+    tl.segments.append(Segment('s1', 6, 9, 12, join_transition='hard'))
+    tl.match_joins = [{'keep': 1, 'out': 0, 'in': 1, 'played': 'hard', 'matched': False, 'why': 'the speaker moves too much across the cut'}]
+    (issue,) = [r for r in lint_edit(p, tl)['issues'] if r['rule'] == 'match-unmet']
+    assert issue['at_seconds'] == 12
+    assert 'moves too much' in issue['message']
+    tl.match_joins[0].update(played='match', matched=True)
+    tl.segments[1].join_transition = 'match'
+    assert 'match-unmet' not in rules(lint_edit(p, tl))
+    # where the take runs straight on there is no cut, so nothing plays as a plain cut
+    tl.match_joins = [{'keep': 1, 'played': 'none', 'matched': False}]
+    assert {'match-no-cut'} <= rules(lint_edit(p, tl)) and 'match-unmet' not in rules(lint_edit(p, tl))
+
+
+def test_a_zoom_on_a_match_cut_is_flagged_and_one_clear_of_it_is_not():
+    p, tl = edit(), plan()
+    tl.segments.append(Segment('s1', 6, 9, 12, join_transition='match'))
+    tl.zooms = [z(12.1, 14)]
+    assert 'match-framing' in rules(lint_edit(p, tl))
+    tl.zooms = [z(12.4, 14)]
+    assert 'match-framing' not in rules(lint_edit(p, tl))
+
+
+def test_a_busy_opening_is_flagged_against_its_pace_and_one_change_per_frame_counts_once():
+    """Fails if the first 5 seconds can hold any number of changes, a cut and a zoom on the same frame
+    count as two, or a change after 5 s counts toward the opening."""
+    tl = plan()
+    tl.segments.append(Segment('s1', 6, 9, 2))
+    tl.zooms = [z(2, 3), z(4, 7)]        # changes at 2 (cut and zoom), 3, 4, then 7 outside the opening
+    assert 'opening-busy' not in rules(lint_edit(edit(), tl))        # 3 changes, 3 allowed without a pace
+    (issue,) = [r for r in lint_edit(edit('standard'), tl)['issues'] if r['rule'] == 'opening-busy']
+    assert issue['at_seconds'] == 4                                   # the first change past the 2 allowed
+    assert 'opening-busy' not in rules(lint_edit(edit('hyper'), tl))
+    tl.zooms.append(z(4.5, 4.9))
+    assert 'opening-busy' in rules(lint_edit(edit(), tl))

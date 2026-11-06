@@ -343,3 +343,16 @@ except BlockingIOError:
     final = project.load(tmp_path)
     assert final['version'] == 4
     assert final['post']['caption'] == 'Serialized trial'
+
+
+def test_a_pace_adds_no_framing_switch_next_to_a_cut(tmp_path):
+    """Fails if a calm pace switches the framing within its shortest hold of a cut, which made a Calm reel
+    change the picture more often than one with no pace (pace survey on a real take)."""
+    from reelengine import variation
+    p, tl = reel(tmp_path)
+    p["cutStyle"] = {"preset": "clean", "seed": 42}
+    cut = tl.segments[1].out_start
+    _, decisions = variation.resolve(p, tl)
+    band = 6
+    assert all(abs(row["t0"] - cut) >= band for row in decisions["framing"][1:])
+    assert decisions["framing"][0]["t0"] == 0

@@ -103,6 +103,8 @@ export class FakeHost implements EngineHost {
   engineAssets = false;
   songInfo: any = { duration: 120, bpm: 92, energy: 'calm', tags: ['calm', 'warm'], suggestedStartAt: 7.5, arrivals: [{ at: 30, riseDb: 6 }], curve: [[0, -20]] };
   renderExtra: any = {};
+  /** `match-joins`: the first words of the ranges whose join lines up as a match cut */
+  matchable = new Set<string>();
   /** runs after a render wrote its files, before it reports (Stop or a crash mid-render) */
   afterRenderFiles?: (r: { draft: boolean; dir: string }) => Promise<void> | void;
   /** what `inspect-render` answers per render id: that render's word times and layer records */
@@ -146,6 +148,13 @@ export class FakeHost implements EngineHost {
         return { keep: p.cut.keep };
       }
       case 'lint-edit': return { fixed: [], issues: [] };
+      case 'match-joins': {
+        const keep = args.includes('--keep') ? JSON.parse(args[args.indexOf('--keep') + 1]) : p.cut.keep;
+        const every = args.includes('--every');
+        return { joins: keep.flatMap((k: any, i: number) => (i && !('clip' in k) && (every || k.join?.transition === 'match')
+          ? [this.matchable.has(k.from) ? { keep: i, matched: true, at: i * 2 } : { keep: i, matched: false, at: i * 2, why: 'the speaker moves too much across the cut' }]
+          : [])) };
+      }
       case 'render': {
         if (this.failRender) throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' };
         // docs/versions.md: a draft goes to --out (default versions/preview/) and never bumps the

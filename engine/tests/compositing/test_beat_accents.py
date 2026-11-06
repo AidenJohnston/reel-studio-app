@@ -119,6 +119,9 @@ def test_hyper_opts_in_without_cut_style_dependency(tmp_path, click_track):
         assert times(ctx) == before
     ctx.project["cutStyle"] = {"preset": "hyper"}
     assert times(ctx) == pytest.approx([*TARGETS, *TARGETS], abs=1 / 30)
+    # fails if the person can't turn the fast pace's beat landing off
+    ctx.project["beatAccents"] = False
+    assert times(ctx) == before
 
 
 def test_music_start_disabled_and_beatless_music(tmp_path, click_track):

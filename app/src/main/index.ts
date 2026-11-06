@@ -89,6 +89,8 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createProxyBuilds } from './proxy-builds'
+import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
 import { createUsage, editScore, postViews, usageCode } from './usage'
 import { createLiveMoments, createLiveVideos } from './live-video'
@@ -118,7 +120,7 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -231,6 +233,25 @@ const renderSlot = withRenderSlot(
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
 const runEngine: RunEngine = renderSlot.run
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid, project) => {
+        pidRegistry?.add(pid, project)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,
@@ -290,8 +311,12 @@ let sleptAt = 0
 const editorName = (p: { id: string } | null): string | null =>
   p?.id === 'claude-cli' || p?.id === 'claude' ? 'Claude' : p?.id === 'chatgpt' ? 'ChatGPT' : null
 const pauseCtx = (kind: 'first-edit' | 'note', startedAt: number, editor: string | null) => ({ kind, online: net.isOnline(), slept: sleptAt > startedAt, editor })
-/** Reels being deleted: nothing continues them (continuePaused). */
+/** Reels being deleted: nothing continues them (continuePaused) or starts their preview copies. */
 const removing = new Set<string>()
+/** Starts the reel's preview copy build (proxy-builds.ts) unless the reel is being deleted. */
+function startProxy(slug: string, dir: string): void {
+  if (!removing.has(slug)) proxies.start(slug, dir)
+}
 
 /** Continues a paused reel: Version 1 starts again where it stopped (listening kept); waiting notes run on. */
 async function continuePaused(slug: string): Promise<void> {
@@ -400,6 +425,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
         prepared()
       }
       const before = (await readProject(slug)).version ?? 0
+      startProxy(slug, dir) // a project from before preview copies existed gets them now
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
@@ -688,6 +714,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -1515,6 +1542,26 @@ function registerIpc(): void {
     return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
+  // How often each pace would change the picture of this reel, from the plan a render makes (engine pace-preview), for
+  // the edit drawer's Pace: shown before the version is made, so the choice isn't blind.
+  handle('projects:pacePreview', async (_e, slug: string): Promise<PacePreview> => {
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('pace-preview', owned(['--project', projectDir(slug)], owner))
+    const paces: PacePreview['paces'] = {}
+    for (const [k, v] of Object.entries((r?.paces ?? {}) as Record<string, any>)) {
+      if (Number.isFinite(v?.perMinute) && Number.isInteger(v?.opening) && Number.isInteger(v?.openingMax)) paces[k] = { perMinute: v.perMinute, opening: v.opening, openingMax: v.openingMax }
+    }
+    return { paces }
+  })
+  // Whether the cut into each range lines up as a match cut (engine match-joins; engine/reelengine/match.py), for the
+  // edit drawer's Transitions. `keep`: the cut as the drawer has it, checked before it becomes a version.
+  handle('projects:matchJoins', async (_e, slug: string, keep: unknown): Promise<MatchVerdict[]> => {
+    if (!Array.isArray(keep) || keep.length > 2000) throw { code: 'BAD_CUT', userMessage: 'That cut could not be checked. Try again.' }
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner))
+    return Array.isArray(r?.joins) ? r.joins.filter((j: any) => Number.isInteger(j?.keep) && typeof j?.matched === 'boolean')
+      .map((j: any) => ({ keep: j.keep, matched: j.matched, ...(typeof j.why === 'string' ? { why: j.why } : {}) })) : []
+  })
 
   // More reels from this video (main/propose-reels.ts)
   const reelsDeps = (): ReelsDeps => ({ jobs, ai, startFirstEdit: (slug, init) => startFirstEdit(slug, init) })
@@ -1536,8 +1583,12 @@ function registerIpc(): void {
     try {
       await coverScans.stop(slug)
       await noteQueue.remove(slug, async () => {
+        // after the reel's jobs have ended, so none can start a build behind this; a build that won't stop refuses
+        await proxies.stop(slug)
         await fs.rm(noteStagingDir(projectDir(slug)), { recursive: true, force: true })
-        await fs.rm(projectDir(slug), { recursive: true, force: true })
+        // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+        // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+        await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
       })
     } finally {
       removing.delete(slug)
@@ -1884,7 +1935,10 @@ function createWindow(): BrowserWindow {
     }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
   )
   void loadSettings().then((s) => showTimelineInMenu(s.timeline), () => undefined)
-  created.once('ready-to-show', () => created.show())
+  created.once('ready-to-show', () => {
+    performance.mark(WINDOW_SHOWN) // app/perf times launch to here
+    created.show()
+  })
   // Stop flashing the taskbar once the person is back.
   created.on('focus', () => created.flashFrame(false))
   // The animation renderer keeps a hidden offscreen window; it must not keep the app alive.
