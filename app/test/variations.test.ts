@@ -37,6 +37,8 @@ describe('one-thing variations beyond the pace', () => {
   const reel = { cut: { keep: [{ from: 'a', to: 'n9' }] }, cover: { atSourceTime: 1.6, source: 's1', text: null } } as any
 
   it('fails if brightness is not 8% each way from the reel’s own exposure, or sets anything else', () => {
+    // at the brightest a reel can be, only the darker one is offered (the brighter would be refused when queued)
+    expect(variations({ ...reel, exposure: 8 }, 'brightness')!.map((v) => v.edit.set[0].value)).toEqual([7.36])
     const list = variations({ ...reel, exposure: 1.25 }, 'brightness')!
     expect(list.map((v) => v.edit.set)).toEqual([[{ path: ['exposure'], value: 1.35 }], [{ path: ['exposure'], value: 1.15 }]])
     expect(list.map((v) => v.summary)).toEqual(['Variation: 8% brighter', 'Variation: 8% darker'])

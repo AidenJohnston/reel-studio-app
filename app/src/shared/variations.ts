@@ -22,6 +22,8 @@ const PACES: CutPreset[] = ['clean', 'standard', 'hyper']
 const MOMENT_SETS = 3
 /** variation.py make_variant's brightness trial: +8% or -8% exposure. */
 const BRIGHTNESS_STEP = 0.08
+/** The exposure a reel can have (project.schema.json, shared/hand-edit.ts): a step past either end is not offered. */
+const EXPOSURE = { min: 0.125, max: 8 }
 /** A first sentence longer than this many words is not an opening line to drop; nor is a reel that would keep fewer. */
 const MAX_OPENING_WORDS = 30
 const MIN_WORDS_LEFT = 8
@@ -70,10 +72,14 @@ export function variations(p: Reel, kind: VariationKind, words: Word[] = [], ran
     }
     case 'brightness': {
       const base = p.exposure ?? 1
-      return [1, -1].map((sign) => ({
-        edit: edit({ set: [{ path: ['exposure'], value: round(base * (1 + sign * BRIGHTNESS_STEP)) }] }),
-        summary: `Variation: ${Math.round(BRIGHTNESS_STEP * 100)}% ${sign > 0 ? 'brighter' : 'darker'}`
-      }))
+      const list = [1, -1]
+        .map((sign) => ({ sign, value: round(base * (1 + sign * BRIGHTNESS_STEP)) }))
+        .filter(({ value }) => value >= EXPOSURE.min && value <= EXPOSURE.max)
+        .map(({ sign, value }) => ({
+          edit: edit({ set: [{ path: ['exposure'], value }] }),
+          summary: `Variation: ${Math.round(BRIGHTNESS_STEP * 100)}% ${sign > 0 ? 'brighter' : 'darker'}`
+        }))
+      return list.length ? list : null
     }
     case 'hook': {
       const said = kept(p, words)

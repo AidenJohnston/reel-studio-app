@@ -183,10 +183,17 @@ export async function findPastEdits(deps: FindDeps): Promise<Look> {
     const k = kindOf(path)
     return st && st.isDirectory() === k.folder ? { path, st, k } : null
   })
-  // one row per CapCut project: draft_content.json where both are there
-  const drafts = new Set(seen.filter((x) => x?.k.kind === 'capcut').map((x) => x!.path))
-  const twin = (p: string) => /draft_info\.json$/i.test(p) && drafts.has(join(dirname(p), 'draft_content.json'))
-  const candidates = seen.filter((x): x is NonNullable<typeof x> => x !== null && !twin(x.path)).sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)
+  // one row per CapCut project, found by its draft but read as the folder: the engine picks the draft in it that is
+  // plain JSON (reference_import._capcut_draft), since JianYing encrypts draft_content.json beside a plain draft_info.json
+  const projects = new Set<string>()
+  const candidates = []
+  for (const c of seen.filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)) {
+    if (c.k.kind !== 'capcut') candidates.push(c)
+    else if (!projects.has(dirname(c.path))) {
+      projects.add(dirname(c.path))
+      candidates.push({ ...c, path: dirname(c.path) })
+    }
+  }
   // XML is everywhere; only the newest are opened to see whether Premiere Pro wrote them
   const xml = candidates.filter((c) => c.k.kind === 'premiere-xml' && c.st.size <= XML_MAX_BYTES)
   if (xml.length > lim.sniff) cut = true
@@ -203,10 +210,10 @@ export async function findPastEdits(deps: FindDeps): Promise<Look> {
     .map(({ path, st, k }) => ({
       id: idOf(path),
       path,
-      // a CapCut project by its folder's name, and the lesson's name for it (main style-learn.ts nameOf)
-      name: k.kind === 'capcut' ? basename(dirname(path)) : basename(path, extname(path)),
-      file: k.kind === 'capcut' ? `${basename(dirname(path))}/${basename(path)}` : basename(path),
-      where: k.kind === 'capcut' && IN_CAPCUT.test(path) ? 'CapCut' : whereOf(k.kind === 'capcut' ? dirname(path) : path, deps.home),
+      // a CapCut project by its folder's name (path is the folder here)
+      name: k.kind === 'capcut' ? basename(path) : basename(path, extname(path)),
+      file: basename(path),
+      where: k.kind === 'capcut' && IN_CAPCUT.test(path) ? 'CapCut' : whereOf(path, deps.home),
       app: k.app,
       kind: k.kind,
       modified: new Date(st.mtimeMs).toISOString(),

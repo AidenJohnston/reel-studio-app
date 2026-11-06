@@ -54,12 +54,13 @@ describe('Learn from my past edits: finding them', () => {
         mkdirSync(join(projects, folder), { recursive: true })
         for (const f of files) writeFileSync(join(projects, folder, f), '{}')
       }
-      // CapCut on a Mac writes draft_info.json; some builds keep draft_content.json beside it
+      // CapCut on a Mac writes draft_info.json; some builds keep draft_content.json beside it, which JianYing encrypts,
+      // so the project is listed as its folder and the engine picks the readable draft in it
       draft('Bread reel', ['draft_content.json', 'draft_info.json', 'draft_meta_info.json'])
       draft('.recycle_bin', ['draft_content.json'])
       const look = await findPastEdits({ platform, home, spotlight: null })
-      expect(shape(look.edits)).toEqual([['Bread reel/draft_content.json', 'CapCut', 'capcut', true, 'CapCut']])
-      expect(look.edits[0].name).toBe('Bread reel')
+      expect(shape(look.edits)).toEqual([['Bread reel', 'CapCut', 'capcut', true, 'CapCut']])
+      expect(look.edits[0].path).toBe(join(projects, 'Bread reel'))
     }
   })
 

@@ -41,15 +41,15 @@ describe('Learn from my past edits', () => {
     ])
   })
 
-  // DaVinci Resolve starts a timeline at 01:00:00:00, and its FCPXML and EDL place clips from there
-  it('fails if a timeline that starts at one hour is read as an hour long, or its opening title is missed', () => {
+  // DaVinci Resolve starts a timeline at 01:00:00:00, and its FCPXML places clips from there
+  it('fails if an FCPXML timeline that starts at one hour is read as an hour long, or its opening title is missed', () => {
     const h = 3600
     const main = Array.from({ length: 10 }, (_, i) => clip(h + i * 2, 2))
     const lesson = learnStyle([
-      record([
-        { name: '0', kind: 'Video', items: main },
-        { name: '1', kind: 'Video', items: [title(h + 0.5)] }
-      ])
+      {
+        source: { adapter: 'fcpx_xml', writer: 'DaVinci Resolve' },
+        timelines: [{ name: 'Timeline 1', globalStart: { value: h * 25, rate: 25 }, tracks: [{ name: '0', kind: 'Video', items: main }, { name: '1', kind: 'Video', items: [title(h + 0.5)] }] }]
+      }
     ])
     expect(lesson.rules.map((r) => r.text)).toEqual([
       'Keep reels around 20 seconds.',
@@ -57,6 +57,13 @@ describe('Learn from my past edits', () => {
       'Use straight cuts between shots, no transitions.',
       'Open with a title on screen in the first few seconds.'
     ])
+  })
+
+  it('fails if a blank lead-in on a Premiere timeline is dropped, making a later title an opening one', () => {
+    const main = Array.from({ length: 10 }, (_, i) => clip(5 + i * 2, 2))
+    const lesson = learnStyle([record([{ name: '0', kind: 'Video', items: main }, { name: '1', kind: 'Video', items: [title(5.5)] }])])
+    expect(lesson.rules[0].text).toBe('Keep reels around 25 seconds.')
+    expect(lesson.rules.map((r) => r.text)).not.toContain('Open with a title on screen in the first few seconds.')
   })
 
   it('fails if a song on an EDL, which names clips but not their files, is not heard as music', () => {

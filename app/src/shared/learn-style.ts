@@ -19,6 +19,8 @@ export interface RefTrack {
 }
 export interface RefTimeline {
   name: string
+  /** The timeline's start timecode; FCPXML places clips from it (a Resolve timeline starts at 01:00:00:00). */
+  globalStart?: Time
   tracks: RefTrack[]
 }
 /** The engine's readers: OpenTimelineIO's FCPXML and FCP7 XML adapters, CapCut's draft, a CMX 3600 EDL. */
@@ -62,11 +64,14 @@ interface Read {
   music: boolean
 }
 
-function read(tl: RefTimeline): Read {
+/** `fromStart`: clip times count from the timeline's start timecode, as FCPXML's do; the other readers already give
+ * them from zero, so a blank lead-in stays part of the timeline. */
+function read(tl: RefTimeline, fromStart: boolean): Read {
   const main = mainTrack(tl)
   const placed = tl.tracks.flatMap((t) => t.items.filter((i) => i.type !== 'transition'))
-  // times from the timeline's first clip: DaVinci Resolve starts a timeline at 01:00:00:00 and its FCPXML says so
-  const origin = placed.length ? Math.min(...placed.map((i) => secs(i.trackRange?.start ?? null))) : 0
+  // never past the first clip, so a start timecode that disagrees with the clips can't make times negative
+  const first = placed.length ? Math.min(...placed.map((i) => secs(i.trackRange?.start ?? null))) : 0
+  const origin = fromStart ? Math.min(secs(tl.globalStart ?? null), first) : 0
   const length = Math.max(0, ...placed.map((i) => secs(i.trackRange?.start ?? null) + secs(i.trackRange?.duration ?? null) - origin))
   const mainItems = main?.items ?? []
   const shots = mainItems.filter((i) => i.type !== 'transition' && i.media?.kind !== 'generator').map((i) => secs(i.trackRange?.duration ?? null)).filter((d) => d > 0)
@@ -91,7 +96,7 @@ export interface Lesson {
 
 /** The rules a set of exported timelines show, in the order a person would check them. */
 export function learnStyle(records: ImportRecord[]): Lesson {
-  const reads = records.flatMap((r) => r.timelines).map(read).filter((r) => r.length > 0)
+  const reads = records.flatMap((r) => r.timelines.map((tl) => read(tl, r.source.adapter === 'fcpx_xml'))).filter((r) => r.length > 0)
   const n = reads.length
   const shots = reads.flatMap((r) => r.shots)
   const rules: LearnedRule[] = []
