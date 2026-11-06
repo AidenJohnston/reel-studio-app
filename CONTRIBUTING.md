@@ -17,8 +17,15 @@ See "Build from source" in the [README](README.md). The short version:
 
 ```
 npm install && npm run build -w ai
-cd engine && python -m venv .venv && .venv/bin/pip install -e ".[dev]"    # Windows: .venv\Scripts\pip
+cd engine
+uv venv --python 3.11 --managed-python
+uv pip install --python .venv -c requirements.txt -e ".[dev]"
 ```
+
+[uv](https://docs.astral.sh/uv/) is what CI uses; the same lines work in PowerShell and on macOS. `--managed-python`
+keeps uv from picking another Python 3.11 on the computer (an Anaconda one crashes the speech model on Windows).
+`-c requirements.txt` installs the engine's exact pins, the ones the installer ships
+(`packaging/requirements-runtime.hashed.txt`, which adds a hash to each).
 
 If you work on `reelengine import-reference` or run its tests, install `.[dev,reference]` instead.
 
