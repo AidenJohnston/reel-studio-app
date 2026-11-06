@@ -116,7 +116,7 @@ export function JoinControls({ d, now, change, placed, next }: TabProps) {
         )}
         {rows.length > 0 && (
           <p className="edit-hint">
-            J lets the next part be heard first, L lets the sound run on, Smash hits the cut with a sound. Match is kept only where both sides line up.
+            J lets the next part be heard first, L lets the sound run on, Smash hits the cut with a sound, Flash dips to white. Match is kept only where both sides line up.
           </p>
         )}
       </div>

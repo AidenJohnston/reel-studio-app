@@ -1416,7 +1416,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_cut',
-    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l, smash or match. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range. A match is refused where its two sides do not line up; find_match_cuts says where they do.',
+    description: 'Replace the whole cut. keep = inclusive word-id ranges in OUTPUT order. Optional joins after the first range: hard, j, l, smash, match or flash. J/L frames are clamped by the engine to available source handles; 6-12 frames is a starting range. A match is refused where its two sides do not line up; find_match_cuts says where they do.',
     parameters: S.obj({ keep: S.arr(S.obj({
       ...ANCHOR.properties,
       join: S.opt(S.obj({

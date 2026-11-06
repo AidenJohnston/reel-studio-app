@@ -1368,6 +1368,28 @@ def source_files(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
     return src_meta, src_paths
 
 
+# A flash join (Resolve's "dip to color", in white): the picture fades to white over FLASH_IN frames before the cut
+# and back over FLASH_OUT after it. It is a layer like any picture, so a draft, a window and the final draw it the
+# same, and captions stay on top of it. Frame counts judged by eye in other editors' presets (2 in, 3 out); no
+# measurement behind them.
+FLASH_IN, FLASH_OUT, FLASH_Z = 2, 3, 10_000
+
+
+def flash_layers(ctx: RenderCtx, segments: list) -> list:
+    cuts = [s.out_start for s in segments[1:] if s.join_transition == "flash"]
+    if not cuts:
+        return []
+    from PIL import Image
+    png = Path(ctx.work) / "render" / "flash.png"
+    if not png.exists():
+        png.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (16, 16), (255, 255, 255)).save(png)
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    fps = float(ctx.fmt["fps"])
+    return [Layer(path=png, kind="image", t0=max(0.0, t - FLASH_IN / fps), t1=t + FLASH_OUT / fps, x=0, y=0, w=W, h=H,
+                  z=FLASH_Z, fade_in=FLASH_IN / fps, fade_out=FLASH_OUT / fps) for t in cuts]
+
+
 def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
     """(layers, zooms, layer items, raw b-roll, broll_report): the b-roll layers and zooms (A2) drawn
     over the cut. The layer items are the records build_layers wrote to work/layers/layers.json, which
@@ -1403,6 +1425,7 @@ def overlays(ctx: RenderCtx, proj: dict, tl, warnings: list) -> tuple:
         except Exception as exc:   # noqa: BLE001
             log(f"# zoom.build_zooms failed: {exc!r}")
             warnings.append(ZOOMS_FAILED)
+    layers += flash_layers(ctx, tl.segments)
     return layers, zooms, layer_items, raw_broll, broll_report
 
 

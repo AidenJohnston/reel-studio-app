@@ -55,10 +55,16 @@ CACHE_FILE = "match-joins.json"
 CACHE_LIMIT = 256
 
 
+# Below this spread (grey 0..1) a region has no shape to compare: blurring a flat frame leaves float noise that
+# would otherwise normalise into a pattern and match itself.
+FLAT = 1e-3
+
+
 def _unit(a: np.ndarray) -> np.ndarray:
+    if float(a.std()) < FLAT:
+        return np.zeros_like(a)
     a = a - a.mean()
-    n = float(np.linalg.norm(a))
-    return a / n if n > 1e-6 else np.zeros_like(a)
+    return a / float(np.linalg.norm(a))
 
 
 def describe(gray: np.ndarray) -> dict:

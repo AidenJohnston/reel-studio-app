@@ -32,7 +32,7 @@ AFTER_SHARE = 0.08      # of the kept air, at most this much stays with the OUTG
 HEAD_LEAD = 0.10        # air before the very first word of the video
 TAIL_KEEP = 0.35        # ring-out after the very last word
 EPS = 1e-6
-TRANSITIONS = ("hard", "j", "l", "smash", "match")
+TRANSITIONS = ("hard", "j", "l", "smash", "match", "flash")
 MATCH_HOLD = 0.3        # seconds either side of a match cut where a framing change would undo it
 
 

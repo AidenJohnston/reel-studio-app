@@ -3,19 +3,20 @@
 // joinProblem against the AI's own validateProject. No Node or DOM imports.
 import type { Word } from './api'
 
-export const TRANSITIONS = ['hard', 'j', 'l', 'smash', 'match'] as const
+export const TRANSITIONS = ['hard', 'j', 'l', 'smash', 'match', 'flash'] as const
 export type Transition = (typeof TRANSITIONS)[number]
 export interface Join { transition: Transition; frames: number }
 export type KeepRange = { from: string; to: string; join?: Join }
 
 // J and L are the names editors already use; the hint under the list says what each does.
-export const TRANSITION_LABELS: Record<Transition, string> = { hard: 'Plain', j: 'J', l: 'L', smash: 'Smash', match: 'Match' }
+export const TRANSITION_LABELS: Record<Transition, string> = { hard: 'Plain', j: 'J', l: 'L', smash: 'Smash', match: 'Match', flash: 'Flash' }
 export const TRANSITION_HINTS: Record<Transition, string> = {
   hard: 'Picture and sound cut together.',
   j: 'You hear the next part a moment before you see it.',
   l: 'The sound runs on a moment over the next picture.',
   smash: 'A hard hit: a sound on the cut and the music dips.',
-  match: 'The cut lands where both sides line up, so it hides.'
+  match: 'The cut lands where both sides line up, so it hides.',
+  flash: 'The picture dips to white for a moment on the cut.'
 }
 /** Frames a hand-picked J or L asks for; the engine clamps them to the room it has (ai/prompts/system.md: 6 to 12). */
 export const BRIDGE_FRAMES = 8
@@ -25,7 +26,7 @@ export function joinProblem(join: unknown, index: number): string | null {
   if (index === 0) return 'not allowed on the first range'
   if (!join || typeof join !== 'object') return 'needs transition and frames'
   const j = join as Record<string, unknown>
-  if (!(TRANSITIONS as readonly unknown[]).includes(j.transition)) return 'transition must be hard, j, l, smash or match'
+  if (!(TRANSITIONS as readonly unknown[]).includes(j.transition)) return 'transition must be hard, j, l, smash, match or flash'
   if (!Number.isSafeInteger(j.frames) || (j.frames as number) < 0) return 'frames must be a non-negative integer'
   return null
 }
