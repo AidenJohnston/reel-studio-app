@@ -622,7 +622,7 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
         <span className="nk">
           <span className="wait-dot" />
         </span>
-        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}, on Version ${on}`}</span>
+        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}, ${q.branch !== undefined ? `changing Version ${q.branch}` : `on Version ${on}`}`}</span>
         {draft === null && (
           <>
             {canAdd && !q.hand && !q.attachments.length && (

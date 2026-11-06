@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
@@ -164,6 +164,8 @@ export interface AI {
     opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number; steer?: NoteSteer }
   ): Promise<AgentResult>
   mergeVersions?(projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult & { edit: ProjectJson; report: string[] }>
+  /** The parts two saved versions differ in. Optional: older packages lack it. */
+  mergeLayers?(projectDir: string, ours: number, theirs: number): Promise<MergeLayer[]>
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
   wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult>

@@ -121,6 +121,7 @@ const api: ReelApi = {
     resume: (slug, basic) => call('projects:resume', slug, basic),
     note: (slug, text, attachments, moment, onVersion, base, steer) => call('projects:note', slug, text, attachments, moment, onVersion, base, steer),
     mergeVersions: (slug, request) => call('projects:mergeVersions', slug, request),
+    mergeLayers: (slug, ours, theirs) => call('projects:mergeLayers', slug, ours, theirs),
     timeline: (slug, n) => call('projects:timeline', slug, n),
     versionRows: (slug, n) => call('projects:versionRows', slug, n),
     update: (slug, patch) => call('projects:update', slug, patch),

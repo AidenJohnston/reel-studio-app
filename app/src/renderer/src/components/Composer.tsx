@@ -57,6 +57,7 @@ export function Composer({
   connect,
   onSend,
   onAdd,
+  base,
   onStop,
   onRunNext,
   onClear,
@@ -104,6 +105,8 @@ export function Composer({
   onSend: () => void
   /** ⌘/Ctrl+Enter: into the version being made now (Add now); absent when nothing can take it */
   onAdd?: () => void
+  /** the older version the next note changes (Versions > Change this one), and how to go back to the newest */
+  base?: { n: number; onClear: () => void } | null
   onStop: () => void
   onRunNext: () => void
   onClear: () => void
@@ -212,6 +215,22 @@ export function Composer({
       </div>
       {connect ?? (
         <>
+          {base && (
+            <span className="base-chip" data-testid="note-base">
+              Changes Version {base.n}
+              <button
+                className="x"
+                aria-label={`Change the newest version instead of Version ${base.n}`}
+                onClick={() => {
+                  base.onClear()
+                  inputRef.current?.focus()
+                }}
+                data-testid="note-base-clear"
+              >
+                <Icon name="x" size={12} stroke={2} />
+              </button>
+            </span>
+          )}
           <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
           {alert && (
             <p className="cin-alert" role="alert" data-testid="change-alert">

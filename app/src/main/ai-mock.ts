@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { Phase, StyleProposal, StyleRule } from '../shared/api'
+import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -165,7 +166,7 @@ export const createMockAI: CreateAI = ({ host }) => {
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
-  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer }): Promise<AgentResult> {
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer; base?: number; mergeParent?: number }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
@@ -195,7 +196,9 @@ export const createMockAI: CreateAI = ({ host }) => {
       await writeJson(copy, edit)
     }
     onEvent({ type: 'status', message: 'Making the final version', pct: 0, phase: 'final' })
-    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
+    // a note on an older version, or a combination of two, records the version(s) it came from (version-tree)
+    const from = [...(opts?.base !== undefined ? ['--parent', String(opts.base)] : []), ...(opts?.mergeParent !== undefined ? ['--merge-parent', String(opts.mergeParent)] : [])]
+    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...from, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
     const version = Number(r?.version)
     if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     const done = JSON.parse(await fs.readFile(copy, 'utf8'))
@@ -431,6 +434,14 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
 
     // this stand-in has no fast path: every note goes through applyNote above
+    async mergeVersions(projectDir, request, onEvent, signal, opts) {
+      const r = await slowNote(projectDir, `Combine Version ${request.ours} and Version ${request.theirs}`, onEvent, signal, { ...opts, base: request.ours, mergeParent: request.theirs })
+      return { ...r, summary: `Combined Version ${request.ours} and Version ${request.theirs}.`, edit: await readProject(projectDir), report: [] }
+    },
+    // the practice editor keeps no version snapshots to compare, so every part is a choice
+    async mergeLayers() {
+      return [...MERGE_LAYERS]
+    },
     async wholeReelSetting() {
       return false
     },

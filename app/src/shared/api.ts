@@ -840,11 +840,15 @@ export interface CloudDrive {
   label: 'iCloud Drive' | 'Google Drive'
 }
 
+/** The parts of a version that can come from either of two when combining them (ai version-merge.ts MERGE_FIELDS). */
+export type MergeLayer = 'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover'
+export const MERGE_LAYERS: readonly MergeLayer[] = ['cut', 'captions', 'music', 'zooms', 'broll', 'sfx', 'cover']
+
 /** version-merge: which version each layer of the new one comes from (docs/version-merge.md). */
 export interface MergeRequest {
   ours: number
   theirs: number
-  take: Record<'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover', 'ours' | 'theirs'>
+  take: Record<MergeLayer, 'ours' | 'theirs'>
 }
 
 export interface ReelApi {
@@ -981,6 +985,8 @@ export interface ReelApi {
     note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number, steer?: boolean): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }>
     /** One version's layers with another's, as a new version (docs/version-merge.md). */
     mergeVersions(slug: string, request: MergeRequest): Promise<{ jobId: string }>
+    /** The parts two saved versions differ in, so Combine asks only about those. */
+    mergeLayers(slug: string, ours: number, theirs: number): Promise<MergeLayer[]>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
      * fresh from that render's manifest each call, with the segments it was cut from. null when the render
      * left no timeline to read. */

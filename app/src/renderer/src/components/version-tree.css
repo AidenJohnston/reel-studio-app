@@ -1,0 +1,50 @@
+/* Versions: the reel's versions as a tree (VersionTree.tsx). Rows are one height so the lines between them join. */
+.vt { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; flex: 1; }
+.vt-row { display: flex; align-items: center; gap: 8px; min-height: 48px; height: 48px; padding-right: 4px; border-radius: 10px; min-width: 0; }
+.vt-lanes { flex: none; align-self: stretch; height: 48px; }
+.vt-lanes line, .vt-lanes path { stroke: var(--line-strong); stroke-width: 1.5; fill: none; }
+.vt-lanes circle { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.5; }
+.vt-row.on .vt-lanes circle { fill: var(--ink); stroke: var(--ink); }
+.vt-row.base .vt-lanes circle { stroke: var(--marker-ink); stroke-width: 2; }
+
+.vt-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 100%; border: 0; background: none;
+  padding: 0 4px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: 8px;
+}
+.vt-l1 { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: var(--fs-base); line-height: var(--lh-base); }
+.vt-l1 b { font-weight: 650; white-space: nowrap; }
+.vt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); min-width: 0; }
+.vt-l2 { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vt-row.on .vt-main b { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+
+/* the row's actions show on hover or focus, and always on a touch screen or the version on screen */
+.vt-acts { display: flex; gap: 10px; flex: none; opacity: 0; transition: opacity 120ms ease; }
+.vt-acts .lk { border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.vt-acts .lk:disabled { color: var(--ink-4); cursor: default; }
+.vt-row:focus-within .vt-acts, .vt-row.on .vt-acts { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .vt-row:hover { background: var(--wash); }
+  .vt-row:hover .vt-acts { opacity: 1; }
+  .vt-acts .lk:not(:disabled):hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+}
+@media (hover: none) { .vt-acts { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .vt-acts { transition: none; } }
+
+/* the notes header's Notes | Versions switch sits at its far end */
+.notes-h .segmented { margin-left: auto; }
+
+/* in the note box: the version the next note changes, when it is not the newest */
+.base-chip {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; height: 24px; padding: 0 4px 0 9px; margin: 0 0 6px 8px; border-radius: 7px;
+  background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600;
+}
+.base-chip .x { border: 0; background: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--ink-3); cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .base-chip .x:hover { background: var(--wash); color: var(--ink); } }
+
+/* Combine */
+.cb-with { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.cb-with .input { max-width: 200px; }
+.cb-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cb-part { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }
+.cb-part > span { font-weight: 600; }
+.cb-same { font-size: var(--fs-sm); }

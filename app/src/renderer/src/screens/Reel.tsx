@@ -10,7 +10,8 @@ import { pausedSentence, pausedWords } from '../../../shared/pause'
 import type { Step } from '../../../shared/steps'
 import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
-import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Spinner } from '../components/ui'
+import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Segmented, Spinner } from '../components/ui'
+import { CombineDialog, VersionTree } from '../components/VersionTree'
 import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
 import { PhonePlayer } from '../components/Player'
@@ -128,6 +129,10 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const [warmOriginal, setWarmOriginal] = useState(false)
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const [compare, setCompare] = useState<{ a: number; b: number } | null>(null)
+  // Versions: the older version the next note changes, the notes column's view, and Combine's starting version
+  const [base, setBase] = useState<number | null>(null)
+  const [notesView, setNotesView] = useState<'notes' | 'versions'>('notes')
+  const [combine, setCombine] = useState<number | null>(null)
   const [landed, setLanded] = useState<number | null>(null)
   const [unwatched, setUnwatched] = useState<number | null>(null)
   // the version whose arrival crosses over the one on screen
@@ -505,7 +510,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
   const autoMoment = stoppedOn && !playing && hasVersions && !chip
 
   const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined, add: boolean) => {
-    const r = await reel.projects.note(slug, text, files, moment, version?.n, undefined, add || undefined)
+    const on = !add && base !== null && base !== latestN ? base : undefined
+    const r = await reel.projects.note(slug, text, files, moment, version?.n, on, add || undefined)
+    setBase(null)
     if (add && r.added === false) notify('That version was already being saved, so your note runs next on its own.', 'info')
     if (r.jobId) setJob((cur) => (cur?.jobId === r.jobId ? cur : { ...EMPTY_LIVE, jobId: r.jobId, message: 'Reading your note' }))
     await load()
@@ -703,7 +710,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     const i = d.versions.findIndex((v) => v.n === b)
     if (i < 1) return
     setPointing(false)
-    setCompare({ a: d.versions[i - 1].n, b })
+    // against the version it was made from: on a branch that is not the one numbered just before it
+    setCompare({ a: d.versions[i].parent ?? d.versions[i - 1].n, b })
     setSelected(b)
   }
 
@@ -729,7 +737,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     hasVersions,
     making: making !== null,
     busy: !!job,
-    ...(addable ? { addKeys: `${MOD}Enter` } : {})
+    ...(addable && base === null ? { addKeys: `${MOD}Enter` } : {}),
+    ...(base !== null && base !== latestN ? { base } : {})
   })
   const showComposer = (planned && !aiOff) || hasVersions || first?.kind === 'making'
   const planCard = d.plan && (
@@ -793,6 +802,19 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
       {older && !compare && (
         <Button kind="tertiary" size="small" onClick={() => watch(latestN!)} data-testid="version-latest">
           Back to latest
+        </Button>
+      )}
+      {older && !compare && !aiOff && base !== older.n && (
+        <Button
+          kind="tertiary"
+          size="small"
+          onClick={() => {
+            setBase(older.n)
+            noteField.current?.focus()
+          }}
+          data-testid="version-change-this"
+        >
+          Change this one
         </Button>
       )}
     </span>
@@ -1042,8 +1064,20 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
           ) : (
             <>
               <div className="notes-h">
-                <h2>{planned ? 'Plan with your editor' : 'Notes for your editor'}</h2>
+                <h2>{planned ? 'Plan with your editor' : notesView === 'versions' && d.versions.length > 1 ? 'Versions' : 'Notes for your editor'}</h2>
                 {planned && !aiOff && <PlanWho provider={provider} />}
+                {!planned && d.versions.length > 1 && (
+                  <Segmented
+                    label="Show"
+                    value={notesView}
+                    options={[
+                      { key: 'notes', label: 'Notes' },
+                      { key: 'versions', label: 'Versions' }
+                    ]}
+                    onPick={setNotesView}
+                    testid="notes-view"
+                  />
+                )}
               </div>
               {planned && !providerChecked ? null : planned && aiOff ? (
                 <PlanEmpty
@@ -1053,6 +1087,20 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                     markPlanConnect(slug)
                     connect()
                   }}
+                />
+              ) : notesView === 'versions' && d.versions.length > 1 ? (
+                <VersionTree
+                  versions={d.versions}
+                  shown={onScreen?.n ?? version?.n ?? null}
+                  nameOf={nameOf}
+                  busy={!!job}
+                  base={base}
+                  onPlay={watch}
+                  onChange={(n) => {
+                    setBase(n === latestN ? null : n)
+                    noteField.current?.focus()
+                  }}
+                  onCombine={setCombine}
                 />
               ) : (
                 <NotesLog
@@ -1184,7 +1232,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                       ) : null
                     }
                     onSend={() => void send()}
-                    onAdd={addable && !att.chips.length ? () => void send(true) : undefined}
+                    onAdd={addable && base === null && !att.chips.length ? () => void send(true) : undefined}
+                    base={base !== null && base !== latestN ? { n: base, onClear: () => setBase(null) } : null}
                     onStop={() => job?.jobId && void reel.jobs.cancel(job.jobId)}
                     onRunNext={() => void reel.queue.runNext(slug).catch((e) => notify(userMessage(e), 'error'))}
                     onClear={() => void reel.queue.clear(slug).catch((e) => notify(userMessage(e), 'error'))}
@@ -1197,6 +1246,20 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
         </div>
       </div>
 
+      {combine !== null && (
+        <CombineDialog
+          slug={slug}
+          versions={d.versions}
+          ours={combine}
+          onClose={() => setCombine(null)}
+          onStarted={(jobId) => {
+            setCombine(null)
+            setNotesView('notes')
+            setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Combining the two versions' }))
+            void load()
+          }}
+        />
+      )}
       {confirmDelete && (
         <Confirm
           title="Delete this reel?"

@@ -9,7 +9,8 @@ import {
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore, StyleProposal, StyleRule } from './style';
-import { loadProject, writeFileAtomic } from './project';
+import { loadProject, versionDir, writeFileAtomic } from './project';
+import { differingLayers, type MergeLayer } from './version-merge';
 import { planFastNote } from './fastnote';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL, SMALL_CLAUDE_MODEL } from './providers/anthropic';
 import { ClaudeCliProvider, CodexCliProvider, extractJson } from './providers/cli';
@@ -1087,6 +1088,11 @@ export function createAI(opts: CreateAIOptions) {
     },
     async mergeVersions(projectDir: string, request: import('./version-merge').MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string; id?: string } = {}): Promise<editor.MergeEditResult> {
       return exclusive(projectDir, opts.owner, () => edit(opts.owner, (d) => editor.saveMerge(d, projectDir, request, onEvent, signal, opts)));
+    },
+    /** What two saved versions differ in, for choosing which version each part comes from when combining them. */
+    async mergeLayers(projectDir: string, ours: number, theirs: number): Promise<MergeLayer[]> {
+      const snapshot = (n: number) => loadProject(projectDir, path.join(versionDir(projectDir, n), 'project.json'));
+      return differingLayers(await snapshot(ours), await snapshot(theirs));
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(opts.host), await modelProvider('writer'), idea, onEvent, signal);

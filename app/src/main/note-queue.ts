@@ -174,7 +174,8 @@ export function createNoteQueue(deps: {
       // a note moved below another after a Stop brings what was added to it
       const text = [q.text, ...(q.steers ?? []).map((x) => x.text)].join('\n')
       const said = [words(q), ...(q.steers ?? []).map(words)].join('\n')
-      if (!ran || !box || !box.add(q.id, said)) return { added: false }
+      // a note for another version than the one being made is a branch of its own, never part of this one
+      if (!ran || !box || q.branch !== ran.branch || !box.add(q.id, said)) return { added: false }
       const added = { id: q.id, text, ...(q.moment ? { moment: q.moment } : {}) }
       await change(slug, (s) => {
         s.queue = (s.queue ?? []).filter((x) => x.id !== q.id)

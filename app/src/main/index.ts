@@ -111,7 +111,8 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
-import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { MERGE_LAYERS, MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { mergeWords } from '../shared/combine'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
@@ -1292,9 +1293,27 @@ function registerIpc(): void {
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
     const dir = projectDir(slug)
     if (!ai.mergeVersions) throw { code: 'MERGE_UNAVAILABLE', userMessage: 'This editor does not support combining versions. Update Reel Studio and try again.' }
+    if (!request || typeof request !== 'object' || !request.take || typeof request.take !== 'object') throw { code: 'BAD_MERGE', userMessage: 'Choose which version each part comes from.' }
     const merge = ai.mergeVersions.bind(ai)
-    const jobId = jobs.start(slug, 'note', (emit, signal, { id, owner }) => merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) }))
+    // the notes show it as what was asked, with the version it made as its result
+    const asked = mergeWords(request)
+    let jobId = ''
+    jobId = jobs.start(
+      slug,
+      'note',
+      async (emit, signal, { id, owner }) => {
+        const r = await merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) })
+        return { summary: [r.summary, ...r.report].join(' '), ...(r.version !== undefined ? { version: r.version } : {}), made: { by: 'note', summary: asked } }
+      },
+      { note: asked, record: (s) => void s.chat.push(stamp({ from: 'you', text: asked, jobId })) }
+    )
     return { jobId }
+  })
+  handle('projects:mergeLayers', async (_e, slug: string, ours: number, theirs: number) => {
+    const saved = (await readProject(slug)).version ?? 0
+    for (const n of [ours, theirs]) if (!Number.isInteger(n) || n < 1 || n > saved) throw { code: 'BAD_VERSION', userMessage: 'Pick two saved versions of this reel.' }
+    // an older AI package: every part is a choice
+    return ai.mergeLayers ? ai.mergeLayers(projectDir(slug), ours, theirs) : [...MERGE_LAYERS]
   })
   handle('projects:versionRows', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 1) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
