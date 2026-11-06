@@ -815,6 +815,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
           quiet={!!compare || !!drawer || aiOff}
           why={job ? (d.job?.kind === 'propose' ? 'Wait for your editor to finish looking.' : 'Wait for this version to finish.') : undefined}
           onSaveCaption={savePost}
+          onCover={() => openDrawer('cover')}
         />
       )}
       <span className="rt-more">

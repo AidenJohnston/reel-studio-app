@@ -87,3 +87,27 @@ test('fails if Help improve is asked before a share that worked or a second time
     await app.close()
   }
 })
+
+// The share panel shows the cover posted with the reel beside its caption; Change takes the person to where it is picked.
+test('fails if the share panel does not show the cover beside the caption, or Change does not open the Cover tab', async () => {
+  test.setTimeout(10 * 60_000)
+  const media = makeMedia()
+  const { app, page } = await launch()
+  try {
+    await passFirstRun(page)
+    await startReel(page, media.video)
+    await expect(page.getByTestId('share')).toBeEnabled({ timeout: 8 * 60_000 })
+    await page.getByTestId('share').click()
+    const pop = page.getByTestId('share-pop')
+    const cover = pop.getByTestId('share-cover')
+    await expect(cover.locator('img')).toHaveJSProperty('complete', true)
+    expect(await cover.locator('img').evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0)
+    await cover.click()
+    await expect(pop).toBeHidden()
+    await expect(page.getByTestId('drawer')).toBeVisible()
+    await expect(page.getByTestId('tab-cover')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('tab-cover')).toBeFocused()
+  } finally {
+    await app.close()
+  }
+})

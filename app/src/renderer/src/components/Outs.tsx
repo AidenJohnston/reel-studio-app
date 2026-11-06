@@ -41,7 +41,8 @@ export function Outs({
   disabled,
   quiet,
   why,
-  onSaveCaption
+  onSaveCaption,
+  onCover
 }: {
   slug: string
   /** The reel's name: Post to YouTube starts its title from it. */
@@ -56,6 +57,8 @@ export function Outs({
   why?: string
   /** Saves the caption as typed (hashtags included) and reloads the reel. */
   onSaveCaption: (caption: string) => Promise<boolean>
+  /** Opens the hands-on Cover tab, where another frame or words can be picked for the cover posted with the reel. */
+  onCover?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
@@ -408,20 +411,40 @@ export function Outs({
             <h2 id="share-h" className="sp-h">{version.n ? `Share Version ${version.n}` : 'Share the preview'}</h2>
             {why && <p className="muted-sm sp-why">{why}</p>}
             {version.draft && !why && <p className="muted-sm sp-why">This is a preview. Sharing makes the full-quality version first.</p>}
-            <div className="sp-cap">
-              <label htmlFor="share-caption">Caption</label>
-              <span className={`tnum${over ? ' sp-over' : ''}`}>{caption.length.toLocaleString()}/{INSTAGRAM_LIMIT.toLocaleString()}</span>
+            {/* what is posted, as Instagram's own post screen shows it: the cover beside the caption */}
+            <div className={version.cover ? 'sp-post' : 'sp-post no-cover'}>
+              {version.cover && (
+                <div className="sp-cover">
+                  <span className="sp-label" aria-hidden>
+                    Cover
+                  </span>
+                  {onCover ? (
+                    <button type="button" className="sp-cover-btn" onClick={() => (close(), onCover())} aria-label="Change the cover" data-testid="share-cover">
+                      <img src={version.cover} alt="" width={56} height={100} />
+                      <span className="sp-cover-change">Change</span>
+                    </button>
+                  ) : (
+                    <img className="sp-cover-img" src={version.cover} alt="" width={56} height={100} />
+                  )}
+                </div>
+              )}
+              <div className="sp-cap-col">
+                <div className="sp-cap">
+                  <label htmlFor="share-caption">Caption</label>
+                  <span className={`tnum${over ? ' sp-over' : ''}`}>{caption.length.toLocaleString()}/{INSTAGRAM_LIMIT.toLocaleString()}</span>
+                </div>
+                <textarea
+                  id="share-caption"
+                  className="textarea sp-caption"
+                  rows={3}
+                  value={caption}
+                  placeholder="A line or two to post under the reel"
+                  onChange={(e) => setCaption(e.target.value)}
+                  onBlur={() => void saveCaption().catch(() => {})}
+                  data-testid="share-caption"
+                />
+              </div>
             </div>
-            <textarea
-              id="share-caption"
-              className="textarea sp-caption"
-              rows={3}
-              value={caption}
-              placeholder="A line or two to post under the reel"
-              onChange={(e) => setCaption(e.target.value)}
-              onBlur={() => void saveCaption().catch(() => {})}
-              data-testid="share-caption"
-            />
             <ul className="sp-list">
               {ordered.map((d, i) => {
                 const key = `${version.n}|${d.id}`

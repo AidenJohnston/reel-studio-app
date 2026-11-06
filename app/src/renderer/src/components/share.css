@@ -27,8 +27,24 @@
 .sp-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
 .sp-why { margin-top: -4px; }
 
+/* What is posted: the cover (9:16, 56 px wide) beside the caption, each under its own label on one line */
+.sp-post { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: start; }
+.sp-post.no-cover { grid-template-columns: minmax(0, 1fr); }
+.sp-cover, .sp-cap-col { display: grid; gap: 4px; min-width: 0; }
 .sp-cap { display: flex; align-items: baseline; justify-content: space-between; margin-top: 0; }
-.sp-cap label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
+.sp-cap label, .sp-label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
+.sp-cover-btn {
+  display: grid; gap: 4px; justify-items: center; padding: 0; border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.sp-cover-btn img, .sp-cover-img {
+  display: block; width: 56px; height: auto; aspect-ratio: 9 / 16; object-fit: cover; border-radius: var(--r-sm); background: var(--sunk);
+  outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px;
+}
+.sp-cover-change { font-size: var(--fs-sm); line-height: var(--lh-sm); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: color 120ms ease, text-decoration-color 120ms ease; }
+@media (hover: hover) and (pointer: fine) { .sp-cover-btn:hover .sp-cover-change { color: var(--ink); text-decoration-color: currentColor; } }
+/* the caption box is as tall as the cover beside it, so the two read as one post */
+.sp-post:not(.no-cover) .sp-caption { min-height: 100px; }
 .sp-cap span { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .sp-cap .sp-over { color: var(--pencil); font-weight: 600; }
 .textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-md); user-select: text; }
