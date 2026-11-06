@@ -503,9 +503,9 @@ def output_to_source(ctx, t: float):
 
 
 def source_spans(ctx, t0: float, t1: float):
-    """Output window -> [(source id, src_a, src_b, out_a)] pieces it plays."""
+    """Output window -> [(source id, src_a, src_b, out_a)] pieces of picture it plays."""
     out = []
-    for seg in ctx.out_timeline or []:
+    for seg in getattr(ctx, "picture_timeline", None) or ctx.out_timeline or []:
         o0 = float(_get(seg, "out_start"))
         sa, sb = float(_get(seg, "src_start")), float(_get(seg, "src_end"))
         o1 = o0 + (sb - sa)

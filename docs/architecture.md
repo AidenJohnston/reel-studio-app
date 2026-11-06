@@ -342,6 +342,14 @@ that clip to the whole render, runs it through the same zoom chains as the foota
 copy of the zoomed frame, so the cut-out follows every zoom. Without the model (offline), the words go above
 the face as `text-pop` and the render result says so.
 
+**Cameras of one recording** (`angles.py`). A source with `angleOf` is another camera on the main take's
+recording, lined up by the cross-correlation of their sound. The cut, the words and the sound stay on the main
+take; `render.use_angles` gives the render a second list of segments, `RenderCtx.picture_timeline`: the same
+segments, each moved to the camera chosen for it (a keep item's `angle`, or with `cut.angles: "auto"` the
+camera whose face fills more of the frame, held 2 to 7 s, never changed across a match cut or a cut on action).
+The picture, face placement (`source_spans`) and the speaker cut-out read that list; everything about words and
+sound reads `out_timeline`. Tested only on two cameras made from one take; real multi-camera footage is untested.
+
 **Placement rule.** The protected zone is the **eyes-to-chin** region (eyes, nose and mouth: from just above
 the eyebrows to the chin, outer eye corners plus a margin) and the **caption band**, not the whole face box.
 It comes from YuNet's eye and mouth landmarks, else from the face box's proportions. Cards may cover hair, the

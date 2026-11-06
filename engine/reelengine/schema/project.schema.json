@@ -39,7 +39,16 @@
           "rotation": { "type": "integer" },
           "originalName": { "type": "string" },
           "hdr": { "type": "boolean" },
-          "mirror": { "type": "boolean", "description": "the take is mirrored (a front-camera selfie: on-screen text reads backwards): the render flips the picture left to right. Absent = false" }
+          "mirror": { "type": "boolean", "description": "the take is mirrored (a front-camera selfie: on-screen text reads backwards): the render flips the picture left to right. Absent = false" },
+          "angleOf": {
+            "type": "object", "required": ["source", "offset"],
+            "description": "this source is another camera on the recording of `source`: what that source shows at second t, this one shows at t + offset (reelengine sync-angles finds it by their sound). Its picture can replace the main one's; the words and the sound stay on the main take",
+            "properties": {
+              "source": { "type": "string", "pattern": "^s[0-9]+$" },
+              "offset": { "type": "number" },
+              "confidence": { "type": "number", "description": "how far the sound's best match stood out from the next (sync-angles)" }
+            }
+          }
         }
       }
     },
@@ -68,17 +77,20 @@
           "prefixItems": [{
             "if": { "required": ["clip"] },
             "then": { "$ref": "#/$defs/clip" },
-            "else": { "$ref": "#/$defs/wordRange", "not": { "required": ["join"] } }
+            "else": { "$ref": "#/$defs/wordRange", "not": { "required": ["join"] },
+              "properties": { "angle": { "type": "string", "pattern": "^s[0-9]+$" } } }
           }],
           "items": {
             "if": { "required": ["clip"] },
             "then": { "$ref": "#/$defs/clip" },
-            "else": { "$ref": "#/$defs/wordRange", "properties": { "join": { "$ref": "#/$defs/join" } } }
+            "else": { "$ref": "#/$defs/wordRange", "properties": { "join": { "$ref": "#/$defs/join" },
+              "angle": { "type": "string", "pattern": "^s[0-9]+$", "description": "show this camera (a source with angleOf on this range's take) for the range" } } }
           }
         },
         "gapCap": { "type": "number", "minimum": 0, "maximum": 5 },
         "minSaving": { "type": "number", "minimum": 0, "maximum": 2 },
-        "source": { "type": "string", "description": "who wrote the cut: autocut | ai | user" }
+        "source": { "type": "string", "description": "who wrote the cut: autocut | ai | user" },
+        "angles": { "enum": ["auto", "off"], "description": "auto: switch the picture between the cameras of a recording (sources with angleOf) at cuts, by whose face fills more of the frame; off or absent: only a keep item's own angle" }
       }
     },
     "captions": {

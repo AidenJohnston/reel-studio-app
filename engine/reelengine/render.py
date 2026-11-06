@@ -1239,6 +1239,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))
     ctx.out_dir = vdir
     ctx.window = win
+    angle_rows = use_angles(ctx, tl, warnings)
     from .lint_edit import prepare
     lint = prepare(ctx, tl)
     for m in tl.match_joins:
@@ -1296,10 +1297,10 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     # 4. the picture
     if win:
         a, b = win
-        segments = cutmod.window_segments(tl.segments, a, b)
+        segments = cutmod.window_segments(ctx.picture_timeline or tl.segments, a, b)
         dur, t_shift, audio_seek = b - a, a, a
     else:
-        segments, dur, t_shift, audio_seek = tl.segments, tl.duration, 0.0, 0.0
+        segments, dur, t_shift, audio_seek = ctx.picture_timeline or tl.segments, tl.duration, 0.0, 0.0
     if draft:
         out_w = int(round(W * DRAFT_SCALE / 2)) * 2
         out_h = int(round(H * DRAFT_SCALE / 2)) * 2
@@ -1380,7 +1381,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
               "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
               "captions": len(cap_report), "warnings": warnings, "visualChanges": visual_changes,
               "expectedSilence": ctx.expected_silence,
-              "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
+              "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")],
+              **({"angles": angle_rows} if angle_rows else {})}
     result.update(lint)
     if rule_report is not None:
         result["ruleChecks"] = rule_report
@@ -1482,6 +1484,15 @@ def source_files(project_dir: Path, proj: dict, root: Optional[Path] = None) -> 
 # same, and captions stay on top of it. Frame counts judged by eye in other editors' presets (2 in, 3 out); no
 # measurement behind them.
 FLASH_IN, FLASH_OUT, FLASH_Z = 2, 3, 10_000
+
+
+def use_angles(ctx: RenderCtx, tl, warnings: list) -> list:
+    """Point the picture at the chosen camera on each segment (angles.py); [{out, angle}] when the
+    project switches cameras, else []. Sound and words stay on tl.segments."""
+    from . import angles
+    pic, rows = angles.picture_segments(ctx.project_dir, ctx.project, tl.segments, ctx.words, ctx.ffmpeg, warnings)
+    ctx.picture_timeline = pic if rows else None
+    return rows
 
 
 def flash_layers(ctx: RenderCtx, segments: list) -> list:
@@ -1698,6 +1709,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
     ctx = make_ctx(project_dir, proj, tl, True, root, rwork)
     ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))     # a still is the draft's frame (#146)
+    use_angles(ctx, tl, warnings)
     times = [*times, *word_times(tl.words_out, words)]
     if not times:
         raise EngineError("BAD_ARGS", "no times given", "Reel Studio didn't say which moments to show.")
@@ -1726,7 +1738,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
         t_still = time.time()
         k = frame_at(t, fps, n_frames)
         a = k / fps
-        segments = cutmod.window_segments(tl.segments, a, a + one)
+        segments = cutmod.window_segments(ctx.picture_timeline or tl.segments, a, a + one)
         png, part = out_dir / f"still_{k:06d}.png", rwork / "still.png"
         graph = rwork / "graph_still.txt"
 

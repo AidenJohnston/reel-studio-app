@@ -2,6 +2,17 @@
 
 Existing project shapes remain valid. New shapes can require a newer engine, as noted below. Schema: `engine/reelengine/schema/project.schema.json`.
 
+## 2026-11-06 (cameras of one recording, words behind the speaker)
+
+- `sources[].angleOf: {source, offset, confidence?}` marks a source as another camera on the recording of
+  `source`: it shows that source's second t at t + offset. `reelengine sync-angles --angle sN --of sM --write`
+  finds the offset by cross-correlating their sound (`engine/reelengine/angles.py`). Older builds ignore it.
+- `cut.angles: "auto"` lets the engine switch the picture between those cameras at cuts; `cut.keep[].angle`
+  forces one camera for a range. Words and sound always stay on the main take. Older builds ignore both and
+  show the main camera.
+- A b-roll item's `treatment` may be `"text-behind"`: big words drawn behind the speaker, who is cut out of the
+  footage above them (`engine/reelengine/segment.py`). Older builds skip the item as an unknown treatment.
+
 ## 2026-11-06 (match cuts, joins and beat landing by hand)
 
 - `cut.keep[].join.transition` accepts `"match"`. The engine searches the silence around that cut for the frames

@@ -110,6 +110,10 @@ class RenderCtx:
     sfx_mixed: Optional[list] = None                        # sound effects music.build_audio put in the mix
 
     src_to_out: Optional[Callable[[str, float], Optional[float]]] = None
+    # the segments the PICTURE plays when a project switches cameras (angles.py): out_timeline's, with
+    # source and times moved to the chosen camera. None = the picture plays out_timeline. Words and
+    # sound always follow out_timeline.
+    picture_timeline: Optional[list] = None
     expected_silence: bool = False
 
     def resolve_path(self, p: str) -> Path:

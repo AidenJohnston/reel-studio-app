@@ -141,6 +141,36 @@ def cmd_lint_edit(args):
     return prepare(ctx, tl)
 
 
+def cmd_sync_angles(args):
+    """Line camera --angle up with camera --of by their sound; --write records it as sources[].angleOf."""
+    from . import angles, project
+    from .compose_util import ffmpeg_bin
+    pdir = _project(args)
+    proj = project.load(pdir)
+    by = {s["id"]: s for s in proj["sources"]}
+    if args.angle not in by or args.of not in by or args.angle == args.of:
+        raise EngineError("BAD_ARGS", f"--angle {args.angle} --of {args.of}: two different sources of this project",
+                          "Reel Studio asked to line up cameras this video doesn't have. Please try again.")
+    res = angles.sync_offset(ffmpeg_bin(), project.source_path(pdir, by[args.of]), project.source_path(pdir, by[args.angle]))
+    if args.write:
+        by[args.angle]["angleOf"] = {"source": args.of, **res}
+        project.save(pdir, proj)
+    return {"angle": args.angle, "of": args.of, **res, "written": bool(args.write)}
+
+
+def cmd_angles(args):
+    """Which camera the picture would show on each segment of the cut, without rendering."""
+    from . import angles, project
+    from .compose_util import ffmpeg_bin
+    pdir = _project(args)
+    proj = project.load(pdir)
+    words = project.load_transcript(pdir, proj)["words"]
+    tl = project.timeline(pdir, proj, words)
+    warnings: list = []
+    _pic, rows = angles.picture_segments(pdir, proj, tl.segments, words, ffmpeg_bin(), warnings)
+    return {"angles": rows, "warnings": warnings}
+
+
 def cmd_match_joins(args):
     from . import project
     pdir = _project(args)
@@ -571,6 +601,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--keep", help="cut.keep to check instead of the project's, as JSON")
     sp.add_argument("--every", action="store_true", help="check every join that could hold a match, not only the ones that ask for it")
     sp.add_argument("--project-file", help="the edit to read instead of project.json, inside work/ (a note's private copy)")
+    sp = add("sync-angles", cmd_sync_angles, "line one camera up with another by their sound")
+    sp.add_argument("--angle", required=True, help="the other camera's source id")
+    sp.add_argument("--of", required=True, help="the main camera's source id")
+    sp.add_argument("--write", action="store_true", help="record the offset in project.json (sources[].angleOf)")
+    add("angles", cmd_angles, "which camera the picture shows on each segment, without rendering")
     sp = add("pace-preview", cmd_pace_preview, "count the picture changes each pace would make, without rendering")
     sp.add_argument("--root")
     sp = add("render", cmd_render, "render project.json")

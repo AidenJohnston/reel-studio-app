@@ -169,7 +169,7 @@ def matte_clip(ctx, t0: float, t1: float, out_dir: Path, stem: str) -> Optional[
     from .render import source_faces
     W, H, fps = fmt_of(ctx)
     sources = {s["id"]: s for s in ctx.project["sources"]}
-    plan = frame_plan(ctx.out_timeline, sources, t0, t1, fps)
+    plan = frame_plan(ctx.picture_timeline or ctx.out_timeline, sources, t0, t1, fps)
     if not plan:
         return None
     faces = source_faces(ctx.project_dir, ctx.project)
