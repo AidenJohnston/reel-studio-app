@@ -140,19 +140,25 @@ process.stdout.write(JSON.stringify({type:'result',is_error:false,result:reply})
     expect(alive(Number(fs.readFileSync(pidFile, 'utf8')))).toBe(false);
   }, 30000);
 
-  it('a session whose output stays open after its process is killed fails the run instead of holding Stop forever', async () => {
+  it.each([
+    ['is killed', false],
+    ['exits before the run ends', true],
+  ])('a session whose output a child keeps open after the process %s fails the run instead of holding Stop forever', async (_, exitsFirst) => {
     const dir = tmpDir();
-    const pidFile = path.join(dir, 'pid');
+    const pids = path.join(dir, 'pids');
     const script = path.join(dir, 'leaky-claude.js');
     // a child it started shares its output and outlives it
     fs.writeFileSync(script, `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});
-require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000);${ANSWER}`);
+require('fs').writeFileSync(${JSON.stringify(pids)},process.pid+' '+c.pid);${exitsFirst ? '' : 'setInterval(()=>{},1000);'}
+process.stdin.on('data',()=>{process.stdout.write(JSON.stringify({type:'result',is_error:false,result:'{"tool_calls":[{"name":"finish","arguments":{"summary_for_user":"ok"}}]}'})+'\\n');${exitsFirst ? 'setTimeout(()=>process.exit(0),50);' : ''}});`);
     const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script], session: true });
     try {
       await oneTurn(p);
+      const parent = Number(fs.readFileSync(pids, 'utf8').split(' ')[0]);
+      if (exitsFirst) for (let i = 0; i < 100 && alive(parent); i++) await new Promise((r) => setTimeout(r, 50));
       await expect(p.dispose()).rejects.toMatchObject({ code: 'cli_stuck' });
     } finally {
-      try { process.kill(Number(fs.readFileSync(pidFile, 'utf8'))); } catch { /* gone */ }
+      try { process.kill(Number(fs.readFileSync(pids, 'utf8').split(' ')[1])); } catch { /* gone */ }
     }
   }, 30000);
 });
