@@ -742,9 +742,9 @@ def track_start(mcfg: dict, duration: float, offset: float = 0.0) -> float:
 
 def accent_beats(ctx) -> list[float]:
     """Detected beats on the full output clock, only for projects that request accents."""
+    from .cut_style import beat_accents_on
     proj = ctx.project or {}
-    style = proj.get("cutStyle")
-    if proj.get("beatAccents") is not True and not (isinstance(style, dict) and style.get("preset") == "hyper"):
+    if not beat_accents_on(proj):
         return []
     mcfg = proj.get("music") or {}
     if not mcfg.get("enabled", True) or not mcfg.get("track"):

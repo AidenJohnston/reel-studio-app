@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage, StyleProposal } from '../src/shared/api'
 import { serialized } from '../src/main/store'
-import { answerStyleQuestion, rememberQuestion, styleConsent, type AnswerDeps } from '../src/main/style-consent'
+import { answerStyleQuestion, rememberQuestion, replyChat, styleConsent, type AnswerDeps } from '../src/main/style-consent'
 
 describe('My style consent (grandma 2: saved without asking)', () => {
   it('an AI that already saved a rule: undo it, drop the announcement, ask instead', () => {
@@ -140,5 +140,40 @@ describe('a rule kept from a note', () => {
     }
     await answerStyleQuestion(deps, 'bread', 'q', true)
     expect(added).toEqual([{ text: 'Use big subtitles.', source: { project: 'bread', title: 'Baking bread', version: 3, note: 'always use big subtitles' } }])
+  })
+})
+
+describe('a checked My style question', () => {
+  const check = { kind: 'captions.maxWords', value: 2 } as const
+  const text = 'Show at most 2 words in a subtitle.'
+
+  it('fails if Yes drops the check, or the reply does not say the rule is checked on every reel', async () => {
+    const chat: ChatMessage[] = [
+      { id: 'm1', from: 'editor', text: rememberQuestion(text), at: '', actions: ['remember-yes', 'remember-no'], suggestion: text, check }
+    ]
+    const saved: unknown[][] = []
+    const deps: AnswerDeps = {
+      chat: async () => structuredClone(chat),
+      title: async () => 'Baking bread',
+      addStyleRule: async (...args) => {
+        saved.push(args)
+      },
+      settle: async (_slug, id, reply) => {
+        delete chat.find((m) => m.id === id)!.actions
+        chat.push({ id: 'r', from: 'editor', text: reply, at: '' })
+      },
+      serialized
+    }
+    await answerStyleQuestion(deps, 'bread', 'm1', true)
+    expect(saved).toEqual([[text, { source: { project: 'bread', title: 'Baking bread', version: 0 } }, check]])
+    expect(chat.at(-1)?.text).toBe("Saved. I'll check this on every new reel. You can pause or forget it in My style.")
+  })
+
+  it('fails if the same rule is asked twice, once plain and once checked', () => {
+    const lines = replyChat(styleConsent('Two words now.', [], [text]), 2, undefined, [{ text, check }])
+    expect(lines.map((l) => [l.text, l.check ?? null])).toEqual([
+      ['Two words now.', null],
+      [rememberQuestion(text), check]
+    ])
   })
 })

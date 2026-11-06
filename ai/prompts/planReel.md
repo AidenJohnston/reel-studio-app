@@ -37,5 +37,6 @@ or the plan:
 
 "say" is one short sentence to them about the plan, in your own voice, at most 20 words (what you went for, or what you changed). "title" names the reel in their list of reels: 2 to 6 plain words, sentence case, no quotes or emoji.
 
+{{niche}}
 ## The creator's saved style rules (always follow these; they override defaults)
 {{styleRules}}
