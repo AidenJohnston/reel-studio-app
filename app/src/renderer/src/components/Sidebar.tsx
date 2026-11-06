@@ -40,12 +40,37 @@ export const providerName = (p: ProviderInfo | null): string | null => {
   return p.label
 }
 
+/** Narrower than this, the sidebar starts as its rail, so the reel keeps the room (the lead's call, 2026-11-06, for
+ * Sam to keep or undo: at 1100 px the open sidebar took a fifth of the window). */
+const RAIL_BELOW = 1200
+/** The person's own choice, once they have folded or opened the sidebar: it wins at every width. null: none yet. */
+function chosenRail(): boolean | null {
+  try {
+    const v = localStorage.getItem(RAIL_KEY)
+    return v === '1' ? true : v === '0' ? false : null
+  } catch {
+    return null
+  }
+}
+
 /**
- * The sidebar folds to a 64 px rail (Cmd/Ctrl+\, remembered). The column takes its new width at once and the
- * page and the title row slide from where they were, so nothing reflows while it moves; from the keyboard it just changes.
+ * The sidebar folds to a 64 px rail (Cmd/Ctrl+\, remembered). Until the person folds or opens it themselves it follows
+ * the window: the rail below RAIL_BELOW, open above. The column takes its new width at once and the page and the
+ * title row slide from where they were, so nothing reflows while it moves; from the keyboard it just changes.
  */
 export function useRail(): [boolean, (byShortcut?: boolean) => void] {
-  const [rail, setRail] = useState(() => localStorage.getItem(RAIL_KEY) === '1')
+  const [rail, setRail] = useState(() => chosenRail() ?? window.innerWidth < RAIL_BELOW)
+  useEffect(() => {
+    const follow = (): void => {
+      if (chosenRail() !== null) return
+      const narrow = window.innerWidth < RAIL_BELOW
+      // the rail hides the Recent list: focus there moves to the toggle first, as a fold by hand does
+      if (narrow && document.activeElement?.closest('.side-recent')) sidebarToggle()?.focus()
+      setRail(narrow)
+    }
+    window.addEventListener('resize', follow)
+    return () => window.removeEventListener('resize', follow)
+  }, [])
   // byKeyboard() does not count Cmd/Ctrl shortcuts (motion.ts), so the shortcut says so itself
   const toggle = useCallback((byShortcut = false) => {
     // folding hides the resize edge and the Recent list: focus on either moves to the toggle first, so it isn't left
@@ -201,7 +226,7 @@ const RECENT_MAX = 6
  * (store.ts isUntouchedPlanned), and listed here it only repeated the New reel button above. */
 const untouched = (r: ProjectSummary): boolean => r.noVideo && r.title === 'New reel' && r.updatedAt === r.createdAt
 
-function SideRecent({ current, go }: { current: string | null; go: Go }) {
+function SideRecent({ current, go, onListed }: { current: string | null; go: Go; onListed: (listed: boolean) => void }) {
   const [list, setList] = useState<ProjectSummary[] | null>(null)
   /** the jobs already seen: a new one (a first edit, a Resume, a note) reads the list once, as a reel it starts on
    * may be listed as stopped, or not at all (a New reel keeps its slug when its video comes in) */
@@ -233,6 +258,8 @@ function SideRecent({ current, go }: { current: string | null; go: Go }) {
       offRenamed()
     }
   }, [current])
+  const listed = !!current && !!list?.some((p) => p.slug === current)
+  useEffect(() => onListed(listed), [listed, onListed])
   if (!list?.length) return null
   return (
     <nav className="side-recent" aria-label="Recent reels" data-testid="side-recent">
@@ -270,6 +297,7 @@ function SideRecent({ current, go }: { current: string | null; go: Go }) {
 export function Sidebar({
   section,
   current,
+  rail,
   go,
   provider,
   userName,
@@ -278,11 +306,16 @@ export function Sidebar({
   section: string
   /** the reel on screen, marked in Recent */
   current: string | null
+  /** folded to the rail, which hides Recent */
+  rail: boolean
   go: Go
   provider: ProviderInfo | null
   userName: string | null
   onNewReel: () => void
 }) {
+  // the open reel's row in Recent, when it is there and showing, is the one marked; otherwise Reels is
+  const [listed, setListed] = useState(false)
+  const reelRowShown = listed && !rail
   const name = providerName(provider)
   const who = userName?.trim() || 'You'
   const inSettings = section === 'settings'
@@ -300,8 +333,9 @@ export function Sidebar({
           <span className="lbl">New reel</span>
         </button>
         {NAV.map((n) => {
-          // a reel open is marked in Recent, under Reels: one row selected at a time (Craft, goal 4: two read as current)
-          const here = section === n.key && !(n.key === 'home' && current)
+          // a reel open is marked by its own row in Recent, not also by Reels: one row selected at a time (Craft, goal 4:
+          // two read as current). A reel not in Recent (untouched, older than its six) or the rail hiding it: Reels.
+          const here = section === n.key && !(n.key === 'home' && reelRowShown)
           return (
           <button
             key={n.key}
@@ -317,7 +351,7 @@ export function Sidebar({
           )
         })}
       </nav>
-      <SideRecent current={current} go={go} />
+      <SideRecent current={current} go={go} onListed={setListed} />
       <div className="side-foot">
         <div className="side-update">
           <UpdateButton />

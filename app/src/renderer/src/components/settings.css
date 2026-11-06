@@ -5,6 +5,9 @@
 /* centred, so the room either side is even; in a window narrower than the page it starts at the gutter, where the
    nav's labels sit under the screen's title */
 .page.settings-page { max-width: 920px; margin: 0 auto; padding: 0 var(--gutter) var(--space-l); }
+/* Narrower than 1200 px (the sidebar's rail width, Sidebar.tsx RAIL_BELOW) it starts at the gutter like Library and
+   Reels: centred, its edge fell 7 px from the screen title's (the consistency audit's near miss at 1100 x 720). */
+@media (max-width: 1199px) { .page.settings-page { margin-left: 0; } }
 .settings { display: grid; grid-template-columns: 168px minmax(0, 640px); gap: 32px; align-items: start; }
 
 /* the rows' wash hangs 12 px left, so their labels start where the screen's title does */

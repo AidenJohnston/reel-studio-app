@@ -58,8 +58,9 @@ export function PaceControls({ d, base, now, change, placed, next }: TabProps) {
 
   return (
     <div className="edit-stack" data-testid="pace">
-      {/* first, where it is seen: on the 1100 x 720 window a note at the end was below the fold */}
-      <p className="edit-hint" data-testid="pace-later">
+      {/* first, where it is seen: on the 1100 x 720 window a note at the end was below the fold; and it stays in view while
+          the list under it scrolls, as picking a pace makes the panel taller than the window */}
+      <p className="edit-hint edit-hint-stay" data-testid="pace-later">
         The player shows the pace and zoom-ins as made. What you pick here plays in Version {next}.
       </p>
       <div className="edit-field">

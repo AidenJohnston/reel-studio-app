@@ -625,8 +625,9 @@ function Stage({
             )}
             {pane === 'editor' && (
               <Button kind={ai ? 'primary' : 'secondary'} onClick={() => void finish()} disabled={leaving} data-testid={ai ? 'editor-continue' : 'not-now'}>
-                {/* says where it goes: the line above says what a reel is without an editor (Sense, goal 3) */}
-                {ai ? 'Continue' : 'Continue without an editor'}
+                {/* short: it shares the footer with the speech model's download line, which a longer label cut at
+                    1100 px (layout-audit); the line above says what a reel is without an editor */}
+                {ai ? 'Continue' : 'Not now'}
               </Button>
             )}
           </footer>

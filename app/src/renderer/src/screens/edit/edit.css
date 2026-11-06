@@ -30,6 +30,9 @@ html.kb .edit { animation: none; }
 .edit-label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 620; color: var(--ink-2); }
 h3.edit-label { margin: 0; }
 .edit-hint { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+/* a hint that stays at the top of the panel while what it is about scrolls under it: it covers the panel's 16 px top
+   padding (.edit-b) on the page's paper, so nothing shows through above it */
+.edit-hint-stay { position: sticky; top: 0; z-index: 1; margin-top: -16px; padding: 16px 0 8px; background: var(--paper); }
 .edit-rule { height: 1px; background: var(--line); }
 .edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .edit-inline { display: flex; align-items: center; gap: 8px; }

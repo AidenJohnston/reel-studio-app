@@ -255,6 +255,7 @@ export function App() {
           <Sidebar
             section={section}
             current={shown.name === 'reel' ? shown.slug : null}
+            rail={rail}
             go={go}
             provider={provider}
             userName={info.userName}
