@@ -33,9 +33,10 @@
 /* the notes header's Notes | Versions switch sits at its far end */
 .notes-h .segmented { margin-left: auto; }
 
-/* in the note box: the version the next note changes, when it is not the newest */
+/* in the note box: the version the next note changes, when it is not the newest. Inset like the attachment chips
+   (reel.css .cbox .att-chips) so the two rows share the box's inner edge; at 0 it touched the box's top border. */
 .base-chip {
-  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start; height: 26px; padding: 0 1px 0 10px; margin: 0 0 6px 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start; height: 26px; padding: 0 1px 0 10px; margin: 10px 0 0 10px; border-radius: 999px;
   background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600;
 }
 .base-chip .x { border: 0; background: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; color: var(--ink-3); cursor: pointer; }
