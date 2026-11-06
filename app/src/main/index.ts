@@ -844,20 +844,25 @@ app.whenReady().then(async () => {
 })
 
 let quitting = false
-// Stop sends a job's engine SIGKILL (or taskkill) within 1.5 s; 5 s leaves room for that to finish. No
-// measurement chose the number. Before it, quit could wait 4 s for jobs and then up to 6.5 s per kill.
-const QUIT_WAIT_MS = 5000
+// killTree sends SIGKILL 1.5 s after SIGTERM (taskkill /F at once on Windows), so 2 s is enough for every
+// leftover engine to be sent it. No measurement chose the number. Without it a kill could hold quit for
+// 6.5 s (5 s on Windows) after the jobs' own 4 s.
+const QUIT_KILL_MS = 2000
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
   if (quitting || !jobs.runningCount()) {
     void killAllEngines()
     return
   }
-  // Stop running work cleanly so the next start finds a tidy project. One deadline for all of it: an
-  // engine that will not die stays on the engine list, and the next start deals with it (orphans.ts).
+  // Stop running work cleanly so the next start finds a tidy project. The jobs get their 4 s (cancelAll)
+  // to clean up; one cut short leaves app.json saying it runs, which the next start cleans up
+  // (store.ts recoverInterrupted). Waiting for engines to die is cut short: one that will not stays on
+  // the engine list, and the next start stops it or keeps its video closed (orphans.ts).
   e.preventDefault()
   quitting = true
-  void Promise.race([jobs.cancelAll().then(() => killAllEngines()), new Promise((r) => setTimeout(r, QUIT_WAIT_MS))])
+  void jobs
+    .cancelAll()
+    .then(() => Promise.race([killAllEngines(), new Promise((r) => setTimeout(r, QUIT_KILL_MS))]))
     .finally(() => app.quit())
 })
 
