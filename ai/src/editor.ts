@@ -126,9 +126,12 @@ function honestSummary(r: Pick<RunAgentResult, 'finished' | 'stoppedBy'>, state:
   return `I ran out of time before I finished ${what}, so it may be only partly done. So far I: ${did.map((d) => d[0].toLowerCase() + d.slice(1)).join('; ')}. Tell me what still needs changing.`;
 }
 
-async function removeStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
+/** Undo what a failed note did to My style: rules it saved are removed, paused rules it turned back on are paused
+ * again. A rule removed in My style since then stays removed. */
+async function undoStyleRules(deps: EditorDeps, state: ToolState): Promise<void> {
   for (const id of state.styleRuleIds) await deps.style.remove(id).catch(() => undefined);
-  state.styleRuleIds = []; state.styleRulesAdded = [];
+  for (const id of state.styleRulesResumed) await deps.style.update(id, { paused: true }).catch(() => undefined);
+  state.styleRuleIds = []; state.styleRulesAdded = []; state.styleRulesResumed = [];
 }
 
 async function listAssets(projectDir: string): Promise<Set<string>> {
@@ -136,11 +139,11 @@ async function listAssets(projectDir: string): Promise<Set<string>> {
   return new Set(await fsp.readdir(dir).catch(() => [] as string[]));
 }
 
-/** Put the project back exactly as it was before a failed note: project.json, the My style rules
- * it added, the credits book, and the pictures it downloaded. */
+/** Put the project back exactly as it was before a failed note: project.json, what it changed in My style,
+ * the credits book, and the pictures it downloaded. */
 async function rollbackNote(deps: EditorDeps, projectDir: string, before: Buffer, creditsBefore: Buffer | null | undefined, assetsBefore: Set<string>, state: ToolState): Promise<void> {
   await writeFileAtomic(path.join(projectDir, 'project.json'), before).catch(() => undefined);
-  await removeStyleRules(deps, state);
+  await undoStyleRules(deps, state);
   const creditsPath = path.join(projectDir, 'work', 'assets', 'credits.json');
   if (creditsBefore === null) await fsp.rm(creditsPath, { force: true }).catch(() => undefined);
   else if (creditsBefore) await writeFileAtomic(creditsPath, creditsBefore).catch(() => undefined);
@@ -360,9 +363,9 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
     run = await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
   } catch (e: any) {
     await ctx.renderGate?.catch(() => undefined);   // never two renders at once
-    if (signal?.aborted || e?.code === 'cancelled') { await removeStyleRules(deps, ctx.state); throw e; }
+    if (signal?.aborted || e?.code === 'cancelled') { await undoStyleRules(deps, ctx.state); throw e; }
     if (e instanceof AIError && !ctx.state.renders.length) {
-      await removeStyleRules(deps, ctx.state);
+      await undoStyleRules(deps, ctx.state);
       // The AI stopped (limit, sign-in, network). Make a simple version so the user still gets a video,
       // and say plainly why. No other paid service is used.
       const simple = await deterministicEdit(deps, projectDir, onEvent, signal, e.userMessage);

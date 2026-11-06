@@ -30,6 +30,8 @@ export interface ToolState {
   styleSuggestions: string[];
   /** ids of the rules above, so a failed note can take them back out of My style */
   styleRuleIds: string[];
+  /** ids of paused rules this note turned back on, so a failed note can pause them again */
+  styleRulesResumed: string[];
   /** every user-facing tool summary, in order (an honest "what I changed" when the agent stops early) */
   summaries: string[];
   renders: RenderInfo[];
@@ -84,7 +86,7 @@ export interface ToolDef extends ToolSchema {
 }
 
 export function newToolState(): ToolState {
-  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
+  return { changed: new Set(), styleRulesAdded: [], styleSuggestions: [], styleRuleIds: [], styleRulesResumed: [], summaries: [], renders: [], finished: null, toolCalls: 0 };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -1237,8 +1239,9 @@ const tools: ToolDef[] = [
       const existing = await ctx.style.find(text);
       if (existing && existing.paused && noteAsksToRemember(ctx.userNote)) {
         // The note asks again for a rule paused in My style: add() turns it back on. Not in styleRuleIds, because
-        // undoing this note must not delete a rule that was there before it.
+        // undoing this note must not delete a rule that was there before it; undoing it pauses the rule again.
         const r = await ctx.style.add(text);
+        ctx.state.styleRulesResumed.push(r.rule.id);
         return { content: { ok: true, alreadySaved: r.rule.text, turnedBackOn: true }, summary: `Turned back on in My style: "${r.rule.text}"` };
       }
       if (existing) return { content: { ok: true, alreadySaved: existing.text } };
