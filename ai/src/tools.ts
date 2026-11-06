@@ -15,7 +15,7 @@ import {
 import { MERGE_FIELDS, MergeRequest, MergeResult, mergeVersions, validateMergeRequest } from './version-merge';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { SFX_SOUNDS } from './sfx.generated';
-import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, composeProblems, itemTimes, phraseTime, templateSpec, timeComposeParts } from './animations';
+import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, composeProblems, composeTimingProblem, itemTimes, phraseTime, templateSpec, timeComposeParts } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
@@ -1273,6 +1273,8 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
       if (!ac.exact && timing !== 'template default timing') timing += ' (approximate)';
     }
   }
+  const late = template === 'compose' ? composeTimingProblem(params) : null;
+  if (late) throw new ToolInputError(late);
   // readable on a phone (live e2e: a count-up "9" came out ~60 px tall in a corner): estimate the
   // main text's size from the region; too small above the face -> full screen; too small even
   // full screen -> the text must be shorter

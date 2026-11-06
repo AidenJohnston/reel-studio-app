@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ANIMATION_TEMPLATES, ENGINE_FED, alignWordTimes, itemTimes } from '../src/animations';
 import { executeTool, newToolState, toolByName, ToolContext } from '../src/tools';
 import { loadProject, saveProject } from '../src/project';
@@ -158,12 +159,19 @@ describe('make_animation compose (a graphic built from parts)', () => {
     ]);
     expect(r.isError, r.content).toBe(false);
     expect(JSON.parse(r.content).timing).toMatch(/each part lands on the word/);
+    // what the real renderer accepts (templates/animations/render.mjs): a nested null is refused there
+    const renderer = await import(pathToFileURL(path.resolve(templatesDir, 'render.mjs')).href);
+    expect(() => renderer.prepareParams(renderer.loadMeta('compose'), host.animations[0].params)).not.toThrow();
     expect(host.animations[0].params.rows).toEqual([
       { parts: [{ kind: 'text', text: 'Rent', size: 'small', color: 'muted', on: 'rent', at: 0.13 }] },
       // the arrow says nothing, so it follows the old value by 0.3 s
       { parts: [{ kind: 'number', text: '1,200', motion: 'strike', on: 'twelve hundred', at: 1.03 }, { kind: 'arrow', at: 1.33 },
         { kind: 'number', text: '2,000', on: 'two thousand', at: 1.93 }] },
     ]);
+    // a part timed past an explicit clip length would never be seen
+    const short = await executeTool(ctx, 'make_animation', { template: 'compose', anchor: { from: 'w42', to: 'w49' },
+      params: { duration: 1.5, rows: [{ parts: [{ kind: 'text', text: 'Rent', on: 'rent' }, { kind: 'number', text: '2,000', on: 'two thousand' }] }] } });
+    expect(short.content).toMatch(/lands at 1.93 s but the clip ends at 1.5 s/);
     // the times are the transcript's to set, never the model's
     const guessed = await make(ctx, [{ parts: [{ kind: 'text', text: 'Rent', at: 0.5 }] }]);
     expect(guessed.content).toMatch(/at: unknown field/);
