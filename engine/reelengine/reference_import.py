@@ -1,5 +1,7 @@
-"""`import-reference <file> [--output F]`: read a Final Cut Pro (.fcpxml, .fcpxmld) or Premiere
-FCP7 (.xml) export through OpenTimelineIO into an evidence-only timeline record.
+"""`import-reference <file> [--output F]`: read a Final Cut Pro or DaVinci Resolve FCPXML (.fcpxml,
+.fcpxmld) or a Premiere FCP7 (.xml) export through OpenTimelineIO into an evidence-only timeline record.
+A CapCut project (reference_capcut.py) and a CMX 3600 edit list (.edl, reference_edl.py) are read
+without OpenTimelineIO into the same record.
 
 Nothing here writes project.json or My style.json. A clean parse is not proof the edit survived:
 `losses` lists the gaps this module knows the pinned adapters have (elements and attributes they
@@ -31,6 +33,7 @@ from fractions import Fraction
 from pathlib import Path
 from xml.parsers import expat
 
+from . import reference_capcut, reference_edl
 from .project import write_json
 from .proto import EngineError
 
@@ -38,6 +41,8 @@ MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_BYTES = 256 * 1024 * 1024
 MAX_BUNDLE_FILES = 4096
 MAX_XML_DEPTH = 256
+# CapCut keeps a project as a folder; draft_content.json holds the edit (draft_info.json on a Mac).
+CAPCUT_DRAFTS = ("draft_content.json", "draft_info.json")
 # Both adapters rebuild a referenced definition (an FCPXML compound clip, a Premiere `<file id>`)
 # for every reference, so a small file can expand without bound. These cap what they would build.
 MAX_EXPANDED_CLIPS = 50_000
@@ -60,7 +65,8 @@ _FCPX_CLIP_METADATA = ("metadata", "md", "note", "keyword")
 
 _AGAIN = "Export it again from your editor and try once more."
 _USER = {
-    "BAD_INPUT": "Choose a Final Cut Pro (.fcpxml or .fcpxmld) or Premiere (.xml) export.",
+    "BAD_INPUT": "Choose a Final Cut Pro or DaVinci Resolve export (.fcpxml, .fcpxmld or .edl), a Premiere Pro "
+                 "export (.xml) or a CapCut project.",
     "UNSAFE_INPUT": f"This Final Cut bundle contains a link to another file or folder. {_AGAIN}",
     "UNSAFE_XML": f"This export has extra XML declarations Reel Studio won't read. {_AGAIN}",
     "BAD_XML": f"This file isn't a readable edit export. {_AGAIN}",
@@ -121,9 +127,29 @@ def _bundle_files(bundle: Path) -> list[Path]:
     return sorted(files)
 
 
+def _capcut_draft(folder: Path) -> Path:
+    """The draft file in a CapCut project folder: the first of CAPCUT_DRAFTS that is plain JSON, so a folder whose
+    draft_content.json JianYing encrypted is read from the plain draft_info.json beside it."""
+    found = [folder / n for n in CAPCUT_DRAFTS if (folder / n).is_file() and not (folder / n).is_symlink()]
+    if not found:
+        raise _fail("BAD_INPUT", f"no {' or '.join(CAPCUT_DRAFTS)} in {folder}")
+    for f in found:
+        if _read_file(f).lstrip(b"\xef\xbb\xbf \t\r\n")[:1] == b"{":
+            return f
+    return found[0]
+
+
 def _load(path: Path) -> tuple[bytes, str, str]:
-    """The XML bytes to parse, the adapter name, and a sha256 of the whole input."""
+    """The bytes to read, the reader's name (an OpenTimelineIO adapter, or capcut or cmx_3600), and a sha256 of the
+    whole input."""
     suffix = path.suffix.lower()
+    if path.name.lower() in CAPCUT_DRAFTS or (suffix != ".fcpxmld" and path.is_dir() and not path.is_symlink()):
+        draft = path if path.is_file() else _capcut_draft(path)
+        data = _read_file(draft)
+        return data, "capcut", hashlib.sha256(data).hexdigest()
+    if suffix == ".edl":
+        data = _read_file(path)
+        return data, "cmx_3600", hashlib.sha256(data).hexdigest()
     if suffix == ".fcpxmld":
         if path.is_symlink() or _is_reparse_point(path) or not path.is_dir():
             raise _fail("BAD_INPUT", f"FCPXML bundle is not a folder: {path}")
@@ -763,14 +789,37 @@ def _read_bounded(data: bytes, adapter: str) -> dict:
     return message[1]
 
 
+def _resolve_wrote(root: ET.Element) -> bool:
+    """DaVinci Resolve names the event and project it exports "<timeline> (Resolve)". That is what its exports are
+    reported to look like, not a documented marker, and no real one was read here; Final Cut Pro wrote the rest."""
+    return any((e.get("name") or "").endswith("(Resolve)") for e in root.iter() if e.tag in ("event", "project"))
+
+
+def _plain(path: Path, data: bytes, adapter: str) -> tuple[dict, str | None, str | None]:
+    """The record, version and writer of a format read without OpenTimelineIO."""
+    if adapter == "capcut":
+        draft = reference_capcut.parse(data, str(path))
+        folder = path.parent.name if path.is_file() else path.name
+        return reference_capcut.read(draft, folder or None), reference_capcut.version(draft), reference_capcut.writer(draft)
+    return reference_edl.read(data), None, None
+
+
 def import_reference(path: Path) -> dict:
     path = Path(path)
     data, adapter, sha256 = _load(path)
-    root = _parse(data, path)
-    record = _read_bounded(data, adapter)
+    if adapter in ("capcut", "cmx_3600"):
+        if adapter == "capcut" and path.is_dir():
+            path = _capcut_draft(path)  # source.path names the file that was read
+        record, version, writer = _plain(path, data, adapter)
+    else:
+        root = _parse(data, path)
+        record = _read_bounded(data, adapter)
+        version = root.get("version")
+        writer = "DaVinci Resolve" if adapter == "fcpx_xml" and _resolve_wrote(root) else None
     urls = {item["media"]["url"] for tl in record["timelines"] for track in tl["tracks"] for item in track["items"]
-            if item.get("media", {}).get("kind") == "file"}
-    return {"source": {"path": str(path), "adapter": adapter, "version": root.get("version"), "sha256": sha256},
+            if item.get("media", {}).get("kind") == "file" and item["media"].get("url")}
+    # writer: the app that made the file when the format alone doesn't say (Resolve's FCPXML, CapCut or JianYing)
+    return {"source": {"path": str(path), "adapter": adapter, "version": version, "sha256": sha256, "writer": writer},
             "mediaRefs": sorted(urls), **record}
 
 
@@ -780,6 +829,8 @@ def count_timelines(path: Path) -> int:
     for an export it would refuse before the adapters run (no timeline, a skipped event, bad XML)."""
     path = Path(path)
     data, adapter, _ = _load(path)
+    if adapter in ("capcut", "cmx_3600"):
+        return len(_plain(path, data, adapter)[0]["timelines"])
     root = _parse(data, path)
     if adapter == "fcpx_xml":
         fcpx = _Fcpx(root)

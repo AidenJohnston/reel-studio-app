@@ -125,7 +125,7 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -1782,25 +1782,26 @@ function registerIpc(): void {
     let files: string[]
     if (ids) {
       files = ids.map((id) => foundEdit(id)).filter((f) => f.readable).map((f) => f.path)
-      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an XML export to learn from.' }
+      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an export or a CapCut project to learn from.' }
     } else {
       const mac = process.platform === 'darwin'
       const picker = learnPicker(mac)
       const r = await showOpenDialog({
         title: picker.title,
-        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package
+        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package, and a CapCut project is a
+        // folder; on Windows the person picks the draft_content.json inside it
         properties: mac ? ['openFile', 'openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
-        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml'] }]
+        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml', 'edl', 'json'] }]
       })
       if (r.canceled || !r.filePaths.length) return null
       files = r.filePaths
     }
     return readLesson(files, (file) => runEngine('import-reference', [file]), (p) => e.sender.send('style:learnProgress', p))
   })
-  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string) => {
+  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string, editor?: EditorName) => {
     if (!ai.addStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
     const kept: StyleRule[] = []
-    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from } }))
+    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from, ...(editor ? { editor } : {}) } }))
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
