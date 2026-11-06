@@ -30,6 +30,8 @@ export interface StyleRule {
   updatedAt?: string;
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
   byYou?: true;
+  /** Kept from a suggestion My style made from post results or the person's own hand edits: what it was read from. */
+  learned?: { from: 'results' | 'edits'; evidence: string };
 }
 /** The active checked rules, and rules whose check this version can't read (saved by a newer Reel Studio):
  * those are named in every note's reply rather than skipped without a word. */
@@ -49,7 +51,9 @@ export interface TrialLink {
 export interface MemoryProposal {
   id: string; kind: MemoryKind; line: string; text: string; proposedAt: string;
   from: { kind: 'note'; project: string; title: string; version: number; note?: string }
-    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string; trials: TrialLink[] };
+    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string; trials: TrialLink[] }
+    /** The same change made by hand in several reels (the app's memory-loop.ts finds them). */
+    | { kind: 'edits'; reels: string[]; n: number; evidence: string };
 }
 export type ProposalDraft = Omit<MemoryProposal, 'id' | 'proposedAt'>;
 export type ProposalStatus = 'added' | 'duplicate' | 'forgotten' | 'full';
@@ -66,6 +70,10 @@ function isProposal(value: unknown): value is MemoryProposal {
     || typeof value.text !== 'string' || typeof value.line !== 'string' || value.line.length > 60
     || typeof value.kind !== 'string' || !['captions', 'pacing', 'music', 'cuts', 'look'].includes(value.kind) || !record(value.from)) return false;
   const source = value.from;
+  if (source.kind === 'edits') {
+    return Array.isArray(source.reels) && source.reels.every((r) => typeof r === 'string')
+      && typeof source.n === 'number' && Number.isSafeInteger(source.n) && source.n > 0 && typeof source.evidence === 'string';
+  }
   return source.kind === 'note'
     ? typeof source.project === 'string' && typeof source.title === 'string' && typeof source.version === 'number'
       && (source.note === undefined || typeof source.note === 'string')
@@ -206,6 +214,38 @@ export class StyleStore {
       if (!isProposal(saved)) throw new Error('Invalid memory proposal. Supply a kind, a short line and its evidence.');
       await this.write({ ...data, proposals: [...(data.proposals ?? []), saved] });
       return 'added';
+    });
+  }
+
+  /** The memories waiting for the person, oldest first. Nothing when the file can't be read. */
+  async proposals(): Promise<MemoryProposal[]> {
+    return (await this.serial(() => this.read()).catch(() => null))?.proposals ?? [];
+  }
+
+  /** The person kept a waiting memory, with its words or theirs: it becomes a rule in the same write that takes it
+   * off the list. An equivalent rule already there is kept instead (and turned back on). Null when it is gone. */
+  async accept(id: string, words?: string): Promise<StyleRule | null> {
+    return this.serial(async () => {
+      const data = await this.readForLearning();
+      const proposal = data.proposals?.find((p) => p.id === id);
+      if (!proposal) return null;
+      const text = cleanRuleText(words ?? proposal.text);
+      const proposals = data.proposals!.filter((p) => p.id !== id);
+      const dup = data.rules.find((r) => normalize(r.text) === normalize(text));
+      if (dup) {
+        delete dup.paused;
+        await this.write({ ...data, proposals });
+        return dup;
+      }
+      const from = proposal.from;
+      const rule: StyleRule = {
+        id: randomUUID(), text, createdAt: new Date().toISOString(),
+        ...(from.kind === 'note'
+          ? { source: { project: from.project, title: from.title, version: from.version, ...(from.note ? { note: from.note } : {}) } }
+          : { learned: { from: from.kind, evidence: from.evidence } }),
+      };
+      await this.write({ ...data, rules: [...data.rules, rule], proposals });
+      return rule;
     });
   }
 

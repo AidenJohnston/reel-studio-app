@@ -6,7 +6,7 @@ import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
-import type { Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import type { MemorySuggestion, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -90,7 +90,7 @@ const sameRule = (s: string): string =>
     .trim()
 
 /** My style.json: the rules, plus whatever else the real package stores there (kept on every write). */
-type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; [field: string]: unknown }
+type StyleData = { rules: StyleRule[]; damaged?: string; forgotten?: string[]; proposals?: MemorySuggestion[]; [field: string]: unknown }
 
 const LOWERCASE_CAPTIONS = 'Use lowercase subtitles.'
 
@@ -527,6 +527,48 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
     async addStyleRule(text, from, check) {
       return (await addRule(text, from, check)).rule
+    },
+    // The learning loop, as the real StyleStore keeps it: at most three waiting, never a rule until kept, and words
+    // turned down or forgotten never come back. This stand-in has no post results to learn from.
+    async learnFromResults() {
+      return []
+    },
+    async proposeMemory(draft) {
+      const d = draft as Omit<MemorySuggestion, 'id' | 'proposedAt'>
+      return withStyle(async (s) => {
+        const words = sameRule(d.text)
+        if ((s.forgotten ?? []).some((f) => sameRule(f) === words)) return 'forgotten'
+        if (s.rules.some((r) => sameRule(r.text) === words) || (s.proposals ?? []).some((x) => sameRule(x.text) === words)) return 'duplicate'
+        if ((s.proposals ?? []).length >= 3) return 'full'
+        await writeJson(styleFile(), { ...s, proposals: [...(s.proposals ?? []), { ...d, id: randomUUID(), proposedAt: new Date().toISOString() }] })
+        return 'added'
+      })
+    },
+    async memoryProposals() {
+      return withStyle(async (s) => s.proposals ?? []).catch(() => [])
+    },
+    async acceptMemory(id, words) {
+      return withStyle(async (s) => {
+        const x = (s.proposals ?? []).find((m) => m.id === id)
+        if (!x) return null
+        const proposals = (s.proposals ?? []).filter((m) => m.id !== id)
+        const text = cleanRule(words ?? x.text)
+        const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+        const from = x.from
+        const rule: StyleRule = dup ?? {
+          id: randomUUID(), text, createdAt: new Date().toISOString(),
+          ...(from.kind === 'note' ? { source: { project: from.project, title: from.title, version: from.version } } : { learned: { from: from.kind, evidence: from.evidence } })
+        }
+        await writeJson(styleFile(), { ...s, rules: dup ? s.rules : [...s.rules, rule], proposals })
+        return rule
+      })
+    },
+    async dismissMemory(id) {
+      await withStyle(async (s) => {
+        const x = (s.proposals ?? []).find((m) => m.id === id)
+        if (!x) return
+        await writeJson(styleFile(), { ...s, proposals: (s.proposals ?? []).filter((m) => m.id !== id), forgotten: [...(s.forgotten ?? []), x.text] })
+      })
     },
     async restoreStyleRule(rule, index) {
       await withStyle(async (s) => {

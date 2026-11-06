@@ -189,7 +189,10 @@ const api: ReelApi = {
     keepLearned: (rules, from) => call('style:keepLearned', rules, from),
     update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
-    rememberLowercase: (slug) => call('style:rememberLowercase', slug)
+    rememberLowercase: (slug) => call('style:rememberLowercase', slug),
+    suggestions: () => call('style:suggestions'),
+    keepSuggestion: (id, text) => call('style:keepSuggestion', id, text),
+    dismissSuggestion: (id) => call('style:dismissSuggestion', id)
   },
   sfx: {
     pack: () => call('sfx:pack')

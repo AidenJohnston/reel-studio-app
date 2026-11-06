@@ -78,6 +78,7 @@ import { createJobManager } from './jobs'
 import { createPauser, pauseFor, quitQuestion } from './pause'
 import { createNoteQueue, noteOutcome, type NoteToRun, type StartHand } from './note-queue'
 import { handEditJob, HAND_MESSAGE } from './hand-edit'
+import { refreshMemories } from './memory-loop'
 import { parseHandEdit } from '../shared/hand-edit'
 import { learnPicker } from '../shared/style-editors'
 import { checkPlan, planFromEditor, planReply, planTurns, titleFromTopic } from '../shared/plan'
@@ -1548,6 +1549,22 @@ function registerIpc(): void {
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  // the learning loop (memory-loop.ts): looks again when My style opens, at most once a minute
+  handle('style:suggestions', async () => {
+    await refreshMemories(ai, projectsDir(), log)
+    return (await ai.memoryProposals?.().catch(() => [])) ?? []
+  })
+  handle('style:keepSuggestion', async (_e, id: string, text?: unknown) => {
+    if (!ai.acceptMemory) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
+    if (text !== undefined && (typeof text !== 'string' || !text.trim())) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press No thanks.' }
+    const rule = await ai.acceptMemory(id, text)
+    if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That suggestion is not in My style any more.' }
+    return rule
+  })
+  handle('style:dismissSuggestion', async (_e, id: string) => {
+    if (!ai.dismissMemory) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
+    await ai.dismissMemory(id)
+  })
   handle('style:update', (_e, id: string, patch: { text?: unknown; paused?: unknown }) => {
     if (!ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
     const text = typeof patch?.text === 'string' ? patch.text : undefined

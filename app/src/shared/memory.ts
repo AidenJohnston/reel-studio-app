@@ -93,6 +93,7 @@ function origin(r: StyleRule): string | null {
   if (r.source?.note) return `from your note on “${r.source.title}”`
   if (r.source?.title) return `from “${r.source.title}”`
   if (r.byYou) return 'added by you'
+  if (r.learned) return r.learned.from === 'results' ? 'from your post results' : 'from your hand edits'
   return null
 }
 
@@ -111,6 +112,7 @@ export function sourceLine(r: StyleRule, now: number): string {
 export function sourceDetail(r: StyleRule): string | null {
   const files = filesOf(r)
   if (files.length > 1) return `Read from ${files.map((f) => `${f} (${editorOf(f)})`).join(', ')}`
+  if (r.learned) return r.learned.evidence
   if (!r.source?.title) return null
   const where = `${r.source.version ? `Version ${r.source.version} of ` : ''}“${r.source.title}”`
   if (r.source.note) return `Your note “${r.source.note}” on ${where}`

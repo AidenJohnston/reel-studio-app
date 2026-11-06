@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
@@ -180,6 +180,13 @@ export interface AI {
   /** Saves a typed rule the user said Yes to. `exists`: already in My style; `forgotten`: they removed it since. */
   approveStyleProposal?(p: StyleProposal): Promise<{ status: 'saved' | 'exists' | 'forgotten' }>
   declineStyleProposal?(p: StyleProposal): Promise<void>
+  /** Memories drafted from post results (read-only); each goes to proposeMemory. Optional: older packages lack these. */
+  learnFromResults?(): Promise<unknown[]>
+  /** Keeps a drafted memory waiting in My style: 'added', or why not ('duplicate', 'forgotten', 'full'). */
+  proposeMemory?(draft: unknown): Promise<string>
+  memoryProposals?(): Promise<MemorySuggestion[]>
+  acceptMemory?(id: string, words?: string): Promise<StyleRule | null>
+  dismissMemory?(id: string): Promise<void>
   /** My style: change a rule's words, or pause or resume it. Optional: older packages lack it. */
   updateStyleRule?(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
   /** Stops setActive('claude-cli')'s check call, which then throws code 'cancelled'. Optional: older packages lack it. */

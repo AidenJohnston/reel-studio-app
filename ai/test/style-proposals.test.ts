@@ -71,3 +71,24 @@ it('a rule removed and then put back by Undo is not forgotten', async () => {
   await style.remove(rule.id, { forget: false });
   expect(await style.propose(draft())).toBe('added');
 });
+
+it('fails if keeping a suggestion leaves it waiting, drops its evidence, or ignores the words the person typed', async () => {
+  const { style, read } = await store();
+  const edits: ProposalDraft = { kind: 'captions', line: 'Use bigger subtitles', text: 'Use bigger subtitles.', from: { kind: 'edits', reels: ['a', 'b'], n: 2, evidence: 'You made the subtitles bigger by hand in 2 reels.' } };
+  expect(await style.propose(edits)).toBe('added');
+  expect(await style.propose(draft())).toBe('added');
+  const [byHand, byResults] = await style.proposals();
+  expect(await style.accept(byHand.id, 'use big subtitles, around 126 px')).toMatchObject({ text: 'Use big subtitles, around 126 px.', learned: { from: 'edits', evidence: 'You made the subtitles bigger by hand in 2 reels.' } });
+  expect(await style.accept(byResults.id)).toMatchObject({ text: 'Prefer brighter exposure.', learned: { from: 'results', evidence: '3 of 3 trials, avg watch +20%' } });
+  expect((await read()).proposals).toEqual([]);
+  expect((await style.list()).map((r) => r.text)).toEqual(['Use big subtitles, around 126 px.', 'Prefer brighter exposure.']);
+  // kept once: a second Keep (a double click) finds nothing to keep
+  expect(await style.accept(byHand.id)).toBeNull();
+  expect(await style.list()).toHaveLength(2);
+});
+
+it('fails if an edits suggestion with no evidence or reels is stored', async () => {
+  const { style } = await store();
+  const bad = { kind: 'captions', line: 'Bigger', text: 'Bigger.', from: { kind: 'edits', reels: 'a', n: 2, evidence: 'x' } } as unknown as ProposalDraft;
+  await expect(style.propose(bad)).rejects.toThrow(/Invalid memory proposal/);
+});

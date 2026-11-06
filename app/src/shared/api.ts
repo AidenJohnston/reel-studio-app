@@ -715,6 +715,22 @@ export interface StyleRule {
   updatedAt?: string
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
   byYou?: true
+  /** Kept from a suggestion made from post results or hand edits: what it was read from. */
+  learned?: { from: 'results' | 'edits'; evidence: string }
+}
+
+/** A memory My style suggests (ai/src/style.ts MemoryProposal): nothing is saved until the person keeps it. */
+export interface MemorySuggestion {
+  id: string
+  kind: 'captions' | 'pacing' | 'music' | 'cuts' | 'look'
+  /** the short line the list shows, at most 60 characters */
+  line: string
+  text: string
+  proposedAt: string
+  from:
+    | { kind: 'note'; project: string; title: string; version: number; note?: string }
+    | { kind: 'results'; reels: string[]; metric: string; change: number; n: number; evidence: string }
+    | { kind: 'edits'; reels: string[]; n: number; evidence: string }
 }
 
 /** A checked My style rule's machine form (ai/src/rules.ts validates it; engine/reelengine/rule_checks.py measures it). */
@@ -1102,6 +1118,12 @@ export interface ReelApi {
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
     /** "Use lowercase for new reels too", ticked in Edit it myself: the same rule a note's question saves. */
     rememberLowercase(slug: string): Promise<void>
+    /** Memories My style suggests from post results and hand edits, after looking again (at most once a minute). */
+    suggestions(): Promise<MemorySuggestion[]>
+    /** Keep a suggestion as a rule, with its words or `text` the person typed. */
+    keepSuggestion(id: string, text?: string): Promise<StyleRule>
+    /** No thanks: the suggestion and its words are never suggested again. */
+    dismissSuggestion(id: string): Promise<void>
   }
   sfx: {
     /** Every built-in sound effect, with a URL to hear it. */

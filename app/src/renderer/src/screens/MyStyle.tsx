@@ -7,6 +7,7 @@ import { Icon, type IconName } from '../components/icons'
 import { byKeyboard, reducedMotion } from '../components/motion'
 import { TitleBarSlot } from '../components/titlebar'
 import { LearnSheet } from './LearnSheet'
+import { MemorySuggestions } from './MemorySuggestions'
 import { styleEmptyLine } from './style-words'
 import '../components/library.css'
 
@@ -53,6 +54,8 @@ export function MyStyle() {
   const [sheet, setSheet] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [damaged, setDamaged] = useState(false)
+  // suggestions waiting above the list: the empty page's "Nothing learned yet" would contradict them
+  const [suggested, setSuggested] = useState(0)
   const editButtons = useRef(new Map<string, HTMLButtonElement>())
   const forgetButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
@@ -242,6 +245,8 @@ export function MyStyle() {
         </p>
       )}
 
+      <MemorySuggestions onKept={() => void load()} onCount={setSuggested} />
+
       {lesson && (
         <section className="lesson" aria-labelledby="lesson-h" data-testid="style-lesson">
           <div className="lesson-h">
@@ -311,7 +316,7 @@ export function MyStyle() {
         </form>
       )}
 
-      {rules && !rules.length && !forgot && adding === null && !lesson && (
+      {rules && !rules.length && !forgot && adding === null && !lesson && !suggested && (
         <div className="style-empty" data-testid="style-empty">
           <h2>Nothing learned yet</h2>
           <p>{styleEmptyLine(IS_MAC)}</p>

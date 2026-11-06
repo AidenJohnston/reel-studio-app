@@ -8,7 +8,8 @@ import {
   AgentEvent, AgentResult, AIError, EngineHost, ModelProvider, Part, PlanTurnInput, PlanTurnResult, ProviderId, ProviderStatus, ScriptResult, SecretStore, UserFacingError,
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
-import { StyleStore, StyleProposal, StyleRule } from './style';
+import { StyleStore, StyleProposal, StyleRule, type ProposalDraft } from './style';
+import { learn } from './learning';
 import type { RuleCheck } from './rules';
 import { loadProject, writeFileAtomic } from './project';
 import { planFastNote } from './fastnote';
@@ -1128,6 +1129,15 @@ export function createAI(opts: CreateAIOptions) {
     async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
     /** The user said No to AgentResult.styleProposal. */
     async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
+    /** Memories drafted from post results (learning.ts learn(), read-only); the app passes each to proposeMemory. */
+    async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },
+    /** Keeps a drafted memory waiting for the person (at most three). Never a rule until they keep it. */
+    async proposeMemory(d: ProposalDraft) { return style.propose(d); },
+    async memoryProposals() { return style.proposals(); },
+    /** The person kept a waiting memory, with its words or `words` they typed. Null when it was already gone. */
+    async acceptMemory(id: string, words?: string) { return style.accept(id, words); },
+    /** No thanks: the memory, and its words, are never proposed again. */
+    async dismissMemory(id: string) { return style.dismiss(id); },
     /** My style: the user edited a rule's words, or paused or resumed it. */
     async updateStyleRule(id: string, patch: { text?: string; paused?: boolean }) { return style.update(id, patch); },
   };
