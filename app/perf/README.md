@@ -14,8 +14,9 @@ Timing attribute (`elementtiming`), so the app never reads its own timings or wa
 enters a number.
 
 The Reel screen's player loads a version in a hidden layer and swaps it in once its first frame is ready
-(`Player.tsx`). Chromium may record that layer's first paint while it is still hidden, so a player moment ends at the
-later of that paint and the first animation frame in which the layer is the shown one. That frame's start can be up to
+(`Player.tsx`). Chromium records no Element Timing paint for a layer that loaded hidden (a Windows run timed out
+waiting for one), so a player moment ends at the first animation frame in which the layer is the shown one, or at
+the layer's paint when Chromium did record a later one (the first version on opening, which loads in view). That frame's start can be up to
 one frame (about 17 ms at 60 Hz) before the swap is on screen.
 
 | Moment | Starts | Ends |

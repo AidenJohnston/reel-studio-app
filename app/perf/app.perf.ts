@@ -106,8 +106,8 @@ async function paintAfter(page: Page, mark: string, id: string): Promise<{ ms: n
 }
 
 /**
- * ms from moment `mark`'s event to the player showing version `version`: the later of the shown <video>'s first paint
- * (Element Timing) and the first animation frame with it as the shown layer. Only an element that became the shown
+ * ms from moment `mark`'s event to the player showing version `version`: the first animation frame with its <video>
+ * as the shown layer, or that element's first paint (Element Timing) if Chromium recorded a later one. Only an element that became the shown
  * layer after the event counts, so the version on screen before the click never ends the moment.
  */
 async function shownAfter(page: Page, mark: string, version: number): Promise<{ ms: number; url: string }> {
@@ -120,8 +120,11 @@ async function shownAfter(page: Page, mark: string, version: number): Promise<{ 
         const el = document.querySelector<HTMLVideoElement>(sel)
         if (!el || !new RegExp(`[\\\\/]v${v}[\\\\/]`).test(decodeURIComponent(el.currentSrc || el.src))) return null
         const swap = rec.layers.find((x) => x.el === el && x.at > start)
+        if (!swap) return null
+        // A layer that loaded hidden gets no Element Timing paint (Chromium skips invisible elements), so the swap,
+        // which the player makes only once the layer has a decoded frame, ends the moment then.
         const p = rec.paints.find((x) => x.id === id && x.el === el && x.renderTime > 0)
-        return swap && p ? { ms: Math.max(swap.at, p.renderTime) - start, url: p.url } : null
+        return { ms: (p ? Math.max(swap.at, p.renderTime) : swap.at) - start, url: p?.url ?? (el.currentSrc || el.src) }
       },
       [mark, version, PLAYER_SELECTOR, PLAYER] as const,
       { timeout: 60_000, polling: 100 }
