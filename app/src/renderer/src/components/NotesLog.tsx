@@ -255,8 +255,9 @@ export function NotesLog({
       return (
         <>
           <div className="nt-res quiet" aria-busy>
+            {/* pending, not live: the tray under the log has the one spinner and the time left */}
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version 1</span>
           </div>
@@ -317,7 +318,7 @@ export function NotesLog({
         return (
           <div className="nt-res quiet" aria-busy>
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version {r.v}</span>
           </div>

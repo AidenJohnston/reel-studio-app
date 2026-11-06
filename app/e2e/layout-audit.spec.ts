@@ -479,7 +479,7 @@ SCREENS.push({
       id: 'reel-shape-menu',
       enter: async ({ page }) => {
         await openReel(page)
-        await page.getByTestId('shape').first().click()
+        await page.getByTestId('view-menu').first().click()
       },
       ready: (page) => page.getByRole('menu').first()
     },

@@ -676,7 +676,7 @@ function Step({ state, children }: { state: 'now' | 'done' | 'later'; children: 
   return (
     <li className={`vstep ${state}`}>
       <span className="vstep-mark" aria-hidden>
-        {state === 'now' ? <Spinner /> : state === 'done' ? <Icon name="check" size={13} stroke={2.4} /> : <span className="vstep-dot" />}
+        {state === 'now' ? <Spinner /> : state === 'done' ? <Icon name="check" size={14} stroke={2.4} /> : <span className="vstep-dot" />}
       </span>
       <span className="vstep-what">{children}</span>
     </li>

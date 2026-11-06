@@ -120,3 +120,119 @@ export function ShapeMenu({ side = 'left' }: { side?: Side }) {
     </span>
   )
 }
+
+const VIEW_MENU_W = 300
+const VIEWS = [
+  { key: 'instagram', label: 'Instagram', fit: 'Your reel under Instagram’s buttons and caption', testid: 'view-instagram' },
+  { key: 'clean', label: 'Clean', fit: 'Your reel alone', testid: 'view-clean' }
+] as const
+
+/**
+ * How the preview looks, in one menu under the phone: Instagram or Clean, the phone's shape, and the timeline. One
+ * pill instead of three keeps the transport row as wide as the phone at every window size (reel.css). While two
+ * versions are compared the view is held at Clean, and the menu says why.
+ */
+export function ViewMenu({
+  view,
+  onView,
+  held,
+  timeline,
+  onTimeline,
+  timelineShortcut,
+  side = 'left'
+}: {
+  view: 'instagram' | 'clean'
+  onView: (v: 'instagram' | 'clean') => void
+  /** comparing versions: the preview stays Clean until Done comparing */
+  held: boolean
+  timeline: boolean
+  onTimeline: (shown: boolean) => void
+  timelineShortcut: string
+  side?: Side
+}) {
+  const [shape, setShape] = usePhoneShape()
+  const [open, setOpen] = useState(false)
+  const [opensTo, setOpensTo] = useState<Side>(side)
+  const pill = useRef<HTMLButtonElement>(null)
+  const done = (words?: string) => {
+    setOpen(false)
+    pill.current?.focus({ preventScroll: true })
+    if (words) announce(words)
+  }
+  const shown = VIEWS.find((v) => v.key === view) ?? VIEWS[0]
+  return (
+    <span className="tmenu">
+      <button
+        ref={pill}
+        type="button"
+        className="icon-btn view-pick"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`View: ${shown.label}, ${shape.label}${timeline ? '' : ', timeline hidden'}`}
+        title={`View: ${shown.label}, ${shape.label}`}
+        onClick={() => {
+          if (!open) setOpensTo(roomFor(pill.current, side, VIEW_MENU_W))
+          setOpen((o) => !o)
+        }}
+        data-testid="view-menu"
+      >
+        <Icon name="eye" size={18} />
+      </button>
+      <PopMenu open={open} onClose={() => setOpen(false)} anchor={pill} label="View" {...above(opensTo, VIEW_MENU_W)} testid="view-menu-list">
+        <p className="mi-head" aria-hidden>
+          On the phone
+        </p>
+        {VIEWS.map((v) => (
+          <button
+            key={v.key}
+            type="button"
+            className="mi shape-mi"
+            role="menuitemradio"
+            aria-checked={v.key === view}
+            disabled={held}
+            onClick={() => (onView(v.key), done())}
+            data-testid={v.testid}
+          >
+            {v.key === view ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
+            <span className="shape-mi-text">
+              <span>{v.label}</span>
+              <span className="shape-mi-fit">{held ? 'Comparing shows the reel without Instagram. Your view comes back on Done comparing.' : v.fit}</span>
+            </span>
+          </button>
+        ))}
+        <hr />
+        <p className="mi-head" aria-hidden>
+          Phone
+        </p>
+        {SHAPES.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className="mi shape-mi"
+            role="menuitemradio"
+            aria-checked={s.id === shape.id}
+            onClick={() => (setShape(s), done(fitWords(s)))}
+            data-testid={`shape-${s.id}`}
+          >
+            {s.id === shape.id ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
+            <span className="shape-mi-text">
+              <span>
+                {s.label}
+                <span className="r">{s.ratio}</span>
+              </span>
+              <span className="shape-mi-fit">{fitWords(s)}</span>
+            </span>
+          </button>
+        ))}
+        <hr />
+        <button type="button" className="mi" role="menuitemcheckbox" aria-checked={timeline} onClick={() => (onTimeline(!timeline), done())} data-testid="timeline-toggle">
+          {timeline ? <Icon name="check" size={16} /> : <span className="mi-sp" />}
+          Timeline
+          <span className="r">
+            <kbd className="kbd">{timelineShortcut}</kbd>
+          </span>
+        </button>
+      </PopMenu>
+    </span>
+  )
+}

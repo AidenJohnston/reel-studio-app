@@ -17,7 +17,7 @@ import { PhonePlayer } from '../components/Player'
 import type { SubtitleLook } from '../../../shared/caption-presets'
 import { PhoneViewSwitch, usePhoneShape, usePhoneView } from '../components/Phone'
 import { FullStage } from '../components/FullStage'
-import { ShapeMenu, SpeedMenu } from '../components/PreviewControls'
+import { SpeedMenu, ViewMenu } from '../components/PreviewControls'
 import { createPlayhead, usePlayhead, type Playhead } from '../components/playhead'
 import { createTransport, useTransport, type Transport } from '../components/transport'
 import { versionOnScreen, versionsShown } from '../components/videoLayers'
@@ -52,11 +52,11 @@ const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
 }
 
 const pinsKey = (slug: string): string => `rs.pins.${slug}`
-/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the button that
- * shows it when it is hidden. */
+/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the View menu's
+ * button, whose menu shows it, when it is hidden. */
 const keyboardBackToTimeline = (): void => {
   if (byKeyboard())
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="timeline-toggle"]')?.focus())
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="view-menu"]')?.focus())
 }
 const typing = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null
@@ -795,6 +795,8 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
 
   const actions = (
     <>
+      {/* planning: who answers, in the one header row (the column below has no title row of its own) */}
+      {planned && !drawer && !aiOff && providerChecked && <PlanWho provider={provider} />}
       {hasVersions && (
         <Button kind="tertiary" className={drawer ? 'on' : undefined} aria-pressed={!!drawer} onClick={() => (drawer ? (setDrawer(null), setHandId(null), setPreview(null), setSound(null), setPicture(null)) : openDrawer('cut'))} data-testid="edit-myself">
           <Icon name="sliders" size={16} /> Edit it myself
@@ -989,16 +991,13 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
                     onPlay={(n) => !drawer && watch(n)}
                   />}
                   <TransportRow transport={transport} playhead={playhead}>
-                    <ShapeMenu />
-                    {viewSwitch}
-                    <IconButton
-                      icon="timeline"
-                      label="Show timeline"
-                      shortcut={TIMELINE_SHORTCUT}
-                      className="tl-toggle"
-                      aria-pressed={timelineShown}
-                      onClick={() => void setTimelineShown(!timelineShown).catch((e) => notify(userMessage(e), 'error'))}
-                      data-testid="timeline-toggle"
+                    <ViewMenu
+                      view={shownView}
+                      onView={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))}
+                      held={!!compare}
+                      timeline={timelineShown}
+                      onTimeline={(shown) => void setTimelineShown(shown).catch((e) => notify(userMessage(e), 'error'))}
+                      timelineShortcut={TIMELINE_SHORTCUT}
                     />
                     <IconButton icon="fullscreen" label="Full screen" shortcut="F" aria-keyshortcuts="F" onClick={() => setFull(true)} data-testid="full-screen" />
                   </TransportRow>
@@ -1036,10 +1035,9 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
             />
           ) : (
             <>
-              <div className="notes-h">
-                <h2>{planned ? 'Plan with your editor' : 'Notes for your editor'}</h2>
-                {planned && !aiOff && <PlanWho provider={provider} />}
-              </div>
+              {/* The column's name is for screen readers: the title bar is the one header row across the screen (it names
+                  who answers while planning), and the note box says what the column is for. */}
+              <h2 className="sr-only">{planned ? 'Plan with your editor' : 'Notes for your editor'}</h2>
               {planned && !providerChecked ? null : planned && aiOff ? (
                 <PlanEmpty
                   provider={null}

@@ -5,22 +5,22 @@
 .reel-b { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(360px, 31vw, 400px); }
 
 /* ---- the title-bar row: the title (click to rename), the version on screen, Back to latest ---- */
-.rt-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .reel-title { -webkit-app-region: no-drag; pointer-events: auto; min-width: 0; cursor: text; border-radius: 6px; padding: 2px 6px; margin-left: -6px; }
 @media (hover: hover) and (pointer: fine) { .reel-title:hover { background: var(--wash); } }
-.reel-title-input { height: 30px; min-height: 30px; padding: 2px 8px; font-size: var(--fs-md); font-weight: 620; width: min(420px, 40vw); }
-.rt-ver { flex: none; font-size: var(--fs-base); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.reel-title-input { height: 30px; min-height: 30px; padding: 2px 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; width: min(420px, 40vw); }
+.rt-ver { flex: none; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rt-ver.older { color: var(--ink-2); font-weight: 600; }
 /* the on-screen version's name, after its number: a caption, cut short before it crowds the title */
 /* out of the drag region, as .reel-title is, so hovering a cut-short name shows it whole */
-.rt-ver-name { -webkit-app-region: no-drag; pointer-events: auto; margin-left: -6px; flex: 0 1 auto; min-width: 0; max-width: 32ch; font-size: var(--fs-base); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt-ver-name { -webkit-app-region: no-drag; pointer-events: auto; margin-left: -6px; flex: 0 1 auto; min-width: 0; max-width: 32ch; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rt-ver-name::before { content: '·\00a0' / ''; color: var(--ink-4); }
 .rt-title .btn.ghost.small { flex: none; }
 .rt-more { position: relative; display: flex; }
 .rt-more .pop { pointer-events: auto; -webkit-app-region: no-drag; }
 
 /* ---- the stage: the video, the timeline, the transport ---- */
-.stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 4px var(--gutter) 14px; }
+.stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 8px var(--gutter) 16px; }
 .stage-v { flex: 1; min-height: 0; display: flex; position: relative; }
 
 /* Drag the file out from here, not from anywhere on the video: a quiet grip in the gutter beside the frame. It shows
@@ -36,8 +36,8 @@
 @media (hover: none) { .draghandle { opacity: 1; } }
 .draghandle:active { cursor: grabbing; scale: .96; background: var(--sunk); color: var(--ink); opacity: 1; }
 .draghandle-tip {
-  position: absolute; left: 30px; top: 50%; translate: 0 -50%; white-space: nowrap; background: var(--ink); color: #fff; font-size: var(--fs-sm); font-weight: 600;
-  padding: 5px 9px; border-radius: 7px; opacity: 0; pointer-events: none; transition: opacity 150ms ease;
+  position: absolute; left: 30px; top: 50%; translate: 0 -50%; white-space: nowrap; background: var(--ink); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600;
+  padding: 4px 8px; border-radius: 7px; opacity: 0; pointer-events: none; transition: opacity 150ms ease;
 }
 @media (hover: hover) and (pointer: fine) {
   .draghandle:hover { background: var(--sunk); color: var(--ink); }
@@ -61,7 +61,7 @@
 .reel-tag, .change-tag { position: absolute; top: calc(100cqw * (58 + var(--ig-top, 0)) / var(--sw, 393) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; }
 .reel-tag, .change-label {
   background: rgba(0, 0, 0, .6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm);
-  font-weight: 600; padding: 4px 10px; border-radius: 999px; pointer-events: none; white-space: nowrap;
+  font-weight: 600; padding: 4px 12px; border-radius: 999px; pointer-events: none; white-space: nowrap;
 }
 
 /* A change before its draft (ChangeMoments.tsx): its pictures lie on the reel's box under Instagram's screen, as the
@@ -89,11 +89,11 @@
   position: absolute; top: calc(14px + var(--safe-top, 0px) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; display: flex; flex-wrap: wrap; justify-content: center;
   align-items: center; gap: 6px; width: max-content; max-width: calc(100cqw - 16px); white-space: nowrap;
 }
-.abswitch { display: flex; padding: 3px; border-radius: 999px; background: rgba(0, 0, 0, .6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-.abswitch button { border: 0; background: transparent; color: #fff; font: inherit; font-size: var(--fs-sm); font-weight: 650; padding: 5px 11px; border-radius: 999px; white-space: nowrap; cursor: pointer; }
+.abswitch { display: flex; padding: 4px; border-radius: 999px; background: rgba(0, 0, 0, .6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.abswitch button { border: 0; background: transparent; color: #fff; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 650; padding: 4px 12px; border-radius: 999px; white-space: nowrap; cursor: pointer; }
 .abswitch button.on { background: #fff; color: var(--ink); }
 .cmp-done {
-  height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--primary); color: #fff; font: inherit; font-size: var(--fs-sm); font-weight: 650; cursor: pointer;
+  height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--primary); color: #fff; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 650; cursor: pointer;
   transition: transform 120ms var(--ease-out);
 }
 .cmp-done:active { transform: scale(.97); }
@@ -103,24 +103,24 @@
 
 .spot {
   position: absolute; width: 24px; height: 24px; margin: -24px 0 0 -2px; border-radius: 50% 50% 50% 2px; background: var(--marker); color: var(--marker-ink);
-  font-size: var(--fs-sm); font-weight: 760; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0, 0, 0, .35), 0 0 0 2px #fff; pointer-events: none;
+  font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 760; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0, 0, 0, .35), 0 0 0 2px #fff; pointer-events: none;
   transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 @starting-style { .spot.pending { opacity: 0; transform: translateY(-6px) scale(.9); } }
 .spot.away { opacity: 0; transform: scale(.9); }
 .spot-lab {
-  position: absolute; left: 30px; top: -2px; background: rgba(22, 25, 23, .9); color: #fff; font-size: var(--fs-sm); line-height: 16px; padding: 5px 9px; border-radius: 9px;
+  position: absolute; left: 30px; top: -2px; background: rgba(22, 25, 23, .9); color: #fff; font-size: var(--fs-sm); line-height: 16px; padding: 4px 8px; border-radius: 9px;
   max-width: min(200px, calc(var(--room, 1) * 100cqw - 38px)); width: max-content; white-space: normal; text-align: left; font-weight: 500;
 }
 .spot.flip .spot-lab { left: auto; right: 30px; }
 .pointer { position: absolute; inset: 0; cursor: crosshair; outline: none; }
 .pointer-hint {
-  position: absolute; top: calc(14px + var(--safe-top, 0px) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; background: var(--ink); color: #fff; font-size: var(--fs-sm); font-weight: 600; padding: 5px 12px;
+  position: absolute; top: calc(14px + var(--safe-top, 0px) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; background: var(--ink); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; padding: 4px 12px;
   border-radius: 999px; white-space: nowrap; pointer-events: none;
 }
 .ring { position: absolute; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0, 0, 0, .35); pointer-events: none; }
 .ring::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .4); }
-.ring .rt { position: absolute; left: 48px; top: 10px; background: #fff; color: var(--ink); font-size: var(--fs-sm); font-weight: 650; padding: 3px 7px; border-radius: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ring .rt { position: absolute; left: 48px; top: 10px; background: #fff; color: var(--ink); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 650; padding: 4px 8px; border-radius: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* The timeline, as wide as the stage: phrase ticks, version marks (✓), your waiting notes (yellow), a dragged range. */
 /* The timeline (Timeline.tsx), in three lanes told apart by place, shape and a named icon each, not colour: Pictures
@@ -134,7 +134,6 @@ html.tl-instant .tl-pic > i, html.tl-instant .tl-thumb { transition: none; }
 .tl-lane-icon.pics { top: 0; }
 .tl-lane-icon.video { top: 22px; }
 .tl-lane-icon.sound { top: 40px; }
-.tl-toggle[aria-pressed='false'] { color: var(--ink-3); }
 .tl-track { position: absolute; inset: 0; outline: none; }
 html.kb .tl-track:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
 .tl-ticks { position: absolute; left: 0; top: 20px; width: 100%; height: 6px; overflow: visible; }
@@ -234,7 +233,7 @@ html.kb .tl-song-ring { outline: 2px solid var(--ink); outline-offset: 1px; }
   cursor: pointer; z-index: 1; pointer-events: auto; display: flex; align-items: flex-start;
 }
 /* level with the flag's body, clear of the song's line under it */
-.tl-sound-word { padding: 1px 4px 0 21px; font-size: var(--fs-xs); line-height: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.tl-sound-word { padding: 1px 4px 0 20px; font-size: var(--fs-xs); line-height: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .tl-sound.off .tl-sound-word { color: var(--ink-3); }
 .tl-sound.on .tl-sound-word { color: var(--ink); }
 .tl-sound > svg {
@@ -248,10 +247,10 @@ html.kb .tl-song-ring { outline: 2px solid var(--ink); outline-offset: 1px; }
 @media (hover: hover) and (pointer: fine) { .tl-sound:not(.on):not(.off):hover path { fill: var(--ink-2); } }
 html.kb .tl-sound > svg, html.kb .tl-sound path { transition: none; }
 html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
-.tl-mark .n { position: absolute; top: 0; right: -1px; min-width: 12px; height: 12px; border-radius: 6px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 700; line-height: 12px; padding: 0 3px; }
+.tl-mark .n { position: absolute; top: 0; right: -1px; min-width: 12px; height: 12px; border-radius: 6px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 700; line-height: 12px; padding: 0 4px; }
 .tl-tip {
   position: absolute; bottom: calc(100% + 8px); left: 50%; translate: -50% 0; z-index: 5; width: max-content; display: grid; gap: 1px; text-align: left; white-space: nowrap; max-width: 260px;
-  background: var(--surface); color: var(--ink); box-shadow: var(--e2); border-radius: 8px; padding: 6px 9px; font-size: var(--fs-sm); line-height: 16px; pointer-events: none;
+  background: var(--surface); color: var(--ink); box-shadow: var(--e2); border-radius: 8px; padding: 6px 8px; font-size: var(--fs-sm); line-height: 16px; pointer-events: none;
 }
 .tl-tip span { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .tl-tip.start { left: 0; translate: 0 0; }
@@ -261,56 +260,61 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .tl-tip .tnum { font-variant-numeric: tabular-nums; color: var(--ink-3); }
 .tl-tip.dark { background: var(--ink); color: #fff; font-weight: 650; font-variant-numeric: tabular-nums; bottom: calc(100% - 2px); }
 
-.transport { flex: none; height: 40px; margin-top: 4px; }
-/* The timeline and the transport row take the phone's width (Reel.tsx usePhoneWidth), centred on it: play and the time
-   under its left edge, the view switch and full screen under its right. Never narrower than the row needs (440 px holds
-   it at full size, preview.css tightens below 500), never wider than the stage. */
-.stage { --under-phone: min(100%, max(var(--phone-px, 100%), 440px)); }
+.transport { flex: none; height: 32px; margin-top: 4px; }
+/* The phone, the timeline and the transport row are one stack at the phone's width (Reel.tsx usePhoneWidth), sharing
+   both edges: play and the time under the phone's left edge, speed, View and full screen under its right. The row fits
+   the narrowest phone (about 255 px at 1100 x 720) because the preview's options live in one View menu. */
+.stage { --under-phone: min(100%, var(--phone-px, 100%)); }
 .stage > .transport { align-self: center; width: var(--under-phone); }
 .stage > .tl { align-self: center; width: calc(var(--under-phone) - 24px); }
 /* the row is inside the container (preview.css), so a narrow stage can tighten its gap */
-.tr-row { display: flex; align-items: center; gap: 10px; height: 100%; }
+.tr-row { display: flex; align-items: center; gap: 4px; height: 100%; }
+.tr-row > .pp { margin-right: 4px; }
+/* the row's one filled control: play, the action the row exists for */
 .transport .pp {
   width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; cursor: pointer;
   transition: transform 120ms var(--ease-out);
 }
 .transport .pp:active { transform: scale(.94); }
-.transport .tc { font-size: var(--fs-base); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.transport .tc { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .transport .tc span { color: var(--ink-3); font-weight: 500; }
 .transport .sp { flex: 1; }
+/* speed reads as a word but is a control like its neighbours: bare, 32 px, a wash on hover, ink when it isn't 1x */
 .transport .speed {
-  height: 32px; min-width: 40px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink);
-  font: inherit; font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
+  height: 32px; min-width: 32px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2);
+  font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, transform 120ms var(--ease-out);
 }
-.transport .speed.on { background: var(--ink); color: #fff; box-shadow: none; }
+@media (hover: hover) and (pointer: fine) { .transport .speed:hover { background: var(--wash); color: var(--ink); } }
+.transport .speed.on { background: var(--ink); color: #fff; }
 
 /* Version 1 failed before its video was copied in: why, and Choose another video, where the video would be. */
 .phone-failed {
-  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 28px;
+  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 24px;
   text-align: center; color: #fff; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 560; text-wrap: balance;
 }
 
 /* ---- the notes column ---- */
-.ncol { min-width: 0; min-height: 0; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 var(--line); padding: 4px 20px 14px; position: relative; }
+/* inset on the right as the title bar is (--gutter), so the note box, the drawer and the title-bar actions share an edge */
+.ncol { min-width: 0; min-height: 0; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 var(--line); padding: 8px var(--gutter) 16px 24px; position: relative; }
 .notes-h { height: 32px; display: flex; align-items: center; flex: none; }
 .notes-h h2 { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
 /* a short log sits just above the note box, as the prototype's does; a long one folds its oldest entries behind one line */
-.log { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 12px; padding: 6px 2px 14px; margin: 0 -2px; }
+.log { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 12px; padding: 6px 2px 16px; margin: 0 -2px; }
 .log > :first-child { margin-top: auto; }
 .log-empty { margin: auto 0; padding: 0 12px; text-align: center; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); }
 .fold {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; border: 0; background: none; padding: 0 8px 0 2px;
-  border-radius: 7px; font: inherit; color: var(--ink-2); font-size: var(--fs-base); font-weight: 600; cursor: pointer;
+  border-radius: 7px; font: inherit; color: var(--ink-2); font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; cursor: pointer;
 }
 .fold .icon { color: var(--ink-3); }
 @media (hover: hover) and (pointer: fine) { .fold:hover { background: var(--wash); color: var(--ink); } }
-.nday { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 650; letter-spacing: .02em; color: var(--ink-3); text-align: center; margin: 2px 0 4px; }
+.nday { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 650; letter-spacing: .02em; color: var(--ink-3); text-align: center; margin: 0 0 6px; }
 .nt { display: grid; gap: 6px; min-width: 0; }
 
 /* yours: a light bubble on the right */
 .nt-ask { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; min-width: 0; }
 .bubble {
-  max-width: 86%; background: var(--sunk); border-radius: 14px 14px 4px 14px; padding: 7px 11px; font-size: var(--fs-base); line-height: var(--lh-base);
+  max-width: 86%; background: var(--sunk); border-radius: 14px 14px 4px 14px; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base);
   color: var(--ink); overflow-wrap: anywhere;
 }
 .bubble > .icon { display: inline-block; vertical-align: -3px; margin-right: 6px; color: var(--ink-3); }
@@ -318,16 +322,17 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .q-att { display: inline-flex; gap: 6px; vertical-align: middle; margin-left: 8px; }
 /* a note about a moment: the time, in marker yellow */
 .tm {
-  display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--marker-soft); color: var(--marker-ink);
-  font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 6px; vertical-align: 1px;
+  display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border-radius: 4px; background: var(--marker-soft); color: var(--marker-ink);
+  font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 6px; vertical-align: 1px;
 }
 .nt.queued .grip { border: 0; background: none; padding: 4px 0; cursor: grab; color: var(--ink-3); align-self: center; }
 .nt.queued.over .nt-ask { box-shadow: 0 -2px 0 var(--ink); }
-.q-edit { min-height: 32px; padding: 4px 10px; font-size: var(--fs-base); flex: 1; }
+.q-edit { min-height: 32px; padding: 4px 12px; font-size: var(--fs-base); line-height: var(--lh-base); flex: 1; }
 
 /* what came of it: one line on the left */
 .nt-res { display: flex; align-items: center; gap: 8px; min-height: 22px; min-width: 0; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); }
-.nk { width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center; align-self: flex-start; margin-top: 0; }
+/* 16 px and an 8 px gap: what sits under a line (heard, What changed, Compare) indents 24 px, level with the line's words */
+.nk { width: 16px; height: 16px; border-radius: 50%; flex: none; display: grid; place-items: center; align-self: flex-start; margin-top: 0; }
 .nk.ok { background: var(--green-tint); color: var(--green-ink); }
 .nk.err { background: var(--pencil-tint); color: var(--pencil); }
 .nk.stop { background: var(--sunk); color: var(--ink-2); }
@@ -346,28 +351,28 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .nt-res.paused { flex-wrap: wrap; }
 .nt-res .t.full { display: block; -webkit-line-clamp: unset; flex: 1 1 200px; }
 .nt-res .lk, .reply-acts .lk, .dacts .lk, .script .lk {
-  flex: none; border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-base); font-weight: 600; color: var(--ink-2); display: inline-flex; align-items: center; gap: 5px;
+  flex: none; border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px;
   text-decoration: underline; text-decoration-color: rgba(22, 30, 26, .3); text-underline-offset: 3px; white-space: nowrap; cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine) { :is(.nt-res, .reply-acts, .dacts, .script) .lk:not(:disabled):hover { color: var(--ink); text-decoration-color: currentColor; } }
 .nt-res .lk:disabled { opacity: .5; cursor: default; }
-.nt-res .onscreen { margin-left: auto; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.nt-res .onscreen { margin-left: auto; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .nt-res.quiet { color: var(--ink-3); }
 /* the editor asking something waits on the person, so it reads in ink like a bubble, not as a hint */
 .nt-res.asks { color: var(--ink); }
 .nt-res.paused .t { color: var(--amber); font-weight: 600; }
 .nt-res .spin { width: 12px; height: 12px; border-width: 1.75px; }
 .nt-res .btn.small { flex: none; }
-.nt-acts { display: flex; gap: 8px; padding-left: 26px; }
+.nt-acts { display: flex; gap: 8px; padding-left: 24px; }
 .reply { align-items: flex-start; }
-.reply-acts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+.reply-acts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
 .nt-res.enter { animation: line-in 180ms cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
-.heard { padding-left: 26px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); overflow-wrap: anywhere; }
+.heard { padding-left: 24px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); overflow-wrap: anywhere; }
 .heard b { color: var(--ink); font-weight: 620; margin-right: 4px; }
 
 /* the editor's script for a planned reel */
-.script { padding-left: 26px; display: grid; gap: 6px; justify-items: start; }
+.script { padding-left: 24px; display: grid; gap: 6px; justify-items: start; }
 .sc-hook { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 650; color: var(--ink); }
 .sc-body { font-size: var(--fs-base); line-height: 20px; color: var(--ink); white-space: pre-line; }
 .sc-screen { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
@@ -378,76 +383,75 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .acc > div { overflow: hidden; min-height: 0; opacity: 0; transform: translateY(-4px); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
 .acc.open { grid-template-rows: 1fr; }
 .acc.open > div { opacity: 1; transform: none; }
-.detail { padding: 2px 0 4px 26px; display: grid; gap: 4px; }
+.detail { padding: 2px 0 4px 24px; display: grid; gap: 4px; }
 .drow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); align-items: baseline; }
 .drow .ba { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .drow .ba s { color: var(--ink-3); text-decoration: none; }
 .drow .ba b { color: var(--ink); font-weight: 650; }
 .drow .ba .arr { color: var(--ink-3); margin: 0 6px; }
 .detail .said { font-size: var(--fs-sm); color: var(--ink-2); line-height: var(--lh-sm); }
-.dacts { padding: 2px 0 6px 26px; }
+.dacts { padding: 2px 0 6px 24px; }
 
 /* ---- the note box, with the progress strip on its top edge ---- */
 .cwrap { position: relative; flex: none; }
 .cbox { border-radius: var(--r-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .cbox.focus { box-shadow: inset 0 0 0 1.5px var(--ink), 0 0 0 3px rgba(22, 30, 26, .08); }
 .cbox.bare { background: transparent; box-shadow: none; }
-.cbox .att-chips { padding: 10px 10px 0; margin: 0; }
+/* with no note box under it (no editor yet, the first run's sample) the tray is its own surface, the note box's */
+.cbox.bare .stripwrap > div { background: var(--surface); border-radius: var(--r-lg); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.cbox.bare .tray-bar { margin-bottom: 8px; }
+.cbox .att-chips { padding: 12px 12px 0; margin: 0; }
 .stripwrap { display: grid; grid-template-rows: 0fr; }
 .stripwrap > div { overflow: hidden; min-height: 0; opacity: 0; transform: translateY(6px); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
 .stripwrap.on { grid-template-rows: 1fr; }
 .stripwrap.on > div { opacity: 1; transform: none; }
-.strip { position: relative; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 12px; background: var(--ink); color: #fff; border-radius: var(--r-lg) var(--r-lg) 0 0; font-size: var(--fs-base); }
-.cbox.bare .strip { border-radius: var(--r-lg); }
-.cbox.bare .steps.on + .strip { border-radius: 0 0 var(--r-lg) var(--r-lg); }
-.strip .bar { position: absolute; left: 12px; right: 12px; top: 0; height: 2px; border-radius: 2px; background: rgba(255, 255, 255, .22); overflow: hidden; }
-.strip .bar i { position: absolute; inset: 0; background: #fff; transform-origin: left; transition: transform .6s linear; }
+/* The progress tray: the work the editor is doing, on the note box's own surface, as T3 Code's composer tray holds a
+   turn's work. One row (what is happening, the time left, Steps, Stop), then the steps under it when open, then a
+   hairline that is also the progress bar, then the box. No dark slab: the reel is the only dark thing on the screen. */
+.strip { position: relative; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 4px 0 12px; color: var(--ink); font-size: var(--fs-base); line-height: var(--lh-base); }
+.tray-bar { display: block; position: relative; height: 2px; margin: 0 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.tray-bar i { position: absolute; inset: 0; background: var(--ink); border-radius: 2px; transform-origin: left; transition: transform .6s linear; }
 /* A job's own words give way before Steps and Stop do; the time left never does (Composer.tsx): only the step words
    after it are cut short. */
 .strip b { font-weight: 650; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .strip :is(b, span).time { flex: none; }
-.strip span.time { color: rgba(255, 255, 255, .78); white-space: nowrap; }
-.strip .m { color: rgba(255, 255, 255, .78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.strip span.time { color: var(--ink-2); white-space: nowrap; }
+.strip .m { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .strip .sp { flex: 1; }
-.strip .sbtn { height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, .92); font: inherit; font-size: var(--fs-base); font-weight: 600; display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 4px; cursor: pointer; }
-@media (hover: hover) and (pointer: fine) { .strip .sbtn:hover { background: rgba(255, 255, 255, .14); color: #fff; } }
-.strip :focus-visible, .steps :focus-visible { outline-color: #fff !important; }
-.strip.wait { background: var(--sunk); color: var(--ink); }
-.strip.wait .m { color: var(--ink-2); }
-.strip.wait .sbtn { color: var(--ink); }
+.strip .sbtn {
+  height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600;
+  display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 4px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
+}
+@media (hover: hover) and (pointer: fine) { .strip .sbtn:hover { background: var(--wash); color: var(--ink); } }
+.strip .sbtn .icon.flip { transform: rotate(180deg); }
 .strip.wait .sbtn:last-child { background: var(--ink); color: #fff; }
-.strip.wait :focus-visible { outline-color: var(--ink) !important; }
-.strip .thinking { width: 13px; justify-content: center; }
-.strip .thinking i { background: #fff; opacity: .5; }
-.spin.light { border-color: rgba(255, 255, 255, .28); border-top-color: #fff; width: 13px; height: 13px; flex: none; }
-/* Steps opens the list upward from the strip */
-.steps { display: grid; grid-template-rows: 0fr; background: var(--ink); color: rgba(255, 255, 255, .8); border-radius: var(--r-lg) var(--r-lg) 0 0; }
-.steps > div { overflow: hidden; min-height: 0; opacity: 0; transform: translateY(6px); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
+.strip .thinking { justify-content: center; }
+/* the steps, under the row that opens them */
+.steps { display: grid; grid-template-rows: 0fr; }
+.steps > div { overflow: hidden; min-height: 0; opacity: 0; transform: translateY(-4px); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
 .steps.on { grid-template-rows: 1fr; }
 .steps.on > div { opacity: 1; transform: none; }
-.steps ul { list-style: none; margin: 0; padding: 10px 12px 6px; font-size: var(--fs-base); }
-.steps.on + .strip { border-radius: 0; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12); }
-.steps li { display: flex; align-items: flex-start; gap: 8px; min-height: 24px; padding: 3px 0; min-width: 0; line-height: var(--lh-base); }
+.steps ul { list-style: none; margin: 0; padding: 0 12px 8px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); }
+.steps li { display: flex; align-items: flex-start; gap: 8px; min-height: 24px; padding: 2px 0; min-width: 0; line-height: var(--lh-base); }
 /* A label is never cut: one line at 1280 wide, and in a narrower column it wraps under itself. */
 .steps li .sl { min-width: 0; text-wrap: pretty; }
-.steps li > :is(.ok, .todo, .spin) { margin-top: 2.5px; }
-.steps li .sr { margin-left: auto; padding-left: 10px; flex: none; white-space: nowrap; color: rgba(255, 255, 255, .6); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-/* spec section 7: a step skipped for lack of an editor says so in amber. --amber itself is 3:1 on ink, so the list
-   mixes it with the marker yellow: about 6:1, and still amber. */
-.steps li .sr.amber { color: color-mix(in srgb, var(--amber) 55%, var(--marker)); }
-.steps li.st-now { color: #fff; font-weight: 600; }
-.steps li.st-todo, .steps li.st-skipped, .steps li.st-stopped { color: rgba(255, 255, 255, .55); }
-.steps .tm { height: 18px; padding: 0 5px; font-size: var(--fs-sm); margin-right: 0; vertical-align: 0; }
-.steps .ok { width: 13px; height: 13px; border-radius: 50%; background: var(--green); color: #fff; display: grid; place-items: center; flex: none; }
-.steps .todo { width: 13px; height: 13px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .4); }
-.steps .todo.passed { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .25); }
-.notify-ask { padding: 2px 12px 10px 33px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: rgba(255, 255, 255, .75); }
-.notify-ask button { border: 0; background: none; padding: 0; font: inherit; font-weight: 650; color: #fff; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.steps li > :is(.ok, .todo, .spin) { margin-top: 2px; }
+.steps li .sr { margin-left: auto; padding-left: 12px; flex: none; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-base); font-variant-numeric: tabular-nums; }
+/* spec section 7: a step skipped for lack of an editor says so in amber */
+.steps li .sr.amber { color: var(--amber); }
+.steps li.st-now { color: var(--ink); font-weight: 600; }
+.steps li.st-todo, .steps li.st-skipped, .steps li.st-stopped { color: var(--ink-3); }
+.steps .tm { height: 18px; padding: 0 4px; font-size: var(--fs-sm); line-height: var(--lh-sm); margin-right: 0; vertical-align: 0; }
+.steps .ok { width: 14px; height: 14px; border-radius: 50%; background: var(--green-tint); color: var(--green-ink); display: grid; place-items: center; flex: none; }
+.steps .todo { width: 14px; height: 14px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-4); }
+.steps .todo.passed { box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+.notify-ask { padding: 0 12px 8px 34px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
+.notify-ask button { border: 0; background: none; padding: 0; font: inherit; font-weight: 650; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
-.cin { display: flex; align-items: flex-end; gap: 4px; padding: 7px; }
-.cin .att { width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); display: grid; place-items: center; flex: none; cursor: pointer; }
+.cin { display: flex; align-items: flex-end; gap: 4px; padding: 8px; }
+.cin .att { width: 32px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); display: grid; place-items: center; flex: none; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .cin .att:not(:disabled):hover { background: var(--sunk); color: var(--ink); } }
-.cfield { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px; }
+.cfield { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0; }
 .cfield textarea {
   flex: 1 1 110px; min-width: 100px; border: 0; resize: none; background: transparent; padding: 6px 2px; font: inherit; font-size: var(--fs-md); line-height: var(--lh-md);
   color: var(--ink); max-height: 132px; field-sizing: content; min-height: 32px; outline: none;
@@ -455,25 +459,25 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 /* the moment chip: shows the playhead, attaches it in one click; its menu points at a spot */
 .tchip-split { position: relative; display: inline-flex; flex: none; }
 .tchip {
-  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 999px; border: 0; background: var(--marker-soft); color: var(--marker-ink);
-  font: inherit; font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none;
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; border: 0; background: var(--marker-soft); color: var(--marker-ink);
+  font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none;
   transition: opacity 150ms ease, scale 150ms var(--ease-out);
 }
 @starting-style { .tchip:not(.suggest) { opacity: 0; scale: .96; } }
 .tchip.suggest { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink-2); font-weight: 600; cursor: pointer; }
 .tchip-split .tchip.suggest:first-child { border-radius: 999px 0 0 999px; padding-right: 6px; }
-.tchip-split .tchip.caret { border-radius: 0 999px 999px 0; padding: 0 6px 0 5px; margin-left: -1px; min-width: 24px; justify-content: center; }
+.tchip-split .tchip.caret { border-radius: 0 999px 999px 0; padding: 0 6px 0 4px; margin-left: -1px; min-width: 24px; justify-content: center; }
 @media (hover: hover) and (pointer: fine) { .tchip.suggest:not(:disabled):hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink-3); } }
 /* 24 px, the house minimum for a target; the negative margins keep the chip the height and width it was at 18 px */
-.tchip .x { position: relative; width: 24px; height: 24px; margin: -3px -7px -3px -3px; border: 0; background: none; border-radius: 50%; color: var(--marker-ink); display: grid; place-items: center; padding: 0; cursor: pointer; }
+.tchip .x { position: relative; width: 24px; height: 24px; margin: 0 -8px 0 -4px; border: 0; background: none; border-radius: 50%; color: var(--marker-ink); display: grid; place-items: center; padding: 0; cursor: pointer; }
 .tchip .spot-n { width: 16px; height: 16px; margin-left: -4px; border-radius: 50%; background: var(--marker); display: grid; place-items: center; font-size: 10px; }
 .tchip-split .pop .kbd { font-size: 11px; }
-.send { width: 34px; height: 34px; border-radius: 999px; border: 0; display: grid; place-items: center; background: var(--sunk); color: var(--ink-3); flex: none; transition: transform 120ms var(--ease-out), background-color 120ms ease; }
+.send { width: 32px; height: 32px; border-radius: 999px; border: 0; display: grid; place-items: center; background: var(--sunk); color: var(--ink-3); flex: none; transition: transform 120ms var(--ease-out), background-color 120ms ease; }
 .send.ready { background: var(--ink); color: #fff; cursor: pointer; }
 .send.ready:active { transform: scale(.94); }
-.cin-alert { margin: 8px 10px 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--pencil-tint); color: var(--pencil); font-size: var(--fs-base); }
+.cin-alert { margin: 8px 12px 0; padding: 8px 12px; border-radius: var(--r-md); background: var(--pencil-tint); color: var(--pencil); font-size: var(--fs-base); line-height: var(--lh-base); }
 /* no editor: the picker, under one line saying what it is for */
-.connect-cin { padding: 10px 0 0; max-height: 52vh; overflow-y: auto; }
+.connect-cin { padding: 12px 0 0; max-height: 52vh; overflow-y: auto; }
 .connect-cin > p { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 620; margin-bottom: 8px; }
 
 /* playback speed in a player's own row (Player.tsx, where it has one) */

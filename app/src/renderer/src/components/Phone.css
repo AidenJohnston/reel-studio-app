@@ -180,7 +180,7 @@
   animation: safe-in 180ms cubic-bezier(.2, .8, .2, 1);
 }
 .safe-band span {
-  position: absolute; top: 6px; left: 6px; padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff;
+  position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff;
   font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap;
 }
 @keyframes safe-in { from { opacity: 0; } }

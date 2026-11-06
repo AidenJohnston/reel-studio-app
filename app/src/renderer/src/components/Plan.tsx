@@ -354,7 +354,7 @@ export function PlannedStage({ plan, onFiles }: { plan: ReactNode; onFiles: (pat
         )}
         {/* remounts when the plan comes or goes, so the zone fades in at its new place instead of jumping there */}
         <div key={plan ? 'beside' : 'alone'} className="pd-drop" data-testid="drop-zone">
-          <Icon name="video" size={22} />
+          <Icon name="video" size={24} />
           <div className="pd-words">
             <h2>Drop the video you filmed</h2>
             <p>A few takes are fine. Retakes and pauses come out.</p>

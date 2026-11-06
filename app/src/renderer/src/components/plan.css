@@ -3,20 +3,20 @@
    boxes. The picked hook leads in the card's largest type: picking one is what promotes it. */
 
 .plan {
-  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e1); padding: 10px 12px 12px;
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e1); padding: 12px 12px 12px;
   display: grid; gap: 4px; min-width: 0;
   transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 @starting-style { .plan { opacity: 0; transform: translateY(4px); } }
 /* under the editor's line in the chat, aligned with the line's words */
-.pl-wrap { padding-left: 26px; min-width: 0; }
+.pl-wrap { padding-left: 24px; min-width: 0; }
 
 .pl-head { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 0; }
 .pl-head h3 { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 650; }
-.pl-acts { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 14px; }
+.pl-acts { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 12px; }
 .plan .lk, .rf .lk {
-  flex: none; border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-base); font-weight: 600; color: var(--ink-2);
-  display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; text-decoration-color: rgba(22, 30, 26, .3); text-underline-offset: 3px;
+  flex: none; border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: 4px; text-decoration: underline; text-decoration-color: rgba(22, 30, 26, .3); text-underline-offset: 3px;
   white-space: nowrap; cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine) { :is(.plan, .rf) .lk:not(:disabled):hover { color: var(--ink); text-decoration-color: currentColor; } }
@@ -34,7 +34,7 @@
 
 /* a line, edited where it stands: plain text until hovered or focused */
 .pl-field {
-  display: block; width: 100%; min-height: 24px; margin: 0; padding: 3px 6px; border: 0; border-radius: 6px; resize: none; field-sizing: content;
+  display: block; width: 100%; min-height: 24px; margin: 0; padding: 4px 6px; border: 0; border-radius: 6px; resize: none; field-sizing: content;
   background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); overflow-wrap: anywhere;
 }
 @media (hover: hover) and (pointer: fine) { .pl-field:not([readonly]):hover { background: var(--sunk-2); } }
@@ -59,7 +59,7 @@
 /* the real checkbox covers the 24 px target, unseen; the span under it is drawn as the one checkbox (styles.css) */
 .pl-tick input[type="checkbox"], .pl-tick input[type="checkbox"]:disabled { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .pl-tick span {
-  display: grid; place-items: center; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none;
+  display: grid; place-items: center; color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .pl-tick input:checked + span { color: #fff; }
 .pl-tick input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -76,18 +76,18 @@
 .plan.folded .pl-acts { margin-left: 0; justify-content: flex-start; }
 .pl-fold {
   flex: 1 1 auto; min-width: 0; min-height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; border-radius: 7px; background: none;
-  font: inherit; font-size: var(--fs-base); color: var(--ink); cursor: pointer; text-align: left;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); cursor: pointer; text-align: left;
 }
 .pl-fold .icon { flex: none; color: var(--ink-3); transform: rotate(-90deg); transition: transform 150ms cubic-bezier(.2, .8, .2, 1); }
 .pl-fold .icon.open { transform: none; }
 .pl-fold b { font-weight: 650; flex: none; }
 .pl-fold-hook { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.pl-n { flex: none; font-size: var(--fs-sm); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 4px; }
+.pl-n { flex: none; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 4px; }
 @media (hover: hover) and (pointer: fine) { .pl-fold:hover { background: var(--wash); } }
 
 /* Send to my phone, opened in the card */
 .pl-phone {
-  display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 12px; align-items: start; margin-top: 6px; padding: 10px; border-radius: var(--r-md);
+  display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 12px; align-items: start; margin-top: 6px; padding: 12px; border-radius: var(--r-md);
   background: var(--sunk-2); box-shadow: inset 0 0 0 1px var(--line);
   transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
@@ -114,13 +114,13 @@
 }
 .pd { margin: auto; width: min(100%, clamp(360px, 40cqi, 480px)); display: grid; gap: 16px; min-width: 0; }
 .pd-drop {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0;
-  min-height: clamp(240px, 40vh, 380px); padding: 32px 28px; text-align: center; border-radius: var(--r-lg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-width: 0;
+  min-height: clamp(240px, 40vh, 380px); padding: 32px 24px; text-align: center; border-radius: var(--r-lg);
   background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line-strong);
   transition: background-color 150ms ease, box-shadow 150ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1), opacity 180ms cubic-bezier(.2, .8, .2, 1);
 }
 @starting-style { .pd-drop { opacity: 0; } }
-.pd-drop > .icon { flex: none; color: var(--ink-3); margin-bottom: 6px; }
+.pd-drop > .icon { flex: none; color: var(--ink-3); margin-bottom: 0; }
 .pd-words { display: grid; gap: 4px; min-width: 0; justify-items: center; }
 .pd-drop h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 650; text-wrap: balance; }
 .pd-drop p { max-width: 32ch; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); text-wrap: pretty; }
@@ -130,7 +130,7 @@
 
 /* with a plan, on a narrow stage: the card, then the zone as one row under it */
 .with-plan .pd { width: min(100%, 540px); }
-.with-plan .pd-drop { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 6px 14px; min-height: 0; padding: 16px 18px; text-align: left; }
+.with-plan .pd-drop { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 6px 12px; min-height: 0; padding: 16px 16px; text-align: left; }
 .with-plan .pd-drop > .icon { margin: 0; }
 .with-plan .pd-words { flex: 1 1 200px; justify-items: start; }
 .with-plan .pd-drop h2 { font-size: var(--fs-section); line-height: var(--lh-section); }
@@ -138,14 +138,14 @@
 /* with a plan, on a wide stage: the card on the left, the zone beside it and as tall as it */
 @container planned (min-width: 720px) {
   .with-plan .pd { width: min(100%, 860px); grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); align-items: stretch; gap: 20px; }
-  .with-plan .pd-drop { flex-direction: column; flex-wrap: nowrap; justify-content: center; gap: 6px; min-height: 280px; padding: 28px 24px; text-align: center; }
+  .with-plan .pd-drop { flex-direction: column; flex-wrap: nowrap; justify-content: center; gap: 6px; min-height: 280px; padding: 24px 24px; text-align: center; }
   .with-plan .pd-drop > .icon { margin-bottom: 6px; }
   .with-plan .pd-words { flex: none; justify-items: center; }
   .with-plan .pd-drop h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); }
   .with-plan .pd-drop .btn { margin-top: 12px; }
 }
 .pd-plan { position: relative; min-width: 0; display: grid; }
-.pd-plan .plan { padding: 14px 18px 16px; align-content: start; }
+.pd-plan .plan { padding: 16px 16px 16px; align-content: start; }
 .pd-plan .pl-head h3 { font-size: var(--fs-section); line-height: var(--lh-section); border-radius: 6px; }
 .pd-plan .pl-head h3:focus { outline: none; }
 .pd-plan .pl-head h3:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
@@ -157,6 +157,8 @@
 .ncol.planning .notes-h h2 { flex: none; }
 /* who answers: the editor's mark and name, then the model it plans with */
 .pl-who { margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
+/* in the title-bar row: its tooltip names the whole line when it is cut short, so it takes the pointer */
+.titlebar .pl-who { max-width: 280px; pointer-events: auto; -webkit-app-region: no-drag; }
 .pl-who-mark { flex: none; display: grid; place-items: center; color: var(--ink-3); }
 .pl-who-mark:empty { display: none; }
 .pl-who-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -165,7 +167,7 @@
 /* the editor's words: a white bubble on the left, as yours are a grey one on the right (reel.css .bubble). A bubble
    says all of it: the log's two-line cut is for a version's line, not for what the editor asks. */
 .planning .nt-res.reply, .planning .nt-res.pl-answering {
-  justify-self: start; width: fit-content; max-width: 86%; padding: 7px 11px; border-radius: 14px 14px 14px 4px;
+  justify-self: start; width: fit-content; max-width: 86%; padding: 8px 12px; border-radius: 14px 14px 14px 4px;
   background: var(--surface); box-shadow: var(--e1); color: var(--ink);
 }
 .planning .nt-res.reply > .nk, .planning .nt-res.pl-answering > .nk { display: none; }
@@ -176,7 +178,7 @@
 /* under the editor's newest plan: the way to the card on the stage */
 .pl-chip {
   display: inline-flex; align-items: center; gap: 8px; min-height: 32px; max-width: 100%; padding: 0 12px; border: 0; border-radius: 999px;
-  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); color: var(--ink); cursor: pointer;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); cursor: pointer;
   transition: transform 120ms cubic-bezier(.2, .8, .2, 1), box-shadow 150ms ease;
 }
 .pl-chip b { flex: none; font-weight: 650; }
@@ -189,10 +191,10 @@
 /* an empty plan chat: what planning does, in the middle of the chat area. It fills the column (no editor) or the log
    above the note box (connected), and centres itself in that space. */
 .pl-empty { flex: 1 0 auto; min-height: 0; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 24px 16px; text-align: center; }
-.pl-empty-marks { display: flex; gap: 10px; margin-bottom: 4px; color: var(--ink-3); }
+.pl-empty-marks { display: flex; gap: 8px; margin-bottom: 4px; color: var(--ink-3); }
 .pl-empty h3 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 650; text-wrap: balance; }
 .pl-empty p { max-width: 34ch; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); text-wrap: pretty; }
-.pl-empty .btn { margin-top: 10px; }
+.pl-empty .btn { margin-top: 12px; }
 
 /* What the keyboard opens or ticks just appears. */
 html.kb :is(.plan, .pl-phone, .pl-fold .icon, .nt-res.pl-said, .pd-drop, .pl-chip) { transition: none !important; }

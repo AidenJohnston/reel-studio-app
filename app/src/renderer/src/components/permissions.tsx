@@ -122,7 +122,7 @@ export function NotifyRow({ onOn }: { onOn: () => void }) {
     : n === 'unverified'
       ? [
           <span key="on">
-            <Icon name="check" size={13} stroke={2.4} />
+            <Icon name="check" size={14} stroke={2.4} />
             Turned on
           </span>,
           'ok',

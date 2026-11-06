@@ -8,21 +8,27 @@ html.kb .edit { animation: none; }
 
 .edit-h { height: 32px; display: flex; align-items: center; justify-content: space-between; flex: none; }
 .edit-h h2 { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
-.edit-h .icon-btn { margin-right: -6px; }
-.edit-sub { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); margin-bottom: 6px; flex: none; }
+.edit-h .icon-btn { margin-right: 0; }
+.edit-sub { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); margin-bottom: 12px; flex: none; }
 
-.tabs.edit-tabs { padding: 0; gap: 0; flex: none; flex-wrap: nowrap; margin-left: -8px; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--line); }
-.edit-tabs .tab { padding: 0 8px; height: 34px; font-size: var(--fs-base); white-space: nowrap; }
+.tabs.edit-tabs { position: relative; padding: 0; gap: 0; flex: none; flex-wrap: nowrap; margin-left: -8px; border-bottom: 0; box-shadow: none; }
+/* the tabs hang 8 px left so their words start at the heading's edge; the hairline and the chosen tab's bar start
+   at that edge too, so nothing in the drawer sticks out past its column */
+.tabs.edit-tabs::after { content: ''; position: absolute; left: 8px; right: 0; bottom: 0; height: 1px; background: var(--line); pointer-events: none; }
+.edit-tabs .tab { position: relative; }
+.edit-tabs .tab.active { box-shadow: none; }
+.edit-tabs .tab.active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 2px; background: var(--ink); z-index: 1; }
+.edit-tabs .tab { padding: 0 8px; height: 32px; font-size: var(--fs-base); line-height: var(--lh-base); white-space: nowrap; }
 
 .edit-b { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 4px 20px; margin: 0 -4px; overscroll-behavior: contain; }
-.edit-stack { display: flex; flex-direction: column; gap: 14px; }
+.edit-stack { display: flex; flex-direction: column; gap: 12px; }
 .edit-field { display: flex; flex-direction: column; gap: 8px; }
 .edit-label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 620; color: var(--ink-2); }
 h3.edit-label { margin: 0; }
 .edit-hint { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .edit-rule { height: 1px; background: var(--line); }
 .edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.edit-inline { display: flex; align-items: center; gap: 10px; }
+.edit-inline { display: flex; align-items: center; gap: 8px; }
 .edit-inline .input { flex: 1; min-width: 0; }
 .toggle.quiet { font-weight: 500; color: var(--ink-2); }
 
@@ -37,16 +43,16 @@ h3.edit-label { margin: 0; }
 
 /* the one-word-per-place fixes ("As heard" -> "Should read") */
 .edit-fix { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }
-.edit-fix .input { height: 32px; padding: 0 10px; }
+.edit-fix .input { height: 32px; padding: 0 12px; }
 
 /* Rows: sounds, songs, pictures. Hairlines between, nothing boxed. */
 .edit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.edit-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; min-height: 40px; }
+.edit-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; min-height: 40px; }
 .edit-list > .edit-row + .edit-row { box-shadow: inset 0 1px 0 var(--line); }
 .edit-row.radio { align-items: center; cursor: pointer; }
 .edit-row.radio input { width: 16px; height: 16px; margin: 0; flex: none; }
 .edit-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-label.edit-row-main { flex-direction: row; align-items: center; gap: 10px; cursor: pointer; }
+label.edit-row-main { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .edit-row-title { font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-row-title .muted { color: var(--ink-3); font-weight: 450; }
 .edit-row-sub { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); }
@@ -66,10 +72,10 @@ label.edit-row-main { flex-direction: row; align-items: center; gap: 10px; curso
 
 /* Sound (SoundTab.tsx). A slider is its label, the track, and its value in a fixed column so the tracks line up. */
 .edit-sliders { display: flex; flex-direction: column; gap: 2px; }
-.edit-slider { display: grid; grid-template-columns: 104px minmax(0, 1fr) 52px; align-items: center; gap: 10px; min-height: 28px; }
+.edit-slider { display: grid; grid-template-columns: 104px minmax(0, 1fr) 52px; align-items: center; gap: 8px; min-height: 28px; }
 .edit-slider-label { color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .edit-slider .slider { max-width: none; height: 24px; margin: 0; }
-.edit-slider-value { text-align: right; color: var(--ink-2); font-size: var(--fs-sm); }
+.edit-slider-value { text-align: right; color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); }
 
 /* Each sound effect: what, when and why (picks it), Remove; which one and Preview; its level. The row picked here or
    on the timeline gets the soft wash a selected row has everywhere, and loses the hairlines beside it. */
@@ -89,14 +95,14 @@ html.kb .picture-row { transition: none; }
 .sfx-why { color: var(--ink-3); }
 @media (hover: hover) and (pointer: fine) { .sfx-name:hover .edit-row-title { text-decoration: underline; text-decoration-color: var(--ink-4); text-underline-offset: 3px; } }
 .sfx-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.sfx-controls select.input { height: 28px; width: auto; max-width: 100%; font-size: var(--fs-sm); padding: 0 30px 0 10px; background-position: right 8px center; }
+.sfx-controls select.input { height: 28px; width: auto; max-width: 100%; font-size: var(--fs-sm); line-height: var(--lh-sm); padding: 0 32px 0 12px; background-position: right 8px center; }
 /* its level in words, like the song's, beside the label the fade sliders use */
-.sfx-level { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.sfx-level { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .sfx-level .edit-slider-label { width: 64px; flex: none; }
 
 /* Add a sound: grows from its button, in the list's flow, so nothing covers the sounds above it. */
 .sfx-picker {
-  display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--e1);
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--e1);
   transform-origin: top left; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 @starting-style { .sfx-picker { opacity: 0; transform: translateY(-4px) scale(.98); } }
@@ -112,21 +118,21 @@ html.kb .sfx-picker { transition: none; }
 .sfx-kind.on { background: var(--wash); }
 .sfx-kind-h { display: flex; align-items: center; gap: 4px; min-height: 36px; }
 .sfx-kind-name {
-  position: relative; flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: baseline; gap: 6px; padding: 9px 0;
+  position: relative; flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: baseline; gap: 6px; padding: 8px 0;
   color: var(--ink); cursor: pointer; border-radius: 4px;
   /* the arrow keys move the pick along the rows: the sticky footer never covers the picked one */
   scroll-margin-bottom: 64px;
 }
 .sfx-kind-name b { font-weight: 620; flex: none; }
-.sfx-kind-name span { color: var(--ink-3); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfx-kind-name span { color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :is(.sfx-kind-name, .sfx-variant) > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 :is(.sfx-kind-name, .sfx-variant):has(> input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
 .sfx-others .icon { transition: transform 150ms cubic-bezier(.2, .8, .2, 1); }
 .sfx-others .icon.open { transform: rotate(180deg); }
 .sfx-variants { border: 0; padding: 0 0 8px; margin: 0 0 0 -10px; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; }
 .sfx-variant {
-  position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 999px;
-  font-size: var(--fs-sm); font-weight: 520; color: var(--ink-2); cursor: pointer; scroll-margin-bottom: 64px;
+  position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px;
+  font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 520; color: var(--ink-2); cursor: pointer; scroll-margin-bottom: 64px;
 }
 .sfx-variant.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 .5px rgba(22, 30, 26, .08); }
 @media (hover: hover) and (pointer: fine) { .sfx-variant:not(.on):hover { color: var(--ink); } }
@@ -135,7 +141,7 @@ html.kb .sfx-name:focus-visible { outline: 2px solid var(--ink); outline-offset:
 /* Add stays in reach while the person listens down the list: the footer sticks to the panel's bottom edge. */
 .sfx-picker-f {
   position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 6px;
-  margin: 0 -12px -12px; padding: 10px 12px 12px; background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg);
+  margin: 0 -12px -12px; padding: 12px 12px 12px; background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg);
   box-shadow: 0 -1px 0 var(--line);
 }
 
@@ -167,9 +173,9 @@ html.kb .library-pick:active { transform: none; }
 
 /* What happens to the edit while the editor is busy, then the footer: "2 changes · Undo · Make Version 5". */
 .edit-wait { flex: none; color: var(--ink-3); font-size: var(--fs-sm); line-height: var(--lh-sm); padding: 8px 0 0; }
-.edit-f { flex: none; display: flex; align-items: center; gap: 4px; padding: 10px 0 0; margin-top: 8px; box-shadow: inset 0 1px 0 var(--line); }
+.edit-f { flex: none; display: flex; align-items: center; gap: 4px; padding: 12px 0 0; margin-top: 0; box-shadow: inset 0 1px 0 var(--line); }
 .edit-count { color: var(--ink-2); font-weight: 560; }
-.edit-f { gap: 10px; }
+.edit-f { gap: 8px; }
 
 /* Previews drawn on the phone (preview.tsx OnPhone): over the reel, under nothing that takes a click. */
 .edit-stage { position: absolute; inset: 0; z-index: 3; pointer-events: none; }

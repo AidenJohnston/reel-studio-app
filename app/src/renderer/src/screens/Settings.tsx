@@ -411,7 +411,7 @@ function ListeningModel({ shared }: { shared: boolean }) {
       control={
         s.installed ? (
           <span className="sval ok" data-testid="model-ready">
-            <Icon name="check" size={13} stroke={2.4} />
+            <Icon name="check" size={14} stroke={2.4} />
             Ready
           </span>
         ) : s.checking ? (

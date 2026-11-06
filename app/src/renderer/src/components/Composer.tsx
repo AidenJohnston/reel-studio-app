@@ -128,33 +128,14 @@ export function Composer({
         <div>
           {stripShown && strip === 'job' && job && (
             <>
-              <div className={`steps${stepsOpen ? ' on' : ''}`} inert={!stepsOpen || undefined}>
-                <div>
-                  <ul aria-label="Steps" data-testid="steps-list">
-                    {firstSteps
-                      ? <StepRows steps={firstSteps} />
-                      : steps.map((s, i) => (
-                          <li key={`${i}-${s}`} className={i === steps.length - 1 ? 'st-now' : 'st-done'}>
-                            <StepMark state={i === steps.length - 1 ? 'now' : 'done'} />
-                            <span className="sl">
-                              <StepText s={s} note={running} />
-                            </span>
-                          </li>
-                        ))}
-                  </ul>
-                  {under}
-                </div>
-              </div>
               <div className="strip" data-testid="note-progress">
                 {/* announced once per step, not on every tick of the time left */}
                 <span className="sr-only" role="status">
                   {making ? `Making Version ${making}` : job.message}
                   {making && current ? `, ${current}` : ''}
                 </span>
-                <span className="bar" aria-hidden>
-                  <i style={{ transform: `scaleX(${pct})` }} />
-                </span>
-                {job.thinking ? <Thinking /> : <span className="spin light" aria-hidden />}
+                {/* one live mark: the open list's current row has the spinner, so the strip shows it only when shut */}
+                {(!stepsOpen || job.waiting) && (job.thinking ? <Thinking /> : <span className="spin" aria-hidden />)}
                 {/* The time left is the one number a waiting person wants, so it leads and is never cut short. The line
                     above the box already says "Making Version N", which needs no repeating here: the column has no room
                     for both beside Steps and Stop. Before there is an estimate, the version leads. */}
@@ -183,13 +164,33 @@ export function Composer({
                 <span className="sp" />
                 {!noSteps && (
                   <button className="sbtn" aria-expanded={stepsOpen} onClick={() => setStepsToggled((t) => (t === job.jobId ? null : job.jobId))} data-testid="steps">
-                    Steps <Icon name={stepsOpen ? 'chevron-down' : 'up'} size={12} stroke={2} />
+                    Steps <Icon name="chevron-down" size={12} stroke={2} className={stepsOpen ? 'flip' : undefined} />
                   </button>
                 )}
                 <button className="sbtn" onClick={onStop} data-testid="stop">
                   Stop
                 </button>
               </div>
+              <div className={`steps${stepsOpen ? ' on' : ''}`} inert={!stepsOpen || undefined}>
+                <div>
+                  <ul aria-label="Steps" data-testid="steps-list">
+                    {firstSteps
+                      ? <StepRows steps={firstSteps} />
+                      : steps.map((s, i) => (
+                          <li key={`${i}-${s}`} className={i === steps.length - 1 ? 'st-now' : 'st-done'}>
+                            <StepMark state={i === steps.length - 1 ? 'now' : 'done'} />
+                            <span className="sl">
+                              <StepText s={s} note={running} />
+                            </span>
+                          </li>
+                        ))}
+                  </ul>
+                  {under}
+                </div>
+              </div>
+              <span className="tray-bar" aria-hidden>
+                <i style={{ transform: `scaleX(${pct})` }} />
+              </span>
             </>
           )}
           {stripShown && strip === 'held' && (
@@ -217,7 +218,7 @@ export function Composer({
           )}
           <div className="cin">
             {!plain && <button className="att" onClick={att.choose} disabled={checking} aria-label="Attach a picture or a clip" title="Attach a picture or a clip" data-testid="note-attach">
-              <Icon name="paperclip" size={17} />
+              <Icon name="paperclip" size={18} />
             </button>}
             <div className="cfield">
               {plain ? null : chip || auto ? (
@@ -331,7 +332,7 @@ function StepMark({ state }: { state: Step['state'] }) {
         <Icon name="check" size={8} stroke={3} />
       </span>
     )
-  if (state === 'now') return <span className="spin light" aria-label="Now" />
+  if (state === 'now') return <span className="spin" aria-label="Now" />
   return <span className={`todo${state === 'todo' ? '' : ' passed'}`} aria-label={state === 'todo' ? 'To do' : state === 'skipped' ? 'Skipped' : 'Stopped'} />
 }
 

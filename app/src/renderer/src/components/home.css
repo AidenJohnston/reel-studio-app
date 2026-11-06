@@ -8,20 +8,20 @@
 .rsearch { position: relative; display: flex; align-items: center; width: 240px; height: 28px; border-radius: var(--r-sm); background: var(--sunk); color: var(--ink-3); }
 .rsearch .icon { position: absolute; left: 9px; pointer-events: none; }
 .rsearch input {
-  width: 100%; height: 100%; border: 0; outline: 0; background: transparent; padding: 0 10px 0 29px; border-radius: inherit;
-  font: inherit; font-size: var(--fs-base); color: var(--ink);
+  width: 100%; height: 100%; border: 0; outline: 0; background: transparent; padding: 0 12px 0 32px; border-radius: inherit;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink);
 }
 .rsearch:focus-within { box-shadow: 0 0 0 2px var(--ink); background: var(--surface); }
 .rsearch input::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 .home .sec-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; margin: 0 0 12px; }
-.home .grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 24px 18px; margin-bottom: var(--space-m); }
+.home .grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 24px 16px; margin-bottom: var(--space-m); }
 .home-quiet { font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-2); }
 
 .series { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
 .schip {
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-strong);
-  background: transparent; font: inherit; font-size: var(--fs-sm); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
+  background: transparent; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
 }
 .schip .n { color: var(--ink-3); font-weight: 500; font-variant-numeric: tabular-nums; }
 .schip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
@@ -82,8 +82,8 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
 
 /* the title gets two lines before it is cut; then one line saying where the reel is */
 .rcard .ttl {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 10px;
-  font-size: var(--fs-base); line-height: 17px; font-weight: 600; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 12px;
+  font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; overflow-wrap: anywhere;
 }
 .rcard .cm {
   margin-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3);
@@ -97,7 +97,7 @@ html.kb .rcard .hit:focus-visible { outline: 2px solid var(--ink); outline-offse
 .rcard .cm .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin: 0 6px 1px 0; vertical-align: middle; }
 .rcard .card-act { position: relative; z-index: 4; margin-top: 8px; }
 /* "Choose another video" is as wide as the narrowest card: it keeps to the card, and wraps there rather than clip */
-.rcard .card-act { max-width: 100%; padding: 6px 9px; white-space: normal; text-align: center; height: auto; min-height: 28px; line-height: 16px; }
+.rcard .card-act { max-width: 100%; padding: 6px 8px; white-space: normal; text-align: center; height: auto; min-height: 28px; line-height: 16px; }
 
 /* Needs you and Making (Home.tsx Row): rows, not cards, side by side when both have reels. A column is never wider
    than about a third of a big window, so a row's pill stays near its words. No container: a hover wash marks the
@@ -128,7 +128,7 @@ html.kb .rrow .hit:focus-visible { outline: 2px solid var(--ink); outline-offset
 .rrow.st-making .rthumb:not(:has(img, video)) .pb { background: rgba(22, 25, 23, .12); }
 .rrow.st-making .rthumb:not(:has(img, video)) .pb i { background: var(--ink-2); }
 .rrow .rtext { min-width: 0; }
-.rrow .ttl { font-size: var(--fs-base); line-height: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rrow .ttl { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rrow .cm {
   margin-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
@@ -147,8 +147,8 @@ html.kb :is(.rcard:hover .im, .rcard .hit:active ~ .im, .rrow .hit:active ~ .rth
 /* No reels yet: the sample, and one invitation */
 .home-empty { min-height: calc(100vh - var(--titlebar) - 96px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0; }
 .home-empty .sample-card { width: clamp(150px, 15vw, 188px); }
-.home-empty h2 { margin-top: 28px; max-width: 460px; font-size: var(--fs-heading); line-height: var(--lh-heading); font-weight: 620; letter-spacing: -.01em; text-wrap: balance; }
-.home-empty .row { display: flex; gap: 10px; margin-top: 20px; }
+.home-empty h2 { margin-top: 24px; max-width: 460px; font-size: var(--fs-heading); line-height: var(--lh-heading); font-weight: 620; letter-spacing: -.01em; text-wrap: balance; }
+.home-empty .row { display: flex; gap: 8px; margin-top: 24px; }
 .home-empty .faint { margin-top: 16px; }
 
 .sample-card { margin: 0; }
@@ -173,7 +173,7 @@ html.kb .sample-card .im:focus-visible { outline: 2px solid var(--ink); outline-
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .5));
 }
 .sample-card .yt-play :is(polygon, rect) { fill: currentColor; }
-.sample-card figcaption { display: flex; justify-content: space-between; margin-top: 10px; font-size: var(--fs-base); }
+.sample-card figcaption { display: flex; justify-content: space-between; margin-top: 12px; font-size: var(--fs-base); line-height: var(--lh-base); }
 .sample-card figcaption b { font-weight: 620; }
 .sample-card figcaption span { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 html.kb .sample-card .im { transition: none; }

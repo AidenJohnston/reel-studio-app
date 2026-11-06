@@ -5,10 +5,11 @@
 .page.settings-page { max-width: 920px; margin: 0 auto; padding: 0 var(--gutter) var(--space-l); }
 .settings { display: grid; grid-template-columns: 168px minmax(0, 640px); gap: 32px; align-items: start; }
 
-.snav { position: sticky; top: 0; display: grid; gap: 2px; padding-top: var(--space-s); }
+/* the rows' wash hangs 12 px left, so their labels start where the screen's title does */
+.snav { position: sticky; top: 0; display: grid; gap: 2px; padding-top: var(--space-s); margin-left: -12px; }
 .snav button {
-  height: 30px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; font: inherit;
-  font-size: var(--fs-base); font-weight: 540; color: var(--ink-2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; font: inherit;
+  font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 540; color: var(--ink-2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 @media (hover: hover) and (pointer: fine) { .snav button[aria-current="false"]:hover { background: var(--wash); color: var(--ink); } }
 .snav button[aria-current="true"] { background: var(--wash); color: var(--ink); }
@@ -16,24 +17,24 @@
 /* search stays at the top while the page scrolls under it */
 .ssearch {
   position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; height: 36px; margin-top: var(--space-s);
-  padding: 0 6px 0 11px; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 8px var(--paper);
+  padding: 0 6px 0 12px; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 8px var(--paper);
   color: var(--ink-3);
 }
 .ssearch:focus-within { box-shadow: inset 0 0 0 1px var(--ink-3), 0 0 0 3px rgba(22, 25, 23, .1), 0 0 0 8px var(--paper); }
-.ssearch input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font: inherit; font-size: var(--fs-base); color: var(--ink); }
+.ssearch input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); }
 .ssearch input::placeholder { color: var(--ink-3); }
 .ssearch input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 html.kb .ssearch input:focus-visible { outline: 0; }
 @media (forced-colors: active) { .ssearch:focus-within { outline: 2px solid Highlight; outline-offset: 2px; } }
 .ssearch-x { width: 24px; height: 24px; }
 
-.snone { display: grid; justify-items: start; gap: 10px; padding: var(--space-s) 0; }
+.snone { display: grid; justify-items: start; gap: 8px; padding: var(--space-s) 0; }
 .snone p { font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-2); }
 
 .ssec { padding-top: var(--space-s); scroll-margin-top: 52px; }
 .ssec > h2 { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
 .ssec-desc { margin-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
-.srows { margin-top: 10px; box-shadow: inset 0 -1px 0 var(--line); }
+.srows { margin-top: 12px; box-shadow: inset 0 -1px 0 var(--line); }
 
 /* one setting: label and line on the left, its control on the right, a hairline above */
 .srow { padding: 12px 0; box-shadow: inset 0 1px 0 var(--line); }
@@ -43,11 +44,11 @@ html.kb .ssearch input:focus-visible { outline: 0; }
 .srow-t > span { min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .srow.sub { padding-left: 24px; }
 .privacy.off .srow.sub .srow-t { opacity: .55; }
-.srow-more { display: grid; gap: 8px; margin-top: 10px; }
-.srow-more.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.srow-more { display: grid; gap: 8px; margin-top: 12px; }
+.srow-more.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .srow-more.row > .pv-note { flex: 1; padding: 0; }
-.srow-foot { padding: 10px 0 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); box-shadow: inset 0 1px 0 var(--line); }
-.ssub { padding: 14px 0 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 620; color: var(--ink-2); box-shadow: inset 0 1px 0 var(--line); }
+.srow-foot { padding: 12px 0 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); box-shadow: inset 0 1px 0 var(--line); }
+.ssub { padding: 16px 0 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 620; color: var(--ink-2); box-shadow: inset 0 1px 0 var(--line); }
 .sctl { flex: none; display: flex; align-items: center; gap: 8px; }
 .sval { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sval.ok { color: var(--green-ink); }
@@ -62,7 +63,7 @@ html.kb .ssearch input:focus-visible { outline: 0; }
 
 /* search: the words that matched, in the marker yellow of your own marks; the synonym that found a row */
 .ssec mark { border-radius: 3px; padding: 0 1px; margin: 0 -1px; background: var(--marker-soft); color: inherit; }
-.smatch { margin-left: 8px; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-3); }
+.smatch { margin-left: 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; color: var(--ink-3); }
 @media (forced-colors: active) { .ssec mark { background: Mark; color: MarkText; } }
 .ext-link {
   /* min-height: a link is a target, and its 16 px line was under the 24 px house minimum */
@@ -75,10 +76,10 @@ html.kb .ssearch input:focus-visible { outline: 0; }
 .update-row-line { display: flex; align-items: center; gap: 12px; }
 .update-row-line > p { flex: 1; min-width: 0; }
 .whats-new {
-  max-height: 220px; overflow-y: auto; margin: 0; padding: 10px 12px; list-style: none; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
+  max-height: 220px; overflow-y: auto; margin: 0; padding: 12px 12px; list-style: none; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
   font-size: var(--fs-sm); line-height: 18px; color: var(--ink-2); overscroll-behavior: contain;
 }
-.whats-new > li + li { margin-top: 10px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--line); }
+.whats-new > li + li { margin-top: 12px; padding-top: 12px; box-shadow: inset 0 1px 0 var(--line); }
 .whats-new p { margin: 0; }
 .whats-new p + p, .whats-new ul { margin-top: 2px; }
 .whats-new ul { padding-left: 16px; }
@@ -105,8 +106,8 @@ button.ext-link:disabled { cursor: default; opacity: .5; }
 .mnote.warn { color: var(--amber); }
 .mnote .icon { flex: none; margin-top: 1px; }
 .mpick {
-  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 13px; border: 0; border-radius: 999px;
-  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); font-weight: 600; color: var(--ink);
+  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 12px; border: 0; border-radius: 999px;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; color: var(--ink);
   white-space: nowrap; cursor: pointer;
 }
 .mpick::after { content: ''; position: absolute; inset: -7px -4px; }

@@ -2,7 +2,7 @@
    opacity, opacity only with reduced motion, nothing from the keyboard). Rows sit bare on the popover; only a hover wash. */
 
 .share { position: relative; display: flex; flex: none; }
-.share-btn { gap: 7px; }
+.share-btn { gap: 8px; }
 .share-ring { flex: none; transform: rotate(-90deg); }
 .share-ring circle { fill: none; stroke-width: 2.2; }
 .share-ring .track { stroke: rgba(255, 255, 255, .32); }
@@ -14,7 +14,7 @@
 
 .share-pop {
   right: 0; top: calc(100% + 8px); width: 360px; overflow-y: auto; overscroll-behavior: contain;
-  padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 8px; text-align: left; cursor: default;
+  padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; cursor: default;
   --o: top right; pointer-events: auto; -webkit-app-region: no-drag; user-select: none;
 }
 .share-pop[hidden] { display: none; }
@@ -24,16 +24,17 @@
 .sp-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; }
 .sp-why { margin-top: -4px; }
 
-.sp-cap { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; }
+.sp-cap { display: flex; align-items: baseline; justify-content: space-between; margin-top: 0; }
 .sp-cap label { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
 .sp-cap span { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
 .sp-cap .sp-over { color: var(--pencil); font-weight: 600; }
-.textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 10px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-sm); user-select: text; }
+.textarea.sp-caption { min-height: 58px; max-height: 128px; field-sizing: content; resize: none; padding: 8px 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-sm); user-select: text; }
 
-.sp-list { list-style: none; margin: 2px -6px 0; padding: 0; display: flex; flex-direction: column; }
+/* the rows' wash hangs 8 px (their padding) past the caption's edges, so the icons start where the caption does */
+.sp-list { list-style: none; margin: 8px -8px 0; padding: 0; display: flex; flex-direction: column; }
 .sp-row + .sp-row { box-shadow: inset 0 1px 0 var(--line); }
 .sp-go {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 7px 8px; border: 0; border-radius: var(--r-sm);
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px; border: 0; border-radius: var(--r-sm);
   background: transparent; font: inherit; color: var(--ink); text-align: left; cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine) { .sp-go:not(:disabled):hover { background: var(--sunk-2); } }
@@ -51,7 +52,8 @@
 html.kb .sp-chev { transition: none; }
 
 /* A destination at work, done, or stopped: under its label, never in a box. */
-.sp-strip, .sp-done, .sp-fail, .sp-plat { margin: -2px 8px 8px 38px; }
+/* under a row, level with its words: the row's 8 px padding, the 20 px icon and the 12 px gap */
+.sp-strip, .sp-done, .sp-fail, .sp-plat { margin: -2px 8px 8px 40px; }
 .sp-bar { height: 3px; border-radius: 2px; background: var(--sunk); overflow: hidden; }
 .sp-bar i { display: block; height: 100%; background: var(--ink); border-radius: 2px; transform-origin: left; transition: transform 200ms linear; }
 .sp-bar i.run { width: 30%; animation: sp-run 1.1s ease-in-out infinite; }
@@ -78,12 +80,12 @@ html.kb .sp-plat[data-enter] { transition: none; }
 .sp-act { display: inline-flex; align-items: center; min-height: 24px; padding: 0 2px; font-size: inherit; color: var(--ink); font-weight: 560; }
 
 /* Try two versions: the editor's pick, the four things it can change, Use Try 2. */
-.sp-try { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--line); }
+.sp-try { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 12px; box-shadow: inset 0 1px 0 var(--line); }
 .sp-try-h { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); }
 .sp-things { display: flex; flex-wrap: wrap; gap: 4px; }
 .sp-thing {
   height: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong);
-  font: inherit; font-size: var(--fs-sm); font-weight: 560; color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2); cursor: pointer; white-space: nowrap;
   transition: box-shadow 150ms cubic-bezier(.2, .8, .2, 1), color 150ms cubic-bezier(.2, .8, .2, 1);
 }
 @media (hover: hover) and (pointer: fine) { .sp-thing:not(:disabled):not(.on):hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink-4); } }
@@ -96,7 +98,7 @@ html.kb .sp-thing { transition: none; }
 html.kb .sp-prop { transition: none; }
 .sp-value { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 560; color: var(--ink); white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
 /* The proposed hook line, as tall and as rounded as the caption field above it. */
-.input.sp-try-text { height: 32px; padding: 0 10px; font-size: var(--fs-base); border-radius: var(--r-sm); user-select: text; }
+.input.sp-try-text { height: 32px; padding: 0 12px; font-size: var(--fs-base); line-height: var(--lh-base); border-radius: var(--r-sm); user-select: text; }
 .sp-prop .input[aria-invalid], .sp-prop .textarea[aria-invalid] { border-color: var(--amber); }
 .sp-reason { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-2); }
 .sp-on { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
@@ -116,13 +118,13 @@ html.kb .sp-prop { transition: none; }
 .sp-help-done { padding: 8px 2px 2px; }
 
 /* Send to my phone, in the popover's width */
-.share-pop .send-phone { gap: 10px; }
+.share-pop .send-phone { gap: 8px; }
 .share-pop .send-phone h2 { font-size: var(--fs-section); line-height: var(--lh-section); }
-.share-pop .phone-main { grid-template-columns: 1fr; gap: 10px; }
+.share-pop .phone-main { grid-template-columns: 1fr; gap: 8px; }
 .share-pop .phone-qr-box { width: 176px; height: 176px; margin: 0 auto; }
 .share-pop .phone-lead { font-size: var(--fs-base); line-height: var(--lh-base); }
 .share-pop .phone-steps > div { padding: 8px 0; }
-.share-pop .phone-way { grid-template-columns: 18px 1fr auto; gap: 10px; padding: 10px 0; }
+.share-pop .phone-way { grid-template-columns: 18px 1fr auto; gap: 8px; padding: 12px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .sp-chev { transition: none; }
