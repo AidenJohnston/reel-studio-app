@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -26,6 +26,7 @@ const api: ReelApi = {
     refresh: (options) => call('insights:refresh', options),
     onChange: (cb) => on<void>('insights:changed', () => cb())
   },
+  wrapped: { report: () => call('wrapped:report') },
   tiktok: {
     configure: (settings) => call('tiktok:configure', settings),
     session: () => call('tiktok:session'),
@@ -198,6 +199,15 @@ const api: ReelApi = {
     save: (video, folder, id) => call('cloud:save', video, folder, id),
     cancel: (id) => call('cloud:cancel', id),
     onProgress: (cb) => on<{ id: string; pct: number }>('cloud:progress', cb)
+  },
+  devices: {
+    status: () => call('devices:status'),
+    setOn: (on) => call('devices:setOn', on),
+    pair: (kind, notes) => call('devices:pair', kind, notes),
+    cancelPair: () => call('devices:cancelPair'),
+    openInBrowser: (notes) => call('devices:openInBrowser', notes),
+    remove: (id) => call('devices:remove', id),
+    onChange: (cb) => on<DevicesStatus>('devices:change', cb)
   },
   phone: {
     start: (video, caption, address) => call('phone:start', video, caption, address),

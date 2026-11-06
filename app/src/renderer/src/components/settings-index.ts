@@ -7,6 +7,7 @@ export const SECTIONS = {
   privacy: 'Privacy',
   reels: 'Reels',
   posting: 'Posting',
+  devices: 'Phone and browser',
   about: 'About and updates',
   advanced: 'Advanced'
 } as const
@@ -32,6 +33,8 @@ export const SETTINGS = {
   x: { section: 'posting', label: 'X', synonyms: ['Twitter', 'tweet', 'post', 'posting', 'publish', 'connect', 'account'] },
   linkedin: { section: 'posting', label: 'LinkedIn', synonyms: ['post', 'posting', 'publish', 'connect', 'account'] },
   'social-closed': { section: 'posting', label: 'Other platforms', synonyms: ['Instagram', 'TikTok', 'Facebook', 'Threads', 'X', 'Twitter', 'LinkedIn', 'sign-in service', 'connect', 'post', 'posting'] },
+  'phone-browser': { section: 'devices', label: 'Use from your phone or a browser', synonyms: ['phone', 'mobile', 'iPhone', 'Android', 'browser', 'web', 'companion', 'remote', 'Wi-Fi', 'pair', 'QR', 'scan', 'watch', 'notes', 'sync', 'account'] },
+  'paired-devices': { section: 'devices', label: 'Paired devices', synonyms: ['devices', 'phones', 'browsers', 'paired', 'remove', 'forget', 'unpair', 'revoke', 'account', 'sync'] },
   'library-folder': { section: 'reels', label: 'Library folder', synonyms: ['folder', 'location', 'where', 'storage', 'save', 'saved', 'path', 'directory', 'Movies', 'Documents', 'Finder', 'Explorer', 'disk', 'files', 'move'] },
   'listening-model': { section: 'reels', label: 'Listening model', synonyms: ['subtitles', 'captions', 'transcript', 'transcription', 'speech', 'speech to text', 'Whisper', 'WhisperX', 'words', 'voice', 'download', 'offline'] },
   'faster-exports': { section: 'reels', label: 'Faster versions', synonyms: ['30 fps', '30fps', '60 fps', 'fps', 'frame rate', 'export quality', 'quality', 'smooth', 'speed', 'render', 'export'] },
