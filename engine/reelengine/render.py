@@ -1334,6 +1334,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
+    err = None
     try:
         err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
                                     cwd=rwork, user_message="I couldn't finish making your video. "
@@ -1341,33 +1342,46 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     except EngineError as exc:
         if not draft:
             raise
-        log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
-        warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
-        # the originals too: a damaged preview copy must cost speed, never the preview
-        video_from = {sid: "original" for sid in src_meta}
-
-        def slow(enc: str) -> str:
-            return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h,
-                                                         layers, zooms, ass_name, audio, audio_seek, dur, t_shift,
-                                                         enc, out_part, graph, fast=False),
-                                         dur, on_pct, timeout=max(600, dur * 40), what="video render", cwd=rwork)
-        err = None
-        # Hardware decode AND a GPU encoder: either may have failed, so keep the encoder first and a
-        # decoder that can't open this file doesn't get a working encoder marked as failed for days.
-        # Not after a timeout: a third full timeout would leave the user waiting half an hour.
-        both_gpu = encoder != "libx264" and "-hwaccel" in cmd
-        if both_gpu and exc.code != "TIMEOUT":
+        if vpaths != src_paths:
+            # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
+            # so a bad copy costs one retry and never marks a working encoder as failed.
+            log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
+            video_from = {sid: "original" for sid in src_meta}
+            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
             try:
-                err = slow(encoder)
-            except EngineError as exc2:
-                log(f"# software decode with {encoder} failed too: {exc2.message[-400:]}")
+                err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                            cwd=rwork)
+            except EngineError as again:
+                exc = again
         if err is None:
-            failed_encoder, encoder = encoder, "libx264"
-            err = slow(encoder)
-            if failed_encoder != "libx264" and not (both_gpu and exc.code == "TIMEOUT"):
-                # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
-                # (After a timeout with hardware decode, nothing showed the encoder was at fault.)
-                tools.mark_encoder_failed(failed_encoder)
+            log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
+            warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+            # the originals too: a damaged preview copy must cost speed, never the preview
+            video_from = {sid: "original" for sid in src_meta}
+
+            def slow(enc: str) -> str:
+                return tools.ffmpeg_progress(build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w,
+                                                             out_h, layers, zooms, ass_name, audio, audio_seek,
+                                                             dur, t_shift, enc, out_part, graph, fast=False),
+                                             dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                             cwd=rwork)
+            # Hardware decode AND a GPU encoder: either may have failed, so keep the encoder first and a
+            # decoder that can't open this file doesn't get a working encoder marked as failed for days.
+            # Not after a timeout: a third full timeout would leave the user waiting half an hour.
+            both_gpu = encoder != "libx264" and "-hwaccel" in cmd
+            if both_gpu and exc.code != "TIMEOUT":
+                try:
+                    err = slow(encoder)
+                except EngineError as exc2:
+                    log(f"# software decode with {encoder} failed too: {exc2.message[-400:]}")
+            if err is None:
+                failed_encoder, encoder = encoder, "libx264"
+                err = slow(encoder)
+                if failed_encoder != "libx264" and not (both_gpu and exc.code == "TIMEOUT"):
+                    # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
+                    # (After a timeout with hardware decode, nothing showed the encoder was at fault.)
+                    tools.mark_encoder_failed(failed_encoder)
     timings["encode"] = round(time.time() - t, 2)
     if font_path is not None:
         bad = check_fontselect(err, Path(font_path))
