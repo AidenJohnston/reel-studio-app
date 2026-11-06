@@ -5,7 +5,7 @@ import { versionRows, type VersionRow } from '../shared/version-diff'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, net, powerMonitor, powerSaveBlocker, safeStorage, shell, type IpcMainInvokeEvent, Notification } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { clipboardFiles, filesFromArgv } from './intake'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -110,7 +110,7 @@ import { claudeCheckWords, createVendorConnect, type CliStatus, type VendorConne
 import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -141,6 +141,8 @@ import { takeNote } from './note-intake'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createWindowHolder } from './window-holder'
+import { registerCompanionIpc } from './companion-ipc'
+import { lanAddresses } from './phone-share'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 // Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
@@ -247,7 +249,12 @@ const windows = createWindowHolder<BrowserWindow>()
 
 function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
+  companion?.publish(channel, payload)
 }
+/** Settings > Devices: the paired phones and browsers (main/companion-ipc.ts). Set in registerIpc. */
+let companion: ReturnType<typeof registerCompanionIpc> | null = null
+/** This computer's name for "Connected to …" on a paired phone: the host name, without ".local" and dashes. */
+const computerName = (): string => (TEST ? 'Test computer' : hostname().replace(/\.local$/i, '').replace(/[-_]+/g, ' ').trim() || 'this computer')
 
 // The window, menu, Dock/taskbar and notifications (window.ts) hear about every job too.
 const sendCommand = (c: AppCommand): void => broadcast('app:command', c)
@@ -971,6 +978,33 @@ function registerIpc(): void {
     log,
     test: TEST
   })
+  // Settings > Devices: a paired phone or browser watches versions and leaves notes (main/companion-ipc.ts). It reads
+  // and notes through the same functions as the window's projects:get and projects:note.
+  companion = registerCompanionIpc({
+    handle,
+    send: broadcast,
+    dir: settingsDir(),
+    secrets: safeStorage,
+    staticDir: join(__dirname, '../renderer'),
+    service: {
+      list: () => listProjects(),
+      get: (slug) => projectWithJob(slug),
+      projectDir,
+      note: (slug, text, attachments, moment, onVersion) => submitNote(slug, text, attachments, moment, onVersion),
+      cancel: (id, slug) => noteQueue.stop(id, slug),
+      timeline: (slug, n) => readTimeline(slug, n),
+      editorConnected: async () => {
+        const a = await ai.active().catch(() => null)
+        return !!a && a.connected && a.id !== 'none'
+      },
+      appVersion: app.getVersion(),
+      computer: computerName()
+    },
+    // The e2e runs the phone page in a browser on this computer, so it listens on loopback there.
+    address: () => (TEST && process.env.REELSTUDIO_COMPANION_HOST ? process.env.REELSTUDIO_COMPANION_HOST : (lanAddresses()[0]?.address ?? null)),
+    openExternal: (url) => shell.openExternal(url),
+    log
+  })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
     handle,
@@ -1106,7 +1140,8 @@ function registerIpc(): void {
 
   handle('projects:list', () => listProjects())
   handle('projects:search', (_e, query: string) => searchProjects(query))
-  handle('projects:get', async (_e, slug: string) => {
+  handle('projects:get', (_e, slug: string) => projectWithJob(slug))
+  async function projectWithJob(slug: string): Promise<ProjectDetail> {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
@@ -1114,7 +1149,7 @@ function registerIpc(): void {
       : null
     if (!running && d.status === 'working') d.status = 'interrupted'
     return d
-  })
+  }
   /** The videos among dropped or picked files; anything else goes to the Library. Throws when there is no video. */
   const takeVideos = async (files: string[]): Promise<{ videos: string[]; skipped: DropResult[] }> => {
     const videos = files.filter(isVideo)
@@ -1230,7 +1265,10 @@ function registerIpc(): void {
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) => {
+  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) =>
+    submitNote(slug, text, attachments, at, onVersion, requestedBase))
+  // The note path for the window and for a paired phone (main/companion): one admission, one queue.
+  async function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown): Promise<{ jobId: string | null; queued?: boolean }> {
     // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
     // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
     const admit = async () => {
@@ -1285,7 +1323,7 @@ function registerIpc(): void {
       const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
       return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
     }, given ?? 0)
-  })
+  }
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
     const dir = projectDir(slug)
@@ -1931,6 +1969,7 @@ app.whenReady().then(async () => {
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir()])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
   registerIpc()
+  void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
   createWindow()
   // What a quit, a plan limit or no internet paused last time goes on now, or when it can (main/pause.ts). Sleep
   // was a different run of the app, so it waits only for the network.
@@ -1974,6 +2013,7 @@ app.whenReady().then(async () => {
 let quitting = false
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
+  void companion?.stop() // nor does the phone and browser connection
   permissionHelper.close()
   const indexing = footageIndex.status().state === 'indexing'
   if (quitting || (!jobs.runningCount() && !cloudSavesRunning() && !indexing)) {
