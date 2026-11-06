@@ -301,7 +301,11 @@ export class ClaudeCliProvider implements ModelProvider {
       if (s.idle) clearTimeout(s.idle);
       s.closed = true;
       try { s.child.stdin.end(); } catch { /* gone */ }
-      this.ending = Promise.all([this.ending, ended(s.child, s.done)]).then(() => undefined);
+      // every session's process is waited for, even after an earlier one failed: then the first failure
+      this.ending = Promise.allSettled([this.ending, ended(s.child, s.done)]).then((rs) => {
+        const failed = rs.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+        if (failed) throw failed.reason;
+      });
     }
     return this.ending;
   }
