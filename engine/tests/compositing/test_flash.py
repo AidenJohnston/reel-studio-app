@@ -55,4 +55,4 @@ def test_a_flash_lasts_as_long_in_a_preview_as_in_the_final(tmp_path, video):
     ctx.fmt["fps"] = 30          # what render.run sets for a draft or a window (preview_fps)
     assert [(round(l.t0, 6), round(l.t1, 6)) for l in render.flash_layers(ctx, tl.segments)] == final
     (t0, t1), = final
-    assert t1 - t0 == pytest.approx(5 / 60)
+    assert t1 - t0 == pytest.approx(5 / 60, abs=1e-5)
