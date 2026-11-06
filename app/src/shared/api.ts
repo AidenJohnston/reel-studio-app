@@ -4,6 +4,7 @@ import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
+import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
@@ -852,6 +853,33 @@ export interface PhoneShare {
 
 export type PhoneEvent = { kind: 'page' } | { kind: 'video' } | { kind: 'stopped'; reason: 'timeout' | 'closed' }
 
+/** A phone or browser paired with this computer (Settings > Phone and browser; main/companion/devices.ts). */
+export interface PairedDevice {
+  id: string
+  /** The device's own guess at its name ("iPhone", "Chrome on Windows"). */
+  name: string
+  kind: 'phone' | 'browser'
+  /** view: watch and save versions. note: also send notes, which start edits here. */
+  scopes: ('view' | 'note')[]
+  pairedAt: number
+  lastSeenAt: number
+}
+
+/** Settings > Phone and browser. */
+export interface DevicesStatus {
+  /** The "Phone and browser" switch. */
+  on: boolean
+  /** Where a paired device reaches this computer ("192.168.1.20:52114"), or null while it isn't listening. */
+  address: string | null
+  /** Why it isn't listening although it's on, in the app's words. */
+  problem: string | null
+  devices: PairedDevice[]
+  /** The pairing link to show as a code, while one is open (5 minutes, one device). It holds the device's secret. */
+  pairing: { url: string; expiresAt: number; kind: 'phone' | 'browser'; notes: boolean } | null
+  /** This computer's name as paired devices show it. */
+  computer: string
+}
+
 /** One line of a plan: what to say at a beat, or one shot to film. `done`: ticked off while filming. */
 export interface PlanLine {
   text: string
@@ -911,6 +939,8 @@ export interface ReelApi {
     /** A background read saved new numbers: read the summary again. */
     onChange(cb: () => void): () => void
   }
+  /** Insights > Your recent reels: built only when asked, from what's saved on this computer (shared/wrapped.ts). */
+  wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
   app: {
@@ -1127,6 +1157,18 @@ export interface ReelApi {
     save(video: string, folder: string, id: string): Promise<string>
     cancel(id: string): Promise<void>
     onProgress(cb: (p: { id: string; pct: number }) => void): () => void
+  }
+  /** Settings > Phone and browser: phones and browsers that watch versions and leave notes over the home network. */
+  devices: {
+    status(): Promise<DevicesStatus>
+    setOn(on: boolean): Promise<DevicesStatus>
+    /** A new pairing code (the one before stops working); turns the switch on. `notes`: the device may send notes. */
+    pair(kind: 'phone' | 'browser', notes: boolean): Promise<DevicesStatus>
+    cancelPair(): Promise<DevicesStatus>
+    /** Pairs this computer's own browser and opens the page there. */
+    openInBrowser(notes: boolean): Promise<DevicesStatus>
+    remove(id: string): Promise<DevicesStatus>
+    onChange(cb: (s: DevicesStatus) => void): () => void
   }
   phone: {
     /** Start (or restart, e.g. on another network) the link for one exported video. */

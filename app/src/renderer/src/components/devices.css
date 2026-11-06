@@ -1,0 +1,16 @@
+/* Settings > Phone and browser (components/Devices.tsx). Layout only; tokens and controls come from styles.css. */
+.devices-actions { gap: 8px; align-items: center; flex-wrap: wrap; }
+.devices-actions .muted-sm { margin-left: auto; font-variant-numeric: tabular-nums; }
+.devices-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.devices-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.devices-list li + li { box-shadow: inset 0 1px 0 var(--line); }
+.devices-list li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.devices-list b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-sheet { max-width: 560px; }
+.pair-text { display: flex; flex-direction: column; gap: 8px; }
+.pair-notes { gap: 8px; align-items: flex-start; cursor: pointer; }
+.pair-notes input { margin-top: 3px; }
+.pair-privacy { margin-top: 14px; }
+@media (max-width: 560px) {
+  .pair-sheet .phone-main { grid-template-columns: 1fr; justify-items: center; }
+}
