@@ -13,13 +13,16 @@ import { APP_DIR, PYTHON, setupPaths } from './helpers'
 
 // Off: the real renameSync. On: moving that one file is refused, as Windows refuses while another
 // program (a virus scanner, an indexer) has it open. Root on macOS/Linux is never refused for real.
-const refuseRename = vi.hoisted(() => ({ from: '' }))
+const refuseRename = vi.hoisted(() => ({ from: '', refused: 0 }))
 vi.mock(import('node:fs'), async (real) => {
   const fs = await real()
   return {
     ...fs,
     renameSync: (...args: Parameters<typeof fs.renameSync>) => {
-      if (String(args[0]) === refuseRename.from) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${args[0]}'`), { code: 'EPERM' })
+      if (String(args[0]) === refuseRename.from) {
+        refuseRename.refused++
+        throw Object.assign(new Error(`EPERM: operation not permitted, rename '${args[0]}'`), { code: 'EPERM' })
+      }
       return fs.renameSync(...args)
     }
   }
@@ -353,11 +356,13 @@ describe('orphaned engine reaper', () => {
       await once(engine, 'spawn')
       // the list cannot be moved aside, and this start rewrites it
       refuseRename.from = file
+      refuseRename.refused = 0
       try {
         expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
       } finally {
         refuseRename.from = ''
       }
+      expect(refuseRename.refused).toBe(1)
       expect(await createPidRegistry(settings).reap()).toMatchObject({ unknown: true, stillRunning: [bread] })
     } finally {
       await killTree(engine.pid!)
