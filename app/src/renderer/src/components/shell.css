@@ -112,8 +112,12 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
   position: absolute; z-index: 50; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3); padding: 6px;
   transform-origin: var(--o, top left); transition: opacity 150ms ease, transform 150ms var(--ease-out);
 }
-/* from .95, so the growth from the trigger reads (at .97 it looked like a fade in place) */
-@starting-style { .pop { opacity: 0; transform: scale(.95); } }
+/* from .93, so the growth from the trigger reads (at .97 it looked like a fade in place); a menu's words come in just
+   after its surface, so a half-clear menu never shows its text over the video like a ghost. Share's panel, larger and
+   over the notes column, comes in whole: an empty panel for a beat read as loading. */
+@starting-style { .pop { opacity: 0; transform: scale(.93); } }
+.pop:not(.share-pop) > * { transition: opacity 100ms ease 50ms; }
+@starting-style { .pop:not(.share-pop) > * { opacity: 0; } }
 .pop.leave { opacity: 0; transform: scale(.98); transition-duration: 120ms; pointer-events: none; }
 .mi {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 12px 0 8px; border: 0; background: none; border-radius: 8px;
@@ -131,7 +135,7 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .brandmark { flex: none; display: block; }
 
 /* What the keyboard opens or folds just appears. */
-html.kb .pop, html.kb .side::before, html.kb .side .lbl, html.kb .wordmark,
+html.kb .pop, html.kb .pop:not(.share-pop) > *, html.kb .side::before, html.kb .side .lbl, html.kb .wordmark,
 html.rail-instant .side::before, html.rail-instant .side .lbl, html.rail-instant .wordmark { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .pop { transition-property: opacity !important; transform: none !important; }

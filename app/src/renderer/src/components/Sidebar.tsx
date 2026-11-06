@@ -299,11 +299,14 @@ export function Sidebar({
           <Icon name="plus" size={16} stroke={1.75} />
           <span className="lbl">New reel</span>
         </button>
-        {NAV.map((n) => (
+        {NAV.map((n) => {
+          // a reel open is marked in Recent, under Reels: one row selected at a time (Craft, goal 4: two read as current)
+          const here = section === n.key && !(n.key === 'home' && current)
+          return (
           <button
             key={n.key}
-            className={section === n.key ? 'on' : undefined}
-            aria-current={section === n.key ? 'page' : undefined}
+            className={here ? 'on' : undefined}
+            aria-current={here ? 'page' : undefined}
             onClick={() => go({ name: n.key })}
             title={n.label}
             data-testid={`nav-${n.key}`}
@@ -311,7 +314,8 @@ export function Sidebar({
             <Icon name={n.icon} size={16} stroke={1.75} />
             <span className="lbl">{n.label}</span>
           </button>
-        ))}
+          )
+        })}
       </nav>
       <SideRecent current={current} go={go} />
       <div className="side-foot">

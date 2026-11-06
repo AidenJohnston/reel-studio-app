@@ -418,6 +418,9 @@ const SCENES: Scene[] = [
     pose: async (page) => {
       await page.mouse.move(600, 600)
       await page.getByTestId('nav-library').hover()
+      // the wash fades in: shoot once it is painted (one run caught the row before it)
+      await expect.poll(() => page.getByTestId('nav-library').evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
+      await page.waitForTimeout(200)
     }
   }
 ]
