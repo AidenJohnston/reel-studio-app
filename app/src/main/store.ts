@@ -309,6 +309,21 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+/** Removes what an ended job left (cleanPartialVersions, and a note's work/notes). False when a removal
+ * was refused, as Windows does while a file is open: the caller keeps cleanupOwed for a later try. Any
+ * other failure throws. */
+async function removeLeftovers(dir: string): Promise<boolean> {
+  try {
+    await cleanPartialVersions(dir)
+    // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
+    await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
+    return true
+  } catch (e) {
+    if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
+    throw e
+  }
+}
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
@@ -348,22 +363,17 @@ export async function settleInterrupted(slug: string): Promise<'settled' | 'unre
   const dir = projectDir(slug)
   if (!existsSync(join(dir, 'app.json'))) return 'nothing'
   const s = await readAppState(slug)
-  if (!s.job) {
-    if (!s.cleanupOwed) return 'nothing'
-    // the job ended and said so, and only its clean-up was left: refused again, it waits for the next try
-    if (!(await cleanPartialVersions(dir).then(() => true, () => false))) return 'nothing'
-    await updateAppState(slug, (st) => {
-      delete st.cleanupOwed
-    })
-    return 'settled'
-  }
-  const saved = s.job.kind === 'note' ? await savedNote(dir, s.job.id) : null
+  if (!s.job && !s.cleanupOwed) return 'nothing'
+  const saved = s.job?.kind === 'note' ? await savedNote(dir, s.job.id) : null
   if (saved === UNREADABLE) return 'unreadable'
-  await cleanPartialVersions(dir)
-  // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
-  await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
+  // a removal still refused keeps the mark for a later try; the job is settled all the same, so the other
+  // projects, and the next job on this one, go ahead
+  const cleaned = await removeLeftovers(dir)
+  if (!s.job && !cleaned) return 'nothing'
   await updateAppState(slug, (st) => {
-    delete st.cleanupOwed
+    if (cleaned) delete st.cleanupOwed
+    else st.cleanupOwed = true
+    if (!st.job) return // the job itself ended and said so: only its clean-up was left
     st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
     if (saved) {
       const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
