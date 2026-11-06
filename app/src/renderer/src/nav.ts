@@ -1,6 +1,7 @@
 export type Screen =
   | { name: 'home' }
-  | { name: 'reel'; slug: string }
+  /** `draft`: words to put in the note box, unsent (Insights' "Try this edit"). */
+  | { name: 'reel'; slug: string; draft?: string }
   | { name: 'library' }
   | { name: 'style' }
   | { name: 'insights' }

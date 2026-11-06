@@ -83,7 +83,7 @@ interface Pin {
  * editor in a column on the right. Version 1 is made here, a reel with no video is planned here, and Edit it myself
  * takes the column's place.
  */
-export function Reel({ slug, go }: { slug: string; go: Go }) {
+export function Reel({ slug, go, draft: startDraft }: { slug: string; go: Go; draft?: string }) {
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
@@ -184,7 +184,7 @@ export function Reel({ slug, go }: { slug: string; go: Go }) {
     }
   }, [transport, playhead])
   const [shownSrc, setShownSrc] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(startDraft ?? '')
   const [chip, setChip] = useState<Chip>(null)
   const [alert, setAlert] = useState<string | null>(null)
   const [notifyAsk, setNotifyAsk] = useState(false)

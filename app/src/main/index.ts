@@ -142,6 +142,8 @@ import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createWindowHolder } from './window-holder'
 import { registerCompanionIpc } from './companion-ipc'
+import { insightsSummary } from './insights'
+import { timingOf, wrappedReport, type WrappedReel } from '../shared/wrapped'
 import { lanAddresses } from './phone-share'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
@@ -1139,6 +1141,21 @@ function registerIpc(): void {
   })
 
   handle('projects:list', () => listProjects())
+  // Insights > Your recent reels (shared/wrapped.ts): the saved results of posted reels with each version's own timing.
+  handle('wrapped:report', async () => {
+    const summary = await insightsSummary(projectsDir(), { asOf: new Date().toISOString() })
+    const reels: WrappedReel[] = []
+    for (const r of summary.reels) {
+      const title = (await readProject(r.project).catch(() => null))?.title || r.project
+      const timeline = await readTimeline(r.project, r.version).catch(() => null)
+      const m = r.totals.metrics
+      reels.push({
+        project: r.project, version: r.version, title, publishedAt: r.posts.map((p) => p.publishedAt).sort().at(-1) ?? '',
+        plays: m.plays, averageWatchTimeMs: m.averageWatchTimeMs, shares: m.shares, saves: m.saves, timing: timeline ? timingOf(timeline) : null
+      })
+    }
+    return wrappedReport(reels, Date.now())
+  })
   handle('projects:search', (_e, query: string) => searchProjects(query))
   handle('projects:get', (_e, slug: string) => projectWithJob(slug))
   async function projectWithJob(slug: string): Promise<ProjectDetail> {

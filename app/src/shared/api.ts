@@ -3,6 +3,7 @@
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
 import type { InsightsOptions, InsightsSummary } from './insights'
+import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
@@ -871,6 +872,8 @@ export interface MergeRequest {
 
 export interface ReelApi {
   insights: { get(options?: InsightsOptions): Promise<InsightsSummary> }
+  /** Insights > Your recent reels: built only when asked, from what's saved on this computer (shared/wrapped.ts). */
+  wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
   app: {
