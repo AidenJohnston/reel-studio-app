@@ -23,7 +23,10 @@ import { b64url, s256, sameText, seal, sealKey, unseal } from './seal.ts'
 
 export const META_VERSION = 'v26.0'
 export const INSTAGRAM_SCOPES = ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_insights']
-export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights']
+// read_insights and pages_manage_engagement are what Graph's /{video-id}/video_insights requires (its Requirements
+// section, v26.0), so Insights can read a posted reel's numbers. The app requires only the posting three
+// (main/facebook.ts), so someone who declines these two can still post.
+export const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights', 'pages_manage_engagement']
 export const THREADS_SCOPES = ['threads_basic', 'threads_content_publish']
 const THREADS_GRAPH = 'https://graph.threads.com'
 export const X_SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access']
