@@ -110,6 +110,8 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await expect(phone.getByTestId('cp-chat')).toContainText('I made the subtitles lowercase.')
     await phoneShot(app, 'companion-05-phone-version-2')
     // the same page in a desktop browser, and with reduced motion on (prep-for-prod's runtime pass)
+    await sizePhone(app, phone, 960, 800)
+    await phoneShot(app, 'companion-05a-960')
     await sizePhone(app, phone, 1440, 900)
     await phoneShot(app, 'companion-05b-wide')
     await sizePhone(app, phone, 320, 640)
