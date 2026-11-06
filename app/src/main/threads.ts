@@ -307,6 +307,8 @@ export class ThreadsService {
       const version = p.version
       let saved = await receipt(dir, version)
       if (saved && saved.userId !== c.userId) return fail('ACCOUNT', 'This version already started posting to another Threads account.')
+      if (saved?.state === 'published' && saved.inputHash !== createHash('sha256').update(JSON.stringify({ text: p.text })).update(await exportHash(dir, version)).digest('hex'))
+        return fail('ALREADY_POSTED', 'This version is already on Threads with other text. Export a new version to post it again.')
       if (saved?.state === 'published') {
         await saveOutcome(dir, { ...saved.post, platform: 'threads', apiVersion: THREADS_VERSION, observedAt: null, metrics: null })
         return saved.post

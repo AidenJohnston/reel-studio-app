@@ -65,7 +65,7 @@ async function world() {
       expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${token}`)
       expect(JSON.parse(String(init.body))).toEqual({ media_type: 'video/mp4', total_bytes: VIDEO.length, media_category: 'tweet_video' })
     } })
-    steps.push({ url: `${X_API}/media/upload/1234/append`, method: 'POST', body: {}, inspect: async (init) => {
+    steps.push({ url: `${X_API}/media/upload/1234/append`, method: 'POST', respond: async () => new Response(null, { status: 204 }), inspect: async (init) => {
       const f = init.body as FormData
       expect(f.get('segment_index')).toBe('0')
       expect(await (f.get('media') as Blob).text()).toBe(VIDEO)
@@ -90,7 +90,8 @@ describe('X', () => {
     expect(post).toEqual({ version: 1, accountId: '99', postId: '5555', publishedAt: new Date(NOW).toISOString() })
     const outcomes = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
     expect(outcomes.versions.v1['x:5555']).toMatchObject({ platform: 'x', apiVersion: 'v2' })
-    expect(await w.service.publish(INPUT)).toEqual(post); w.done()
+    expect(await w.service.publish(INPUT)).toEqual(post)
+    await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'X_ALREADY_POSTED' }); w.done()
   })
 
   it('refreshes the two-hour token through the service and keeps X’s new refresh token', async () => {

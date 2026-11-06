@@ -96,7 +96,8 @@ describe('LinkedIn', () => {
     expect(post).toEqual({ version: 1, accountId: 'AbC123', postId: 'urn:li:share:777', publishedAt: new Date(NOW).toISOString() })
     const outcomes = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
     expect(outcomes.versions.v1['linkedin:urn:li:share:777']).toMatchObject({ platform: 'linkedin', apiVersion: '202610' })
-    expect(await w.service.publish(INPUT)).toEqual(post); w.done()
+    expect(await w.service.publish(INPUT)).toEqual(post)
+    await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'LI_ALREADY_POSTED' }); w.done()
   })
 
   it('never posts again after LinkedIn’s answer to the post was lost, and uploads only to LinkedIn', async () => {

@@ -52,8 +52,10 @@ async function request(fetcher: MetaFetch, url: string, init: RequestInit, signa
     signal.throwIfAborted()
     return fail('NETWORK', 'X could not be reached. Check your connection and try again.')
   }
-  let data: unknown = null
-  try { data = await res.json() } catch { /* below */ }
+  // a success can come with no body at all (append answers 204); only a body that is there has to be JSON
+  const raw = await res.text().catch(() => '')
+  let data: unknown = {}
+  if (raw) try { data = JSON.parse(raw) } catch { data = null }
   if (res.ok && data && typeof data === 'object' && !('errors' in data && !('data' in data))) return data as Record<string, unknown>
   if (res.status === 401) return fail('TOKEN', 'Your X connection has ended. Connect X again in Settings.')
   if (res.status === 402) return fail('CREDITS', 'X needs more API credits on Reel Studio’s developer account before it can post. Post this one in X for now.')
@@ -155,8 +157,9 @@ export class XService {
     if (c.expiresAt - this.now() < 5 * 60_000) {
       const r = await request(this.o.fetch, `${cfg.brokerUrl}/v1/x/refresh`, jsonPost({ refresh_token: c.refresh }), signal)
       c = { ...c, token: text(r.access_token), refresh: text(r.refresh_token), expiresAt: this.now() + (typeof r.expires_in === 'number' ? r.expires_in : invalid()) * 1000 }
-      // X has already retired the old refresh token: keep the new one before anything else can fail
-      await this.save(c)
+      // X has already retired the old refresh token: keep the new one before anything else can fail. If it can't be
+      // kept, the connection is gone either way, so say so plainly.
+      try { await this.save(c) } catch { return fail('TOKEN', 'Reel Studio couldn’t save your X sign-in on this computer. Connect X again in Settings.') }
     }
     return c
   }
@@ -316,6 +319,7 @@ export class XService {
       if (raw !== undefined) {
         const r = object(raw)
         if (r.userId !== c.userId) return fail('ACCOUNT', 'This version was posted to another X account.')
+        if (r.state === 'published' && r.inputHash !== inputHash) return fail('ALREADY_POSTED', 'This version is already on X with other text. Export a new version to post it again.')
         if (r.state === 'published') return { version, accountId: c.userId, postId: id(object(r.post).postId), publishedAt: text(object(r.post).publishedAt) }
         if (r.state === 'posting') return fail('PUBLISH_UNKNOWN', 'X didn’t confirm whether this was posted. Check X before posting this version again.')
         return localError()

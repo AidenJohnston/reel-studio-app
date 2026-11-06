@@ -87,8 +87,9 @@ describe('Threads', () => {
     expect(post).toEqual({ version: 1, accountId: '4242', postId: '700', publishedAt: new Date(NOW).toISOString() })
     const outcomes = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
     expect(outcomes.versions.v1['threads:700']).toMatchObject({ platform: 'threads', apiVersion: 'v1.0' })
-    // asking again posts nothing
-    expect(await w.service.publish(INPUT)).toEqual(post); w.done()
+    // asking again posts nothing; asking with other words says it's already there
+    expect(await w.service.publish(INPUT)).toEqual(post)
+    await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'TH_ALREADY_POSTED' }); w.done()
   })
 
   it('won’t publish a container made from an older export of the version', async () => {

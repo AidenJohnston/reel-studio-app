@@ -49,7 +49,8 @@ async function call(fetcher: MetaFetch, url: string, init: RequestInit, signal: 
   }
   const raw = await res.text().catch(() => '')
   let data: unknown = {}
-  if (raw) try { data = JSON.parse(raw) } catch { data = null }
+  // a success often has no body (part uploads, new posts: what matters is in the headers); a body that isn't JSON is ignored
+  if (raw) try { data = JSON.parse(raw) } catch { data = res.ok ? {} : null }
   if (res.ok && data && typeof data === 'object') return { data: data as Record<string, unknown>, headers: res.headers }
   if (res.status === 401) return fail('TOKEN', 'Your LinkedIn connection has ended. Connect LinkedIn again in Settings.')
   if (res.status === 403) return fail('PERMISSION', 'LinkedIn didn’t allow this. Connect LinkedIn again in Settings and allow posting.')
@@ -269,8 +270,10 @@ export class LinkedInService {
       if (!video.startsWith('urn:li:video:')) return invalid()
       const parts = Array.isArray(v.uploadInstructions) ? v.uploadInstructions.map((p) => {
         const x = object(p)
-        if (typeof x.firstByte !== 'number' || typeof x.lastByte !== 'number' || x.firstByte < 0 || x.lastByte < x.firstByte || x.lastByte >= size) return invalid()
-        return { first: x.firstByte, last: x.lastByte, url: uploadLink(x.uploadUrl) }
+        if (!Number.isSafeInteger(x.firstByte) || !Number.isSafeInteger(x.lastByte)) return invalid()
+        const first = x.firstByte as number, last = x.lastByte as number
+        if (first < 0 || last < first || last >= size) return invalid()
+        return { first, last, url: uploadLink(x.uploadUrl) }
       }) : invalid()
       if (!parts.length || parts[0].first !== 0 || parts[parts.length - 1].last !== size - 1 || parts.some((p, i) => i > 0 && p.first !== parts[i - 1].last + 1)) return invalid()
       const etags: string[] = []
@@ -307,9 +310,11 @@ export class LinkedInService {
       const all = await readJson(file)
       const versions = all?.versions && typeof all.versions === 'object' ? (all.versions as Record<string, unknown>) : {}
       const raw = versions[`v${version}`]
+      const inputHash = createHash('sha256').update(JSON.stringify({ text: p.text })).digest('hex')
       if (raw !== undefined) {
         const r = object(raw)
         if (r.memberId !== c.memberId) return fail('ACCOUNT', 'This version was posted by another LinkedIn member.')
+        if (r.state === 'published' && r.inputHash !== inputHash) return fail('ALREADY_POSTED', 'This version is already on LinkedIn with other text. Export a new version to post it again.')
         if (r.state === 'published') { const post = object(r.post); return { version, accountId: c.memberId, postId: text(post.postId), publishedAt: text(post.publishedAt) } }
         if (r.state === 'posting') return fail('PUBLISH_UNKNOWN', 'LinkedIn didn’t confirm whether this was posted. Check LinkedIn before posting this version again.')
         return localError()
@@ -317,7 +322,7 @@ export class LinkedInService {
       const save = (r: Record<string, unknown>) => atomicSocialFile(file, JSON.stringify({ schemaVersion: 1, versions: { ...versions, [`v${version}`]: r } }, null, 2) + '\n')
       const video = await this.upload(dir, version, c, signal)
       signal.throwIfAborted()
-      await save({ state: 'posting', memberId: c.memberId })
+      await save({ state: 'posting', memberId: c.memberId, inputHash })
       let dispatched = false
       let postId: string
       try {
@@ -342,7 +347,7 @@ export class LinkedInService {
       }
       const post: LinkedInPost = { version, accountId: c.memberId, postId, publishedAt: new Date(this.now()).toISOString() }
       try {
-        await save({ state: 'published', memberId: c.memberId, post })
+        await save({ state: 'published', memberId: c.memberId, inputHash, post })
         await withSocialFile(join(dir, 'outcomes.json'), async () => {
           const saved = await readJson(join(dir, 'outcomes.json'))
           if (saved && saved.schemaVersion !== 1) return localError()
