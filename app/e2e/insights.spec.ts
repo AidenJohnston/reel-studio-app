@@ -29,7 +29,8 @@ test('Insights: results read, explained and opened at the posted version', async
   test.setTimeout(15 * 60_000)
   if (existsSync(FIXTURE)) rmSync(FIXTURE)
   const media = makeMedia()
-  const { app, page } = await launch({ REELSTUDIO_TEST_RESULTS: FIXTURE })
+  // REELSTUDIO_MOCK_NOTE connects the practice editor, so a note makes Version 2
+  const { app, page } = await launch({ REELSTUDIO_TEST_RESULTS: FIXTURE, REELSTUDIO_MOCK_NOTE: '300' })
   try {
     await passFirstRun(page)
 

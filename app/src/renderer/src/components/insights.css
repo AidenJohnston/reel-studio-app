@@ -58,7 +58,7 @@ html.kb .ins-reel .hit:focus-visible { outline: 2px solid var(--ink); outline-of
 .ins-split { display: flex; gap: 2px; height: 24px; font-size: var(--fs-xs); line-height: 24px; font-variant-numeric: tabular-nums; }
 .ins-split span {
   flex-basis: 0; min-width: max-content; padding: 0 8px; border-radius: 6px; background: var(--sunk); color: var(--ink-2);
-  white-space: nowrap; transition: flex-grow 240ms var(--ease-out);
+  white-space: nowrap;
 }
 .ins-split span + span { text-align: right; }
 .ins-split span.won { background: var(--green-tint); color: var(--green-ink); font-weight: 600; }
@@ -69,7 +69,7 @@ html.kb .ins-reel .hit:focus-visible { outline: 2px solid var(--ink); outline-of
 .ins-foot { margin-top: var(--space-l); }
 
 @media (prefers-reduced-motion: reduce) {
-  .ins-bar > i, .ins-split span, .ins-reel .rthumb { transition: none; }
+  .ins-bar > i, .ins-reel .rthumb { transition: none; }
 }
 html.kb .ins-reel .rthumb { transition: none; }
 html.kb .ins-reel .hit:active ~ .rthumb { transform: none; }

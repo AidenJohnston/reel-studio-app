@@ -420,18 +420,25 @@ export class InstagramService {
   /**
    * Who follows the connected account, one request per breakdown (instagram-audience.ts). The results refresh reads it
    * at most once a day. Instagram answers an account under 100 followers with nothing, or with error 100 on some
-   * accounts; either way that breakdown is empty.
+   * accounts; that breakdown is then empty. When every breakdown is refused the request itself is wrong, so the error
+   * goes up and the refresh keeps the audience it had.
    */
   audience(): Promise<{ accountId: string; followers: Record<AudienceBreakdown, AudienceSlice[]> }> {
     return this.run(async (signal) => {
       await this.config()
       const c = await this.credentials()
       const followers = { age: [], gender: [], country: [], city: [] } as Record<AudienceBreakdown, AudienceSlice[]>
+      let refused: InstagramError | null = null, answered = 0
       for (const breakdown of AUDIENCE_BREAKDOWNS) {
-        try { followers[breakdown] = parseAudience(await this.graph(audienceQuery(c.accountId, breakdown), { method: 'GET' }, signal)) } catch (e) {
+        try {
+          followers[breakdown] = parseAudience(await this.graph(audienceQuery(c.accountId, breakdown), { method: 'GET' }, signal))
+          answered++
+        } catch (e) {
           if (!(e instanceof InstagramError) || e.code !== 'IG_INPUT') throw e
+          refused = e
         }
       }
+      if (!answered && refused) throw refused
       return { accountId: c.accountId, followers }
     })
   }

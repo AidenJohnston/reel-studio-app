@@ -5,6 +5,9 @@ import type { InsightPost, TrialVerdict } from '../shared/insights'
 // combined views is equally likely to have landed on either try, so the count for one try is Binomial(n, 1/2).
 // A winner needs all of:
 //   - both results read at least SETTLE_HOURS after posting (Meta says insights can lag up to 48 hours);
+//   - both tries about the same age when read (within MAX_AGE_GAP): views are lifetime counts, so a try that has
+//     been up twice as long would win on time alone. Lifetime views level off, so ages drawing closer as both
+//     tries get older lets a trial whose tries went up days apart still be decided;
 //   - at least MIN_VIEWS views between them;
 //   - a two-sided exact binomial p-value under MAX_P;
 //   - the leader at least MIN_LIFT_PERCENT ahead.
@@ -15,6 +18,8 @@ export const SETTLE_HOURS = 48
 export const MIN_VIEWS = 100
 export const MAX_P = 0.05
 export const MIN_LIFT_PERCENT = 20
+/** The younger try's age at its read over the older's must be at least this. */
+export const MIN_AGE_RATIO = 0.8
 
 const HOUR = 3_600_000
 const count = (n: number) => n.toLocaleString('en-US')
@@ -58,6 +63,11 @@ export function decideTrial(one: InsightPost, two: InsightPost): TrialVerdict {
   const a = one.metrics.plays, b = two.metrics.plays
   if (a === null || b === null || !settled(one) || !settled(two))
     return { kind: 'waiting', reason: `Waiting for both results. A winner is picked once both tries have been up for ${SETTLE_HOURS} hours.` }
+  const ageOne = Date.parse(one.observedAt!) - Date.parse(one.publishedAt), ageTwo = Date.parse(two.observedAt!) - Date.parse(two.publishedAt)
+  if (Math.min(ageOne, ageTwo) / Math.max(ageOne, ageTwo) < MIN_AGE_RATIO) {
+    const later = ageOne < ageTwo ? 1 : 2
+    return { kind: 'waiting', reason: `Try ${later} has been up for less time, so its views aren't comparable yet. A winner is picked once both have been up about as long.` }
+  }
   if (a + b < MIN_VIEWS)
     return { kind: 'too-few', reason: `${count(a + b)} ${a + b === 1 ? 'view' : 'views'} between them so far. It takes at least ${MIN_VIEWS} to tell them apart.` }
   const winner: 1 | 2 = a >= b ? 1 : 2

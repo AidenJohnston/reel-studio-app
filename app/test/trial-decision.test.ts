@@ -42,6 +42,14 @@ describe('decideTrial', () => {
     expect(decideTrial(post(900), post(null, SETTLED, 2)).kind).toBe('waiting')
     expect(decideTrial(post(900), post(100, null, 2)).kind).toBe('waiting')
   })
+  // fails if a try wins only because it has been up longer: equal tries at 100 views a day, read at 4 and 2 days
+  it('waits until both tries have been up about as long', () => {
+    const younger = { ...post(200, '2026-11-05T10:00:00.000Z', 2), publishedAt: '2026-11-03T10:00:00.000Z' }
+    expect(decideTrial(post(400, '2026-11-05T10:00:00.000Z'), younger)).toMatchObject({ kind: 'waiting', reason: expect.stringContaining('Try 2 has been up for less time') })
+    // a day later both have been up long enough for the gap in age to stop mattering (5 days and 4 days)
+    const later = { ...post(200, '2026-11-07T10:00:00.000Z', 2), publishedAt: '2026-11-03T10:00:00.000Z' }
+    expect(decideTrial(post(400, '2026-11-06T10:00:00.000Z'), later).kind).not.toBe('waiting')
+  })
   // fails if a tiny sample can produce a winner
   it('needs 100 views between them', () => {
     const v = decideTrial(post(80), post(19, SETTLED, 2))

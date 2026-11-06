@@ -344,11 +344,14 @@ describe('Instagram fixture HTTP', () => {
   // fails if one breakdown Instagram won't give (error 100 under 100 followers) stops the whole audience
   it('reads who follows the account, one breakdown at a time', async () => {
     const w = await world(); await w.seed()
-    const ask = (breakdown: string) => `${GRAPH}/123/insights?metric=follower_demographics&period=lifetime&metric_type=total_value&breakdown=${breakdown}`
+    const ask = (breakdown: string) => `${GRAPH}/123/insights?metric=follower_demographics&period=lifetime&metric_type=total_value&timeframe=this_month&breakdown=${breakdown}`
     const one = (key: string, value: number) => ({ data: [{ name: 'follower_demographics', total_value: { breakdowns: [{ dimension_keys: ['x'], results: [{ dimension_values: [key], value }] }] } }] })
     w.steps.push({ url: ask('age'), body: one('25-34', 9) }, { url: ask('gender'), body: one('F', 5) },
       { url: ask('country'), status: 400, body: { error: { code: 100 } } }, { url: ask('city'), body: { data: [] } })
     expect(await w.service.audience()).toEqual({ accountId: '123', followers: { age: [{ key: '25-34', value: 9 }], gender: [{ key: 'F', value: 5 }], country: [], city: [] } })
+    // every breakdown refused: an error, so the refresh keeps the audience it had instead of saving an empty one
+    for (const b of ['age', 'gender', 'country', 'city']) w.steps.push({ url: ask(b), status: 400, body: { error: { code: 100 } } })
+    await expect(w.service.audience()).rejects.toMatchObject({ code: 'IG_INPUT' })
     w.done()
   })
   it('rejects another version or account post before requesting insights', async () => {

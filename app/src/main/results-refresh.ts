@@ -86,9 +86,14 @@ export function errorKind(e: unknown): 'rate-limit' | 'reconnect' | 'not-connect
 const message = (e: unknown, fallback: string) => e && typeof e === 'object' && 'userMessage' in e && typeof e.userMessage === 'string' ? e.userMessage : fallback
 
 interface PlatformMemory { state: ResultsPlatformState; streak: number; audienceAt: number | null }
-interface Saved { checkedAt: string | null; platforms: Record<InsightPlatform, PlatformMemory>; audience: PlatformAudience[] }
+/**
+ * `tried`: when a read last failed for one post (key: postKey), so a post the platform keeps refusing waits its turn
+ * like a read one instead of taking the front of every run.
+ */
+interface Saved { checkedAt: string | null; platforms: Record<InsightPlatform, PlatformMemory>; audience: PlatformAudience[]; tried: Record<string, number> }
+const postKey = (p: SavedPostRef) => JSON.stringify([p.platform, p.accountId, p.slug, p.version, p.postId])
 const fresh = (): Saved => ({
-  checkedAt: null, audience: [],
+  checkedAt: null, audience: [], tried: {},
   platforms: { instagram: { state: { state: 'not-connected' }, streak: 0, audienceAt: null }, tiktok: { state: { state: 'not-connected' }, streak: 0, audienceAt: null },
     facebook: { state: { state: 'not-connected' }, streak: 0, audienceAt: null } }
 })
@@ -114,6 +119,8 @@ function parseSaved(value: unknown): Saved {
     base.platforms[p] = { state: s as unknown as ResultsPlatformState, streak: typeof m.streak === 'number' ? m.streak : 0,
       audienceAt: typeof m.audienceAt === 'number' ? m.audienceAt : null }
   }
+  if (v.tried && typeof v.tried === 'object')
+    for (const [k, t] of Object.entries(v.tried as Record<string, unknown>)) if (typeof t === 'number' && Number.isFinite(t)) base.tried[k] = t
   if (Array.isArray(v.audience)) {
     base.audience = v.audience.flatMap((a: unknown) => {
       if (!a || typeof a !== 'object') return []
@@ -137,7 +144,7 @@ export class ResultsRefresh {
     stateDir: string
     sources: ResultsSource[]
     now?: () => number
-    /** after a run that changed anything: Insights reloads */
+    /** after every run, once it is no longer running: Insights reloads */
     changed?: () => void
   }) {}
 
@@ -177,7 +184,12 @@ export class ResultsRefresh {
    */
   refresh({ all = false }: { all?: boolean } = {}): Promise<ResultsStatus> {
     if (this.running) return this.running
-    const run = this.run(all).finally(() => { this.running = null })
+    // Every finished run is announced once `running` is clear: a status-only change (a rate limit) matters to an open
+    // Insights screen as much as new numbers, and a screen that loaded mid-run must not keep showing it running.
+    const run = this.run(all).finally(() => {
+      this.running = null
+      this.o.changed?.()
+    })
     this.running = run
     return run
   }
@@ -185,7 +197,12 @@ export class ResultsRefresh {
   private async run(all: boolean): Promise<ResultsStatus> {
     const s = structuredClone(await this.load())
     const posts = await savedPosts(this.o.projectsRoot())
-    let changed = false
+    // a failed read counts as a read for spacing; a post since read, or gone, drops its failure
+    const last = (p: SavedPostRef) => Math.max(p.observedAt ?? -Infinity, s.tried[postKey(p)] ?? -Infinity)
+    s.tried = Object.fromEntries(posts.flatMap((p) => {
+      const t = s.tried[postKey(p)]
+      return t !== undefined && (p.observedAt === null || t > p.observedAt) ? [[postKey(p), t]] : []
+    }))
     for (const source of this.o.sources) {
       const memory = s.platforms[source.platform]
       const now = this.now()
@@ -198,18 +215,24 @@ export class ResultsRefresh {
       if (account === null) { memory.state = { state: 'not-connected' }; continue }
       const mine = posts.filter((p) => p.platform === source.platform && p.accountId === account)
       const due = mine
-        .filter((p) => p.publishedAt <= now && (all || (nextReadAt(p.publishedAt, p.observedAt) ?? Infinity) <= now))
-        // never read first, then the longest since a read; newest post first among equals
-        .sort((a, b) => (a.observedAt ?? 0) - (b.observedAt ?? 0) || b.publishedAt - a.publishedAt)
+        .filter((p) => {
+          const at = last(p)
+          return p.publishedAt <= now && (all || (nextReadAt(p.publishedAt, Number.isFinite(at) ? at : null) ?? Infinity) <= now)
+        })
+        // never tried first, then the longest since a read or a try; newest post first among equals
+        .sort((a, b) => Math.max(last(a), 0) - Math.max(last(b), 0) || b.publishedAt - a.publishedAt)
         .slice(0, MAX_READS_PER_RUN)
       let stopped: ResultsPlatformState | null = null
       for (const p of due) {
         try {
           await source.read(p.slug, p.version, p.postId)
-          changed = true
+          delete s.tried[postKey(p)]
         } catch (e) {
           const kind = errorKind(e)
-          if (kind === 'post') continue
+          if (kind === 'post') {
+            s.tried[postKey(p)] = now
+            continue
+          }
           stopped = this.halt(memory, kind, e, now)
           break
         }
@@ -220,7 +243,6 @@ export class ResultsRefresh {
           s.audience = [...s.audience.filter((x) => x.platform !== source.platform),
             { platform: source.platform, accountId: a.accountId, observedAt: new Date(now).toISOString(), followers: a.followers }]
           memory.audienceAt = now
-          changed = true
         } catch (e) {
           // audience is extra: a post-shaped failure leaves the old facts; anything else stops the platform as reads do
           if (errorKind(e) !== 'post') stopped = this.halt(memory, errorKind(e), e, now)
@@ -233,7 +255,6 @@ export class ResultsRefresh {
     }
     s.checkedAt = new Date(this.now()).toISOString()
     await this.store(s)
-    if (changed) this.o.changed?.()
     const status = await this.status()
     return { ...status, running: false }
   }

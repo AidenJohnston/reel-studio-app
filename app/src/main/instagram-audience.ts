@@ -1,6 +1,6 @@
 // Instagram account insights, demographics: https://developers.facebook.com/docs/instagram-platform/api-reference/instagram-user/insights
-// follower_demographics needs metric_type=total_value and one breakdown per request. Instagram returns nothing for an
-// account under 100 followers, and only its top 45 values per breakdown.
+// follower_demographics needs metric_type=total_value, a timeframe (since v20 only this_month or this_week) and one
+// breakdown per request. Instagram returns nothing for an account under 100 followers, and only its top 45 values.
 import type { AudienceSlice } from '../shared/insights'
 import { invalidResponse, object } from './instagram-http'
 
@@ -8,7 +8,7 @@ export const AUDIENCE_BREAKDOWNS = ['age', 'gender', 'country', 'city'] as const
 export type AudienceBreakdown = (typeof AUDIENCE_BREAKDOWNS)[number]
 
 export function audienceQuery(accountId: string, breakdown: AudienceBreakdown): string {
-  return `${accountId}/insights?${new URLSearchParams({ metric: 'follower_demographics', period: 'lifetime', metric_type: 'total_value', breakdown })}`
+  return `${accountId}/insights?${new URLSearchParams({ metric: 'follower_demographics', period: 'lifetime', metric_type: 'total_value', timeframe: 'this_month', breakdown })}`
 }
 
 /** One breakdown's counts, biggest first. An empty answer (too few followers, or no data yet) is an empty list. */

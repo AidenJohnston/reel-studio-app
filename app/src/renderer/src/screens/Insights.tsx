@@ -188,11 +188,14 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
   const where = join([...new Set(r.posts.map((p) => PLATFORM_NAMES[p.platform]))])
   const watched = t.completionEstimate ?? null
   const missing = (what: string) => `${where} ${r.posts.length > 1 ? 'don’t' : 'doesn’t'} report ${what}`
+  // The column heads are hidden from screen readers, so each number says what it is.
   const cell = (label: string, value: string | null, what: string) => (
-    <span className="ins-n tnum" aria-label={value === null ? `${label}: not reported` : `${label}: ${value}`} title={value === null ? missing(what) : undefined}>
-      {value ?? '–'}
+    <span className="ins-n" title={value === null ? missing(what) : undefined}>
+      <span className="sr-only">{label}: </span>
+      {value ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
     </span>
   )
+  const watchedText = watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : null
   const line = reelLine(r, all)
   return (
     <li className={`ins-reel${counting ? ' counting' : ''}`} data-testid="insights-reel" data-project={r.project} data-version={r.version}>
@@ -204,9 +207,8 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
         <div className={`ins-why${counting ? ' faint' : ''}`} data-testid="insights-why">{line}</div>
       </div>
       {cell('Views', t.plays === null ? null : compact(t.plays), 'views')}
-      <span className="ins-n tnum ins-watch" aria-label={watched === null ? (t.averageWatchTimeMs === null ? 'Watched: not reported' : `Watched: ${seconds(t.averageWatchTimeMs)} on average`) : `Watched: ${percent(watched)} on average`}
-        title={watched === null && t.averageWatchTimeMs === null ? missing('watch time') : undefined}>
-        {watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : '–'}
+      <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : undefined}>
+        <span><span className="sr-only">Watched on average: </span>{watchedText ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}</span>
         {watched !== null && <i className="ins-bar" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, watched)})` }} /></i>}
       </span>
       {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips')}

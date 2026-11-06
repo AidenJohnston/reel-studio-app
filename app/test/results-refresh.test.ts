@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { backoffMs, nextReadAt, ResultsRefresh, type ResultsSource } from '../src/main/results-refresh'
+import { backoffMs, MAX_READS_PER_RUN, nextReadAt, ResultsRefresh, type ResultsSource } from '../src/main/results-refresh'
 import type { InsightPlatform } from '../src/shared/insights'
 
 const HOUR = 3_600_000
@@ -81,9 +81,13 @@ it('backs off a rate-limited platform and remembers it across restarts', async (
   const w = await world([{ slug: 'a', postId: 'p1', publishedAt: T0 - 2 * DAY }, { slug: 'a', postId: 'p2', publishedAt: T0 - 2 * DAY }])
   let now = T0
   const limited = source('instagram', { fail: { p1: { code: 'IG_RATE_LIMIT', userMessage: 'Wait a few minutes.' }, p2: { code: 'IG_RATE_LIMIT', userMessage: 'Wait a few minutes.' } } })
-  const r = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [limited.s], now: () => now })
+  let announced = 0
+  const r = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [limited.s], now: () => now, changed: () => announced++ })
   expect((await r.refresh()).platforms.instagram).toEqual({ state: 'waiting', until: new Date(T0 + 15 * 60_000).toISOString(), message: 'Wait a few minutes.' })
   expect(limited.reads).toHaveLength(1)
+  // nothing new was read, but an open Insights must hear about the wait, and see the run as over
+  expect(announced).toBe(1)
+  expect((await r.status()).running).toBe(false)
   // a restart reads the saved state: still waiting, nothing is asked
   const again = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [limited.s], now: () => now })
   await again.refresh({ all: true })
@@ -91,6 +95,21 @@ it('backs off a rate-limited platform and remembers it across restarts', async (
   // after the wait it tries again, and a second limit in a row waits twice as long
   now = T0 + 16 * 60_000
   expect((await again.refresh()).platforms.instagram).toMatchObject({ state: 'waiting', until: new Date(now + 30 * 60_000).toISOString() })
+})
+
+// fails if posts the platform keeps refusing take every run's reads and the rest are never read
+it('lets a refused post wait its turn instead of blocking the others', async () => {
+  const refused = Array.from({ length: MAX_READS_PER_RUN }, (_, i) => ({ slug: 'a', postId: `bad${i}`, publishedAt: T0 - 3 * DAY }))
+  const w = await world([...refused, { slug: 'b', postId: 'good', publishedAt: T0 - 4 * DAY }])
+  const ig = source('instagram', { fail: Object.fromEntries(refused.map((p) => [p.postId, { code: 'IG_POST', userMessage: 'Not linked.' }])) })
+  let now = T0
+  const r = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [ig.s], now: () => now })
+  await r.refresh()
+  expect(ig.reads).not.toContain('good')
+  now += HOUR
+  await r.refresh()
+  expect(ig.reads.filter((id) => id === 'good')).toHaveLength(1)
+  expect(ig.reads).toHaveLength(MAX_READS_PER_RUN + 1)
 })
 
 // fails if an expired connection reads as "not connected" (the screen would hide the way to fix it)
