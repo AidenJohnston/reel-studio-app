@@ -12,12 +12,13 @@ const RELAY = resolve(__dirname, '..', '..', 'ai', 'relay', 'reelstudio-mcp.js')
 const posix = process.platform !== 'win32'
 
 /** Stand-in controls that record what reached them. */
-function controls() {
+function controls(slowMs = 0) {
   const calls: { name: string; args: unknown[] }[] = []
+  const slow = () => new Promise((r) => setTimeout(r, slowMs))
   const c: OutsideControls = {
     listReels: async () => (calls.push({ name: 'list_reels', args: [] }), JSON.stringify({ reels: [{ reel: 'my-reel' }] })),
     getReel: async (r) => (calls.push({ name: 'get_reel', args: [r] }), JSON.stringify({ reel: r })),
-    sendNote: async (r, t, b) => (calls.push({ name: 'send_note', args: [r, t, b] }), 'Sent.'),
+    sendNote: async (r, t, b) => (calls.push({ name: 'send_note', args: [r, t, b] }), await slow(), 'Sent.'),
     stopNote: async (r) => (calls.push({ name: 'stop_note', args: [r] }), 'Stopped.')
   }
   return { c, calls }
@@ -30,8 +31,8 @@ afterEach(async () => {
   for (const o of opened.splice(0)) await o.close()
 })
 
-function open(dir = mkdtempSync(join(tmpdir(), 'oa-'))) {
-  const { c, calls } = controls()
+function open(dir = mkdtempSync(join(tmpdir(), 'oa-')), slowMs = 0) {
+  const { c, calls } = controls(slowMs)
   const access = createOutsideAccess({ dir, platform: process.platform, command: process.execPath, relaySource: async () => readFileSync(RELAY, 'utf8'), controls: c })
   opened.push(access)
   return { access, calls, dir, file: join(dir, 'access.json') }
@@ -107,6 +108,21 @@ describe('the endpoint', () => {
       expect(r.result.isError).toBe(true)
     }
     expect(calls).toEqual([{ name: 'send_note', args: ['my-reel', 'cut the intro', 2] }])
+  })
+
+  it('fails if calls queued on a connection still run after it closed', async () => {
+    // each note takes a moment, as a real send does, so the connection closes while the first one runs
+    const { access, calls, file } = open(undefined, 150)
+    await access.enable()
+    const { endpoint, token } = accessOf(file)
+    const c = connect(endpoint)
+    c.send({ hello: { token } })
+    await c.next()
+    // three notes in one write, then gone: only a call already running may finish
+    c.sock.end([1, 2, 3].map((id) => JSON.stringify({ id, call: { name: 'send_note', args: { reel: 'my-reel', text: `note ${id}` } } })).join('\n') + '\n')
+    await c.closed
+    await new Promise((r) => setTimeout(r, 600))
+    expect(calls.length).toBeLessThanOrEqual(1)
   })
 
   it('fails if a message longer than the limit is read instead of the connection being closed', async () => {
@@ -262,6 +278,14 @@ describe('the setup lines', () => {
       expect(argv).toContain('ELECTRON_RUN_AS_NODE=1')
       expect(argv[argv.indexOf('--') - 1]).toBe('reelstudio')
     }
+  })
+
+  it('fails if a Windows command lets PowerShell expand or split a path', () => {
+    const win = "C:\\Users\\$Sam O'Neil\\AppData\\Local\\Programs\\Reel Studio\\Reel Studio.exe"
+    const s = setupFor(win, 'C:\\x\\reelstudio-mcp.js', 'win32')
+    // PowerShell reads '...' literally: no $ expansion, a ' doubled, and '--' is not taken for its own end of parameters
+    expect(s.claudeCode).toBe(`claude mcp add --scope user --env ELECTRON_RUN_AS_NODE=1 --transport stdio reelstudio '--' 'C:\\Users\\$Sam O''Neil\\AppData\\Local\\Programs\\Reel Studio\\Reel Studio.exe' 'C:\\x\\reelstudio-mcp.js'`)
+    expect(s.codexToml).toContain(`command = ${JSON.stringify(win)}`)
   })
 
   it('fails if the Claude Desktop entry does not start the relay with the app as Node', () => {

@@ -765,14 +765,18 @@ export function createAI(opts: CreateAIOptions) {
     const found = await harnessApp();
     if (!found || found.app !== s.harness) return undefined;
     const app = found.app;
-    const key = JSON.stringify([app, found.bin, s.cliModel]);
+    // the editor's model as Settings › Models chose it (Auto: the app's own saved model), as modelProvider runs it
+    const choice = modelForRole(app === 'codex' ? 'codex-cli' : 'claude-cli', 'editor', await roleChoices()) ?? (app === 'codex' ? s.codexModel : s.cliModel);
+    const picked = app === 'codex' ? codexChoice(choice) : claudeCodeChoice(choice);
+    const key = JSON.stringify([app, found.bin, choice]);
     let harness = sessionHarnesses.get(key);
     if (!harness) {
-      const o = { model: s.cliModel, env: env(), ...(found.bin ? { bin: found.bin } : {}) };
-      const native = app === 'codex' ? new CodexHarness(o) : new ClaudeCodeHarness(o);
+      const o = { env: env(), ...(found.bin ? { bin: found.bin } : {}) };
+      // the Codex runner takes a model only; its reasoning level stays the app's own
+      const native = app === 'codex' ? new CodexHarness({ ...o, ...(picked.model ? { model: picked.model } : {}) }) : new ClaudeCodeHarness({ ...o, ...picked });
       harness = new SessionHarness(native, () => app === 'codex'
-        ? new CodexCliProvider(o)
-        : new ClaudeCliProvider({ ...o, session: true }),
+        ? new CodexCliProvider({ ...o, ...picked })
+        : new ClaudeCliProvider({ ...o, ...picked, session: true }),
       (reason) => { lastFallback = { app, reason, at: new Date().toISOString() }; });
       sessionHarnesses.set(key, harness);
     }

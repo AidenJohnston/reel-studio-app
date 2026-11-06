@@ -9,6 +9,8 @@ import { Button, Confirm, IS_MAC, Segmented } from './ui'
 import './ai-apps.css'
 
 const APP_NAME = { 'claude-code': 'Claude Code', codex: 'Codex' } as const
+/** where the setup commands are pasted: their quoting is PowerShell's on Windows (main/outside-access.ts setupFor) */
+const SHELL = /Win/i.test(navigator.platform) ? 'PowerShell' : 'Terminal'
 
 /** Settings › Editor › How notes run. Shown only while the editor in use is an app that can run notes itself. */
 export function NoteRunnerRow({ onError }: { onError: (m: string) => void }) {
@@ -101,7 +103,7 @@ function Paste({ text, label, testid }: { text: string; label: string; testid: s
   useEffect(() => setCopied(false), [text])
   return (
     <div className="paste">
-      <pre tabIndex={0} aria-label={label} data-testid={testid}>
+      <pre tabIndex={0} role="group" aria-label={label} data-testid={testid}>
         {text}
       </pre>
       <Button size="small" onClick={() => void reel.app.copyText(text).then(() => setCopied(true))} data-testid={`${testid}-copy`}>
@@ -158,7 +160,7 @@ export function OutsideAppsRow({ onError }: { onError: (m: string) => void }) {
           <Segmented label="AI app" value={client} options={CLIENTS} onPick={setClient} testid="outside-client" />
           {client === 'claudeCode' && (
             <>
-              <p className="muted-sm">Paste this in a terminal, then start Claude Code again.</p>
+              <p className="muted-sm">Paste this in {SHELL}, then start Claude Code again.</p>
               <Paste text={setup.claudeCode} label="Command for Claude Code" testid="outside-claude-code" />
             </>
           )}
@@ -173,9 +175,9 @@ export function OutsideAppsRow({ onError }: { onError: (m: string) => void }) {
           )}
           {client === 'codex' && (
             <>
-              <p className="muted-sm">Paste this in a terminal. The ChatGPT app for Mac and Windows uses the same setup as Codex.</p>
+              <p className="muted-sm">Paste this in {SHELL}. The ChatGPT app for Mac and Windows uses the same setup as Codex.</p>
               <Paste text={setup.codex} label="Command for Codex" testid="outside-codex" />
-              <p className="muted-sm">No terminal? Add this to ~/.codex/config.toml instead, or in the ChatGPT app: Settings › MCP servers › Add server.</p>
+              <p className="muted-sm">Or add this to ~/.codex/config.toml instead, or in the ChatGPT app: Settings › MCP servers › Add server.</p>
               <Paste text={setup.codexToml} label="Codex config.toml settings" testid="outside-codex-toml" />
               <p className="muted-sm" data-testid="outside-chatgpt-web">
                 ChatGPT in a web browser can only reach servers on the internet, so it can’t use Reel Studio on this computer.

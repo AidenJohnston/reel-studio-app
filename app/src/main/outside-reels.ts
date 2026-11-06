@@ -20,6 +20,10 @@ export interface OutsideReelDeps {
 const NOT_FOUND = { code: 'NOT_FOUND', userMessage: 'There is no reel with that id. Call list_reels for the ids.' }
 /** lines of the notes get_reel returns, newest last */
 const RECENT = 8
+/** the newest versions and the first waiting notes get_reel lists: its answer stays far under the relay's 1 MiB line
+ * (each note is at most 4000 characters), with the totals so the agent knows what it did not see */
+const VERSIONS = 40
+const WAITING = 20
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const WORKING: Record<JobKind, string> = {
   'first-edit': 'making Version 1', note: 'running a note', rerender: 'making a version again', export: 'exporting', script: 'writing a plan', propose: 'looking for more reels'
@@ -58,7 +62,8 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
         reel: slug,
         title: s.title,
         status: s.status,
-        versions: versions.filter((v) => v.n > 0).map((v) => ({
+        versions_total: versions.filter((v) => v.n > 0).length,
+        versions: versions.filter((v) => v.n > 0).slice(-VERSIONS).map((v) => ({
           version: v.n,
           title: v.wording?.title ?? (v.facts?.length ? versionTitle(v.facts, words) : madeBy.get(v.n)),
           made_by: madeBy.get(v.n),
@@ -67,8 +72,9 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
           ...(v.madeWith ? { made_with: v.madeWith } : {})
         })),
         working_on: job ? WORKING[job.kind] : null,
-        running_note: ran ? { text: ran.text, ...(ran.branch ? { base_version: ran.branch } : {}) } : null,
-        notes_waiting: (st.queue ?? []).filter((q) => !q.attempt).map((q) => ({ text: q.hand ? `Edit it myself: ${q.text}` : q.text, ...(q.branch ? { base_version: q.branch } : {}) })),
+        running_note: ran ? { text: clip(ran.text, 4000), ...(ran.branch ? { base_version: ran.branch } : {}) } : null,
+        notes_waiting_total: (st.queue ?? []).filter((q) => !q.attempt).length,
+        notes_waiting: (st.queue ?? []).filter((q) => !q.attempt).slice(0, WAITING).map((q) => ({ text: clip(q.hand ? `Edit it myself: ${q.text}` : q.text, 4000), ...(q.branch ? { base_version: q.branch } : {}) })),
         queue_held: !!st.queueHeld && !!st.queue?.length,
         recent_notes: st.chat.filter((m) => !m.plan && !m.planTurn).slice(-RECENT).map((m) => ({ from: m.from, text: clip(m.text, 500), ...(m.version ? { version: m.version } : {}) }))
       })

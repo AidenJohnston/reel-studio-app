@@ -55,16 +55,18 @@ const HELLO_TIMEOUT_MS = 5000
 const MAX_CONNECTIONS = 8
 /** calls one connection may have waiting at once */
 const MAX_PENDING = 16
+/** answers a connection has not read yet; past this it is cut off rather than grow the app's memory */
+const MAX_UNREAD = 4 * 1024 * 1024
 const SLUG = /^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u
 /** macOS refuses a socket path longer than 103 bytes (sun_path is 104 with its NUL) */
 const SOCKET_PATH_MAX = 103
 
 const SERVER = 'reelstudio'
 
-/** Quoted for the shell the person pastes into: POSIX single quotes, or double quotes on Windows (cmd and PowerShell
- * both take them; a Windows path cannot hold a double quote). */
+/** Quoted for the shell the person pastes into: POSIX sh, or PowerShell on Windows (Settings says so). Both take
+ * single quotes literally, so a path with `$` or a space stays one argument as it is; PowerShell doubles a `'`. */
 function quote(arg: string, platform: NodeJS.Platform): string {
-  if (platform === 'win32') return `"${arg}"`
+  if (platform === 'win32') return `'${arg.replace(/'/g, "''")}'`
   return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
@@ -77,8 +79,8 @@ function quote(arg: string, platform: NodeJS.Platform): string {
  */
 export function setupFor(command: string, script: string, platform: NodeJS.Platform): OutsideSetup {
   const q = (a: string) => quote(a, platform)
-  // On Windows `--` is written "--": PowerShell would take a bare `--` for itself when claude or codex is a .ps1 shim
-  const dashes = platform === 'win32' ? '"--"' : '--'
+  // On Windows `--` is written '--': PowerShell would take a bare `--` for itself when claude or codex is a .ps1 shim
+  const dashes = platform === 'win32' ? "'--'" : '--'
   // --transport stdio sits between --env and the name: Claude Code reads a name straight after --env as another pair
   const claudeCode = `claude mcp add --scope user --env ELECTRON_RUN_AS_NODE=1 --transport stdio ${SERVER} ${dashes} ${q(command)} ${q(script)}`
   const claudeDesktop = JSON.stringify({ mcpServers: { [SERVER]: { command, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } } } }, null, 2)
@@ -115,11 +117,13 @@ export function checkArgs(name: ToolName, raw: unknown): Args {
 }
 
 /** Runs one checked call on the controls. */
-export async function dispatch(controls: OutsideControls, name: string, raw: unknown): Promise<{ content: string; isError: boolean }> {
+export async function dispatch(controls: OutsideControls, name: string, raw: unknown, still: () => boolean = () => true): Promise<{ content: string; isError: boolean }> {
   if (!(TOOL_NAMES as readonly string[]).includes(name)) return { content: `Reel Studio has no tool "${name}". It has: ${TOOL_NAMES.join(', ')}.`, isError: true }
   try {
     const tool = name as ToolName
     const a = checkArgs(tool, raw)
+    // the connection may have been ended (off, Reset access, quit, or it closed) while this call waited its turn
+    if (!still()) return { content: 'Reel Studio ended this connection.', isError: true }
     const content =
       tool === 'list_reels' ? await controls.listReels()
       : tool === 'get_reel' ? await controls.getReel(a.reel as string)
@@ -191,10 +195,14 @@ export function createOutsideAccess(o: OutsideAccessOptions) {
   function onConnection(sock: net.Socket): void {
     const c: Client = { sock, name: '', authed: false, dropped: false, chain: Promise.resolve(), pending: 0 }
     const send = (m: unknown) => {
-      if (!c.dropped && sock.writable) sock.write(JSON.stringify(m) + '\n')
+      if (c.dropped || !sock.writable) return
+      sock.write(JSON.stringify(m) + '\n')
+      if (sock.writableLength > MAX_UNREAD) sock.destroy()
     }
     let timer: NodeJS.Timeout | undefined
     sock.on('close', () => {
+      // calls it sent that have not run yet never run
+      c.dropped = true
       if (timer) clearTimeout(timer)
       const was = c.authed
       clients.delete(c)
@@ -247,7 +255,7 @@ export function createOutsideAccess(o: OutsideAccessOptions) {
         // one call at a time per connection, in the order sent
         c.chain = c.chain.then(async () => {
           if (c.dropped) return
-          const r = await dispatch(o.controls, m.call.name, m.call.args ?? {})
+          const r = await dispatch(o.controls, m.call.name, m.call.args ?? {}, () => !c.dropped && server !== null)
           c.pending--
           send({ id, result: r })
         })
