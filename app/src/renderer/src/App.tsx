@@ -257,7 +257,7 @@ export function App() {
           <main className="main">
             <ErrorBoundary resetKey={JSON.stringify(screen)} onReset={() => go({ name: 'home' })}>
               {screen.name === 'home' && <Home go={go} />}
-              {screen.name === 'reel' && <Reel key={screen.slug} slug={screen.slug} at={screen.version} go={go} />}
+              {screen.name === 'reel' && <Reel key={screen.slug} slug={screen.slug} at={screen.version} go={go} draft={screen.draft} />}
               {screen.name === 'library' && <Library added={libraryAdded} />}
               {screen.name === 'style' && <MyStyle />}
               {screen.name === 'insights' && <Insights go={go} />}
