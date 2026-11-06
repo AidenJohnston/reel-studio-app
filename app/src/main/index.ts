@@ -78,6 +78,7 @@ import { createJobManager } from './jobs'
 import { createPauser, pauseFor, quitQuestion } from './pause'
 import { createNoteQueue, noteOutcome, type NoteToRun, type StartHand } from './note-queue'
 import { handEditJob, HAND_MESSAGE } from './hand-edit'
+import { refreshMemories } from './memory-loop'
 import { parseHandEdit } from '../shared/hand-edit'
 import { learnPicker } from '../shared/style-editors'
 import { checkPlan, planFromEditor, planReply, planTurns, titleFromTopic } from '../shared/plan'
@@ -112,6 +113,9 @@ import { registerSocialIpc } from './social-ipc'
 import { testPlatformFetch } from './test-platforms'
 import { SIGNIN_URL } from '../shared/config'
 import { registerInsightsIpc } from './insights-ipc'
+import { registerReferencesIpc } from './references-ipc'
+import { createReferenceLibrary } from './references'
+import { registerNicheIpc } from './niche-ipc'
 import { ResultsRefresh, type ResultsSource } from './results-refresh'
 import { testResultsSources } from './results-test-source'
 import { InstagramError } from './instagram-http'
@@ -125,7 +129,7 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -871,6 +875,14 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 }
 
 function registerIpc(): void {
+  // My style › Reference reels and Your niche
+  const references = createReferenceLibrary({ root: reelStudioRoot, runEngine, log, mediaUrl, onChange: () => win?.webContents.send('refs:changed') })
+  registerReferencesIpc({
+    handle, library: references, ensureRoot,
+    openExternal: (url) => (TEST ? Promise.resolve(log(`[references] test run: not opening ${url}`)) : shell.openExternal(url)),
+    showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
+  })
+  registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
   // Instagram and TikTok connect through Reel Studio's sign-in service (docs/signin.md): its list of platforms says
   // which can be connected. A developer's own app (REELSTUDIO_DEV=1 and saved instagram*/tiktok* settings) wins.
   const platformFetch = TEST && process.env.REELSTUDIO_TEST_PLATFORMS
@@ -974,7 +986,12 @@ function registerIpc(): void {
           read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
-    projectsRoot: projectsDir, stateDir: settingsDir(), sources, changed: () => broadcast('insights:changed', null),
+    projectsRoot: projectsDir, stateDir: settingsDir(), sources,
+    // new post results may make a trial's memory worth suggesting (memory-loop.ts): look now, not only when My style opens
+    changed: () => {
+      broadcast('insights:changed', null)
+      void refreshMemories(ai, projectsDir(), log)
+    },
     // Post results go into usage data only when sharing and its Post results part are both on (usage.ts record)
     onRead: (post, outcome) => {
       const views = postViews(post, outcome)
@@ -1567,6 +1584,26 @@ function registerIpc(): void {
     return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
+  // How often each pace would change the picture of this reel, from the plan a render makes (engine pace-preview), for
+  // the edit drawer's Pace: shown before the version is made, so the choice isn't blind.
+  handle('projects:pacePreview', async (_e, slug: string): Promise<PacePreview> => {
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('pace-preview', owned(['--project', projectDir(slug)], owner))
+    const paces: PacePreview['paces'] = {}
+    for (const [k, v] of Object.entries((r?.paces ?? {}) as Record<string, any>)) {
+      if (Number.isFinite(v?.perMinute) && Number.isInteger(v?.opening) && Number.isInteger(v?.openingMax)) paces[k] = { perMinute: v.perMinute, opening: v.opening, openingMax: v.openingMax }
+    }
+    return { paces }
+  })
+  // Whether the cut into each range lines up as a match cut (engine match-joins; engine/reelengine/match.py), for the
+  // edit drawer's Transitions. `keep`: the cut as the drawer has it, checked before it becomes a version.
+  handle('projects:matchJoins', async (_e, slug: string, keep: unknown): Promise<MatchVerdict[]> => {
+    if (!Array.isArray(keep) || keep.length > 2000) throw { code: 'BAD_CUT', userMessage: 'That cut could not be checked. Try again.' }
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner))
+    return Array.isArray(r?.joins) ? r.joins.filter((j: any) => Number.isInteger(j?.keep) && typeof j?.matched === 'boolean')
+      .map((j: any) => ({ keep: j.keep, matched: j.matched, ...(typeof j.why === 'string' ? { why: j.why } : {}) })) : []
+  })
 
   // More reels from this video (main/propose-reels.ts)
   const reelsDeps = (): ReelsDeps => ({ jobs, ai, startFirstEdit: (slug, init) => startFirstEdit(slug, init) })
@@ -1732,6 +1769,27 @@ function registerIpc(): void {
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
+  // a version's edit checks (engine score.py): read-only, so it needs no job and never waits behind one
+  handle('projects:score', async (_e, slug: string, version: unknown) => {
+    if (!Number.isSafeInteger(version) || (version as number) < 1) throw { code: 'BAD_ARGS', userMessage: 'That version is not saved.' }
+    return runEngine('score', ['--project', projectDir(slug), '--version', String(version)])
+  })
+  // the learning loop (memory-loop.ts): looks again each time My style opens
+  handle('style:suggestions', async () => {
+    await refreshMemories(ai, projectsDir(), log)
+    return (await ai.memoryProposals?.().catch(() => [])) ?? []
+  })
+  handle('style:keepSuggestion', async (_e, id: string, text?: unknown) => {
+    if (!ai.acceptMemory) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
+    if (text !== undefined && (typeof text !== 'string' || !text.trim())) throw { code: 'EMPTY', userMessage: 'Type the rule first, or press No thanks.' }
+    const rule = await ai.acceptMemory(id, text)
+    if (!rule) throw { code: 'NOT_FOUND', userMessage: 'That suggestion is not in My style any more.' }
+    return rule
+  })
+  handle('style:dismissSuggestion', async (_e, id: string) => {
+    if (!ai.dismissMemory) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
+    await ai.dismissMemory(id)
+  })
   handle('style:update', (_e, id: string, patch: { text?: unknown; paused?: unknown }) => {
     if (!ai.updateStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be changed in My style. Try again later.' }
     const text = typeof patch?.text === 'string' ? patch.text : undefined

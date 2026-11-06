@@ -32,6 +32,8 @@ AFTER_SHARE = 0.08      # of the kept air, at most this much stays with the OUTG
 HEAD_LEAD = 0.10        # air before the very first word of the video
 TAIL_KEEP = 0.35        # ring-out after the very last word
 EPS = 1e-6
+TRANSITIONS = ("hard", "j", "l", "smash", "match", "flash")
+MATCH_HOLD = 0.3        # seconds either side of a match cut where a framing change would undo it
 
 
 def snap(t: float, fps: float) -> float:
@@ -49,6 +51,9 @@ class Timeline:
     kept_index: list = field(default_factory=list)   # sorted transcript positions that are kept
     index: dict = field(default_factory=dict)        # word id -> transcript position
     words: list = field(default_factory=list)        # the transcript words
+    # one row per match join: {keep, out, in, word, prevWord, played: "match" | "hard" | "none", matched?, why?}
+    # (match.py fills in matched/look/move/why; "none" = no cut there, the take runs on)
+    match_joins: list = field(default_factory=list)
 
     def is_kept(self, wid: str) -> bool:
         return wid in self.first_pos
@@ -164,13 +169,8 @@ def join_runs(words: list, keep: list, first: int = 0) -> list:
     for k, rng in enumerate(keep or []):
         join = rng.get("join")
         if join is not None:
-            if isinstance(join, dict) and join.get("transition") == "match":
-                # The face track says where a face is, not what a shot shows, so no match between two shots can be
-                # found or checked; on one take both sides are the same shot (ai/src/project.ts MATCH_CUT_REFUSAL).
-                raise EngineError("BAD_JOIN", f"cut.keep[{first + k}].join: match cuts are not available, the engine can't tell whether two shots match",
-                                  "Choose a hard, J, L or smash join. Match cuts aren't available.")
             if (first + k == 0 or not isinstance(join, dict)
-                    or join.get("transition") not in ("hard", "j", "l", "smash")
+                    or join.get("transition") not in TRANSITIONS
                     or type(join.get("frames")) is not int or join["frames"] < 0):
                 raise EngineError("BAD_JOIN", f"cut.keep[{first + k}].join needs a transition and non-negative integer frames after the first range",
                                   "Choose a join after the first range, with a whole number of frames.")
@@ -179,7 +179,7 @@ def join_runs(words: list, keep: list, first: int = 0) -> list:
         while parts[-1][1] != end:
             parts.append(next(resolved))
         for j, (i0, i1) in enumerate(parts):
-            markers = ([(i0, previous_end, join)]
+            markers = ([(i0, previous_end, join, first + k)]
                        if j == 0 and join and join["transition"] != "hard" and previous_end is not None else [])
             if runs and i0 == runs[-1][1] + 1 and words[i0]["source"] == words[runs[-1][1]]["source"]:
                 old0, _, old_markers = runs[-1]
@@ -267,9 +267,13 @@ def clip_span(item: dict, sources: dict) -> tuple[float, float]:
 
 
 def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_CAP,
-                   min_saving: float = MIN_SAVING, join_fps: float = 30.0) -> Timeline:
+                   min_saving: float = MIN_SAVING, join_fps: float = 30.0,
+                   match_points: Optional[dict] = None) -> Timeline:
     """sources: {sid: {"duration": float, "fps": float}}. A keep item with `clip` plays that source span
-    whole (multi-source); the word ranges between clips are merged and joined as before."""
+    whole (multi-source); the word ranges between clips are merged and joined as before.
+
+    match_points: {keep index: match.plan verdict}. A matched verdict moves that join's bounds to the
+    frames that line up; without one a match join plays as a hard cut (project.timeline asks match.py)."""
     runs, pending, first = [], [], 0
     clip_ids = set()
     for k, item in enumerate(keep or []):
@@ -287,7 +291,7 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
             pending.append(item)
     runs.extend(join_runs(words, pending, first))
     segments, words_out, first_pos = [], [], {}
-    joins = []
+    joins, unmoved = [], []
     out = 0.0
     for n, run in enumerate(runs):
         if isinstance(run, dict):
@@ -306,6 +310,14 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
             pieces = plan_run(words, i0, i1, gap_cap, min_saving, fps, float(meta.get("duration") or 0.0),
                               is_first=(n == 0), is_last=(n == len(runs) - 1))
             positions = range(i0, i1 + 1)
+            point = next(((match_points or {}).get(kk) for wi, _, join, kk in markers
+                          if wi == i0 and join["transition"] == "match"), None)
+            if point and point.get("matched") and segments and pieces:
+                # the frames that line up, found inside the air around the join (match.windows): the
+                # outgoing side only gains or loses silence, so its words keep their output times
+                out += point["outEnd"] - segments[-1].src_end
+                segments[-1].src_end = point["outEnd"]
+                pieces[0] = (point["inStart"], pieces[0][1])
         run_segs = []
         for s, e in pieces:
             seg = Segment(source=src, src_start=s, src_end=e, out_start=round(out, 6))
@@ -334,7 +346,7 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
             run_segs[-1].last_word = words[positions[-1]]["id"]
         # Split a merged contiguous range only at a declared join. The two pieces
         # still show exactly the same source frames and have the same total length.
-        for wi, previous_end, join in markers:
+        for wi, previous_end, join, kk in markers:
             t = snap(words[wi]["s"], fps)
             for si, seg in enumerate(run_segs):
                 if seg.src_start <= t < seg.src_end:
@@ -343,7 +355,11 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                     if seg.src_start + EPS < t and prior_word_in_piece:
                         # There is no picture discontinuity here. A J/L handle would
                         # replay the same samples; clamp to zero without adding fades.
-                        if join["transition"] in ("j", "l"):
+                        # A match has nothing to line up: the take simply runs on.
+                        if join["transition"] == "match":
+                            unmoved.append({"keep": kk, "word": wi, "prevWord": previous_end, "played": "none",
+                                            "matched": False, "why": "there is no cut here: both sides are one continuous stretch of the take"})
+                        if join["transition"] in ("j", "l", "match"):
                             break
                         right = Segment(src, t, seg.src_end, seg.out_start + t - seg.src_start,
                                         first_word=words[wi]["id"], last_word=seg.last_word)
@@ -352,20 +368,32 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                     else:
                         right = seg
                     right.first_word = words[wi]["id"]
-                    joins.append((right, wi, previous_end, join))
+                    joins.append((right, wi, previous_end, join, kk))
                     break
                 if t < seg.src_start:
                     seg.first_word = words[wi]["id"]
-                    joins.append((seg, wi, previous_end, join))
+                    joins.append((seg, wi, previous_end, join, kk))
                     break
         segments.extend(run_segs)
-    for incoming, wi, previous_end, join in joins:
+    match_joins = list(unmoved)
+    for incoming, wi, previous_end, join, kk in joins:
         si = next(i for i, seg in enumerate(segments) if seg is incoming)
         if si == 0:
             continue
         outgoing = segments[si - 1]
         incoming.join_transition = join["transition"]
         incoming.join_requested_frames = join["frames"]
+        if join["transition"] == "match":
+            point = (match_points or {}).get(kk) or {}
+            matched = point.get("matched") is True and abs(incoming.src_start - float(point.get("inStart", -1))) < EPS
+            if point.get("matched") is True and not matched:
+                # a cut made by shortening a pause inside one kept stretch: the bounds are only moved at a range start
+                point = {**point, "matched": False, "why": "this cut sits inside one kept stretch, where a pause was shortened, and can't be moved"}
+            # an unmatched join is labelled what it is: a plain cut
+            incoming.join_transition = "match" if matched else "hard"
+            match_joins.append({"keep": kk, "out": si - 1, "in": si, "word": wi, "prevWord": previous_end,
+                                "played": incoming.join_transition, **point})
+            continue
         if join["transition"] == "j":
             meta = sources.get(incoming.source) or {}
             lo, _ = run_bounds(words, wi, wi, float(meta.get("duration") or 0), TAIL_KEEP)
@@ -391,7 +419,8 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
     index = {w["id"]: i for i, w in enumerate(words)}
     kept_index = sorted({index[wid] for wid in first_pos})
     return Timeline(segments=segments, duration=round(out, 6), words_out=words_out,
-                    first_pos=first_pos, kept_index=kept_index, index=index, words=words)
+                    first_pos=first_pos, kept_index=kept_index, index=index, words=words,
+                    match_joins=sorted(match_joins, key=lambda m: m["keep"]))
 
 
 def window_segments(segments: list, w0: float, w1: float) -> list:

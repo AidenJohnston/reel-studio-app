@@ -1,0 +1,12 @@
+/* My style's suggestions (MemorySuggestions.tsx): the lesson card's frame (library.css .lesson) with one row per
+ * suggestion. Its actions stay visible, unlike a rule row's: deciding is the only thing to do here. */
+.sugg .lesson-h > h2 { margin: 0; font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; overflow-wrap: anywhere; }
+.sugg .lesson-h > h2:focus { outline: none; }
+.sugg .lesson-h > h2:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sugg-rows { list-style: none; margin: 0; padding: 0; }
+.sugg-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; box-shadow: inset 0 1px 0 var(--line); }
+.sugg-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+/* the smallest window: the actions go under the words instead of squeezing them */
+@media (max-width: 640px) {
+  .sugg-row { flex-direction: column; gap: 8px; }
+}

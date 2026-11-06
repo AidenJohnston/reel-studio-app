@@ -1,7 +1,8 @@
 // Pure helpers for cut.keep (word-id ranges, inclusive, output order). Used by main and renderer.
 import type { Word } from './api'
+import type { Join } from './joins'
 
-type WordRange = { from: string; to: string }
+type WordRange = { from: string; to: string; join?: Join }
 type CutItem = WordRange | { clip: string; source: string; in: number; out: number }
 
 /** A word-only rewrite would remove silent clips, so refuse it until manual cuts preserve both shapes. */
@@ -51,21 +52,30 @@ export function rangesFromKept(words: Word[], kept: Set<string>): { from: string
  * moved a later take to the front, and un-striking one word must not put the whole reel back in
  * spoken order. Old ranges keep their place (split where words were struck); a word brought back
  * joins the range it touches, or becomes its own range right after the nearest earlier kept word.
+ * A range keeps its join (J, L, smash, match) while it still starts with a cut, so striking a word
+ * elsewhere doesn't turn the editor's joins back into plain cuts.
  */
 export function rangesKeepingOrder(
   words: Word[],
   oldKeep: CutItem[] | undefined,
   kept: Set<string>
-): { from: string; to: string }[] {
+): WordRange[] {
   assertWordCutEditable(oldKeep)
   const index = new Map(words.map((w, i) => [w.id, i]))
   const runs: [number, number][] = [] // [start, end] word indexes, in output order
+  const joins = new Map<number, NonNullable<WordRange['join']>>() // a run's first word index -> the join into it
   const placed = new Set<number>()
   for (const r of oldKeep ?? []) {
     const a = index.get(r.from)
     const b = index.get(r.to)
     if (a === undefined || b === undefined) continue
     let start = -1
+    // the join leads into the range's first kept word; a range split by a struck word keeps it on its first piece only
+    if (r.join) {
+      let first = Math.min(a, b)
+      while (first <= Math.max(a, b) && (!kept.has(words[first].id) || placed.has(first))) first++
+      if (first <= Math.max(a, b)) joins.set(first, r.join)
+    }
     for (let i = Math.min(a, b); i <= Math.max(a, b) + 1; i++) {
       const on = i <= Math.max(a, b) && kept.has(words[i].id) && !placed.has(i)
       if (on && start < 0) start = i
@@ -88,6 +98,8 @@ export function rangesKeepingOrder(
     }
     const after = runs.find((r) => r[0] === i + 1)
     if (after) {
+      // a word brought back at a range's start: the cut into it moves one word earlier and keeps its join
+      if (joins.has(i + 1)) joins.set(i, joins.get(i + 1)!)
       after[0] = i
       return
     }
@@ -97,5 +109,10 @@ export function rangesKeepingOrder(
     })
     runs.splice(at + 1, 0, [i, i])
   })
-  return runs.map(([a, b]) => ({ from: words[a].id, to: words[b].id }))
+  return runs.map(([a, b], k) => {
+    const join = joins.get(a)
+    // the first range, or one the range before it now runs straight into, has no cut to join
+    const touching = k > 0 && runs[k - 1][1] === a - 1
+    return join && k > 0 && !touching ? { from: words[a].id, to: words[b].id, join: { ...join } } : { from: words[a].id, to: words[b].id }
+  })
 }
