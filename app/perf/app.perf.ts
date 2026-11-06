@@ -54,7 +54,7 @@ function recorder(player: string): void {
     for (const e of list.getEntries() as ElementTiming[])
       rec.paints.push({ id: e.identifier, renderTime: e.renderTime, loadTime: e.loadTime, url: e.url, el: e.element })
   }).observe({ type: 'element', buffered: true })
-  for (const type of ['click', 'keydown', 'input'])
+  for (const type of ['click', 'keydown', 'input', 'pointerup'])
     document.addEventListener(
       type,
       (e) => {
@@ -79,7 +79,7 @@ function recorder(player: string): void {
 }
 
 /** The next `type` event (keydown: Enter only) starts the moment `name`. */
-async function arm(page: Page, name: string, type: 'click' | 'keydown' | 'input'): Promise<void> {
+async function arm(page: Page, name: string, type: 'click' | 'keydown' | 'input' | 'pointerup'): Promise<void> {
   await page.evaluate(([n, t]) => void (window.__rsPerf.pending = { name: n, type: t }), [name, type] as const)
 }
 
@@ -136,17 +136,17 @@ async function shownAfter(page: Page, mark: string, version: number): Promise<{ 
   }
 }
 
-/** ms from moment `mark`'s input on the scrub bar to the frame at the position it asked for being on screen. */
-async function frameAfter(page: Page, mark: string): Promise<number> {
+/** ms from moment `mark`'s release on the timeline to the frame at `target` seconds, where it seeked, being on screen. */
+async function frameAfter(page: Page, mark: string, target: number): Promise<number> {
   const h = await page.waitForFunction(
-    (m) => {
+    ([m, t]) => {
       const rec = window.__rsPerf
       const at = rec.marks[m]
       if (!at) return null
-      const f = rec.frames.find((x) => x.shown > at.ts && Math.abs(x.mediaTime - Number(at.value)) <= 0.1)
+      const f = rec.frames.find((x) => x.shown > at.ts && Math.abs(x.mediaTime - t) <= 0.1)
       return f ? f.shown - at.ts : null
     },
-    mark,
+    [mark, target] as const,
     { timeout: 30_000, polling: 100 }
   )
   return (await h.jsonValue())!
@@ -264,22 +264,33 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
       await page.getByTestId(`log-play-${latest}`).click()
       const back = await shownAfter(page, 'back', latest)
 
-      // A person plays before scrubbing; the bar shows once the video has started. Then each click is one seek.
-      await page.locator(PLAYER_SELECTOR).evaluate(async (v: HTMLVideoElement) => {
+      // A person plays before scrubbing, then clicks the timeline under the phone (Timeline.tsx): a click seeks to
+      // where it lands when the button comes up. The player on the Reel screen has no scrub bar of its own.
+      const player = page.locator(PLAYER_SELECTOR)
+      await player.evaluate(async (v: HTMLVideoElement) => {
         v.muted = true
         await v.play()
         await new Promise((r) => setTimeout(r, 300))
         v.pause()
       })
       await page.evaluate(watchFrames, PLAYER_SELECTOR)
-      await page.getByTestId('phone').hover()
-      const box = await page.getByRole('slider', { name: 'Position in the reel' }).boundingBox()
-      if (!box) throw new Error('the scrub bar has no bounds')
+      const box = await page.getByTestId('timeline').boundingBox()
+      if (!box) throw new Error('the timeline has no bounds')
       const scrubMs: number[] = []
       for (const [i, at] of SCRUB_AT.entries()) {
-        await arm(page, `scrub${i}`, 'input')
+        const before = await player.evaluate((v: HTMLVideoElement) => v.currentTime)
+        await arm(page, `scrub${i}`, 'pointerup')
         await page.mouse.click(box.x + box.width * at, box.y + box.height / 2)
-        scrubMs.push(await frameAfter(page, `scrub${i}`))
+        // where the click seeked to, read from the player once it has moved there
+        const moved = await page.waitForFunction(
+          ([sel, t]) => {
+            const v = document.querySelector<HTMLVideoElement>(sel)
+            return v && Math.abs(v.currentTime - t) > 0.05 ? v.currentTime : null
+          },
+          [PLAYER_SELECTOR, before] as const,
+          { timeout: 10_000, polling: 50 }
+        )
+        scrubMs.push(await frameAfter(page, `scrub${i}`, (await moved.jsonValue())!))
       }
 
       await page.evaluate(() => window.reel.ai.setActive('codex-cli'))

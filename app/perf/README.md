@@ -25,10 +25,10 @@ one frame (about 17 ms at 60 Hz) before the swap is on screen.
 | Open a reel | the click on its card on Home | its latest version shown in the player: its cover, or its first frame if it has none |
 | Switch version | the click on Play for the version before it in the notes, not yet shown since launch | that version shown in the player |
 | Switch back | the click on Play for the latest version | the latest version shown in the player |
-| Scrub | the scrub bar's `input` event on a click | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
+| Scrub | the `pointerup` of a click on the timeline under the phone, which seeks there | the frame at that position on screen (`requestVideoFrameCallback`, `expectedDisplayTime`) |
 | Note to first status | Enter in the note box | the words in the note's progress strip being painted |
 
-Scrub clicks five positions in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
+Scrub clicks five positions of the timeline in a fixed order and reports each on its own. A seek decodes from the keyframe before it,
 so its time depends on where it lands in the encode, and the first click after opening also loads data the player had
 not fetched yet. The fake engine encodes with x264's default keyframe spacing, so scrub numbers describe that encode,
 not the real engine's exports.
