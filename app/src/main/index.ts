@@ -110,7 +110,7 @@ import { claudeCheckWords, createVendorConnect, type CliStatus, type VendorConne
 import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
 import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
@@ -1387,6 +1387,15 @@ function registerIpc(): void {
     return parseCoverCandidates(r, source, projectDir(slug))
   })
   handle('projects:stopCoverCandidates', (_e, slug: string) => coverScans.stop(slug))
+  // Whether the cut into each range lines up as a match cut (engine match-joins; engine/reelengine/match.py), for the
+  // edit drawer's Transitions. `keep`: the cut as the drawer has it, checked before it becomes a version.
+  handle('projects:matchJoins', async (_e, slug: string, keep: unknown): Promise<MatchVerdict[]> => {
+    if (!Array.isArray(keep) || keep.length > 2000) throw { code: 'BAD_CUT', userMessage: 'That cut could not be checked. Try again.' }
+    const owner = coverScanOwner(jobs, slug)
+    const r: any = await runEngine('match-joins', owned(['--project', projectDir(slug), '--keep', JSON.stringify(keep)], owner))
+    return Array.isArray(r?.joins) ? r.joins.filter((j: any) => Number.isInteger(j?.keep) && typeof j?.matched === 'boolean')
+      .map((j: any) => ({ keep: j.keep, matched: j.matched, ...(typeof j.why === 'string' ? { why: j.why } : {}) })) : []
+  })
 
   // More reels from this video (main/propose-reels.ts)
   const reelsDeps = (): ReelsDeps => ({ jobs, ai, startFirstEdit: (slug, init) => startFirstEdit(slug, init) })

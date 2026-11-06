@@ -60,9 +60,9 @@ label.edit-row-main { flex-direction: row; align-items: center; gap: 10px; curso
    row is its words and when, then how it moves; in a narrow column the control wraps under the words. */
 .edit-row.radio:has(.edit-row-sub) { align-items: flex-start; }
 .edit-row.radio:has(.edit-row-sub) input { margin-top: 1px; }
-.edit-row.zoom-row { flex-wrap: wrap; align-items: center; row-gap: 6px; }
-.zoom-row > .edit-row-main { min-width: 160px; }
-.zoom-row .edit-row-title { white-space: normal; }
+.edit-row.zoom-row, .edit-row.join-row { flex-wrap: wrap; align-items: center; row-gap: 6px; }
+.zoom-row > .edit-row-main, .join-row > .edit-row-main { min-width: 160px; }
+.zoom-row .edit-row-title, .join-row .edit-row-title { white-space: normal; }
 
 /* Sound (SoundTab.tsx). A slider is its label, the track, and its value in a fixed column so the tracks line up. */
 .edit-sliders { display: flex; flex-direction: column; gap: 2px; }

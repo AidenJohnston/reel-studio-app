@@ -138,7 +138,9 @@ def cmd_lint_edit(args):
 def cmd_match_joins(args):
     from . import project
     pdir = _project(args)
-    edit = project.load(pdir)
+    # inside a note, the note's private copy of the edit (render does the same)
+    note = _in_work(args, "project_file")
+    edit = project.load(pdir, file=note) if note else project.load(pdir)
     if args.keep is not None:
         try:
             edit["cut"]["keep"] = json.loads(args.keep)
@@ -520,6 +522,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("match-joins", cmd_match_joins, "say which joins of the cut can be match cuts")
     sp.add_argument("--keep", help="cut.keep to check instead of the project's, as JSON")
     sp.add_argument("--every", action="store_true", help="check every join that could hold a match, not only the ones that ask for it")
+    sp.add_argument("--project-file", help="the edit to read instead of project.json, inside work/ (a note's private copy)")
     sp = add("render", cmd_render, "render project.json")
     sp.add_argument("--draft", action="store_true")
     sp.add_argument("--window", help="a:b output seconds")

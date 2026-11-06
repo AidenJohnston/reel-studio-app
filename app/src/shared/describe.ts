@@ -99,6 +99,8 @@ function joinActs(acts: string[]): string {
   return andList(phrases, phrases.some((x) => x.includes(' and ')))
 }
 
+const JOIN_PHRASES: Record<string, string> = { hard: 'plain', j: 'a J cut', l: 'an L cut', smash: 'a smash cut', match: 'a match cut' }
+
 /** The verbs an "Edit it myself" summary starts with (describeChange), so its line can say "You …". */
 export const HAND_VERBS: ReadonlySet<string> = new Set([
   'added', 'removed', 'brought', 'cut', 'flipped', 'put', 'turned', 'gave', 'made', 'moved', 'fixed', 'changed', 'swapped', 'faded', 'picked'
@@ -160,6 +162,14 @@ export function describeChange(before: ProjectJson, patch: Partial<ProjectJson>,
       if (was) acts.push('turned the set pace off')
     } else if (now.preset !== was?.preset) acts.push(`gave the reel a ${PACE_LABELS[now.preset].toLowerCase()} pace`)
     else if (now.seed !== was?.seed) acts.push('picked other moments for the accents')
+  }
+  if (patch.cut) {
+    // a join is told apart by the first word after its cut (shared/hand-edit.ts)
+    const joins = (keep: NonNullable<ProjectJson['cut']>['keep'] | undefined) => new Map((keep ?? []).slice(1).map((r) => [r.from, r.join?.transition ?? 'hard']))
+    const was = joins(before.cut?.keep)
+    const changed = [...joins(patch.cut.keep)].filter(([at, t]) => (was.get(at) ?? 'hard') !== t)
+    if (changed.length === 1) acts.push(`made a cut ${JOIN_PHRASES[changed[0][1]]}`)
+    else if (changed.length) acts.push(`changed how ${changed.length} cuts play`)
   }
   if (patch.zooms) {
     // one per stretch of words, as the drawer shows them

@@ -4,6 +4,7 @@
 import type { ProjectJson, Word } from './api'
 import { keptIds, rangesKeepingOrder } from './cut'
 import { cutStyleProblem, kindsByWords, withKind, zoomKey, zoomKindProblem, type Zoom } from './cut-style'
+import { joinProblem, withJoin, type Join, type KeepRange } from './joins'
 
 /** A list whose items are told apart by a key, so an item is added, replaced or removed on its own. */
 export type ListName = 'broll' | 'sfx' | 'zooms' | 'captions.corrections' | 'captions.split' | 'captions.join'
@@ -17,6 +18,9 @@ export interface HandEdit {
   words: { cut: string[]; keep: string[] }
   /** Takes flipped (`on`) or shown as filmed. */
   mirror: { source: string; on: boolean }[]
+  /** How a cut plays, told apart by the first word after it (`join: null`: a plain cut). Applied after the words,
+   * so a join picked on a cut the person just made lands on it. */
+  joins: { at: string; join: Join | null }[]
 }
 
 const SET_ROOTS = ['captions', 'music', 'cover']
@@ -60,9 +64,13 @@ function walk(a: unknown, b: unknown, path: string[], out: HandEdit): void {
   } else out.set.push({ path, value: b })
 }
 
+/** The join into each range after the first, by its first word. */
+const joinsByStart = (keep: unknown[] | undefined): Map<string, Join | null> =>
+  new Map((keep ?? []).flatMap((r, i) => (i && isObject(r) && typeof r.from === 'string' ? [[r.from, (r.join as Join | undefined) ?? null] as const] : [])))
+
 /** What changed from `base` to `edited`, with the words kept before and after. */
 export function diffProject(base: ProjectJson, edited: ProjectJson, keptBefore: Set<string>, keptAfter: Set<string>): HandEdit {
-  const out: HandEdit = { set: [], items: [], words: { cut: [], keep: [] }, mirror: [] }
+  const out: HandEdit = { set: [], items: [], words: { cut: [], keep: [] }, mirror: [], joins: [] }
   for (const root of SET_ROOTS) walk(base[root], edited[root], [root], out)
   for (const root of WHOLE) {
     if (same(base[root], edited[root])) continue
@@ -77,6 +85,8 @@ export function diffProject(base: ProjectJson, edited: ProjectJson, keptBefore: 
     const { anchor } = edited.zooms!.find((z) => zoomKey(z) === key)!
     out.items.push({ list: 'zooms', key, item: { anchor, kind: kinds[kinds.length - 1] } })
   }
+  const joinsBefore = joinsByStart(base.cut?.keep)
+  for (const [at, join] of joinsByStart(edited.cut?.keep)) if (!same(joinsBefore.get(at) ?? null, join)) out.joins.push({ at, join })
   for (const id of keptBefore) if (!keptAfter.has(id)) out.words.cut.push(id)
   for (const id of keptAfter) if (!keptBefore.has(id)) out.words.keep.push(id)
   const was = new Map((base.sources ?? []).map((s) => [s.id, s.mirror === true]))
@@ -84,7 +94,8 @@ export function diffProject(base: ProjectJson, edited: ProjectJson, keptBefore: 
   return out
 }
 
-export const isEmpty = (e: HandEdit): boolean => !e.set.length && !e.items.length && !e.words.cut.length && !e.words.keep.length && !e.mirror.length
+export const isEmpty = (e: HandEdit): boolean =>
+  !e.set.length && !e.items.length && !e.words.cut.length && !e.words.keep.length && !e.mirror.length && !e.joins?.length
 
 /** The project with the edit on top. A value the edit set wins over what the project has there; everything
  * else is the project's own. Applying the same edit twice gives the same project. */
@@ -124,6 +135,12 @@ export function applyHandEdit(project: ProjectJson, e: HandEdit, words: Word[]):
     const known = new Set(words.map((w) => w.id))
     for (const id of e.words.keep) if (known.has(id)) kept.add(id)
     p.cut = { ...(p.cut ?? { keep: [] }), keep: rangesKeepingOrder(words, p.cut?.keep, kept) }
+  }
+  // an edit queued on disk before joins existed has none (parseHandEdit fills them in only for new ones)
+  if (e.joins?.length && p.cut?.keep) {
+    let keep = p.cut.keep as KeepRange[]
+    for (const j of e.joins) keep = withJoin(keep, j.at, j.join)
+    p.cut = { ...p.cut, keep }
   }
   if (e.mirror.length) {
     const want = new Map(e.mirror.map((m) => [m.source, m.on]))
@@ -173,7 +190,15 @@ export function parseHandEdit(v: unknown): HandEdit {
       return { list: it.list as ListName, key: it.key, item }
     }),
     words: { cut: strings(words.cut), keep: strings(words.keep) },
-    mirror: mirror.map((m) => (isObject(m) && typeof m.source === 'string' && typeof m.on === 'boolean' ? { source: m.source, on: m.on } : bad('mirror entry')))
+    mirror: mirror.map((m) => (isObject(m) && typeof m.source === 'string' && typeof m.on === 'boolean' ? { source: m.source, on: m.on } : bad('mirror entry'))),
+    // an edit queued before joins existed has none
+    joins: (Array.isArray(v.joins) ? v.joins : v.joins === undefined ? [] : bad('joins')).map((j) => {
+      if (!isObject(j) || typeof j.at !== 'string') return bad('join entry')
+      if (j.join === null) return { at: j.at, join: null }
+      // the AI's set_cut takes only these; the engine would refuse the version after the queue's wait
+      const problem = joinProblem(j.join, 1)
+      return problem ? bad(`join ${problem}`) : { at: j.at, join: json(j.join) as Join }
+    })
   }
 }
 
@@ -207,6 +232,7 @@ export function countChanges(e: HandEdit, words: Word[]): number {
   }
   for (const it of e.items) keys.add(`${it.list}:${it.key}`)
   for (const m of e.mirror) keys.add(`mirror:${m.source}`)
+  for (const j of e.joins ?? []) keys.add(`join:${j.at}`)
   return keys.size + runs(new Set(e.words.cut), words) + runs(new Set(e.words.keep), words)
 }
 

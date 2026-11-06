@@ -312,6 +312,9 @@ export interface StoredProposal {
 }
 
 // Loose mirror of project.json (docs/architecture.md section 3). The engine owns validation.
+/** One join of a cut, as the engine's match-joins answers for it. */
+export interface MatchVerdict { keep: number; matched: boolean; why?: string }
+
 export interface ProjectJson {
   schemaVersion: number
   id: string
@@ -326,7 +329,7 @@ export interface ProjectJson {
   /** The group this reel belongs to on Reels ("Sourdough basics"). */
   series?: string
   transcript?: { file: string; language?: string }
-  cut?: { keep: { from: string; to: string }[]; gapCap?: number; minSaving?: number }
+  cut?: { keep: { from: string; to: string; join?: { transition: 'hard' | 'j' | 'l' | 'smash' | 'match'; frames: number } }[]; gapCap?: number; minSaving?: number }
   captions?: {
     enabled: boolean
     style?: Record<string, unknown>
@@ -991,6 +994,8 @@ export interface ReelApi {
     coverCandidates(slug: string, moments: number[], source: string): Promise<CoverCandidate[]>
     /** Stops the look, if one runs; resolves once the engine has exited. */
     stopCoverCandidates(slug: string): Promise<void>
+    /** Whether each match join in `keep` lines up (engine match-joins): `why` says what stops one that doesn't. */
+    matchJoins(slug: string, keep: unknown[]): Promise<MatchVerdict[]>
     exportPlatforms(slug: string, version: number, request: PlatformExportRequest): Promise<PlatformExportResult>
     /** Try 2 for a trial post: the connected editor's one change from the version with this caption, or the app's
      * cover pick when no editor is connected. `notice`: why the editor's answer isn't used, in the app's words.

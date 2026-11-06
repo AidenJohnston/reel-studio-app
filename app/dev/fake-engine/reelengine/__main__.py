@@ -638,6 +638,27 @@ def cmd_reference_scan(args: list[str]) -> dict:
     return {"files": files}
 
 
+def cmd_match_joins(args: list[str]) -> dict:
+    """The real engine compares frames (reelengine/match.py). This stand-in has none to compare, so a join lines up
+    when the first word after it has an even number (w2, w4, ...): tests can pick a cut that matches and one that
+    doesn't."""
+    proj = Path(take(args, "--project"))
+    data = load(proj, take(args, "--project-file"))
+    raw = take(args, "--keep")
+    keep = json.loads(raw) if raw is not None else data["cut"]["keep"]
+    every = "--every" in args
+    joins = []
+    for i, k in enumerate(keep):
+        if not i or "clip" in k or "clip" in keep[i - 1]:
+            continue
+        if not every and (k.get("join") or {}).get("transition") != "match":
+            continue
+        n = int(re.sub(r"\D", "", k["from"]) or 1)
+        joins.append({"keep": i, "matched": n % 2 == 0, "at": float(i),
+                      **({} if n % 2 == 0 else {"why": "the speaker moves too much across the cut (0.081, a match allows 0.045)"})})
+    return {"joins": joins}
+
+
 def cmd_doctor(_args: list[str]) -> dict:
     return {"engine": "fake", "ffmpeg": shutil.which(FFMPEG) or FFMPEG, "ok": True}
 
@@ -648,7 +669,7 @@ COMMANDS = {
     "download-model": cmd_download_model, "speech-check": cmd_speech_check, "attach": cmd_attach,
     "cover-candidates": cmd_cover_candidates, "export-cover": cmd_export_cover, "export-probe": cmd_export_probe,
     "export-media": cmd_export_media, "import-reference": cmd_import_reference,
-    "reference-scan": cmd_reference_scan, "moments": cmd_moments,
+    "reference-scan": cmd_reference_scan, "moments": cmd_moments, "match-joins": cmd_match_joins,
 }
 
 

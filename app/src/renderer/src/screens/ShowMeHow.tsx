@@ -31,7 +31,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'cover', label: 'Cover' }
 ]
 // The parts of the project a hand edit can change, for the plain-words summary.
-const PARTS = ['sources', 'captions', 'music', 'broll', 'cover', 'sfx', 'cutStyle', 'zooms'] as const
+const PARTS = ['sources', 'captions', 'music', 'broll', 'cover', 'sfx', 'cutStyle', 'zooms', 'cut'] as const
 // Matches the .edit enter animation (edit.css): the notes column and this panel swap in a 150 ms crossfade.
 const LEAVE_MS = 150
 

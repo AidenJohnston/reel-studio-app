@@ -188,7 +188,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `match.py` (match cuts: the frames around a join that line up, searched in its pause and cached; `project.timeline` applies them so every kind of render cuts on the same frames), `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
@@ -218,7 +218,8 @@ cover.render(ctx, out_png) -> Path
 The agent loop lives in `ai/`. Tools are strict JSON-schema functions that operate on project.json through a
 small TypeScript project API and then ask the main process to re-render. The set:
 
-`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`,
+`get_project`, `get_transcript` (with retake groups and pauses from `analyze`), `set_cut(keep)`, `find_match_cuts`
+(which joins can be match cuts, from `reelengine match-joins`; `set_cut` refuses a match whose two sides don't line up),
 `set_gap_cap`, `set_cut_style(preset, seed)`, `set_caption_style`, `add_caption_correction`, `list_library(kind)`, `choose_music(track,
 startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, params)`, `update_broll`,
 `remove_broll`, `set_mirror(on, source)` (flip a mirrored take; the editor calls it when text in the room reads
