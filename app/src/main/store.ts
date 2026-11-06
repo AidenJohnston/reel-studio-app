@@ -304,6 +304,18 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
+/** Removes what an ended job left (cleanPartialVersions). False when a removal was refused, as Windows
+ * does while a file is open: the caller keeps cleanupOwed for a later try. Any other failure throws. */
+async function removeLeftovers(dir: string): Promise<boolean> {
+  try {
+    await cleanPartialVersions(dir)
+    return true
+  } catch (e) {
+    if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
+    throw e
+  }
+}
+
 /**
  * Called once at startup, before any job can run: a project whose app.json still says a job is
  * running was interrupted (quit, crash, power cut). Clean it up and mark it so the UI can offer
@@ -329,18 +341,14 @@ export async function recoverInterrupted(stillRunning: string[] = []): Promise<s
     if (!existsSync(join(dir, 'app.json'))) continue
     const s = await readAppState(slug)
     if (!s.job && !s.cleanupOwed) continue
-    if (!s.job) {
-      // the job ended and said so, and only its clean-up was left: refused again, it waits for the next start
-      if (!(await cleanPartialVersions(dir).then(() => true, () => false))) continue
-      await updateAppState(slug, (st) => {
-        delete st.cleanupOwed
-      })
-      recovered.push(slug)
-      continue
-    }
-    await cleanPartialVersions(dir)
+    // a removal still refused keeps the mark for the next start; the job is settled all the same, and the
+    // other projects are still recovered
+    const cleaned = await removeLeftovers(dir)
+    if (!s.job && !cleaned) continue
     await updateAppState(slug, (st) => {
-      delete st.cleanupOwed
+      if (cleaned) delete st.cleanupOwed
+      else st.cleanupOwed = true
+      if (!st.job) return // the job itself ended and said so: only its clean-up was left
       st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
       if (st.status === 'ready' && st.job?.kind !== 'export') {
         st.chat.push({
