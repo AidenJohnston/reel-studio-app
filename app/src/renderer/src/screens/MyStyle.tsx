@@ -8,6 +8,9 @@ export function MyStyle() {
   const [rules, setRules] = useState<StyleRule[] | null>(null)
   const [damaged, setDamaged] = useState(false)
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  // While the words are being saved the row stays open but cannot change: closing it afterwards must not throw
+  // away words typed during the save, or close another rule opened in the meantime.
+  const [saving, setSaving] = useState(false)
   const editButtons = useRef(new Map<string, HTMLButtonElement>())
   const editInput = useRef<HTMLInputElement>(null)
   const load = () => Promise.all([reel.style.rules().then(setRules), reel.style.damaged().then(setDamaged)])
@@ -31,9 +34,12 @@ export function MyStyle() {
     requestAnimationFrame(() => editButtons.current.get(id)?.focus())
   }
   const save = async () => {
-    if (!editing) return
+    if (!editing || saving) return
     const { id, text } = editing
-    if (await run(() => reel.style.update(id, { text }))) stopEditing(id)
+    setSaving(true)
+    const saved = await run(() => reel.style.update(id, { text }))
+    setSaving(false)
+    if (saved) stopEditing(id)
   }
   return (
     <div className="page narrow">
@@ -67,23 +73,25 @@ export function MyStyle() {
                 void save()
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Escape') stopEditing(r.id)
+                if (e.key === 'Escape' && !saving) stopEditing(r.id)
               }}
+              aria-busy={saving}
             >
               <input
                 className="input"
                 style={{ flex: 1 }}
                 value={editing.text}
                 onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
+                readOnly={saving}
                 aria-label="Rule"
                 ref={editInput}
                 autoFocus
                 data-testid="style-edit-input"
               />
-              <button className="btn small primary" type="submit" disabled={!editing.text.trim()}>
+              <button className="btn small primary" type="submit" disabled={saving || !editing.text.trim()}>
                 Save
               </button>
-              <button className="btn small ghost" type="button" onClick={() => stopEditing(r.id)}>
+              <button className="btn small ghost" type="button" onClick={() => stopEditing(r.id)} disabled={saving}>
                 Cancel
               </button>
             </form>
@@ -104,9 +112,9 @@ export function MyStyle() {
                   else editButtons.current.delete(r.id)
                 }}
                 onClick={() => {
-                  // Another row has typed words that are not saved: keep it open rather than throw them away.
+                  // Another row is saving, or has typed words that are not saved: keep it open rather than throw them away.
                   const open = editing && rules.find((x) => x.id === editing.id)
-                  if (open && open.text !== editing.text) editInput.current?.focus()
+                  if (open && (saving || open.text !== editing.text)) editInput.current?.focus()
                   else setEditing({ id: r.id, text: r.text })
                 }}
                 aria-label={`Edit "${r.text}"`}
