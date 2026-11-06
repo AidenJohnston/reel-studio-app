@@ -272,8 +272,34 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
 
   return (
     <div className="page lib-page">
+      {/* the views switch beside the screen's name, as Reels' does: one switcher style for a screen's views */}
       <TitleBarSlot
-        title="Library"
+        title={
+          <>
+            <h1 className="tb-h">Library</h1>
+            <div className="lib-tabs" role="tablist" aria-label="Library" onKeyDown={arrows}>
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  ref={(el) => {
+                    if (el) tabs.current.set(t.key, el)
+                  }}
+                  role="tab"
+                  id={`lib-tab-${t.key}`}
+                  aria-selected={tab === t.key}
+                  aria-controls="lib-panel"
+                  tabIndex={tab === t.key ? 0 : -1}
+                  className="lib-tab"
+                  onClick={() => choose(t.key)}
+                  data-testid={`library-tab-${t.key}`}
+                >
+                  {t.label}
+                  {bins && <span className="n">{count(t)}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        }
         actions={
           <>
             {busy && <Spinner />}
@@ -281,27 +307,6 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
           </>
         }
       />
-      <div className="lib-tabs" role="tablist" aria-label="Library" onKeyDown={arrows}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            ref={(el) => {
-              if (el) tabs.current.set(t.key, el)
-            }}
-            role="tab"
-            id={`lib-tab-${t.key}`}
-            aria-selected={tab === t.key}
-            aria-controls="lib-panel"
-            tabIndex={tab === t.key ? 0 : -1}
-            className="lib-tab"
-            onClick={() => choose(t.key)}
-            data-testid={`library-tab-${t.key}`}
-          >
-            {t.label}
-            {bins && <span className="n">{count(t)}</span>}
-          </button>
-        ))}
-      </div>
       <div className="lib-sub">
         <span>{ABOUT[tab]}</span>
         {folder && (

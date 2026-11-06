@@ -127,6 +127,13 @@
 .pd-drop .btn { flex: none; margin-top: 12px; }
 /* a file over the stage: the zone answers, a little forward */
 .planned.over .pd-drop { background: var(--surface); box-shadow: inset 0 0 0 2px var(--ink); transform: scale(1.01); }
+/* No plan yet: the zone is the phone's slot on the Reel screen, at its proportion (Phone.tsx deviceRatio) and the
+   stage's full height, its corners a phone's, so the video lands where it was dropped and the stage holds one object
+   instead of a small card in the middle of nowhere. */
+.planned:not(.with-plan) { padding: 0; margin: 0; overflow: hidden; }
+.planned:not(.with-plan) .pd { margin: 0 auto; width: auto; height: 100%; aspect-ratio: var(--slot-ratio, .46); max-width: 100%; }
+/* the phone body's own corners (Phone.css .phone), as percentages of the slot, so the slot and the phone that replaces it match */
+.planned:not(.with-plan) .pd-drop { height: 100%; min-height: 0; padding: 32px 24px; border-radius: 9.4752% / 5.4631%; }
 
 /* with a plan, on a narrow stage: the card, then the zone as one row under it */
 .with-plan .pd { width: min(100%, 540px); }
@@ -160,7 +167,6 @@
 /* in the title-bar row, after the reel's name: a caption like the version on screen (reel.css .rt-ver), with its
    tooltip naming the whole line when it is cut short, so it takes the pointer */
 .titlebar .pl-who { margin-left: 0; max-width: 320px; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 500; color: var(--ink-3); pointer-events: auto; -webkit-app-region: no-drag; }
-.titlebar .pl-who::before { content: '·\00a0' / ''; color: var(--ink-4); }
 .pl-who-mark { flex: none; display: grid; place-items: center; color: var(--ink-3); }
 .pl-who-mark:empty { display: none; }
 .pl-who-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

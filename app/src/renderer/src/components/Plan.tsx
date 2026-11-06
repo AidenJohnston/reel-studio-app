@@ -11,6 +11,7 @@ import { NOTE_DROP_DONE } from '../App'
 import { BrandMark } from './brand'
 import { Icon } from './icons'
 import { byKeyboard, reducedMotion } from './motion'
+import { deviceRatio, usePhoneShape } from './Phone'
 import { planAnswerer, type AnswererMark } from './plan-who'
 import { Qr } from './SendToPhone'
 import { Button, PickFiles, Spinner, useFileDrop } from './ui'
@@ -343,8 +344,16 @@ export function PlannedStage({ plan, onFiles }: { plan: ReactNode; onFiles: (pat
     window.dispatchEvent(new Event(NOTE_DROP_DONE))
     onFiles(paths)
   })
+  // with no plan yet, the zone is the phone's own slot: its shape and height, where the video will play
+  const [shape] = usePhoneShape()
   return (
-    <div className={`planned${drop.over ? ' over' : ''}${plan ? ' with-plan' : ''}`} {...drop.props} data-video-drop data-testid="planned-stage">
+    <div
+      className={`planned${drop.over ? ' over' : ''}${plan ? ' with-plan' : ''}`}
+      style={{ '--slot-ratio': deviceRatio(shape) } as React.CSSProperties}
+      {...drop.props}
+      data-video-drop
+      data-testid="planned-stage"
+    >
       <div className="pd">
         {plan && (
           <div className="pd-plan" data-plan-main>

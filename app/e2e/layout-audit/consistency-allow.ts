@@ -32,6 +32,12 @@ export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason:
   },
   {
     rule: 'off-scale',
+    selector: '.planned:not(.with-plan) [data-testid="drop-zone"]',
+    props: ['border-radius'],
+    reason: "A new reel's drop zone is the phone's slot: it takes the phone body's corners (Phone.css .phone), so the phone that replaces it lands in the same shape."
+  },
+  {
+    rule: 'off-scale',
     selector: '.tb-main',
     props: ['padding-right'],
     reason: "The page's gutter plus its scroll bar's (--gutter + --sbw, shell.css): the title bar's actions end where the page's content does, beside the scroll bar the page always keeps room for."

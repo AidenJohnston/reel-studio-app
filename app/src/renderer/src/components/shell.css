@@ -22,7 +22,7 @@
 .tb-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 12px; padding: 0 calc(var(--gutter) + var(--sbw)) 0 var(--gutter); }
 .platform-win32 .tb-main { padding-right: 150px; }
 .tb-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.tb-h { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; letter-spacing: 0; font-stretch: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; letter-spacing: 0; font-stretch: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-actions { flex: none; display: flex; align-items: center; gap: 8px; }
 /* one control height across the title-bar row: its pills match its 32 px icon buttons */
 .titlebar .btn { height: 32px; }

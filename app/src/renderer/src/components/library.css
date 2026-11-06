@@ -3,13 +3,16 @@
 
 /* ---- Library ---- */
 .page.lib-page { margin: 0; max-width: none; padding-top: 4px; }
-.lib-tabs { display: flex; gap: 24px; box-shadow: inset 0 -1px 0 var(--line); }
+.lib-tabs { display: inline-grid; grid-auto-flow: column; margin-left: 8px; padding: 2px; border-radius: 999px; background: var(--sunk); align-self: center; flex: none; }
+/* drawn as the segmented control (styles.css .segmented): a sunk track, the chosen view on a lifted pill; tabs
+   underneath, so the panel below is their tabpanel and the arrow keys move between them */
 .lib-tab {
-  height: 32px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 560; color: var(--ink-2);
-  cursor: pointer; white-space: nowrap; box-shadow: inset 0 -2px 0 transparent; transition: color 120ms ease;
+  height: 24px; padding: 0 12px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2);
+  cursor: pointer; white-space: nowrap; transition: color 120ms ease, background-color 120ms ease;
 }
 .lib-tab .n { margin-left: 6px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.lib-tab[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+.lib-tab[aria-selected="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 .5px rgba(22, 30, 26, .08); }
+.lib-tab:focus-visible { outline-offset: 0; }
 @media (hover: hover) and (pointer: fine) { .lib-tab[aria-selected="false"]:hover { color: var(--ink); } }
 
 .lib-sub { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }

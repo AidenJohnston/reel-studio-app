@@ -8,7 +8,7 @@
 .rt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .reel-title { -webkit-app-region: no-drag; pointer-events: auto; min-width: 0; cursor: text; border-radius: 6px; padding: 2px 6px; margin-left: -6px; }
 @media (hover: hover) and (pointer: fine) { .reel-title:hover { background: var(--wash); } }
-.reel-title-input { height: 30px; min-height: 30px; padding: 2px 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; width: min(420px, 40vw); }
+.reel-title-input { height: 32px; min-height: 32px; padding: 0 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; width: min(420px, 40vw); }
 .rt-ver { flex: none; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rt-ver.older { color: var(--ink-2); font-weight: 600; }
 /* the on-screen version's name, after its number: a caption, cut short before it crowds the title */
@@ -304,8 +304,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .log > :first-child { margin-top: auto; }
 .log-empty { margin: auto 0; padding: 0 12px; text-align: center; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); }
 .fold {
-  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; border: 0; background: none; padding: 0 8px 0 2px;
-  border-radius: 7px; font: inherit; color: var(--ink-2); font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; cursor: pointer;
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 0; background: none; padding: 0 8px 0 2px;
+  border-radius: 8px; font: inherit; color: var(--ink-2); font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; cursor: pointer;
 }
 .fold .icon { color: var(--ink-3); }
 @media (hover: hover) and (pointer: fine) { .fold:hover { background: var(--wash); color: var(--ink); } }
@@ -483,8 +483,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 
 /* playback speed in a player's own row (Player.tsx, where it has one) */
 .scrub-speed {
-  flex: none; height: 22px; min-width: 34px; padding: 0 6px; border: 0; border-radius: 6px; background: rgba(255, 255, 255, .18); color: #fff;
-  font: inherit; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
+  flex: none; height: 24px; min-width: 32px; padding: 0 6px; border: 0; border-radius: 6px; background: rgba(255, 255, 255, .18); color: #fff;
+  font: inherit; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
 }
 .scrub-speed.on { background: #fff; color: var(--ink); }
 
