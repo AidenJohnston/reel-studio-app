@@ -87,6 +87,7 @@ import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createProxyBuilds } from './proxy-builds'
+import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { createLiveMoments, createLiveVideos } from './live-video'
 import { askAboutStyle, type ChatLine, answerStyleQuestion, rememberQuestion } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -1781,7 +1782,10 @@ function createWindow(): BrowserWindow {
     }).catch((e) => log(`[update] menu check failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`))
   )
   void loadSettings().then((s) => showTimelineInMenu(s.timeline), () => undefined)
-  created.once('ready-to-show', () => created.show())
+  created.once('ready-to-show', () => {
+    performance.mark(WINDOW_SHOWN) // app/perf times launch to here
+    created.show()
+  })
   // Stop flashing the taskbar once the person is back.
   created.on('focus', () => created.flashFrame(false))
   // The animation renderer keeps a hidden offscreen window; it must not keep the app alive.
