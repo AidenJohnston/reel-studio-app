@@ -10,6 +10,8 @@ import './recent-reels.css'
 
 export function RecentReels({ go }: { go: Go }) {
   const [report, setReport] = useState<WrappedReport | null>(null)
+  // Without an AI editor the reel shows no note box, so the written note would be out of sight: say so here.
+  const [editor, setEditor] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,7 +19,9 @@ export function RecentReels({ go }: { go: Go }) {
     setBusy(true)
     setError(null)
     try {
-      setReport(await reel.wrapped.report())
+      const [r, active] = await Promise.all([reel.wrapped.report(), reel.ai.active().catch(() => null)])
+      setEditor(!!active && active.connected && active.id !== 'none')
+      setReport(r)
     } catch (e) {
       setError(userMessage(e))
     } finally {
@@ -53,7 +57,7 @@ export function RecentReels({ go }: { go: Go }) {
               ? 'There are no results for posted reels on this computer yet. Post 3 reels and connect where you posted them, and this compares them.'
               : `Only ${report.posted} posted ${report.posted === 1 ? 'reel has' : 'reels have'} results so far. With 3, this compares them.`}
           </p>
-          {report.edit && <TryEdit edit={report.edit} go={go} label="From your newest reels" />}
+          {report.edit && <TryEdit edit={report.edit} go={go} editor={editor} label="From your newest reels" />}
         </div>
       )}
       {report?.state === 'ready' && (
@@ -64,7 +68,7 @@ export function RecentReels({ go }: { go: Go }) {
             <p className="muted-sm">{report.strength.detail}</p>
           </div>
           {report.edit ? (
-            <TryEdit edit={report.edit} go={go} label="One to try" />
+            <TryEdit edit={report.edit} go={go} editor={editor} label="One to try" />
           ) : (
             <p className="muted-sm">Nothing in these reels' timing stands out to change: they start talking at once, change shot early and end on the last word.</p>
           )}
@@ -83,7 +87,7 @@ export function RecentReels({ go }: { go: Go }) {
 }
 
 /** One edit to try, and the button that writes it into that reel's note box (unsent). */
-function TryEdit({ edit, go, label }: { edit: WrappedEdit; go: Go; label: string }) {
+function TryEdit({ edit, go, editor, label }: { edit: WrappedEdit; go: Go; editor: boolean; label: string }) {
   return (
     <div data-testid="recent-edit">
       <span className="recent-label">{label}</span>
@@ -93,6 +97,13 @@ function TryEdit({ edit, go, label }: { edit: WrappedEdit; go: Go; label: string
         <p className="muted-sm" data-testid="recent-fixed">
           That was the posted version. Version {edit.fixedIn}, made since, doesn't have this. Post it and compare.
         </p>
+      ) : !editor ? (
+        <div className="row" data-testid="recent-no-editor">
+          <span className="muted-sm">Notes need an AI editor. Connect one, and this writes the note for you.</span>
+          <Button size="small" onClick={() => go({ name: 'connect', back: { name: 'insights' } })}>
+            Connect an editor
+          </Button>
+        </div>
       ) : (
         <>
           <div className="row">

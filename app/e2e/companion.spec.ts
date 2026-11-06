@@ -8,18 +8,36 @@
 //
 // Run: npm run build && npx playwright test e2e/companion.spec.ts
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, launch, makeMedia, makeReel, openSettings, passFirstRun, SHOTS } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'companion-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
 
+/**
+ * A screenshot of the phone window. It stays hidden on a runner that keeps windows off screen, where Playwright's
+ * screenshot waits for a frame that never comes; Electron's capturePage with stayHidden renders it anyway.
+ */
+async function phoneShot(app: ElectronApplication, name: string): Promise<void> {
+  const png = await app.evaluate(async () => {
+    const w = (globalThis as unknown as { __phone: { webContents: { capturePage(r: undefined, o: { stayHidden: boolean }): Promise<{ toPNG(): Buffer }> } } }).__phone
+    return (await w.webContents.capturePage(undefined, { stayHidden: true })).toPNG().toString('base64')
+  })
+  writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, 'base64'))
+}
+
 async function openPhone(app: ElectronApplication, url: string): Promise<Page> {
   const opened = app.waitForEvent('window')
   await app.evaluate(({ BrowserWindow }, u) => {
-    const w = new BrowserWindow({ width: 390, height: 844, webPreferences: { partition: 'companion-e2e-phone', sandbox: true, contextIsolation: true } })
+    // Painted while hidden and never throttled, like the app's own test window: a runner that keeps windows off screen
+    // still gets frames to screenshot.
+    const w = new BrowserWindow({
+      width: 390, height: 844, show: false, paintWhenInitiallyHidden: true,
+      webPreferences: { partition: 'companion-e2e-phone', sandbox: true, contextIsolation: true, backgroundThrottling: false }
+    })
     w.webContents.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1')
+    Object.assign(globalThis, { __phone: w })
     void w.loadURL(u)
   }, url)
   const phone = await opened
@@ -65,7 +83,7 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await expect.poll(() => phone.evaluate(() => location.hash)).toBe('')
     const row = phone.getByTestId('cp-reel-row')
     await expect(row).toHaveCount(1, { timeout: 30_000 })
-    await phone.screenshot({ path: join(SHOTS, 'companion-03-phone-reels.png') })
+    await phoneShot(app, 'companion-03-phone-reels')
     await row.click()
 
     // ---- watch and save Version 1 ----
@@ -76,7 +94,7 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     const saveUrl = new URL((await save.getAttribute('href'))!, url)
     const saved = await fetch(saveUrl, { method: 'HEAD' })
     expect([saved.status, saved.headers.get('content-disposition')]).toEqual([200, expect.stringMatching(/^attachment; filename=".+, version 1\.mp4"/)])
-    await phone.screenshot({ path: join(SHOTS, 'companion-04-phone-reel.png') })
+    await phoneShot(app, 'companion-04-phone-reel')
 
     // ---- a note from the phone makes Version 2 on the computer ----
     await phone.getByTestId('cp-note-input').fill('make the captions lowercase')
@@ -84,14 +102,14 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await expect(phone.getByTestId('cp-chat')).toContainText('make the captions lowercase')
     await expect(phone.locator('[data-testid="cp-version"][data-n="2"]')).toBeVisible({ timeout: 120_000 })
     await expect(phone.getByTestId('cp-chat')).toContainText('I made the subtitles lowercase.')
-    await phone.screenshot({ path: join(SHOTS, 'companion-05-phone-version-2.png') })
+    await phoneShot(app, 'companion-05-phone-version-2')
     // the same page in a desktop browser, and with reduced motion on (prep-for-prod's runtime pass)
     await phone.setViewportSize({ width: 1440, height: 900 })
-    await phone.screenshot({ path: join(SHOTS, 'companion-05b-wide.png') })
+    await phoneShot(app, 'companion-05b-wide')
     await phone.setViewportSize({ width: 320, height: 640 })
     await phone.emulateMedia({ reducedMotion: 'reduce' })
     await phone.locator('[data-testid="cp-version"][data-n="1"]').click()
-    await phone.screenshot({ path: join(SHOTS, 'companion-05c-320-reduced-motion.png') })
+    await phoneShot(app, 'companion-05c-320-reduced-motion')
     // every control in reach of the keyboard shows where focus is
     for (let i = 0; i < 6; i++) {
       await phone.keyboard.press('Tab')
@@ -118,7 +136,7 @@ test('a paired phone watches a reel, saves it, sends a note that makes Version 2
     await page.getByRole('button', { name: 'Remove', exact: true }).last().click()
     await expect(page.getByTestId('device-row')).toHaveCount(0)
     await expect(phone.getByTestId('cp-not-paired')).toBeVisible({ timeout: 30_000 })
-    await phone.screenshot({ path: join(SHOTS, 'companion-07-phone-removed.png') })
+    await phoneShot(app, 'companion-07-phone-removed')
 
     // ---- switched off: nothing listens ----
     await page.getByTestId('devices-on').click()

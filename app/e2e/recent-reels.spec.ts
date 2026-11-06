@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, passFirstRun, SHOTS } from './helpers'
+import { BASE, launch, makeMedia, makeReel, openSettings, passFirstRun, SHOTS } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'recent-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
@@ -25,9 +25,14 @@ function saveResults(slug: string, n: number, m: { plays: number; watchMs: numbe
 test('the recent reels report names the shared reel, and Try this edit writes the note without sending it', async () => {
   test.setTimeout(15 * 60_000)
   const media = makeMedia()
-  const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data'), FAKE_ENGINE_SLOW: '1' })
+  // The mock plays a connected Claude Code app: the note box only shows with an editor connected.
+  const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data'), REELSTUDIO_MOCK_CLAUDE: 'ready', FAKE_ENGINE_SLOW: '1' })
   try {
+    test.skip((await page.evaluate(() => window.reel.app.info())).ai !== 'mock', 'the mock plays the connected AI')
     await passFirstRun(page)
+    await openSettings(page)
+    await page.getByTestId('use-claude-code').click()
+    await expect(page.getByTestId('ai-connected')).toBeVisible()
     const made: string[] = []
     for (let i = 0; i < 3; i++) {
       const before = projects()
