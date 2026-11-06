@@ -557,14 +557,32 @@ def build_audio(ctx: RenderCtx, segments: list, src_paths: dict, rwork: Path, wa
 
 # --- video graph --------------------------------------------------------------------------------
 
-def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, dur: float):
-    """(chain, x, y, t0, t1) for one overlay layer, or None when it falls outside the render."""
+def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, dur: float,
+                 video_dur: Optional[float] = None):
+    """(chain, x, y, t0, t1, seek, lead) for one overlay layer, or None when it falls outside the render.
+
+    `seek` is how far into the layer's input to start reading. `lead` is how much more of it the chain
+    reads and trims away before the render's first frame: a window (or still) that starts inside a fade
+    reads the layer from where that fade began, so the fade keeps the full render's clock. `video_dur` is
+    the whole video's length (the full render's `dur`); the fades follow the layer as the full render
+    clips it, so a window shows the frames the full render shows."""
     t0, t1 = layer.t0 - t_shift, layer.t1 - t_shift
     if t1 <= 0 or t0 >= dur or t1 - t0 < 1e-3:
         return None
     skip = max(0.0, -t0)
     t0 = max(0.0, t0)
     t1 = min(dur, t1)
+    end = layer.t1 if video_dur is None else min(layer.t1, video_dur)
+    full = end - max(0.0, layer.t0)         # the layer's span in the full render
+    fi = min(layer.fade_in, full / 2) if layer.fade_in > 0 and layer.t0 >= 0 else 0.0
+    fo = min(layer.fade_out, full / 2) if layer.fade_out > 0 and (video_dur is None or layer.t1 <= video_dur + 1e-6) else 0.0
+    if 0 < skip < fi:
+        seek = 0.0                          # inside the fade-in: read from the layer's start
+    elif fo > 0 and skip > full - fo:
+        seek = full - fo                    # inside the fade-out: read from where it began
+    else:
+        seek = skip
+    lead = skip - seek
     w, h = max(2, int(round(layer.w * f / 2)) * 2), max(2, int(round(layer.h * f / 2)) * 2)
     parts = []
     if layer.kind == "video":
@@ -579,12 +597,13 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
         rh = abs(w * math.sin(a)) + abs(h * math.cos(a))
         x -= (rw - w) / 2
         y -= (rh - h) / 2
-    span = t1 - t0
-    if layer.fade_in > 0 and skip <= 0:
-        parts.append(f"fade=t=in:st=0:d={_f(min(layer.fade_in, span / 2))}:alpha=1")
-    if layer.fade_out > 0 and layer.t1 - t_shift <= dur + 1e-6:
-        fo = min(layer.fade_out, span / 2)
-        parts.append(f"fade=t=out:st={_f(max(0.0, span - fo))}:d={_f(fo)}:alpha=1")
+    # Fade times are on the input's clock, which starts `seek` seconds into the layer.
+    if fi > 0 and seek == 0:
+        parts.append(f"fade=t=in:st=0:d={_f(fi)}:alpha=1")
+    if fo > 0 and full - fo - seek < lead + (t1 - t0):
+        parts.append(f"fade=t=out:st={_f(full - fo - seek)}:d={_f(fo)}:alpha=1")
+    if lead > 0:
+        parts.append(f"trim=start={_f(lead)}")
     # Start the layer at t0 with transparent padding frames, NOT by shifting its timestamps: overlay
     # waits for the first frame of each input, so a layer whose first frame is at 66 s made ffmpeg
     # queue every main frame before it (GBs of full-resolution frames on a long take, and a render
@@ -592,7 +611,7 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
     parts.append("setpts=PTS-STARTPTS")
     if t0 > 0:
         parts.append(f"fps={fps},tpad=start_duration={_f(t0)}:color=0x00000000")   # tpad needs the fps timebase
-    return ",".join(parts), int(round(x)), int(round(y)), t0, t1, skip
+    return ",".join(parts), int(round(x)), int(round(y)), t0, t1, seek, lead
 
 
 SHUTTER = 0.5        # of a frame: the film camera's 180-degree shutter
@@ -923,17 +942,17 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
                           f"enable='between(t,{_f(t0)},{_f(t1)})'[o{li}]")
             cur = f"o{li}"
             continue
-        lc = _layer_chain(li, layer, f, fps, t_shift, dur)
+        lc = _layer_chain(li, layer, f, fps, t_shift, dur, ctx.duration)
         if lc is None:
             continue
-        chain, x, y, t0, t1, skip = lc
-        span = t1 - t0 + 0.1
+        chain, x, y, t0, t1, seek, lead = lc
+        span = lead + t1 - t0 + 0.1
         p = Path(layer.path)
         if layer.kind == "image":
             layer_inputs += ["-loop", "1", "-framerate", _f(fps), "-t", _f(span), "-i", str(p)]
         else:
-            if skip > 0:
-                layer_inputs += ["-ss", _f(skip)]
+            if seek > 0:
+                layer_inputs += ["-ss", _f(seek)]
             layer_inputs += ["-t", _f(span), "-i", str(p)]
         chains.append(f"[{k}:v]{chain}[l{li}]")
         chains.append(f"[{cur}][l{li}]overlay={x}:{y}:eof_action=pass:repeatlast=0:"
