@@ -88,6 +88,9 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'app:setPhoneView': ok = first === 'instagram' || first === 'clean'; break
     case 'app:setTimeline': case 'outside:setEnabled': ok = typeof first === 'boolean'; break
     case 'ai:setNoteRunner': ok = first === 'reelstudio' || first === 'app'; break
+    case 'devices:setOn': case 'devices:openInBrowser': ok = typeof first === 'boolean'; break
+    case 'devices:pair': ok = (first === 'phone' || first === 'browser') && typeof second === 'boolean'; break
+    case 'devices:remove': ok = text(first) && /^[0-9a-f]{32}$/.test(first); break
     case 'projects:exportPlatforms': ok = finite(second) && Number.isInteger(second) && second >= 0 && object(third); break
     case 'projects:proposeTry': ok = finite(second) && Number.isInteger(second) && second >= 0 && object(third) && text(third.caption) &&
       third.caption.length <= 100_000 && (third.variable === undefined || (TRY_VARIABLES as readonly unknown[]).includes(third.variable)); break

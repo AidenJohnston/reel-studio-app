@@ -19,6 +19,7 @@ import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '.
 import '../components/settings.css'
 import { StockKeys } from '../components/stock-keys'
 import { PostingRows, useInstagramLine } from '../components/PostingSettings'
+import { DevicesRows } from '../components/Devices'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
 const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', posting: 'posting', about: 'about' }
@@ -317,6 +318,9 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               <SettingRow id="instagram" line={instagramLine} control={<span className="sval">Not connected</span>} />
             </Section>
 
+            <Section id="devices" desc="Your reels stay on this computer. A paired phone or browser reaches them over your Wi-Fi; no account is needed.">
+              <DevicesRows />
+            </Section>
             <Section id="about">
               <SettingRow id="version" line={`${productName(info.version)} ${info.version}. No account needed.${info.engine.mode === 'fake' ? ' Test engine in use.' : ''}`} />
               <SettingRow

@@ -1,0 +1,201 @@
+/* The phone companion page (companion/*.tsx): layout only. Tokens, buttons, badges, banners and the progress bar are
+   styles.css's, unchanged. One column, phone-wide, centred in a desktop browser; 44 px touch targets; safe-area
+   insets on every edge. Motion: the version crossfade (200 ms ease-out) and the menu's pop-in; nothing moves from the
+   keyboard (html.kb, components/motion.ts) or with reduced motion. */
+
+html.companion {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* styles.css places a toast under the title bar; this page has none, only the notch */
+  --titlebar: env(safe-area-inset-top, 0px);
+  --cp-pad: 16px;
+  background: var(--paper);
+}
+/* styles.css holds the desktop window to one screen that never scrolls and selects nothing. This is a page: it
+   scrolls, and its words (a note, the editor's reply) can be copied. Controls stay unselectable below. */
+html.companion, html.companion body, html.companion #root { height: auto; min-height: 100%; }
+html.companion body { overflow: visible; user-select: text; -webkit-user-select: text; font-size: var(--fs-section); line-height: 1.45; }
+html.companion :is(button, a, summary, label) { touch-action: manipulation; }
+html.companion :is(button, summary, .btn, .cp-card) { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+.cp-col {
+  max-width: 440px; margin: 0 auto; min-height: 100vh; min-height: 100svh; overflow-x: clip;
+  display: flex; flex-direction: column; gap: 16px;
+  padding:
+    calc(env(safe-area-inset-top, 0px) + 8px)
+    calc(env(safe-area-inset-right, 0px) + var(--cp-pad))
+    calc(env(safe-area-inset-bottom, 0px) + 40px)
+    calc(env(safe-area-inset-left, 0px) + var(--cp-pad));
+}
+.cp-col > main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 720px) { .cp-col { padding-top: 40px; } }
+.cp-wide { width: 100%; }
+
+.cp-title { margin: 0; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 640; font-stretch: 112%; letter-spacing: -.012em; overflow-wrap: anywhere; }
+.cp-empty { color: var(--ink-2); }
+
+/* A bare 44 px icon button (the header menu, Back): ui.tsx's IconButton is 32 px, under a finger's size. */
+.cp-tap {
+  width: 44px; height: 44px; flex: none; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms var(--ease-out);
+}
+.cp-tap:active { transform: scale(.94); background: var(--wash); }
+@media (hover: hover) and (pointer: fine) { .cp-tap:hover { background: var(--wash); color: var(--ink); } }
+
+/* ---- not paired ---- */
+.cp-intro { justify-content: center; gap: 24px; }
+.cp-intro-body { display: flex; flex-direction: column; gap: 24px; }
+.cp-brand { display: flex; align-items: center; gap: 8px; font-weight: 640; color: var(--ink); }
+.cp-intro-text { display: flex; flex-direction: column; gap: 10px; }
+.cp-lede { font-size: var(--fs-subhead); line-height: var(--lh-subhead); color: var(--ink-2); }
+.cp-how { display: flex; flex-direction: column; gap: 8px; padding-top: 20px; box-shadow: inset 0 1px 0 var(--line); }
+.cp-how h2 { font-size: var(--fs-section); }
+.cp-how .faint { font-size: var(--fs-md); line-height: var(--lh-md); }
+.cp-pairing { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink-2); }
+
+/* ---- header ---- */
+.cp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; margin-right: -10px; }
+.cp-who { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-2); }
+.cp-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-who b { font-weight: 620; color: var(--ink); }
+/* a dot and a word: solid when connected, a ring while connecting, amber when the computer can't be reached */
+.cp-who > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--ink-2); }
+.cp-who[data-conn="connecting"] > i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-4); }
+.cp-who[data-conn="offline"] > i { background: var(--amber); }
+.cp-offline { display: flex; flex-direction: column; gap: 10px; }
+
+.cp-menu { position: relative; flex: none; }
+.cp-pop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; width: min(300px, calc(100vw - 32px)); padding: 6px;
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3);
+  transform-origin: top right; animation: pop-in .15s var(--ease-out);
+}
+.cp-pop-item {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; width: 100%; min-height: 44px;
+  padding: 8px 12px; border: 0; border-radius: var(--r-md); background: none; font: inherit; text-align: left; color: var(--ink); cursor: pointer;
+}
+.cp-pop-item .danger { color: var(--pencil); font-weight: 560; }
+.cp-pop-item:active { background: var(--sunk-2); }
+@media (hover: hover) and (pointer: fine) { .cp-pop-item:hover { background: var(--sunk-2); } }
+
+/* ---- the reels: two covers across, like a creator's own Reels grid ---- */
+.cp-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
+.cp-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: inherit; text-decoration: none; border-radius: var(--r-lg); transition: transform 120ms var(--ease-out); }
+.cp-card:not(.waiting):active { transform: scale(.98); }
+.cp-card:focus-visible { outline-offset: 4px; }
+.cp-card-pic { position: relative; display: block; aspect-ratio: 9 / 16; margin-bottom: 6px; border-radius: var(--r-lg); overflow: hidden; background: var(--sunk); }
+.cp-card-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-card-blank { display: grid; place-items: center; height: 100%; padding: 12px; text-align: center; background: var(--paper-2); color: var(--ink-3); font-weight: 600; overflow-wrap: anywhere; }
+.cp-card-title { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.cp-card-job { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.cp-card-step { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cp-card-line { display: block; width: 70%; height: 12px; border-radius: 6px; background: var(--sunk); }
+
+/* ---- one reel ---- */
+.cp-reel-head { display: flex; align-items: flex-start; gap: 2px; margin-left: -10px; }
+/* the title's first line centred on the 44 px Back button */
+.cp-reel-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 8px; }
+
+/* The player: 9:16, as tall as most of the screen allows, so the version strip shows under it. */
+.cp-stage {
+  position: relative; isolation: isolate; margin: 0 auto; aspect-ratio: 9 / 16;
+  width: min(100%, calc(70vh * 9 / 16)); width: min(100%, calc(70svh * 9 / 16));
+  border-radius: var(--r-lg); overflow: hidden; background: var(--bezel);
+}
+/* A version swap: the new layer fades in over the old, which stays opaque underneath, so nothing dips to black. */
+.cp-layer { position: absolute; inset: 0; transition: opacity 200ms var(--ease-out); }
+.cp-layer[data-shown="false"] { opacity: 0; }
+.cp-video, .cp-still { width: 100%; height: 100%; display: block; object-fit: contain; background: transparent; }
+.cp-still { object-fit: cover; }
+.cp-stage-note { position: absolute; left: 16px; right: 16px; bottom: 16px; color: #fff; text-align: center; font-size: var(--fs-md); line-height: var(--lh-md); text-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+.cp-fresh { align-self: center; gap: 10px; }
+
+/* Versions, newest first, as one strip that bleeds to the screen's edges. The one on screen has the ink ring a
+   choice gets everywhere in the app (styles.css .cover-frame.on). */
+.cp-strip {
+  display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  /* 6 px of room all round: a scroller clips, and the focus ring reaches 4 px past each version */
+  margin-inline: calc(-1 * var(--cp-pad)); padding: 6px var(--cp-pad); scroll-padding-inline: var(--cp-pad);
+}
+.cp-ver {
+  flex: none; width: 176px; min-height: 76px; display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px;
+  border: 0; border-radius: var(--r-lg); background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: inherit; text-align: left; color: var(--ink-2); cursor: pointer; scroll-snap-align: start;
+  transition: transform 120ms var(--ease-out);
+}
+.cp-ver[aria-checked="true"] { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+.cp-ver:active { transform: scale(.97); }
+/* High contrast drops box-shadow, which is all that marks the chosen version */
+@media (forced-colors: active) { .cp-ver[aria-checked="true"] { outline: 2px solid CanvasText; outline-offset: -2px; } }
+@media (hover: hover) and (pointer: fine) { .cp-ver[aria-checked="false"]:hover { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); } }
+.cp-ver-pic { flex: none; width: 36px; aspect-ratio: 9 / 16; border-radius: 6px; overflow: hidden; background: var(--sunk); }
+.cp-ver-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-ver-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cp-ver-name { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; white-space: nowrap; }
+.cp-ver-tag { font-weight: 500; color: var(--ink-3); }
+.cp-ver-change { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.cp-save { display: flex; flex-direction: column; gap: 4px; }
+.cp-hint { font-size: var(--fs-md); line-height: var(--lh-md); color: var(--ink-2); }
+.cp-hint summary { min-height: 44px; display: flex; align-items: center; justify-content: center; list-style: none; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.cp-hint summary::-webkit-details-marker { display: none; }
+.cp-hint summary:active { color: var(--ink); }
+.cp-hint ol { margin: 0 0 4px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+
+/* ---- notes ---- */
+.cp-notes { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; padding-top: 20px; box-shadow: inset 0 1px 0 var(--line); }
+.cp-notes h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 640; }
+.cp-notes > .faint { font-size: var(--fs-md); line-height: var(--lh-md); }
+.cp-chat { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.cp-line { display: flex; flex-direction: column; gap: 3px; max-width: 88%; }
+/* yours are bubbles; the editor's replies sit on the paper (spec section 7) */
+.cp-line.you { align-self: flex-end; align-items: flex-end; }
+.cp-line.you .cp-line-text { padding: 9px 13px; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e1); }
+.cp-line.editor { align-self: flex-start; }
+.cp-line-who { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 640; color: var(--ink-3); }
+.cp-line-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.cp-line-meta { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.cp-job { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e1); }
+.cp-job-top { display: flex; align-items: center; gap: 10px; }
+.cp-job-words { flex: 1; min-width: 0; font-weight: 560; }
+.cp-job .faint { font-variant-numeric: tabular-nums; }
+
+.cp-note { display: flex; flex-direction: column; gap: 10px; }
+.cp-note-why { font-size: var(--fs-md); line-height: var(--lh-md); color: var(--amber); }
+/* 16 px: under that, iPhone Safari zooms the page into the field and stays zoomed */
+.textarea.cp-note-text { min-height: 96px; padding: 12px 14px; border-radius: var(--r-lg); font-size: 16px; line-height: 22px; resize: none; }
+.cp-note-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; }
+.cp-here { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-right: auto; cursor: pointer; font-weight: 560; font-variant-numeric: tabular-nums; animation: fade .15s ease-out; }
+.cp-send { min-width: 104px; }
+
+/* ---- a wide window: the same page in a desktop browser ----
+   The phone's one column keeps its order. From 960 px the reel screen puts the player and its versions beside the
+   notes, as the desktop app's Reel screen does, and the list shows more covers across. */
+.cp-reel, .cp-reel-watch, .cp-reel-talk { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 720px) and (max-width: 959px) {
+  .cp-col:has(.cp-grid) { max-width: 720px; }
+  .cp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 960px) {
+  .cp-col:has(.cp-grid), .cp-col:has(.cp-reel) { max-width: 1040px; }
+  .cp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 20px; }
+  .cp-reel { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 40px; align-items: start; }
+  /* the player stays in view while the notes scroll */
+  .cp-reel-watch { position: sticky; top: 24px; }
+  /* versions wrap under the player instead of scrolling sideways past the column */
+  .cp-reel-watch .cp-strip { flex-wrap: wrap; overflow-x: visible; margin-inline: 0; padding-inline: 0; }
+  .cp-reel-talk .cp-notes { margin-top: 0; padding-top: 0; box-shadow: none; }
+}
+
+/* ---- what never moves ---- */
+html.kb :is(.cp-layer, .cp-card, .cp-ver, .cp-tap) { transition: none; }
+html.kb :is(.cp-card, .cp-ver, .cp-tap):active { transform: none; }
+html.kb :is(.cp-pop, .cp-here) { animation: none; }
+/* Reduced motion: nothing scales or moves, but the version crossfade and the fades stay, because they say what changed. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-card, .cp-ver, .cp-tap { transition: none; }
+  .cp-pop { animation: fade .15s ease-out; }
+  .cp-card:not(.waiting):active, .cp-ver:active, .cp-tap:active { transform: none; }
+}
