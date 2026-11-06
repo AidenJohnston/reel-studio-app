@@ -327,11 +327,18 @@ const recordUsage = (e: UsageEvent): void => void usage.record(e).catch((err) =>
 // Once a day to the collection address. There is none in any build yet (USAGE_ENDPOINT null), so nothing is scheduled.
 if (USAGE_ENDPOINT) setInterval(() => void usage.send().catch((err) => log(`[usage] send: ${String(err?.message ?? err)}`)), 24 * 3_600_000).unref()
 // Each version an edit made is scored once per run of the app, by the next thing done to its reel (usage.ts editScore).
+// A version counts as scored only once a line was really kept: with quality sharing off nothing is used up, so turning
+// it on later still scores what happens next. Cleared whenever quality sharing goes off (app:setSharing).
 const scoredEdits = new Set<string>()
 function scoreEdit(slug: string, made: number, next: Parameters<typeof editScore>[0]): void {
-  if (!(made >= 1) || scoredEdits.has(`${slug}:${made}`)) return
-  scoredEdits.add(`${slug}:${made}`)
-  recordUsage({ part: 'quality', name: 'edit', outcome: editScore(next, made) })
+  const key = `${slug}:${made}`
+  if (!(made >= 1) || scoredEdits.has(key)) return
+  scoredEdits.add(key)
+  void usage.record({ part: 'quality', name: 'edit', outcome: editScore(next, made) })
+    .then((kept) => { if (!kept) scoredEdits.delete(key) }, (err) => {
+      scoredEdits.delete(key)
+      log(`[usage] ${String(err?.message ?? err)}`)
+    })
 }
 
 const jobs = createJobManager(
@@ -903,6 +910,7 @@ function registerIpc(): void {
     await saveSettings({ sharing })
     // off deletes what was kept; a part switched off loses its lines
     await usage.applySharing(sharing)
+    if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
   handle('app:usage', () => usage.read())
@@ -1448,6 +1456,8 @@ function registerIpc(): void {
     await jobs.forSlug(slug)?.done
     if (failure) throw failure
     if (!result) throw { code: 'EXPORT_FAILED', userMessage: 'Saving for those platforms stopped. Try again.' }
+    // sharing the newest version keeps the edit that made it, as exporting it does (projects:export)
+    if (n === (project.version ?? 0)) scoreEdit(slug, n, { type: 'export' })
     return result
   })
   handle('projects:coverCandidates', async (_e, slug: string, moments: number[], source: string): Promise<CoverCandidate[]> => {

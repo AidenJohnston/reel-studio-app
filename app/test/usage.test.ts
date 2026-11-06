@@ -1,6 +1,6 @@
 // Anonymous usage data (src/main/usage.ts): opt in, a fixed shape per event, deleted on opt-out, sent only to an endpoint.
 import { describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DataSharing, UsageEvent } from '../src/shared/api'
@@ -84,7 +84,7 @@ describe('usage data', () => {
   it('fails if the queue grows past its cap or drops the newest lines', async () => {
     const { usage } = setup(ON, null, undefined, 5)
     await Promise.all(Array.from({ length: 8 }, (_, i) => usage.record({ ...JOB, seconds: i })))
-    expect((await usage.read()).map((l) => l.seconds)).toEqual([3, 4, 5, 6, 7])
+    expect((await usage.read()).map((l) => (l.name === 'job' ? l.seconds : null))).toEqual([3, 4, 5, 6, 7])
   })
 
   it('fails if anything is sent with no endpoint, or with sharing off', async () => {
@@ -117,6 +117,29 @@ describe('usage data', () => {
     expect(readFileSync(join(dir, 'install-id'), 'utf8')).toMatch(/^[0-9a-f-]{36}$/)
   })
 
+  // fails if a part switched off between the last write and a send still goes out
+  it('sends only the parts switched on at the moment of sending', async () => {
+    const bodies: string[] = []
+    const fetch = (async (_url: string, init: RequestInit) => (bodies.push(String(init.body)), new Response(''))) as typeof globalThis.fetch
+    const { usage, state } = setup(ON, 'https://usage.example.com/v1', fetch)
+    await usage.record(JOB)
+    await usage.record(EDIT)
+    state.sharing = { ...ON, quality: false }
+    expect(await usage.send()).toBe(1)
+    expect(JSON.parse(bodies[0]).lines.map((l: { part: string }) => l.part)).toEqual(['usage'])
+  })
+
+  // fails if a temp copy a failed write left behind outlives opting out
+  it('opting out removes the whole folder, temp files included', async () => {
+    const { usage, state, dir } = setup(ON)
+    await usage.record(JOB)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'queue.jsonl.0d1f.tmp'), 'left behind')
+    state.sharing = { ...ON, on: false }
+    await usage.applySharing(state.sharing)
+    expect(existsSync(dir)).toBe(false)
+  })
+
   it('fails if an edit is scored from the wrong next step', () => {
     expect(editScore({ type: 'export' }, 3)).toBe('kept')
     expect(editScore({ type: 'note', on: 3 }, 3)).toBe('changed')
@@ -125,6 +148,9 @@ describe('usage data', () => {
 
   it('fails if an error code that is not a constant reaches a line', () => {
     expect(usageCode('ENGINE_STUCK')).toBe('ENGINE_STUCK')
+    // shaped like a code but not one of the app's: a title or id can't ride in on it
+    expect(usageCode('MY_TRIP_TO_LISBON')).toBe('OTHER')
+    expect(invalidEvent({ ...JOB, code: 'MY_TRIP_TO_LISBON' })).toMatch(/code/)
     expect(usageCode('ENOENT: no such file, open C:\\Users\\me\\take.mov')).toBe('OTHER')
   })
 

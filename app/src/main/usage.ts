@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type { DataSharing, EditOutcome, JobKind, UsageEvent, UsageLine } from '../shared/api'
+import { atomicSocialFile } from './social-store'
+import { USAGE_CODES } from './usage-codes'
 
 /**
  * Anonymous usage data, opt in (Settings › Privacy). Off by default: until the person turns sharing on, and the part
@@ -17,8 +19,8 @@ import type { DataSharing, EditOutcome, JobKind, UsageEvent, UsageLine } from '.
 
 const JOB_KINDS: readonly JobKind[] = ['first-edit', 'note', 'rerender', 'export', 'script', 'propose']
 const PLATFORMS = ['instagram', 'tiktok', 'youtube', 'facebook'] as const
-// error codes are constants such as ENGINE_STUCK, never text a person wrote
-const CODE = /^[A-Z][A-Z0-9_]{1,40}$/
+// error codes: only the app's own constants (usage-codes.ts), or OTHER; a string that merely looks like one isn't enough
+const knownCode = (v: unknown): boolean => typeof v === 'string' && (v === 'OTHER' || USAGE_CODES.has(v))
 const count = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1e12
 const oneOf = (list: readonly string[]) => (v: unknown) => typeof v === 'string' && list.includes(v)
 
@@ -26,7 +28,7 @@ const oneOf = (list: readonly string[]) => (v: unknown) => typeof v === 'string'
 const SHAPES: Record<UsageEvent['name'], { part: UsageEvent['part']; fields: Record<string, (v: unknown) => boolean>; optional?: string[] }> = {
   job: {
     part: 'usage',
-    fields: { job: oneOf(JOB_KINDS), outcome: oneOf(['done', 'failed', 'cancelled']), code: (v) => typeof v === 'string' && CODE.test(v), seconds: count },
+    fields: { job: oneOf(JOB_KINDS), outcome: oneOf(['done', 'failed', 'cancelled']), code: knownCode, seconds: count },
     optional: ['code']
   },
   edit: { part: 'quality', fields: { outcome: oneOf(['kept', 'changed', 'undone']) } },
@@ -49,8 +51,8 @@ export function invalidEvent(e: unknown): string | null {
   return null
 }
 
-/** An error code as it may be recorded: a constant such as ENGINE_STUCK, or OTHER for anything that isn't one. */
-export const usageCode = (code: string): string => (CODE.test(code) ? code : 'OTHER')
+/** An error code as it may be recorded: one of the app's own constants (usage-codes.ts), or OTHER for anything else. */
+export const usageCode = (code: string): string => (USAGE_CODES.has(code) ? code : 'OTHER')
 
 /**
  * What became of the version an edit made, from the next thing done to that reel: exported or shared, it was kept;
@@ -122,9 +124,8 @@ export function createUsage(d: UsageDeps) {
   const write = async (all: UsageLine[]): Promise<void> => {
     if (!all.length) return fs.rm(queue(), { force: true })
     await fs.mkdir(d.dir(), { recursive: true })
-    const tmp = `${queue()}.tmp`
-    await fs.writeFile(tmp, all.map((l) => JSON.stringify(l)).join('\n') + '\n')
-    await fs.rename(tmp, queue())
+    // a unique temp file, renamed with retries on Windows locks and always removed (social-store.ts)
+    await atomicSocialFile(queue(), all.map((l) => JSON.stringify(l)).join('\n') + '\n')
   }
   async function installId(): Promise<string> {
     const have = (await fs.readFile(idFile(), 'utf8').catch(() => '')).trim()
@@ -153,8 +154,8 @@ export function createUsage(d: UsageDeps) {
   function applySharing(s: DataSharing): Promise<void> {
     return serial(async () => {
       if (!s.on) {
-        await fs.rm(queue(), { force: true })
-        await fs.rm(idFile(), { force: true })
+        // the whole folder: the queue, the install id and any temp file a failed write left behind
+        await fs.rm(d.dir(), { recursive: true, force: true })
         return
       }
       const all = await lines()
@@ -166,19 +167,22 @@ export function createUsage(d: UsageDeps) {
   /** Posts what is waiting to the endpoint and drops what it accepted. No endpoint, or sharing off: nothing. */
   function send(): Promise<number> {
     return serial(async () => {
-      if (!d.endpoint || !(await d.sharing()).on) return 0
+      if (!d.endpoint) return 0
       const all = await lines()
-      if (!all.length) return 0
+      // consent as it is now, right before anything goes out: the master switch and each line's own part
+      const s = await d.sharing()
+      const going = s.on ? all.filter((l) => s[l.part]) : []
+      if (!going.length) return 0
       const r = await (d.fetch ?? fetch)(d.endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lines: all }),
+        body: JSON.stringify({ lines: going }),
         signal: AbortSignal.timeout(20_000)
       })
       if (!r.ok) throw new Error(`usage: the endpoint answered ${r.status}`)
-      // only what was sent: lines recorded while it was on its way wait for the next send
+      // only what was read for this send: lines recorded while it was on its way wait for the next one
       await write((await lines()).slice(all.length))
-      return all.length
+      return going.length
     })
   }
 
