@@ -279,7 +279,21 @@ export function createOutsideAccess(o: OutsideAccessOptions) {
     const tmp = `${accessFile}.${randomBytes(4).toString('hex')}.tmp`
     await fs.writeFile(tmp, JSON.stringify({ v: 1, endpoint, token }), { mode: 0o600 })
     await fs.chmod(tmp, 0o600)
-    await fs.rename(tmp, accessFile)
+    // Windows refuses to replace a file another process has open: a relay reading it at that moment (store.ts
+    // renameWithRetry retries for the same reason)
+    for (let i = 0; ; i++) {
+      try {
+        await fs.rename(tmp, accessFile)
+        return
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if (i >= 20 || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) {
+          await fs.rm(tmp, { force: true })
+          throw e
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+    }
   }
 
   async function pickEndpoint(): Promise<string> {
