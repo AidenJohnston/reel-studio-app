@@ -74,3 +74,35 @@ def test_agree_compares_hashes_without_requiring_identical_tool_paths(tmp_path, 
         path.write_text(json.dumps(report), encoding="utf-8")
     assert cli.main(["agree", *map(str, paths)]) == 0
     assert "agree within" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failed", ["draft", "still", "window", "coverage", "final", None])
+def test_run_writes_reports_and_returns_failure_for_any_failed_check(monkeypatch, tmp_path, failed):
+    def check(name):
+        return {"status": "fail" if name == failed else "unset", "metrics": {}, "failures": []}
+
+    cfg = {"corpus": [{"id": "one"}], "heldOut": [], "runs": 1, "thresholds": {}, "sizes": {}}
+    c = SimpleNamespace(cfg=cfg, work=tmp_path, scratch=tmp_path / "scratch", python="unused",
+                        ffmpeg="unused", ffprobe="unused", pins={"engineCommit": "reference"}, env=lambda p: {})
+    take = SimpleNamespace(session=[{"note": "edit"}])
+    ref = {"moment": 1.0, "window": [0.0, 2.0], "stills": [1.0]}
+    run = {"seconds": {name: [1.0] for name in cli.replay.STEPS}, "final": 1.0,
+           "files": [{}], "finalFile": {"final": {"sha256": "final"}}}
+    checked = {"steps": [{"draft": check("draft"), "still": [check("still")], "window": check("window"),
+                           "coverage": check("coverage")}], "final": check("final")}
+    monkeypatch.setattr(cli, "Ctx", lambda a: c)
+    monkeypatch.setattr(cli, "setup", lambda *args: {"takes": {"one": (take, [ref])}, "mediaBytes": {}})
+    monkeypatch.setattr(cli, "Engine", lambda *args: SimpleNamespace(check_import=lambda: None))
+    monkeypatch.setattr(cli, "git_head", lambda: {"commit": "candidate", "engineDirty": False})
+    monkeypatch.setattr(cli, "ffmpeg_version", lambda p: "ffmpeg test")
+    monkeypatch.setattr(cli, "load_sample", lambda: {})
+    monkeypatch.setattr(cli.replay, "replay", lambda *args: run)
+    monkeypatch.setattr(cli.replay, "check_take", lambda *args: checked)
+    monkeypatch.setattr(cli.replay, "prune_duplicates", lambda runs: None)
+    assert cli.main(["run", "--no-warmup"]) == (1 if failed else 0)
+    reports = list((tmp_path / "runs").glob("*/report.json"))
+    assert len(reports) == 1
+    report = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report["takes"]["one"]["steps"][0]["checks"] == checked["steps"][0]
+    assert report["takes"]["one"]["final"]["check"] == checked["final"]
+    assert reports[0].with_suffix(".md").is_file()
