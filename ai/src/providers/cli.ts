@@ -228,6 +228,31 @@ function conversationKey(req: CompletionRequest): string {
 
 interface Waiter { resolve: (r: any) => void; reject: (e: unknown) => void }
 
+const END_STEP_MS = 3000;
+
+/** Settles once a session process has exited and closed its output. With its input ended it is given
+ * END_STEP_MS, then SIGTERM, then SIGKILL, END_STEP_MS each. Still open after that (a process that
+ * survives SIGKILL, or a child of it holding the output), it fails: Stop says so instead of waiting forever. */
+function ended(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const steps: (() => void)[] = [
+      () => child.kill(),
+      () => child.kill('SIGKILL'),
+      () => reject(new AIError('cli_stuck', 'The AI would not stop. Restart Reel Studio if this keeps happening.', { detail: `claude process ${child.pid} still open after SIGKILL` })),
+    ];
+    let timer: NodeJS.Timeout;
+    const next = (): void => {
+      timer = setTimeout(() => {
+        try { steps.shift()!(); } catch { /* gone */ }
+        if (steps.length) next();
+      }, END_STEP_MS);
+    };
+    child.once('close', () => { clearTimeout(timer); resolve(); });
+    next();
+  });
+}
+
 interface LiveSession {
   child: ChildProcessWithoutNullStreams;
   key: string;
@@ -266,19 +291,22 @@ export class ClaudeCliProvider implements ModelProvider {
   }
 
   /** Ends the live session (the agent loop calls this when a run ends) and settles once its process,
-   * and any session ended before it, has exited: Stop waits for every process a note started. */
+   * and any session ended before it, has exited: Stop waits for every process a note started, and
+   * fails with cli_stuck when one would not stop (ended). */
   dispose(): Promise<void> {
     const s = this.live; this.live = null;
     if (s) {
       if (s.idle) clearTimeout(s.idle);
       s.closed = true;
       try { s.child.stdin.end(); } catch { /* gone */ }
-      const t = setTimeout(() => { try { s.child.kill(); } catch { /* gone */ } }, 3000);
-      const exited = s.child.exitCode !== null || s.child.signalCode !== null ? Promise.resolve()
-        : new Promise<void>((resolve) => s.child.once('close', () => resolve()));
-      this.ending = Promise.all([this.ending, exited.finally(() => clearTimeout(t))]).then(() => undefined);
+      this.ending = Promise.all([this.ending, ended(s.child)]).then(() => undefined);
     }
     return this.ending;
+  }
+
+  /** Ends the live session without waiting: a process that would not stop fails the run's own dispose (agent.ts). */
+  private drop(): void {
+    this.dispose().catch(() => undefined);
   }
 
   private startSession(key: string): LiveSession {
@@ -315,7 +343,7 @@ export class ClaudeCliProvider implements ModelProvider {
     let rendered: { text: string; images: { label: string; img: ImagePart }[] };
     if (continues) { s = cur!; rendered = renderDelta(req, s.next); }
     else {
-      void this.dispose();
+      this.drop();
       s = this.live = this.startSession(key);
       rendered = renderConversation(req);
     }
@@ -323,8 +351,8 @@ export class ClaudeCliProvider implements ModelProvider {
     const result = await new Promise<any>((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => { if (settled) return; settled = true; clearTimeout(timer); req.signal?.removeEventListener('abort', abort); fn(); };
-      const timer = setTimeout(() => finish(() => { s.waiter = null; void this.dispose(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
-      const abort = () => finish(() => { s.waiter = null; void this.dispose(); reject(new AIError('cancelled', 'Stopped.')); });
+      const timer = setTimeout(() => finish(() => { s.waiter = null; this.drop(); reject(new AIError('cli_timeout', 'The AI took too long to answer.', { retryable: true })); }), this.o.timeoutMs ?? 600_000);
+      const abort = () => finish(() => { s.waiter = null; this.drop(); reject(new AIError('cancelled', 'Stopped.')); });
       if (req.signal?.aborted) return abort();
       req.signal?.addEventListener('abort', abort, { once: true });
       s.waiter = { resolve: (r) => finish(() => resolve(r)), reject: (e) => finish(() => reject(e)) };
@@ -334,7 +362,7 @@ export class ClaudeCliProvider implements ModelProvider {
     });
     s.next = req.messages.length + 1;
     // an idle session must not outlive its run for long (a crashed caller never calls dispose)
-    s.idle = setTimeout(() => { if (this.live === s) void this.dispose(); }, 120_000);
+    s.idle = setTimeout(() => { if (this.live === s) this.drop(); }, 120_000);
     s.idle.unref?.();
     return result;
   }
