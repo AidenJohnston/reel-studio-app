@@ -22,7 +22,7 @@ The suite pins each ref's SHA before starting. Add `--resume` to reuse its compl
 
 `--models` points to an existing CTranslate2 small.en directory containing model.bin, config.json, and tokenizer.json. It is linked read-only by convention into scratch. No model download or AI sign-in occurs. The model binary and input clips are SHA-256 hashed in the report. `REELSTUDIO_PERF_MODEL` can supply this path instead.
 
-The default fixture is `~/Downloads/Video/aiden-v1-new.mp4`. `--long` also runs `~/Downloads/Video/IMG_7303.mov`. The runner copies each clip before importing it into a new project. `--python` selects the Python 3.11 executable. `--ffmpeg-dir` overrides the default `/Applications/Reel Studio.app/Contents/Resources/ffmpeg`.
+The default fixture is `~/Downloads/Video/short-take.mp4` (`--clip short`). `--long` also runs `~/Downloads/Video/IMG_7303.mov` (`--clip long` runs only that one). `REELSTUDIO_PERF_SHORT_CLIP` and `REELSTUDIO_PERF_LONG_CLIP` point either at another file. The runner copies each clip before importing it into a new project. `--python` selects the Python 3.11 executable. `--ffmpeg-dir` overrides the default `/Applications/Reel Studio.app/Contents/Resources/ffmpeg`.
 
 Use `--clip long` to run only IMG_7303, including through suite.mjs. `--adopt-model` starts with an empty model folder and a scratch Hugging Face cache linked to the supplied weights. It calls the ref's real model.find API, requires successful adoption, and independently hashes the copied model. It never requests a model download. This option requires a ref with the pinned-model reuse API.
 

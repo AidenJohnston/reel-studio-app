@@ -50,6 +50,13 @@ NEVER_COMMIT = [re.compile(p, re.I) for p in (
 )]
 # The one media folder that ships: the CC0 sound effects, each listed with its source in engine/THIRD_PARTY.md.
 SHIPPED_MEDIA = re.compile(r"^engine/reelengine/sfx/[a-z0-9-]+\.opus$")
+# The first run's bundled sample (THIRD_PARTY.md, "First-run sample"), file by file: nothing else in that folder.
+SHIPPED_SAMPLE = {
+    "app/src/renderer/src/assets/sample/raw.mp4": "a silent slideshow of a CC0 Wikimedia Commons photo, made for the sample",
+    "app/src/renderer/src/assets/sample/ai.mp4": "the same, with two CC BY Commons photos credited in THIRD_PARTY.md",
+    "app/src/renderer/src/assets/sample/cut.mp3": "Kenney Interface Sounds drop_002, CC0, re-encoded",
+    "app/src/renderer/src/assets/sample/ready.mp3": "Kenney Interface Sounds glass_004, CC0, re-encoded",
+}
 NEVER_COMMIT_EXACT = {"SPEC.md", "docs/PUBLISH.md"}
 NEVER_COMMIT_PREFIX = ("docs/RELEASE-NOTES",)
 
@@ -150,7 +157,7 @@ def is_text(path: str, data: bytes) -> bool:
 
 
 def never_commit(path: str) -> bool:
-    if SHIPPED_MEDIA.match(path):
+    if SHIPPED_MEDIA.match(path) or path in SHIPPED_SAMPLE:
         return False
     return path in NEVER_COMMIT_EXACT or path.startswith(NEVER_COMMIT_PREFIX) or any(r.search(path) for r in NEVER_COMMIT)
 

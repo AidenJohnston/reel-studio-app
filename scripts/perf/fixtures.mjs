@@ -1,3 +1,13 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+/** The takes the runner imports: `short` by default, `long` with --long or --clip long. Each can point anywhere with
+ * REELSTUDIO_PERF_SHORT_CLIP / REELSTUDIO_PERF_LONG_CLIP. */
+export function clipPath(kind) {
+  if (kind === 'long') return process.env.REELSTUDIO_PERF_LONG_CLIP || join(homedir(), 'Downloads/Video/IMG_7303.mov')
+  return process.env.REELSTUDIO_PERF_SHORT_CLIP || join(homedir(), 'Downloads/Video/short-take.mp4')
+}
+
 export function noteFixture() {
   const calls = [
     ['set_caption_style', { size: 110 }],
