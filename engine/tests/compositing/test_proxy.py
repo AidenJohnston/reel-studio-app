@@ -123,6 +123,19 @@ def test_a_preview_reads_the_take_unless_its_copy_is_finished_and_current(tmp_pa
     assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
 
 
+def test_a_still_reads_what_a_draft_reads(tmp_path):
+    """A still stands for the draft's frame (render.stills), so it reads the finished copy when a draft would,
+    and the take when the copy is not usable."""
+    take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=6.0)
+    pdir = _project(tmp_path, take, 1080, 1920, keep=((1.0, 4.0),))
+    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "original"}     # no copy yet
+    built = proxy.run(pdir, short_side=540)["sources"]["s1"]
+    assert _draft(pdir)["videoFrom"] == {"s1": "proxy"}
+    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "proxy"}
+    Path(built["file"]).with_suffix(".json").unlink()                     # no longer a finished copy
+    assert render.stills(pdir, [1.0], 270, root=pdir)["videoFrom"] == {"s1": "original"}
+
+
 def test_a_take_is_copied_by_one_build_at_a_time(tmp_path):
     take = fx.synth_video(tmp_path / "media-src" / "take.mp4", dur=3.0)
     pdir = _project(tmp_path, take, 1080, 1920, keep=((0.5, 2.0),))

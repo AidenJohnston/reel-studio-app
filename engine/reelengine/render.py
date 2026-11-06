@@ -1566,7 +1566,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
     src_meta, src_paths = source_files(project_dir, proj, root)
     faces = source_faces(project_dir, proj)
     # a still is the draft's frame, so it reads what the draft reads: each take's finished preview copy (proxy.py)
-    vmeta, vpaths, vfaces, _ = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
+    vmeta, vpaths, vfaces, video_from = proxymod.for_preview(project_dir, src_meta, src_paths, faces)
     ctx = make_ctx(project_dir, proj, tl, True, root, rwork)
     ctx.fmt["fps"] = preview_fps(float(ctx.fmt.get("fps") or 30))     # a still is the draft's frame (#146)
     times = [*times, *word_times(tl.words_out, words)]
@@ -1612,6 +1612,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
             err = draw(True)
         except EngineError as exc:      # as a draft does: the fast path failed, the draft from before next
             log(f"# fast still failed, retrying the slow way: {exc.message[-400:]}")
+            video_from = {sid: "original" for sid in src_meta}
             err = draw(False)
         if font_path is not None:
             bad = check_fontselect(err, Path(font_path))
@@ -1630,7 +1631,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
             on_still(out[-1])
         progress("frames", 100 * (n + 1) / len(times), "Looking at your video")
     return {"frames": out, "animationsSampledAtEnd": moved, "warnings": warnings,
-            "timings": timings}
+            "timings": timings, "videoFrom": video_from}
 
 
 def cover_key(ctx, proj: dict) -> str:
