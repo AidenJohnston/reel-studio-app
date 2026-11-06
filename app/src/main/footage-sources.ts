@@ -106,17 +106,18 @@ export function createFootageSources(deps: SourcesDeps) {
 
   let polls = 0
   /** Looks at every folder once: one that came back or went away re-reads the index. A plugged-in folder that can't
-   * be watched (some network drives) is read every fourth look instead, so its new videos still arrive. */
+   * be watched (some network drives) is read every fourth look, and every folder every twentieth, since a watcher
+   * on some file systems registers and then never reports a change. */
   async function check(): Promise<void> {
     let moved = false
-    const blind = ++polls % 4 === 0
+    polls++
     for (const s of await all()) {
       const now = isFolder(s.path)
       if (online.has(s.id) && online.get(s.id) !== now) moved = true
       online.set(s.id, now)
       if (now) arm(s)
       else disarm(s.id)
-      if (now && blind && !watchers.has(s.id)) moved = true
+      if (now && (polls % 20 === 0 || (polls % 4 === 0 && !watchers.has(s.id)))) moved = true
     }
     if (moved) deps.changed()
   }
