@@ -22,3 +22,8 @@ export const POSTING_URL = 'https://post.getreelstudio.com'
  * secrets and does their sign-in exchange. Not deployed yet; REELSTUDIO_SIGNIN_URL points the app at a local run.
  */
 export const SIGNIN_URL = 'https://signin.getreelstudio.com'
+/**
+ * Where anonymous usage data goes when the person shares it (main/usage.ts). null: there is no server for it yet, so
+ * nothing is sent; what would be is kept on the computer and shown in Settings › Privacy.
+ */
+export const USAGE_ENDPOINT: string | null = null

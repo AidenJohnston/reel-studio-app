@@ -21,7 +21,7 @@ import { PostingRows } from '../components/PostingSettings'
 import { SocialRows } from '../components/SocialSettings'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
-const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', about: 'about' }
+const TARGET: Record<SettingsSection, SectionId | SettingId> = { ai: 'editor', listen: 'listening-model', where: 'library-folder', notify: 'notifications', privacy: 'privacy', posting: 'posting', about: 'about' }
 const sectionOf = (t: SectionId | SettingId): SectionId => (t in SECTIONS ? (t as SectionId) : SETTINGS[t as SettingId].section)
 
 export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i: AppInfo) => void; go?: Go; section?: SettingsSection }) {
