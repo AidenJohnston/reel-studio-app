@@ -24,6 +24,7 @@ const EASE = 'cubic-bezier(.2, .8, .2, 1)'
 /** What the open line says under the full sentence: who uses the rule, or that nobody does while it is paused. */
 function usedBy(r: StyleRule): string {
   if (r.paused) return 'Paused. Not used on new reels until you resume it.'
+  if (r.check) return 'The app checks this on every reel it makes, and your editor fixes a reel that breaks it.'
   return r.payload ? 'The app sets this on every new reel.' : 'Your editor reads this on every new reel.'
 }
 
@@ -363,7 +364,7 @@ export function MyStyle() {
                       value={editing.text}
                       onChange={(e) => setEditing({ id: r.id, text: e.target.value })}
                       aria-label="Rule"
-                      aria-describedby={r.payload ? `edit-hint-${r.id}` : undefined}
+                      aria-describedby={r.payload || r.check ? `edit-hint-${r.id}` : undefined}
                       autoFocus
                       data-testid="style-edit-input"
                     />
@@ -374,9 +375,11 @@ export function MyStyle() {
                       Cancel
                     </button>
                   </form>
-                  {r.payload && (
+                  {(r.payload || r.check) && (
                     <p id={`edit-hint-${r.id}`} className="muted-sm style-edit-hint" data-testid="style-edit-hint">
-                      If you change these words, they become a sentence the AI reads, and the app no longer makes new reels lowercase by itself.
+                      {r.check
+                        ? 'If you change these words, they become a sentence the AI reads, and the app no longer checks every reel for it.'
+                        : 'If you change these words, they become a sentence the AI reads, and the app no longer makes new reels lowercase by itself.'}
                     </p>
                   )}
                 </li>
@@ -400,7 +403,7 @@ export function MyStyle() {
                   {kind && <span className="sr-only">{KIND_NAME[kind]}: </span>}
                   {line}
                 </button>
-                <span className="mem-state">{r.paused && 'Paused'}</span>
+                <span className="mem-state">{r.paused ? 'Paused' : r.check ? 'Checked' : null}</span>
                 <span className="mem-acts">
                   <button
                     className="btn small ghost"

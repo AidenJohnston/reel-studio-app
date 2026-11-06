@@ -9,6 +9,7 @@ import {
 } from './types';
 import { Prompts, defaultPromptsDir } from './prompts';
 import { StyleStore, StyleProposal, StyleRule } from './style';
+import type { RuleCheck } from './rules';
 import { loadProject, writeFileAtomic } from './project';
 import { planFastNote } from './fastnote';
 import { AnthropicProvider, DEFAULT_CLAUDE_MODEL, SMALL_CLAUDE_MODEL } from './providers/anthropic';
@@ -48,6 +49,7 @@ export { CodexHarness } from './mcp/codex';
 export { SessionHarness } from './mcp/session';
 export { Prompts } from './prompts';
 export { StyleStore } from './style';
+export type { RuleCheck, StyleCheckProposal } from './rules';
 export type { MemoryKind, MemoryProposal, ProposalDraft, ProposalStatus, TrialLink } from './style';
 export { learn, MIN_LEARNING_REACH } from './learning';
 export { AnthropicProvider, DEFAULT_CLAUDE_MODEL } from './providers/anthropic';
@@ -1115,8 +1117,9 @@ export function createAI(opts: CreateAIOptions) {
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string, options?: { forget?: boolean }) { return style.remove(id, options); },
     /** The user said Yes to a proposed rule (AgentResult.styleSuggestions), typed one in My style, or kept one
-     * learned from an export. `from`: the note or the export it came from. Returns the saved rule. */
-    async addStyleRule(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>) { return (await style.add(text, from)).rule; },
+     * learned from an export. `from`: the note or the export it came from. `check`: a styleChecks entry's machine form,
+     * which the app then measures on every render. Returns the saved rule. */
+    async addStyleRule(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck) { return (await style.add(text, from, check)).rule; },
     /** Undo of removeStyleRule: the rule back at `index`. */
     async restoreStyleRule(rule: StyleRule, index: number) { return style.restore(rule, index); },
     /** My style started over because its file was damaged; the damaged copy is kept next to it. */

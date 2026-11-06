@@ -140,7 +140,8 @@ def cmd_render(args):
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
                       first_look=args.first_look, music=args.music, cover=not args.no_cover,
-                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent)
+                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"), job_id=args.job_id, parent=args.parent, merge_parent=args.merge_parent,
+                      rules=args.rules)
 
 
 def cmd_cover(args):
@@ -503,6 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
     sp.add_argument("--project-file", help="render this project document instead of project.json")
+    sp.add_argument("--rules", help="JSON file of checkable My style rules (rule_checks.py); the result's "
+                                    "`ruleChecks` lists the ones this render breaks")
     sp.add_argument("--parent", type=int, help="saved version this edit is based on (default: latest)")
     sp.add_argument("--merge-parent", type=int, help="second saved parent; always makes a new final version")
     sp.add_argument("--out", help="folder for a draft (default versions/preview)")

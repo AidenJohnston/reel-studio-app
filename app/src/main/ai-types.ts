@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { TryVariable } from '../shared/platforms'
 import type { EngineProgress } from './engine'
@@ -24,6 +24,8 @@ export interface AgentResult {
   styleSuggestions?: string[]
   /** A typed rule to ask about; Yes = approveStyleProposal(it). */
   styleProposal?: StyleProposal
+  /** Rules the app would measure on every render, measured on this version; Yes = addStyleRule(text, from, check). */
+  styleChecks?: { text: string; check: RuleCheck }[]
   /** Set when the AI stopped early and a simpler edit was made instead. */
   notice?: UserFacingError
   /** the model that made this version ("Claude Sonnet 5.5 · High"); absent for a basic version */
@@ -170,7 +172,7 @@ export interface AI {
    * (learn()) never proposes its words again; false when the app takes back a rule the AI saved on its own. */
   removeStyleRule(id: string, options?: { forget?: boolean }): Promise<{ rule: StyleRule; index: number } | null>
   /** Saves one My style rule (after the user said Yes, typed in My style, or learned from an export). Optional: older packages lack it. */
-  addStyleRule?(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<StyleRule>
+  addStyleRule?(text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<StyleRule>
   /** Undo of removeStyleRule. */
   restoreStyleRule?(rule: StyleRule, index: number): Promise<void>
   /** My style started over because its file was damaged; the damaged copy is kept next to it. Optional: older packages lack it. */

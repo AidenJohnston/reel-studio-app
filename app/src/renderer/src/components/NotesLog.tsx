@@ -435,6 +435,7 @@ export function NotesLog({
               onAction={onAction}
               question={!!(m.suggestion || m.proposal)}
               scope={m.proposal?.source.version}
+              checked={m.suggestion && m.actions?.includes('remember-yes') ? !!m.check : undefined}
               error={answerError?.id === m.id && m.actions?.length ? answerError.text : undefined}
             />
           ))}
@@ -474,6 +475,7 @@ function Reply({
   onAction,
   question,
   scope,
+  checked,
   error
 }: {
   text: string
@@ -485,6 +487,8 @@ function Reply({
   question?: boolean
   /** the version a typed My style rule comes from */
   scope?: number
+  /** a suggested My style rule: true when the app will measure it on every render, false when the editor only reads it */
+  checked?: boolean
   error?: string
 }) {
   const shown = actions.filter((a) => a !== 'connect')
@@ -498,6 +502,11 @@ function Reply({
         {scope !== undefined && (
           <span className="bubble-meta" data-testid="remember-scope">
             For new reels. From Version {scope} of this reel.
+          </span>
+        )}
+        {checked !== undefined && (
+          <span className="bubble-meta" data-testid="remember-kind">
+            {checked ? 'I’ll check this on every reel.' : 'I’ll keep it in mind.'}
           </span>
         )}
         {error && (

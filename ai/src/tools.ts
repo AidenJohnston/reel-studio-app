@@ -21,6 +21,7 @@ import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema 
 import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
+import { CHECK_PARAM, CheckChoice, CheckedRule, RuleFailure, RuleReport, failureText, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
 export interface RenderInfo {
@@ -28,6 +29,11 @@ export interface RenderInfo {
   /** a preview the checker asked for (editor.ts candidateRender): it does not use up the editor's previews */
   checker?: boolean;
 }
+
+/** An AI edit's checked My style rules. `before`: the ones already failing in the version the edit started from.
+ * Those are named in the reply, never chased: "make the subtitles blue" must not send the AI after b-roll placed
+ * three notes ago. */
+export interface NoteRules { active: CheckedRule[]; before: Set<string> }
 
 export interface ToolState {
   changed: Set<string>;
@@ -54,6 +60,13 @@ export interface ToolState {
   /** project saves so far in this task, and the number of the last one that changed what the video shows */
   edits: number;
   pictureEdit: number;
+  /** The newest render's checked-rule results, including a final render stopped before its encode. Cleared by a
+   * render that did not check them (a preview moments drew), so a stale result never refuses finish. */
+  ruleChecks?: RuleReport;
+  /** finish refused once because a checked rule failed and nothing changed: it never refuses twice */
+  finishRefused?: boolean;
+  /** rules the AI proposed with a check: the app turns each into a checked rule measured on the finished video */
+  styleChecks?: { text: string; choice: CheckChoice }[];
 }
 
 export interface ToolContext {
@@ -83,6 +96,8 @@ export interface ToolContext {
   /** A render already running for this project (the first look). Every engine render waits for it:
    * two renders would share work/render/ and versions/preview/. */
   renderGate?: Promise<unknown>;
+  /** Set for an AI edit: every render it asks for measures these (`render --rules`). */
+  rules?: NoteRules;
   /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
   moments?: Moments;
   /** cached; reloaded from disk by `load()` */
@@ -592,22 +607,50 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
 }
 
 /** `announce: false`: a note's final video is shown only once the note is saved (editor.ts). */
-export async function doRender(ctx: ToolContext, draft: boolean, announce = true): Promise<RenderInfo> {
+/** The checked rules a render failed that this edit has to meet (not the ones failing before it). */
+export function unmetRules(ctx: ToolContext, report = ctx.state.ruleChecks): RuleFailure[] {
+  return (report?.failures ?? []).filter((f) => !ctx.rules?.before.has(f.id));
+}
+
+/** `stopOnRules`: a final render that fails a rule this edit has to meet stops before its encode (the result says
+ * `encoded: false`, and it is not one of `renders`), so a fix costs seconds rather than a whole video. Drafts always
+ * encode: the editor needs their frames. */
+export async function doRender(ctx: ToolContext, draft: boolean, announce = true, opts: { stopOnRules?: boolean } = {}): Promise<RenderInfo> {
   // a draft of this very edit may already be made, or being made, by moments; a final stops it
   const drawn = await ctx.moments?.before(draft ? ctx.state.edits : null);
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   const made = draft && drawn?.draft?.file ? drawn.draft : null;
   const args = [...(draft ? ['--draft', ...previewArgs(ctx)] : []), ...versionArgs(ctx)];
+  if (ctx.rules && !made) {
+    const stopOn = opts.stopOnRules && !draft ? ctx.rules.active.filter((r) => !ctx.rules!.before.has(r.id)).map((r) => r.id) : [];
+    const file = rulesFilePath(ctx);
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(file, rulesFile(ctx.rules.active, stopOn));
+    args.push('--rules', file);
+  }
   const result = made ?? await engine(ctx, 'render', args, draft ? 'Making a preview' : 'Making the final video');
+  if (ctx.rules) ctx.state.ruleChecks = result?.ruleChecks ?? undefined;
   // only a render that finished shows the changes: after a failed one they are still unseen (checkAndRepair)
   ctx.state.dirty = new Set();
   const p = await loadProject(ctx.projectDir, ctx.note?.file);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
   const info: RenderInfo = { version, draft, result };
+  if (result?.encoded === false) return info;
   ctx.state.renders.push(info);
   if (announce && !made) ctx.emit(renderEvent(info));     // moments sent its own
   return info;
+}
+
+/** What render_draft and finish tell the editor about checked rules this edit has to meet and the newest render broke. */
+function rulesFeedback(ctx: ToolContext): { myStyleRules?: { rule: string; problem: string }[]; note?: string } {
+  const unmet = unmetRules(ctx);
+  if (!unmet.length) return {};
+  const byId = new Map(ctx.rules!.active.map((r) => [r.id, r]));
+  return {
+    myStyleRules: unmet.map((f) => ({ rule: byId.get(f.id)?.text ?? f.id, problem: failureText(f, byId.get(f.id)?.check) })),
+    note: "This preview breaks the user's My style rules (see myStyleRules). The app measures them on every render and the edit is not done until they hold: change the project to meet them before finish.",
+  };
 }
 
 export function renderEvent(r: RenderInfo): AgentEvent {
@@ -2017,11 +2060,17 @@ const tools: ToolDef[] = [
   },
   {
     name: 'add_style_rule',
-    description: "Propose a lasting preference for the user's My style list (one plain sentence, applies to every future video). The user is ASKED whether to keep it; it is saved straight away only when their note itself says always / from now on / remember.",
-    parameters: S.obj({ rule: S.str('e.g. "Keep music quieter under talking."') }),
+    description: "Propose a lasting preference for the user's My style list (one plain sentence, applies to every future video). The user is ASKED whether to keep it; it is saved straight away only when their note itself says always / from now on / remember. A rule with a check is always asked about.",
+    parameters: S.obj({ rule: S.str('e.g. "Keep music quieter under talking."'), check: CHECK_PARAM }),
     async run(ctx, args) {
       let text: string;
       try { text = cleanRuleText(args.rule); } catch { throw new ToolInputError('rule is empty'); }
+      if (args.check) {
+        // The number and the words come from the finished video (editor.ts checkedProposals): this only notes the kind.
+        const list = (ctx.state.styleChecks ??= []);
+        if (!list.some((c) => c.choice === args.check)) list.push({ text, choice: args.check });
+        return { content: { ok: true, proposed: text, note: 'NOT saved. When the reel is finished the app measures it and asks the user whether to check this on every reel. Do not say you saved it or that you will remember it.' } };
+      }
       const existing = await ctx.style.find(text);
       // A note that asks again for a paused rule goes on as a new ask (PR #83: otherwise the app says "Saved" for a
       // rule it skips). Saving it turns the rule back on (StyleStore.add).
@@ -2122,6 +2171,8 @@ const tools: ToolDef[] = [
       const want = p.sources.length > 1 ? 0 : Math.round((typeof r.duration === 'number' ? r.duration : 60) / 6);
       if (!p.cutStyle && moments < Math.round(want * 0.75)) notes.push(`Only ${moments} b-roll moments (pictures, animations, labels; the hook title not counted) for a ${Math.round(r.duration ?? 60)} s video: hand edits carry about ${want}. Before finishing, add pictures or animations for the named things, places, numbers and examples still bare: search_images for them now, all in one reply.`);
       if (remakeAnimations.length) notes.push(`Animation${remakeAnimations.length > 1 ? 's' : ''} ${remakeAnimations.map((a: any) => a.id).join(', ')} now cover${remakeAnimations.length > 1 ? '' : 's'} the face or captions because the edit changed after ${remakeAnimations.length > 1 ? 'they were' : 'it was'} made. Remake each one now with its "fix" call (update_broll with the same anchor re-renders it into the free space), then render_draft again.`);
+      const rules = rulesFeedback(ctx);
+      if (rules.note) notes.unshift(rules.note);
       return { content: { ok: true, version: info.version, issues: r.issues ?? [], fixed: r.fixed ?? [], duration: r.duration ?? null, verify: r.verify ?? null, warnings: r.warnings ?? null,
         ...(r.variation ? { variation: r.variation } : {}),
         ...(shown.length ? { brollShownDifferently: shown.map((b: any) => ({ id: b.id, treatment: b.treatment, ...(b.fallback ? { shownAs: b.shownAs, why: b.fallback } : { skipped: b.skipped }) })) } : {}),
@@ -2133,6 +2184,7 @@ const tools: ToolDef[] = [
         ...(names.length ? { namedNotShown: names } : {}),
         brollMoments: { have: moments, ...(!p.cutStyle ? { handEditsCarry: want } : {}) },
         ...(visualChanges ? { visualChanges, settings: p.cutStyle ? CUT_STYLES[p.cutStyle.preset] : undefined } : {}),
+        ...(rules.myStyleRules ? { myStyleRules: rules.myStyleRules } : {}),
         ...(notes.length ? { note: notes.join(' ') } : {}) } };
     },
   },
@@ -2167,6 +2219,13 @@ const tools: ToolDef[] = [
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
     async run(ctx, args) {
+      // The newest render broke a checked My style rule and nothing changed since: the final video would too.
+      // Asks for a change, never a render (the preview budget may be spent), and only once, so it can't loop.
+      if (unmetRules(ctx).length && !ctx.state.dirty?.size && !ctx.state.finishRefused) {
+        ctx.state.finishRefused = true;
+        const fb = rulesFeedback(ctx).myStyleRules!;
+        throw new ToolInputError(`Not finished: the newest render breaks the user's My style rule${fb.length > 1 ? 's' : ''}: ${fb.map((r) => `"${r.rule}" (${r.problem})`).join('; ')}. Change the project to meet ${fb.length > 1 ? 'them' : 'it'}, then call finish. The final video is checked without a preview. If the note itself asks for the opposite, call finish again and say so.`);
+      }
       ctx.state.finished = cleanSummary(args.summary_for_user);
       return { content: { ok: true } };
     },

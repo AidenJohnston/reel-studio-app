@@ -6,8 +6,9 @@ import { effectiveTokens, runAgent, RunAgentResult, DEFAULT_TOKEN_BUDGET, waitWo
 import { Harness, loopHarness } from './harness';
 import type { LookupFn } from './safety';
 import { Prompts } from './prompts';
-import { StyleStore, StyleProposal, captionCaseProposal } from './style';
-import { RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, writeEdit } from './tools';
+import { StyleStore, StyleProposal, StyleRule, captionCaseProposal } from './style';
+import { Measured, RuleFailure, RuleReport, StyleCheckProposal, checkFromMeasured, failureText, ruleText } from './rules';
+import { NoteRules, RenderInfo, ToolContext, ToolState, captionWithCredits, captionsForProofread, doRender, unsureWords, executeTool, load, newToolState, resolveAsset, cleanSummary, renderEvent, operationStatus, noteBase, stageMerge, ToolInputError, TOOL_NAMES, unmetRules, writeEdit } from './tools';
 import { planFastNote } from './fastnote';
 import { LEDGER } from './assets';
 import { Moments } from './moments';
@@ -146,8 +147,8 @@ function watchMoments(deps: EditorDeps, ctx: ToolContext): void {
   ctx.moments.mark();
 }
 
-async function systemPrompt(deps: EditorDeps): Promise<string> {
-  return `${deps.prompts.render('system', { styleRules: await deps.style.asPromptText() })}\n\n${DATA_BOUNDARY}\n`;
+async function systemPrompt(deps: EditorDeps, ctx?: ToolContext): Promise<string> {
+  return `${deps.prompts.render('system', { styleRules: await deps.style.asPromptText(ctx?.rules?.before) })}\n\n${DATA_BOUNDARY}\n`;
 }
 
 /** The user always hears about a My style rule the AI saved. */
@@ -229,16 +230,19 @@ async function wrapUpPost(deps: EditorDeps, provider: ModelProvider, ctx: ToolCo
   const p = await loadProject(ctx.projectDir);
   if (p.post?.caption?.trim()) return;
   const finished = ctx.state.finished;
+  const refused = ctx.state.finishRefused;
   ctx.state.finished = null;
+  ctx.state.finishRefused = true;    // a short side run: the final render measures whatever it changes
   const needCover = !ctx.state.changed.has('cover');
   const task = `The edit of this video is saved. Only the post kit is missing. ${needCover ? 'Call set_cover (a raw-take second where the face is clear and expressive, from a word start time) and write_post' : 'Call write_post'} in ONE reply, following the post-kit rules below, then call finish.\n\n${deps.prompts.render('firstEdit').split(/^## /m).filter((s) => /^\d+\. (Post kit|Cover)/.test(s)).map((s) => `## ${s}`).join('\n')}`;
   try {
-    await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: 4, maxMisses: 3, tokenBudget: deps.tokenBudget,
+    await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: 4, maxMisses: 3, tokenBudget: deps.tokenBudget,
       tools: ['get_transcript', 'cover_candidates', 'set_cover', 'write_post', 'finish'], preload: ['get_transcript'] });
   } catch (e) {
     if (signal?.aborted) throw e;
   } finally {
     ctx.state.finished = finished;
+    ctx.state.finishRefused = refused;
   }
 }
 
@@ -252,33 +256,118 @@ async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx:
   const kept = new Set(keptWords(t, p.cut.keep).map((w) => w.id));
   if (!unsureWords(t, 400).some((u) => kept.has(u.id))) return;
   const finished = ctx.state.finished;
+  const refused = ctx.state.finishRefused;
   ctx.state.finished = null;
+  ctx.state.finishRefused = true;    // a short side run: the final render measures whatever it changes
   onEvent({ type: 'status', message: 'Checking your subtitles', phase: 'edit' });
   try {
-    await runAgent({ provider, system: await systemPrompt(deps), task: deps.prompts.render('proofread', { captions: captionsForProofread(t, p) }),
+    await runAgent({ provider, system: await systemPrompt(deps, ctx), task: deps.prompts.render('proofread', { captions: captionsForProofread(t, p) }),
       ctx, onEvent, signal, maxSteps: 3, maxMisses: 2, tokenBudget: deps.tokenBudget,
       tools: ['add_caption_correction', 'remove_caption_correction', 'finish'] });
   } catch (e) {
     if (signal?.aborted) throw e;
   } finally {
     ctx.state.finished = finished;
+    ctx.state.finishRefused = refused;
   }
 }
 
-async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void): Promise<number> {
-  await refreshCredits(ctx).catch(() => undefined);
-  const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
-  // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
-  if (deps.finalRender !== false) {
-    try { return (await doRender(ctx, false)).version; } catch (e) {
-      // a draft in its place would be saved and written into a version folder that engine may still write to
-      if (ctx.signal?.aborted || engineStuck(e)) throw e;
-      if (ctx.state.renders.length && !ctx.state.previewReplaced) return ctx.state.renders.at(-1)!.version;
-      throw e;
+/** `fixRules`: called once when the finished edit breaks a checked My style rule it has to meet. The final render
+ * stops before its encode in that case, so the fix costs no extra video; after the fix the video is made whatever
+ * the rules say, and the reply names what still fails (rulesReply). */
+async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void, fixRules?: (unmet: RuleFailure[]) => Promise<void>): Promise<number> {
+  const render = async (stopOnRules: boolean): Promise<number | null> => {
+    await refreshCredits(ctx).catch(() => undefined);
+    const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
+    // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
+    if (deps.finalRender !== false) {
+      try {
+        const info = await doRender(ctx, false, true, { stopOnRules });
+        return info.result?.encoded === false ? null : info.version;
+      } catch (e) {
+        // a draft in its place would be saved and written into a version folder that engine may still write to
+        if (ctx.signal?.aborted || engineStuck(e)) throw e;
+        if (ctx.state.renders.length && !ctx.state.previewReplaced) return ctx.state.renders.at(-1)!.version;
+        throw e;
+      }
     }
+    if (changedSinceRender) return (await doRender(ctx, true)).version;
+    return ctx.state.renders.at(-1)!.version;
+  };
+  const version = await render(!!fixRules);
+  if (version !== null) return version;
+  await fixRules!(unmetRules(ctx));
+  return (await render(false))!;
+}
+
+/** The checked My style rules an AI edit measures, and what the version it starts from measured (its render.json). */
+async function noteRules(deps: EditorDeps, projectDir: string, version: number): Promise<{ rules: NoteRules; unreadable: StyleRule[]; measured: Measured | null }> {
+  const { active, unreadable } = await deps.style.checks();
+  let before: RuleReport | null = null;
+  if (version > 0) {
+    try { before = JSON.parse(await fsp.readFile(path.join(versionDir(projectDir, version), 'render.json'), 'utf8'))?.ruleChecks ?? null; } catch { /* rendered before rules were checked */ }
   }
-  if (changedSinceRender) return (await doRender(ctx, true)).version;
-  return ctx.state.renders.at(-1)!.version;
+  return { rules: { active, before: new Set((before?.failures ?? []).map((f) => f.id)) }, unreadable, measured: before?.measured ?? null };
+}
+
+/** One short run with the failures in hand: no previews left, the final video is measured again. Fails soft: the AI
+ * stopping (limit, sign-in) makes the video as it is, and the reply says which rule still fails. */
+function rulesFixer(deps: EditorDeps, provider: ModelProvider, ctx: ToolContext, onEvent: (e: AgentEvent) => void, signal: AbortSignal | undefined, note?: string) {
+  return async (unmet: RuleFailure[]): Promise<void> => {
+    const byId = new Map(ctx.rules!.active.map((r) => [r.id, r]));
+    const finished = ctx.state.finished;
+    const cap = ctx.maxDraftRenders;
+    ctx.state.finished = null;
+    ctx.state.finishRefused = false;
+    ctx.maxDraftRenders = 0;
+    onEvent({ type: 'status', message: 'Fixing it to match your My style', phase: 'edit' });
+    const task = [
+      "The edit is done, but the finished reel breaks the user's My style rules, which the app measures on every render:",
+      ...unmet.map((f) => `- "${byId.get(f.id)?.text ?? f.id}": ${failureText(f, byId.get(f.id)?.check)}`),
+      ...(note ? [`The user's note was: ${JSON.stringify(note)}. Keep what it asked for.`] : []),
+      'Change the project so each rule holds, then call finish. There are no more previews: the final reel is measured again.',
+      'If the note asked for exactly the opposite of a rule, change nothing and call finish.',
+      'Your summary_for_user replaces your earlier one: say what the reel now does, and where it differs from the note because of a rule.',
+    ].join('\n');
+    try {
+      await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: 8, maxMisses: 3, tokenBudget: deps.tokenBudget, preload: ['get_project'] });
+    } catch (e) {
+      if (signal?.aborted || !(e instanceof AIError)) throw e;
+    } finally {
+      // the fix may have undone part of the note: its own summary says what the reel now does
+      ctx.state.finished ??= finished;
+      ctx.maxDraftRenders = cap;
+    }
+  };
+}
+
+/** What the reply says about checked rules, in the app's words: each one the reel still breaks, and each one this
+ * version could not check. Nothing when every rule holds. */
+function rulesReply(ctx: Pick<ToolContext, 'rules' | 'state'>, unreadable: StyleRule[]): string {
+  const byId = new Map((ctx.rules?.active ?? []).map((r) => [r.id, r]));
+  const quote = (t: string) => `"${t.replace(/\.$/, '')}"`;
+  const failed = (ctx.state.ruleChecks?.failures ?? []).filter((f) => byId.has(f.id))
+    .map((f) => `I couldn't meet your My style rule ${quote(byId.get(f.id)!.text)}: ${failureText(f, byId.get(f.id)!.check)}.`);
+  if (failed.length) failed.push('Tell me what to change, or pause the rule in My style.');
+  const unchecked = unreadable.map((r) => `I couldn't check your My style rule ${quote(r.text)}: it needs a newer version of Reel Studio.`);
+  return [...failed, ...unchecked].join(' ');
+}
+
+const withRulesReply = (summary: string, ctx: ToolContext, unreadable: StyleRule[]) => [summary, rulesReply(ctx, unreadable)].filter(Boolean).join(' ');
+
+/** Rules the AI proposed with a check, as checked rules measured on the finished reel (so the version the person
+ * approves meets them), minus ones already in My style. A kind this reel can't measure is asked as plain words. */
+async function checkedProposals(deps: EditorDeps, ctx: ToolContext, measuredBefore: Measured | null): Promise<{ styleChecks?: StyleCheckProposal[]; styleSuggestions: string[] }> {
+  const measured = ctx.state.ruleChecks?.measured ?? measuredBefore;
+  const saved = new Set((await deps.style.checks()).active.map((r) => r.text));
+  const styleChecks: StyleCheckProposal[] = [];
+  const styleSuggestions = [...ctx.state.styleSuggestions];
+  for (const { text, choice } of ctx.state.styleChecks ?? []) {
+    const check = checkFromMeasured(choice, measured);
+    if (!check) { if (!styleSuggestions.includes(text)) styleSuggestions.push(text); continue; }
+    if (!saved.has(ruleText(check)) && !styleChecks.some((c) => c.text === ruleText(check))) styleChecks.push({ text: ruleText(check), check });
+  }
+  return { styleSuggestions, ...(styleChecks.length ? { styleChecks } : {}) };
 }
 
 // ---------------------------------------------------------------- first edit
@@ -324,6 +413,8 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
   if (!provider) return deterministicEdit(deps, projectDir, onEvent, signal);
   const ctx = newCtx(deps, projectDir, provider, onEvent, signal, 3);
   const { p } = await load(ctx);
+  const { rules, unreadable, measured } = await noteRules(deps, projectDir, 0);
+  ctx.rules = rules;
   // a first look plays the analysis's default cut of the whole video, which a proposed reel's copied analysis still is
   if (deps.firstLook !== false && p.sources.length < 2 && !isProposedReel(p)) {
     ctx.renderGate = firstLook(deps, ctx, onEvent);
@@ -334,7 +425,7 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
     const task = `${deps.prompts.render(p.sources.length > 1 ? 'multiClipEdit' : 'firstEdit')}\n\nVideo title: ${p.title}${plannedScript(p)}${proposedReel(p)}`;
     let run: Pick<RunAgentResult, 'finished' | 'stoppedBy'> = { finished: null, stoppedBy: null };
     try {
-      run = await runAgent({ provider, system: await systemPrompt(deps), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+      run = await runAgent({ provider, system: await systemPrompt(deps, ctx), task, ctx, onEvent, signal, maxSteps: deps.maxSteps ?? 45, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     } catch (e: any) {
       await ctx.moments?.stop();   // before the simple version or the final render below
       await ctx.renderGate?.catch(() => undefined);   // never two renders at once
@@ -353,7 +444,7 @@ async function editNewVideo(deps: EditorDeps, provider: ModelProvider | null, pr
         // Stopped after a preview existed: keep what was done and say so.
         onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
         const version = await finalize(deps, ctx, onEvent);
-        const summary = withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state);
+        const summary = withRulesReply(withStyleEcho(`I got most of the way through your edit. ${e.userMessage}`, ctx.state), ctx, unreadable);
         await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}
 
 First edit (stopped early).
@@ -361,20 +452,21 @@ First edit (stopped early).
 ${summary}
 `);
         await writeAiRun(projectDir, version, ctx.state.aiCalls);
-        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed], notice: e.toJSON() };
+        return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed], notice: e.toJSON() };
       }
       throw e;
     }
     await proofreadCaptions(deps, deps.checker ?? provider, ctx, onEvent, signal);
     await wrapUpPost(deps, deps.writer ?? provider, ctx, onEvent, signal);
     onEvent({ type: 'status', message: 'Finishing your reel', pct: 94, phase: 'final' });
-    const version = await finalize(deps, ctx, onEvent);
-    const summary = withStyleEcho(honestSummary(run, ctx.state)
-      ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state);
+    const version = await finalize(deps, ctx, onEvent, rulesFixer(deps, provider, ctx, onEvent, signal));
+    // ctx.state.finished: a rules fix replaces the run's summary with what the reel now does
+    const summary = withRulesReply(withStyleEcho(honestSummary({ ...run, finished: ctx.state.finished ?? run.finished }, ctx.state)
+      ?? 'I could not finish your first edit this time, so this version is mostly your video as it was. Try again, or tell me what to change.', ctx.state), ctx, unreadable);
     await snapshotVersion(projectDir, await loadProject(projectDir), version, `# v${version}\n\nFirst edit.\n\n${summary}\n`);
     await writeAiRun(projectDir, version, ctx.state.aiCalls);
     onEvent({ type: 'status', message: 'Done', pct: 100 });
-    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, styleSuggestions: ctx.state.styleSuggestions, changed: [...ctx.state.changed] };
+    return { summary, version, styleRulesAdded: ctx.state.styleRulesAdded, ...(await checkedProposals(deps, ctx, measured)), changed: [...ctx.state.changed] };
   } finally {
     await ctx.moments?.stop();
   }
@@ -400,6 +492,9 @@ export interface ApplyNoteOptions {
 }
 
 const REPAIR_STEPS = 12;
+
+/** Thrown by a fast note's rule fixer: the note goes to the AI instead, which can meet the note and the rule. */
+const BREAKS_A_RULE = Symbol('a fast note breaks a checked My style rule');
 
 async function candidateRender(ctx: ToolContext): Promise<RenderInfo> {
   const last = ctx.state.renders.at(-1);
@@ -489,7 +584,7 @@ async function checkAndRepair(deps: EditorDeps, provider: ModelProvider, ctx: To
     };
     ctx.state.finished = null;
     try {
-      const r = await runAgent({ provider: counted, system: await systemPrompt(deps), task: repairTask(note, asked.round.fixes, attachments.files), taskImages: attachments.images, ctx, onEvent, signal,
+      const r = await runAgent({ provider: counted, system: await systemPrompt(deps, ctx), task: repairTask(note, asked.round.fixes, attachments.files), taskImages: attachments.images, ctx, onEvent, signal,
         maxSteps: REPAIR_STEPS, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
       const after = await loadProject(ctx.projectDir, ctx.note?.file);
       if (sameEdit(p0, after) || sameEdit(start, after)) {
@@ -538,7 +633,7 @@ async function checkInHarness(deps: EditorDeps, harness: Harness, ctx: ToolConte
     if (repairs === MAX_REPAIRS) return `${said} ${unresolvedLine(verdict.findings)}`;
     onEvent({ type: 'status', message: 'Fixing what the check found', pct: 87, phase: 'edit' });
     ctx.state.finished = null;
-    const repair = await harness.run({ system: await systemPrompt(deps), task: repairTask(n.noteText, verdict.findings, n.files), taskImages: n.images,
+    const repair = await harness.run({ system: await systemPrompt(deps, ctx), task: repairTask(n.noteText, verdict.findings, n.files), taskImages: n.images,
       ctx, onEvent, signal, tools: TOOL_NAMES.filter((name) => name !== 'add_style_rule'), maxSteps: 12, tokenBudget: Math.max(0, budget - spent),
       preload: ['get_project', 'get_transcript'] });
     count(repair.tokens);
@@ -599,10 +694,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const ledgerBefore = await ledgerBytes(projectDir);
   // what runs the note's AI turns: our own loop, or Claude Code over MCP behind the dev setting (mcp-harness)
   const harness = deps.harness ?? loopHarness(provider);
+  // checked My style rules: measured on every render of this note, from what the version it changes measured
+  const { rules, unreadable, measured } = await noteRules(deps, projectDir, parent);
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
     await writeFileAtomic(file, edit);
-    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId };
+    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, rules };
   };
   const label = noteLabel(note, attached);
   let committed: EditResult;
@@ -626,8 +723,14 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       if (ok) {
         // the change is made: say so now, the render that shows it follows
         onEvent({ type: 'reply', text: fast.summary });
-        const r = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary: fast.summary, attachments: [] }, opts.saveStyleRules !== false);
-        return { ...r, fast: fast.kind };
+        try {
+          // a fast note that breaks a checked rule goes to the AI instead, which can meet both
+          const r = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary: fast.summary, attachments: [] }, opts.saveStyleRules !== false,
+            { fix: async () => { throw BREAKS_A_RULE; }, unreadable });
+          return { ...r, fast: fast.kind };
+        } catch (e) {
+          if (e !== BREAKS_A_RULE) throw e;
+        }
       }
       // the direct change did not fit this project: start again from the saved project and let the AI read the note
       ctx = await begin();
@@ -642,7 +745,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const files = attachmentsSection(attached, earlier, harness.supportsImages ? stills : new Map());
     const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
-    const r = await harness.run({ system: await systemPrompt(deps), task, taskImages: images, ctx, onEvent, signal, tools: TOOL_NAMES, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+    const r = await harness.run({ system: await systemPrompt(deps, ctx), task, taskImages: images, ctx, onEvent, signal, tools: TOOL_NAMES, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     const nothing = !ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length;
     // A note that stopped before finish (step limit, or replies with no tool call) is not applied, and
     // says so when that throws work away. With nothing to throw away it gets the "not sure" reply.
@@ -673,7 +776,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
     const placedNow = await placedAssets(projectDir, await loadProject(projectDir, ctx.note!.file));
     const recorded = [...refs, ...earlier.map((a) => a.asset).filter((r) => placedNow.has(r) && !refs.includes(r))];
-    const result = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false);
+    // A note run in an MCP harness (dev only) has no loop of ours for the fix: its reply still names any failing rule.
+    const fix = deps.harness ? undefined : rulesFixer(deps, provider, ctx, onEvent, signal, note.trim() || undefined);
+    const result = await saveNote(deps, ctx, base, baseVersion, { text: note.trim(), label, summary, attachments: recorded }, opts.saveStyleRules !== false, { fix, unreadable });
     if (review && result.version !== undefined) {
       try {
         await saveCheck(projectDir, result.version, review.record);
@@ -681,7 +786,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         console.warn(`Could not save check.json for v${result.version}; keeping the committed note.`, e);
       }
     }
-    committed = { ...result, ...(review ? { check: review.record } : {}) };
+    committed = { ...result, ...(await checkedProposals(deps, ctx, measured)), ...(review ? { check: review.record } : {}) };
     started = p0;
   } catch (e) {
     stuck = engineStuck(e);
@@ -752,7 +857,11 @@ const changedElsewhere = (): AIError =>
 
 /** The final video (none when the note only saved or proposed a My style rule), then the one write that saves the note
  * (see applyNote). Nothing after that write can fail the note. */
-async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVersion: number, n: { text: string; label: string; summary: string; attachments: string[] }, saveStyle: boolean): Promise<EditResult> {
+/** `rules`: an AI edit's checked My style rules. With `fix`, a final render that breaks one stops before its encode and
+ * `fix` runs once (a short AI run, or a fast note handing over to the AI by throwing); the video is then made
+ * whatever the rules say, and the reply names what still fails. */
+async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVersion: number, n: { text: string; label: string; summary: string; attachments: string[] }, saveStyle: boolean,
+  rules?: { fix?: (unmet: RuleFailure[]) => Promise<void>; unreadable: StyleRule[] }): Promise<EditResult> {
   const live = path.join(ctx.projectDir, PROJECT_FILE);
   // Checked again before anything goes into versions/: a version saved since the note began (another
   // edit) has the number this note's final would take, and must never be rendered or written over.
@@ -769,8 +878,22 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
       await refreshCredits(ctx);
       // the engine refuses that number too (render.py PROJECT_CHANGED), for a save that lands meanwhile
       renderStarted = true;
-      final = await doRender(ctx, false, false).catch((e) => { throw e?.code === 'PROJECT_CHANGED' ? changedElsewhere() : e; });
+      const render = (stopOnRules: boolean) => doRender(ctx, false, false, { stopOnRules })
+        .catch((e) => { throw e?.code === 'PROJECT_CHANGED' ? changedElsewhere() : e; });
+      final = await render(!!rules?.fix);
+      if (final.result?.encoded === false) {
+        const said = ctx.state.finished;
+        await rules!.fix!(unmetRules(ctx));
+        // the fix may have undone part of the note: its own summary says what the reel now does
+        if (ctx.state.finished && ctx.state.finished !== said) n = { ...n, summary: withStyleEcho(ctx.state.finished, ctx.state) };
+        await unchanged();
+        await refreshCredits(ctx);
+        final = await render(false);
+      }
     }
+    // only the final render's results are this version's: a preview's are not, and a note with no video has none
+    if (!final) ctx.state.ruleChecks = undefined;
+    if (rules) n = { ...n, summary: withRulesReply(n.summary, ctx, rules.unreadable) };
     const version = final?.version ?? baseVersion;
     // A preference-only note must not replace the live edit with its selected historical base.
     const p = ctx.state.changed.size ? await loadProject(ctx.projectDir, ctx.note!.file) : withDefaults(JSON.parse(base.toString('utf8').replace(/^\uFEFF/, '')));

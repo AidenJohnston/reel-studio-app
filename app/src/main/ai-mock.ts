@@ -6,7 +6,7 @@ import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
-import type { Phase, StyleProposal, StyleRule } from '../shared/api'
+import type { Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -132,9 +132,15 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeJson(styleFile(), { ...s, rules })
   }
   /** As the real package's StyleStore.add: the same words again turn a paused rule back on instead of adding a copy. */
-  const addRule = (text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>): Promise<{ added: boolean; rule: StyleRule }> =>
+  const addRule = (text: string, from?: Pick<StyleRule, 'source' | 'imported' | 'byYou'>, check?: RuleCheck): Promise<{ added: boolean; rule: StyleRule }> =>
     withStyle(async (s) => {
       const dup = s.rules.find((r) => sameRule(r.text) === sameRule(text))
+      if (dup && check) {
+        // as the real store: a checked rule replaces any rule checking the same kind
+        const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, check }
+        await saveRules(s, [...s.rules.filter((r) => r.check?.kind !== check.kind && r !== dup), rule])
+        return { added: true, rule }
+      }
       if (dup) {
         if (dup.paused) {
           delete dup.paused
@@ -142,8 +148,8 @@ export const createMockAI: CreateAI = ({ host }) => {
         }
         return { added: false, rule: dup }
       }
-      const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from }
-      await saveRules(s, [...s.rules, rule])
+      const rule: StyleRule = { id: randomUUID(), text: cleanRule(text), createdAt: new Date().toISOString(), ...from, ...(check ? { check } : {}) }
+      await saveRules(s, [...s.rules.filter((r) => !check || r.check?.kind !== check.kind), rule])
       return { added: true, rule }
     })
 
@@ -405,6 +411,18 @@ export const createMockAI: CreateAI = ({ host }) => {
           : { id: randomUUID(), text: LOWERCASE_CAPTIONS, payload: { kind: 'caption-case', case: 'lower' }, source: { project: p.id, title: p.title, version } }
         return { summary: 'I made the subtitles lowercase.', version, styleRulesAdded: [], changed: ['captions'], ...(styleProposal ? { styleProposal } : {}) }
       }
+      // Tests only, as above: "at most 2 words" asks to check that on every reel, as the real package does once it has
+      // measured the finished reel (ai/src/editor.ts checkedProposals). The words are the app's (ai/src/rules.ts ruleText).
+      const most = chosen === 'claude-cli' && state.claude === 'ready' ? /\bat most ([1-4]) words?\b/i.exec(note) : null
+      if (most) {
+        const value = Number(most[1])
+        const text = value === 1 ? 'Show subtitles one word at a time.' : `Show at most ${value} words in a subtitle.`
+        const summary = 'Your subtitles already show that many words, so I left this reel as it is.'
+        p.notes = [...(p.notes ?? []), { version: p.version ?? 0, text: note, applied: [], at: new Date().toISOString(), ...(opts?.id ? { id: opts.id } : {}), reply: summary }]
+        await writeProject(projectDir, p)
+        onEvent({ type: 'status', message: 'Done', pct: 100 })
+        return { summary, version: p.version ?? 0, styleRulesAdded: [], styleSuggestions: [], styleChecks: [{ text, check: { kind: 'captions.maxWords', value } }], changed: [] }
+      }
       // a rule to remember is only proposed: the app asks before anything goes into My style
       const proposed = /\b(always|never|every video|from now on|in general)\b/i.test(note) ? [note.trim()] : []
       const summary = proposed.length
@@ -507,8 +525,8 @@ export const createMockAI: CreateAI = ({ host }) => {
     async styleWasDamaged() {
       return withStyle(async (s) => typeof s.damaged === 'string' && existsSync(join(host.reelStudioRoot(), basename(s.damaged)))).catch(() => false)
     },
-    async addStyleRule(text, from) {
-      return (await addRule(text, from)).rule
+    async addStyleRule(text, from, check) {
+      return (await addRule(text, from, check)).rule
     },
     async restoreStyleRule(rule, index) {
       await withStyle(async (s) => {

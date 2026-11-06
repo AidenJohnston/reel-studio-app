@@ -132,6 +132,8 @@ export interface ChatMessage {
   suggestion?: string
   /** A typed My style rule to ask about instead (lowercase captions after a note made them so). */
   proposal?: StyleProposal
+  /** With `suggestion`: once saved, the app measures this rule on every render ("I'll check this every time"). */
+  check?: RuleCheck
   /** Pictures, GIFs or clips the user attached to this note (a "you" message). */
   attachments?: NoteAttachment[]
   /** Where a note asked "Just here" points: shown as a muted "0:08" before the words and placed as a mark (shared/moments.ts). */
@@ -702,6 +704,8 @@ export interface StyleRule {
   paused?: boolean
   /** Set: the app applies this rule itself when a new video is made. Otherwise the AI reads it on every edit. */
   payload?: { kind: 'caption-case'; case: 'lower' }
+  /** Set: the app measures this on every render, and a note can't finish while it fails. Its words are the app's. */
+  check?: RuleCheck
   /** The reel, version and note it was learned from. */
   source?: { project: string; title: string; version: number; note?: string }
   /** Learned from another editor's export (My style, Learn from my past edits): its file name. */
@@ -712,6 +716,11 @@ export interface StyleRule {
   /** Typed in by the person with Add a rule, not learned from a note or an export. */
   byYou?: true
 }
+
+/** A checked My style rule's machine form (ai/src/rules.ts validates it; engine/reelengine/rule_checks.py measures it). */
+export type RuleCheck =
+  | { kind: 'captions.maxWords' | 'captions.maxSize' | 'captions.minSize' | 'music.underVoiceDb'; value: number }
+  | { kind: 'broll.keepOut'; zone: 'face' | 'eyes' }
 
 /** One rule "Learn from my past edits" read from an export, with what it was read from. Nothing is saved until the person keeps it. */
 export interface LearnedRule {
