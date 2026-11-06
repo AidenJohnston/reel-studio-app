@@ -28,3 +28,12 @@ def test_a_render_run_by_hand_refuses_a_project_reel_studio_has_open(tmp_path):
 
     # the app's own render gets past the check (and then finds this folder has no project yet)
     assert last_event(project, "render", "--owner", "the app's note")["code"] == "NO_PROJECT"
+
+
+def test_the_preview_copy_builds_while_reel_studio_has_the_project_open(tmp_path):
+    """The app starts `proxy` from inside the import and note jobs, which hold the lock, and lets it run on
+    after they end, so it carries no job's token (app/src/main/proxy-builds.ts)."""
+    project = tmp_path / "bread"
+    (project / "work").mkdir(parents=True)
+    (project / "work" / ".owner.lock").write_text(json.dumps({"app": "Reel Studio", "token": "the app's note"}))
+    assert last_event(project, "proxy").get("code") != "PROJECT_OPEN"
