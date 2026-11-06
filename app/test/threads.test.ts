@@ -91,6 +91,15 @@ describe('Threads', () => {
     expect(await w.service.publish(INPUT)).toEqual(post); w.done()
   })
 
+  it('won’t publish a container made from an older export of the version', async () => {
+    const w = await world(); w.connect(); await w.service.connect()
+    // made, then still processing when the person stopped waiting
+    w.upload(); for (let i = 0; i < 10; i++) w.status('IN_PROGRESS')
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'TH_PROCESSING' })
+    await fs.writeFile(join(w.project, 'versions', 'v1', 'export.mp4'), VIDEO.split('').reverse().join(''))
+    await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'TH_PUBLISH_CHANGED' }); w.done()
+  })
+
   it('never posts again after Threads’ answer to Publish was lost, and refuses text over 500 characters', async () => {
     const w = await world(); w.connect(); await w.service.connect()
     await expect(w.service.publish({ ...INPUT, text: 'x'.repeat(501) })).rejects.toMatchObject({ code: 'TH_INPUT' })

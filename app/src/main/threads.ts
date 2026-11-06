@@ -8,7 +8,7 @@
 // and publishes. threads-publish.json in the project keeps where each version got to, so a lost answer to Publish
 // blocks a second post instead of risking one.
 import { createHash, randomBytes } from 'node:crypto'
-import { constants, promises as fs } from 'node:fs'
+import { constants, createReadStream, promises as fs } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
 import { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -98,6 +98,18 @@ async function saveReceipt(dir: string, version: number, r: Receipt): Promise<vo
   const saved = await readJson(file)
   const versions = saved?.versions && typeof saved.versions === 'object' ? (saved.versions as Record<string, unknown>) : {}
   await atomicSocialFile(file, JSON.stringify({ schemaVersion: 1, versions: { ...versions, [`v${version}`]: r } }, null, 2) + '\n')
+}
+
+/** SHA-256 of a version's export, or "" when there is none yet (stage() then says so). */
+async function exportHash(dir: string, version: number): Promise<string> {
+  const hash = createHash('sha256')
+  try {
+    for await (const chunk of createReadStream(join(dir, 'versions', `v${version}`, 'export.mp4'))) hash.update(chunk as Buffer)
+  } catch (e) {
+    if (e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') return ''
+    throw e
+  }
+  return hash.digest('hex')
 }
 
 /** outcomes.json, next to the other platforms' posts, as threads:<id>. */
@@ -293,7 +305,6 @@ export class ThreadsService {
       const dir = await this.project(p.slug, p.version)
       const c = await this.credentials(signal)
       const version = p.version
-      const inputHash = createHash('sha256').update(JSON.stringify({ text: p.text })).digest('hex')
       let saved = await receipt(dir, version)
       if (saved && saved.userId !== c.userId) return fail('ACCOUNT', 'This version already started posting to another Threads account.')
       if (saved?.state === 'published') {
@@ -301,7 +312,9 @@ export class ThreadsService {
         return saved.post
       }
       if (saved?.state === 'publishing') return fail('PUBLISH_UNKNOWN', 'Threads didn’t confirm whether this was posted. Check Threads before posting this version again.')
-      if (saved && saved.inputHash !== inputHash) return fail('PUBLISH_CHANGED', 'This version started posting with other text. Post it with that text, or export a new version.')
+      // the bytes are part of what was asked: a container made from an older export is never published for a newer one
+      const inputHash = createHash('sha256').update(JSON.stringify({ text: p.text })).update(await exportHash(dir, version)).digest('hex')
+      if (saved && saved.inputHash !== inputHash) return fail('PUBLISH_CHANGED', 'This version started posting with other text or another export. Post it as it was, or export a new version.')
       const auth = { authorization: `Bearer ${c.token}` }
       if (!saved) {
         const videoUrl = await this.stage(dir, version, c, cfg, signal)
