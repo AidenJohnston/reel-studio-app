@@ -146,12 +146,21 @@ async function settingsAt(page: Page, key: string): Promise<void> {
 const MOMENT = 7.5
 /** The player paused at `t`, as a person stops it to look. */
 async function pauseAt(page: Page, t: number): Promise<void> {
-  await page.evaluate((at) => {
-    const v = document.querySelector('[data-testid=player]') as HTMLVideoElement | null
-    v?.pause()
-    if (v) v.currentTime = at
-  }, t)
+  // A new version's video loads as a second layer over the one on screen and plays from its start once it is in
+  // (Player.tsx FADE_MS): hold every player video at `t` until none is loading and all stay there.
+  const hold = () =>
+    page.evaluate((at) => {
+      const vs = [...document.querySelectorAll<HTMLVideoElement>('video[data-testid=player]')]
+      if (!vs.length || document.querySelector('video.layer.loading')) return false
+      for (const v of vs) {
+        if (!v.paused) v.pause()
+        if (Math.abs(v.currentTime - at) > 0.05) v.currentTime = at
+      }
+      return vs.every((v) => v.paused && v.readyState >= 2 && Math.abs(v.currentTime - at) <= 0.05)
+    }, t)
+  await expect.poll(hold, { timeout: 20_000 }).toBe(true)
   await page.waitForTimeout(300)
+  await expect.poll(hold, { timeout: 5_000 }).toBe(true)
 }
 async function note(page: Page, text: string): Promise<void> {
   // at a moment in the reel, as a creator makes one, clear of the reel's start
@@ -461,7 +470,8 @@ test('climb scenes at two sizes', async () => {
   }, { realViewport: true })
   const ctx: Ctx = { app, page, gate: (n) => writeFileSync(join(gateDir, `go-${n}`), '') }
   const kept = words.filter((w) => !w.cut).map((w) => w.w)
-  const lines = Array.from({ length: Math.ceil(kept.length / 3) }, (_, i) => kept.slice(i * 3, i * 3 + 3).join(' '))
+  // three to a line, in capitals: the engine's default look (captions.py, case "upper"), as the stand-in names them
+  const lines = Array.from({ length: Math.ceil(kept.length / 3) }, (_, i) => kept.slice(i * 3, i * 3 + 3).join(' ').toUpperCase())
   await expect(page.getByTestId('get-started')).toBeVisible()
   const subtitles = join(BASE, 'climb-subtitles')
   // the default size, and the bigger one the climb's note asks for (ai-mock.ts slowNote)

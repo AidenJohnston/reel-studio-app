@@ -198,7 +198,9 @@ export const createMockAI: CreateAI = ({ host }) => {
     done.notes[done.notes.length - 1].version = version
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-    if (bigger) return { summary: 'I made the subtitles bigger, so they read at a glance on a phone.', version, styleRulesAdded: [], changed: ['captions'] }
+    // the subtitles have one size for the whole reel (captions.style.size), so a note pointed at a moment says where it
+    // landed, as an editor would
+    if (bigger) return { summary: 'I made the subtitles bigger through the whole reel, since they are one size everywhere, so they read at a glance on a phone.', version, styleRulesAdded: [], changed: ['captions'] }
     return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 

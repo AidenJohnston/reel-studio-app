@@ -335,15 +335,21 @@ def subtitle_layers(proj: Path, data: dict, width: int) -> tuple[list[str], str]
     size, position = int(float(style.get("size", 105))), float(style.get("position", 0.75))
     times = {w["id"]: (w["s"], w["e"]) for w in json.loads((proj / "work" / "transcript.json").read_text("utf-8"))["words"]}
     inputs, chain, last = [], [], "base"
+    # in the style's case, as the engine draws it (captions.py cue_text; capitals unless the style says otherwise)
+    case = style.get("case") or "upper"
     for cue in cues:
         text = " ".join(t["w"] for t in cue["tokens"] if t["w"])
+        text = text.upper() if case == "upper" else text.lower() if case == "lower" else text
         png = Path(folder) / str(size) / f"{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}.png"
         if not png.exists():
             continue
         n = len(inputs) + 1
         inputs.append(str(png))
         a, b = times[cue["ids"][0]][0], times[cue["ids"][-1]][1]
-        chain.append(f"[{n}:v]scale=iw*{width / 1080:.4f}:-1[s{n}];"
+        # shrink-only into the safe width, as captions.py fit does: inside the side margins and left of Instagram's
+        # button rail (MARGIN_FRAC 0.065, verify.IG_RIGHT_FRAC 0.13), centred
+        safe = 2 * min(width / 2 - 0.065 * width, width * (1 - 0.13) - width / 2 - 1)
+        chain.append(f"[{n}:v]scale=w='min(iw*{width / 1080:.4f},{safe:.1f})':h=-1[s{n}];"
                      f"[{last}][s{n}]overlay=x=(W-w)/2:y=H*{position:.4f}-h/2:enable='between(t,{a:.3f},{b:.3f})'[o{n}]")
         last = f"o{n}"
     if not inputs:
