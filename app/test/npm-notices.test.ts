@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 // package can carry a nested copy at another version than the top-level one (electron-updater's semver 7.7.4 beside
 // a dev-only 7.8.5). The lock's own dev flags are not used.
 const repo = resolve(__dirname, '../..')
-type Entry = { version?: string; link?: boolean; resolved?: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> }
+type Entry = { version?: string; link?: boolean; resolved?: string; dev?: boolean; devOptional?: boolean; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> }
 const lock = JSON.parse(readFileSync(resolve(repo, 'package-lock.json'), 'utf8')).packages as Record<string, Entry>
 // The front-end libraries vite bundles into the window (devDependencies, but they ship).
 const BUNDLED = ['react', 'react-dom', 'scheduler']
@@ -24,20 +24,25 @@ function locate(name: string, from: string): string | null {
   return null
 }
 
-function shipped(): Set<string> {
-  const out = new Set<string>()
-  const seen = new Set<string>()
+/** The packages the app loads at run time, lock path to name: the workspaces' production dependencies, followed. */
+function runtime(): Map<string, string> {
+  const seen = new Map<string, string>()
   const queue = ['app', 'ai'] // the workspaces; only their production dependencies ship
   while (queue.length) {
     const at = queue.pop()!
     for (const name of Object.keys({ ...lock[at].dependencies, ...lock[at].optionalDependencies })) {
       const path = locate(name, at)
       if (path === null || seen.has(path)) continue
-      seen.add(path)
+      seen.set(path, name)
       queue.push(path)
-      if (!name.startsWith('@reelstudio/')) out.add(`${name} ${lock[path].version}`)
     }
   }
+  return seen
+}
+
+function shipped(): Set<string> {
+  const out = new Set<string>()
+  for (const [path, name] of runtime()) if (!name.startsWith('@reelstudio/')) out.add(`${name} ${lock[path].version}`)
   for (const name of BUNDLED) out.add(`${name} ${lock[locate(name, 'app')!].version}`)
   return out
 }
@@ -57,4 +62,11 @@ it('fails if the npm licence notices miss a shipped package version or name one 
   const notices = noticed()
   expect([...notices].filter((n) => !ships.has(n)).sort()).toEqual([])
   expect([...ships].filter((n) => !notices.has(n)).sort()).toEqual([])
+})
+
+it('fails if package-lock.json marks a package the app loads at run time as dev-only', () => {
+  // A dev flag tells an install that omits dev packages (npm ci --omit=dev, or a packager asking npm for production
+  // dependencies) to leave the package out; electron-updater then fails to load in the packaged app.
+  const devOnly = [...runtime().keys()].filter((path) => lock[path].dev || lock[path].devOptional)
+  expect(devOnly.sort()).toEqual([])
 })
