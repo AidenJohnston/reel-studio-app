@@ -142,6 +142,9 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             if (!cancelled) s.lastError = { code: err.code, userMessage: err.userMessage }
           }).catch(() => {})
           if (!cancelled && kind !== 'first-edit') await addChat(slug, 'editor', err.userMessage).catch(() => {})
+          // Stop shows no message, except news the stop could not undo (a My style rule left on, ai/src/editor.ts)
+          const tell = (e as { tellAfterStop?: unknown } | null)?.tellAfterStop
+          if (cancelled && typeof tell === 'string' && tell) await addChat(slug, 'editor', tell).catch(() => {})
         }
         send(cancelled ? { jobId: id, slug, type: 'cancelled' } : { jobId: id, slug, type: 'error', code: err.code, userMessage: err.userMessage })
       } finally {

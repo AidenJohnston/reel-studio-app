@@ -94,7 +94,8 @@ export interface AI {
   setActive(id: ProviderStatus['id'], connectionId?: string): Promise<void>
   setClaudeKey(key: string | null): Promise<ProviderStatus>
   firstEdit(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentResult>
-  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). */
+  /** `opts.attachments`: `work/assets/attach-*` refs main already checked (the AI checks them again). A rejected
+   * note may carry `tellAfterStop`: a sentence the chat shows even after Stop (jobs.ts). */
   applyNote(
     projectDir: string,
     note: string,
