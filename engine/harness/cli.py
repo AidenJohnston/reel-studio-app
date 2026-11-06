@@ -206,6 +206,10 @@ def cmd_run(a) -> int:
     (out_dir / "report.md").write_text(md, encoding="utf-8")
     print(md)
     print(f"\nreport: {out_dir / 'report.json'}")
+    for take in report["takes"].values():
+        if _status(take["final"]["check"]) == "fail" or any(
+                _status(chk) == "fail" for step in take["steps"] for chk in step["checks"].values()):
+            return 1
     return 0
 
 
