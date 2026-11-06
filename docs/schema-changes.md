@@ -10,7 +10,7 @@ Existing project shapes remain valid. New shapes can require a newer engine, as 
 - `cut.keep[].join.transition` accepts `"flash"`: the picture dips to white for 2 frames before the cut and 3 after
   it (`render.flash_layers`), drawn as a layer so every kind of render shows it.
 - `beatAccents: false` now turns beat landing off even when `cutStyle.preset` is `"hyper"`. Before, false meant the
-  same as absent. No project written before this has false (nothing set it), so none renders differently.
+  same as absent. Neither the app nor the AI ever wrote false, so only a project edited by hand can render differently.
 - "Edit it myself" sets joins (Cut > Transitions) and `beatAccents` (Cut > Pace) through the `handEdits` queue. A
   queued hand edit saved before this has no `joins` list and applies as it did.
 

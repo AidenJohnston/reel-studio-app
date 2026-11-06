@@ -170,6 +170,8 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
 | `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
+| `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
 | `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
