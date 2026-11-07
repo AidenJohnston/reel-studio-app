@@ -212,14 +212,19 @@ def _dense_window(times: list, info: dict) -> Optional[tuple]:
 
 def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None):
     """For each t, the first frame at or after t (what `-ss t -frames:v 1` returns), from one decode.
-    Frame k of an accurate `-ss a` seek is at a + k/fps (sources are constant frame rate)."""
+    Frame k of an accurate `-ss a` seek is source frame ceil(a * fps) + k (sources are constant frame
+    rate, frames at n / fps)."""
     info = probe(path, ctx)
     fps = float(info["fps"])
     a, b = win
-    cmd = [ffmpeg_bin(ctx), "-v", "error", "-nostdin", "-ss", f"{a:.3f}", "-i", str(path), "-t", f"{b - a:.3f}",
+    seek = f"{a:.3f}"
+    cmd = [ffmpeg_bin(ctx), "-v", "error", "-nostdin", "-ss", seek, "-i", str(path), "-t", f"{b - a:.3f}",
            "-an", "-vf", f"scale={w}:{h}:flags=area", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
     size = w * h * 3
-    t0 = round(a, 3)
+    # The decode starts at the first frame at or after the seek, not at the seek time itself, so indices
+    # count source frames from that one. Counting from the seek time puts a pick one frame late whenever
+    # the window starts between frames. Times are read to the millisecond, as the one-seek path passes them.
+    first = math.ceil(float(seek) * fps - 1e-6)
     # A separate file keeps stderr from filling a pipe while stdout is read one frame at a time.
     with tempfile.TemporaryFile() as stderr:
         try:
@@ -242,7 +247,7 @@ def _window_frames(path: Path, times: list, win: tuple, w: int, h: int, ctx=None
             started = time.monotonic()
             timer.start()
             for t in times:
-                k = max(0, int(math.ceil((t - t0) * fps - 1e-6)))
+                k = max(0, math.ceil(float(f"{max(0.0, t):.3f}") * fps - 1e-6) - first)
                 while index < k and not eof:
                     frame = proc.stdout.read(size)
                     if len(frame) < size:
