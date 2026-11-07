@@ -19,6 +19,7 @@ Extra test hooks (env):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -281,8 +282,15 @@ def write_captions(proj: Path, vdir: Path, data: dict) -> None:
     words = json.loads(transcript.read_text("utf-8"))["words"]
     index = {w["id"]: i for i, w in enumerate(words)}
     fixes = {c["at"]: c["to"] for c in cap.get("corrections") or [] if c.get("at")}
+
+    def kept(r):
+        # a clip item keeps the words of its source inside its times; a range keeps its words
+        if "clip" in r:
+            return [w for w in words if w.get("source") == r["source"] and w["s"] >= r["in"] and w["e"] <= r["out"]]
+        return words[index[r["from"]]:index[r["to"]] + 1]
+
     tokens = [{"w": fixes.get(w["id"], w["w"]), "ids": [w["id"]]}
-              for r in (data.get("cut") or {}).get("keep") or [] for w in words[index[r["from"]]:index[r["to"]] + 1]]
+              for r in (data.get("cut") or {}).get("keep") or [] for w in kept(r)]
     split = set(cap.get("split") or [])
     joins = {(j["from"], j["to"]) for j in cap.get("join") or []}
 
@@ -786,6 +794,30 @@ def cmd_footage(args: list[str]) -> dict:
     action = args.pop(0) if args else ""
     if action == "search":
         return {"hits": [], "more": False, "backend": "none"}
+    if action == "digest":
+        # the videos the last index run saw, unchanged since, each with a placeholder line every 4 s and its
+        # content hash (real: footage.py digest); --ref: only those
+        root = Path(take(args, "--root") or ROOT)
+        only = []
+        while "--ref" in args:
+            only.append(take(args, "--ref"))
+        seen = root / ".index" / "fake-files.json"
+        out = []
+        for entry in (json.loads(seen.read_text()) if seen.is_file() else []):
+            path = Path(entry["path"])
+            if not path.is_file() or path.suffix.lower() not in VIDEO or (only and entry["ref"] not in only):
+                continue
+            if hashlib.sha1(path.read_bytes()).hexdigest() != entry["hash"]:
+                continue
+            duration = float(probe(str(path)).get("duration") or 0)
+            lines, t, n = [], 0.5, 0
+            while t + 3.5 <= duration:
+                lines.append({"s": round(t, 2), "e": round(t + 3.5, 2),
+                              "text": " ".join(PLACEHOLDER[(n * 6) % len(PLACEHOLDER):][:6]) + "."})
+                t += 4
+                n += 1
+            out.append({"ref": entry["ref"], "name": path.name, "hash": entry["hash"], "duration": duration, "lines": lines})
+        return {"files": out, "truncated": False}
     if action != "index":
         raise Fail("BAD_ARGS", "Reel Studio asked for something I do not know how to do.", action)
     root = Path(take(args, "--root") or ROOT)
@@ -797,7 +829,7 @@ def cmd_footage(args: list[str]) -> dict:
     # the real engine keeps an unplugged folder's rows; the stand-in keeps its last count
     counts_file = root / ".index" / "fake-counts.json"
     counts = json.loads(counts_file.read_text()) if counts_file.is_file() else {}
-    found, out = [], []
+    found, out, refs = [], [], []
     for pid, folder, kinds in places:
         if pid != "Library" and not folder.is_dir():
             out.append({"id": pid, "files": counts.get(pid, 0), "online": False})
@@ -807,8 +839,11 @@ def cmd_footage(args: list[str]) -> dict:
         out.append({"id": pid, "files": len(files), "online": True})
         counts[pid] = len(files)
         found += files
+        refs += [{"ref": ("Library/" if pid == "Library" else f"Footage/{pid}/") + f.relative_to(folder).as_posix(),
+                  "path": str(f), "hash": hashlib.sha1(f.read_bytes()).hexdigest()} for f in files]
     counts_file.parent.mkdir(parents=True, exist_ok=True)
     counts_file.write_text(json.dumps(counts))
+    (root / ".index" / "fake-files.json").write_text(json.dumps(refs))
     for k, f in enumerate(found):
         progress("footage-file", 100 * k / len(found), f"Reading {f.name} ({k + 1} of {len(found)})")
         time.sleep(step)
