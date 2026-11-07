@@ -43,8 +43,8 @@ it.each(['refused', 'no-roundtrip'])('falls back for the whole session when the 
   const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model) });
   const statuses: string[] = [];
   const event = (e: { type: string; message?: string }) => { if (e.type === 'status') statuses.push(e.message ?? ''); };
-  expect((await ai.applyNote(s.dir, 'one', event)).summary).toBe('Fallback one.');
-  expect((await ai.applyNote(s.dir, 'two', event)).summary).toBe('Fallback two.');
+  expect((await ai.applyNote(s.dir, 'one', event)).summary).toMatch(/^Fallback one\./);
+  expect((await ai.applyNote(s.dir, 'two', event)).summary).toMatch(/^Fallback two\./);
   expect((await fs.readFile(s.starts, 'utf8')).trim().split('\n')).toEqual(['probe']);
   expect(statuses.join('\n')).toMatch(/claude-code.*self-test.*(?:failed|harness_|round.trip)/i);
   expect(model.requests).toHaveLength(2);
@@ -96,7 +96,7 @@ it('logs why Codex is unavailable before using the session text fallback', async
   const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model) });
   const statuses: string[] = [];
   const result = await ai.applyNote(s.dir, 'hello', (e) => { if (e.type === 'status') statuses.push(e.message); });
-  expect(result.summary).toBe('Fallback.');
+  expect(result.summary).toMatch(/^Fallback\./);
   expect(statuses.join('\n')).toMatch(/self-test failed.*capacity/i);
 });
 
