@@ -983,9 +983,9 @@ let outside: OutsideAccess | null = null
 function createOutside(): OutsideAccess {
   const controls = createOutsideReels({
     // checked as the Reel screen's own send is (ipc-guard.ts): a reel id, the words, a saved version to branch from
-    send: (slug, text, base) => {
+    send: (slug, text, base, steer) => {
       validateIpcArgs('projects:note', [slug, text, undefined, undefined, undefined, base])
-      return sendNote(slug, text, undefined, undefined, undefined, base)
+      return sendNote(slug, text, undefined, undefined, undefined, base, steer)
     },
     running: (slug) => jobs.forSlug(slug),
     stop: (jobId, slug) => noteQueue.stop(jobId, slug)

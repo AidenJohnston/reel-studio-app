@@ -149,7 +149,7 @@ export function OutsideAppsRow({ onError }: { onError: (m: string) => void }) {
   return (
     <SettingRow
       id="outside-apps"
-      line="Claude, Codex or the ChatGPT app can list your reels, send notes and press Stop, as you do here. Everything they do shows in Reel Studio."
+      line="Claude, Codex or the ChatGPT app can list your reels, send notes, add to the one running and press Stop, as you do here. Everything they do shows in Reel Studio."
       control={<Switch on={st.on} disabled={busy} labelledBy="set-outside-apps" onToggle={() => void run(() => reel.outside.setEnabled(!st.on))} testid="outside-apps" />}
     >
       {st.on && setup && shown && (

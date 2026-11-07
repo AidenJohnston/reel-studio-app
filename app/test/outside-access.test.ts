@@ -19,6 +19,7 @@ function controls(slowMs = 0) {
     listReels: async () => (calls.push({ name: 'list_reels', args: [] }), JSON.stringify({ reels: [{ reel: 'my-reel' }] })),
     getReel: async (r) => (calls.push({ name: 'get_reel', args: [r] }), JSON.stringify({ reel: r })),
     sendNote: async (r, t, b) => (calls.push({ name: 'send_note', args: [r, t, b] }), await slow(), 'Sent.'),
+    addToRunningNote: async (r, t) => (calls.push({ name: 'add_to_running_note', args: [r, t] }), 'Added.'),
     stopNote: async (r) => (calls.push({ name: 'stop_note', args: [r] }), 'Stopped.')
   }
   return { c, calls }

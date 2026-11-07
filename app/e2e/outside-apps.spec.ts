@@ -84,7 +84,9 @@ function mcp(command: string, args: string[], env: Record<string, string>) {
 test('fails if an outside AI app, set up as Settings says, cannot send a note that shows and runs on the Reel screen', async () => {
   const media = makeMedia()
   // the practice editor: every note thinks for a moment, then makes a version
-  const { app, page } = await launch({ REELSTUDIO_MOCK_NOTE: '800' })
+  test.setTimeout(10 * 60_000)
+  // the practice editor takes 25 s per note, long enough to add to it on a loaded machine (as note-add.spec)
+  const { app, page } = await launch({ REELSTUDIO_MOCK_NOTE: '25000' })
   let client: ReturnType<typeof mcp> | null = null
   try {
     await passFirstRun(page)
@@ -130,7 +132,20 @@ test('fails if an outside AI app, set up as Settings says, cannot send a note th
     expect(sent).toEqual({ text: expect.stringMatching(/^Sent\./), isError: false })
     await expect(page.getByTestId('chat')).toContainText('make the subtitles bigger')
     await evidence(page, 'outside-note-on-reel')
-    await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 120_000 })
+    // while it runs, the outside app adds to it, as the person's Add now does: one version takes both
+    await expect.poll(async () => JSON.parse((await client!.call('get_reel', { reel: slug })).text).working_on, { timeout: 60_000 }).toBe('running a note')
+    const added = await client.call('add_to_running_note', { reel: slug, text: 'and cut the first pause' })
+    expect(added).toEqual({ text: expect.stringMatching(/^Added\./), isError: false })
+    await expect(page.getByTestId('note-added')).toHaveText(/Added\s*and cut the first pause/)
+    await evidence(page, 'outside-added-to-running-note')
+    await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 180_000 })
+    const p2 = await page.evaluate((s) => window.reel.projects.get(s), slug!)
+    expect(p2.project.notes?.at(-1)?.text).toBe('make the subtitles bigger\nand cut the first pause')
+    expect(p2.queue).toEqual([])
+    // with nothing running there is nothing to add to: the tool says to send a note instead of starting one
+    const idle = await client.call('add_to_running_note', { reel: slug, text: 'warmer colors' })
+    expect(idle.isError).toBe(true)
+    expect(idle.text).toMatch(/send_note/)
     const read = JSON.parse((await client.call('get_reel', { reel: slug })).text)
     expect(read.versions.map((v: { version: number }) => v.version)).toEqual([1, 2])
     expect(JSON.stringify(read)).not.toMatch(/[A-Za-z]:\\\\|\/Users\/|reel-media:/)

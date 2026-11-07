@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /** The tools a connection may call: the relay's TOOLS by name (ai/relay/reelstudio-mcp.js; a test keeps them equal). */
-export const TOOL_NAMES = ['list_reels', 'get_reel', 'send_note', 'stop_note'] as const
+export const TOOL_NAMES = ['list_reels', 'get_reel', 'send_note', 'add_to_running_note', 'stop_note'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
 
 /** The person's own controls, as the Reel screen has them (main/index.ts). Each answer is the text the agent reads. */
@@ -27,6 +27,8 @@ export interface OutsideControls {
   listReels(): Promise<string>
   getReel(reel: string): Promise<string>
   sendNote(reel: string, text: string, base?: number): Promise<string>
+  /** Add now: the words go into the note running now when they can, else wait as a note of their own */
+  addToRunningNote(reel: string, text: string): Promise<string>
   stopNote(reel: string): Promise<string>
 }
 
@@ -100,14 +102,14 @@ const refuse = (userMessage: string): never => {
 export function checkArgs(name: ToolName, raw: unknown): Args {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) refuse('The arguments must be an object.')
   const args = raw as Args
-  const allowed: Record<ToolName, string[]> = { list_reels: [], get_reel: ['reel'], send_note: ['reel', 'text', 'base_version'], stop_note: ['reel'] }
+  const allowed: Record<ToolName, string[]> = { list_reels: [], get_reel: ['reel'], send_note: ['reel', 'text', 'base_version'], add_to_running_note: ['reel', 'text'], stop_note: ['reel'] }
   const extra = Object.keys(args).filter((k) => !allowed[name].includes(k))
   if (extra.length) refuse(`${name} does not take ${extra.join(', ')}. It takes: ${allowed[name].join(', ') || 'nothing'}.`)
   if (allowed[name].includes('reel')) {
     const reel = args.reel
     if (typeof reel !== 'string' || reel.length > 200 || !SLUG.test(reel)) refuse('Give a reel id from list_reels.')
   }
-  if (name === 'send_note') {
+  if (name === 'send_note' || name === 'add_to_running_note') {
     if (typeof args.text !== 'string' || !args.text.trim()) refuse('Say what to change in text.')
     if ((args.text as string).length > NOTE_MAX) refuse(`A note can be at most ${NOTE_MAX} characters.`)
     const b = args.base_version
@@ -128,6 +130,7 @@ export async function dispatch(controls: OutsideControls, name: string, raw: unk
       tool === 'list_reels' ? await controls.listReels()
       : tool === 'get_reel' ? await controls.getReel(a.reel as string)
       : tool === 'send_note' ? await controls.sendNote(a.reel as string, (a.text as string).trim(), a.base_version as number | undefined)
+      : tool === 'add_to_running_note' ? await controls.addToRunningNote(a.reel as string, (a.text as string).trim())
       : await controls.stopNote(a.reel as string)
     return { content, isError: false }
   } catch (e) {

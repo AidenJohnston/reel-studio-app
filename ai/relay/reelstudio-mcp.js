@@ -46,6 +46,16 @@ const TOOLS = [
     },
   },
   {
+    name: 'add_to_running_note',
+    description: 'Add words to the note running on a reel now, as the person\'s Add now does: the running note reads them before it finishes, and its one version includes them. If it is too late, they wait as a note of their own. Use send_note when no note is running.',
+    inputSchema: {
+      type: 'object',
+      properties: { reel, text: { type: 'string', description: 'What to add, in plain words (at most 4000 characters).' } },
+      required: ['reel', 'text'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'stop_note',
     description: 'Press Stop on the note running on a reel. Unless it was already saved, the note waits again at the top of the queue, and the notes behind it hold until the person sends them on.',
     inputSchema: { type: 'object', properties: { reel }, required: ['reel'], additionalProperties: false },
@@ -53,7 +63,7 @@ const TOOLS = [
 ];
 
 const INSTRUCTIONS = 'Reel Studio makes short vertical videos (reels) from a person\'s talking-head recordings on this computer. '
-  + 'These tools are the person\'s own controls: list_reels and get_reel read, send_note queues a note for the reel\'s AI editor, stop_note presses Stop. '
+  + 'These tools are the person\'s own controls: list_reels and get_reel read, send_note queues a note for the reel\'s AI editor, add_to_running_note adds to the note running now, stop_note presses Stop. '
   + 'A note takes a minute or more; call get_reel to see it running and the version it made. Every version is kept, so nothing is lost.';
 
 const NOT_REACHABLE = 'Reel Studio is not open, or "Let other AI apps use Reel Studio" is off in its Settings. Open Reel Studio, turn it on, then try again.';

@@ -10,7 +10,7 @@ import { listProjects, listVersions, projectDir, readAppState, readProject, read
 
 export interface OutsideReelDeps {
   /** main/index.ts sendNote, as the Reel screen's Send calls it */
-  send(slug: string, text: string, base?: number): Promise<{ jobId: string | null; queued?: boolean; noEditor?: true }>
+  send(slug: string, text: string, base?: number, steer?: boolean): Promise<{ jobId: string | null; queued?: boolean; added?: boolean; noEditor?: true }>
   /** the job running on a reel, if any */
   running(slug: string): { id: string; kind: JobKind } | undefined
   /** Stop on the Reel screen (note-queue.ts stop) */
@@ -89,6 +89,17 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
       const ahead = (st.queue ?? []).length - 1
       if (st.queueHeld) return `Sent. It waits with ${ahead} other note${ahead === 1 ? '' : 's'}: this reel's notes are held after a Stop or a failed note, until the person sends them on in Reel Studio.`
       return `Sent. It waits its turn behind ${ahead} note${ahead === 1 ? '' : 's'}.`
+    },
+
+    async addToRunningNote(slug, text) {
+      await exists(slug)
+      // nothing to add to: a note of its own would start, which is send_note's job, not this tool's
+      if (deps.running(slug)?.kind !== 'note') throw { code: 'NOT_RUNNING', userMessage: 'No note is running on that reel. Use send_note to send this as a note of its own.' }
+      const r = await deps.send(slug, text, undefined, true)
+      if (r.noEditor) return 'Reel Studio has no AI editor connected, so nothing was added. The words show in the reel\'s notes.'
+      if (r.added) return 'Added. The note running now reads your words before it finishes, and its version includes them. Call get_reel to see it.'
+      // too late (it was being saved), or the running note changes another version: the words wait as their own note
+      return 'The running note could not take more words (it was finishing, or it changes a different version), so they wait as a note of their own, next in line.'
     },
 
     async stopNote(slug) {
