@@ -81,6 +81,23 @@ def test_frame_rounding_never_brings_back_a_removed_word():
                     assert any(sg.src_start <= ws[j]["s"] + 1e-6 and ws[j]["e"] <= sg.src_end + 1e-6 for sg in tl.segments), (fps, k, j)
 
 
+def test_a_kept_word_squeezed_between_removed_words_still_plays():
+    """Fails if a kept word whose removed neighbours are each under a frame away is dropped whole
+    (holding both neighbours off leaves it no frame); it plays, with a sliver of them, as on 9e9c93b7."""
+    w = mkwords([(0.450, 0.501, "cut"), (0.502, 0.521, "kept"), (0.522, 0.573, "cut")])
+    tl = cut.build_timeline(w, [{"from": "w1", "to": "w1"}], {"s1": {"duration": 2.0, "fps": 30.0}}, gap_cap=0.02)
+    assert any(sg.src_start <= 0.502 and 0.521 <= sg.src_end for sg in tl.segments), [(sg.src_start, sg.src_end) for sg in tl.segments]
+
+
+def test_a_silence_inside_a_word_is_not_speech_when_cuts_snap():
+    """Fails if a word's internal silence (`gaps`) counts as speech, which rounds the cuts inside it
+    outward and plays back air the cut removed."""
+    w = [{"id": "w0", "source": "s1", "s": 0.5, "e": 2.5, "w": "long", "gaps": [[0.8, 2.2]]}]
+    tl = cut.build_timeline(w, [{"from": "w0", "to": "w0"}], {"s1": {"duration": 4.0, "fps": 30.0}}, gap_cap=0.25)
+    ends = [round(sg.src_end, 4) for sg in tl.segments][:1] + [round(sg.src_start, 4) for sg in tl.segments][1:]
+    assert ends == [0.8667, 2.0333], [(sg.src_start, sg.src_end) for sg in tl.segments]
+
+
 def test_a_join_lands_on_the_piece_that_holds_its_first_word():
     """Fails if the join on a range moves to a later piece when its first word sits in a one-frame piece
     (24 fps, no pause kept): a flash or smash then plays a cut late, and J/L handles bridge the wrong edge."""
