@@ -4,12 +4,13 @@
 // cut is the spans as time-based clips (project.json cut.keep clip items), so its first edit starts from them and
 // stays inside them (ai editor.ts proposedReel). The person's files are never changed.
 import { existsSync, promises as fs } from 'node:fs'
-import { basename, join, sep } from 'node:path'
+import { basename, join } from 'node:path'
 import type { AI, ArchiveCandidate } from './ai-types'
 import type { RunEngine } from './engine'
 import type { JobManager } from './jobs'
 import { projectDir, readAppState, readProject, stamp, uniqueSlug, updateAppState, writeJson, writeProject } from './store'
 import type { ArchiveStatus, ProjectJson } from '../shared/api'
+import { isInside } from './path-inside'
 
 /** app.json `fromArchive`: what a reel made from an archive pick is seeded with once its copy is in. */
 export interface ArchiveSeed {
@@ -207,7 +208,7 @@ export async function libraryRef(ref: string, library: string): Promise<string> 
   try {
     const base = await fs.realpath(library)
     const real = await fs.realpath(join(base, ...parts))
-    if (!real.startsWith(base + sep) || !(await fs.stat(real)).isFile()) throw gone
+    if (real === base || !isInside(real, base) || !(await fs.stat(real)).isFile()) throw gone
     return real
   } catch {
     throw gone

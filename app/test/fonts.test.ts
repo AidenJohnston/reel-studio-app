@@ -20,7 +20,7 @@ it('fails if an added font is sorted as media, a damaged one is kept, or the eng
   const { setupPaths } = await import('./helpers')
   const { addToLibrary, listLibrary } = await import('../src/main/library')
   const { binDir, engineEnv } = await import('../src/main/paths')
-  const { mkdtempSync, writeFileSync, copyFileSync } = await import('node:fs')
+  const { mkdirSync, mkdtempSync, writeFileSync, copyFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { delimiter } = await import('node:path')
   setupPaths()
@@ -35,4 +35,12 @@ it('fails if an added font is sorted as media, a damaged one is kept, or the eng
   expect(fonts.files.map((f) => [f.name, f.font?.full])).toEqual([['My Brand.ttf', 'Inter Bold']])
   // the person's fonts come before the bundled ones, which stay last (engine tools.font_dirs)
   expect(engineEnv().REELENGINE_FONTS!.split(delimiter)).toEqual([binDir('fonts'), FONTS])
+
+  // audit 06 F02: a folder beside the Library whose name starts the same is not the Library, so its file is copied in
+  const { libraryDir } = await import('../src/main/paths')
+  const backup = libraryDir() + ' backup'
+  mkdirSync(backup, { recursive: true })
+  copyFileSync(join(FONTS, 'Inter-Bold.ttf'), join(backup, 'Other.ttf'))
+  const [beside] = await addToLibrary([join(backup, 'Other.ttf')], async () => [], () => {})
+  expect([beside.bin, beside.dest]).toEqual(['fonts', join(binDir('fonts'), 'Other.ttf')])
 })
