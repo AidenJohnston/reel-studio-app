@@ -3,7 +3,7 @@
 
 .picker, .prov { display: grid; }
 .pv + .pv { box-shadow: inset 0 1px 0 var(--line); }
-.pv-main { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 0; }
+.pv-main { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 12px 0; }
 .pv-mark { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--ink-2); }
 .pv-mark > svg { width: 20px; height: 20px; }
 .pv-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
@@ -17,6 +17,9 @@
 .pv-status > span { display: inline-flex; align-items: center; gap: 6px; }
 .pv-ok { display: inline-flex; align-items: center; gap: 4px; }
 .pv-main > .btn { flex: none; }
+/* a text button at the row's end (Disconnect) hangs its padding, so its word ends on the column's edge with the selects and
+   outlined buttons under it, as Library's Show in Finder does */
+.pv-main > .btn.ghost.small:last-child { margin-right: -6px; }
 
 /* a status that changes (Found → Checking Claude… → Connected) settles in; the first one is just there */
 .pv-status.enter { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
@@ -24,9 +27,9 @@
 
 .pv-more { display: grid; gap: 8px; padding: 0 0 12px 32px; }
 .pv-more .row .input { height: 32px; }
-.pv-steps { margin: 0; padding-left: 18px; font-size: var(--fs-sm); line-height: 18px; color: var(--ink-2); }
-.pv-looking { display: flex; align-items: center; gap: 8px; min-height: 56px; font-size: var(--fs-sm); color: var(--ink-3); }
-.pv-note { padding: 0 0 10px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
+.pv-steps { margin: 0; padding-left: 16px; font-size: var(--fs-sm); line-height: 18px; color: var(--ink-2); }
+.pv-looking { display: flex; align-items: center; gap: 8px; min-height: 56px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.pv-note { padding: 0 0 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
 .pv-note.error { color: var(--pencil); }
 .noai-line { padding: 12px 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); box-shadow: inset 0 1px 0 var(--line); }
 
@@ -34,20 +37,22 @@
 .pv-subs { list-style: none; margin: 0; padding: 0 0 6px 32px; display: grid; }
 .pv-sub { padding: 8px 0; box-shadow: inset 0 1px 0 var(--line); }
 .pv-sub-main { display: flex; align-items: center; gap: 8px; }
-.pv-sub .conn-images { min-height: 24px; margin-top: 2px; font-size: var(--fs-sm); font-weight: 500; }
+.pv-sub .conn-images { min-height: 24px; margin-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; }
 .conn-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Advanced: a quiet row with a chevron; the panel settles in under it */
 .disc { box-shadow: inset 0 1px 0 var(--line); }
 .disc-h {
-  width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0; border: 0; background: none; text-align: left; font: inherit;
-  font-size: var(--fs-base); font-weight: 600; color: var(--ink-2); cursor: pointer;
+  width: 100%; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0; border: 0; background: none; text-align: left; font: inherit;
+  font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; color: var(--ink-2); cursor: pointer;
 }
+/* the chevron sits in the rows' 20 px mark column, so a disclosure's label starts where a provider's name does */
+.disc-h > .chev, .mstages-h > .chev { width: 20px; height: 20px; }
 @media (hover: hover) and (pointer: fine) { .disc-h:hover { color: var(--ink); } }
-.disc-hint { min-width: 0; font-size: var(--fs-sm); font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disc-hint { min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .disc .chev { flex: none; color: var(--ink-3); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
 .disc.open .chev { transform: rotate(90deg); }
-.disc-body { padding-left: 22px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.disc-body { padding-left: 32px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
 @starting-style { .disc-body { opacity: 0; transform: translateY(-4px); } }
 .disc.open .disc-h { color: var(--ink); }
 .disc-body > .pv { box-shadow: inset 0 1px 0 var(--line); }
@@ -62,10 +67,10 @@ html.kb .disc .chev, html.kb .disc-body, html.kb .pv-status.enter { transition: 
 /* Connect Claude / Connect ChatGPT (vendor-connect.tsx): each row sits in a wrapper that carries its step for the page
    and tests, so the hairline goes between the picker's direct children. The steps of a connect open under the row. */
 .prov > * + * { box-shadow: inset 0 1px 0 var(--line); }
-.vendor-steps { gap: 10px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.vendor-steps { gap: 8px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
 @starting-style { .vendor-steps { opacity: 0; transform: translateY(-4px); } }
 .vsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.vstep { display: flex; align-items: flex-start; gap: 10px; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.vstep { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .vstep-mark { width: 16px; height: 18px; flex: none; display: grid; place-items: center; color: var(--green-ink); }
 .vstep-mark .spin { width: 11px; height: 11px; border-width: 1.5px; }
 .vstep.done .vstep-mark > svg { transition: opacity 160ms cubic-bezier(.2, .8, .2, 1), transform 160ms cubic-bezier(.2, .8, .2, 1); }
@@ -91,10 +96,10 @@ html.kb .vendor-steps, html.kb .vstep.done .vstep-mark > svg { transition: none;
 
 /* ChatGPT's sign-in code (vendor-connect.tsx DeviceCodeBox): read here, typed on OpenAI's page. Large and spaced,
    in the system's fixed-width face, where 0 and O differ, and it settles in like the steps when Codex prints it. */
-.vcode-box { display: grid; justify-items: start; gap: 10px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.vcode-box { display: grid; justify-items: start; gap: 8px; transition: opacity 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1); }
 @starting-style { .vcode-box { opacity: 0; transform: translateY(-4px); } }
 .vcode {
-  margin: 0; padding: 8px 14px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line);
+  margin: 0; padding: 8px 16px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line);
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 26px; line-height: 1.2; font-weight: 600;
   letter-spacing: .1em; color: var(--ink); user-select: all;
 }
@@ -111,11 +116,11 @@ html.kb .vcode-box { transition: none; }
 .pv { min-width: 0; }
 .pv-t > b { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .pv-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pv-plan { flex: none; font-size: var(--fs-sm); font-weight: 560; color: var(--ink-2); }
+.pv-plan { flex: none; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2); }
 .pv-plan::before { content: '·'; margin-right: 6px; color: var(--ink-4); }
 .pv-tag {
-  flex: none; height: 18px; padding: 0 7px; border-radius: 999px; display: inline-flex; align-items: center;
-  background: var(--green-tint); color: var(--green-ink); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .01em;
+  flex: none; height: 18px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center;
+  background: var(--green-tint); color: var(--green-ink); font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 600; letter-spacing: .01em;
 }
 .pv-status { min-width: 0; }
 .pv-line { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -138,7 +143,7 @@ html.kb .vcode-box { transition: none; }
 .ed-note { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .ed-note.warn { color: var(--amber); }
 .ed-mgmt { display: grid; gap: 6px; min-width: 0; }
-.ed-accts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 44px minmax(36px, 1fr) auto; row-gap: 10px; column-gap: 8px; min-width: 0; }
+.ed-accts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 44px minmax(36px, 1fr) auto; row-gap: 8px; column-gap: 8px; min-width: 0; }
 /* every account and window sits on the list's three columns (subgrid), so the bars line up and share one length
    instead of each row sizing its own text column */
 .ed-acct { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 4px; min-width: 0; }
@@ -148,11 +153,11 @@ html.kb .vcode-box { transition: none; }
 .ed-acct-plan { flex: 0 1 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
 .ed-acct-note { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .ed-acct-note.warn { color: var(--amber); }
-.ed-more { align-self: start; justify-self: start; min-height: 24px; display: inline-flex; align-items: center; font-size: var(--fs-sm); }
+.ed-more { align-self: start; justify-self: start; min-height: 24px; display: inline-flex; align-items: center; font-size: var(--fs-sm); line-height: var(--lh-sm); }
 
 /* one window: its name, a bar of what is left, the percent and when it starts over. The bar is the screen's one
    loud detail: green while there is room, amber under a fifth, an empty red-edged track at nothing. */
-.ed-lws { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: subgrid; row-gap: 3px; min-width: 0; }
+.ed-lws { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: subgrid; row-gap: 4px; min-width: 0; }
 .ed-lw {
   display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
   min-width: 0; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); font-variant-numeric: tabular-nums;
@@ -166,7 +171,7 @@ html.kb .vcode-box { transition: none; }
 .ed-lw-text > b { font-weight: 600; color: var(--ink-2); }
 .ed-lw.out .ed-lw-text > b { color: var(--pencil); }
 
-.ed-test { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.ed-test { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .ed-result { padding-top: 6px; }
 .ed-test .btn { flex: none; }
 .ed-result { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
@@ -176,27 +181,29 @@ html.kb .vcode-box { transition: none; }
 /* a model for each stage: a quiet disclosure, then one row per stage with its chip */
 .mstages { box-shadow: inset 0 1px 0 var(--line); min-width: 0; }
 .mstages-h {
-  width: 100%; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0; border: 0; background: none; text-align: left; font: inherit;
-  font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); cursor: pointer; min-width: 0;
+  width: 100%; display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0; border: 0; background: none; text-align: left; font: inherit;
+  font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); cursor: pointer; min-width: 0;
 }
 @media (hover: hover) and (pointer: fine) { .mstages-h:hover { color: var(--ink); } }
 .mstages-h .chev { flex: none; color: var(--ink-3); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
 .mstages.open .mstages-h .chev { transform: rotate(90deg); }
 .mstages-title { flex: none; }
 .mstages-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--ink-3); text-align: right; }
-.mrows { list-style: none; margin: 0; padding: 0 0 6px; display: grid; min-width: 0; }
+/* under the Models label, as a disclosure's body sits under its label (.disc-body) */
+.mrows { list-style: none; margin: 0; padding: 0 0 6px 32px; display: grid; min-width: 0; }
 /* display: grid would otherwise beat the hidden attribute: closed means its rows are not drawn */
 .mrows[hidden] { display: none; }
-.mrow { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 36px; padding: 4px 0; }
+/* each model a row like Settings' own (settings.css .srow): its name at body size over its line, with room between */
+.mrow { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 8px 0; }
 .mrow + .mrow { box-shadow: inset 0 1px 0 var(--line); }
-.mrow-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); font-weight: 560; color: var(--ink); }
-.mrow-line { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
+.mrow-t { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 560; color: var(--ink); }
+.mrow-line { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .mrow-line.warn { color: var(--amber); }
 .mchip {
-  flex: 0 1 auto; max-width: 62%; min-width: 0; height: 28px; padding: 0 8px 0 9px; display: inline-flex; align-items: center; gap: 6px;
+  flex: 0 1 auto; max-width: 62%; min-width: 0; height: 28px; padding: 0 8px 0 8px; display: inline-flex; align-items: center; gap: 6px;
   border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong);
-  font: inherit; font-size: var(--fs-sm); font-weight: 560; color: var(--ink); cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink); cursor: pointer;
   transition: transform 160ms cubic-bezier(.2, .8, .2, 1);
 }
 .mchip:not(:disabled):active { transform: scale(.97); }
@@ -216,36 +223,36 @@ html.kb .vcode-box { transition: none; }
 @starting-style { .mpop { opacity: 0; transform: scale(.97); } }
 .mpop-search { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--line); color: var(--ink-3); }
 .mpop-search:focus-within { box-shadow: inset 0 -2px 0 var(--ink-3); color: var(--ink-2); }
-.mpop-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none; font: inherit; font-size: var(--fs-base); color: var(--ink); }
+.mpop-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); }
 .mpop-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 6px 6px; }
-.mpop-group { margin: 8px 8px 2px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; color: var(--ink-3); }
+.mpop-group { margin: 8px 8px 2px; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 600; letter-spacing: .02em; color: var(--ink-3); }
 .mpop-group-note { font-weight: 400; color: var(--amber); }
 .mopt.spent .mopt-name { color: var(--ink-3); }
 .mopt {
   width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 7px; background: none;
-  font: inherit; font-size: var(--fs-base); color: var(--ink); text-align: left; cursor: pointer; min-width: 0;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); text-align: left; cursor: pointer; min-width: 0;
 }
 @media (hover: hover) and (pointer: fine) { .mopt:hover { background: var(--sunk-2); } }
 .mopt:focus-visible { background: var(--sunk-2); outline-offset: -2px; }
 .mopt-mark { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--green-ink); }
 .mopt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .mopt[aria-selected="true"] .mopt-name { font-weight: 620; }
-.mopt-sub { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 8px; font-size: var(--fs-xs); color: var(--ink-3); }
-.mpop-empty { display: flex; align-items: center; gap: 6px; margin: 10px 8px; font-size: var(--fs-sm); color: var(--ink-3); }
-.mpop-effort { flex: none; display: grid; gap: 6px; padding: 8px 10px 10px; box-shadow: inset 0 1px 0 var(--line); }
-.mpop-effort-h { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-3); }
+.mopt-sub { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 8px; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--ink-3); }
+.mpop-empty { display: flex; align-items: center; gap: 6px; margin: 12px 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.mpop-effort { flex: none; display: grid; gap: 6px; padding: 8px 12px 12px; box-shadow: inset 0 1px 0 var(--line); }
+.mpop-effort-h { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 600; color: var(--ink-3); }
 .ed-seg { display: flex; flex-wrap: wrap; gap: 4px; }
 .ed-seg-o {
-  height: 26px; min-width: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: none; box-shadow: inset 0 0 0 1px var(--line-strong);
-  font: inherit; font-size: var(--fs-xs); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: transform 160ms cubic-bezier(.2, .8, .2, 1);
+  height: 28px; min-width: 28px; padding: 0 8px; border: 0; border-radius: 999px; background: none; box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: inherit; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 560; color: var(--ink-2); cursor: pointer; transition: transform 160ms cubic-bezier(.2, .8, .2, 1);
 }
 .ed-seg-o:active { transform: scale(.97); }
 .ed-seg-o.on { background: var(--ink); color: var(--paper); box-shadow: none; }
 
 /* your own server's form, in place under its row: one field per line, full width */
-.conn-form { gap: 10px; padding-top: 2px; }
+.conn-form { gap: 8px; padding-top: 2px; }
 .conn-form-h { margin: 0; display: grid; gap: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
-.conn-form-h b { font-size: var(--fs-base); color: var(--ink); font-weight: 620; }
+.conn-form-h b { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); font-weight: 620; }
 .conn-fields { display: grid; gap: 12px; min-width: 0; }
 .conn-fields > .stack { min-width: 0; }
 .conn-form .conn-kinds { grid-template-columns: minmax(0, 1fr); gap: 0; }
@@ -253,10 +260,10 @@ html.kb .vcode-box { transition: none; }
 .conn-form .input, .conn-form select.input { width: 100%; min-width: 0; max-width: none; height: 32px; }
 .conn-form .muted-sm { overflow-wrap: anywhere; }
 .conn-buttons { display: flex; justify-content: flex-end; gap: 8px; }
-.conn-acts { display: flex; gap: 14px; padding-top: 2px; }
-.conn-acts .link.inline { min-height: 24px; display: inline-flex; align-items: center; font-size: var(--fs-sm); }
+.conn-acts { display: flex; gap: 12px; padding-top: 2px; }
+.conn-acts .link.inline { min-height: 24px; display: inline-flex; align-items: center; font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .link.inline.danger { color: var(--pencil); }
-.conn-confirm { display: grid; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: var(--r-md); background: var(--pencil-tint); font-size: var(--fs-sm); }
+.conn-confirm { display: grid; gap: 8px; margin-top: 6px; padding: 12px 12px; border-radius: var(--r-md); background: var(--pencil-tint); font-size: var(--fs-sm); line-height: var(--lh-sm); }
 .conn-confirm p { margin: 0; color: var(--ink-2); }
 .conn-confirm .row { justify-content: flex-end; gap: 8px; }
 

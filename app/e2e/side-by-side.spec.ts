@@ -10,7 +10,7 @@ async function openCompare(page: Page): Promise<void> {
   await page.getByTestId('compare-2').click()
 }
 
-test('fails if Side by side does not play both versions in step with one sound, or the choice is not remembered', async () => {
+test('fails if Side by side does not play both versions in step with one sound, Keep Version N does not leave that version on screen, or the choice is not remembered', async () => {
   test.setTimeout(10 * 60_000)
   const media = makeMedia()
   const dirs = { REELSTUDIO_USER_DATA: join(BASE, 'sbs', 'data'), REELSTUDIO_ROOT: join(BASE, 'sbs', 'Reel Studio'), REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '300' }
@@ -57,9 +57,18 @@ test('fails if Side by side does not play both versions in step with one sound, 
     // each one still playing is named in the failure
     expect(others.filter((v) => !v.paused)).toEqual([])
     await shot(page, 'side-by-side-01-playing')
+    // Keep Version 2 (the primary) leaves the newer one on screen; Keep Version 1 the older one
+    await expect(page.getByTestId('sbs-done')).toHaveText('Keep Version 2')
     await page.getByTestId('sbs-done').click()
     await expect(sbs).toHaveCount(0)
     await expect(page.getByTestId('compare')).toHaveCount(0)
+    await expect(page.getByTestId('version-on-screen')).toHaveText('Version 2')
+    await openCompare(page)
+    await expect(sbs).toBeVisible()
+    await page.getByTestId('sbs-keep-1').click()
+    await expect(sbs).toHaveCount(0)
+    await expect(page.getByTestId('version-on-screen')).toHaveText('Version 1')
+    await expect(page.getByTestId('version-latest')).toBeVisible()
     await app.close()
 
     // remembered: Compare opens side by side, and "Compare in one player" goes back to the one player

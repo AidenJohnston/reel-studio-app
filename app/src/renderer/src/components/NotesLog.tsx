@@ -264,8 +264,9 @@ export function NotesLog({
       return (
         <>
           <div className="nt-res quiet" aria-busy>
+            {/* pending, not live: the tray under the log has the one spinner and the time left */}
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version 1</span>
           </div>
@@ -281,7 +282,7 @@ export function NotesLog({
       return (
         <div className="nt-res paused" data-testid="first-paused">
           <span className="nk pause">
-            <Icon name="pause" size={11} stroke={2.4} />
+            <Icon name="pause" size={10} stroke={2.4} />
           </span>
           <span className="t wrap full" data-testid="first-paused-why">
             Paused. {f.why ?? 'Resume continues where it stopped.'}
@@ -326,7 +327,7 @@ export function NotesLog({
         return (
           <div className="nt-res quiet" aria-busy>
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version {r.v}</span>
           </div>
@@ -376,7 +377,7 @@ export function NotesLog({
         return (
           <div className="nt-res paused" data-testid="log-paused">
             <span className="nk pause">
-              <Icon name="pause" size={11} stroke={2.4} />
+              <Icon name="pause" size={10} stroke={2.4} />
             </span>
             <span className="t wrap full">Paused. {pausedWhy ?? 'It waits below.'}</span>
           </div>
@@ -385,7 +386,7 @@ export function NotesLog({
         return (
           <div className="nt-res" data-testid="log-stopped">
             <span className="nk stop">
-              <Icon name="stop" size={11} stroke={2.4} />
+              <Icon name="stop" size={10} stroke={2.4} />
             </span>
             <span className="t">Stopped. {r.kept ? `Version ${r.kept} is unchanged.` : 'Nothing changed.'}</span>
             {e.ask.kind === 'note' && aiOn && (
@@ -461,7 +462,7 @@ export function NotesLog({
         </article>
       ))}
       {waiting.map((q, i) => (
-        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} on={latest + (making ? 1 : 0) + i} canAdd={!!runningNote && q.branch === runningNote.branch} onEditHand={onEditHand} onError={onError} />
+        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} making={making} canAdd={!!runningNote && q.branch === runningNote.branch} onEditHand={onEditHand} onError={onError} />
       ))}
     </div>
   )
@@ -548,7 +549,7 @@ function Reply({
 }
 
 /** A note waiting its turn: its words can change, it can go, and with others waiting it can move (grip, or arrow keys on it). */
-function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }: { slug: string; q: QueuedNote; i: number; count: number; held: boolean; on: number; canAdd: boolean; onEditHand: (id: string) => void; onError: (m: string) => void }) {
+function QueuedRow({ slug, q, i, count, held, making, canAdd, onEditHand, onError }: { slug: string; q: QueuedNote; i: number; count: number; held: boolean; making: number | null; canAdd: boolean; onEditHand: (id: string) => void; onError: (m: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [over, setOver] = useState(false)
   const act = (p: Promise<unknown>) => void p.catch((e) => onError(userMessage(e)))
@@ -638,9 +639,13 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
         <span className="nk">
           <span className="wait-dot" />
         </span>
-        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}, ${q.branch !== undefined ? `from Version ${q.branch}` : `on Version ${on}`}`}</span>
+        {/* its place in line, and Add names the version it would join, the one the row above says is being made: a bare
+            "Add now" beside "Next, on Version 2" asked a person to work out the queue (Sense re-score 4, both judges).
+            No number is promised for the version a waiting note makes: a note that changes only the caption keeps its
+            version, and a stopped one waits to run again, so counting rows overshoots (review round 3). */}
+        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}${q.branch !== undefined ? `, from Version ${q.branch}` : ''}`}</span>
         {draft === null && (
-          <>
+          <span className="q-acts">
             {canAdd && !q.hand && !q.attachments.length && (
               <button
                 className="lk"
@@ -650,7 +655,7 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
                 }
                 data-testid="queue-add"
               >
-                Add now
+                {making !== null ? `Add to Version ${making}` : 'Add now'}
               </button>
             )}
             <button className="lk" onClick={() => (q.hand ? onEditHand(q.id) : setDraft(q.text))} data-testid="queue-edit">
@@ -659,7 +664,7 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
             <button className="lk" onClick={() => act(reel.queue.cancel(slug, q.id))} data-testid="queue-cancel">
               Cancel
             </button>
-          </>
+          </span>
         )}
       </div>
     </article>

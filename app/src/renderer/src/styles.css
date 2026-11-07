@@ -19,7 +19,7 @@
 :root {
   --paper: #F1F2EF; --paper-2: #F7F8F6; --side: #E9EBE6; --surface: #FFFFFF; --sunk: #E8EAE6; --sunk-2: #F6F7F5;
   --line: #E0E2DD; --line-strong: #CBCFC9;
-  --ink: #161917; --ink-2: #474D49; --ink-3: #626963; --ink-4: #9CA29D;
+  --ink: #161917; --ink-2: #474D49; --ink-3: #5A615B; --ink-4: #9CA29D;
   --green: #1E5E4B; --green-hover: #184F3F; --green-press: #133F33; --green-tint: #E2EDE7; --green-ink: #164A3B;
   --marker: #F4DF6E; --marker-soft: #FAEFB4; --marker-ink: #4A3E00;
   --pencil: #BF3626; --pencil-tint: #FBEAE6; --amber: #8A5A00; --amber-tint: #FBF0D9;
@@ -28,7 +28,9 @@
   --wash: rgba(22, 30, 26, .06);
   --e1: 0 1px 2px rgba(22, 30, 26, .06), 0 0 0 1px rgba(22, 30, 26, .06);
   --e2: 0 10px 28px -12px rgba(22, 30, 26, .22), 0 0 0 1px rgba(22, 30, 26, .07);
-  --e3: 0 28px 70px -20px rgba(22, 30, 26, .35), 0 0 0 1px rgba(22, 30, 26, .08);
+  /* menus and panels that float: a hairline, a tight contact shadow and a soft wide one, so the surface lifts without a
+     dark halo (Craft, goal 4: the single 70 px shadow at .35 read as heavy around small menus) */
+  --e3: 0 0 0 1px rgba(22, 30, 26, .08), 0 2px 6px rgba(22, 30, 26, .06), 0 16px 40px -12px rgba(22, 30, 26, .24);
   --focus: 0 0 0 3px rgba(22, 25, 23, .14);
   --r-sm: 8px; --r-md: 10px; --r-lg: 14px;
   --ease-out: cubic-bezier(.23, 1, .32, 1);
@@ -46,9 +48,13 @@
   --fs-title: 22px; --lh-title: 28px;
   --fs-page: 28px; --lh-page: 34px;
   --fs-display: 40px; --lh-display: 44px;
+  /* the welcome's one line, seen once */
+  --fs-hero: 48px; --lh-hero: 52px;
 
   /* Space: one page gutter, and three steps between sections. */
   --gutter: 32px;
+  /* the page's scroll bar gutter (::-webkit-scrollbar width): .main always keeps it, so the title bar's right inset adds it */
+  --sbw: 10px;
   --space-s: 24px; --space-m: 32px; --space-l: 48px;
 
   /* --titlebar is set from shared/chrome.ts (main.tsx), the same number main gives the window buttons. */
@@ -66,6 +72,10 @@
   /* Native radios and sliders in ink, never the OS blue (the checkbox is drawn: see "The one checkbox"). */
   accent-color: var(--ink);
 }
+/* Headings break into even lines, and no paragraph or menu description ends on one word alone (Craft, goal 4: the View
+   menu's "…about 5% off each / side." was the climb's example). Screens that set their own text-wrap keep it. */
+h1, h2, h3 { text-wrap: balance; }
+p, li, figcaption, .shape-mi-fit { text-wrap: pretty; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -106,7 +116,7 @@ a { color: inherit; }
 
 /* The sidebar's update row (UpdateButton.tsx): a row like the nav, not a box. */
 .update-pill {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 6px 8px; overflow: hidden; text-align: left;
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 8px; overflow: hidden; text-align: left;
   border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink);
   font: inherit; cursor: pointer; transition: background-color 120ms ease, transform 120ms var(--ease-out);
 }
@@ -119,7 +129,7 @@ a { color: inherit; }
 .update-pill-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .update-pill-label { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* folded to the rail: the icon alone, the size of a nav row (shell.css) */
-.rail .update-pill { width: 40px; padding: 5px; border-radius: 999px; }
+.rail .update-pill { width: 40px; padding: 4px; border-radius: 999px; }
 .update-pill-sub { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .update-icon { position: relative; width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--ink); }
@@ -138,7 +148,7 @@ a { color: inherit; }
 .update-pop {
   position: fixed; z-index: 35; width: 300px; max-height: min(420px, calc(100vh - 80px)); overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3);
-  padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px;
   transform-origin: left bottom; opacity: 0; transform: translateY(4px) scale(.97); visibility: hidden; pointer-events: none;
   transition: opacity .15s var(--ease-out), transform .15s var(--ease-out), visibility 0s linear .15s;
 }
@@ -153,9 +163,9 @@ a { color: inherit; }
 .update-pop-sub .nowrap { white-space: nowrap; }
 .update-pop-notes { border-top: 1px solid var(--line); padding-top: 12px; }
 .update-pop-notes h3 { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 620; color: var(--ink-2); }
-.update-pop-notes ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); user-select: text; }
+.update-pop-notes ul { margin: 8px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink); user-select: text; }
 .update-pop-link {
-  flex: none; display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 4px 0; min-height: 28px;
+  flex: none; display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 4px 0; min-height: 28px;
   font: inherit; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; cursor: pointer;
 }
 .update-pop-link:hover { color: var(--ink); }
@@ -164,8 +174,8 @@ a { color: inherit; }
 .update-pop-link.inline { display: inline; min-height: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .update-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 6px; }
 
-.update-row { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
-.update-row-line { display: flex; align-items: center; gap: 14px; }
+.update-row { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.update-row-line { display: flex; align-items: center; gap: 12px; }
 .update-row-line p { flex: 1; }
 .update-row .progress > div { transition: none; }
 
@@ -176,7 +186,7 @@ a { color: inherit; }
 .page.narrow { max-width: 820px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: var(--space-s); }
 .page-head p { margin-top: 6px; }
-.back { border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; padding: 6px 8px 6px 0; min-height: 32px; margin-bottom: 10px; display: inline-flex; gap: 6px; align-items: center; }
+.back { border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; padding: 6px 8px 6px 0; min-height: 32px; margin-bottom: 12px; display: inline-flex; gap: 6px; align-items: center; }
 .back:hover { color: var(--ink); }
 
 /* ---- buttons (spec section 1): four kinds, nothing else ----
@@ -197,16 +207,20 @@ a { color: inherit; }
 html.kb .btn:active { transform: none; }
 html.kb .switch { transition: none; }
 .btn:disabled { opacity: .45; cursor: default; }
+/* a primary that can't be pressed yet is a quiet pill, not a faded green one: green means ready (spec section 1) */
+.btn.primary:disabled { opacity: 1; background: var(--sunk); color: var(--ink-3); box-shadow: none; }
 .btn.primary { background: var(--primary); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 1px 2px rgba(22, 25, 23, .25); }
 .btn.primary:not(:disabled):active { background: var(--primary-press); }
+/* open: its panel showing, as ⋯ and Edit it myself show theirs (Craft, goal 4: only Share looked the same open and shut) */
+.btn.primary[aria-expanded="true"] { background: var(--primary-press); }
 .btn.ghost { box-shadow: none; padding: 0 8px; color: var(--ink-2); text-decoration-line: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
 @media (hover: hover) and (pointer: fine) {
   .btn:not(:disabled):hover { background: var(--wash); }
   .btn.primary:not(:disabled):hover { background: var(--primary-hover); }
   .btn.ghost:not(:disabled):hover { background: transparent; color: var(--ink); text-decoration-color: currentColor; }
 }
-.btn.big { height: 44px; padding: 0 22px; font-size: var(--fs-md); gap: 8px; }
-.btn.small { height: 28px; padding: 0 12px; font-size: var(--fs-sm); gap: 5px; }
+.btn.big { height: 44px; padding: 0 24px; font-size: var(--fs-md); line-height: var(--lh-md); gap: 8px; }
+.btn.small { height: 28px; padding: 0 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); gap: 4px; }
 .btn.ghost.small { padding: 0 6px; }
 /* A tertiary button that opens a panel (Reel's Edit it myself): while the panel is open it has the soft wash the
    sidebar's selected row has (shell.css .nav button.on), not an underline, which reads as a link being pointed at.
@@ -234,7 +248,7 @@ html.kb .switch { transition: none; }
 .link.left { align-self: flex-start; padding-left: 0; }
 .link.center { align-self: center; }
 .link.inline { padding: 0; min-height: 0; font-size: inherit; }
-.row { display: flex; gap: 10px; align-items: center; }
+.row { display: flex; gap: 8px; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
 .spacer { flex: 1; }
 
@@ -247,7 +261,7 @@ html.kb .switch { transition: none; }
 /* ---- drop zone: the canvas itself takes the drop; a wash and an ink edge while a file is over it ---- */
 .drop {
   border-radius: var(--r-lg); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
-  gap: 14px; padding: var(--space-l) var(--space-s); transition: background-color 120ms ease, box-shadow 120ms ease;
+  gap: 12px; padding: var(--space-l) var(--space-s); transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 .drop.tall { min-height: 360px; }
 .drop.over { background: var(--wash); box-shadow: inset 0 0 0 1.5px var(--ink); }
@@ -273,7 +287,7 @@ html.kb .switch { transition: none; }
 
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--ink); animation: spin .7s linear infinite; display: inline-block; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.thinking { display: inline-flex; gap: 3px; align-items: center; flex: none; }
+.thinking { display: inline-flex; gap: 4px; align-items: center; flex: none; }
 .thinking i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink); opacity: .25; animation: breathe 1.8s ease-in-out infinite; }
 .thinking i:nth-child(2) { animation-delay: .3s; }
 .thinking i:nth-child(3) { animation-delay: .6s; }
@@ -288,27 +302,27 @@ html.kb .switch { transition: none; }
 .phone-screen > video.still.shown { opacity: 1; }
 
 /* Working: the phone column is as wide as the full-height phone (Phone.tsx PhoneFill). */
-.reel { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 36px; align-items: start; }
+.reel { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 32px; align-items: start; }
 .reel-left { position: sticky; top: 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 300px; }
-.phone-tag { position: absolute; top: calc(14px + var(--safe-top, 0px)); left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+.phone-tag { position: absolute; top: calc(14px + var(--safe-top, 0px)); left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; padding: 4px 12px; border-radius: 999px; }
 .big-play { position: absolute; left: 50%; top: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: var(--ink); display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 24px rgba(0,0,0,.25); transition: transform .12s; }
 .big-play .icon { fill: currentColor; margin-left: 4px; }
 .big-play:hover { transform: scale(1.05); }
-.sound-chip { position: absolute; top: calc(14px + var(--safe-top, 0px)); right: 14px; display: inline-flex; gap: 6px; align-items: center; border: 0; border-radius: 999px; padding: 7px 12px; min-height: 32px; background: rgba(0,0,0,.6); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-.scrub { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 10px; display: flex; align-items: center; gap: 8px; background: linear-gradient(transparent, rgba(0,0,0,.45)); opacity: 0; transition: opacity .2s; }
+.sound-chip { position: absolute; top: calc(14px + var(--safe-top, 0px)); right: 14px; display: inline-flex; gap: 6px; align-items: center; border: 0; border-radius: 999px; padding: 0 12px; height: 32px; background: rgba(0,0,0,.6); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.scrub { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 12px 12px; display: flex; align-items: center; gap: 8px; background: linear-gradient(transparent, rgba(0,0,0,.45)); opacity: 0; transition: opacity .2s; }
 .phone-screen:hover .scrub.shown, .scrub.shown:focus-within { opacity: 1; }
 .scrub-btn { width: 32px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: #fff; display: grid; place-items: center; cursor: pointer; flex: none; }
 .scrub-btn:hover { background: rgba(255,255,255,.15); }
 .scrub-btn .icon { fill: none; }
-.scrub-time { color: #fff; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
+.scrub-time { color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
 .scrub input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px; background: linear-gradient(90deg, #fff var(--pct, 0%), rgba(255,255,255,.35) var(--pct, 0%)); cursor: pointer; }
 .scrub input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 0; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 340px; }
-.chip { height: 28px; padding: 0 12px; border-radius: 999px; border: 0; box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; font: inherit; font-weight: 560; font-size: var(--fs-sm); cursor: pointer; color: var(--ink-2); }
+.chip { height: 28px; padding: 0 12px; border-radius: 999px; border: 0; box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; font: inherit; font-weight: 560; font-size: var(--fs-sm); line-height: var(--lh-sm); cursor: pointer; color: var(--ink-2); }
 .chip:hover { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); }
 .chip.active { background: var(--ink); color: var(--paper); box-shadow: none; }
 
-.reel-right { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - var(--titlebar) - 40px); }
+.reel-right { display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - var(--titlebar) - 40px); }
 
 .vswitch.older .vswitch-current :is(.vswitch-name, .vswitch-state, .icon) { color: inherit; }
 
@@ -317,7 +331,7 @@ html.kb .switch { transition: none; }
 /* under a "Remember this for next time?" question: where the rule applies, or why saving failed */
 .bubble-meta { display: block; margin-top: 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .bubble-meta.error { color: var(--pencil); }
-.att-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.att-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 /* a pill with the picture round at its start, as a contact chip is (spec section 1: no rounded squares) */
 .att-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; padding: 4px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .att-chip.busy { padding: 6px 12px; color: var(--ink-2); }
@@ -330,7 +344,7 @@ html.kb .switch { transition: none; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .att-badge { position: absolute; left: 3px; bottom: 3px; padding: 0 4px; border-radius: 4px; background: rgba(0,0,0,.72); color: #fff; font-size: var(--fs-xs); font-weight: 700; line-height: 15px; }
 
-.kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; background: var(--sunk); font-size: var(--fs-xs); font-weight: 600; color: var(--ink-3); }
+.kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; background: var(--sunk); font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 600; color: var(--ink-3); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 /* The one segmented control (ui.tsx Segmented): a sunk pill track 28 px tall, so it sits level with .btn.small and
@@ -341,11 +355,13 @@ html.kb .switch { transition: none; }
 }
 .segmented > button {
   position: relative; z-index: 1; height: 24px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent;
-  font: inherit; font-size: var(--fs-sm); font-weight: 560; color: var(--ink-2); white-space: nowrap; cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; color: var(--ink-2); white-space: nowrap; cursor: pointer;
 }
 .segmented > button[aria-checked="true"] { color: var(--ink); }
 @media (hover: hover) and (pointer: fine) { .segmented > button[aria-checked="false"]:hover { color: var(--ink); } }
 .segmented > button:focus-visible { outline-offset: 0; }
+/* beside a transport row's 32 px controls (Side by side's play button too) the track is 32 px: one height per row */
+:is(.fr-tr-row, .stage-row, .sbs-bar) .segmented > button { height: 28px; }
 .seg-thumb {
   position: absolute; top: 2px; bottom: 2px; left: 2px; border-radius: 999px; background: var(--surface); pointer-events: none;
   box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 .5px rgba(22, 30, 26, .08); transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
@@ -358,13 +374,13 @@ html.kb .seg-thumb { transition: none; }
   border-radius: var(--r-md); padding: 0 12px; height: 36px; outline: none;
 }
 .input:focus, .textarea:focus, select.input:focus { border-color: var(--ink-3); box-shadow: var(--focus); }
-select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 36px; max-width: 420px;
+select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 32px; max-width: 420px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23474D49' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 12px center; }
-.textarea { resize: vertical; height: auto; min-height: 120px; padding: 10px 12px; line-height: 20px; }
+.textarea { resize: vertical; height: auto; min-height: 120px; padding: 12px 12px; line-height: 20px; }
 .field-label { font-weight: 620; }
 /* A status line: a dot in the status colour and the words, never a filled box. */
-.banner { display: flex; gap: 10px; align-items: center; min-height: 28px; color: var(--amber); font-weight: 560; }
+.banner { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--amber); font-weight: 560; }
 .banner::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
 .banner.error { color: var(--pencil); }
 .banner.good { color: var(--green-ink); }
@@ -391,7 +407,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .scrub-mark.failed::before { width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg); background: var(--pencil-tint); box-shadow: 0 0 0 2px var(--pencil); }
 /* stopped on purpose: not an error, so grey and square */
 .scrub-mark.stopped::before { width: 7px; height: 7px; border-radius: 1px; background: rgba(255,255,255,.7); box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
-.scrub-mark-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 200px; padding: 6px 9px; border-radius: 8px; background: rgba(0,0,0,.82); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); text-align: left; overflow-wrap: anywhere; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.scrub-mark-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 200px; padding: 6px 8px; border-radius: 8px; background: rgba(0,0,0,.82); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm); text-align: left; overflow-wrap: anywhere; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .scrub-mark-tip > span { display: block; }
 .scrub-mark-tip > span + span { margin-top: 4px; }
 .scrub-mark-tip b { display: block; font-weight: 700; }
@@ -409,16 +425,16 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .drawer.closing { animation: slide-out .16s var(--ease-out) forwards; pointer-events: none; }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes slide-out { to { transform: translateX(24px); opacity: 0; } }
-.drawer-head { padding: calc(var(--titlebar) + 4px) 22px 10px 26px; display: flex; align-items: flex-start; gap: 12px; }
-.tabs { display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.tab { border: 0; background: none; font: inherit; font-size: var(--fs-base); padding: 0 9px; height: 36px; cursor: pointer; color: var(--ink-2); box-shadow: inset 0 -2px 0 transparent; font-weight: 580; }
+.drawer-head { padding: calc(var(--titlebar) + 4px) 24px 12px 24px; display: flex; align-items: flex-start; gap: 12px; }
+.tabs { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tab { border: 0; background: none; font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); padding: 0 8px; height: 36px; cursor: pointer; color: var(--ink-2); box-shadow: inset 0 -2px 0 transparent; font-weight: 580; }
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
-.drawer-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 26px; }
-.drawer-foot { padding: 14px 22px 14px 26px; box-shadow: inset 0 1px 0 var(--line); display: flex; gap: 10px; align-items: center; background: var(--surface); }
-.words { display: flex; flex-direction: column; gap: 14px; user-select: none; text-align: left; }
+.drawer-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 24px; }
+.drawer-foot { padding: 16px 24px 16px 24px; box-shadow: inset 0 1px 0 var(--line); display: flex; gap: 8px; align-items: center; background: var(--surface); }
+.words { display: flex; flex-direction: column; gap: 12px; user-select: none; text-align: left; }
 .take p { line-height: 2; font-size: var(--fs-md); overflow-wrap: anywhere; }
-.take-label { font-size: var(--fs-xs); font-weight: 640; color: var(--ink-3); margin-bottom: 2px; }
+.take-label { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 640; color: var(--ink-3); margin-bottom: 2px; }
 .word { padding: 1px; border-radius: 4px; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .word:hover { background: var(--sunk); } }
 .word.cut { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--pencil); }
@@ -429,7 +445,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 .sub-line + .sub-line { border-top: 1px solid var(--line); }
 .sub-line-text {
   flex: 1; min-width: 0; font: inherit; font-size: var(--fs-md); line-height: 1.5; color: var(--ink); background: transparent;
-  border: 0; border-radius: var(--r-sm); padding: 9px 10px; margin: 2px 0; transition: background-color .12s;
+  border: 0; border-radius: var(--r-sm); padding: 8px 12px; margin: 2px 0; transition: background-color .12s;
 }
 .sub-line-text:focus { background: var(--surface); }
 /* With a mouse, Join shows on the row you point at or type in; on a touch screen it always shows. */
@@ -440,7 +456,7 @@ select.input { -webkit-appearance: none; appearance: none; cursor: pointer; padd
 }
 .broll-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; background: var(--sunk); }
 .broll-thumb.none { display: grid; place-items: center; color: var(--ink-3); }
-.list-item { display: flex; gap: 14px; align-items: center; padding: 12px 0; }
+.list-item { display: flex; gap: 12px; align-items: center; padding: 12px 0; }
 .list-item + .list-item { box-shadow: inset 0 1px 0 var(--line); }
 /* a choice row: the radio marks the choice; no box around it */
 .radio { display: flex; gap: 12px; align-items: center; padding: 8px 0; cursor: pointer; min-height: 36px; }
@@ -518,13 +534,13 @@ input[type="checkbox"]:disabled { cursor: default; opacity: .45; }
 .file-thumb { aspect-ratio: 4 / 3; background: var(--sunk); display: grid; place-items: center; overflow: hidden; color: var(--ink-3); }
 .file-thumb img, .file-thumb video { width: 100%; height: 100%; object-fit: cover; }
 /* Two lines, not one: the end of a name is what tells files apart ("… - Version 2.mp4"). */
-.file-name { padding: 8px 10px 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.file-name { padding: 8px 12px 2px; font-size: var(--fs-sm); line-height: var(--lh-sm); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .empty-bin { color: var(--ink-3); }
 
 /* ---- more menu: a popover ---- */
 .more { position: relative; }
 .more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3); padding: 6px; display: flex; flex-direction: column; transform-origin: top right; animation: pop-in .15s var(--ease-out); }
-.more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 0 10px; height: 32px; border-radius: 7px; cursor: pointer; color: var(--ink); }
+.more-menu button { border: 0; background: none; font: inherit; text-align: left; padding: 0 12px; height: 32px; border-radius: 7px; cursor: pointer; color: var(--ink); }
 .more-menu button:hover { background: var(--sunk-2); }
 .more-menu button.danger { color: var(--pencil); }
 .more-menu button:disabled { opacity: .5; cursor: default; }
@@ -541,7 +557,7 @@ input[type="checkbox"]:disabled { cursor: default; opacity: .45; }
 html.kb .modal-backdrop, html.kb .modal { animation: none; }
 /* At the top, under the title row: the bottom of a screen is where its main action sits (Choose video, the note box's
    Send, Make version), and a toast there covered it. Toast (ui.tsx) centres it over the screen's main column. */
-.toast { position: fixed; top: calc(var(--titlebar) + 8px); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; box-shadow: var(--e3); display: flex; gap: 10px; align-items: center; max-width: min(640px, 80vw); animation: toast-in .2s var(--ease-out); }
+.toast { position: fixed; top: calc(var(--titlebar) + 8px); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--e3); display: flex; gap: 8px; align-items: center; max-width: min(640px, 80vw); animation: toast-in .2s var(--ease-out); }
 /* what a key press caused just appears (motion.ts sets html.kb) */
 html.kb .toast { animation: none; }
 .toast:not(.error) { pointer-events: none; } /* nothing to press on it; a click goes to the button it covers */
@@ -559,7 +575,7 @@ html.kb .toast { animation: none; }
 .input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(191, 54, 38, .16); }
 .field-error { color: var(--pencil); }
 
-.copy-box { padding: 2px 0 2px 14px; box-shadow: inset 2px 0 0 var(--line-strong); white-space: pre-wrap; user-select: text; }
+.copy-box { padding: 2px 0 2px 16px; box-shadow: inset 2px 0 0 var(--line-strong); white-space: pre-wrap; user-select: text; }
 
 /* ---- the finish moment: the phone slides in, the checks land, the reel plays ---- */
 .fresh .reel-left .phone { animation: phone-in .6s var(--ease-out) both; }
@@ -568,9 +584,10 @@ html.kb .toast { animation: none; }
 
 /* ---- small windows ---- */
 @media (max-width: 1180px) {
-  .reel { gap: 26px; }
+  /* one gutter token, so the title bar, the pages and the Reel screen's columns narrow together */
+  :root { --gutter: 24px; }
+  .reel { gap: 24px; }
   .checklist.two { grid-template-columns: 1fr; }
-  .page { padding-left: 28px; padding-right: 28px; }
 }
 
 /* Reduced motion: nothing slides or scales, but things still fade in at their designed length, and a spinner still

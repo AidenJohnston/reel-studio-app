@@ -247,7 +247,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               {lookUps !== null && (
                 <SettingRow
                   id="look-ups"
-                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: Claude Code or Codex, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
+                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: your Claude Code app or Codex app, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
                   control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
                 />
               )}
@@ -439,7 +439,7 @@ function ListeningModel({ shared }: { shared: boolean }) {
       control={
         s.installed ? (
           <span className="sval ok" data-testid="model-ready">
-            <Icon name="check" size={13} stroke={2.4} />
+            <Icon name="check" size={14} stroke={2.4} />
             Ready
           </span>
         ) : s.checking ? (
