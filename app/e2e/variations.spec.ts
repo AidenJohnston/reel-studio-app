@@ -12,7 +12,7 @@ const MINE = mkdtempSync(join(BASE, 'variations-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
 
 test('one version at each pace, made in a row and compared', async () => {
-  test.setTimeout(10 * 60_000)
+  test.setTimeout(15 * 60_000)
   const media = makeMedia()
   const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data') })
   try {
@@ -47,6 +47,21 @@ test('one version at each pace, made in a row and compared', async () => {
     await expect(page.getByTestId('compare-pick-3')).toBeVisible()
     await expect(page.getByTestId('compare-pick-4')).toBeVisible()
     await shot(page, 'variations-02-compare')
+
+    // brightness: two more versions, 8% each way, differing from Version 4 in exposure alone
+    await page.getByTestId('done-compare').click()
+    await page.getByRole('button', { name: 'Edit it myself' }).click()
+    await page.getByRole('tab', { name: 'Cut' }).click()
+    await page.getByTestId('cut-mode-pace').click()
+    await page.getByTestId('variations-brightness').click()
+    await expect(page.getByTestId('variations-said')).toContainText('Versions 5 to 6 are on their way')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('log-play-6')).toBeVisible({ timeout: 240_000 })
+    const v4 = read(4)
+    expect([read(5).exposure, read(6).exposure]).toEqual([1.08, 0.92])
+    for (const n of [5, 6]) expect({ ...read(n), exposure: undefined, version: undefined, handEdits: undefined, updatedAt: undefined }).toEqual({ ...v4, exposure: undefined, version: undefined, handEdits: undefined, updatedAt: undefined })
+    await expect(page.getByTestId('chat')).toContainText('Variation: 8% darker')
+    await shot(page, 'variations-03-brightness')
   } finally {
     await app.close().catch(() => {})
   }

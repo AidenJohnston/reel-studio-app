@@ -90,12 +90,13 @@ interface PlatformMemory { state: ResultsPlatformState; streak: number; audience
  * `tried`: when a read last failed for one post (key: postKey), so a post the platform keeps refusing waits its turn
  * like a read one instead of taking the front of every run.
  */
+const ALL_PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads', 'x', 'linkedin']
 interface Saved { checkedAt: string | null; platforms: Record<InsightPlatform, PlatformMemory>; audience: PlatformAudience[]; tried: Record<string, number> }
 const postKey = (p: SavedPostRef) => JSON.stringify([p.platform, p.accountId, p.slug, p.version, p.postId])
 const fresh = (): Saved => ({
   checkedAt: null, audience: [], tried: {},
-  platforms: { instagram: { state: { state: 'not-connected' }, streak: 0, audienceAt: null }, tiktok: { state: { state: 'not-connected' }, streak: 0, audienceAt: null },
-    facebook: { state: { state: 'not-connected' }, streak: 0, audienceAt: null } }
+  // every platform Insights knows, including the ones nothing reads results from yet (Threads, X, LinkedIn)
+  platforms: Object.fromEntries(ALL_PLATFORMS.map((p) => [p, { state: { state: 'not-connected' }, streak: 0, audienceAt: null }])) as Record<InsightPlatform, PlatformMemory>
 })
 
 function slices(value: unknown): AudienceSlice[] {
@@ -169,7 +170,7 @@ export class ResultsRefresh {
    */
   async status(): Promise<ResultsStatus> {
     const s = await this.load()
-    const platforms = { instagram: s.platforms.instagram.state, tiktok: s.platforms.tiktok.state, facebook: s.platforms.facebook.state }
+    const platforms = Object.fromEntries(ALL_PLATFORMS.map((p) => [p, s.platforms[p].state])) as Record<InsightPlatform, ResultsPlatformState>
     for (const source of this.o.sources) {
       const account = await source.account().catch(() => null)
       const saved = platforms[source.platform]

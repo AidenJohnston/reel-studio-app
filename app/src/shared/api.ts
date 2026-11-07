@@ -3,7 +3,13 @@
 import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
+import type { SocialStatus } from './social'
+import type { FacebookApi } from './facebook'
+import type { ThreadsApi } from './threads'
+import type { XApi } from './x'
+import type { LinkedInApi } from './linkedin'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
+import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
@@ -143,6 +149,8 @@ export interface ChatMessage {
   moment?: NoteMoment
   /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
   jobId?: string
+  /** Words added to the note with this id while it ran (Add now): the notes show them under that note. */
+  steerOf?: string
   outcome?: NoteOutcome
   /** Said while planning, before the reel had a video. */
   plan?: true
@@ -242,6 +250,9 @@ export interface QueuedNote {
   branch?: number
   /** Set while its note job runs: `base` = the version it started from. */
   attempt?: { base: number }
+  /** Words added to this note while it ran (Add now), oldest first. Its next run, after Stop or a failure, reads them
+   * with its own words. */
+  steers?: { id: string; text: string; moment?: NoteMoment }[]
   /** A change made in "Edit it myself" rather than a note: it runs without the editor (`text` says what it changes). */
   hand?: { edit: HandEdit; changes: number }
 }
@@ -452,11 +463,13 @@ export interface LibraryFile {
   durationSec?: number
   /** The sound pack's job for a sound effect: whoosh, pop, click... */
   group?: string
+  /** A font's names from the file (main/fonts.ts): `full` is what a caption style names. */
+  font?: { family: string; full: string }
 }
 
 export interface LibraryBin {
-  /** sfx: the sound effects that come with Reel Studio, not a folder of yours. */
-  key: 'raw' | 'broll' | 'music' | 'images' | 'sfx'
+  /** sfx and fontpack: the sound effects and caption fonts that come with Reel Studio, not a folder of yours. */
+  key: 'raw' | 'broll' | 'music' | 'images' | 'fonts' | 'sfx' | 'fontpack'
   label: string
   dir: string
   files: LibraryFile[]
@@ -474,7 +487,7 @@ export interface LibraryPreview {
 export interface DropResult {
   file: string
   name: string
-  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | null
+  bin: 'raw' | 'broll' | 'music' | 'images' | 'exports' | 'fonts' | null
   dest: string | null
   reason?: string
 }
@@ -587,6 +600,42 @@ export type FootageIndexStatus =
   | { state: 'idle' | 'paused' }
   | { state: 'indexing'; stage: string; pct: number; message: string }
   | { state: 'error'; message: string }
+
+/** Reels the editor found across the footage archive (main/archive-reels.ts), each with the reel made from it. */
+export interface ArchiveStatus {
+  state: 'idle' | 'finding' | 'error'
+  /** what the editor is doing, or why the last look failed */
+  message?: string
+  jobId?: string
+  candidates: {
+    id: string
+    title: string
+    hook: string
+    why: string
+    /** ref: Library/... or Footage/<folder>/<file> */
+    spans: { ref: string; t0: number; t1: number; said: string }[]
+    seconds: number
+    /** the reel made from it, or null */
+    made: string | null
+  }[]
+  notes: string
+  /** the footage had more to read than one look reads */
+  truncated: boolean
+  at: string | null
+}
+
+/** A folder or drive of someone's videos, indexed where it is (main/footage-sources.ts). */
+export interface FootageSource {
+  id: string
+  path: string
+  /** the folder's own name, as the Library shows it */
+  name: string
+  /** false: the folder isn't there now (a drive unplugged); its index is kept */
+  online: boolean
+  /** videos the last index run found in it; null before the first run */
+  files: number | null
+  addedAt: string
+}
 
 export interface AppInfo {
   version: string
@@ -733,8 +782,9 @@ export interface StyleRule {
   check?: RuleCheck
   /** The reel, version and note it was learned from. */
   source?: { project: string; title: string; version: number; note?: string }
-  /** Learned from another editor's export (My style, Learn from my past edits): its file name. */
-  imported?: { file: string }
+  /** Learned from another editor's export (My style, Learn from my past edits): its file name, and the editor
+   * when one file was read (a rule kept before editors were remembered has none; shared/memory.ts guesses). */
+  imported?: { file: string; editor?: EditorName }
   consent?: { proposal: string; at: string }
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in the list. */
   updatedAt?: string
@@ -772,7 +822,7 @@ export interface LearnedRule {
 /** What "Learn from my past edits" read: the exports, how much was in them, and the rules, before any is saved. */
 export interface StyleLesson {
   /** By id and name; the paths stay in main. */
-  files: { id: string; name: string; editor: 'Final Cut Pro' | 'Premiere Pro' }[]
+  files: { id: string; name: string; editor: EditorName }[]
   timelines: number
   shots: number
   rules: LearnedRule[]
@@ -780,7 +830,9 @@ export interface StyleLesson {
   skipped: { name: string; reason: string }[]
 }
 
-export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj'
+export type PastEditKind = 'fcpxml' | 'fcpxmld' | 'fcpbundle' | 'premiere-xml' | 'prproj' | 'capcut'
+/** The editor a lesson says a file came from; an EDL names none. */
+export type EditorName = 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL'
 
 /** An edit "Learn from my past edits" found on this computer. Its path stays in main; the page names it by id. */
 export interface PastEdit {
@@ -791,7 +843,7 @@ export interface PastEdit {
   file: string
   /** The folder it is in, below the home folder ("Movies › Exports"), or its drive and folder. */
   where: string
-  app: 'Final Cut Pro' | 'Premiere Pro'
+  app: 'Final Cut Pro' | 'Premiere Pro' | 'CapCut'
   kind: PastEditKind
   /** ISO time it last changed. */
   modified: string
@@ -822,7 +874,8 @@ export interface ExportResult {
 export interface PlatformExportResult {
   folder: string
   /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
-  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `version`: the version each file was made from (Try 2 can be another version). */
+  files: { platform: Platform; try?: 1 | 2; version: number; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */
@@ -846,6 +899,33 @@ export interface PhoneShare {
 }
 
 export type PhoneEvent = { kind: 'page' } | { kind: 'video' } | { kind: 'stopped'; reason: 'timeout' | 'closed' }
+
+/** A phone or browser paired with this computer (Settings > Phone and browser; main/companion/devices.ts). */
+export interface PairedDevice {
+  id: string
+  /** The device's own guess at its name ("iPhone", "Chrome on Windows"). */
+  name: string
+  kind: 'phone' | 'browser'
+  /** view: watch and save versions. note: also send notes, which start edits here. */
+  scopes: ('view' | 'note')[]
+  pairedAt: number
+  lastSeenAt: number
+}
+
+/** Settings > Phone and browser. */
+export interface DevicesStatus {
+  /** The "Phone and browser" switch. */
+  on: boolean
+  /** Where a paired device reaches this computer ("192.168.1.20:52114"), or null while it isn't listening. */
+  address: string | null
+  /** Why it isn't listening although it's on, in the app's words. */
+  problem: string | null
+  devices: PairedDevice[]
+  /** The pairing link to show as a code, while one is open (5 minutes, one device). It holds the device's secret. */
+  pairing: { url: string; expiresAt: number; kind: 'phone' | 'browser'; notes: boolean } | null
+  /** This computer's name as paired devices show it. */
+  computer: string
+}
 
 /** One line of a plan: what to say at a beat, or one shot to film. `done`: ticked off while filming. */
 export interface PlanLine {
@@ -885,11 +965,15 @@ export interface CloudDrive {
   label: 'iCloud Drive' | 'Google Drive'
 }
 
+/** The parts of a version that can come from either of two when combining them (ai version-merge.ts MERGE_FIELDS). */
+export type MergeLayer = 'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover'
+export const MERGE_LAYERS: readonly MergeLayer[] = ['cut', 'captions', 'music', 'zooms', 'broll', 'sfx', 'cover']
+
 /** version-merge: which version each layer of the new one comes from (docs/version-merge.md). */
 export interface MergeRequest {
   ours: number
   theirs: number
-  take: Record<'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover', 'ours' | 'theirs'>
+  take: Record<MergeLayer, 'ours' | 'theirs'>
 }
 
 export interface ReelApi {
@@ -902,8 +986,16 @@ export interface ReelApi {
     /** A background read saved new numbers: read the summary again. */
     onChange(cb: () => void): () => void
   }
+  /** Insights > Your recent reels: built only when asked, from what's saved on this computer (shared/wrapped.ts). */
+  wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
+  /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
+  social: { status(fresh?: boolean): Promise<SocialStatus> }
+  facebook: FacebookApi
+  threads: ThreadsApi
+  x: XApi
+  linkedin: LinkedInApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
@@ -983,6 +1075,9 @@ export interface ReelApi {
     /** Settings > "Double-check each edit" (off by default). */
     checkEdits(): Promise<boolean>
     setCheckEdits(on: boolean): Promise<boolean>
+    /** Settings > "Look things up in parallel" (main/settings.ts lookUps) */
+    lookUps(): Promise<boolean>
+    setLookUps(on: boolean): Promise<boolean>
     connections(): Promise<ConnectionInfo[]>
     saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
     removeConnection(id: string): Promise<void>
@@ -1033,10 +1128,14 @@ export interface ReelApi {
      * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one).
      * `moment`: a "Just here" note's place; main writes it into the text the AI reads. `onVersion`: the version on
      * screen while it was written (default: the moment's). `base`: a saved version the note changes instead of the
-     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn. */
-    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number): Promise<{ jobId: string | null; queued?: boolean }>
+     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn.
+     * `steer`: add the words to the note running now instead (queue.steer); `added` says whether they made it in
+     * time, and a note too late for it waits to run next. */
+    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number, steer?: boolean): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }>
     /** One version's layers with another's, as a new version (docs/version-merge.md). */
     mergeVersions(slug: string, request: MergeRequest): Promise<{ jobId: string }>
+    /** The parts two saved versions differ in, so Combine asks only about those. */
+    mergeLayers(slug: string, ours: number, theirs: number): Promise<MergeLayer[]>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
      * fresh from that render's manifest each call, with the segments it was cut from. null when the render
      * left no timeline to read. */
@@ -1070,6 +1169,8 @@ export interface ReelApi {
     makeReels(slug: string, ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
     /** Not now (true) folds the card to one line; Show (false) opens it again. */
     foldReels(slug: string, folded: boolean): Promise<void>
+    /** The person's own series for this reel, or null for none; automatic grouping leaves it alone after (main/series.ts). */
+    setSeries(slug: string, series: string | null): Promise<ProjectDetail>
     remove(slug: string): Promise<void>
   }
   /** Pictures, GIFs and short clips on a note (0.1.2). Each call copies the files into the project. */
@@ -1095,6 +1196,9 @@ export interface ReelApi {
     cancel(slug: string, id: string): Promise<void>
     /** -1 = one place earlier, 1 = one place later */
     move(slug: string, id: string, by: -1 | 1): Promise<void>
+    /** Add now: a waiting note's words go into the note running now, which reads them before it finishes. False when
+     * that note had already finished: this one stays first in line. */
+    steer(slug: string, id: string): Promise<{ added: boolean }>
     /** Send now: runs the waiting notes again, from the first, after Stop, a failed note or a restart, and ends a
      * paused job's wait. */
     runNext(slug: string): Promise<void>
@@ -1108,6 +1212,18 @@ export interface ReelApi {
     save(video: string, folder: string, id: string): Promise<string>
     cancel(id: string): Promise<void>
     onProgress(cb: (p: { id: string; pct: number }) => void): () => void
+  }
+  /** Settings > Phone and browser: phones and browsers that watch versions and leave notes over the home network. */
+  devices: {
+    status(): Promise<DevicesStatus>
+    setOn(on: boolean): Promise<DevicesStatus>
+    /** A new pairing code (the one before stops working); turns the switch on. `notes`: the device may send notes. */
+    pair(kind: 'phone' | 'browser', notes: boolean): Promise<DevicesStatus>
+    cancelPair(): Promise<DevicesStatus>
+    /** Pairs this computer's own browser and opens the page there. */
+    openInBrowser(notes: boolean): Promise<DevicesStatus>
+    remove(id: string): Promise<DevicesStatus>
+    onChange(cb: (s: DevicesStatus) => void): () => void
   }
   phone: {
     /** Start (or restart, e.g. on another network) the link for one exported video. */
@@ -1128,6 +1244,18 @@ export interface ReelApi {
     choose(kind: 'music' | 'images'): Promise<DropResult[]>
     /** A Library file's contact sheet or waveform (main/library-preview.ts). */
     preview(path: string): Promise<LibraryPreview>
+  }
+  /** Footage folders and the index that reads them (main/footage-sources.ts, footage-index.ts). */
+  footage: {
+    sources(): Promise<FootageSource[]>
+    /** The system folder picker, then the picked folder is added. Unchanged list = cancelled. */
+    addSource(): Promise<FootageSource[]>
+    removeSource(id: string): Promise<FootageSource[]>
+    status(): Promise<FootageIndexStatus>
+    /** Reels across all the read footage (main/archive-reels.ts): the editor's look, what it found, and making them. */
+    findReels(): Promise<{ jobId: string }>
+    reels(): Promise<ArchiveStatus>
+    makeReels(ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
   }
   style: {
     rules(): Promise<StyleRule[]>
@@ -1152,8 +1280,9 @@ export interface ReelApi {
     appIcons(): Promise<Partial<Record<PastEdit['app'], string>>>
     /** Show a found edit in Finder or File Explorer. */
     reveal(id: string): Promise<void>
-    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from. */
-    keepLearned(rules: LearnedRule[], from: string): Promise<StyleRule[]>
+    /** Keep these rules from a lesson; each remembers `from`, the export names it was read from, and the editor
+     * that made it when the lesson read one file. */
+    keepLearned(rules: LearnedRule[], from: string, editor?: EditorName): Promise<StyleRule[]>
     /** Change a rule's words, or pause or resume it. */
     update(id: string, patch: { text?: string; paused?: boolean }): Promise<StyleRule>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */
@@ -1239,7 +1368,7 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
-  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  /** Posting to YouTube (main/posting.ts). Hidden only with REELSTUDIO_POSTING=0. */
   posting: {
     status(): Promise<PostingStatus>
     /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
@@ -1273,7 +1402,7 @@ export type PostPrivacy = 'private' | 'unlisted' | 'public'
 
 /** What Settings and the Post sheet show. Never the key, the session or any Google token. */
 export interface PostingStatus {
-  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  /** Not turned off with REELSTUDIO_POSTING=0, and a usable server address */
   enabled: boolean
   /** A download key is saved (automatic updates on) */
   hasKey: boolean

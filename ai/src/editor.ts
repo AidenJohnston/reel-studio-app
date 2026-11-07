@@ -25,6 +25,8 @@ import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { refuseIfOpen } from './owner';
 import { MergeRequest, MergeResult } from './version-merge';
+import type { NoteSteer } from './steer';
+import type { Helper } from './helpers';
 
 export interface EditorDeps {
   host: EngineHost;
@@ -50,6 +52,8 @@ export interface EditorDeps {
   fastNotes?: boolean;
   /** the model that proofreads Version 1's subtitles (Settings: Checks each edit); default the editor's */
   checker?: ModelProvider | null;
+  /** Settings > "Look things up in parallel": the second AI the note's look_up tool hands searches to (helpers.ts) */
+  helper?: Helper;
   /** the model that writes the caption the editor left out (Settings: Writes titles); default the editor's */
   writer?: ModelProvider | null;
   /** An AI failure the host pauses on (a plan at its limit, no internet): Version 1 is not made without the editor
@@ -498,6 +502,10 @@ export interface ApplyNoteOptions {
   /** Settings > "Double-check each edit": a second request checks the edit before it becomes a version
    * (checkAndRepair). Off unless the app passes true: its added tokens and time are not measured yet. */
   checkEdit?: boolean;
+  /** words the person adds while the note runs (steer.ts); the note reads them before it can finish */
+  steer?: NoteSteer;
+  /** Settings > "Look things up in parallel": the note may hand searches to a second AI (helpers.ts) */
+  helpers?: boolean;
 }
 
 const REPAIR_STEPS = 12;
@@ -708,7 +716,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const begin = async (): Promise<ToolContext> => {
     const file = path.join(dir, 'edit.json');
     await writeFileAtomic(file, edit);
-    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, rules };
+    return { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), supportsImages: harness.supportsImages, userNote: note, note: { id, file, dir, parent }, jobId: opts.jobId, rules, ...(opts.steer ? { steer: opts.steer } : {}), ...(deps.helper ? { helper: deps.helper } : {}) };
   };
   const label = noteLabel(note, attached);
   let committed: EditResult;
@@ -721,7 +729,9 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     let ctx = await begin();
     const { p: p0 } = await load(ctx);
     // "smaller captions", "quieter music": one direct change and the final render, no AI turns
-    const fast = deps.fastNotes === false || attached.length || (opts.checkEdit && deps.harness) ? null : planFastNote(note, p0);
+    let fast = deps.fastNotes === false || attached.length || (opts.checkEdit && deps.harness) ? null : planFastNote(note, p0);
+    // words added before a direct change starts need the model to read them; once sealed, later ones become the next note
+    if (fast && opts.steer && !opts.steer.seal()) fast = null;
     if (fast) {
       onEvent({ type: 'status', message: operationStatus(ctx, fast.calls[0].name, fast.calls[0].args) ?? 'Making your change', pct: 10, phase: 'final' });
       let ok = true;
@@ -742,6 +752,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         }
       }
       // the direct change did not fit this project: start again from the saved project and let the AI read the note
+      opts.steer?.unseal();
       ctx = await begin();
       await load(ctx);
     }
@@ -754,7 +765,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     const files = attachmentsSection(attached, earlier, harness.supportsImages ? stills : new Map());
     const noteText = note.trim() || '(no words: the user only attached the file(s) below)';
     const task = deps.prompts.render('applyNote', { note: noteText }) + (files ? `\n\n${files}` : '');
-    const r = await harness.run({ system: await systemPrompt(deps, ctx), task, taskImages: images, ctx, onEvent, signal, tools: TOOL_NAMES, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
+    const tools = deps.helper ? [...TOOL_NAMES, 'look_up'] : TOOL_NAMES;
+    const r = await harness.run({ system: await systemPrompt(deps, ctx), task, taskImages: images, ctx, onEvent, signal, tools, maxSteps: deps.maxSteps ?? 25, tokenBudget: deps.tokenBudget, preload: ['get_project', 'get_transcript'] });
     const nothing = !ctx.state.changed.size && !ctx.state.styleRulesAdded.length && !ctx.state.styleSuggestions.length;
     // A note that stopped before finish (step limit, or replies with no tool call) is not applied, and
     // says so when that throws work away. With nothing to throw away it gets the "not sure" reply.
@@ -768,11 +780,15 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     // only a reply that is nothing but a question passes: "I cut the intro. Want more?" still claims the cut
     const question = undone && /^[^.!]*\?$/.test(r.finished?.trim() ?? '') ? r.finished : null;
     // Settings > "Double-check each edit": a checker reviews a note that changed the edit before its final render
-    // a note in an MCP harness (dev only) is checked by the other harness instead (mcp-harness-2, checkInHarness)
-    const harnessed = opts.checkEdit && ctx.state.changed.size && deps.harness
-      ? await checkInHarness(deps, harness, ctx, { noteText, files, images, start: p0, said: r.finished || 'I saved your preference.', tokens: r.tokens }, onEvent, signal)
+    // a note in an MCP harness is checked by the other harness instead (mcp-harness-2, checkInHarness)
+    // the checker judges the edit against everything the person asked, words added while it ran included
+    const asked = [noteText, ...(ctx.state.added ?? [])].join('\n');
+    // the other app checks when it can answer (index.ts checkerHarness); otherwise the checker model does
+    const crossCheck = !!(opts.checkEdit && ctx.state.changed.size && deps.harness && deps.checkerHarness);
+    const harnessed = crossCheck
+      ? await checkInHarness(deps, harness, ctx, { noteText: asked, files, images, start: p0, said: r.finished || 'I saved your preference.', tokens: r.tokens }, onEvent, signal)
       : null;
-    const review = !opts.checkEdit || !ctx.state.changed.size || deps.harness ? null : await checkAndRepair(deps, provider, ctx, label, p0,
+    const review = !opts.checkEdit || !ctx.state.changed.size || crossCheck ? null : await checkAndRepair(deps, provider, ctx, [label, ...(ctx.state.added ?? [])].join('\n'), p0,
       { files, images, assets: [...attached, ...earlier].map((a) => a.asset) }, onEvent, signal)
       // a checker model of its own only asked (askChecker), so no agent run disposed of it
       .finally(() => (deps.checker && deps.checker !== provider ? deps.checker.dispose?.() : undefined));
@@ -914,6 +930,8 @@ async function saveNote(deps: EditorDeps, ctx: ToolContext, base: Buffer, baseVe
       ...(final ? { version } : {}), text: n.text, applied: [...ctx.state.changed], at: new Date().toISOString(),
       ...(n.attachments.length ? { attachments: n.attachments } : {}), ...(receipt ? { receipt } : {}),
       id: ctx.note!.id, reply: n.summary,
+      // what the person added while it ran is part of what they asked (steer.ts)
+      ...(ctx.state.added?.length ? { text: [n.text, ...ctx.state.added].join('\n') } : {}),
       ...(styleRulesAdded.length ? { styleRulesAdded } : {}), ...(styleSuggestions.length ? { styleSuggestions } : {}),
     };
     p.notes = [...(p.notes ?? []), entry];
@@ -972,8 +990,10 @@ export function plannedScript(p: object): string {
 
 // ---------------------------------------------------------------- one of several reels from one video
 
+const howManyVideos = (r: ProposedReel): string => (Array.isArray(r.files) && r.files.length > 1 ? 'several videos' : 'one video');
+
 /** project.json `proposal`: this reel is one the editor proposed from another reel's video (app propose-reels.ts). */
-interface ProposedReel { title?: unknown; hook?: unknown; why?: unknown }
+interface ProposedReel { title?: unknown; hook?: unknown; why?: unknown; archive?: unknown; files?: unknown }
 const proposalOf = (p: object): ProposedReel | null => {
   const r = (p as { proposal?: unknown }).proposal;
   return r && typeof r === 'object' && typeof (r as ProposedReel).title === 'string' ? r as ProposedReel : null;
@@ -988,6 +1008,9 @@ export function proposedReel(p: object): string {
   if (!r) return '';
   const hook = typeof r.hook === 'string' && r.hook.trim() ? ` It opens on: "${r.hook.trim()}".` : '';
   const why = typeof r.why === 'string' && r.why.trim() ? ` ${r.why.trim()}` : '';
+  // app main/archive-reels.ts: proposed from the creator's whole footage, its cut the proposed spans as clips
+  if (r.archive === true) return `\n\nThis reel was proposed from the creator's footage: the lines it is made of come from ${howManyVideos(r)}. It is about: ${String(r.title).trim()}.${hook}${why}
+Its cut is already set to those parts of the videos, in order (CURRENT CUT in get_transcript). Keep inside them: tighten the edges, take the clean take of any line said twice, drop filler. Do not add parts of the videos outside them.`;
   return `\n\nThis reel is one of several from the same video. It is about: ${String(r.title).trim()}.${hook}${why}
 Its cut is already set to those words (CURRENT CUT in get_transcript). Keep inside it: tighten it, take the clean take of any line said twice, drop filler. Do not add words from elsewhere in the video.`;
 }

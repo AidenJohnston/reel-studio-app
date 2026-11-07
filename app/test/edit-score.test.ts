@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { scoreLine, scoreRows, type EditScore } from '../src/shared/edit-score'
+import { failingRows, scoreLine, scoreRows, type EditScore } from '../src/shared/edit-score'
 
 const score = (checks: EditScore['checks']): EditScore => ({ version: 2, checks, passed: checks.filter((c) => c.ok).length, measured: checks.length })
 
@@ -15,6 +15,8 @@ describe("a version's edit checks", () => {
       ['Video file', 'Plays as expected']
     ])
     expect(scoreLine(s)).toBe('1 of 2 checks pass')
+    // Insights lists only what to fix
+    expect(failingRows(s).map((r) => r.label)).toEqual(['Loudness'])
   })
 
   it('fails if a version with nothing measured claims its checks pass', () => {

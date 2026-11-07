@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { failingRows, scoreLine, scoreRows, type EditScore } from '../../../shared/edit-score'
 import { TitleBarSlot } from '../components/titlebar'
 import { Button, Spinner } from '../components/ui'
 import { reel } from '../api'
 import type { Go } from '../nav'
-import type { InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
+import { RecentReels } from '../components/RecentReels'
+import type { InsightMetric, InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
 import { ago, audienceLines, bestReel, compact, percent, PLATFORM_NAMES, reelLine, seconds } from '../../../shared/insight-words'
 import '../components/library.css'
 import '../components/insights.css'
@@ -94,6 +96,8 @@ export function Insights({ go }: { go: Go }) {
           <p className="faint ins-foot">Read from your connected accounts. Your results stay on this computer.</p>
         </>
       ) : null}
+      {/* one edit to try, from these results and the reels' own timing; it also works before any results */}
+      {data && <RecentReels go={go} />}
     </div>
   )
 }
@@ -182,36 +186,73 @@ function ReelList({ reels, go }: { reels: InsightReel[]; go: Go }) {
 }
 const latest = (r: InsightReel) => Math.max(...r.posts.map((p) => Date.parse(p.publishedAt)))
 
+/** The posted version's edit checks (engine `score`), so a reel's results sit beside how its edit checked out. Null
+ * while they load, and for a version the engine can't score (an older or damaged folder): the row then says nothing. */
+function useEditScore(project: string, version: number): EditScore | null {
+  const [score, setScore] = useState<EditScore | null>(null)
+  useEffect(() => {
+    let live = true
+    reel.projects.score(project, version).then(
+      (s) => live && setScore(scoreRows(s).length ? s : null),
+      () => live && setScore(null)
+    )
+    return () => {
+      live = false
+    }
+  }, [project, version])
+  return score
+}
+
 function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go }) {
   const t = r.totals.metrics
   const counting = r.posts.some((p) => p.status === 'still counting')
   const where = join([...new Set(r.posts.map((p) => PLATFORM_NAMES[p.platform]))])
   const watched = t.completionEstimate ?? null
   const missing = (what: string) => `${where} ${r.posts.length > 1 ? 'don’t' : 'doesn’t'} report ${what}`
+  // A number that rests on some of the reel's posts (TikTok gives no watch time) says which: "from Instagram only".
+  const partial = (m: InsightMetric): string | null => r.totals.coverage[m] > 0 && r.totals.coverage[m] < r.posts.length
+    ? `from ${join([...new Set(r.posts.filter((p) => p.metrics[m] !== null).map((p) => PLATFORM_NAMES[p.platform]))])} only` : null
   // The column heads are hidden from screen readers, so each number says what it is.
-  const cell = (label: string, value: string | null, what: string) => (
-    <span className="ins-n" title={value === null ? missing(what) : undefined}>
-      <span className="sr-only">{label}: </span>
-      {value ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
-    </span>
-  )
+  const cell = (label: string, value: string | null, what: string, m?: InsightMetric) => {
+    const only = m ? partial(m) : null
+    return (
+      <span className="ins-n" title={value === null ? missing(what) : only ? `${label} ${only}` : undefined}>
+        <span className="sr-only">{label}: </span>
+        {value ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
+        {value !== null && only && <span className="sr-only">, {only}</span>}
+      </span>
+    )
+  }
+  const watchedOnly = partial(watched !== null ? 'completionEstimate' : 'averageWatchTimeMs')
   const watchedText = watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : null
   const line = reelLine(r, all)
+  const score = useEditScore(r.project, r.version)
+  // what to fix in the edit, beside what the reel did: the failing checks, by name and value
+  const off = score ? failingRows(score) : []
   return (
     <li className={`ins-reel${counting ? ' counting' : ''}`} data-testid="insights-reel" data-project={r.project} data-version={r.version}>
       <button className="hit" onClick={() => go({ name: 'reel', slug: r.project, version: r.version })} aria-label={`Open ${versionName(r)}`} data-testid="insights-open" />
       <div className="rthumb" aria-hidden>{r.cover && <img src={r.cover} alt="" loading="lazy" decoding="async" />}</div>
       <div className="rtext">
         <div className="ttl">{r.title ?? r.project}</div>
-        <div className="cm">Version {r.version} · {where} · {ago(r.posts[0].publishedAt, Date.now())}</div>
+        <div className="cm">
+          Version {r.version} · {where} · {ago(r.posts[0].publishedAt, Date.now())}
+          {score && <span data-testid="insights-checks"> · {scoreLine(score)}</span>}
+        </div>
         <div className={`ins-why${counting ? ' faint' : ''}`} data-testid="insights-why">{line}</div>
+        {off.length > 0 && (
+          <div className="ins-why faint" data-testid="insights-checks-off">
+            In the edit: {off.map((row) => `${row.label.toLowerCase()} ${row.after}`).join('; ')}.
+          </div>
+        )}
       </div>
       {cell('Views', t.plays === null ? null : compact(t.plays), 'views')}
-      <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : undefined}>
-        <span><span className="sr-only">Watched on average: </span>{watchedText ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}</span>
+      <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : watchedOnly ? `Watched ${watchedOnly}` : undefined}>
+        <span><span className="sr-only">Watched on average: </span>{watchedText ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
+          {watchedText !== null && watchedOnly && <span className="sr-only">, {watchedOnly}</span>}</span>
         {watched !== null && <i className="ins-bar" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, watched)})` }} /></i>}
       </span>
-      {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips')}
+      {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips', 'skipRatePercent')}
       {cell('Shares', t.shares === null ? null : compact(t.shares), 'shares')}
       {cell('Saves', t.saves === null ? null : compact(t.saves), 'saves')}
     </li>

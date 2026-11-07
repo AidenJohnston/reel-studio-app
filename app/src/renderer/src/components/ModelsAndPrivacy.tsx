@@ -126,7 +126,7 @@ function Kept({ sharing, onError }: { sharing: DataSharing; onError: (m: string)
     >
       {open && lines && n > 0 && (
         <div className="srow-more" id="usage-lines">
-          <ol className="usage-lines" data-testid="usage-lines">
+          <ol className={`usage-lines${n > 8 ? ' long' : ''}`} data-testid="usage-lines">
             {lines
               .slice()
               .reverse()

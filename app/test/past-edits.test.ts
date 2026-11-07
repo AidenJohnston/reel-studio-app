@@ -15,7 +15,7 @@ const shape = (found: Awaited<ReturnType<typeof findPastEdits>>['edits']) => fou
 describe('Learn from my past edits: finding them', () => {
   it('finds each editor’s exports, libraries and projects where they are kept, newest first, and leaves out copies', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const look = await findPastEdits({ platform: 'darwin', home, spotlight: null })
     expect(look.cut).toBe(false)
     expect(shape(look.edits)).toEqual([
@@ -43,12 +43,30 @@ describe('Learn from my past edits: finding them', () => {
       }
     })
     expect(found.edits.map((f) => f.file)).toEqual(['Big day.fcpbundle'])
-    expect(asked).toHaveLength(2)
+    expect(asked).toHaveLength(3)
+  })
+
+  it('fails if a CapCut project where CapCut keeps it is missed, listed twice, or its recycle bin is listed', async () => {
+    for (const [platform, base] of [['darwin', 'Movies'], ['win32', join('AppData', 'Local')]] as const) {
+      const home = fresh()
+      const projects = join(home, base, 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft')
+      const draft = (folder: string, files: string[]) => {
+        mkdirSync(join(projects, folder), { recursive: true })
+        for (const f of files) writeFileSync(join(projects, folder, f), '{}')
+      }
+      // CapCut on a Mac writes draft_info.json; some builds keep draft_content.json beside it, which JianYing encrypts,
+      // so the project is listed as its folder and the engine picks the readable draft in it
+      draft('Bread reel', ['draft_content.json', 'draft_info.json', 'draft_meta_info.json'])
+      draft('.recycle_bin', ['draft_content.json'])
+      const look = await findPastEdits({ platform, home, spotlight: null })
+      expect(shape(look.edits)).toEqual([['Bread reel', 'CapCut', 'capcut', true, 'CapCut']])
+      expect(look.edits[0].path).toBe(join(projects, 'Bread reel'))
+    }
   })
 
   it('keeps the same id for the same file across looks, so ticks survive a refresh', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const a = (await findPastEdits({ platform: 'darwin', home, spotlight: null })).edits
     const b = (await findPastEdits({ platform: 'darwin', home, spotlight: null })).edits
     expect(b.map((f) => f.id)).toEqual(a.map((f) => f.id))
@@ -75,7 +93,7 @@ describe('Learn from my past edits: finding them', () => {
 
   it('says it was cut short when a limit stops the walk, and keeps what it found', async () => {
     const home = fresh()
-    makePastEditsHome(home)
+    makePastEditsHome(home, 'darwin')
     const look = await findPastEdits({ platform: 'darwin', home, spotlight: null, limits: { walk: 3 } })
     expect(look.cut).toBe(true)
     expect(look.edits.length).toBeLessThan(5)
@@ -109,7 +127,7 @@ describe('Learn from my past edits: finding them', () => {
       return q.includes('fcpbundle') ? { paths: libraries, cut: false } : { paths: [], cut: false }
     }
     const look = await findPastEdits({ platform: 'darwin', home, spotlight, limits: { spotlight: 4 } })
-    expect(asked).toEqual([4, 4])
+    expect(asked).toEqual([4, 4, 4])
     expect(look.cut).toBe(true)
     expect(look.edits).toHaveLength(4)
   })
@@ -139,6 +157,12 @@ describe('Learn from my past edits: finding them', () => {
   })
 
   // fails if a lesson carries a file's path to the page; discovery names edits by id, and so does what it read
+  // fails if a CapCut lesson says "draft_content.json" with no project, or names another editor
+  it('names a CapCut project in a lesson by its folder and the draft read in it', async () => {
+    const lesson = await readLesson(['/x/Bread reel'], async () => ({ source: { adapter: 'capcut', path: '/x/Bread reel/draft_info.json', writer: 'CapCut' }, timelines: [] }))
+    expect(lesson.files).toEqual([{ id: expect.stringMatching(/^[0-9a-f]{16}$/), name: 'Bread reel/draft_info.json', editor: 'CapCut' }])
+  })
+
   it('what a lesson says about its files has names and ids, never a path', async () => {
     const dir = fresh()
     const good = join(dir, 'Spring launch.fcpxml')
@@ -161,7 +185,10 @@ describe('Learn from my past edits: finding them', () => {
     const sequence = text.slice(text.indexOf('  <sequence id="seq-1">'), text.indexOf('</xmeml>'))
     const twice = join(fresh(), 'same-id-twice.xml')
     writeFileSync(twice, text.replace('</xmeml>', `<project><name>Cuts</name><children>${sequence}</children></project></xmeml>`))
-    const files = [...['cut.fcpxmld', 'ntsc-lanes.fcpxml', 'talking-head.xml'].map((f) => join(fixtures, f)), twice]
+    const files = [
+      ...['cut.fcpxmld', 'ntsc-lanes.fcpxml', 'talking-head.xml', 'resolve-timeline.fcpxml', 'resolve-cut.edl', 'capcut-draft', join('capcut-draft', 'draft_content.json')].map((f) => join(fixtures, f)),
+      twice
+    ]
     // each package as `python -m reelengine` runs it: the real one starts in cli.run, the stand-in in __main__.main
     const scan = (pythonPath: string) => {
       const out = execFileSync(PYTHON, ['-I', '-c', 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "reelengine"; runpy.run_module("reelengine", run_name="__main__")', pythonPath, 'reference-scan', ...files], { encoding: 'utf8' })
@@ -169,7 +196,7 @@ describe('Learn from my past edits: finding them', () => {
       return done.result.files.map((f: { timelines?: number }) => f.timelines)
     }
     const real = scan(join(APP_DIR, '..', 'engine'))
-    expect(real).toEqual([1, 1, 1, 1])
+    expect(real).toEqual([1, 1, 1, 1, 1, 1, 1, 1])
     expect(scan(join(APP_DIR, 'dev', 'fake-engine'))).toEqual(real)
   })
 })

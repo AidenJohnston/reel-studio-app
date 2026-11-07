@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
 import { PRODUCT_NAME, type Channel } from '../shared/channel'
 
 export interface PathContext {
@@ -63,7 +63,8 @@ export const BIN_FOLDERS = {
   broll: 'B-roll',
   music: 'Music',
   images: 'Images',
-  exports: 'Exports'
+  exports: 'Exports',
+  fonts: 'Fonts'
 } as const
 
 export type BinKey = keyof typeof BIN_FOLDERS
@@ -290,8 +291,8 @@ export function engineEnv(): NodeJS.ProcessEnv {
   // Only absolute paths: a bare name means "not found", and the engine does its own PATH search.
   if (isAbsolute(ffmpegPath())) out.REELENGINE_FFMPEG = ffmpegPath()
   if (isAbsolute(ffprobePath())) out.REELENGINE_FFPROBE = ffprobePath()
-  const fonts = fontsDir()
-  if (fonts) out.REELENGINE_FONTS = fonts
+  // the person's own fonts first (Library › Fonts), so a caption can name one; the bundled fonts stay last (tools.font_dirs)
+  out.REELENGINE_FONTS = [binDir('fonts'), fontsDir()].filter((d): d is string => !!d).join(delimiter)
   if (asrThreads) out.REELENGINE_ASR_THREADS = String(asrThreads)
   return out
 }

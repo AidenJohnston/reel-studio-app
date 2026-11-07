@@ -12,6 +12,7 @@ import { MODEL_ROLES, type DataSharing, type ModelChoice, type PhoneView } from 
 import type { TikTokSettings } from '../shared/tiktok'
 import type { InstagramSettings } from '../shared/instagram'
 import { UPDATE_KEY_DEFAULTS, type UpdateKeyState } from './update-key'
+import type { SavedSource } from './footage-sources'
 
 // Instagram and TikTok (insights-data): off until a developer configures them, with no UI yet
 export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemory, UpdateKeyState {
@@ -33,6 +34,9 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   /** Settings > "Double-check each edit": passed to every AI note as `checkEdit`. Off by default until
    * the eval harness measures the tokens and time it adds. */
   checkEdits: boolean
+  /** Settings > "Look things up in parallel": a note may hand searches to a second AI (ai helpers.ts) as
+   * `helpers`. Off by default: what it adds in tokens and time is not measured yet. */
+  lookUps: boolean
   models: ModelChoice
   sharing: DataSharing
   phoneView: PhoneView
@@ -40,6 +44,8 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   timeline: boolean
   /** the first run's sample plays its two sounds */
   soundEffects: boolean
+  /** Library › Videos › Footage folders (footage-sources.ts) */
+  footageSources: SavedSource[]
 }
 
 const DEFAULTS: Settings = {
@@ -52,12 +58,14 @@ const DEFAULTS: Settings = {
   notifications: null,
   speechCheck: null,
   checkEdits: false,
+  lookUps: false,
   models: Object.fromEntries(MODEL_ROLES.map((r) => [r, 'auto'])) as ModelChoice,
   sharing: { asked: false, on: false, usage: true, quality: true, posts: true },
   phoneView: 'instagram',
   // Sam asked for the timeline as a toggle that starts on (spec §7)
   timeline: true,
   soundEffects: true,
+  footageSources: [],
   // Connection and publishing stay opt-in until the broker and Meta app have been configured.
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],
   // Posting requires explicit developer configuration and approval of the requested scopes.

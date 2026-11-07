@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -26,6 +26,7 @@ const api: ReelApi = {
     refresh: (options) => call('insights:refresh', options),
     onChange: (cb) => on<void>('insights:changed', () => cb())
   },
+  wrapped: { report: () => call('wrapped:report') },
   tiktok: {
     configure: (settings) => call('tiktok:configure', settings),
     session: () => call('tiktok:session'),
@@ -44,6 +45,36 @@ const api: ReelApi = {
     disconnect: () => call('instagram:disconnect'),
     publish: (input) => call('instagram:publish', input),
     insights: (slug, version, postId) => call('instagram:insights', slug, version, postId)
+  },
+  social: { status: (fresh) => call('social:status', fresh === true) },
+  facebook: {
+    session: () => call('facebook:session'),
+    connect: () => call('facebook:connect'),
+    cancelConnect: () => call('facebook:cancelConnect'),
+    disconnect: () => call('facebook:disconnect'),
+    choosePage: (pageId) => call('facebook:choosePage', pageId),
+    publish: (input) => call('facebook:publish', input)
+  },
+  threads: {
+    session: () => call('threads:session'),
+    connect: () => call('threads:connect'),
+    cancelConnect: () => call('threads:cancelConnect'),
+    disconnect: () => call('threads:disconnect'),
+    publish: (input) => call('threads:publish', input)
+  },
+  x: {
+    session: () => call('x:session'),
+    connect: () => call('x:connect'),
+    cancelConnect: () => call('x:cancelConnect'),
+    disconnect: () => call('x:disconnect'),
+    publish: (input) => call('x:publish', input)
+  },
+  linkedin: {
+    session: () => call('linkedin:session'),
+    connect: () => call('linkedin:connect'),
+    cancelConnect: () => call('linkedin:cancelConnect'),
+    disconnect: () => call('linkedin:disconnect'),
+    publish: (input) => call('linkedin:publish', input)
   },
   app: {
     info: () => call('app:info'),
@@ -100,6 +131,8 @@ const api: ReelApi = {
     onVendor: (cb) => on<VendorInfo>('ai:vendor', cb),
     checkEdits: () => call('ai:checkEdits'),
     setCheckEdits: (on) => call('ai:setCheckEdits', on),
+    lookUps: () => call('ai:lookUps'),
+    setLookUps: (on) => call('ai:setLookUps', on),
     connections: () => call('ai:connections'),
     saveConnection: (input) => call('ai:saveConnection', input),
     removeConnection: (id) => call('ai:removeConnection', id),
@@ -126,8 +159,9 @@ const api: ReelApi = {
     planSay: (slug, text) => call('projects:planSay', slug, text),
     setPlan: (slug, plan) => call('projects:setPlan', slug, plan),
     resume: (slug, basic) => call('projects:resume', slug, basic),
-    note: (slug, text, attachments, moment, onVersion, base) => call('projects:note', slug, text, attachments, moment, onVersion, base),
+    note: (slug, text, attachments, moment, onVersion, base, steer) => call('projects:note', slug, text, attachments, moment, onVersion, base, steer),
     mergeVersions: (slug, request) => call('projects:mergeVersions', slug, request),
+    mergeLayers: (slug, ours, theirs) => call('projects:mergeLayers', slug, ours, theirs),
     timeline: (slug, n) => call('projects:timeline', slug, n),
     versionRows: (slug, n) => call('projects:versionRows', slug, n),
     update: (slug, patch) => call('projects:update', slug, patch),
@@ -142,6 +176,7 @@ const api: ReelApi = {
     proposeReels: (slug) => call('projects:proposeReels', slug),
     makeReels: (slug, ids) => call('projects:makeReels', slug, ids),
     foldReels: (slug, folded) => call('projects:foldReels', slug, folded),
+    setSeries: (slug, series) => call('projects:setSeries', slug, series),
     remove: (slug) => call('projects:remove', slug)
   },
   notes: {
@@ -159,6 +194,7 @@ const api: ReelApi = {
     edit: (slug, id, text) => call('queue:edit', slug, id, text),
     cancel: (slug, id) => call('queue:cancel', slug, id),
     move: (slug, id, by) => call('queue:move', slug, id, by),
+    steer: (slug, id) => call('queue:steer', slug, id),
     runNext: (slug) => call('queue:runNext', slug),
     clear: (slug) => call('queue:clear', slug),
     onChange: (cb) => on<string>('queue:change', cb)
@@ -168,6 +204,15 @@ const api: ReelApi = {
     save: (video, folder, id) => call('cloud:save', video, folder, id),
     cancel: (id) => call('cloud:cancel', id),
     onProgress: (cb) => on<{ id: string; pct: number }>('cloud:progress', cb)
+  },
+  devices: {
+    status: () => call('devices:status'),
+    setOn: (on) => call('devices:setOn', on),
+    pair: (kind, notes) => call('devices:pair', kind, notes),
+    cancelPair: () => call('devices:cancelPair'),
+    openInBrowser: (notes) => call('devices:openInBrowser', notes),
+    remove: (id) => call('devices:remove', id),
+    onChange: (cb) => on<DevicesStatus>('devices:change', cb)
   },
   phone: {
     start: (video, caption, address) => call('phone:start', video, caption, address),
@@ -183,6 +228,15 @@ const api: ReelApi = {
     choose: (kind) => call('library:choose', kind),
     preview: (path) => call('library:preview', path)
   },
+  footage: {
+    sources: () => call('footage:sources'),
+    addSource: () => call('footage:addSource'),
+    removeSource: (id) => call('footage:removeSource', id),
+    status: () => call('footage:status'),
+    findReels: () => call('footage:findReels'),
+    reels: () => call('footage:reels'),
+    makeReels: (ids) => call('footage:makeReels', ids)
+  },
   style: {
     rules: () => call('style:rules'),
     add: (text) => call('style:add', text),
@@ -195,7 +249,7 @@ const api: ReelApi = {
     onLearnProgress: (cb) => on<{ done: number; total: number }>('style:learnProgress', cb),
     appIcons: () => call('style:appIcons'),
     reveal: (id) => call('style:reveal', id),
-    keepLearned: (rules, from) => call('style:keepLearned', rules, from),
+    keepLearned: (rules, from, editor) => call('style:keepLearned', rules, from, editor),
     update: (id, patch) => call('style:update', id, patch),
     answer: (slug, messageId, yes) => call('style:answer', slug, messageId, yes),
     rememberLowercase: (slug) => call('style:rememberLowercase', slug),

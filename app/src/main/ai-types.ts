@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
@@ -54,6 +54,25 @@ export interface TryRequest {
   variable?: TryVariable
 }
 
+/** ai propose-archive.ts: what the editor reads (engine footage digest) and what it proposes. */
+export interface ArchiveRequest {
+  files: { ref: string; name: string; duration: number; lines: { s: number; e: number; text: string }[] }[]
+  limit?: number
+}
+export interface ArchiveCandidate {
+  id: string
+  title: string
+  hook: string
+  why: string
+  spans: { ref: string; t0: number; t1: number; said: string }[]
+  seconds: number
+}
+export interface ArchiveProposal {
+  candidates: ArchiveCandidate[]
+  notes: string
+  attempts: number
+}
+
 /** What the editor reads to find more reels in one video (ai/src/propose.ts). */
 export interface ProposeReelsRequest {
   /** work/transcript.json, with the analysis's retake groups */
@@ -85,6 +104,9 @@ export interface EngineHost {
     outPath: string,
     opts?: { layout?: 'phone' | 'desktop' }
   ): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>
+  /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
+   * Only the app has footage folders (app main/footage-sources.ts). */
+  importFootage?(ref: string): Promise<string>
 }
 
 export interface ProviderStatus {
@@ -134,6 +156,13 @@ export interface SecretStore {
   getSelectedStorageBackend?(): string
 }
 
+/** Words the person adds to a running note (ai/src/steer.ts; the app's side is main/steer.ts). */
+export interface NoteSteer {
+  take(): string[]
+  seal(): boolean
+  unseal(): void
+}
+
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
@@ -157,9 +186,11 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; helpers?: boolean; base?: number; steer?: NoteSteer }
   ): Promise<AgentResult>
   mergeVersions?(projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult & { edit: ProjectJson; report: string[] }>
+  /** The parts two saved versions differ in. Optional: older packages lack it. */
+  mergeLayers?(projectDir: string, ours: number, theirs: number): Promise<MergeLayer[]>
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
   wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult>
@@ -170,6 +201,8 @@ export interface AI {
   proposeTry?(req: TryRequest, signal?: AbortSignal): Promise<{ variable: unknown; value: unknown; reason: unknown }>
   /** More reels from one video. `onEvent` hears the waits for the editor's answer. Optional: older packages lack it. */
   proposeReels?(req: ProposeReelsRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ReelProposal>
+  /** Reels across the whole footage archive (ai propose-archive.ts). Optional: older packages lack it. */
+  proposeFromArchive?(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal>
   styleRules(): Promise<StyleRule[]>
   /** The removed rule and where it was, for Undo; null when it was already gone. */
   /** The removed rule and where it was, for Undo; null when it was already gone. `forget` (default true): learning

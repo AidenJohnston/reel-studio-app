@@ -5,7 +5,7 @@ import { IS_MAC } from './ui'
 import './intake.css'
 
 // the same list as main/library.ts VIDEO_EXT
-const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts)$/i
+const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts|3gp)$/i
 const PICTURE_EXT = /\.(jpe?g|png|heic|heif|gif|webp|tiff?)$/i
 const SONG_EXT = /\.(mp3|m4a|aac|wav|aiff?|flac|ogg)$/i
 

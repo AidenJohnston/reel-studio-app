@@ -110,10 +110,10 @@ const secretsIn = (t: ReturnType<typeof world>, text: string) => {
 
 describe('postingConfig (REELSTUDIO_POSTING, REELSTUDIO_POSTING_URL)', () => {
   const D = 'https://post.getreelstudio.com'
-  it('is off unless REELSTUDIO_POSTING=1', () => {
-    expect(postingConfig({}, D, () => {})).toEqual({ enabled: false, baseUrl: D })
-    expect(postingConfig({ REELSTUDIO_POSTING: 'true' }, D, () => {}).enabled).toBe(false)
+  it('is on for everyone, and off only with REELSTUDIO_POSTING=0', () => {
+    expect(postingConfig({}, D, () => {})).toEqual({ enabled: true, baseUrl: D })
     expect(postingConfig({ REELSTUDIO_POSTING: '1' }, D, () => {})).toEqual({ enabled: true, baseUrl: D })
+    expect(postingConfig({ REELSTUDIO_POSTING: '0' }, D, () => {})).toEqual({ enabled: false, baseUrl: D })
   })
   it('takes https anywhere, and http only on this computer; strips the trailing slash', () => {
     const on = (u: string) => postingConfig({ REELSTUDIO_POSTING: '1', REELSTUDIO_POSTING_URL: u }, D, () => {})

@@ -6,7 +6,9 @@ import { test, expect } from '@playwright/test'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, launch, passFirstRun, shot } from './helpers'
-import { makePastEditsHome } from './past-edits-home'
+import { makePastEditsHome, videoFolder } from './past-edits-home'
+
+const MAC = process.platform === 'darwin'
 
 test('a damaged My style file is kept next to a new one, and My style says so in one line', async () => {
   const mine = mkdtempSync(join(BASE, 'style-'))
@@ -77,9 +79,15 @@ test('Learn from my past edits lists the edits on this computer by app, and lear
   const home = join(mine, 'home')
   mkdirSync(root, { recursive: true })
   makePastEditsHome(home)
-  // Final Cut Pro is installed; Premiere Pro isn't
-  const apps = join(mine, 'Applications')
-  mkdirSync(join(apps, 'Final Cut Pro.app'), { recursive: true })
+  // one editor is installed and the other isn't: Final Cut Pro on a Mac; on Windows, where Final Cut Pro can't be,
+  // Premiere Pro, laid out as Adobe installs it (main app-icons.ts locate)
+  const apps = join(mine, MAC ? 'Applications' : 'Program Files')
+  if (MAC) mkdirSync(join(apps, 'Final Cut Pro.app'), { recursive: true })
+  else {
+    mkdirSync(join(apps, 'Adobe', 'Adobe Premiere Pro 2026'), { recursive: true })
+    writeFileSync(join(apps, 'Adobe', 'Adobe Premiere Pro 2026', 'Adobe Premiere Pro.exe'), '')
+  }
+  const [installed, missing] = MAC ? [0, 1] : [1, 0]
   const { app, page } = await launch({
     REELSTUDIO_ROOT: root,
     REELSTUDIO_USER_DATA: join(mine, 'user data'),
@@ -103,13 +111,13 @@ test('Learn from my past edits lists the edits on this computer by app, and lear
     await expect(groups.nth(0)).toHaveAccessibleName('Final Cut Pro')
     await expect(groups.nth(1)).toHaveAccessibleName('Premiere Pro')
     // the installed editor's own icon from the system; the missing one gets the neutral icon, never a drawn copy
-    await expect(groups.nth(0).getByTestId('learn-app-icon')).toHaveAttribute('src', /^data:image\/png;base64,/)
-    await expect(groups.nth(1).getByTestId('learn-app-icon')).toHaveCount(0)
-    await expect(groups.nth(1).getByTestId('learn-app-neutral')).toBeVisible()
+    await expect(groups.nth(installed).getByTestId('learn-app-icon')).toHaveAttribute('src', /^data:image\/png;base64,/)
+    await expect(groups.nth(missing).getByTestId('learn-app-icon')).toHaveCount(0)
+    await expect(groups.nth(missing).getByTestId('learn-app-neutral')).toBeVisible()
     // Return learns from what is ticked: the Learn button has the focus once the list is there
     await expect(page.getByTestId('learn-go')).toBeFocused()
     const items = sheet.getByTestId('learn-item')
-    await expect(items).toHaveText([/^Spring launchXML export · .* · 1 timeline · Movies › Exports$/, /^Kitchen tour/, /^talking-head.* · Desktop$/])
+    await expect(items).toHaveText([new RegExp(`^Spring launchXML export · .* · 1 timeline · ${videoFolder()} › Exports$`), /^Kitchen tour/, /^talking-head.* · Desktop$/])
     for (const box of await items.locator('input').all()) await expect(box).toBeChecked()
     // a library and a project can't be read as they are: each says once how to export one, beside Show in Finder
     const needs = sheet.getByTestId('learn-needs-export')
@@ -146,6 +154,43 @@ test('Learn from my past edits lists the edits on this computer by app, and lear
   }
 })
 
+// The sample is built from the documented draft layout (engine reference_capcut.py), not a real CapCut project.
+test('a CapCut project where CapCut keeps it is listed under CapCut, read as it is, and its rules say CapCut', async () => {
+  const mine = mkdtempSync(join(BASE, 'style-'))
+  const root = join(mine, 'Documents', 'Reel Studio')
+  const home = join(mine, 'home')
+  mkdirSync(root, { recursive: true })
+  const projects = join(home, ...(process.platform === 'darwin' ? ['Movies'] : ['AppData', 'Local']), 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft')
+  mkdirSync(join(projects, 'Bread reel'), { recursive: true })
+  copyFileSync(join(__dirname, '..', '..', 'engine', 'tests', 'fixtures', 'reference-import', 'capcut-draft', 'draft_content.json'), join(projects, 'Bread reel', 'draft_content.json'))
+  const { app, page } = await launch({
+    REELSTUDIO_ROOT: root,
+    REELSTUDIO_USER_DATA: join(mine, 'user data'),
+    REELSTUDIO_TEST_PAST_EDITS_HOME: home
+  })
+  try {
+    await passFirstRun(page)
+    await page.getByTestId('nav-style').click()
+    await page.getByTestId('style-learn').click()
+    const sheet = page.getByTestId('learn-sheet')
+    await expect(sheet.getByTestId('learn-group')).toHaveText([/^CapCut/])
+    const item = sheet.getByTestId('learn-item')
+    await expect(item).toHaveText([/^Bread reelProject · .* · 1 timeline · CapCut$/])
+    await expect(item.locator('input')).toBeChecked()
+    await shot(page, 'learn-capcut-01-listed')
+    await page.getByTestId('learn-go').click()
+    const lesson = page.getByTestId('style-lesson')
+    await expect(lesson).toContainText('Bread reel/draft_content.json (CapCut)')
+    // the sample's title at half a second and its song under the talking
+    await expect(page.getByTestId('style-lesson-rule')).toContainText(['Open with a title on screen in the first few seconds.', 'Put music under the talking.'])
+    await page.getByTestId('style-lesson-keep').click()
+    await expect(page.getByTestId('style-rule').first()).toContainText('from your CapCut edit Bread reel/draft_content.json')
+    await shot(page, 'learn-capcut-02-kept')
+  } finally {
+    await app.close().catch(() => {})
+  }
+})
+
 test('with nothing found, Learn from my past edits says so and how to get one in, and opens no file dialog by itself', async () => {
   const mine = mkdtempSync(join(BASE, 'style-'))
   const root = join(mine, 'Documents', 'Reel Studio')
@@ -164,9 +209,9 @@ test('with nothing found, Learn from my past edits says so and how to get one in
     })
     await page.getByTestId('style-learn').click()
     const none = page.getByTestId('learn-none')
-    await expect(none).toContainText(/No Final Cut Pro or Premiere Pro edits on this (Mac|PC) yet\./)
+    await expect(none).toContainText(/No edits from (Final Cut Pro, )?Premiere Pro, DaVinci Resolve or CapCut on this (Mac|PC) yet\./)
     await expect(none).toContainText('Export one from your editor.')
-    await expect(none).toContainText('In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML… Save it anywhere')
+    await expect(none).toContainText('In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML… In DaVinci Resolve, choose File › Export › Timeline… and save it as FCPXML. Save it anywhere')
     opened.push(String(await app.evaluate(() => (globalThis as any).__dialogs)))
     await page.getByTestId('learn-choose').click()
     opened.push(String(await app.evaluate(() => (globalThis as any).__dialogs)))
@@ -188,7 +233,8 @@ test('when a limit stops the look, Learn from my past edits says older edits may
     REELSTUDIO_ROOT: root,
     REELSTUDIO_USER_DATA: join(mine, 'user data'),
     REELSTUDIO_TEST_PAST_EDITS_HOME: home,
-    // the walk reads the top of Movies, Documents and Desktop (7 entries), then stops before the folders below
+    // the walk reads the top of Movies (Videos on Windows), Documents and Desktop (7 entries), then stops before the
+    // folders below
     REELSTUDIO_TEST_PAST_EDITS_LIMITS: JSON.stringify({ walk: 7 })
   })
   try {
