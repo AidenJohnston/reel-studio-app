@@ -26,6 +26,72 @@ def test_gap_is_capped_and_words_never_cut():
     assert abs(tl.duration - sum(s.duration for s in tl.segments)) < 1e-6
 
 
+def _whole_and_once(tl, words):
+    for w in words:
+        assert any(sg.source == w["source"] and sg.src_start <= w["s"] + 1e-6 and w["e"] <= sg.src_end + 1e-6
+                   for sg in tl.segments), (w, [(sg.src_start, sg.src_end) for sg in tl.segments])
+    spans = sorted((sg.source, sg.src_start, sg.src_end) for sg in tl.segments)
+    for (sa, _, ea), (sb, b0, _) in zip(spans, spans[1:]):
+        assert sa != sb or b0 >= ea - 1e-6, f"source frames {b0}..{ea} play twice"
+
+
+def test_frame_rounding_never_drops_a_kept_word_or_plays_a_frame_twice():
+    """Fails if snapping a cut to the nearest frame moves a piece's start past a short word (the
+    audit's case: 24 fps, the 0.02 s pause cap, a 20 ms word just after a cut), or if snapping two
+    pieces outward makes them overlap."""
+    w = mkwords([(0.101, 0.121, "a"), (0.521, 0.541, "b")])
+    src = {"s1": {"duration": 2.0, "fps": 24.0}}
+    _whole_and_once(cut.build_timeline(w, [{"from": "w0", "to": "w1"}], src, gap_cap=0.02, min_saving=0.0), w)
+    for fps in (23.976, 24.0, 25.0, 29.97, 30.0, 60.0):
+        for k in range(60):
+            # short words and short gaps at every phase of the frame grid
+            t, spans = 0.05 + k * 0.0037, []
+            for j in range(6):
+                d = 0.015 + 0.011 * ((k + j) % 7)
+                spans.append((round(t, 4), round(t + d, 4), f"x{j}"))
+                t += d + 0.02 + 0.031 * ((k * 3 + j) % 9)
+            ws = mkwords(spans)
+            src = {"s1": {"duration": t + 1.0, "fps": fps}}
+            for cap, saving in ((0.02, 0.0), (0.02, 0.08), (0.25, 0.08)):
+                _whole_and_once(cut.build_timeline(ws, [{"from": "w0", "to": "w5"}], src, gap_cap=cap, min_saving=saving), ws)
+
+
+def test_frame_rounding_never_brings_back_a_removed_word():
+    """Fails if rounding a kept range's edges outward plays the word cut out between two ranges (the
+    review's case: a 20 ms word under a frame from both its kept neighbours, played twice and uncaptioned)."""
+    w = mkwords([(0.10, 0.50, "kept"), (0.51, 0.53, "cut"), (0.54, 0.90, "kept")])
+    tl = cut.build_timeline(w, [{"from": "w0", "to": "w0"}, {"from": "w2", "to": "w2"}], {"s1": {"duration": 2.0, "fps": 30.0}})
+    assert not any(sg.src_start < 0.52 < sg.src_end for sg in tl.segments), [(sg.src_start, sg.src_end) for sg in tl.segments]
+    for fps in (24.0, 25.0, 29.97, 30.0, 60.0):
+        for k in range(40):
+            t, spans = 0.05 + k * 0.0041, []
+            for j in range(7):
+                d = 0.02 + 0.013 * ((k + j) % 5)
+                spans.append((round(t, 4), round(t + d, 4), f"x{j}"))
+                t += d + 0.004 + 0.029 * ((k * 3 + j) % 7)
+            ws = mkwords(spans)
+            keep = [{"from": f"w{j}", "to": f"w{j}"} for j in (0, 2, 4, 6)]
+            tl = cut.build_timeline(ws, keep, {"s1": {"duration": t + 1.0, "fps": fps}}, gap_cap=0.25, min_saving=0.08)
+            for j in (1, 3, 5):                          # every removed word stays out
+                mid = (ws[j]["s"] + ws[j]["e"]) / 2
+                assert not any(sg.src_start < mid < sg.src_end for sg in tl.segments), (fps, k, j)
+            for j in (0, 2, 4, 6):                       # a kept word with a frame of air each side stays whole
+                gaps = [ws[j]["s"] - ws[j - 1]["e"] if j else 1.0, ws[j + 1]["s"] - ws[j]["e"] if j < 6 else 1.0]
+                if min(gaps) >= 1 / fps:
+                    assert any(sg.src_start <= ws[j]["s"] + 1e-6 and ws[j]["e"] <= sg.src_end + 1e-6 for sg in tl.segments), (fps, k, j)
+
+
+def test_a_join_lands_on_the_piece_that_holds_its_first_word():
+    """Fails if the join on a range moves to a later piece when its first word sits in a one-frame piece
+    (24 fps, no pause kept): a flash or smash then plays a cut late, and J/L handles bridge the wrong edge."""
+    w = mkwords([(0.521, 0.541, "a"), (1.0, 1.2, "b")]) + mkwords([(0.1, 0.4, "c")], source="s2", start_id=2)
+    src = {"s1": {"duration": 3.0, "fps": 24.0}, "s2": {"duration": 3.0, "fps": 24.0}}
+    keep = [{"from": "w2", "to": "w2"}, {"from": "w0", "to": "w1", "join": {"transition": "flash", "frames": 0}}]
+    tl = cut.build_timeline(w, keep, src, gap_cap=0.0, min_saving=0.08)
+    flashed = [sg for sg in tl.segments if sg.join_transition == "flash"]
+    assert len(flashed) == 1 and flashed[0].src_start <= 0.521 < flashed[0].src_end, [(sg.source, sg.src_start, sg.src_end, sg.join_transition) for sg in tl.segments]
+
+
 def test_segments_on_frame_grid():
     tl = cut.build_timeline(words_basic(), [{"from": "w0", "to": "w4"}], SRC)
     for s in tl.segments:
@@ -117,3 +183,24 @@ def test_remap_anchors_after_retranscription():
     assert moved == 3
     assert p["cut"]["keep"] == [{"from": "w0", "to": "w9"}]
     assert p["zooms"][0]["anchor"] == {"from": "w9", "to": "w9"}
+
+
+def test_caption_edits_follow_their_words_through_a_retranscription():
+    """Fails if a one-off correction, a line break or a line join still names a word id the new
+    transcript doesn't have: the correction silently stops applying and the break or join is lost."""
+    from reelengine import project
+    old = words_basic()
+    # every word is heard again with a new id, a few ms later
+    new = [{**w, "id": f"n{i}", "s": round(w["s"] + 0.01, 3), "e": round(w["e"] + 0.01, 3)} for i, w in enumerate(old)]
+    p = project.new_project("t")
+    p["captions"]["corrections"] = [{"from": "Every", "to": "Each", "at": "w3"},
+                                    {"from": "build things", "to": "build-things", "at": "w1", "through": "w2"},
+                                    {"from": "We", "to": "Wee"}]
+    p["captions"]["split"] = ["w2", "w4"]
+    p["captions"]["join"] = [{"from": "w2", "to": "w3"}]
+    project.remap_anchors(p, old, new)
+    assert p["captions"]["corrections"] == [{"from": "Every", "to": "Each", "at": "n3"},
+                                            {"from": "build things", "to": "build-things", "at": "n1", "through": "n2"},
+                                            {"from": "We", "to": "Wee"}]
+    assert p["captions"]["split"] == ["n2", "n4"]
+    assert p["captions"]["join"] == [{"from": "n2", "to": "n3"}]

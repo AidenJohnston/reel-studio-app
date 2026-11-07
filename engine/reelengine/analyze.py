@@ -23,7 +23,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
 
-from . import audio_env, cut as cutmod, project as projmod, transcribe
+from . import audio_env, cut as cutmod, probe as probemod, project as projmod, transcribe
 from .proto import EngineError, log, progress
 
 STAGE = "analyze"
@@ -387,7 +387,13 @@ def run(project_dir: Path) -> dict:
     for src in proj["sources"]:
         wav = transcribe.audio_path(project_dir, src["id"])
         if not wav.exists():
-            transcribe.extract_audio(projmod.source_path(project_dir, src), wav)
+            path = projmod.source_path(project_dir, src)
+            # a take with no sound (init accepts one; transcribe skips it the same way) has no envelope,
+            # and extracting its audio failed the whole analysis (audit 11)
+            if src.get("hasAudio") is False or not any(
+                    st.get("codec_type") == "audio" for st in probemod.ffprobe_json(path).get("streams", [])):
+                continue
+            transcribe.extract_audio(path, wav)
         env = audio_env.envelope(audio_env.read_wav(wav))
         env_out[src["id"]] = {"hop": audio_env.HOP_MS / 1000.0,
                               "threshold": round(audio_env.noise_threshold(env), 5),
@@ -431,6 +437,11 @@ def run(project_dir: Path) -> dict:
 def autocut(project_dir: Path, gap_cap: Optional[float] = None) -> dict:
     """Write the deterministic baseline cut into project.json (runs analyze first if needed)."""
     project_dir = Path(project_dir)
+    if gap_cap is not None:
+        gap_cap = float(gap_cap)
+        if not 0 <= gap_cap <= 5:             # the schema's range; also false for NaN (`--gap-cap NaN`)
+            raise EngineError("BAD_ARGS", f"gap cap {gap_cap} is not a number of seconds from 0 to 5",
+                              "Choose a pause length between 0 and 5 seconds.")
     af = project_dir / "work" / "analysis.json"
     tp = project_dir / "work" / "transcript.json"
     if not af.exists() or (tp.exists() and af.stat().st_mtime < tp.stat().st_mtime):
@@ -440,7 +451,7 @@ def autocut(project_dir: Path, gap_cap: Optional[float] = None) -> dict:
     proj.setdefault("cut", {})
     proj["cut"]["keep"] = analysis["defaultCut"]["keep"]
     if gap_cap is not None:
-        proj["cut"]["gapCap"] = float(gap_cap)
+        proj["cut"]["gapCap"] = gap_cap
     proj["cut"].setdefault("gapCap", cutmod.GAP_CAP)
     proj["cut"].setdefault("minSaving", cutmod.MIN_SAVING)
     proj["cut"]["source"] = "autocut"

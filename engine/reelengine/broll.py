@@ -673,13 +673,19 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     # the speaker half is cut from the source with reframe_vf: a flipped take must not reuse an
     # unflipped file (an unmirrored project keeps the key it always had)
     flip = ("mirror",) if any_mirrored(ctx) else ()
-    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip, *_rate_key(fps), _enc(ctx))}.mp4"
+    # The source spans, files and reframe behind the speaker half are part of the name too: a changed cut
+    # can play other footage in the same output window, and the old file would show the previous cut.
+    pieces = source_spans(ctx, t0, t1)
+    speaker = []
+    for sid, a, b, _o in pieces:
+        sp = source_path(ctx, sid)
+        speaker.append((sid, round(a, 3), round(b, 3), sp and _asset_sig(sp), reframe_vf(ctx, sid)))
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), speaker, *flip, *_rate_key(fps), _enc(ctx))}.mp4"
     if out.exists():
         return out
     dur = t1 - t0
     th, crop_y, _ = split_geometry(ctx, face, params)
     bh = H - th
-    pieces = source_spans(ctx, t0, t1)
     if not pieces:
         raise EngineError("SPLIT_NO_SOURCE", "split-top window has no source video", "I couldn't find your video for this part.")
     args, chains = [], []
@@ -1079,6 +1085,9 @@ def _t_phone(ctx, plan, params, kind, src, zones, face, frame):
             th_auto, _, _ = split_geometry(ctx, face, {})
             params = {**params, "split": max(th_auto / H, 0.45)}
         th, _, _ = split_geometry(ctx, face, params)
+        # th sizes the band and the phone in it, and comes partly from the caption band, which the
+        # stem does not carry
+        stem = f"{stem}-{_key(W, H, th)}"
         from PIL import Image
         bgc = _rgba(params.get("background", "#EDEBE7"))
         top = Image.new("RGBA", (W, th), bgc)
@@ -1125,13 +1134,21 @@ def _phone_split(ctx, plan, card_mov, top_bg_png, card_size, face, params, stem)
     d = layers_dir(ctx)
     th, _, _ = split_geometry(ctx, face, params)
     dur = plan["t1"] - plan["t0"]
-    top = d / f"{stem}-top-{_key(*_rate_key(fps), _enc(ctx))}.mp4"
+    # the length is part of the name: a phone re-anchored to a longer span must not reuse the shorter band
+    top = d / f"{stem}-top-{_key(round(dur, 3), *_rate_key(fps), _enc(ctx))}.mp4"
     if not top.exists():
         cw, chh = card_size
-        run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",
-             "-loop", "1", "-framerate", str(fps), "-t", f"{dur:.3f}", "-i", str(top_bg_png), "-i", str(card_mov),
-             "-filter_complex", f"[0:v]format=rgba[b];[b][1:v]overlay={(W - cw) // 2}:{(th - chh) // 2}:format=auto,format=yuv420p[o]",
-             "-map", "[o]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(top)], timeout=max(120, dur * 30), what="phone top")
+        # Existing is what makes `top` a cache hit, so ffmpeg writes beside it and the file is renamed
+        # into place only once whole: a timed-out or killed encode must not leave a truncated hit.
+        tmp = top.with_name(top.stem + ".part.mp4")
+        try:
+            run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",
+                 "-loop", "1", "-framerate", str(fps), "-t", f"{dur:.3f}", "-i", str(top_bg_png), "-i", str(card_mov),
+                 "-filter_complex", f"[0:v]format=rgba[b];[b][1:v]overlay={(W - cw) // 2}:{(th - chh) // 2}:format=auto,format=yuv420p[o]",
+                 "-map", "[o]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(tmp)], timeout=max(120, dur * 30), what="phone top")
+            tmp.replace(top)
+        finally:
+            tmp.unlink(missing_ok=True)
     return _split_video(ctx, plan["t0"], plan["t1"], top, "video", 0.0, params, face, stem)
 
 
@@ -1252,9 +1269,10 @@ def _t_behind(ctx, plan, params, kind, src, zones, face, frame):
         size = int(size * 0.9)
     x = int(round((W - img.width) / 2))
     y = int(round(min(max(0.04 * H, face[1] + BEHIND_DEPTH * face[3] - img.height), H * 0.5 - img.height)))
+    from .proto import EngineError as AnyEngineError    # compose_util's EngineError is a subclass of it
     try:
         matte = segment.matte_clip(ctx, plan["t0"], plan["t1"], layers_dir(ctx), plan["id"])
-    except EngineError as e:
+    except AnyEngineError as e:                          # segment.py and the model download raise the base
         log(f"broll {plan['id']}: no matte ({e.message}); words above the face instead")
         pop = {**treatment_defaults("text-pop"), "text": text, "case": "as-is"}
         layers, rec = _t_text(ctx, plan, pop, kind, src, zones, face, frame)

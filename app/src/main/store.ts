@@ -28,6 +28,7 @@ import type {
 import { mediaUrl } from './media-url'
 import { COPY_GONE, POSTER, canCopyAgain } from './first-video'
 import type { ReelSeed } from './propose-reels'
+import type { ArchiveSeed } from './archive-reels'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import { keptIds } from '../shared/cut'
 import { readCaptionLines } from '../shared/subtitle-lines'
@@ -68,6 +69,10 @@ export interface AppState {
   proposal?: StoredProposal
   /** This reel was made from another reel's proposal: what it is seeded from, kept so a resume can seed it again. */
   from?: ReelSeed
+  /** Made from a pick of reels across the footage archive: seeded once its copy is in (main/archive-reels.ts). */
+  fromArchive?: ArchiveSeed
+  /** The person chose this reel's series (or no series) themselves: automatic grouping leaves it alone (main/series.ts). */
+  seriesChosen?: boolean
   /** The files Version 1 copies its video from, kept until the copy is in (project.json written): a first edit stopped
    * during the copy copies them again (main/index.ts startFirstEdit). */
   copyFrom?: string[]
@@ -171,7 +176,7 @@ export async function readJson<T>(path: string, fallback: T): Promise<T> {
  * On Windows a rename over a file that someone is reading fails with EPERM/EBUSY/EACCES for a few
  * milliseconds, so retry before giving up, and never leave the temp file behind.
  */
-export async function writeJson(path: string, data: unknown, opts: { durable?: boolean } = {}): Promise<void> {
+export async function writeJson(path: string, data: unknown, opts: { durable?: boolean; signal?: AbortSignal } = {}): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
   const text = JSON.stringify(data, null, 2) + '\n'
   if (!opts.durable) await fs.writeFile(tmp, text, 'utf8')
@@ -184,7 +189,7 @@ export async function writeJson(path: string, data: unknown, opts: { durable?: b
       await fh.close()
     }
   }
-  await renameWithRetry(tmp, path)
+  await renameWithRetry(tmp, path, 40, opts.signal)
   if (opts.durable) await syncRename(path)
 }
 
@@ -199,9 +204,12 @@ async function syncRename(path: string): Promise<void> {
   }
 }
 
-export async function renameWithRetry(from: string, to: string, tries = 40): Promise<void> {
+/** `signal`: a job's Stop. Checked before each try, so a write Stop reaches in time replaces nothing (the rename is
+ * the commit: once it is submitted, the write stands). */
+export async function renameWithRetry(from: string, to: string, tries = 40, signal?: AbortSignal): Promise<void> {
   for (let i = 0; ; i++) {
     try {
+      if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
       await fs.rename(from, to)
       return
     } catch (e) {
@@ -233,10 +241,10 @@ export function readProject(slug: string): Promise<ProjectJson> {
   return serialized(p, async () => JSON.parse(await fs.readFile(p, 'utf8')) as ProjectJson)
 }
 
-export async function writeProject(slug: string, project: ProjectJson): Promise<void> {
+export async function writeProject(slug: string, project: ProjectJson, opts: { durable?: boolean; signal?: AbortSignal } = {}): Promise<void> {
   project.updatedAt = new Date().toISOString()
   const file = join(projectDir(slug), 'project.json')
-  await serialized(file, () => writeJson(file, project))
+  await serialized(file, () => writeJson(file, project, opts))
 }
 
 const STATE_UNREADABLE = { code: 'STATE_UNREADABLE', userMessage: 'I could not read this video\'s notes right now. Try again in a moment.' }
@@ -796,7 +804,8 @@ const searchable = (t: string): string =>
 /** Each reel's spoken words, kept while its transcript file is unchanged: search reads every reel on each query. */
 const spoken = new Map<string, { file: string; mtimeMs: number; words: string }>()
 
-async function spokenWords(slug: string, p: ProjectJson): Promise<string> {
+/** What was said in a reel, lower case and without punctuation (searchable). */
+export async function spokenWords(slug: string, p: ProjectJson): Promise<string> {
   const dir = projectDir(slug)
   const file = join(dir, p.transcript?.file ?? 'work/transcript.json')
   const st = await fs.stat(file).catch(() => null)

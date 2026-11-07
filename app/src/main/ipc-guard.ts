@@ -1,6 +1,7 @@
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { EditorName } from '../shared/api'
 import { TRY_VARIABLES } from '../shared/platforms'
 
 function sameRendererPath(actual: string, expected: string): boolean {
@@ -28,6 +29,7 @@ const paths = (v: unknown): v is string[] => Array.isArray(v) && v.every(path)
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(text)
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const EDITORS: EditorName[] = ['Final Cut Pro', 'Premiere Pro', 'DaVinci Resolve', 'CapCut', 'EDL']
 /** A reference reel's id (main references.ts: a UUID). */
 const referenceId = (v: unknown): v is string => text(v) && /^[0-9a-f-]{8,64}$/.test(v)
 const anchor = (v: unknown): boolean => object(v) && text(v.from) && text(v.to)
@@ -86,7 +88,11 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'jobs:cancel': case 'cloud:cancel': case 'style:remove': case 'style:restore': case 'style:add': ok = text(first) && first.length > 0; break
     case 'style:update': ok = text(first) && first.length > 0 && object(second) && (second.text === undefined || text(second.text)) && (second.paused === undefined || typeof second.paused === 'boolean'); break
     case 'app:setPhoneView': ok = first === 'instagram' || first === 'clean'; break
-    case 'app:setTimeline': ok = typeof first === 'boolean'; break
+    case 'app:setTimeline': case 'outside:setEnabled': ok = typeof first === 'boolean'; break
+    case 'ai:setNoteRunner': ok = first === 'reelstudio' || first === 'app'; break
+    case 'devices:setOn': case 'devices:openInBrowser': ok = typeof first === 'boolean'; break
+    case 'devices:pair': ok = (first === 'phone' || first === 'browser') && typeof second === 'boolean'; break
+    case 'devices:remove': ok = text(first) && /^[0-9a-f]{32}$/.test(first); break
     case 'projects:exportPlatforms': ok = finite(second) && Number.isInteger(second) && second >= 0 && object(third); break
     case 'projects:proposeTry': ok = finite(second) && Number.isInteger(second) && second >= 0 && object(third) && text(third.caption) &&
       third.caption.length <= 100_000 && (third.variable === undefined || (TRY_VARIABLES as readonly unknown[]).includes(third.variable)); break
@@ -94,11 +100,16 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'projects:makeReels': ok = Array.isArray(second) && second.length >= 1 && second.length <= 5 && new Set(second).size === second.length &&
       second.every((id) => text(id) && /^r\d+$/.test(id)); break
     case 'projects:foldReels': ok = typeof second === 'boolean'; break
+    case 'projects:setSeries': ok = second === null || (text(second) && second.trim().length > 0 && second.length <= 80); break
     // found edits by id (style:find); the paths stay in main
     case 'style:learn': ok = first === undefined || (Array.isArray(first) && first.length > 0 && first.every((id) => text(id) && /^[0-9a-f]{16}$/.test(id))); break
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break
-    case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second); break
+    case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second) && (third === undefined || EDITORS.includes(third as never)); break
     case 'library:preview': ok = path(first); break
+    // a pick names 1 to 5 of the proposal's candidates (ai propose.ts REEL_LIMIT), each once
+    case 'footage:makeReels': ok = Array.isArray(first) && first.length >= 1 && first.length <= 5 && new Set(first).size === first.length &&
+      first.every((id) => text(id) && /^r\d+$/.test(id)); break
+    case 'footage:removeSource': ok = text(first) && /^src-[0-9a-f]{8,32}$/.test(first); break
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break
     case 'ai:vendorStatus': case 'ai:vendorConnect': case 'ai:vendorCancel': case 'ai:vendorSignInAgain': case 'ai:vendorSignInWithCode': case 'ai:vendorSignIn': ok = first === 'claude' || first === 'chatgpt'; break

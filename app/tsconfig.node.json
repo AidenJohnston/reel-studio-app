@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "composite": false
+    "composite": false,
+    "allowImportingTsExtensions": true
   },
-  "include": ["electron.vite.config.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "test/**/*"]
+  "include": ["electron.vite.config.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "src/server/**/*", "test/**/*"]
 }

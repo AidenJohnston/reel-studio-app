@@ -26,6 +26,11 @@ export interface CaptureResult {
 const PARTITION = 'reelstudio-capture' // no "persist:" prefix: memory only, gone when the app quits
 const LOAD_TIMEOUT_MS = 25_000
 const SETTLE_MS = 2_500
+/** A page's own scripts can leave a step waiting forever (one that replaces requestAnimationFrame never lets the
+ * frame wait end), and the next capture queues behind this one: the whole page phase ends here at the latest. The
+ * number is the load limit plus the settle time plus room for the page scripts; not measured. */
+const CAPTURE_TIMEOUT_MS = 40_000
+const CANCELLED = (): ReturnType<typeof captureError> => captureError('CANCELLED', 'capture stopped', 'Stopped.')
 
 let ses: Session | null = null
 
@@ -59,7 +64,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-async function captureOnce(raw: string, outPath: string, layout: Layout): Promise<CaptureResult> {
+async function captureOnce(raw: string, outPath: string, layout: Layout, signal?: AbortSignal): Promise<CaptureResult> {
+  if (signal?.aborted) throw CANCELLED()
   const target = await assertCapturable(raw)
   const { width, height, zoom } = LAYOUTS[layout]
   const s = await captureSession()
@@ -73,7 +79,18 @@ async function captureOnce(raw: string, outPath: string, layout: Layout): Promis
       autoplayPolicy: 'document-user-activation-required'
     }
   })
-  try {
+  // Stop (the note's job) or the time limit ends every step that waits on the page
+  const limit = AbortSignal.timeout(CAPTURE_TIMEOUT_MS)
+  const stop = signal ? AbortSignal.any([signal, limit]) : limit
+  let onStop = (): void => undefined
+  const stopped = new Promise<never>((_resolve, reject) => {
+    onStop = () => reject(signal?.aborted ? CANCELLED() : captureError('CAPTURE_TIMEOUT', `${target.href}: no screenshot within ${CAPTURE_TIMEOUT_MS} ms`, 'That page took too long to show. Try another address.'))
+    if (stop.aborted) onStop()
+    else stop.addEventListener('abort', onStop, { once: true })
+  })
+  // Stop during the final rename lands after the last check: the rename is the commit, and nothing waits on this
+  stopped.catch(() => undefined)
+  const page = async (): Promise<{ img: Electron.NativeImage; size: Electron.Size; finalUrl: string; info: any }> => {
     // a window taller than the display is clamped at creation, even offscreen: size it again
     win.setContentSize(width, height)
     const wc = win.webContents
@@ -126,9 +143,15 @@ async function captureOnce(raw: string, outPath: string, layout: Layout): Promis
     if (isBlank(img.toBitmap(), size.width, size.height)) {
       throw captureError('BLANK_PAGE', `${finalUrl}: blank`, 'That page came out blank. Try the home page, or a different address.')
     }
+    return { img, size, finalUrl, info }
+  }
+  try {
+    const { img, size, finalUrl, info } = await Promise.race([stopped, page()])
     await mkdir(dirname(outPath), { recursive: true })
     const part = `${outPath}.part`
     await writeFile(part, img.toPNG())
+    // a stopped capture leaves no picture behind (captureWebsite removes the .part)
+    if (stop.aborted) await stopped
     await rename(part, outPath)
     let site = siteOf(target)
     try {
@@ -138,6 +161,7 @@ async function captureOnce(raw: string, outPath: string, layout: Layout): Promis
     }
     return { path: outPath, url: finalUrl || target.href, site, title: String(info?.t ?? '').slice(0, 200), width: size.width, height: size.height }
   } finally {
+    stop.removeEventListener('abort', onStop)
     if (!win.isDestroyed()) win.destroy()
     void s.clearStorageData().catch(() => {}) // nothing a page stored outlives its capture
   }
@@ -146,9 +170,9 @@ async function captureOnce(raw: string, outPath: string, layout: Layout): Promis
 let queue: Promise<unknown> = Promise.resolve()
 
 /** One capture at a time (each opens its own window). Rejects with {code, message, userMessage}. */
-export function captureWebsite(url: string, outPath: string, opts: { layout?: Layout } = {}): Promise<CaptureResult> {
+export function captureWebsite(url: string, outPath: string, opts: { layout?: Layout; signal?: AbortSignal } = {}): Promise<CaptureResult> {
   const layout: Layout = opts.layout === 'desktop' ? 'desktop' : 'phone'
-  const run = (): Promise<CaptureResult> => captureOnce(url, outPath, layout).catch(async (e) => {
+  const run = (): Promise<CaptureResult> => captureOnce(url, outPath, layout, opts.signal).catch(async (e) => {
     await rm(`${outPath}.part`, { force: true }).catch(() => {})
     throw e?.userMessage ? e : captureError('CAPTURE_FAILED', String(e?.message ?? e), "That screenshot couldn't be taken. Try again.")
   })

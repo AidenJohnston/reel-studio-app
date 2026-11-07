@@ -8,6 +8,10 @@ import { join } from 'node:path'
 import { FakeHub } from '../../ai/test/fakeHub'
 import { configsOfRunning, confirmHub, detectHub, hubConfigCandidates, localAddress, parseHubConfig, type Lookup } from '../src/main/vendor-hub'
 
+// The test folder is a real folder on the computer running the tests, so a path found in it is joined the way this
+// computer joins paths: on Windows a macOS platform would give `C:\...\rs-hub-x/config.yaml`.
+const HOST = process.platform
+
 describe('reading CLIProxyAPI’s config', () => {
   it('the older layout: an empty host is this computer, and the api-keys list holds the client keys', () => {
     const c = parseHubConfig('host: ""\nport: 8411\napi-keys:\n  - "k-one"\n  - "k-two"\n', '/x/config.yaml')
@@ -34,6 +38,14 @@ describe('reading CLIProxyAPI’s config', () => {
     const ps = ['/Users/p/build/bin/cliproxyapi-current --config /opt/homebrew/etc/cliproxyapi.conf', '/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi -config=/srv/hub.yaml', 'vim --config /etc/not-this.yaml', 'cliproxyapi --config relative.yaml'].join('\n')
     expect(configsOfRunning(ps)).toEqual(['/opt/homebrew/etc/cliproxyapi.conf', '/srv/hub.yaml'])
   })
+
+  // fails if a running copy whose config is in a folder with a space (Application Support on macOS) is missed: ps prints
+  // the arguments unquoted, and read as words the path ends at "/Users/creator/Library/Application"
+  it('a running copy’s --config with spaces in it, unquoted as ps prints it, up to the next flag', () => {
+    const ps = ['/opt/homebrew/bin/cliproxyapi --config /Users/creator/Library/Application Support/CLIProxyAPI/config.yaml',
+      '/usr/local/bin/cli-proxy-api -config=/srv/my hub/config.yaml -no-browser'].join('\n')
+    expect(configsOfRunning(ps)).toEqual(['/Users/creator/Library/Application Support/CLIProxyAPI/config.yaml', '/srv/my hub/config.yaml'])
+  })
 })
 
 describe('finding the hub', () => {
@@ -56,13 +68,13 @@ describe('finding the hub', () => {
 
   it('ready with the config’s key: the count of models the picker will list, the file it came from, and the key kept for Use it', async () => {
     writeFileSync(join(dir, 'config.yaml'), `port: ${hub.port}\napi-keys:\n  - stale\n  - ${hub.key}\n`)
-    const found = await detectHub({ env: { REELSTUDIO_TEST_HUB_CONFIG: dir }, platform: 'darwin', fetch: f, home: '/nobody' })
+    const found = await detectHub({ env: { REELSTUDIO_TEST_HUB_CONFIG: dir }, platform: HOST, fetch: f, home: '/nobody' })
     expect(found).toEqual({ state: 'ready', origin: hub.origin, models: 5, keySource: join(dir, 'config.yaml'), key: hub.key, file: join(dir, 'config.yaml') })
   })
 
   it('answers but refuses every key in the config: asks for one, and says the config’s keys were refused', async () => {
     writeFileSync(join(dir, 'cliproxyapi.conf'), `port: ${hub.port}\napi-keys: [old-key]\n`)
-    const found = await detectHub({ env: { REELSTUDIO_TEST_HUB_CONFIG: dir }, platform: 'darwin', fetch: f, home: '/nobody' })
+    const found = await detectHub({ env: { REELSTUDIO_TEST_HUB_CONFIG: dir }, platform: HOST, fetch: f, home: '/nobody' })
     expect(found).toEqual({ state: 'needs-key', origin: hub.origin, keySource: join(dir, 'cliproxyapi.conf'), file: join(dir, 'cliproxyapi.conf'), keyRefused: true })
   })
 
@@ -110,7 +122,7 @@ describe('only this computer gets the key (r12 review)', () => {
 
   it('a config naming another computer is shown as elsewhere and is never asked anything', async () => {
     writeFileSync(join(dir, 'config.yaml'), `host: hub.example.com\nport: ${hub.port}\napi-keys: [${hub.key}]\n`)
-    const found = await detectHub({ env: env(), platform: 'darwin', fetch: f, home: '/nobody', lookup: resolvesTo('203.0.113.7') })
+    const found = await detectHub({ env: env(), platform: HOST, fetch: f, home: '/nobody', lookup: resolvesTo('203.0.113.7') })
     expect(found).toEqual({ state: 'elsewhere', host: 'hub.example.com', keySource: join(dir, 'config.yaml') })
     expect(asked).toEqual([])
     expect(hub.requests).toEqual([])
@@ -145,7 +157,7 @@ describe('only this computer gets the key (r12 review)', () => {
   it('right before Use it the config is read again: another host, or a key no longer in it, is refused', async () => {
     const file = join(dir, 'config.yaml')
     writeFileSync(file, `port: ${hub.port}\napi-keys: [${hub.key}]\n`)
-    const deps = { env: env(), platform: 'darwin' as const, fetch: f, home: '/nobody', lookup: resolvesTo('203.0.113.7') }
+    const deps = { env: env(), platform: HOST, fetch: f, home: '/nobody', lookup: resolvesTo('203.0.113.7') }
     const found = await detectHub(deps)
     expect(await confirmHub(deps, found)).toEqual({ origin: hub.origin, key: hub.key, keySource: file })
     writeFileSync(file, `host: hub.example.com\nport: ${hub.port}\napi-keys: [${hub.key}]\n`)

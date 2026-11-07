@@ -22,8 +22,9 @@ export interface StyleRule {
   /** The engine measures this on every render (rules.ts); the rule's words are ruleText(check). */
   check?: RuleCheck;
   source?: StyleSource;
-  /** Learned from another editor's export ("Learn from my past edits"): its file name. */
-  imported?: { file: string };
+  /** Learned from another editor's export ("Learn from my past edits"): its file name, and its editor when one
+   * file was read. */
+  imported?: { file: string; editor?: 'Final Cut Pro' | 'Premiere Pro' | 'DaVinci Resolve' | 'CapCut' | 'EDL' };
   /** the question the person said Yes to */
   consent?: { proposal: string; at: string };
   /** When its words last changed. Pausing does not count, so a paused rule keeps its place in My style. */
@@ -214,6 +215,24 @@ export class StyleStore {
       if (!isProposal(saved)) throw new Error('Invalid memory proposal. Supply a kind, a short line and its evidence.');
       await this.write({ ...data, proposals: [...(data.proposals ?? []), saved] });
       return 'added';
+    });
+  }
+
+  /**
+   * Takes back waiting memories drafted from post results that `current`, the complete set results support now, no
+   * longer contains: a trial read again went the other way, so the suggestion's evidence is gone (and with it the
+   * chance of an opposite suggestion waiting beside it). Rules, memories from notes and hand edits, and the person's
+   * refusals are untouched, and a withdrawn memory may be suggested again if its evidence comes back. Returns how many
+   * were taken back; writes only when that is more than none.
+   */
+  async withdrawUnsupportedResults(current: ProposalDraft[]): Promise<number> {
+    return this.serial(async () => {
+      const data = await this.readForLearning();
+      const supported = new Set(current.map((d) => normalize(cleanRuleText(d.text))));
+      const proposals = (data.proposals ?? []).filter((p) => p.from.kind !== 'results' || supported.has(normalize(p.text)));
+      const gone = (data.proposals?.length ?? 0) - proposals.length;
+      if (gone) await this.write({ ...data, proposals });
+      return gone;
     });
   }
 

@@ -14,8 +14,8 @@ import { test, expect, _electron as electron, type ElectronApplication, type Loc
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
-import { makePastEditsHome } from './past-edits-home'
+import { APP_DIR, expectViewport, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
+import { makePastEditsHome, videoFolder } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
 import { OUT, commit, counts, outlinedShot, sourceFor, writeScreen, type Finding, type ScreenResult } from './layout-audit/report'
@@ -129,7 +129,7 @@ async function setSize(app: ElectronApplication, page: Page, [w, h]: [number, nu
     if (win.isFullScreen()) win.setFullScreen(false)
     win.setContentSize(s.w, s.h)
   }, { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight]), { timeout: 5000 }).toEqual([w, h])
+  await expectViewport(page, w, h, 5000)
   await settle(page)
 }
 
@@ -479,7 +479,7 @@ SCREENS.push({
       id: 'reel-shape-menu',
       enter: async ({ page }) => {
         await openReel(page)
-        await page.getByTestId('shape').first().click()
+        await page.getByTestId('view-menu').first().click()
       },
       ready: (page) => page.getByRole('menu').first()
     },
@@ -614,7 +614,7 @@ SCREENS.push({
       id: 'my-style-learn-found',
       enter: async ({ page }) => {
         await closeAll(page)
-        if (!existsSync(join(STYLE_HOME, 'Movies'))) makePastEditsHome(STYLE_HOME)
+        if (!existsSync(join(STYLE_HOME, videoFolder()))) makePastEditsHome(STYLE_HOME)
         await page.getByTestId('style-learn').click()
         // the timeline counts have arrived
         await expect(page.getByTestId('learn-item').first()).toContainText('timeline')

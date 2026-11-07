@@ -7,7 +7,8 @@ import { withoutWordIds } from './moments'
 
 export type LogAsk =
   | { kind: 'video'; text: string }
-  | { kind: 'note'; text: string; moment: NoteMoment | null; attachments: NoteAttachment[] }
+  /** `added`: what the person added while it ran (Add now), oldest first */
+  | { kind: 'note'; text: string; moment: NoteMoment | null; attachments: NoteAttachment[]; added?: { text: string; moment: NoteMoment | null }[] }
   | { kind: 'hand'; text: string }
   /** the reel's Plan card on its own: made in the plain form, or folded above the video once it arrived */
   | { kind: 'plan'; text: string }
@@ -90,6 +91,14 @@ export function dayLabel(iso: string, now: Date): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
 }
 
+/** The first row: the file the person brought in, or each of them for a reel cut from several (at most three by name). */
+function yourVideos(sources: { path: string; originalName?: string }[]): string {
+  const names = sources.map((x) => x.originalName || x.path.split(/[\\/]/).pop() || x.path)
+  if (names.length <= 1) return names.length ? `Your video, ${names[0]}` : 'Your video'
+  const shown = names.length > 3 ? [...names.slice(0, 2), `${names.length - 2} more`] : names
+  return `Your ${names.length} videos, ${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`
+}
+
 export function notesLog(input: {
   chat: ChatMessage[]
   made: VersionMade[]
@@ -100,8 +109,8 @@ export function notesLog(input: {
   planned?: boolean
   /** the reel's plan (app.json `plan`): once the video is in, its planning folds into the one Plan card */
   plan?: ReelPlan | null
-  /** the raw take as project.json lists it: `originalName` is the file the person brought in, `path` the copy (media/take01.mp4) */
-  source: { path: string; originalName?: string } | null
+  /** the raw takes as project.json lists them: `originalName` is the file the person brought in, `path` the copy (media/take01.mp4) */
+  sources: { path: string; originalName?: string }[]
   now: Date
 }): LogEntry[] {
   const { made, versions, running, now } = input
@@ -113,7 +122,7 @@ export function notesLog(input: {
     key: 'video',
     day: null,
     at: versions[0]?.createdAt ?? chat.find((m) => !m.plan)?.at ?? now.toISOString(),
-    ask: { kind: 'video', text: input.source ? `Your video, ${input.source.originalName || input.source.path.split(/[\\/]/).pop()}` : 'Your video' },
+    ask: { kind: 'video', text: yourVideos(input.sources) },
     result: null,
     extra: []
   }
@@ -152,6 +161,12 @@ export function notesLog(input: {
     // more reels from this video: its job has no note, so its lines follow whatever the log shows last
     if (m.reels) {
       entries[entries.length - 1]?.extra.push(m)
+      continue
+    }
+    // words added to a running note belong to its ask, wherever they land in the chat
+    const joined = m.from === 'you' && m.steerOf ? entries.find((e) => e.key === m.steerOf) : undefined
+    if (joined?.ask.kind === 'note') {
+      joined.ask.added = [...(joined.ask.added ?? []), { text: m.text, moment: m.moment ?? null }]
       continue
     }
     if (m.from === 'you') {

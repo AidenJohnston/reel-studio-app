@@ -145,7 +145,8 @@ it('keeps platform-local post IDs separate and reports unavailable TikTok values
     { platform: 'instagram', totals: { metrics: { plays: 100, reach: 100 } } },
     { platform: 'tiktok', totals: { metrics: { plays: 50, reach: null, saves: null, averageWatchTimeMs: null, completionEstimate: null } } }
   ])
-  expect(result.totals).toMatchObject({ metrics: { plays: 150, reach: 100, averageWatchTimeMs: null }, coverage: { reach: 1 } })
+  // a rate rests on the posts that report it (Instagram's here); coverage says how many that is
+  expect(result.totals).toMatchObject({ metrics: { plays: 150, reach: 100, averageWatchTimeMs: 10_000 }, coverage: { reach: 1, averageWatchTimeMs: 1 } })
 })
 
 it('weights watch time and completion estimates by plays, using rendered duration', async () => {
@@ -313,6 +314,19 @@ it('pairs a trial’s two tries and decides it', async () => {
 })
 
 // fails if Try 2 on another version loses the engine's record of what it varied
+// fails if a damaged count reaches the trial rule and fails Insights with an unexplained error (audit 05-results)
+it('refuses a saved count that isn’t a whole number', async () => {
+  const root = await world()
+  await seed(root, 'trial', [
+    post({ postId: '1', trial: TRY(1), observedAt: SETTLED_AT, metrics: { plays: 410.5 } }),
+    post({ postId: '2', trial: TRY(2), observedAt: SETTLED_AT, metrics: { plays: 640 } })
+  ])
+  await expect(summary(root)).rejects.toMatchObject({ code: 'INSIGHTS_DATA', userMessage: expect.stringContaining('trial/outcomes.json') })
+  // a per-play rate may be fractional
+  await seed(root, 'trial', [post({ postId: '1', metrics: { averageWatchTimeMs: 9_100.5, skipRatePercent: 12.5 } })])
+  expect((await summary(root)).totals.metrics.averageWatchTimeMs).toBe(9_100.5)
+})
+
 it('links the engine’s trial log when Try 2 is another version', async () => {
   const root = await world()
   await seed(root, 'trial', [post({ postId: '1', trial: TRY(1, 'video') }), post({ version: 2, postId: '2', trial: TRY(2, 'video') })])

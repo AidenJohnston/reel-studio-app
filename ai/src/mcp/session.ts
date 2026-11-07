@@ -10,7 +10,9 @@ export class SessionHarness implements Harness {
   readonly id;
   readonly supportsImages;
   private readiness?: Promise<string | null>;
-  constructor(private readonly native: Harness, private readonly provider: () => ModelProvider) {
+  /** `onFallback`: the probe failed and this session's notes run on the text-protocol loop instead; called once per
+   * failed readiness decision with its reason ("claude_cli: MCP refused"), so Settings can say so afterwards. */
+  constructor(private readonly native: Harness, private readonly provider: () => ModelProvider, private readonly onFallback?: (reason: string) => void) {
     this.id = native.id;
     this.supportsImages = native.supportsImages;
   }
@@ -24,6 +26,9 @@ export class SessionHarness implements Harness {
       if (/unknown option|unrecognized|unexpected argument/i.test(e.message)) return `${e.code}: unsupported CLI flags`;
       if (/MCP.*refus/i.test(e.message)) return `${e.code}: MCP refused`;
       return `${e.code}: ${e.userMessage}`;
+    }).then((reason) => {
+      if (reason) this.onFallback?.(reason);
+      return reason;
     });
     const reason = await this.readiness;
     if (!reason) return this.native.run(o);

@@ -191,15 +191,17 @@ describe('a note that finishes is saved in one write', () => {
     expect(await new StyleStore(() => root).list()).toEqual([]);
   });
 
-  it('a note that changes nothing is saved under its id with its reply, with no render', async () => {
+  it('fails if a note that changed nothing is saved with a reply claiming it changed the video', async () => {
     const { dir, host, settingsDir, read } = await setup();
-    const m = new ScriptedModel([finish('It already looks right to me.')]);
+    // a live Codex note did this: finish with an edit claimed, no tool changed anything
+    const m = new ScriptedModel([finish('I made the captions bigger and cut the first pause.')]);
     const r = await createAI({ host, settingsDir, providerOverride: m })
-      .applyNote(dir, 'make it pop', () => undefined, undefined, { id: 'job-3', saveStyleRules: false });
-    expect(r).toMatchObject({ changed: [], summary: 'It already looks right to me.' });
+      .applyNote(dir, 'make the captions bigger and cut the first pause', () => undefined, undefined, { id: 'job-3', saveStyleRules: false });
+    const reply = "I made the captions bigger and cut the first pause. (Your video didn't change, so there's no new version.)";
+    expect(r).toMatchObject({ changed: [], summary: reply });
     expect(r).not.toHaveProperty('version');
     expect(host.calls.filter((c) => c.command === 'render')).toEqual([]);
-    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-3', applied: [], reply: 'It already looks right to me.' });
+    expect(JSON.parse(await read()).notes.at(-1)).toMatchObject({ id: 'job-3', applied: [], reply });
   });
 });
 
@@ -220,7 +222,8 @@ describe('a project.json some Windows editors saved with a byte-order mark', () 
     await fsp.writeFile(path.join(dir, 'project.json'), '\uFEFF' + (await read()));
     const r = await createAI({ host, settingsDir, providerOverride: new ScriptedModel([finish('It already looks right to me.')]) })
       .applyNote(dir, 'make it pop', () => undefined, undefined, { id: 'job-bom', saveStyleRules: false });
-    expect(r).toMatchObject({ changed: [], summary: 'It already looks right to me.' });
-    expect(JSON.parse((await read()).replace(/^\uFEFF/, '')).notes.at(-1)).toMatchObject({ id: 'job-bom', reply: 'It already looks right to me.' });
+    const reply = "It already looks right to me. (Your video didn't change, so there's no new version.)";
+    expect(r).toMatchObject({ changed: [], summary: reply });
+    expect(JSON.parse((await read()).replace(/^\uFEFF/, '')).notes.at(-1)).toMatchObject({ id: 'job-bom', reply });
   });
 });

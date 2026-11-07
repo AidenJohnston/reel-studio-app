@@ -22,3 +22,23 @@ export function withSocialFile<T>(file: string, work: () => Promise<T>): Promise
   void result.finally(() => { if (queues.get(file) === result) queues.delete(file) }).catch(() => undefined)
   return result
 }
+
+/**
+ * A connection file's bytes as they are now (null when there is none), for a cancelled sign-in to put back. Taken as
+ * bytes, not decrypted, so a connection that can't be read right now is restored as it was rather than lost. A file
+ * that exists but can't be read throws, so nothing replaces a connection that couldn't be kept.
+ */
+export async function snapshotSocialFile(file: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(file)
+  } catch (e) {
+    if (e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') return null
+    throw e
+  }
+}
+
+/** Puts back what snapshotSocialFile took: the same bytes, or no file. */
+export async function restoreSocialFile(file: string, bytes: Buffer | null): Promise<void> {
+  if (bytes) await atomicSocialFile(file, bytes)
+  else await fs.rm(file, { force: true })
+}

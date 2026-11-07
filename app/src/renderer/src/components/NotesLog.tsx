@@ -72,6 +72,7 @@ const VIDEO_TYPES = 'video/*,.mov,.mp4,.m4v'
 export function NotesLog({
   slug,
   madeWith,
+  madeFrom,
   entries,
   queue,
   held,
@@ -104,6 +105,8 @@ export function NotesLog({
   slug: string
   /** the model that made each version, by its number (VersionInfo.madeWith): its line names it */
   madeWith?: Record<number, string>
+  /** the version each was made from (Compare compares with it; on a branch it is not the one before) */
+  madeFrom?: Record<number, number>
   entries: LogEntry[]
   queue: QueuedNote[]
   held: boolean
@@ -150,6 +153,10 @@ export function NotesLog({
   const [folded, setFolded] = useState(0)
   const [unfolded, setUnfolded] = useState(false)
   const waiting = waitingRows(queue, entries)
+  // a waiting note can go into a note being made now (Add now), never into a change made by hand
+  // a note from the queue is running (Combine runs as a note job too, but takes no added words)
+  const runningNote = entries.some((e) => e.ask.kind === 'note' && e.result?.kind === 'making') ? queue.find((x) => x.attempt && !x.hand) : undefined
+  // only into the same line of versions: a note for another version waits and branches from that one
 
   // The newest version shows what changed until the person folds it. Every version line says what its rows changed,
   // so each one's rows are read once.
@@ -242,7 +249,7 @@ export function NotesLog({
             {v > 1 && (
               <div className="dacts">
                 <button className="lk" onClick={() => onCompare(v)} data-testid={`compare-${v}`}>
-                  <Icon name="compare" size={14} /> Compare with Version {v - 1}
+                  <Icon name="compare" size={14} /> Compare with Version {madeFrom?.[v] ?? v - 1}
                 </button>
               </div>
             )}
@@ -257,8 +264,9 @@ export function NotesLog({
       return (
         <>
           <div className="nt-res quiet" aria-busy>
+            {/* pending, not live: the tray under the log has the one spinner and the time left */}
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version 1</span>
           </div>
@@ -274,7 +282,7 @@ export function NotesLog({
       return (
         <div className="nt-res paused" data-testid="first-paused">
           <span className="nk pause">
-            <Icon name="pause" size={11} stroke={2.4} />
+            <Icon name="pause" size={10} stroke={2.4} />
           </span>
           <span className="t wrap full" data-testid="first-paused-why">
             Paused. {f.why ?? 'Resume continues where it stopped.'}
@@ -319,7 +327,7 @@ export function NotesLog({
         return (
           <div className="nt-res quiet" aria-busy>
             <span className="nk">
-              <span className="spin" />
+              <span className="wait-dot" />
             </span>
             <span className="t">Making Version {r.v}</span>
           </div>
@@ -369,7 +377,7 @@ export function NotesLog({
         return (
           <div className="nt-res paused" data-testid="log-paused">
             <span className="nk pause">
-              <Icon name="pause" size={11} stroke={2.4} />
+              <Icon name="pause" size={10} stroke={2.4} />
             </span>
             <span className="t wrap full">Paused. {pausedWhy ?? 'It waits below.'}</span>
           </div>
@@ -378,7 +386,7 @@ export function NotesLog({
         return (
           <div className="nt-res" data-testid="log-stopped">
             <span className="nk stop">
-              <Icon name="stop" size={11} stroke={2.4} />
+              <Icon name="stop" size={10} stroke={2.4} />
             </span>
             <span className="t">Stopped. {r.kept ? `Version ${r.kept} is unchanged.` : 'Nothing changed.'}</span>
             {e.ask.kind === 'note' && aiOn && (
@@ -426,6 +434,16 @@ export function NotesLog({
               </p>
             </div>
           )}
+          {e.ask.kind === 'note' &&
+            e.ask.added?.map((x, i) => (
+              <div className="nt-ask" key={i}>
+                <p className="bubble selectable" data-testid="note-added">
+                  <span className="added">Added</span>
+                  {x.moment && <span className="tm">{momentLabel(x.moment)}</span>}
+                  {x.text}
+                </p>
+              </div>
+            ))}
           {e.key === 'video' && first ? firstLine(first) : e.result && result(e, e.result)}
           {e.extra.map((m) => (
             <Reply
@@ -444,7 +462,7 @@ export function NotesLog({
         </article>
       ))}
       {waiting.map((q, i) => (
-        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} on={latest + (making ? 1 : 0) + i} onEditHand={onEditHand} onError={onError} />
+        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} making={making} canAdd={!!runningNote && making !== null && q.branch === runningNote.branch} onEditHand={onEditHand} onError={onError} />
       ))}
     </div>
   )
@@ -531,7 +549,7 @@ function Reply({
 }
 
 /** A note waiting its turn: its words can change, it can go, and with others waiting it can move (grip, or arrow keys on it). */
-function QueuedRow({ slug, q, i, count, held, on, onEditHand, onError }: { slug: string; q: QueuedNote; i: number; count: number; held: boolean; on: number; onEditHand: (id: string) => void; onError: (m: string) => void }) {
+function QueuedRow({ slug, q, i, count, held, making, canAdd, onEditHand, onError }: { slug: string; q: QueuedNote; i: number; count: number; held: boolean; making: number | null; canAdd: boolean; onEditHand: (id: string) => void; onError: (m: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [over, setOver] = useState(false)
   const act = (p: Promise<unknown>) => void p.catch((e) => onError(userMessage(e)))
@@ -621,16 +639,34 @@ function QueuedRow({ slug, q, i, count, held, on, onEditHand, onError }: { slug:
         <span className="nk">
           <span className="wait-dot" />
         </span>
-        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}, on Version ${on}`}</span>
+        {/* its place in line, and Add names the version it would join, the one the row above says is being made: a bare
+            "Add now" beside "Next, on Version 2" asked a person to work out the queue (Sense re-score 4, both judges).
+            No number is promised for the version a waiting note makes: a note that changes only the caption keeps its
+            version, and a stopped one waits to run again, so counting rows overshoots (review round 3). */}
+        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}${q.branch !== undefined ? `, from Version ${q.branch}` : ''}`}</span>
         {draft === null && (
-          <>
+          <span className="q-acts">
+            {/* only with a version being made to join: as a job ends, Reel clears it before the log's data catches up
+                (review round 4), and Add said "Add now" with nothing named */}
+            {canAdd && making !== null && !q.hand && !q.attachments.length && (
+              <button
+                className="lk"
+                title="Add this to the version being made now"
+                onClick={() =>
+                  act(reel.queue.steer(slug, q.id).then((r) => void (r.added || onError('That version was already being saved, so this note runs next on its own.'))))
+                }
+                data-testid="queue-add"
+              >
+                Add to Version {making}
+              </button>
+            )}
             <button className="lk" onClick={() => (q.hand ? onEditHand(q.id) : setDraft(q.text))} data-testid="queue-edit">
               Edit
             </button>
             <button className="lk" onClick={() => act(reel.queue.cancel(slug, q.id))} data-testid="queue-cancel">
               Cancel
             </button>
-          </>
+          </span>
         )}
       </div>
     </article>

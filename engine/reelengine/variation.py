@@ -178,11 +178,19 @@ def recover_transaction(project_dir: Path) -> None:
     projects._fsync_dir(folder)
 
 
-def create_variant(project_dir: Path, variable: str, *, value=None) -> dict:
-    """Commit one trial and retain its exact parent independently of rendered versions."""
+def create_variant(project_dir: Path, variable: str, *, value=None, project_file: Path | None = None) -> dict:
+    """Commit one trial and retain its exact parent independently of rendered versions.
+
+    With `project_file` (a note's private copy of project.json) the trial changes that copy and
+    leaves project.json alone: the note replaces project.json itself when it finishes, and refuses
+    to when project.json changed under it.
+    """
     project_dir = Path(project_dir)
     with projects.owner_lock(project_dir):
-        parent = projects.load(project_dir)
+        if project_file is not None:
+            # project.json is not read below, so finish any trial left half-written in it first
+            recover_transaction(project_dir)
+        parent = projects.load(project_dir, file=project_file)
         variant = make_variant(parent, variable, value=value)
         if variable == "hook":
             words = projects.load_transcript(project_dir, parent)["words"]
@@ -195,7 +203,7 @@ def create_variant(project_dir: Path, variable: str, *, value=None) -> dict:
                 seen.update(range(a, b + 1))
         # Check the revision even under the lock: a caller may have changed the
         # project while constructing the alternative, before the intent exists.
-        if projects.load(project_dir) != parent:
+        if projects.load(project_dir, file=project_file) != parent:
             raise EngineError('TRIAL_CONFLICT', 'The project changed while making the trial.',
                               'The edit changed. Read it again before making a trial.')
         trial_path = project_dir / "trials.json"
@@ -214,6 +222,13 @@ def create_variant(project_dir: Path, variable: str, *, value=None) -> dict:
         trial = {"parent_version": parent.get("version", 0), "variable": variable,
                  "from": _value(parent, variable), "to": _value(variant, variable),
                  "parent_id": parent_id, "parent_snapshot": snapshot}
+        if project_file is not None:
+            # The copy is private to the note and discarded if the note fails, so it needs no journal;
+            # the log is one atomic write after it. An entry whose note never lands is skipped by
+            # comparison readers, which check the next version's edit against it (ai/src/learning.ts).
+            projects.write_json(project_file, variant)
+            projects.write_json(trial_path, [*trials, trial])
+            return {"project": variant, "trial": trial}
         # Intent is durable before either public file changes. A restart completes
         # it once under the owner lock, including exits between the two replacements.
         projects.write_json(project_dir / '.trial-transaction.json', {

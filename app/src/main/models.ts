@@ -31,12 +31,21 @@ export function modelInstalled(dir = join(modelsDir(), modelName())): boolean {
   )
 }
 
-/** A profile copied to another computer checks again. */
+/** A profile copied to another computer checks again, and so does a result from an older check. */
 export interface SpeechCheckResult {
   machine: string
   /** null: the check failed (or the GPU does the work), so the engine keeps its usual rule */
   threads: number | null
+  /** which check made it (CHECK); absent before 2 */
+  check?: number
 }
+
+/**
+ * 2: the engine proves the GPU before skipping the CPU thread count (transcribe.speech_check). Before it, a computer
+ * with an NVIDIA card the packaged app can't use saved `threads: null` and then listened on the CPU at the untested
+ * default count for good, so those results run again once.
+ */
+const CHECK = 2
 
 const thisMachine = (): string => `${process.arch} ${cpus()[0]?.model ?? 'unknown'} x${cpus().length}`
 
@@ -76,7 +85,10 @@ export function createModelManager(deps: ModelDeps) {
     deps.onChange(state)
     return state
   }
-  const checkDone = async (): Promise<boolean> => (await deps.loadCheck())?.machine === thisMachine()
+  const checkDone = async (): Promise<boolean> => {
+    const r = await deps.loadCheck()
+    return r?.machine === thisMachine() && r.check === CHECK
+  }
 
   /** A creator can't judge the thread count, so this is never a setup step; it runs unseen once the model is here. */
   function checkInBackground(): Promise<void> {
@@ -103,7 +115,7 @@ export function createModelManager(deps: ModelDeps) {
         // Cut short by its time budget (a busy computer): use what it found now, but don't keep it, so it runs again
         // on a later start. Seen 2026-10-21: one 7 s run at 8 threads, 4 never tried.
         const complete = r?.complete !== false
-        if (complete) await deps.saveCheck({ machine: thisMachine(), threads })
+        if (complete) await deps.saveCheck({ machine: thisMachine(), threads, check: CHECK })
         deps.useThreads(threads)
         log(`[model] speech check: ${threads ?? 'usual'} thread(s)${complete ? '' : ' (cut short, not saved)'} ${JSON.stringify(r?.runs ?? [])}`)
       } catch (e) {
@@ -112,7 +124,7 @@ export function createModelManager(deps: ModelDeps) {
         else if (err.code === 'CANCELLED') return // a video started; try again on a later start
         // A failure that would repeat: main's thread count (the engine's own rule), saved so it doesn't run again here.
         log(`[model] speech check failed: ${deadline.aborted ? `still running after ${deps.checkDeadlineMs} ms` : `${err.code} ${err.message ?? ''}`}`)
-        await deps.saveCheck({ machine: thisMachine(), threads: null }).catch(() => undefined)
+        await deps.saveCheck({ machine: thisMachine(), threads: null, check: CHECK }).catch(() => undefined)
         deps.useThreads(null)
         set({ checkFailed: true })
       }

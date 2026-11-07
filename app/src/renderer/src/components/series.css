@@ -1,0 +1,5 @@
+/* Reel › More › Series… (SeriesPicker.tsx): the choices as one list with hairlines, like Sound's songs (edit.css). */
+.series-options { display: grid; margin: 12px 0 16px; max-height: 320px; overflow-y: auto; }
+.series-options > .edit-row + .edit-row { box-shadow: inset 0 1px 0 var(--line); }
+.series-options > .input { margin: 0 0 8px 26px; }
+.series-error { margin: -8px 0 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--pencil); }

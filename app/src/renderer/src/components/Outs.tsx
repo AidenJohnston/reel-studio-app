@@ -17,6 +17,10 @@ import { Strip, type Work } from './ShareStrip'
 import { FOLDER_APP, Modal } from './ui'
 import { usePostingStatus } from './posting'
 import { PostSheet } from './PostSheet'
+import { SocialPostSheet } from './SocialPostSheet'
+import { accountName } from './SocialSettings'
+import { useSocialStatus } from './social'
+import { PLATFORM_NAMES } from '../../../shared/social'
 import './share.css'
 
 const LAST = 'rs.share.last'
@@ -41,7 +45,8 @@ export function Outs({
   disabled,
   quiet,
   why,
-  onSaveCaption
+  onSaveCaption,
+  onCover
 }: {
   slug: string
   /** The reel's name: Post to YouTube starts its title from it. */
@@ -51,11 +56,13 @@ export function Outs({
   post: ProjectJson['post']
   /** A version is being made: nothing new can start. */
   disabled: boolean
-  /** Another action is this screen's one green button (Done comparing, Make Version N, connecting an editor). */
+  /** Another action is this screen's one green button (Keep Version N while comparing, Make Version N, connecting an editor). */
   quiet?: boolean
   why?: string
   /** Saves the caption as typed (hashtags included) and reloads the reel. */
   onSaveCaption: (caption: string) => Promise<boolean>
+  /** Opens the hands-on Cover tab, where another frame or words can be picked for the cover posted with the reel. */
+  onCover?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
@@ -81,9 +88,12 @@ export function Outs({
   const openRef = useRef(open)
   openRef.current = open
   const { drives, label: driveName } = useCloudDrives()
-  // Post to YouTube (main/posting.ts): a destination only while posting is on (REELSTUDIO_POSTING=1)
+  // Post to YouTube (main/posting.ts): a destination unless posting is turned off (REELSTUDIO_POSTING=0)
   const [posting] = usePostingStatus()
   const [postSheet, setPostSheet] = useState<{ video: string; version: number; durationSec: number | null } | null>(null)
+  // Post to Instagram and Post to TikTok (SocialPostSheet): rows only while the sign-in service can connect them
+  const [social, reloadSocial] = useSocialStatus()
+  const [socialSheet, setSocialSheet] = useState<{ platform: 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x' | 'linkedin'; version: number; hasCover: boolean; durationSec: number | null } | null>(null)
   // a post is being sent: Stop is the way out, not Esc or a click outside. A ref read when Esc comes, set in the
   // sheet's layout effect: state passed up through a passive effect let an Esc pressed just as Sending showed close it
   const postBusy = useRef(false)
@@ -263,13 +273,35 @@ export function Outs({
     }
   }
 
+  /** Opens a platform's post sheet for the exported version; Share steps aside for it, and Back returns to it. */
+  const openSocial = (platform: 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x' | 'linkedin') =>
+    void run(platform, async (files) => {
+      const n = files.version
+      const timeline = await reel.projects.timeline(slug, n).catch(() => null)
+      close(false)
+      setSocialSheet({ platform, version: n, hasCover: !!files.cover, durationSec: timeline?.duration ?? null })
+      return null
+    })
+  const socialRow = (platform: 'instagram' | 'tiktok' | 'facebook' | 'threads' | 'x' | 'linkedin') => {
+    const who = social && accountName(social, platform)
+    return {
+      id: platform,
+      icon: platform === 'instagram' ? <Icon name="instagram" size={16} /> : <BrandMark name={platform} size={16} />,
+      label: `Post to ${PLATFORM_NAMES[platform]}`,
+      hint: who ? `To ${platform === 'instagram' || platform === 'threads' || platform === 'x' ? `@${who}` : who}` : 'Connect your account once',
+      testid: `share-post-${platform}`,
+      go: () => openSocial(platform)
+    }
+  }
+
   const destinations: { id: string; icon: ReactNode; label: string; hint: string; testid: string; go: () => void }[] = [
-    {
+    social?.instagram.availability.open ? socialRow('instagram') : {
       id: 'instagram',
       icon: <Icon name="instagram" size={16} />,
       label: 'Save for Instagram',
-      // Posting needs Instagram's sign-in, which isn't built (spec.md section 11), so the row says what it does instead.
-      hint: 'Not connected yet. Saves the reel and copies the caption.',
+      // Instagram can't be connected right now (the sign-in service can't be reached, or has no app for it), so the
+      // row does what it can: the reel saved and its caption copied.
+      hint: 'Saves the reel and copies the caption',
       testid: 'share-instagram',
       go: () =>
         void run('instagram', async (files) => {
@@ -296,6 +328,11 @@ export function Outs({
             })
         }]
       : []),
+    ...(social?.tiktok.availability.open ? [socialRow('tiktok')] : []),
+    ...(social?.facebook.availability.open ? [socialRow('facebook')] : []),
+    ...(social?.threads.availability.open ? [socialRow('threads')] : []),
+    ...(social?.x.availability.open ? [socialRow('x')] : []),
+    ...(social?.linkedin.availability.open ? [socialRow('linkedin')] : []),
     {
       id: 'phone',
       icon: <Icon name="phone" size={16} />,
@@ -344,7 +381,8 @@ export function Outs({
       id: 'platforms',
       icon: <Icon name="layers" size={16} />,
       label: 'Other platforms',
-      hint: 'TikTok, YouTube Shorts and 5 more, with Try 2',
+      // Try 2 is introduced inside, where it is offered: named here it was a word nobody knew yet (Sense, goal 3)
+      hint: 'TikTok, YouTube Shorts and 5 more',
       testid: 'share-platforms-toggle',
       go: () => setPlatformsOpen((o) => !o)
     }
@@ -407,20 +445,40 @@ export function Outs({
             <h2 id="share-h" className="sp-h">{version.n ? `Share Version ${version.n}` : 'Share the preview'}</h2>
             {why && <p className="muted-sm sp-why">{why}</p>}
             {version.draft && !why && <p className="muted-sm sp-why">This is a preview. Sharing makes the full-quality version first.</p>}
-            <div className="sp-cap">
-              <label htmlFor="share-caption">Caption</label>
-              <span className={`tnum${over ? ' sp-over' : ''}`}>{caption.length.toLocaleString()}/{INSTAGRAM_LIMIT.toLocaleString()}</span>
+            {/* what is posted, as Instagram's own post screen shows it: the cover beside the caption */}
+            <div className={version.cover ? 'sp-post' : 'sp-post no-cover'}>
+              {version.cover && (
+                <div className="sp-cover">
+                  <span className="sp-label" aria-hidden>
+                    Cover
+                  </span>
+                  {onCover ? (
+                    <button type="button" className="sp-cover-btn" onClick={() => (close(), onCover())} aria-label="Change the cover" data-testid="share-cover">
+                      <img src={version.cover} alt="" width={56} height={100} />
+                      <span className="sp-cover-change">Change</span>
+                    </button>
+                  ) : (
+                    <img className="sp-cover-img" src={version.cover} alt="" width={56} height={100} />
+                  )}
+                </div>
+              )}
+              <div className="sp-cap-col">
+                <div className="sp-cap">
+                  <label htmlFor="share-caption">Caption</label>
+                  <span className={`tnum${over ? ' sp-over' : ''}`}>{caption.length.toLocaleString()}/{INSTAGRAM_LIMIT.toLocaleString()}</span>
+                </div>
+                <textarea
+                  id="share-caption"
+                  className="textarea sp-caption"
+                  rows={3}
+                  value={caption}
+                  placeholder="A line or two to post under the reel"
+                  onChange={(e) => setCaption(e.target.value)}
+                  onBlur={() => void saveCaption().catch(() => {})}
+                  data-testid="share-caption"
+                />
+              </div>
             </div>
-            <textarea
-              id="share-caption"
-              className="textarea sp-caption"
-              rows={3}
-              value={caption}
-              placeholder="A line or two to post under the reel"
-              onChange={(e) => setCaption(e.target.value)}
-              onBlur={() => void saveCaption().catch(() => {})}
-              data-testid="share-caption"
-            />
             <ul className="sp-list">
               {ordered.map((d, i) => {
                 const key = `${version.n}|${d.id}`
@@ -508,6 +566,26 @@ export function Outs({
             {ask === 'answered' && <p className="muted-sm sp-help-done" role="status">Saved. Change it any time in Settings › Privacy.</p>}
           </div>
         </div>
+      )}
+      {socialSheet && social && (
+        <Modal onClose={() => !postBusy.current && setSocialSheet(null)} wide testid="social-dialog">
+          <SocialPostSheet
+            platform={socialSheet.platform}
+            slug={slug}
+            version={socialSheet.version}
+            caption={caption}
+            hasCover={socialSheet.hasCover}
+            durationSec={socialSheet.durationSec}
+            status={social}
+            reload={reloadSocial}
+            onBack={() => {
+              setSocialSheet(null)
+              show()
+            }}
+            onClose={() => setSocialSheet(null)}
+            onBusy={setPostBusy}
+          />
+        </Modal>
       )}
       {postSheet && (
         <Modal onClose={() => !postBusy.current && setPostSheet(null)} wide testid="post-dialog">

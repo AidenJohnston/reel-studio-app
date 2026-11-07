@@ -436,3 +436,134 @@ def test_cli_scan_reports_every_file():
     done = json.loads(buf.getvalue().splitlines()[-1])
     assert code == 0 and done["event"] == "done"
     assert [f["timelines"] for f in done["result"]["files"]] == [1, 1]
+
+
+# CapCut, DaVinci Resolve's EDL and FCPXML. The samples are built from each format's published or documented layout
+# (reference_capcut.py, reference_edl.py); none is a real export, so a real CapCut or Resolve file may differ.
+
+def _us(r):
+    return r["start"]["value"], r["duration"]["value"], r["start"]["rate"]
+
+
+def test_capcut_draft_reads_its_lanes_in_time_order_with_media_text_and_transitions():
+    record = import_reference(FIXTURES / "capcut-draft" / "draft_content.json")
+    assert record["source"]["adapter"] == "capcut"
+    assert record["source"]["writer"] == "CapCut" and record["source"]["version"] == "110.0.0"
+    (timeline,) = record["timelines"]
+    assert timeline["name"] == "capcut-draft"
+    assert timeline["duration"] == {"value": 12_000_000, "rate": 1_000_000}
+    assert [(t["name"], t["kind"]) for t in timeline["tracks"]] == [
+        ("0", "Video"), ("1", "Video"), ("A1", "Audio"), ("T1", "Video"), ("T2", "Video")]
+
+    main = timeline["tracks"][0]["items"]
+    # segments listed out of order are placed by their start; the Mix on the second sits between it and the third
+    assert [i["type"] for i in main] == ["clip", "clip", "transition", "clip", "clip"]
+    assert [_us(i["trackRange"])[:2] for i in main if i["type"] == "clip"] == [
+        (0, 3_000_000), (3_000_000, 3_000_000), (6_000_000, 3_000_000), (9_000_000, 3_000_000)]
+    assert _us(main[0]["sourceRange"])[0] == 10_000_000
+    assert main[0]["media"] == {"kind": "file", "url": "file:///Users/me/Movies/clips/talk.mp4", "name": "talk.mp4"}
+    assert main[2]["name"] == "Mix" and main[2]["inOffset"]["value"] == main[2]["outOffset"]["value"] == 250_000
+
+    (picture,) = timeline["tracks"][1]["items"]
+    assert picture["media"]["url"] == "file:///C:/Users/me/Pictures/chart.png"
+    (song,) = timeline["tracks"][2]["items"]
+    assert song["media"]["url"] == "file:///Users/me/Music/song.mp3"
+    (title,) = timeline["tracks"][3]["items"]
+    assert title["media"] == {"kind": "generator", "generator": "Text", "name": "Three tips"}
+    assert _us(title["trackRange"])[:2] == (500_000, 2_000_000)
+    # CapCut's own captions are not a title the person put on screen
+    (caption,) = timeline["tracks"][4]["items"]
+    assert caption["media"]["generator"] == "Captions"
+
+    assert record["mediaRefs"] == ["file:///C:/Users/me/Pictures/chart.png", "file:///Users/me/Movies/clips/talk.mp4",
+                                   "file:///Users/me/Music/song.mp3"]
+    assert {"path": "tracks[5]", "reason": "CapCut effects are not read"} in record["losses"]
+    assert reference_import.count_timelines(FIXTURES / "capcut-draft" / "draft_content.json") == 1
+
+
+def test_capcut_project_folder_reads_its_draft_and_skips_an_encrypted_one(tmp_path):
+    folder = tmp_path / "Bread reel"
+    folder.mkdir()
+    draft = (FIXTURES / "capcut-draft" / "draft_content.json").read_bytes()
+    (folder / "draft_info.json").write_bytes(draft)
+    # JianYing 6+ encrypts draft_content.json and leaves draft_info.json plain beside it
+    (folder / "draft_content.json").write_bytes(b"\x8f\x12encrypted-bytes\x00")
+    record = import_reference(folder)
+    assert record["source"]["path"].endswith("draft_info.json")
+    assert record["timelines"][0]["name"] == "Bread reel"
+    assert len(record["timelines"][0]["tracks"][0]["items"]) == 5
+
+
+def test_encrypted_or_foreign_capcut_draft_is_refused_in_words(tmp_path):
+    locked = tmp_path / "locked" / "draft_content.json"
+    locked.parent.mkdir()
+    locked.write_bytes(b"\x8f\x12encrypted-bytes\x00")
+    assert _code(locked) == "LOCKED_DRAFT"
+    assert _code(locked.parent) == "LOCKED_DRAFT"
+    other = tmp_path / "other" / "draft_content.json"
+    other.parent.mkdir()
+    other.write_text('{"name": "not a draft"}', encoding="utf-8")
+    assert _code(other) == "BAD_DRAFT"
+    broken = json.loads((FIXTURES / "capcut-draft" / "draft_content.json").read_text(encoding="utf-8"))
+    del broken["tracks"][0]["segments"][0]["target_timerange"]
+    bad = tmp_path / "bad" / "draft_content.json"
+    bad.parent.mkdir()
+    bad.write_text(json.dumps(broken), encoding="utf-8")
+    assert _code(bad) == "BAD_DRAFT"
+    assert _code(tmp_path / "other") == "BAD_DRAFT"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _code(empty) == "BAD_INPUT"
+
+
+def test_resolve_edl_reads_cuts_a_dissolve_and_the_song_at_the_rate_its_frames_allow():
+    record = import_reference(FIXTURES / "resolve-cut.edl")
+    assert record["source"]["adapter"] == "cmx_3600"
+    (timeline,) = record["timelines"]
+    assert timeline["name"] == "Timeline 1"
+    assert timeline["globalStart"] == {"value": 108000, "rate": 30} and timeline["dropFrame"] is False
+    assert timeline["duration"]["value"] == 224
+    video, audio = timeline["tracks"]
+    assert (video["name"], video["kind"], audio["name"], audio["kind"]) == ("V", "Video", "A", "Audio")
+    assert [i["type"] for i in video["items"]] == ["clip", "clip", "transition", "clip"]
+    clips = [i for i in video["items"] if i["type"] == "clip"]
+    assert [i["name"] for i in clips] == ["talk.mov", "talk.mov", "broll.mov"]
+    assert [_frames(i["trackRange"])[:2] for i in clips] == [(0, 75), (75, 59), (134, 90)]
+    assert [_frames(i["sourceRange"])[0] for i in clips] == [300, 900, 1800]
+    assert video["items"][2]["outOffset"]["value"] == 15
+    (song,) = audio["items"]
+    assert song["name"] == "song.mp3" and song["media"]["url"] is None
+    assert any("does not say its frame rate; read as 30 fps" in l["reason"] for l in record["losses"])
+    assert reference_import.count_timelines(FIXTURES / "resolve-cut.edl") == 1
+
+
+def test_drop_frame_edl_counts_frames_as_29_97(tmp_path):
+    edl = tmp_path / "df.edl"
+    edl.write_text("TITLE: DF\nFCM: DROP FRAME\n\n"
+                   "001  AX  V  C  00:00:00;00 00:01:00;02 01:00:00;00 01:01:00;02\n", encoding="utf-8")
+    (timeline,) = import_reference(edl)["timelines"]
+    (clip,) = timeline["tracks"][0]["items"]
+    assert clip["trackRange"]["duration"] == {"value": 1800, "rate": 30000 / 1001}
+    assert timeline["dropFrame"] is True
+
+
+@pytest.mark.parametrize("body,code", [
+    ("TITLE: Empty\nFCM: NON-DROP FRAME\n", "NO_TIMELINE"),
+    ("TITLE: Bad\n001  AX  V  C  00:00:00:00 00:00:01:00 01:00:00:00\n", "BAD_EDL"),
+    ("001  AX  V  C  00:00:02:00 00:00:01:00 01:00:00:00 01:00:01:00\n", "BAD_EDL"),
+], ids=["no-events", "short-event-line", "out-before-in"])
+def test_unreadable_edl_is_refused(tmp_path, body, code):
+    edl = tmp_path / "cut.edl"
+    edl.write_text(body, encoding="utf-8")
+    assert _code(edl) == code
+
+
+def test_resolve_fcpxml_is_read_and_named_for_resolve():
+    record = import_reference(FIXTURES / "resolve-timeline.fcpxml")
+    assert record["source"]["adapter"] == "fcpx_xml" and record["source"]["writer"] == "DaVinci Resolve"
+    (timeline,) = record["timelines"]
+    spine = timeline["tracks"][0]["items"]
+    assert [_frames(i["trackRange"])[1] for i in spine] == [75, 60, 105]
+    assert [_frames(i["sourceRange"])[0] for i in spine] == [300, 900, 1200]
+    assert timeline["globalStart"]["value"] == 108000
+    assert import_reference(FIXTURES / "ntsc-lanes.fcpxml")["source"]["writer"] is None

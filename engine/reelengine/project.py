@@ -103,16 +103,21 @@ def read_json(path: Path):
         return json.load(fh)
 
 
-def write_json(path: Path, data, indent: int = 2) -> None:
-    """Atomic utf-8 JSON write with LF newlines."""
+def write_json(path: Path, data, indent: int = 2, allow_nan: bool = True) -> None:
+    """Atomic utf-8 JSON write with LF newlines. allow_nan=False refuses NaN and infinities, which Python
+    writes as bare `NaN` and the app's JSON.parse cannot read."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(data, fh, indent=indent, ensure_ascii=False)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())        # power loss right after the rename must not leave an empty file
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh, indent=indent, ensure_ascii=False, allow_nan=allow_nan)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())        # power loss right after the rename must not leave an empty file
+    except BaseException:
+        tmp.unlink(missing_ok=True)      # a refused value (allow_nan) stops mid-write: no half file left
+        raise
     _replace_with_retry(tmp, path)
     _fsync_dir(path.parent)
 
@@ -266,7 +271,12 @@ def _save(project_dir: Path, proj: dict, touch: bool = True, file: Optional[Path
     if problems:
         raise EngineError("BAD_PROJECT", "refusing to save an invalid project: " + "; ".join(problems[:8]),
                           "Something went wrong saving your edit. Please try again.")
-    write_json(Path(file) if file is not None else project_file(project_dir), proj)
+    try:
+        # the schema's min/max checks let NaN through, and a project.json holding one never opens in the app
+        write_json(Path(file) if file is not None else project_file(project_dir), proj, allow_nan=False)
+    except ValueError as exc:
+        raise EngineError("BAD_PROJECT", f"refusing to save a project with a number that isn't finite: {exc}",
+                          "Something went wrong saving your edit. Please try again.")
 
 
 def edit_signature(proj: dict) -> str:
@@ -394,9 +404,23 @@ def _anchor_slots(proj: dict):
     for a in ((proj.get("music") or {}).get("automation") or []):
         yield a, "fromWord", "from"
         yield a, "toWord", "to"
-    for h in ((proj.get("captions") or {}).get("hidden") or []):
+    captions = proj.get("captions") or {}
+    for h in captions.get("hidden") or []:
         yield h, "from", "from"
         yield h, "to", "to"
+    # one-off corrections, line breaks and line joins name words too; left stale, a correction stopped
+    # applying and a split or join vanished after re-transcription (audit 08)
+    for c in captions.get("corrections") or []:
+        if c.get("at"):
+            yield c, "at", "from"
+        if c.get("through"):
+            yield c, "through", "to"
+    for j in captions.get("join") or []:
+        yield j, "from", "to"           # the last word of the earlier line: an end
+        yield j, "to", "from"           # the first word of the next line: a start
+    splits = captions.get("split") or []
+    for i in range(len(splits)):
+        yield splits, i, "from"         # a word that starts a line
     for s in proj.get("sfx") or []:
         at = s.get("at") or {}
         for key in ("word", "cut"):
@@ -415,7 +439,7 @@ def remap_anchors(proj: dict, old_words: list, new_words: list) -> int:
         by_src.setdefault(w["source"], []).append(w)
     moved = 0
     for holder, key, role in _anchor_slots(proj):
-        wid = holder.get(key)
+        wid = holder[key] if isinstance(holder, list) else holder.get(key)
         if not wid or wid in new_ids or wid not in old:
             continue
         o = old[wid]

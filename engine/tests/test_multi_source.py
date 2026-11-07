@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from conftest import mkwords
-from reelengine import audio_env, broll, captions, cut, init, project, render, tools, transcribe, verify
+from reelengine import analyze, audio_env, broll, captions, cli, cut, init, project, render, tools, transcribe, verify
 from reelengine.proto import EngineError
 
 
@@ -246,6 +246,10 @@ def test_transcribe_skips_silent_sources_and_keeps_voiced_source_words(tmp_path,
     assert [(w["w"], w["source"]) for w in transcript["words"]] == [("Goal", "s2")]
     assert [s["source"] for s in transcript["segments"]] == ["s2"]
     assert result["timings"]["audioSeconds"] == 6
+    # analyze, run on the same project (the engine CLI's `analyze` and `autocut`), skips the silent take
+    # too instead of failing to extract its audio
+    analyze.run(pdir)
+    assert set(project.read_json(pdir / "work" / "envelope.json")) == {"s2"}
 
 
 def test_init_accepts_silent_video(tmp_path, media):
@@ -307,3 +311,9 @@ def test_batch_intake_orders_capture_times_and_transcribes_only_audio(tmp_path, 
     unsorted = tmp_path / "drop-order"
     init.run(unsorted, "Drop order", [files[0], media["silent"], files[2]])
     assert [s["originalName"] for s in project.load(unsorted)["sources"]] == ["late.mov", "silent.mp4", "early.mov"]
+
+    # fails if a reel cut from parts of several files (app archive-reels.ts) gets its files renumbered by date
+    given = tmp_path / "given-order"
+    parsed = cli.build_parser().parse_args(["init", "--project", str(given), "--title", "Given", "--keep-order", *map(str, files)])
+    parsed.fn(parsed)
+    assert [s["originalName"] for s in project.load(given)["sources"]] == ["late.mov", "silent.mov", "early.mov"]

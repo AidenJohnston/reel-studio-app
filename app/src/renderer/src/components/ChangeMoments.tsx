@@ -6,7 +6,7 @@
 // later second, so the edit's own times could point at the wrong words there.
 import { useEffect, useRef, useState } from 'react'
 import type { Moment } from '../../../shared/live'
-import { clock } from '../../../shared/progress'
+import { momentLabel } from '../../../shared/moments'
 
 /**
  * Each picture stays at least this long before the next replaces it, so stills drawn in quick succession read as
@@ -49,8 +49,9 @@ export function useChangeMoment(moments: Moment[] | null, job: string | null): {
 }
 
 /** "0:06", or "0:05–0:07" for the window: seconds of the edited video. */
+/** As the player's clock and the note's moment read it (shared/moments.ts momentLabel). */
 export function momentTime(m: Moment): string {
-  return m.kind === 'still' ? clock(m.t) : `${clock(m.from)}–${clock(m.to)}`
+  return m.kind === 'still' ? momentLabel({ at: m.t }) : momentLabel({ at: m.from, to: m.to })
 }
 
 /**

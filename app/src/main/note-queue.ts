@@ -9,6 +9,8 @@
 // chat, which it keeps through every Try again and every edit (the notes log hides its queue row).
 // A change made in "Edit it myself" waits in the same queue (an entry with `hand`); its proof is its id in
 // project.json.handEdits (hand-edit.ts), and a stopped one waits again with its changes, like a note.
+// A waiting note can instead go into the note running now (Add now, `steer`): the running note reads its words
+// between two steps and cannot finish before it has (ai steer.ts). One that comes too late stays first in line.
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
@@ -20,6 +22,7 @@ import { dropStaged, pruneStaging } from './attachments'
 import type { ChatLine } from './style-consent'
 import { noteStagingDir, noteStagingRoot } from './paths'
 import { listProjects, projectDir, readAppState, readJson, serialized, stamp, updateAppState, type AppState } from './store'
+import { SteerBox } from './steer'
 
 export interface NoteToRun {
   /** saved with the note in project.json.notes (ai applyNote `opts.id`) */
@@ -30,6 +33,10 @@ export interface NoteToRun {
   moment?: NoteMoment
   /** the saved version it changes instead of the newest (ai applyNote `opts.base`) */
   branch?: number
+  /** words added on an earlier run (Add now): this run reads them with `text` */
+  steers?: QueuedNote['steers']
+  /** words added while this run goes (ai applyNote `opts.steer`) */
+  steer?: SteerBox
 }
 
 /** Starts a note job (index.ts). `record` goes into the app.json write that marks the job running. */
@@ -40,12 +47,21 @@ export type StartHand = (slug: string, entry: HandEntry, record: (s: AppState) =
 
 const STARTED = { code: 'NOT_QUEUED', userMessage: 'That note already started, so it can no longer change.' }
 
+interface Committed {
+  version: number
+  ids: Set<string>
+  /** each saved note's words as the editor saved them: its own, then any it read while it ran (ai steer.ts) */
+  texts: Map<string, string>
+}
+
 /** The saved notes' ids, or null when project.json can't be read or its notes are not a list. */
-async function committed(slug: string): Promise<{ version: number; ids: Set<string> } | null> {
-  const p = await readJson<{ version?: number; notes?: { id?: unknown }[]; handEdits?: unknown } | null>(join(projectDir(slug), 'project.json'), null)
+async function committed(slug: string): Promise<Committed | null> {
+  const p = await readJson<{ version?: number; notes?: { id?: unknown; text?: unknown }[]; handEdits?: unknown } | null>(join(projectDir(slug), 'project.json'), null)
   if (!p || (p.notes !== undefined && !Array.isArray(p.notes))) return null
   const hands = Array.isArray(p.handEdits) ? p.handEdits.filter((x): x is string => typeof x === 'string') : []
-  return { version: Number(p.version) || 0, ids: new Set([...(p.notes ?? []).map((n) => (typeof n?.id === 'string' ? n.id : '')), ...hands]) }
+  const notes = p.notes ?? []
+  const texts = new Map(notes.flatMap((n) => (typeof n?.id === 'string' && typeof n.text === 'string' ? [[n.id, n.text] as const] : [])))
+  return { version: Number(p.version) || 0, ids: new Set([...notes.map((n) => (typeof n?.id === 'string' ? n.id : '')), ...hands]), texts }
 }
 
 /** What the editor says when a Stop came too late: the note was saved (`savedAs`, its version) before it.
@@ -71,8 +87,19 @@ function backToWaiting(s: AppState): void {
   if (s.queue?.length) s.queueHeld = true
 }
 
-export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; startHand: StartHand; changed: (slug: string) => void; log: (s: string) => void }) {
+export function createNoteQueue(deps: {
+  jobs: JobManager
+  startNote: StartNote
+  startHand: StartHand
+  changed: (slug: string) => void
+  log: (s: string) => void
+  /** what the AI reads for an added note: its words, with its moment (index.ts aiNoteText) */
+  words?: (q: Pick<QueuedNote, 'text' | 'moment'>) => string
+}) {
   const { jobs, startNote, startHand } = deps
+  const words = deps.words ?? ((q) => q.text)
+  /** The words box of each note running now, by its entry's id. */
+  const boxes = new Map<string, SteerBox>()
   const lane = <T>(slug: string, fn: () => Promise<T>): Promise<T> => serialized(`queue:${slug}`, fn)
   /** Jobs the creator pressed Stop on. A quit cancels jobs too, but its note must come back. */
   const stopped = new Set<string>()
@@ -103,13 +130,15 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
       }
       // an entry project.json already has is done: its job's end found project.json unreadable
       const next = (await change(slug, (s) => {
-        s.queue = (s.queue ?? []).filter((q) => !head.ids.has(q.id))
-        if (s.queue[0]) s.queue[0].attempt = { base: head.version }
+        dropSaved(s, head)
+        if (s.queue?.[0]) s.queue[0].attempt = { base: head.version }
       })).queue?.[0]
       if (!next) return null
+      const box = new SteerBox()
+      if (!next.hand) boxes.set(next.id, box)
       const started = next.hand
         ? startHand(slug, { ...next, hand: next.hand }, (s) => void (s.job!.noteId = next.id))
-        : startNote(slug, next, (s) => {
+        : startNote(slug, { ...next, steer: box }, (s) => {
             s.job!.noteId = next.id
             // its chat line carries the job id, which marks how the note ended (store.ts settleNote)
             const line = s.chat.find((m) => m.id === next.id)
@@ -120,6 +149,8 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
             }
           })
       return started.catch(async (e) => {
+        if (boxes.get(next.id) === box) boxes.delete(next.id)
+        box.close()
         const err = toUserError(e)
         if (err.code === 'BUSY') {
           // a manual edit or another job took the video first: this note never started, and goes first
@@ -137,6 +168,46 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
         })
         return null
       })
+    })
+  }
+
+  /** Saved entries leave the queue. Words added to one that its saved note does not hold (an editor that never read
+   * them) wait first in line again as notes of their own, the same at a run's end, at the next start and after a
+   * crash, since the saved note is the proof of what was read. */
+  function dropSaved(s: AppState, head: Committed): void {
+    const back: QueuedNote[] = []
+    for (const q of s.queue ?? []) {
+      if (!head.ids.has(q.id) || !q.steers?.length) continue
+      const read = new Set((head.texts.get(q.id) ?? '').split('\n'))
+      for (const x of q.steers) if (!words(x).split('\n').every((line) => read.has(line))) back.push({ ...x, attachments: [], seenVersion: head.version })
+    }
+    const again = new Set(back.map((x) => x.id))
+    if (again.size) s.chat = s.chat.filter((m) => !(m.steerOf && again.has(m.id)))
+    s.queue = [...back, ...(s.queue ?? []).filter((q) => !head.ids.has(q.id))]
+  }
+
+  /** Add now: a waiting note goes into the note running on the reel, when that one can still read it. */
+  function steer(slug: string, id: string): Promise<{ added: boolean }> {
+    return lane(slug, async () => {
+      const st = await readAppState(slug)
+      const q = stillWaiting(st, id)
+      if (q.hand) throw { code: 'NOT_A_NOTE', userMessage: 'A change you made yourself runs on its own, so it stays in line.' }
+      if (q.attachments.length) throw { code: 'HAS_FILES', userMessage: 'A note with files runs on its own, so it stays in line.' }
+      const ran = st.queue?.find((x) => x.attempt)
+      const box = ran ? boxes.get(ran.id) : undefined
+      // a note moved below another after a Stop brings what was added to it
+      const text = [q.text, ...(q.steers ?? []).map((x) => x.text)].join('\n')
+      const said = [words(q), ...(q.steers ?? []).map(words)].join('\n')
+      // a note for another version than the one being made is a branch of its own, never part of this one
+      if (!ran || !box || q.branch !== ran.branch || !box.add(said)) return { added: false }
+      const added = { id: q.id, text, ...(q.moment ? { moment: q.moment } : {}) }
+      await change(slug, (s) => {
+        s.queue = (s.queue ?? []).filter((x) => x.id !== q.id)
+        const r = s.queue.find((x) => x.id === ran.id)
+        if (r) r.steers = [...(r.steers ?? []), added]
+        s.chat.push({ ...stamp({ from: 'you', text, ...(q.moment ? { moment: q.moment } : {}) }), id: q.id, steerOf: ran.id })
+      })
+      return { added: true }
     })
   }
 
@@ -158,11 +229,14 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
       })
     },
     /** A note from the Reel screen. `seenVersion`: the version on screen when it was written. */
-    /** `note` may be a function, which runs in the lane (admission); what it returns may name the seen version. */
-    async send(slug: string, note: Omit<NoteToRun, 'id'> | (() => Promise<Omit<NoteToRun, 'id'> & { seenVersion?: number }>), seenVersion: number): Promise<{ jobId: string | null; queued?: boolean }> {
+    /** `note` may be a function, which runs in the lane (admission); what it returns may name the seen version.
+     * `steer`: goes into the note running now when it can (Add now); otherwise it waits like any note. */
+    async send(slug: string, note: Omit<NoteToRun, 'id'> | (() => Promise<Omit<NoteToRun, 'id'> & { seenVersion?: number }>), seenVersion: number, opts: { steer?: boolean } = {}): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }> {
       let first = false
+      let id = ''
       await lane(slug, async () => {
         const entry: QueuedNote = { id: randomUUID(), seenVersion, ...(typeof note === 'function' ? await note() : note) }
+        id = entry.id
         return change(slug, (s) => {
           // a send to an empty queue starts it again: the hold is about notes that were already waiting
           first = !s.queue?.length
@@ -170,9 +244,16 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           s.queue = [...(s.queue ?? []), entry]
         })
       })
+      if (opts.steer && !first) {
+        // one it can't add (it has files) just waits its turn
+        const { added } = await steer(slug, id).catch(() => ({ added: false }))
+        if (added) return { jobId: null, added }
+      }
       const started = await pump(slug)
-      return started && first ? { jobId: started } : { jobId: null, queued: true }
+      return started && first ? { jobId: started } : { jobId: null, queued: true, ...(opts.steer ? { added: false } : {}) }
     },
+
+    steer,
 
     /** A change from "Edit it myself"; `replace` changes a waiting one in place instead. */
     async sendHand(slug: string, hand: HandEntry['hand'], text: string, seenVersion: number, replace?: string): Promise<{ jobId: string | null; queued?: boolean }> {
@@ -303,10 +384,13 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
         const head = ran ? await committed(slug) : null
         const savedAs = ran && head?.ids.has(ran.id) ? head.version : null
         const runOn = e.type === 'done' && !byStop && (savedAs !== null || !ran)
+        // the run is over: words added from now on run as the next note
+        if (ran) boxes.get(ran.id)?.close()
+        if (ran) boxes.delete(ran.id)
         if (!ran && runOn) return true
         await change(slug, (s) => {
           if (ran) {
-            if (savedAs !== null) s.queue = (s.queue ?? []).filter((q) => q.id !== ran.id)
+            if (savedAs !== null) dropSaved(s, head!)
             const line = endLine(byStop, savedAs, e.type)
             if (line) s.chat.push(stamp(line))
           }
@@ -342,7 +426,7 @@ export function createNoteQueue(deps: { jobs: JobManager; startNote: StartNote; 
           if (st.queue?.length) {
             const head = await committed(p.slug)
             await updateAppState(p.slug, (s) => {
-              s.queue = (s.queue ?? []).filter((q) => !head?.ids.has(q.id))
+              if (head) dropSaved(s, head)
               backToWaiting(s)
             }, { durable: true })
           }
