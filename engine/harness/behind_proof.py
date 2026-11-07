@@ -5,8 +5,10 @@
 Puts one text-behind item (and, unless --zoom 0, a zoom over the same words) on the kept words from
 --at (output seconds; default a third of the way in), renders that window as a final, and writes:
 
-  out/zoom-T.png, out/flat-T.png   the rendered frame at T s into the window, beside the matte that
-                                   cut the speaker out (white = in front of the words)
+  out/zoom-T.png, out/flat-T.png   the rendered frame at T s into the window (words in --color, red by
+                                   default, so where the speaker covers them reads against any hair or
+                                   skin), beside the matte clip as made, BEFORE the zoom moves it
+                                   (white = in front of the words)
   out/report.json                  the window, the words, how b-roll was shown (fallbacks), and per
                                    frame the share of the frame the matte calls the speaker
 
@@ -43,6 +45,7 @@ def main(argv=None) -> None:
     ap.add_argument("--dur", type=float, default=2.4)
     ap.add_argument("--text", default="WAIT")
     ap.add_argument("--zoom", type=float, default=1.2)
+    ap.add_argument("--color", default="#FF3B30")
     a = ap.parse_args(argv)
     pdir, out = Path(a.project), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -65,7 +68,7 @@ def main(argv=None) -> None:
                 continue
             p = projmod.load(pdir)
             p["broll"] = [{"id": "behind1", "anchor": anchor, "leadIn": 0.0, "treatment": "text-behind", "asset": None,
-                           "params": {"text": a.text}}]
+                           "params": {"text": a.text, "color": a.color}}]
             p["zooms"] = [{"anchor": anchor, "scale": zoom, "focus": [0.5, 0.42]}] if zoom > 1.0 else []
             projmod.save(pdir, p)
             res = render.run(pdir, draft=False, window=f"{max(0.0, start - 0.3):.3f}:{start + a.dur:.3f}",
@@ -81,6 +84,7 @@ def main(argv=None) -> None:
                     m = _frame(matte, max(0.0, t - 0.3))
                     side = cv2.resize(m, (img.shape[1], img.shape[0]))
                     share = round(float((side[..., 0] > 128).mean()), 3)
+                cv2.putText(side, "matte before zoom", (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
                 cv2.imwrite(str(out / f"{name}-{t:.2f}.png"), np.hstack([img, side]))
                 rows.append({"t": t, "speakerShare": share})
             report["runs"][name] = {"file": res["file"], "broll": render.read_broll_report(items), "frames": rows,

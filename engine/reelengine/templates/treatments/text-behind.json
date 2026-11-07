@@ -1,0 +1,25 @@
+{
+  "id": "text-behind",
+  "label": "Big words behind you",
+  "description": "One or two big words drawn behind the speaker: the speaker is cut out of the footage and stays in front of them, through zooms too. Uses params.text, or the spoken words of the anchor. Without the cut-out (the model can't be downloaded), the words go above the head as text-pop and the render says so.",
+  "hidesFace": false,
+  "assetKinds": [],
+  "params": {
+    "text": {
+      "default": null,
+      "help": "the words to show; default = the anchor's spoken words"
+    },
+    "size": {
+      "default": 0.22,
+      "help": "font size as a fraction of frame width (shrinks to fit)"
+    },
+    "color": {
+      "default": "#FFFFFF",
+      "help": "fill"
+    },
+    "case": {
+      "default": "upper",
+      "help": "upper | asis"
+    }
+  }
+}

@@ -1252,9 +1252,10 @@ def _t_behind(ctx, plan, params, kind, src, zones, face, frame):
         size = int(size * 0.9)
     x = int(round((W - img.width) / 2))
     y = int(round(min(max(0.04 * H, face[1] + BEHIND_DEPTH * face[3] - img.height), H * 0.5 - img.height)))
+    from .proto import EngineError as AnyEngineError    # compose_util's EngineError is a subclass of it
     try:
         matte = segment.matte_clip(ctx, plan["t0"], plan["t1"], layers_dir(ctx), plan["id"])
-    except EngineError as e:
+    except AnyEngineError as e:                          # segment.py and the model download raise the base
         log(f"broll {plan['id']}: no matte ({e.message}); words above the face instead")
         pop = {**treatment_defaults("text-pop"), "text": text, "case": "as-is"}
         layers, rec = _t_text(ctx, plan, pop, kind, src, zones, face, frame)
