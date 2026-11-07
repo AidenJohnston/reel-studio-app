@@ -244,7 +244,7 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
 
 describe('Windows installer check', () => {
   const signed = { status: 'Valid', subject: 'CN=Reel Studio, O=Reel Studio' }
-  const facts = (installer: Partial<WindowsInstallerFacts['installer']>, running = signed): WindowsInstallerFacts => ({
+  const facts = (installer: Partial<WindowsInstallerFacts['installer']>, running: WindowsInstallerFacts['running'] = signed): WindowsInstallerFacts => ({
     running,
     installer: { ...signed, productVersion: '0.1.3', ...installer }
   })

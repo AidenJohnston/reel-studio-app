@@ -332,6 +332,12 @@ let rootMoving = false
 const refuseWhileRootMoves = (): void => {
   if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
 }
+/** Counts finished library moves. Work that reads paths, awaits, then starts a job takes this first and checks it
+ * just before jobs.start: a move that finished in between means its paths point at the old place. */
+let rootGeneration = 0
+const sameRootSince = (generation: number): void => {
+  if (generation !== rootGeneration) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try again.' }
+}
 const footageSources = createFootageSources({
   load: async () => (await loadSettings()).footageSources,
   save: async (footageSources) => void (await saveSettings({ footageSources })),
@@ -826,12 +832,13 @@ function safeFileName(s: string): string {
 }
 
 async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
+  const generation = rootGeneration
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
   // the library moved while the versions were read: `dir` is the old place
-  if (dir !== projectDir(slug)) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try sharing again.' }
+  sameRootSince(generation)
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -1187,6 +1194,7 @@ function registerIpc(): void {
       try {
         await saveSettings({ root })
         setRootOverride(root)
+        rootGeneration++
         await ensureRoot()
         perms.markTouched()
         indexLibrary()
@@ -1687,6 +1695,7 @@ function registerIpc(): void {
   // a job like any other, so the updater waits for it (main/updater.ts counts running jobs)
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
+    const generation = rootGeneration
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before sharing.' }
     const version = await finishedExportVersion(slug, n)
@@ -1704,6 +1713,8 @@ function registerIpc(): void {
       : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
+    // the versions and project above were read before several awaits: a library move since then makes them stale
+    sameRootSince(generation)
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
