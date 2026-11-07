@@ -35,6 +35,15 @@ def _signature(path: Path) -> tuple:
     return st.st_size, st.st_mtime_ns
 
 
+def _change(path: Path) -> int:
+    """What a copy tool that keeps a file's size and modified time can't keep: the change time on macOS and Linux
+    (a write or a replacement always sets it), the file id on Windows (a replacement is a new file; there the
+    stat ctime is creation time, which copy tools set back). Like git's index, it decides when bytes are read
+    again; it isn't proof, and an in-place rewrite on Windows that keeps the time still passes."""
+    st = path.stat()
+    return st.st_ino if os.name == "nt" else st.st_ctime_ns
+
+
 def _unchanged(path: Path, signature: tuple, digest: str | None = None) -> None:
     if _signature(path) != signature or (digest is not None and file_hash(path) != digest):
         raise EngineError("FOOTAGE_CHANGED", f"{path.name} changed during indexing",
@@ -72,6 +81,10 @@ def _open(root: Path) -> sqlite3.Connection:
                 raise
             db.execute("CREATE TABLE IF NOT EXISTS text_fts("
                        "text TEXT, hash TEXT, s REAL, e REAL, kind TEXT, model TEXT)")
+        # an index from before `change` existed: its rows are trusted as they are, and take the value they have now
+        # on the next run, so an upgrade never re-reads a whole archive
+        if "change" not in {row[1] for row in db.execute("PRAGMA table_info(paths)")}:
+            db.execute("ALTER TABLE paths ADD COLUMN change INT")
         db.commit()
         if not _has_fts(db):
             log("Footage search: SQLite FTS5 is unavailable; using literal text search.")
@@ -275,19 +288,22 @@ def _scan(db, place: str, folder: Path, kinds: set, stages) -> list[tuple]:
             continue
         rel = path.relative_to(folder).as_posix()
         try:
-            signature = _signature(path)
-            old = db.execute("SELECT size, mtime_ns, hash FROM paths WHERE place=? AND rel=?", (place, rel)).fetchone()
+            signature, change = _signature(path), _change(path)
+            old = db.execute("SELECT size, mtime_ns, hash, change FROM paths WHERE place=? AND rel=?",
+                             (place, rel)).fetchone()
             # Metadata only skips completed files. Pending analysis must establish identity
             # from bytes again, including after a replacement that kept size and mtime.
             complete = old and all(_done(db, old[2], stage, version) for stage, version in stages)
-            digest = old[2] if complete and tuple(old[:2]) == signature else file_hash(path)
+            same = complete and tuple(old[:2]) == signature and old[3] in (None, change)
+            digest = old[2] if same else file_hash(path)
             _unchanged(path, signature)
         except (OSError, EngineError):
             if place == "Library" or folder.is_dir():
                 raise
             raise _Gone(place)
         rels.add(rel)
-        db.execute("INSERT OR REPLACE INTO paths VALUES (?, ?, ?, ?, ?)", (place, rel, *signature, digest))
+        db.execute("INSERT OR REPLACE INTO paths(place, rel, size, mtime_ns, hash, change) VALUES (?, ?, ?, ?, ?, ?)",
+                   (place, rel, *signature, digest, change))
         found.append((place, path, digest, signature))
     if place != "Library" and not folder.is_dir():
         raise _Gone(place)
@@ -536,7 +552,8 @@ def _current(folder: Path | None, row) -> bool:
     path = folder / row["rel"]
     try:
         return (path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(folder.resolve())
-                and _signature(path) == (row["size"], row["mtime_ns"]))
+                and _signature(path) == (row["size"], row["mtime_ns"])
+                and row["change"] in (None, _change(path)))
     except OSError:
         return False
 
