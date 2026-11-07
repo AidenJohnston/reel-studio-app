@@ -7,7 +7,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FakeHub } from '../../ai/test/fakeHub'
-import { BASE, expectViewport, launch, modelReady, toEditorStep } from './helpers'
+import { BASE, THIS_COMPUTER, expectViewport, launch, modelReady, toEditorStep } from './helpers'
 
 const SIZES: [number, number][] = [[1100, 720], [1280, 820], [1512, 982], [1920, 1080]]
 const SHOTS = process.env.REELSTUDIO_EDITOR_SHOTS
@@ -67,7 +67,7 @@ test('CLIProxyAPI is found from its config and is the recommended first row', as
   await expect(row).toHaveAttribute('data-state', 'ready')
   await expect(row).toContainText('CLIProxyAPI')
   await expect(row).toContainText('Recommended')
-  await expect(row).toContainText('5 models on this Mac')
+  await expect(row).toContainText(`5 models on ${THIS_COMPUTER}`)
   // where the key came from, in words; the path in its tooltip
   await expect(row).toContainText('Key read from its config')
   await expect(row.locator('.pv-src')).toHaveAttribute('title', `Key read from ${join(configDir, 'config.yaml')}`)

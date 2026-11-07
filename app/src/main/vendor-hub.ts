@@ -106,9 +106,15 @@ export function parseHubConfig(text: string, file: string): HubConfig | null {
   return { file, host, port, tls, keys }
 }
 
-/** How a path is said in the row: the home folder as ~. */
-export function shownPath(file: string, home = homedir()): string {
-  return home && file.startsWith(home) ? `~${file.slice(home.length)}` : file
+/**
+ * How a path is said in the row: on a Mac or Linux the home folder as ~, as their own tools write it. Windows has no
+ * such shorthand, so its paths stay whole. Only the folder itself counts, not one whose name merely begins the same
+ * (/Users/sam is not the home of /Users/samuel).
+ */
+export function shownPath(file: string, home = homedir(), platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32' || !home) return file
+  const base = home.endsWith('/') ? home.slice(0, -1) : home
+  return file === base || file.startsWith(`${base}/`) ? `~${file.slice(base.length)}` : file
 }
 
 export type Lookup = (host: string) => Promise<{ address: string; family: number }[]>
@@ -199,17 +205,17 @@ export async function detectHub(d: DetectDeps): Promise<HubDetection> {
     }
     for (const key of cfg.keys) {
       const n = await probe(d.fetch, where.origin, key)
-      if (typeof n === 'number') return { state: 'ready', origin: where.origin, models: n, keySource: shownPath(file, d.home), key, file }
+      if (typeof n === 'number') return { state: 'ready', origin: where.origin, models: n, keySource: shownPath(file, d.home, d.platform), key, file }
       if (n === 'refused') answered ??= { origin: where.origin, file, refused: true }
     }
     if (!answered && (await probe(d.fetch, where.origin, null)) !== null) answered = { origin: where.origin, file, refused: cfg.keys.length > 0 }
   }
-  if (answered) return { state: 'needs-key', origin: answered.origin, keySource: shownPath(answered.file, d.home), file: answered.file, ...(answered.refused ? { keyRefused: true } : {}) }
+  if (answered) return { state: 'needs-key', origin: answered.origin, keySource: shownPath(answered.file, d.home, d.platform), file: answered.file, ...(answered.refused ? { keyRefused: true } : {}) }
   if (!test) {
     const origin = `http://127.0.0.1:${DEFAULT_HUB_PORT}`
     if ((await probe(d.fetch, origin, null)) !== null) return { state: 'needs-key', origin }
   }
-  if (elsewhere) return { state: 'elsewhere', host: elsewhere.host, keySource: shownPath(elsewhere.file, d.home) }
+  if (elsewhere) return { state: 'elsewhere', host: elsewhere.host, keySource: shownPath(elsewhere.file, d.home, d.platform) }
   return { state: 'none', ...(test ? {} : { looked: `127.0.0.1:${DEFAULT_HUB_PORT}` }) }
 }
 

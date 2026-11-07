@@ -60,7 +60,7 @@ export function NoteRunnerRow({ onError }: { onError: (m: string) => void }) {
           value={info.runner}
           options={[
             { key: 'reelstudio', label: 'Reel Studio' },
-            { key: 'app', label: name }
+            { key: 'app', label: `${name} app` }
           ]}
           onPick={(k) => void pick(k)}
           testid="note-runner"
@@ -72,12 +72,12 @@ export function NoteRunnerRow({ onError }: { onError: (m: string) => void }) {
           <p className="mnote warn" role="status">
             <Icon name="alert" size={14} />
             <span>
-              {name} couldn’t use Reel Studio’s tools, so your last note ran on Reel Studio’s editor instead. Notes keep running there until you try again or
+              Your {name} app couldn’t use Reel Studio’s tools, so your last note ran on Reel Studio’s editor instead. Notes keep running there until you try again or
               restart Reel Studio.
             </span>
           </p>
           <Button size="small" onClick={() => void pick('app')} data-testid="note-runner-retry">
-            Try {name} again
+            Try your {name} app again
           </Button>
         </div>
       )}
