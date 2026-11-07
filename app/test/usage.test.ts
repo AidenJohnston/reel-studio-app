@@ -164,12 +164,21 @@ describe('usage data', () => {
     expect((await usage.read()).map((l) => l.install)).not.toContain(oldId)
   })
   // fails if two quick changes each act on the choice saved before either (review of the audit fix)
-  it('fails if an opt-out and a quick opt-in in a row leave the old queue behind', async () => {
-    const { dir, state, usage } = setup(ON)
+  it('fails if an opt-out whose delete failed, then a quick opt-in, leave the old queue behind', async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'usage-')), 'usage')
+    const state = { sharing: ON }
+    let locked = false // the opt-out's delete hits a locked folder once
+    const usage = createUsage({ dir: () => { if (locked) { locked = false; throw new Error('EBUSY') } return dir },
+      sharing: async () => state.sharing, version: '1.2.3', platform: 'win32', log: () => {}, endpoint: null })
     await usage.record(JOB)
     const oldId = readFileSync(join(dir, 'install-id'), 'utf8')
     const off = { ...ON, on: false }
-    await Promise.all([usage.changeSharing(off, async () => { state.sharing = off }), usage.changeSharing(ON, async () => { state.sharing = ON })])
+    const [out, back] = await Promise.allSettled([
+      usage.changeSharing(off, async () => { state.sharing = off; locked = true }),
+      usage.changeSharing(ON, async () => { state.sharing = ON })
+    ])
+    expect(out.status).toBe('rejected')
+    expect(back.status).toBe('fulfilled')
     expect(await usage.read()).toEqual([])
     await usage.record(JOB)
     expect((await usage.read()).map((l) => l.install)).not.toContain(oldId)

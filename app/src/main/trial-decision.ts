@@ -108,7 +108,8 @@ export function decideTrial(one: InsightPost, two: InsightPost): TrialVerdict {
   if (p >= MAX_P)
     return { kind: 'too-close', reason: `${views} Try ${winner} is ahead${fair}, but with ${count(a + b)} views between them a gap that size could be luck, so neither one wins.` }
   if (lift < MIN_LIFT_PERCENT)
-    return { kind: 'too-close', reason: `${views} Try ${winner} got ${Math.round(lift)}% more${fair}, short of the ${MIN_LIFT_PERCENT}% lead a winner needs.` }
+    // rounded down, so a lead just under the floor never reads as the floor itself
+    return { kind: 'too-close', reason: `${views} Try ${winner} got ${Math.floor(lift)}% more${fair}, short of the ${MIN_LIFT_PERCENT}% lead a winner needs.` }
   const liftText = Number.isFinite(lift) ? `${Math.round(lift)}% more` : 'all of them'
   return {
     kind: 'winner', winner, liftPercent: Number.isFinite(lift) ? lift : null, pValue: p,

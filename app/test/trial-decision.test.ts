@@ -78,6 +78,8 @@ describe('decideTrial', () => {
   it('calls a small or chance gap too close', () => {
     expect(decideTrial(post(55), post(45, SETTLED, 2)).kind).toBe('too-close')
     expect(decideTrial(post(500), post(500, SETTLED, 2)).kind).toBe('too-close')
+    // significant but 19.9% ahead: the reason must not round the lead up to the 20% it falls short of
+    expect(decideTrial(post(5_995), post(5_000, SETTLED, 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('19% more, short of the 20% lead') })
     // significant (p far below 0.05) but under the 20% lift floor
     expect(decideTrial(post(10_500), post(9_500, SETTLED, 2)).kind).toBe('too-close')
   })
