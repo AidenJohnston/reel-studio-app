@@ -241,16 +241,23 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
     out = []
     rate = fps or 30.0
     for s, e in pieces:
-        # Onto the frame grid OUTWARD: a piece's start to the frame at or before it, its end to the frame at
-        # or after it, so rounding keeps a little more air and never cuts into a kept word (to the nearest
-        # frame, a word shorter than half a frame right after a cut was lost whole: audit 11 P1). Never past
-        # the run's bounds, though: outside them is a word the cut removed, which must not come back. Where
-        # a removed word ends less than a frame before a kept one starts there is no clean frame between
-        # them, and the removed word stays out; the kept word then loses under a frame at that edge.
-        s2 = math.floor(s * rate + EPS) / rate
+        # Onto the frame grid: the nearest frame, unless that frame is inside the piece's kept speech; then
+        # outward (start down, end up). To the nearest frame alone, a word shorter than half a frame right
+        # after a cut was lost whole (audit 11 P1); always outward added up to two frames of air per cut.
+        # Never past a removed neighbouring word, which must not come back: where one ends less than a frame
+        # before a kept word starts there is no clean frame between them, the removed word stays out, and
+        # the kept word loses under a frame at that edge.
+        held = [w for w in ws if w["e"] > s + EPS and w["s"] < e - EPS]
+        speech_s = min((max(w["s"], s) for w in held), default=e)
+        speech_e = max((min(w["e"], e) for w in held), default=s)
+        s2 = round(s * rate) / rate
+        if s2 > speech_s + EPS:
+            s2 = math.floor(s * rate + EPS) / rate
         if s2 < word_lo - EPS:
             s2 = math.ceil(word_lo * rate - EPS) / rate
-        e2 = math.ceil(e * rate - EPS) / rate
+        e2 = round(e * rate) / rate
+        if e2 < speech_e - EPS:
+            e2 = math.ceil(e * rate - EPS) / rate
         if e2 > word_hi + EPS:
             e2 = math.floor(word_hi * rate + EPS) / rate
         s2, e2 = round(s2, 6), round(e2, 6)
@@ -367,11 +374,14 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         # Split a merged contiguous range only at a declared join. The two pieces
         # still show exactly the same source frames and have the same total length.
         for wi, previous_end, join, kk in markers:
-            # the frame at or before the word: plan_run snaps a piece's start down, so the piece that
-            # holds the word starts there or earlier (to the nearest frame, a one-frame piece was skipped)
-            t = round(math.floor(words[wi]["s"] * (fps or 30.0) + EPS) / (fps or 30.0), 6)
+            # the piece that holds the word takes the join; its nearest frame may lie past that piece's end
+            # (a one-frame piece), and then the join is at the piece's start
+            ws_ = words[wi]["s"]
+            t = snap(ws_, fps)
             for si, seg in enumerate(run_segs):
-                if seg.src_start <= t < seg.src_end:
+                if seg.src_start - EPS <= ws_ < seg.src_end:
+                    if not seg.src_start <= t < seg.src_end:
+                        t = seg.src_start
                     prior_word_in_piece = any(w["e"] > seg.src_start + EPS and w["s"] < t
                                               for w in words[i0:wi])
                     if seg.src_start + EPS < t and prior_word_in_piece:
@@ -392,7 +402,7 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
                     right.first_word = words[wi]["id"]
                     joins.append((right, wi, previous_end, join, kk))
                     break
-                if t < seg.src_start:
+                if ws_ < seg.src_start:
                     seg.first_word = words[wi]["id"]
                     joins.append((seg, wi, previous_end, join, kk))
                     break
