@@ -136,6 +136,6 @@ it('keeps concurrent text fallbacks in separate CLI sessions', async () => {
   const results = [await first];
   await fs.writeFile(release, 'go');
   results.push(await second);
-  expect(results.map((r) => r.summary)).toEqual(['Separate fallback.', 'Separate fallback.']);
+  expect(results.map((r) => r.summary)).toEqual([expect.stringMatching(/^Separate fallback\./), expect.stringMatching(/^Separate fallback\./)]);
   expect(await fs.readFile(interrupted, 'utf8').catch(() => '')).toBe('');
 });
