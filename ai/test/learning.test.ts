@@ -124,6 +124,30 @@ it('a complete secondary-metric loss vetoes otherwise agreeing wins', async () =
   expect(await learn(projects)).toEqual([]);
 });
 
+// fails if a suggestion keeps waiting after its trials stop agreeing, so an opposite one could wait beside it
+// (audit 05-results), or if a damaged trial file empties the list instead of stopping
+it('takes back a waiting results suggestion the results no longer support, and nothing else', async () => {
+  const { root, projects, style } = await fixture();
+  const [brighter] = await learn(projects, style);
+  await style.propose(brighter);
+  await style.propose({ kind: 'captions', line: 'Use bigger subtitles', text: 'Use bigger subtitles.', from: { kind: 'edits', reels: ['a', 'b'], n: 2, evidence: 'by hand' } });
+  // the brighter version is read again and did worse in one reel: no longer a habit worth suggesting
+  const file = path.join(projects, 'reel-0', 'outcomes.json');
+  const good = await fs.readFile(file, 'utf8');
+  const data = JSON.parse(good);
+  data.versions.v2['02'].metrics.averageWatchTimeMs = 8000;
+  await fs.writeFile(file, '{ damaged');
+  await expect(learn(projects, style)).rejects.toThrow();
+  expect((await style.proposals()).map((p) => p.from.kind)).toEqual(['results', 'edits']);
+  await fs.writeFile(file, JSON.stringify(data));
+  expect(await learn(projects, style)).toEqual([]);
+  expect((await style.proposals()).map((p) => p.text)).toEqual(['Use bigger subtitles.']);
+  // its evidence back, it may be suggested again: withdrawing is not turning down
+  await fs.writeFile(file, good);
+  expect(await learn(projects, style)).toHaveLength(1);
+  expect(JSON.parse(await fs.readFile(path.join(root, 'My style.json'), 'utf8')).forgotten ?? []).toEqual([]);
+});
+
 it('the CLI queues suggestions without a provider and repeats without rewriting memories', async () => {
   const { projects, root, style } = await fixture();
   const cli = path.resolve(__dirname, '../dist/cli.js');

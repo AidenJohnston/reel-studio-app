@@ -1160,7 +1160,8 @@ export function createAI(opts: CreateAIOptions) {
     async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
     /** The user said No to AgentResult.styleProposal. */
     async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
-    /** Memories drafted from post results (learning.ts learn(), read-only); the app passes each to proposeMemory. */
+    /** Memories drafted from post results (learning.ts learn(), which also takes back waiting ones the results no
+     * longer support); the app passes each to proposeMemory. */
     async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },
     /** Keeps a drafted memory waiting for the person (at most three). Never a rule until they keep it. */
     async proposeMemory(d: ProposalDraft) { return style.propose(d); },
