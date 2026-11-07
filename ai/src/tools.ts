@@ -20,6 +20,8 @@ import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
+import { NoteSteer, finishRefused, withAdded } from './steer';
+import { Helper, MAX_LOOKUPS, lookUp } from './helpers';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { CHECK_PARAM, CheckChoice, CheckedRule, RuleFailure, RuleReport, failureText, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
@@ -60,6 +62,12 @@ export interface ToolState {
   /** project saves so far in this task, and the number of the last one that changed what the video shows */
   edits: number;
   pictureEdit: number;
+  /** words the person added while the note ran, as the model got them (steer.ts); saved with the note's words */
+  added?: string[];
+  /** words handed over in results the model has not answered yet: finish waits for its next turn (steer.ts) */
+  unread?: string[];
+  /** our own loop's model turns so far (agent.ts); unset in Claude Code and Codex over MCP */
+  turn?: number;
   /** The newest render's checked-rule results, including a final render stopped before its encode. Cleared by a
    * render that did not check them (a preview moments drew), so a stale result never refuses finish. */
   ruleChecks?: RuleReport;
@@ -100,6 +108,10 @@ export interface ToolContext {
   rules?: NoteRules;
   /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
   moments?: Moments;
+  /** words the person adds while this note runs, from the app's queue (steer.ts) */
+  steer?: NoteSteer;
+  /** a second AI that looks things up in parallel (helpers.ts); look_up is offered only with one */
+  helper?: Helper;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -2343,6 +2355,16 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'look_up',
+    description: `Hand up to ${MAX_LOOKUPS} searches to helpers that run at the same time (and alongside any other searches in the same reply): each finds pictures or footage for ONE thing (a named place, product, person, number or example) and fetches the best candidates. Returns what each found and the candidate ids, which you place with add_broll like your own. Use it when several different things need pictures; search_images yourself for one.`,
+    parameters: S.obj({ things: S.arr(S.str('one thing to find pictures or footage for, in a few words'), undefined, { minItems: 1, maxItems: MAX_LOOKUPS }) }),
+    async run(ctx, args) {
+      if (!ctx.helper) throw new ToolInputError('No helpers in this task: use search_images yourself.');
+      const r = await lookUp(ctx, ctx.helper, args.things, ctx.emit);
+      return { content: r, summary: `Looked up ${r.found.map((f) => f.thing).join(', ')}` };
+    },
+  },
+  {
     name: 'finish',
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
@@ -2429,14 +2451,15 @@ function stripNulls<T extends Record<string, any>>(o: T): T {
 }
 
 export const TOOLS: ToolDef[] = tools;
-export const TOOL_NAMES = tools.map((t) => t.name);
+/** Every tool a task offers by default. look_up only comes with a helper (editor.ts applyNote). */
+export const TOOL_NAMES = tools.map((t) => t.name).filter((n) => n !== 'look_up');
 export function toolByName(name: string): ToolDef | undefined {
   // Some providers prefix namespaced tools ("reel_editor.set_cut").
   const bare = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
   return tools.find((t) => t.name === bare);
 }
 export function toolSchemas(names?: string[]): ToolSchema[] {
-  return tools.filter((t) => !names || names.includes(t.name)).map(({ name, description, parameters }) => ({ name, description, parameters }));
+  return tools.filter((t) => (names ? names.includes(t.name) : TOOL_NAMES.includes(t.name))).map(({ name, description, parameters }) => ({ name, description, parameters }));
 }
 
 /** Validates + runs one tool call. Never throws for model mistakes: returns an error result the model can read. */
@@ -2446,20 +2469,47 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
   const args = fillNulls(tool.parameters, rawArgs ?? {});
   const problems = validate(tool.parameters, args);
-  if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
+  if (problems.length) return delivered(ctx, { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true });
+  const finishing = tool.name === 'finish' && !!ctx.steer;
+  // words that came with a result of this same reply were never read: finish waits, and names them again
+  if (finishing && (ctx.state.unread?.length || !ctx.steer!.seal())) {
+    const unread = ctx.state.unread ?? [];
+    const refused = finishRefused([...unread, ...took(ctx)]);
+    // over MCP there are no turns to count: the refusal itself is what the model reads before it finishes again
+    if (ctx.state.turn === undefined) ctx.state.unread = [];
+    return { content: refused, isError: true };
+  }
   try {
     const out = await tool.run(ctx, args);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
     const content = typeof out.content === 'string' ? out.content : JSON.stringify(out.content);
-    return { content, images: out.images, isError: false, summary: out.summary };
+    // finish sealed the box: nothing can be waiting
+    return delivered(ctx, { content, images: out.images, isError: false, summary: out.summary });
   } catch (err: any) {
+    if (finishing) ctx.steer!.unseal();
     if (ctx.signal?.aborted) throw err;
-    if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
+    if (err instanceof ToolInputError) return delivered(ctx, { content: JSON.stringify({ error: err.message }), isError: true });
     if (err instanceof AIError) throw err;
     // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
     if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
-    return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };
+    return delivered(ctx, { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true });
   }
+}
+
+/** The person's added words, recorded as given to the model. */
+function took(ctx: ToolContext): string[] {
+  const added = ctx.steer?.take() ?? [];
+  if (added.length) {
+    ctx.state.added = [...(ctx.state.added ?? []), ...added];
+    ctx.state.unread = [...(ctx.state.unread ?? []), ...added];
+  }
+  return added;
+}
+
+/** A result with any words the person added since the last one after it (steer.ts). */
+function delivered<R extends { content: string }>(ctx: ToolContext, r: R): R {
+  const added = took(ctx);
+  return added.length ? { ...r, content: withAdded(r.content, added) } : r;
 }

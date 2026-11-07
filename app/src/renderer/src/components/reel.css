@@ -97,6 +97,13 @@
   transition: transform 120ms var(--ease-out);
 }
 .cmp-done:active { transform: scale(.97); }
+/* Compare › Side by side: both versions at once (SideBySide.tsx), a quiet pill beside Keep, one height with the switch
+   and Keep (32 px) so the row reads as one control strip */
+.cmp-side {
+  height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(0, 0, 0, .6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: #fff; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 650; cursor: pointer; transition: transform 120ms var(--ease-out);
+}
+.cmp-side:active { transform: scale(.97); }
 /* while comparing, the preview is Clean and the Instagram switch waits for Done */
 .view-held, .view-held > [inert] { display: contents; }
 .view-held .segmented { opacity: .5; }
@@ -321,6 +328,8 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 }
 .bubble > .icon { display: inline-block; vertical-align: -3px; margin-right: 6px; color: var(--ink-3); }
 .bubble.waiting { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink-2); }
+/* words added to a note while it ran (Add now) */
+.bubble .added { color: var(--ink-3); font-weight: 650; margin-right: 6px; }
 .q-att { display: inline-flex; gap: 6px; vertical-align: middle; margin-left: 8px; }
 /* a note about a moment: the time, in marker yellow */
 .tm {
@@ -493,7 +502,7 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .scrub-speed.on { background: #fff; color: var(--ink); }
 
 /* What the keyboard opens or folds just appears. */
-html.kb :is(.acc > div, .stripwrap > div, .steps > div, .tchip, .spot, .draghandle, .tl-mark, .transport .pp, .cmp-done, .send) { transition: none !important; }
+html.kb :is(.acc > div, .stripwrap > div, .steps > div, .tchip, .spot, .draghandle, .tl-mark, .transport .pp, .cmp-done, .cmp-side, .sbs-pp, .send) { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .acc > div, .stripwrap > div, .steps > div { transform: none; transition-property: opacity; }
   .phone.landing .phone-screen > video.layer.loading { filter: none; }
