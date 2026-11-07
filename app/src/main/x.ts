@@ -226,8 +226,15 @@ export class XService {
           token, refresh: text(data.refresh_token), expiresAt: this.now() + (typeof data.expires_in === 'number' ? data.expires_in : invalid()) * 1000,
           userId: id(me.id), username: text(me.username), clientId: cfg.clientId, brokerUrl: cfg.brokerUrl
         }
+        const previous = await this.load().catch(() => null)
         signal.throwIfAborted()
         await this.save(c)
+        // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
+        if (signal.aborted) {
+          if (previous) await this.save(previous)
+          else await fs.rm(this.file(), { force: true })
+          throw new SocialError('X_CANCELLED', 'X connection was cancelled.')
+        }
         return { connected: true, accountId: c.userId, username: c.username }
       } finally {
         listener.close()

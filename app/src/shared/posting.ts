@@ -24,6 +24,7 @@ export type PostingErrorCode =
   | 'SERVER'
   | 'NOT_A_FINISHED_VIDEO'
   | 'FILE_CHANGED'
+  | 'STOP_UNCONFIRMED'
   | 'BUSY'
 
 export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, string> = {
@@ -46,6 +47,8 @@ export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, stri
   SERVER: 'Something went wrong on the posting server. Try again in a few minutes.',
   NOT_A_FINISHED_VIDEO: 'Only a finished video can be posted. Export it first.',
   FILE_CHANGED: 'The video changed since this post started. Click Start over.',
+  STOP_UNCONFIRMED:
+    "The posting server didn't confirm that this post stopped, and YouTube may already have all of it, so it's kept. Click Finish posting to check: it carries on from what YouTube has and never posts it twice.",
   BUSY: 'Another video is being posted. Wait for it to finish.'
 }
 

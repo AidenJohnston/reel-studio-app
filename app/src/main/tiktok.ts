@@ -266,6 +266,15 @@ export class TikTokService {
               state: 'published', postIds: current.postIds, message: 'TikTok confirmed publication.' } }
             await saveReceipt(dir, input.version, saved)
           }
+        } else if (saved.result.state === 'published' && !saved.result.postIds.length && !saved.result.privateOnly) {
+          // TikTok can confirm a public post before its review makes it public, and only then gives its public id
+          // (Get Post Status). Without the id the post's results can't be linked, so asking again looks once more.
+          // A private post never gets one. If TikTok can't answer now, the saved result stands.
+          const current = await this.status(saved.result.publishId, signal).catch(() => { signal.throwIfAborted(); return null })
+          if (current?.status === 'PUBLISH_COMPLETE' && current.postIds.length) {
+            saved = { ...saved, result: { ...saved.result, postIds: current.postIds } }
+            await saveReceipt(dir, input.version, saved)
+          }
         }
         await this.record(dir, input.version, saved)
         return saved.result

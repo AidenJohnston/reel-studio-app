@@ -659,7 +659,6 @@ export function createPostingService(d: PostingDeps) {
           if (r.uploadId) {
             const s = await session()
             const a = s ? await request('DELETE', `/v1/uploads/${encodeURIComponent(r.uploadId)}`, { auth: s.session }) : null
-            await dropPending(r.uploadId)
             // Stop came after YouTube already had the whole video: it is posted, so say so.
             if (a && !a.net && a.status === 200 && a.body?.status === 'done') {
               const result = (() => {
@@ -670,10 +669,21 @@ export function createPostingService(d: PostingDeps) {
                 }
               })()
               if (result) {
+                await dropPending(r.uploadId)
                 d.log(`[posting] ${r.uploadId}: stopped after YouTube had all of it; posted`)
                 return emit(r, 'done', { sent: r.last.total, result })
               }
             }
+            // Forgotten only once the server says it stopped the upload ({ ok: true }) or no longer has it. Without
+            // that answer YouTube may already have the whole video (the answer to the last chunk can be lost too),
+            // so the post is kept: Finish posting asks the server, and a new Post would upload it a second time.
+            const stopped = a !== null && !a.net && ((a.status === 200 && a.body?.status !== 'done' && a.body?.ok === true) || a.status === 404)
+            if (!stopped) {
+              const kept = (await pendingList()).some((x) => x.uploadId === r.uploadId)
+              d.log(`[posting] ${r.uploadId}: the server didn't confirm Stop; kept for Finish posting`)
+              return emit(r, 'failed', { error: asUser(fail(kept ? 'STOP_UNCONFIRMED' : a === null ? 'SIGNED_OUT' : a.net ? 'OFFLINE' : 'SERVER')), canResume: kept })
+            }
+            await dropPending(r.uploadId)
           }
           d.log(`[posting] stopped ${r.uploadId ?? 'before it started'}`)
           return emit(r, 'cancelled')
@@ -849,8 +859,12 @@ export function createPostingService(d: PostingDeps) {
       if (!s) return null // signed out: the post waits for Sign in
       const a = await request('GET', `/v1/uploads/${encodeURIComponent(entry.uploadId)}`, { auth: s.session })
       const shown = (sent: number): PendingPost => ({ uploadId: entry.uploadId, slug: entry.slug, version: entry.version, sent, total: entry.size })
-      if (a.net || a.status === 502) return shown(entry.sent ?? 0) // can't ask now: Finish posting will
+      // can't ask now (offline, or the server busy or failing for a moment): Finish posting will
+      if (a.net || a.status === 429 || a.status >= 500) return shown(entry.sent ?? 0)
       if (a.status === 200 && a.body?.status === 'uploading') return shown(Number(a.body.received) || 0)
+      // YouTube has all of it, but the answer to the last chunk was lost: Finish posting reports the video. Forgetting
+      // it here would offer Post again, which uploads the same video a second time.
+      if (a.status === 200 && a.body?.status === 'done') return shown(entry.size)
       if (a.status === 401) {
         await lostSession()
         return null

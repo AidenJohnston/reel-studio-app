@@ -218,8 +218,15 @@ export class LinkedInService {
           token, expiresAt: this.now() + (typeof data.expires_in === 'number' ? data.expires_in : invalid()) * 1000,
           memberId, name: text(me.name), clientId: cfg.clientId, brokerUrl: cfg.brokerUrl
         }
+        const previous = await this.load().catch(() => null)
         signal.throwIfAborted()
         await this.save(c)
+        // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
+        if (signal.aborted) {
+          if (previous) await this.save(previous)
+          else await fs.rm(this.file(), { force: true })
+          throw new SocialError('LI_CANCELLED', 'LinkedIn connection was cancelled.')
+        }
         return { connected: true, accountId: c.memberId, name: c.name, expiresAt: c.expiresAt }
       } finally {
         listener.close()

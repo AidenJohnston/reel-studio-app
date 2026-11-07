@@ -277,6 +277,12 @@ export class FacebookService {
         const c: Credentials = { userToken, userName: text(me.name), expiresAt: this.now() + expiresIn * 1000, pages, pageId: keep, appId: config.appId, brokerUrl: config.brokerUrl }
         signal.throwIfAborted()
         await this.save(c)
+        // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
+        if (signal.aborted) {
+          if (previous) await this.save(previous)
+          else await fs.rm(this.file(), { force: true })
+          throw new SocialError('FB_CANCELLED', 'Facebook connection was cancelled.')
+        }
         return this.toSession(c)
       } finally {
         listener.close()

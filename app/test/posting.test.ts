@@ -484,7 +484,7 @@ describe('posting', () => {
     expect(t.pending).toHaveLength(1)
   })
 
-  it('pending(): a changed file or a finished upload is forgotten', async () => {
+  it('pending(): a changed file is forgotten', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, times: 1 })
     t.fake.state.faults.push({ on: 'status', network: true, times: 100 })
@@ -498,13 +498,38 @@ describe('posting', () => {
     expect(t.pending).toEqual([])
   })
 
-  it('pending(): offline, it still offers Finish posting with what was confirmed', async () => {
+  it('pending(): offline, or the server busy or failing for a moment, it still offers Finish posting', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, keepBytes: UNIT, times: 1 })
     t.fake.state.faults.push({ on: 'status', network: true, times: 1000 })
     await t.svc.post(req())
     expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 0, total: 600_000 })
+    t.fake.state.faults.length = 0
+    for (const status of [429, 503]) {
+      t.fake.state.faults.push({ on: 'status', status, body: { error: 'server_error' } })
+      expect(await t.svc.pending('my-video', 2)).toMatchObject({ total: 600_000 })
+    }
     expect(t.pending).toHaveLength(1)
+  })
+
+  it('pending(): YouTube had the whole video but its answer was lost: offered as Finish posting, never posted twice', async () => {
+    const t = await ready()
+    // the last chunk lands, its answer is lost, and the server can't be asked before the post gives up
+    intercept(t, async (call, real) => {
+      const res = await real()
+      if (call.method === 'PUT' && uploaded(t).status === 'done') throw new TypeError('network')
+      return res
+    })
+    t.fake.state.faults.push({ on: 'status', network: true, times: 1000 })
+    expect((await t.svc.post(req())).step).toBe('failed')
+    t.fake.state.faults.length = 0
+    // the app opens again: the sheet asks what is pending
+    expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 600_000, total: 600_000 })
+    const p = await t.svc.resume(t.pending[0].uploadId)
+    expect(p.step).toBe('done')
+    expect(p.result).toMatchObject({ videoId: 'dQw4w9WgXcQ' })
+    expect(t.fake.state.calls.filter((c) => c.startsWith('POST /v1/uploads'))).toHaveLength(1)
+    expect(t.pending).toEqual([])
   })
 
   it('a stopped post older than 3 days is not offered (the server has given up on it)', async () => {
@@ -556,6 +581,27 @@ describe('posting', () => {
     expect(uploaded(t).status).toBe('done')
     expect(t.pending).toEqual([])
     expect(t.progress.at(-1)?.step).toBe('done')
+  })
+
+  it('Stop when the answers to the last chunk and to Stop are both lost: kept, and Finish posting reports the video', async () => {
+    const t = await ready()
+    intercept(t, async (call, real) => {
+      if (call.method === 'DELETE' && call.path.startsWith('/v1/uploads/')) throw new TypeError('network')
+      const res = await real()
+      if (call.method === 'PUT' && uploaded(t).status === 'done') {
+        void t.svc.cancel()
+        throw new TypeError('network')
+      }
+      return res
+    })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'failed', canResume: true, error: { code: 'STOP_UNCONFIRMED', userMessage: POSTING_ERRORS.STOP_UNCONFIRMED } })
+    expect(t.pending).toHaveLength(1)
+    t.deps.fetch = t.fake.fetch
+    const done = await t.svc.resume(t.pending[0].uploadId)
+    expect(done.step).toBe('done')
+    expect(t.fake.state.calls.filter((c) => c.startsWith('POST /v1/uploads'))).toHaveLength(1)
+    expect(t.pending).toEqual([])
   })
 
   it('Stop while waiting to try again', async () => {
