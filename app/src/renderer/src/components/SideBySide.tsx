@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import type { VersionInfo } from '../../../shared/api'
 import { clock } from '../../../shared/progress'
 import { Icon } from './icons'
@@ -142,6 +142,7 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
           max={end}
           step={0.01}
           value={Math.min(time, end || time)}
+          style={{ '--pct': `${end ? (Math.min(time, end) / end) * 100 : 0}%` } as CSSProperties}
           onChange={(e) => seek(Number(e.target.value))}
           aria-label="Where both versions are"
           aria-valuetext={clock(Math.floor(time))}
