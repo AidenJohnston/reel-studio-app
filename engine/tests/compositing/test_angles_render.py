@@ -23,9 +23,11 @@ def bar_at(t: float) -> float:         # the main take's bar: a white column swe
 def two_camera_project(tmp_path, angles: tuple):
     """The take and its other camera; keep range k shows camera angles[k] (None: the main one)."""
     main = tmp_path / "main.mp4"
-    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
-                    f"color=c=0x202020:s={W}x{H}:r={FPS}:d=8,drawbox=x='100+100*t':y=0:w=20:h={H}:color=white:t=fill",
+    # overlay's x is evaluated per frame with t as time (drawbox's `t` is its line thickness)
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=0x202020:s={W}x{H}:r={FPS}:d=8",
+                    "-f", "lavfi", "-i", f"color=c=white:s=20x{H}:r={FPS}:d=8",
                     "-f", "lavfi", "-i", "sine=f=220:d=8:sample_rate=48000",
+                    "-filter_complex", "[0:v][1:v]overlay=x='100+100*t':y=0:eval=frame[v]", "-map", "[v]", "-map", "2:a",
                     "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(main)],
                    check=True)
     other = tmp_path / "other.mp4"
@@ -33,7 +35,8 @@ def two_camera_project(tmp_path, angles: tuple):
                     "-vf", f"crop={W // 2}:{H // 2}:{W // 4}:{H // 4},scale={W}:{H}",
                     "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(other)], check=True)
     pdir = tmp_path / "p"
-    fx.make_project(pdir, main, keep=((0.5, 2.5), (4.0, 6.0)), extra={"captions": {"enabled": False}})
+    # both ranges where the other camera is rolling (it starts 1 s into the main take)
+    fx.make_project(pdir, main, keep=((1.5, 3.0), (4.0, 6.0)), extra={"captions": {"enabled": False}})
     shutil.copy2(other, pdir / "media" / "other.mp4")
     p = project.load(pdir)
     p["sources"].append({"id": "s2", "path": "media/other.mp4", "duration": 7.0, "fps": FPS, "width": W, "height": H,
