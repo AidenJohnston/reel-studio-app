@@ -1290,8 +1290,9 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
             setPlayRequest(null)
             if (transport.get().playing) transport.toggle()
           }}
-          onDone={(t) => {
+          onDone={(t, keep) => {
             transport.seek(t)
+            if (keep !== undefined) setSelected(keep)
             setCompare(null)
             keyboardBackToTimeline()
           }}
