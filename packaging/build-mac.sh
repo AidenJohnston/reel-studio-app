@@ -53,7 +53,8 @@ if [ "$SPIKE" = 1 ]; then
   EXTRA=(-c.appId=dev.reelstudio.spike "-c.productName=Reel Studio Spike" -c.extraMetadata.name=reel-studio-spike)
 else
   if [ "$SKIP_UI" = 0 ]; then
-    (cd "$REPO" && npm install --no-audit --no-fund       && { [ ! -f ai/package.json ] || npm run build --workspace ai; }       && npm run build --workspace app)
+    # ci, not install: exactly what package-lock.json records, never a newer version a range allows
+    (cd "$REPO" && npm ci --no-audit --no-fund       && { [ ! -f ai/package.json ] || npm run build --workspace ai; }       && npm run build --workspace app)
   fi
   if [ -f "$REPO/ai/package.json" ]; then
     # guard: a packaged app without @reelstudio/ai in its dependencies silently runs the mock AI
