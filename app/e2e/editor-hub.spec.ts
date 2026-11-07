@@ -7,7 +7,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FakeHub } from '../../ai/test/fakeHub'
-import { BASE, launch, modelReady, toEditorStep } from './helpers'
+import { BASE, expectViewport, launch, modelReady, toEditorStep } from './helpers'
 
 const SIZES: [number, number][] = [[1100, 720], [1280, 820], [1512, 982], [1920, 1080]]
 const SHOTS = process.env.REELSTUDIO_EDITOR_SHOTS
@@ -22,7 +22,7 @@ async function sized(name: string, ready: () => Promise<void> = async () => {}):
   mkdirSync(SHOTS, { recursive: true })
   for (const [w, h] of SIZES) {
     await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
-    await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([w, h])
+    await expectViewport(page, w, h)
     await ready()
     await page.waitForTimeout(250)
     // the sample's crossfade and any other finite animation finish first, so a shot never catches one mid-frame

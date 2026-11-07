@@ -14,7 +14,7 @@ const listeners = new Set<() => void>()
 
 function emit(next: boolean): void {
   if (next === shown) return
-  // focus in the timeline would fall to the page as it goes: it lands on the button that brings it back
+  // focus in the timeline would fall to the page as it goes: it lands on the button whose menu brings it back
   const inside = !next && !!(document.activeElement as HTMLElement | null)?.closest('.tl')
   // showing or hiding is instant: the phone changes size at once, and a fade on the items would lag behind it
   document.documentElement.classList.add('tl-instant')
@@ -22,7 +22,8 @@ function emit(next: boolean): void {
   for (const l of listeners) l()
   requestAnimationFrame(() => {
     document.documentElement.classList.remove('tl-instant')
-    if (inside) document.querySelector<HTMLElement>('[data-testid="timeline-toggle"]')?.focus()
+    // the timeline's own switch lives in the View menu under the phone: focus waits on that menu's button
+    if (inside) document.querySelector<HTMLElement>('[data-testid="view-menu"]')?.focus()
   })
 }
 

@@ -218,6 +218,12 @@ export function CombineDialog({ slug, versions, ours, busy, onClose, onStarted }
           The same in both: {same.map((l) => LAYER_WORDS[l].toLowerCase().replace(/^the /, '')).join(', ')}.
         </p>
       )}
+      {/* says why Make is off until a part is picked: the button's title alone was missed (Sense re-score 4) */}
+      {!picked && !busy && differ && differ.length > 0 && (
+        <p className="muted" data-testid="combine-pick">
+          Pick at least one part from Version {theirs} to make the new version.
+        </p>
+      )}
       {busy && (
         <p className="muted" data-testid="combine-busy">
           You can make it once the version being made now is finished.

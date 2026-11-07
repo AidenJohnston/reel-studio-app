@@ -10,7 +10,7 @@ export type Tone = 'plain' | 'ok' | 'busy' | 'error'
 export function ConnectedMark({ testid }: { testid?: string }) {
   return (
     <span className="pv-ok" data-testid={testid}>
-      <Icon name="check" size={13} stroke={2.4} />
+      <Icon name="check" size={14} stroke={2.4} />
       Connected
     </span>
   )

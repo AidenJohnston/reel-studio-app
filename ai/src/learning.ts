@@ -125,7 +125,12 @@ const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0)
 const rounded = (value: number) => Math.round(value * 1e6) / 1e6;
 const percent = (ratio: number) => `${ratio >= 1 ? '+' : ''}${Math.round((ratio - 1) * 100)}%`;
 
-/** Read-only scoring. The caller may pass each draft to StyleStore.propose, never add. */
+/**
+ * Scores every trial and returns the drafts StyleStore.propose would keep; the caller may pass each to propose, never
+ * add. Its one write: once every trial has been scored, waiting results memories the evidence no longer supports
+ * are taken back (StyleStore.withdrawUnsupportedResults). A trial that can't be read throws before that, so a damaged
+ * file never empties the list.
+ */
 export async function learn(projectsRoot: string, style = new StyleStore(() => path.dirname(path.resolve(projectsRoot)))): Promise<ProposalDraft[]> {
   let entries;
   try { entries = await fs.readdir(projectsRoot, { withFileTypes: true }); } catch (error) {
@@ -192,6 +197,7 @@ export async function learn(projectsRoot: string, style = new StyleStore(() => p
     candidates.delete('brightness:brighter');
     candidates.delete('brightness:darker');
   }
+  await style.withdrawUnsupportedResults([...candidates.values()]);
   const proposals: ProposalDraft[] = [];
   for (const proposal of candidates.values()) {
     if (await style.proposalStatus(proposal) === 'new') proposals.push(proposal);

@@ -90,6 +90,16 @@ describe('explicit version layers', () => {
     expect(result.report).toContain('Adjusted b-roll a to end at kept word w2.');
   });
 
+  it('fails if a sound at a cut is kept, unreported, when the chosen cut plays straight through that word', () => {
+    const versions = pair();
+    // theirs jumped from w1 to w3, with a whoosh on that cut; ours keeps every word, so nothing jumps into w3
+    versions.theirs.cut.keep = [range(0, 1), range(3, 5)];
+    versions.theirs.sfx = [{ at: { cut: 'w3' }, sound: 'whoosh-quick' }];
+    const { edit, report } = api.mergeVersions({ ...versions, take: { ...take, sfx: 'theirs' } }, transcript);
+    expect(edit.sfx).toEqual([]);
+    expect(report).toContain('Dropped sound effect 1 (whoosh-quick) because there is no cut into w3 any more.');
+  });
+
   // #72's sound effects land on one moment, a picture's among them: one on a dropped picture goes with it
   it('drops a sound effect whose picture was dropped', () => {
     const versions = pair();

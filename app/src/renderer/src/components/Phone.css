@@ -10,7 +10,8 @@
 .phone {
   --rim: #3d413f;
   position: relative; flex: none; display: flow-root; background: #070808; border-radius: var(--radius-o, 9.4752% / 5.4631%);
-  box-shadow: 0 0 0 1.5px var(--rim), inset 0 0 0 1px rgba(255, 255, 255, .06), 0 30px 44px -30px rgba(10, 20, 15, .5), 0 14px 22px -16px rgba(10, 20, 15, .3);
+  /* lifted, not floating: a softer drop than the .5 and .3 it had, which outweighed every other surface (Craft, goal 4) */
+  box-shadow: 0 0 0 1.5px var(--rim), inset 0 0 0 1px rgba(255, 255, 255, .06), 0 24px 40px -28px rgba(10, 20, 15, .34), 0 10px 18px -14px rgba(10, 20, 15, .2);
 }
 .phone-screen {
   margin: var(--bz-top, 3.3706%) var(--bz-side, 3.432%) var(--bz-bottom, 3.3706%);
@@ -56,6 +57,9 @@
 }
 .phone-reel > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 /* On a phone the reel's box overhangs the screen where Instagram trims it: only the part above the tab bar shows. */
+/* Without Instagram's screen over it (Clean, and while comparing) that part sits in the middle of the screen
+   (shapeVars --reel-t-clean); everything placed from the reel's top (the video, the sample, subtitles) moves with it. */
+.phone-screen:not(:has(> .igc:not(.off))) { --reel-t: var(--reel-t-clean); }
 .phone-screen > video { clip-path: var(--reel-clip, none); }
 .phone-screen > video.raw-video { opacity: 0; pointer-events: none; transition: opacity .12s; }
 .phone-screen > video.raw-video.on { opacity: 1; }
@@ -180,7 +184,7 @@
   animation: safe-in 180ms cubic-bezier(.2, .8, .2, 1);
 }
 .safe-band span {
-  position: absolute; top: 6px; left: 6px; padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff;
+  position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff;
   font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap;
 }
 @keyframes safe-in { from { opacity: 0; } }

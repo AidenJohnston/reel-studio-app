@@ -18,8 +18,9 @@ export class CodexHarness implements Harness {
   readonly id = 'codex' as const;
   // MCP image delivery has not been measured with Codex, so do not promise image input.
   readonly supportsImages = false;
-  readonly model: string;
-  constructor(private readonly o: CodexOptions = {}) { this.model = o.model ?? 'gpt-6.1-sol'; }
+  /** unset: the Codex app's own default for the person's plan (no --model), as the Codex editor runs it */
+  readonly model?: string;
+  constructor(private readonly o: CodexOptions = {}) { this.model = o.model; }
 
   async run(o: HarnessRun): Promise<RunAgentResult> {
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
@@ -58,7 +59,7 @@ export class CodexHarness implements Harness {
         '--skip-git-repo-check', '--sandbox', 'read-only',
         ...['shell_tool', 'unified_exec', 'memories', 'apps', 'plugins', 'multi_agent', 'view_image', 'hooks', 'browser_use', 'computer_use', 'skill_search', 'image_generation'].flatMap((f) => ['--disable', f]),
         ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${JSON.stringify(value)}`]),
-        '--model', this.model, ...(this.o.extraArgs ?? []), '-',
+        ...(this.model ? ['--model', this.model] : []), ...(this.o.extraArgs ?? []), '-',
       ];
       return await this.drive(o, run, args, cwd, pre, outcome, decide);
     } finally { await run.close(); }

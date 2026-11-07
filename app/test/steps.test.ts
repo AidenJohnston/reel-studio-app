@@ -59,18 +59,21 @@ const WITH_AI: Line[] = [
   ...FINAL_RENDER.map(([m]): Line => [m])
 ]
 
-/** The rows the job reported right after each line. */
-async function replay(lines: Line[]): Promise<{ after: (message: string, nth?: number) => Step[]; all: Step[][] }> {
+/** The rows the job reported right after each line. A JobUpdate goes through as it is. */
+async function replay(lines: (Line | JobUpdate)[]): Promise<{ after: (message: string, nth?: number) => Step[]; all: Step[][] }> {
   const events: JobEvent[] = []
   const jobs = createJobManager((e) => events.push(e), () => undefined)
   const seen: { message: string; steps: Step[] }[] = []
   await new Promise<void>((resolve) => {
     jobs.start(null, 'first-edit', async (emit) => {
-      for (const [message, phase, noAI] of lines) {
+      for (const line of lines) {
         const before = events.length
-        emit({ type: 'status', message, pct: 0, ...(phase ? { phase } : {}), ...(noAI ? { noAI } : {}) } as JobUpdate)
+        const update: JobUpdate = Array.isArray(line)
+          ? { type: 'status', message: line[0], pct: 0, ...(line[1] ? { phase: line[1] } : {}), ...(line[2] ? { noAI: line[2] } : {}) }
+          : line
+        emit(update)
         const e = events.slice(before).find((x) => x.type === 'status')
-        if (e?.type === 'status' && e.steps) seen.push({ message, steps: e.steps })
+        if (update.type === 'status' && e?.type === 'status' && e.steps) seen.push({ message: update.message, steps: e.steps })
       }
       resolve()
       return { summary: 'ok' }
@@ -111,6 +114,22 @@ describe('first edit rows', () => {
     for (let i = 1; i < order.length; i++) expect(order[i]).toBeGreaterThanOrEqual(order[i - 1])
     const end = r.after('Checking your video')
     expect(end.filter((s) => s.state === 'done').map((s) => s.id)).toEqual(['copy', 'listen', 'retakes', 'edit', 'sound', 'subtitles', 'video', 'cover'])
+  })
+
+  it("fails if the engine's line on a slow listen is not beside Listening, or stays once the words are heard", async () => {
+    // the engine's CPU fallback on a computer with an NVIDIA card it can't use (transcribe.py CPU_FALLBACK_NOTE)
+    const note = 'Slower: listening on the processor, not your graphics card'
+    const r = await replay([
+      ['Listening to your video', 'listen'],
+      ['Waking up the listening model', 'listen'],
+      { type: 'status', message: 'Listening to your video', pct: 9, phase: 'listen', note },
+      ['Listening to your video', 'listen'],
+      { type: 'heard', words: ['And', 'so'] },
+      ['Finding your retakes', 'analyze']
+    ])
+    const listen = (steps: Step[]) => steps.find((s) => s.id === 'listen')!
+    expect(listen(r.after('Listening to your video', 2))).toEqual({ id: 'listen', state: 'now', result: note })
+    expect(listen(r.after('Finding your retakes'))).toEqual({ id: 'listen', state: 'done', result: '2 words' })
   })
 
   it('fails if the AI row says done when the AI stopped and the simple edit stepped in', async () => {

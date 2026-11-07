@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, newProjectFolder, passFirstRun, projectFolders, root, shot } from './helpers'
+import { BASE, expectViewport, launch, makeMedia, makeReel, newProjectFolder, passFirstRun, projectFolders, root, shot } from './helpers'
 
 const FIXTURE = join(BASE, 'insights-platforms.json')
 const DAY = 86_400_000
@@ -125,6 +125,32 @@ test('Insights: results read, explained and opened at the posted version', async
     await expect(page.getByTestId('insights-note-instagram')).toContainText('Instagram asked to slow down. Reading again after')
     await expect(page.getByTestId('insights-readout')).toContainText('2,300 views')
     await shot(page, 'insights-03-rate-limited')
+  } finally {
+    await app.close()
+  }
+})
+
+// No results yet: the page says so at the top, and Your recent reels sits right under it on the same edge (it was left at
+// the window's foot with half a screen of nothing above it).
+test('fails if, on an empty Insights page, Your recent reels is not right under the empty state on its left edge', async () => {
+  // a profile of its own: the file's shared one has the first test's posted reels, so its page is not empty
+  const dirs = { REELSTUDIO_USER_DATA: join(BASE, 'insights-empty', 'data'), REELSTUDIO_ROOT: join(BASE, 'insights-empty', 'Reel Studio') }
+  const { app, page } = await launch(dirs, { realViewport: true })
+  try {
+    await passFirstRun(page)
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900))
+    await expectViewport(page, 1440, 900)
+    await page.getByTestId('nav-insights').click()
+    const empty = page.getByTestId('insights-empty')
+    const recent = page.getByTestId('recent-reels')
+    await expect(empty).toBeVisible()
+    await expect(recent).toBeVisible()
+    // what is drawn, not the boxes (a box can stretch over empty space): each heading's left, the message's last line
+    const heading = (el: typeof empty) => el.locator('h2').evaluate((h) => h.getBoundingClientRect().left)
+    const lastLine = await empty.evaluate((el) => (el.lastElementChild as HTMLElement).getBoundingClientRect().bottom)
+    const recentTop = await recent.locator('h2').evaluate((h) => h.getBoundingClientRect().top)
+    expect(Math.abs((await heading(empty)) - (await heading(recent)))).toBeLessThan(2)
+    expect(recentTop - lastLine).toBeLessThan(80)
   } finally {
     await app.close()
   }

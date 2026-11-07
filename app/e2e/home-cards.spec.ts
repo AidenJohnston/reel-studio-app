@@ -152,7 +152,7 @@ test('stuck and running reels are short rows, the Making row names its step, and
     await expect(section(page, 'Needs you').getByRole('button', { name: /^Resume:/ })).toBeVisible()
 
     // the page is 1280 wide: Recent's card takes a column at least 168 px wide, not 140
-    const recent = section(page, 'Recent').locator('.rcard')
+    const recent = section(page, 'Recent').locator('.rcard:not(.new-card)')
     await expect(recent).toHaveCount(1)
     expect((await recent.boundingBox())!.width).toBeGreaterThanOrEqual(168)
   } finally {
