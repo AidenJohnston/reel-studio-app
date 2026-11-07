@@ -341,6 +341,18 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
+/** Settings › Storage is moving the library: no job or manual edit may start until the new place is in use, or it
+ * would take its project folder from the old place and its bookkeeping from the new one. */
+let rootMoving = false
+const refuseWhileRootMoves = (): void => {
+  if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+}
+/** Counts finished library moves. Work that reads paths, awaits, then starts a job takes this first and checks it
+ * just before jobs.start: a move that finished in between means its paths point at the old place. */
+let rootGeneration = 0
+const sameRootSince = (generation: number): void => {
+  if (generation !== rootGeneration) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try again.' }
+}
 const footageSources = createFootageSources({
   load: async () => (await loadSettings()).footageSources,
   save: async (footageSources) => void (await saveSettings({ footageSources })),
@@ -453,7 +465,10 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
-  () => updates.assertCanStartWork(),
+  () => {
+    refuseWhileRootMoves()
+    updates.assertCanStartWork()
+  },
   footageIndex,
   // and so do the pictures of each change made before its draft
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
@@ -617,7 +632,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,
@@ -836,10 +851,13 @@ function safeFileName(s: string): string {
 }
 
 async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
+  const generation = rootGeneration
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
+  // the library moved while the versions were read: `dir` is the old place
+  sameRootSince(generation)
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -1169,9 +1187,8 @@ function registerIpc(): void {
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
     const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
-    await saveSettings({ sharing })
-    // off deletes what was kept; a part switched off loses its lines
-    await usage.applySharing(sharing)
+    // off deletes what was kept and a part switched off loses its lines; on starts from an empty folder (usage.ts)
+    await usage.changeSharing(sharing, () => saveSettings({ sharing }))
     if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
@@ -1268,20 +1285,27 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
-    if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
-    const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
-    await fs.mkdir(root, { recursive: true })
-    // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
-    await footageIndex.pause()
+    refuseWhileRootMoves()
+    if (jobs.writing()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
+    // Taken before the first await, so no job can start between this check and the new root being in use.
+    rootMoving = true
     try {
-      if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until your video is finished, then change where videos are kept.' }
-      await saveSettings({ root })
-      setRootOverride(root)
-      await ensureRoot()
-      perms.markTouched()
-      indexLibrary()
+      const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
+      await fs.mkdir(root, { recursive: true })
+      // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
+      await footageIndex.pause()
+      try {
+        await saveSettings({ root })
+        setRootOverride(root)
+        rootGeneration++
+        await ensureRoot()
+        perms.markTouched()
+        indexLibrary()
+      } finally {
+        footageIndex.resume()
+      }
     } finally {
-      footageIndex.resume()
+      rootMoving = false
     }
     return appInfo()
   })
@@ -1683,7 +1707,10 @@ function registerIpc(): void {
   })
   handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
     if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
-    await chooseSeries(slug, series)
+    // as a manual edit (projects:update): an Edit it myself job publishes the project it read before its render,
+    // so a series picked meanwhile would be written over while app.json still says it was chosen. Refused (BUSY,
+    // which the picker shows) while a job runs, and no job starts during this write.
+    await jobs.hold(slug, () => chooseSeries(slug, series))
     return detail(slug)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
@@ -1736,6 +1763,7 @@ function registerIpc(): void {
   // a job like any other, so the updater waits for it (main/updater.ts counts running jobs)
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
+    const generation = rootGeneration
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before sharing.' }
     const version = await finishedExportVersion(slug, n)
@@ -1753,6 +1781,8 @@ function registerIpc(): void {
       : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
+    // the versions and project above were read before several awaits: a library move since then makes them stale
+    sameRootSince(generation)
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
@@ -2383,6 +2413,8 @@ app.whenReady().then(async () => {
   // fontsDir: Library › Fonts shows each bundled font in its own face
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
+  // first on usage's queue, so nothing reads it before a cut-short opt-out is finished (usage.ts reconcile)
+  void usage.reconcile().catch((err) => log(`[usage] reconcile: ${String(err?.message ?? err)}`))
   outside = createOutside()
   if (settings.outsideApps) await outside.enable().catch((e) => log(`[outside] ${String(e?.userMessage ?? e)}`))
   registerIpc()

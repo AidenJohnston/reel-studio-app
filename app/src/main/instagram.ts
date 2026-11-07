@@ -448,6 +448,9 @@ export class InstagramService {
         averageWatchTimeMs: values.get(METRICS.averageWatchTimeMs) ?? null, totalWatchTimeMs: values.get(METRICS.totalWatchTimeMs) ?? null,
         skipRatePercent: values.get(METRICS.skipRatePercent) ?? null
       }
+      // counts are whole numbers: a fraction is a damaged answer, and the trial rule's binomial test needs integers
+      for (const k of ['plays', 'reach', 'likes', 'comments', 'shares', 'saves'] as const)
+        if (metrics[k] !== null && !Number.isSafeInteger(metrics[k])) return invalidResponse()
       const outcome: InstagramOutcome = { ...saved.post, platform: 'instagram', apiVersion: INSTAGRAM_VERSION, observedAt: new Date(this.now()).toISOString(), metrics }
       signal.throwIfAborted()
       await saveOutcome(dir, outcome)

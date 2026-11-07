@@ -45,6 +45,14 @@ describe('parseEngineLine', () => {
       message: 'Listening to your video'
     })
   })
+  it("keeps the engine's note for beside the step, and only a real one", () => {
+    // the line the Listening row shows when an NVIDIA computer listens on the processor (transcribe.py)
+    const line = (note: unknown) => JSON.stringify({ event: 'progress', stage: 'transcribe', pct: 9, message: 'Listening to your video', note })
+    expect(parseEngineLine(line('Slower: listening on the processor, not your graphics card'))).toEqual({
+      event: 'progress', stage: 'transcribe', pct: 9, message: 'Listening to your video', note: 'Slower: listening on the processor, not your graphics card'
+    })
+    for (const bad of ['', 3, null]) expect(parseEngineLine(line(bad))).not.toHaveProperty('note')
+  })
   it('reads done and error', () => {
     expect(parseEngineLine('{"event":"done","result":{"version":2}}')).toEqual({ event: 'done', result: { version: 2 } })
     const e = parseEngineLine('{"event":"error","code":"NO_AUDIO","message":"x","userMessage":"This video has no sound. Try a different file."}')

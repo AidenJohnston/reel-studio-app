@@ -5,9 +5,11 @@ import type { InsightPost, TrialVerdict } from '../shared/insights'
 // combined views is equally likely to have landed on either try, so the count for one try is Binomial(n, 1/2).
 // A winner needs all of:
 //   - both results read at least SETTLE_HOURS after posting (Meta says insights can lag up to 48 hours);
-//   - both tries about the same age when read (within MAX_AGE_GAP): views are lifetime counts, so a try that has
-//     been up twice as long would win on time alone. Lifetime views level off, so ages drawing closer as both
-//     tries get older lets a trial whose tries went up days apart still be decided;
+//   - both tries about the same age when read (MIN_AGE_RATIO): views are lifetime counts, so a try that has been up
+//     twice as long would win on time alone. Lifetime views level off, so ages drawing closer as both tries get
+//     older lets a trial whose tries went up days apart still be decided;
+//   - the older try leading even after its extra time is taken out (comparedViews): within that age gap, a try up
+//     25% longer at the same rate has 25% more views, past the lift floor (audit 05-results);
 //   - at least MIN_VIEWS views between them;
 //   - a two-sided exact binomial p-value under MAX_P;
 //   - the leader at least MIN_LIFT_PERCENT ahead.
@@ -43,6 +45,23 @@ export function binomialLowerTail(k: number, n: number): number {
   return 0.5 * erfc(-z / Math.SQRT2)
 }
 
+/**
+ * The two counts the rule compares: the younger try's views, and the older try's views at the younger try's age.
+ * That second number isn't read. Assuming lifetime views grow at most in proportion to time (a reel gets most of
+ * its views early, then levels off; one that takes off late breaks this), the older try had at least
+ * `older × youngerAge / olderAge` and at most `older` by then. Each try is held to the
+ * count least in its favour: the older try leads only if it leads on the smallest count it could have had, and the
+ * younger try only if it leads the older try's whole count. When neither does, the counts are returned equal.
+ */
+export function comparedViews(a: number, ageOne: number, b: number, ageTwo: number): [number, number] {
+  if (ageOne === ageTwo) return [a, b]
+  const oneOlder = ageOne > ageTwo
+  const older = oneOlder ? a : b, younger = oneOlder ? b : a
+  const olderAtYoungerAge = Math.floor(older * Math.min(ageOne, ageTwo) / Math.max(ageOne, ageTwo))
+  const pair: [number, number] = olderAtYoungerAge > younger ? [olderAtYoungerAge, younger] : younger > older ? [older, younger] : [younger, younger]
+  return oneOlder ? pair : [pair[1], pair[0]]
+}
+
 /** Two-sided p-value that two view counts came from the same rate. */
 export function twoSidedP(a: number, b: number): number {
   return Math.min(1, 2 * binomialLowerTail(Math.min(a, b), a + b))
@@ -70,16 +89,30 @@ export function decideTrial(one: InsightPost, two: InsightPost): TrialVerdict {
   }
   if (a + b < MIN_VIEWS)
     return { kind: 'too-few', reason: `${count(a + b)} ${a + b === 1 ? 'view' : 'views'} between them so far. It takes at least ${MIN_VIEWS} to tell them apart.` }
-  const winner: 1 | 2 = a >= b ? 1 : 2
-  const lead = Math.max(a, b), trail = Math.min(a, b)
+  const [ca, cb] = comparedViews(a, ageOne, b, ageTwo)
+  const adjusted = ca !== a || cb !== b
+  const winner: 1 | 2 = ca >= cb ? 1 : 2
+  const lead = Math.max(ca, cb), trail = Math.min(ca, cb)
   const lift = trail > 0 ? (lead - trail) / trail * 100 : Infinity
-  const p = twoSidedP(a, b)
+  const p = twoSidedP(ca, cb)
   const views = `Try 1 got ${count(a)} ${a === 1 ? 'view' : 'views'} and Try 2 got ${count(b)}.`
-  if (a === b || p >= MAX_P || lift < MIN_LIFT_PERCENT)
-    return { kind: 'too-close', reason: `${views} A gap that small could be luck, so neither one wins.` }
+  const older = ageOne > ageTwo ? 1 : 2
+  // the comparison took the leader's extra time out, and the reason says so
+  const fair = adjusted && winner === older ? ', allowing for its extra time up' : ''
+  if (ca === cb) {
+    // equal after the adjustment: the older try's whole lead is what its extra time could have given it
+    return { kind: 'too-close', reason: adjusted && (older === 1 ? a > b : b > a)
+      ? `${views} Try ${older} has been up longer, which is enough to explain its lead, so neither one wins.`
+      : `${views} A gap that small could be luck, so neither one wins.` }
+  }
+  if (p >= MAX_P)
+    return { kind: 'too-close', reason: `${views} Try ${winner} is ahead${fair}, but with ${count(a + b)} views between them a gap that size could be luck, so neither one wins.` }
+  if (lift < MIN_LIFT_PERCENT)
+    // rounded down, so a lead just under the floor never reads as the floor itself
+    return { kind: 'too-close', reason: `${views} Try ${winner} got ${Math.floor(lift)}% more${fair}, short of the ${MIN_LIFT_PERCENT}% lead a winner needs.` }
   const liftText = Number.isFinite(lift) ? `${Math.round(lift)}% more` : 'all of them'
   return {
     kind: 'winner', winner, liftPercent: Number.isFinite(lift) ? lift : null, pValue: p,
-    reason: `${views} Try ${winner} got ${liftText}. With ${count(a + b)} views between them, a gap this big happens by chance less than 1 time in 20.`
+    reason: `${views} Try ${winner} got ${liftText}${fair}. With ${count(a + b)} views between them, a gap this big happens by chance less than 1 time in 20.`
   }
 }

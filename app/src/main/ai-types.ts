@@ -102,7 +102,7 @@ export interface EngineHost {
   captureWebsite?(
     url: string,
     outPath: string,
-    opts?: { layout?: 'phone' | 'desktop' }
+    opts?: { layout?: 'phone' | 'desktop'; signal?: AbortSignal }
   ): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>
   /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
    * Only the app has footage folders (app main/footage-sources.ts). */

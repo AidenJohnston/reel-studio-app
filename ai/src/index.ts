@@ -1213,7 +1213,8 @@ export function createAI(opts: CreateAIOptions) {
     async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
     /** The user said No to AgentResult.styleProposal. */
     async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
-    /** Memories drafted from post results (learning.ts learn(), read-only); the app passes each to proposeMemory. */
+    /** Memories drafted from post results (learning.ts learn(), which also takes back waiting ones the results no
+     * longer support); the app passes each to proposeMemory. */
     async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },
     /** Keeps a drafted memory waiting for the person (at most three). Never a rule until they keep it. */
     async proposeMemory(d: ProposalDraft) { return style.propose(d); },
@@ -1250,6 +1251,8 @@ function editHost(host: EngineHost, owner: string | undefined) {
       renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+      // a search_footage hit is copied into the Library by the app; without this a note could find footage but never place it
+      ...(host.importFootage ? { importFootage: host.importFootage.bind(host) } : {}),
     } satisfies EngineHost,
     stuck: () => stuck,
     async settle<T>(edit: Promise<T>): Promise<T> {
