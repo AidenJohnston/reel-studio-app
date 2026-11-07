@@ -1,11 +1,8 @@
 import { promises as fs } from 'node:fs'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { join } from 'node:path'
 import { BIN_FOLDERS, libraryDir } from './paths'
+import { isInside as inside } from './path-inside'
 
-function inside(file: string, root: string): boolean {
-  const rel = relative(root, file)
-  return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))
-}
 
 export async function isLinkedMedia(realPath: string, roots: string[]): Promise<boolean> {
   const library = await fs.realpath(libraryDir()).catch(() => null)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from reelengine import audio_env, cli, project, transcribe, tools
+from reelengine import audio_env, cli, footage, project, transcribe, tools
 
 
 @pytest.fixture(scope="module")
@@ -604,3 +604,52 @@ def test_drive_pulled_while_reading_is_offline_not_damaged(library, clips, tmp_p
     # fails if a file read while its drive was pulled is marked damaged and never read again
     assert command(root, "index", "--source", f"{SOURCE}={drive}")["filesPending"] == 0
     assert len(calls) == 1
+
+
+def test_digest_lists_each_present_file_once_with_timed_lines(library, clips, tmp_path):
+    root, _ = library
+    shutil.copyfile(root / "Library" / "a.mp4", root / "Library" / "copy.mp4")
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    shutil.copyfile(clips[1], drive / "b.mp4")
+    # a voice note in the Library is listened to like a video, but no reel can be cut from it
+    tools.text_run([tools.ffmpeg(), "-y", "-nostdin", "-v", "error", "-i", str(clips[1]), "-vn", "-c:a", "copy",
+                    str(root / "Library" / "voice.m4a")], 60, "audio fixture")
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    result = command(root, "digest")
+    # fails if a copy is proposed twice, a footage folder's file loses its Footage/ name, lines lose their times,
+    # or an audio file is offered as footage to cut from
+    assert [f["ref"] for f in result["files"]] == ["Library/a.mp4", f"Footage/{SOURCE}/b.mp4"]
+    assert result["files"][0]["lines"] == [{"s": .25, "e": .8, "text": "twenty bucks."}]
+    assert result["truncated"] is False
+    # fails if a reel made later can't tell the file was swapped: each file names its content, and the app asks
+    # about its own files only
+    with connect(root) as db:
+        indexed = db.execute("SELECT hash FROM paths WHERE place='Library' AND rel='a.mp4'").fetchone()[0]
+    only = command(root, "digest", "--ref", "Library/a.mp4")
+    assert [(f["ref"], f["hash"]) for f in only["files"]] == [("Library/a.mp4", indexed)]
+    drive.rename(tmp_path / "away")
+    # an unplugged drive's files can't be made into reels, so they are not offered
+    assert [f["ref"] for f in command(root, "digest")["files"]] == ["Library/a.mp4"]
+    assert footage.digest(root, max_chars=5) == {"files": [], "truncated": True}
+    # audit 06 F04: other bytes of the same size put in its place by a tool that keeps the modified time. Its old
+    # lines are not offered, nor can a reel be cut by them, and the next index reads it again.
+    a = root / "Library" / "a.mp4"
+    swap_same_size(a)
+    assert "Library/a.mp4" not in [f["ref"] for f in command(root, "digest")["files"]]
+    assert command(root, "digest", "--ref", "Library/a.mp4")["files"] == []
+    command(root, "index", "--source", f"{SOURCE}={drive}")
+    with connect(root) as db:
+        assert db.execute("SELECT hash FROM paths WHERE place='Library' AND rel='a.mp4'").fetchone()[0] == footage.file_hash(a)
+
+
+def swap_same_size(path):
+    """Replace `path` with different bytes of the same length, as a sync or copy tool that keeps the time does."""
+    stat = path.stat()
+    data = bytearray(path.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    new = path.with_name(path.name + ".part")
+    new.write_bytes(bytes(data))
+    os.utime(new, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    os.replace(new, path)
+    assert (path.stat().st_size, path.stat().st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)

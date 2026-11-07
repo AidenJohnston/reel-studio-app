@@ -4,9 +4,10 @@
 // A folder that goes away (a drive unplugged) keeps its index and shows as not plugged in until it comes back.
 import { createHash } from 'node:crypto'
 import { promises as fs, realpathSync, statSync, watch as fsWatch, type FSWatcher } from 'node:fs'
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, extname, join, resolve } from 'node:path'
 import type { FootageSource } from '../shared/api'
 import { VIDEO_EXT } from './library'
+import { isInside } from './path-inside'
 
 export interface SavedSource {
   id: string
@@ -55,10 +56,7 @@ function canon(p: string): string {
   return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real
 }
 
-const inside = (child: string, parent: string): boolean => {
-  const r = relative(canon(parent), canon(child))
-  return r === '' || (!!r && !r.startsWith('..') && !isAbsolute(r))
-}
+const inside = (child: string, parent: string): boolean => isInside(canon(child), canon(parent))
 
 const isFolder = (p: string): boolean => {
   try {
@@ -202,7 +200,7 @@ export function createFootageSources(deps: SourcesDeps) {
       const abs = join(source.path, ...parts)
       const real = await fs.realpath(abs).catch(() => null)
       const base = await fs.realpath(source.path)
-      if (!real || !(real === base || real.startsWith(base + sep))) throw bad('FILE_GONE', `${basename(abs)} is not in ${basename(source.path)} any more.`)
+      if (!real || !isInside(real, base)) throw bad('FILE_GONE', `${basename(abs)} is not in ${basename(source.path)} any more.`)
       if ((await fs.lstat(abs)).isSymbolicLink() || !(await fs.stat(real)).isFile()) throw bad('FILE_GONE', `${basename(abs)} is not in ${basename(source.path)} any more.`)
       if (!VIDEO_EXT.has(extname(abs).toLowerCase())) throw bad('BAD_FOOTAGE_PATH', 'Only videos are read from footage folders.')
       return { abs: real, source }
