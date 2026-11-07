@@ -216,8 +216,10 @@ export function createEngineRunner(cfg: RunnerConfig) {
         // Windows kills by pid, and an engine that has already exited may have handed its pid on
         const exited = child.exitCode !== null || child.signalCode !== null
         const kill = child.pid && !(exited && process.platform === 'win32') ? killTree(child.pid) : true
-        void Promise.all([kill, gone]).then(([killed, clean]) =>
-          rejectPromise(killed && clean ? cancelled() : stuck(child.pid)))
+        // An engine that outlives SIGKILL (stuck in disk or device I/O) never exits, so `gone` would never settle and
+        // Stop would hang: once the kill has failed, the job ends as ENGINE_STUCK, which keeps the project closed (jobs.ts).
+        void Promise.resolve(kill).then((killed) =>
+          killed ? gone.then((clean) => rejectPromise(clean ? cancelled() : stuck(child.pid))) : rejectPromise(stuck(child.pid)))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
 

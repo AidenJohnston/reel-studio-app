@@ -46,7 +46,10 @@ export function handEditJob(runEngine: RunEngine, slug: string, entry: QueuedNot
       const done = JSON.parse(await fs.readFile(file, 'utf8'))
       const version = Number(r?.version ?? done.version)
       done.handEdits = [...(Array.isArray(done.handEdits) ? done.handEdits : []), entry.id].slice(-HANDS_KEPT)
-      await writeProject(slug, done)
+      // Durable: the queue's record that this edit ran is written durably right after (jobs.ts, note-queue.ts), so
+      // the edit itself must be on disk first, or a power cut could keep the record and lose the edit. Stop that
+      // arrives during this write still keeps the project as it was.
+      await writeProject(slug, done, { durable: true, signal })
       emit({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
       return { summary: versionMessage(version, entry.text), version, made: { by: 'hand', summary: entry.text } }
     } finally {

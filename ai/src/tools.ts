@@ -905,7 +905,8 @@ async function captureSite(ctx: ToolContext, url: string, layout: 'phone' | 'des
   const dest = safeResolve(ctx.projectDir, ctx.host.reelStudioRoot(), `work/assets/${name}`, 'write');
   let shot;
   try {
-    shot = await ctx.host.captureWebsite(url, dest.abs, { layout });
+    // Stop reaches the page too: a page's own scripts can keep the capture waiting forever (app main/capture.ts)
+    shot = await ctx.host.captureWebsite(url, dest.abs, { layout, ...(ctx.signal ? { signal: ctx.signal } : {}) });
   } catch (e: any) {
     await fsp.rm(dest.abs, { force: true });
     throw new ToolInputError(`${e?.userMessage ?? e?.message ?? 'the screenshot failed'} (use search_images or a text-pop instead)`);

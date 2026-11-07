@@ -1197,6 +1197,8 @@ function editHost(host: EngineHost, owner: string | undefined) {
       renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+      // a search_footage hit is copied into the Library by the app; without this a note could find footage but never place it
+      ...(host.importFootage ? { importFootage: host.importFootage.bind(host) } : {}),
     } satisfies EngineHost,
     stuck: () => stuck,
     async settle<T>(edit: Promise<T>): Promise<T> {

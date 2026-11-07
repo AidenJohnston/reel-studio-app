@@ -1617,7 +1617,10 @@ function registerIpc(): void {
   })
   handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
     if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
-    await chooseSeries(slug, series)
+    // as a manual edit (projects:update): an Edit it myself job publishes the project it read before its render,
+    // so a series picked meanwhile would be written over while app.json still says it was chosen. Refused (BUSY,
+    // which the picker shows) while a job runs, and no job starts during this write.
+    await jobs.hold(slug, () => chooseSeries(slug, series))
     return detail(slug)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
