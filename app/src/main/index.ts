@@ -137,7 +137,8 @@ import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
-import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { MERGE_LAYERS, MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { mergeWords } from '../shared/combine'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
@@ -456,7 +457,9 @@ const jobs = createJobManager(
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
-async function startNote(slug: string, { id: noteId, text, attachments, moment, branch }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+async function startNote(slug: string, { id: noteId, text: own, attachments, moment, branch, steers, steer }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+  // words added on an earlier run (Add now) are part of the note from the start this time
+  const text = [own, ...(steers ?? []).map((x) => x.text)].join('\n')
   const dir = projectDir(slug)
   const startedAt = Date.now()
   let editor: string | null = null
@@ -477,11 +480,11 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
-      const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
-      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}) }
+      const { checkEdits: checkEdit, lookUps: helpers } = await loadSettings() // Settings > "Double-check each edit", "Look things up in parallel"
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, helpers, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
       // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part";
       // what it says back while it works reaches the progress card in the person's own words
-      const aiText = aiNoteText(text, moment)
+      const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
       await recordMadeWith(dir, r)
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
@@ -503,7 +506,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
   jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry), { note: HAND_MESSAGE, record })
-const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log })
+const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log, words: (q) => aiNoteText(q.text, q.moment) })
 
 const models = createModelManager({
   runEngine,
@@ -916,7 +919,9 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
 
 /** A note from the Reel screen, or from another AI app through Settings › Let other AI apps use Reel Studio
  * (outside-access.ts): either way it goes through the reel's note queue, so it shows, waits, runs and stops the same. */
-async function sendNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown): Promise<{ jobId: string | null; queued?: boolean; noEditor?: true }> {
+/** `steer` (Add now from the window, or add_to_running_note): the words go into the note running now when they can;
+ * otherwise they wait like any note, and `added` is false. */
+async function sendNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown): Promise<{ jobId: string | null; queued?: boolean; added?: boolean; noEditor?: true }> {
   // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
   // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
   const admit = async () => {
@@ -970,7 +975,7 @@ async function sendNote(slug: string, text: string, attachments?: unknown, at?: 
     // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
     const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
     return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
-  }, given ?? 0)
+  }, given ?? 0, { steer: steer === true })
 }
 
 /** Settings › Editor › "Let other AI apps use Reel Studio" (outside-access.ts); made at startup, once `ai` is loaded. */
@@ -1099,14 +1104,16 @@ function registerIpc(): void {
     handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
     own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
   })
-  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  // Facebook reads the Page posts go to; a reel on another of the person's Pages is read when that Page is chosen again.
   const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
     ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
     : [
         { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
           read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
         { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
-          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) },
+        { platform: 'facebook', account: async () => { const s = await facebook.session(); return s.connected ? s.page.id : null },
+          read: (slug, version, postId) => facebook.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
     projectsRoot: projectsDir, stateDir: settingsDir(), sources,
@@ -1391,6 +1398,11 @@ function registerIpc(): void {
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
   handle('ai:checkEdits', async () => (await loadSettings()).checkEdits)
+  handle('ai:lookUps', async () => (await loadSettings()).lookUps)
+  handle('ai:setLookUps', async (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
+    return (await saveSettings({ lookUps: on })).lookUps
+  })
   handle('ai:setCheckEdits', async (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
     return (await saveSettings({ checkEdits: on })).checkEdits
@@ -1611,21 +1623,39 @@ function registerIpc(): void {
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
-  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) =>
-    sendNote(slug, text, attachments, at, onVersion, requestedBase)
+  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown) =>
+    sendNote(slug, text, attachments, at, onVersion, requestedBase, steer)
   )
-  // The note path for the window and for a paired phone (main/companion): one admission, one queue. It is sendNote,
-  // which an outside AI app (outside-reels.ts) uses too.
-  function submitNote(...args: Parameters<typeof sendNote>): ReturnType<typeof sendNote> {
-    return sendNote(...args)
+  // The note path for a paired phone (main/companion): sendNote, as the window and an outside AI app send. The phone
+  // sends no `steer` (Add now), so its notes always queue.
+  function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown): ReturnType<typeof sendNote> {
+    return sendNote(slug, text, attachments, at, onVersion)
   }
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
     const dir = projectDir(slug)
     if (!ai.mergeVersions) throw { code: 'MERGE_UNAVAILABLE', userMessage: 'This editor does not support combining versions. Update Reel Studio and try again.' }
+    if (!request || typeof request !== 'object' || !request.take || typeof request.take !== 'object') throw { code: 'BAD_MERGE', userMessage: 'Choose which version each part comes from.' }
     const merge = ai.mergeVersions.bind(ai)
-    const jobId = jobs.start(slug, 'note', (emit, signal, { id, owner }) => merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) }))
+    // the notes show it as what was asked, with the version it made as its result
+    const asked = mergeWords(request)
+    let jobId = ''
+    jobId = jobs.start(
+      slug,
+      'note',
+      async (emit, signal, { id, owner }) => {
+        const r = await merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) })
+        return { summary: [r.summary, ...r.report].join(' '), ...(r.version !== undefined ? { version: r.version } : {}), made: { by: 'note', summary: asked } }
+      },
+      { note: asked, record: (s) => void s.chat.push(stamp({ from: 'you', text: asked, jobId })) }
+    )
     return { jobId }
+  })
+  handle('projects:mergeLayers', async (_e, slug: string, ours: number, theirs: number) => {
+    const saved = (await readProject(slug)).version ?? 0
+    for (const n of [ours, theirs]) if (!Number.isInteger(n) || n < 1 || n > saved) throw { code: 'BAD_VERSION', userMessage: 'Pick two saved versions of this reel.' }
+    // an older AI package: every part is a choice
+    return ai.mergeLayers ? ai.mergeLayers(projectDir(slug), ours, theirs) : [...MERGE_LAYERS]
   })
   handle('projects:versionRows', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 1) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
@@ -1788,6 +1818,7 @@ function registerIpc(): void {
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
+  handle('queue:steer', (_e, slug: string, id: string) => noteQueue.steer(slug, String(id)))
   // Send now / Run next: a held queue goes on, and a paused job's wait ends (main/pause.ts)
   handle('queue:runNext', async (_e, slug: string) => {
     pauser.cancel(slug)

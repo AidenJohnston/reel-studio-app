@@ -237,3 +237,24 @@ it.each([null, { ours: 1, theirs: 2, take: { cut: 'ours' } }])('returns a specif
   });
   expect(await fs.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
 });
+
+describe('which layers two versions differ in', () => {
+  it('names each changed layer once, and nothing for a change outside the layers (the post caption)', () => {
+    const { ours, theirs } = pair();
+    expect(api.differingLayers(ours, theirs)).toEqual(['cut', 'captions', 'music', 'zooms', 'broll', 'sfx', 'cover']);
+    const music = structuredClone(ours);
+    music.music.level = 'quiet';
+    music.post.caption = 'Only the post changed besides the music';
+    expect(api.differingLayers(ours, music)).toEqual(['music']);
+    const post = structuredClone(ours);
+    post.post.caption = 'Different words for the post';
+    expect(api.differingLayers(ours, post)).toEqual([]);
+  });
+
+  it('a mirrored source counts as a change of the cut, which owns the sources', () => {
+    const { ours } = pair();
+    const mirrored = structuredClone(ours);
+    mirrored.sources[0].mirror = true;
+    expect(api.differingLayers(ours, mirrored)).toEqual(['cut']);
+  });
+});

@@ -34,6 +34,9 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   /** Settings > "Double-check each edit": passed to every AI note as `checkEdit`. Off by default until
    * the eval harness measures the tokens and time it adds. */
   checkEdits: boolean
+  /** Settings > "Look things up in parallel": a note may hand searches to a second AI (ai helpers.ts) as
+   * `helpers`. Off by default: what it adds in tokens and time is not measured yet. */
+  lookUps: boolean
   models: ModelChoice
   sharing: DataSharing
   phoneView: PhoneView
@@ -57,6 +60,7 @@ const DEFAULTS: Settings = {
   notifications: null,
   speechCheck: null,
   checkEdits: false,
+  lookUps: false,
   models: Object.fromEntries(MODEL_ROLES.map((r) => [r, 'auto'])) as ModelChoice,
   sharing: { asked: false, on: false, usage: true, quality: true, posts: true },
   phoneView: 'instagram',

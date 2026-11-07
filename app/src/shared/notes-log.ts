@@ -7,7 +7,8 @@ import { withoutWordIds } from './moments'
 
 export type LogAsk =
   | { kind: 'video'; text: string }
-  | { kind: 'note'; text: string; moment: NoteMoment | null; attachments: NoteAttachment[] }
+  /** `added`: what the person added while it ran (Add now), oldest first */
+  | { kind: 'note'; text: string; moment: NoteMoment | null; attachments: NoteAttachment[]; added?: { text: string; moment: NoteMoment | null }[] }
   | { kind: 'hand'; text: string }
   /** the reel's Plan card on its own: made in the plain form, or folded above the video once it arrived */
   | { kind: 'plan'; text: string }
@@ -152,6 +153,12 @@ export function notesLog(input: {
     // more reels from this video: its job has no note, so its lines follow whatever the log shows last
     if (m.reels) {
       entries[entries.length - 1]?.extra.push(m)
+      continue
+    }
+    // words added to a running note belong to its ask, wherever they land in the chat
+    const joined = m.from === 'you' && m.steerOf ? entries.find((e) => e.key === m.steerOf) : undefined
+    if (joined?.ask.kind === 'note') {
+      joined.ask.added = [...(joined.ask.added ?? []), { text: m.text, moment: m.moment ?? null }]
       continue
     }
     if (m.from === 'you') {

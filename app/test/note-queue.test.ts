@@ -23,7 +23,7 @@ process.env.REELSTUDIO_MOCK_NOTE = '1'
 
 const CANCELLED = { code: 'CANCELLED', userMessage: 'Stopped.' }
 
-function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?: boolean; afterEvent?: (e: JobEvent) => void } = {}) {
+function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?: boolean; afterEvent?: (e: JobEvent) => void; olderAI?: boolean } = {}) {
   const engine = createEngineRunner({
     python: () => PYTHON,
     env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, ...(opts.failRender ? { FAKE_ENGINE_FAIL: 'render' } : {}) })
@@ -72,7 +72,10 @@ function app(opts: { failRender?: boolean; holdRenders?: boolean; holdAfterSave?
     startNote: async (slug, note, record) =>
       jobs.start(slug, 'note', async (emit, signal, { owner }) => {
         await gate(thinking, slug, signal)
-        const r = await ai.applyNote(projectDir(slug), note.text, emit, signal, { id: note.id, ...(owner ? { owner } : {}) })
+        const text = [note.text, ...(note.steers ?? []).map((x) => x.text)].join('\n')
+        // an older AI package takes no added words: it never reads the box
+        const steer = note.steer && !opts.olderAI ? { steer: note.steer } : {}
+        const r = await ai.applyNote(projectDir(slug), text, emit, signal, { id: note.id, ...(owner ? { owner } : {}), ...steer })
         // the job's bookkeeping after the save (jobs.ts): Stop can land here, too late to undo the note
         if (opts.holdAfterSave) await gate(saved, slug)
         return { summary: r.summary, version: r.version }
@@ -466,3 +469,120 @@ describe('note queue', () => {
     expect((await readProject(slug)).version).toBe(2)
   }, 60000)
 })
+
+describe('Add now: a waiting note goes into the one running', () => {
+  const idOf = async (slug: string, text: string): Promise<string> => (await readAppState(slug)).queue!.find((q) => q.text === text)!.id
+
+  it('added while it runs: one version does both, and the added words show under the running note', async () => {
+    setupPaths()
+    const slug = await reel('steer-in-time')
+    const a = app()
+    await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    const second = await idOf(slug, 'second')
+    expect(await a.queue.steer(slug, second)).toEqual({ added: true })
+    expect(await waitingTexts(slug)).toEqual(['first'])
+    await a.runAll(slug)
+    expect((await readProject(slug)).version).toBe(2)
+    expect((await readProject(slug)).notes?.at(-1)?.text).toBe('first\nsecond')
+    expect(await replies(slug)).toEqual(['Done: "first". Also: "second". It is Version 2.'])
+    const line = (await readAppState(slug)).chat.find((m) => m.id === second)
+    expect(line).toMatchObject({ from: 'you', text: 'second', steerOf: await firstId(slug) })
+    expect(await waitingTexts(slug)).toEqual([])
+  }, 60000)
+
+  it('too late (the running note was already saved): it stays first in line and runs next as its own version', async () => {
+    setupPaths()
+    const slug = await reel('steer-late')
+    const a = app({ holdAfterSave: true })
+    await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.think(slug)
+    expect(a.waitingAt.saved.has(slug)).toBe(true)
+    expect(await a.queue.steer(slug, await idOf(slug, 'second'))).toEqual({ added: false })
+    await a.runAll(slug)
+    expect((await readProject(slug)).version).toBe(3)
+    expect(await replies(slug)).toEqual(['Done: "first". It is Version 2.', 'Done: "second". It is Version 3.'])
+  }, 60000)
+
+  it('sent with steer while a note runs, it is added straight away; with nothing running it just runs', async () => {
+    setupPaths()
+    const slug = await reel('steer-send')
+    const a = app()
+    expect((await a.queue.send(slug, { text: 'alone', attachments: [] }, 1, { steer: true })).jobId).toBeTruthy()
+    await a.settled()
+    expect(await a.queue.send(slug, { text: 'more', attachments: [] }, 1, { steer: true })).toEqual({ jobId: null, added: true })
+    await a.runAll(slug)
+    expect((await readProject(slug)).version).toBe(2)
+    expect((await readProject(slug)).notes?.at(-1)?.text).toBe('alone\nmore')
+  }, 60000)
+
+  it('Stop after adding: the note waits with what was added, and Try again reads both', async () => {
+    setupPaths()
+    const slug = await reel('steer-stop')
+    const a = app()
+    const { jobId } = await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.queue.steer(slug, await idOf(slug, 'second'))
+    a.queue.stop(jobId!)
+    await a.settled()
+    const q = (await readAppState(slug)).queue!
+    expect(q.map((x) => [x.text, x.steers?.map((y) => y.text)])).toEqual([['first', ['second']]])
+    await a.queue.resume(slug)
+    await a.runAll(slug)
+    expect((await readProject(slug)).version).toBe(2)
+    expect((await readProject(slug)).notes?.at(-1)?.text).toBe('first\nsecond')
+  }, 60000)
+
+  it('an editor that never read the added words (an older AI package): they wait first in line after the note is saved', async () => {
+    setupPaths()
+    const slug = await reel('steer-unread')
+    const a = app({ olderAI: true })
+    await a.send(slug, 'first')
+    await a.send(slug, 'second')
+    await a.send(slug, 'third')
+    const second = await idOf(slug, 'second')
+    await a.queue.steer(slug, second)
+    await a.think(slug)
+    // saved without it: the line under the note goes, and it waits as its own note, before the one behind it
+    expect((await readAppState(slug)).chat.some((m) => m.steerOf)).toBe(false)
+    await a.runAll(slug)
+    expect(await replies(slug)).toEqual(['Done: "first". It is Version 2.', 'Done: "second". It is Version 3.', 'Done: "third". It is Version 4.'])
+  }, 60000)
+
+  it.each([
+    ['the editor never read it', 'first', ['second']],
+    ['the editor read it', 'first\nsecond', []]
+  ])('a crash after a note was saved with a note added to it (%s): at the next start the added note waits again only if unread', async (_, savedText, waiting) => {
+    setupPaths()
+    const slug = await reel(`steer-crash-${waiting.length}`)
+    const file = join(projectDir(slug), 'project.json')
+    const p = JSON.parse(readFileSync(file, 'utf8'))
+    p.notes = [...(p.notes ?? []), { id: 'q1', version: 1, text: savedText, applied: [], at: new Date().toISOString() }]
+    writeFileSync(file, JSON.stringify(p))
+    await updateAppState(slug, (s) => {
+      s.queue = [{ ...entry('q1', 'first', true), steers: [{ id: 'q2', text: 'second' }] }]
+      s.chat.push({ id: 'q2', from: 'you', text: 'second', at: new Date().toISOString(), steerOf: 'q1' })
+    })
+    await app().queue.recover()
+    const st = await readAppState(slug)
+    expect((st.queue ?? []).map((q) => q.text)).toEqual(waiting)
+    expect(st.chat.some((m) => m.steerOf === 'q1')).toBe(waiting.length === 0)
+  }, 60000)
+
+  it('a note with files cannot be added, and stays in line', async () => {
+    setupPaths()
+    const slug = await reel('steer-refused')
+    const a = app()
+    const { jobId } = await a.send(slug, 'first')
+    await updateAppState(slug, (s) => {
+      s.queue!.push({ ...entry('with-files', 'put this here'), attachments: [{ asset: 'work/assets/attach-1.png', name: 'a.png', kind: 'image', bytes: 1 }] })
+    })
+    await expect(a.queue.steer(slug, 'with-files')).rejects.toMatchObject({ code: 'HAS_FILES' })
+    expect(await waitingTexts(slug)).toEqual(['first', 'put this here'])
+    a.queue.stop(jobId!)
+    await a.settled()
+  }, 60000)
+})
+
+const firstId = async (slug: string): Promise<string> => (await readAppState(slug)).chat.find((m) => m.from === 'you' && m.text === 'first')!.id
