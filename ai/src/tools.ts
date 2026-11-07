@@ -20,6 +20,8 @@ import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, CallProvenance, EngineHost, ImagePart, ToolSchema } from './types';
 import { CUT_STYLES, CutPreset } from './cut-style';
 import type { Moments } from './moments';
+import { NoteSteer, finishRefused, withAdded } from './steer';
+import { Helper, MAX_LOOKUPS, lookUp } from './helpers';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { CHECK_PARAM, CheckChoice, CheckedRule, RuleFailure, RuleReport, failureText, rulesFile, rulesFilePath } from './rules';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
@@ -60,6 +62,12 @@ export interface ToolState {
   /** project saves so far in this task, and the number of the last one that changed what the video shows */
   edits: number;
   pictureEdit: number;
+  /** words the person added while the note ran, as the model got them (steer.ts); saved with the note's words */
+  added?: string[];
+  /** words handed over in results the model has not answered yet: finish waits for its next turn (steer.ts) */
+  unread?: string[];
+  /** our own loop's model turns so far (agent.ts); unset in Claude Code and Codex over MCP */
+  turn?: number;
   /** The newest render's checked-rule results, including a final render stopped before its encode. Cleared by a
    * render that did not check them (a preview moments drew), so a stale result never refuses finish. */
   ruleChecks?: RuleReport;
@@ -100,6 +108,10 @@ export interface ToolContext {
   rules?: NoteRules;
   /** Draws what each reply changed while the AI thinks (moments.ts); renders the AI asks for go through it. */
   moments?: Moments;
+  /** words the person adds while this note runs, from the app's queue (steer.ts) */
+  steer?: NoteSteer;
+  /** a second AI that looks things up in parallel (helpers.ts); look_up is offered only with one */
+  helper?: Helper;
   /** cached; reloaded from disk by `load()` */
   project?: Project;
   transcript?: Transcript;
@@ -461,8 +473,9 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
 }
 
 /** Engine commands that read the edit: during a note they read its private copy (`frames` without a
- * render id shows the edit). */
-const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins']);
+ * render id shows the edit). make-variant also writes it: given project.json, a trial inside a note
+ * changed the live edit and the note then failed as changed somewhere else. */
+const READS_EDIT = new Set(['render', 'anim-context', 'cover-candidates', 'frames', 'moments', 'match-joins', 'make-variant']);
 
 export function projectArgs(ctx: { projectDir: string; note?: { file: string } }, command: string): string[] {
   return ['--project', ctx.projectDir, ...(ctx.note && READS_EDIT.has(command) ? ['--project-file', ctx.note.file] : [])];
@@ -945,7 +958,25 @@ function libraryFileKind(ref: string, pictureKind: AssetKind): AssetKind | null 
 /** What add_broll, update_broll, choose_music and logo-pop place: an animation this run made as it is,
  * the user's own Library picture, clip or song frozen and recorded in the same call, and anything else
  * only once resolve_asset committed it as one of `kinds`. */
+/** The caption fonts the engine can draw (engine cli.py cmd_fonts): Library › Fonts first, then the bundled ones. */
+async function captionFonts(ctx: ToolContext): Promise<{ names: string[]; file: string; yours: boolean }[]> {
+  const r: any = await ctx.host.runEngine('fonts', [], undefined, ctx.signal);
+  if (!r || !Array.isArray(r.fonts)) throw new ToolInputError('The engine did not list its caption fonts. Try again.');
+  return r.fonts.filter((f: any) => f && Array.isArray(f.names) && typeof f.file === 'string')
+    .map((f: any) => ({ names: f.names.filter((n: unknown) => typeof n === 'string'), file: f.file, yours: f.yours === true }));
+}
+
+/** A search_footage hit in one of the person's footage folders (Footage/<folder>/<file>) is copied into the Library
+ * by the app first, so every path the engine reads stays inside the project and the Library. Other refs pass through. */
+async function fromFootage(ctx: ToolContext, ref: string): Promise<string> {
+  if (!/^Footage\//.test(ref.replace(/\\/g, '/'))) return ref;
+  if (!ctx.host.importFootage) throw new ToolInputError('Clips from footage folders can only be used in the Reel Studio app.');
+  try { return await ctx.host.importFootage(ref); }
+  catch (e: any) { throw new ToolInputError(e?.userMessage ?? e?.message ?? String(e)); }
+}
+
 async function placementAsset(ctx: ToolContext, asset: string, kinds: readonly AssetKind[] = [...STILL_KINDS, 'video'], pictureKind: AssetKind = 'image'): Promise<string> {
+  asset = await fromFootage(ctx, asset);
   const ref = /^asset_[0-9a-f-]{36}$/.test(asset) ? asset : resolveAsset(ctx, asset)?.ref;
   if (!ref) throw new ToolInputError(`asset not found: ${asset}`);
   if (kinds.includes('video') && ctx.state.animationsMade?.has(ref)) return ref;
@@ -1065,7 +1096,7 @@ async function offerCandidate(ctx: ToolContext, kind: AssetKind, intent: string,
 async function resolveCandidates(ctx: ToolContext, kind: AssetKind, intent: string, policy: string, provider?: StockProvider): Promise<ToolOutput> {
   if (kind === 'website_screenshot' && policy !== 'commentary') throw new ToolInputError('Website screenshots require licensePolicy commentary. The page belongs to its owner.');
   const requestId = randomUUID();
-  const text = intent.trim().replace(/\\/g, '/');
+  const text = await fromFootage(ctx, intent.trim().replace(/\\/g, '/'));
   const isUrl = /^https?:\/\//i.test(text);
   const named = /^(Library|work|media)\//.test(text);
   let local: { ref: string; abs: string } | null = null;
@@ -1417,7 +1448,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'search_footage',
-    description: 'Search indexed Library speech before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail.',
+    description: 'Search indexed speech in the Library and the person\'s footage folders before reading whole transcripts of other clips. Returns source file paths, start and end seconds, matching words and cached midpoint thumbnails. Audio-only hits have no thumbnail. A Footage/... path is a clip in a footage folder: give it to add_broll or resolve_asset as it is, and it is copied into the Library. online false means its drive is unplugged: tell the person to plug it in, and do not place it.',
     // no minLength: OpenAI's strict tool schemas refuse it (#33); an empty query is refused below
     parameters: S.obj({ query: S.str('words to find in your Library'),
       limit: S.opt(S.int('maximum hits, default 6', { minimum: 1, maximum: 8 })) }),
@@ -1604,7 +1635,7 @@ const tools: ToolDef[] = [
       const field = args.variable === 'caption' ? 'post' : args.variable;
       let result: any;
       await writeEdit(ctx, [field], async () => { result = await engine(ctx, 'make-variant', extra, 'Making a trial'); });
-      ctx.project = await loadProject(ctx.projectDir);
+      ctx.project = await loadProject(ctx.projectDir, ctx.note?.file);
       ctx.state.changed.add(field);
       (ctx.state.dirty ??= new Set()).add(field);
       return { content: { ok: true, trial: result.trial }, summary: `Made a ${args.variable} trial` };
@@ -1632,9 +1663,17 @@ const tools: ToolDef[] = [
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
+      font: S.opt(S.str('a caption font by one of the names list_library kind fonts gives (the person\'s own fonts are marked yours); null keeps the current font')),
     }),
     async run(ctx, args) {
       let warning: string | null = null;
+      let font: string | null = null;
+      if (args.font != null) {
+        const fonts = await captionFonts(ctx);
+        const want = String(args.font).trim().toLowerCase();
+        font = fonts.flatMap((f) => f.names).find((n) => n.toLowerCase() === want) ?? null;
+        if (!font) throw new ToolInputError(`No caption font is called "${args.font}". Choose a name from list_library kind fonts.`);
+      }
       await mutate(ctx, 'captions', (p) => {
         const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
         const underBefore = shownUnder();
@@ -1648,6 +1687,7 @@ const tools: ToolDef[] = [
           if (args[k] !== null && args[k] !== undefined) style[k] = args[k];
         }
         if (args.highlight === 'none') delete style.highlight;
+        if (font) style.font = font;
         // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
         // and without it the picker matches the look by its fields.
         if (captionLook(style) !== before) delete style.preset;
@@ -1691,9 +1731,10 @@ const tools: ToolDef[] = [
   },
   {
     name: 'list_library',
-    description: "List the user's own files. kind: music | images | broll | raw. Also returns images already fetched for this project." + READ_PAGE_HELP,
-    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw']), ...READ_PAGING }),
+    description: "List the user's own files. kind: music | images | broll | raw | fonts. Also returns images already fetched for this project. fonts lists every caption font set_caption_style can use: the person's own (yours) and the ones that come with Reel Studio." + READ_PAGE_HELP,
+    parameters: S.obj({ kind: S.enum(['music', 'images', 'broll', 'raw', 'fonts']), ...READ_PAGING }),
     async run(ctx, args) {
+      if (args.kind === 'fonts') return { content: readPage({ kind: 'fonts', fonts: await captionFonts(ctx) }, args) };
       const kind = args.kind as LibraryKind;
       const files = await listFiles(libraryDir(ctx, kind), EXT[kind], `Library/${LIBRARY_FOLDERS[kind]}`);
       const project = kind === 'images' || kind === 'broll' ? await projectAssets(ctx) : [];
@@ -2322,6 +2363,16 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'look_up',
+    description: `Hand up to ${MAX_LOOKUPS} searches to helpers that run at the same time (and alongside any other searches in the same reply): each finds pictures or footage for ONE thing (a named place, product, person, number or example) and fetches the best candidates. Returns what each found and the candidate ids, which you place with add_broll like your own. Use it when several different things need pictures; search_images yourself for one.`,
+    parameters: S.obj({ things: S.arr(S.str('one thing to find pictures or footage for, in a few words'), undefined, { minItems: 1, maxItems: MAX_LOOKUPS }) }),
+    async run(ctx, args) {
+      if (!ctx.helper) throw new ToolInputError('No helpers in this task: use search_images yourself.');
+      const r = await lookUp(ctx, ctx.helper, args.things, ctx.emit);
+      return { content: r, summary: `Looked up ${r.found.map((f) => f.thing).join(', ')}` };
+    },
+  },
+  {
     name: 'finish',
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
@@ -2408,14 +2459,15 @@ function stripNulls<T extends Record<string, any>>(o: T): T {
 }
 
 export const TOOLS: ToolDef[] = tools;
-export const TOOL_NAMES = tools.map((t) => t.name);
+/** Every tool a task offers by default. look_up only comes with a helper (editor.ts applyNote). */
+export const TOOL_NAMES = tools.map((t) => t.name).filter((n) => n !== 'look_up');
 export function toolByName(name: string): ToolDef | undefined {
   // Some providers prefix namespaced tools ("reel_editor.set_cut").
   const bare = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
   return tools.find((t) => t.name === bare);
 }
 export function toolSchemas(names?: string[]): ToolSchema[] {
-  return tools.filter((t) => !names || names.includes(t.name)).map(({ name, description, parameters }) => ({ name, description, parameters }));
+  return tools.filter((t) => (names ? names.includes(t.name) : TOOL_NAMES.includes(t.name))).map(({ name, description, parameters }) => ({ name, description, parameters }));
 }
 
 /** Validates + runs one tool call. Never throws for model mistakes: returns an error result the model can read. */
@@ -2425,20 +2477,47 @@ export async function executeTool(ctx: ToolContext, name: string, rawArgs: unkno
   if (!tool) return { content: JSON.stringify({ error: `unknown tool "${name}". Tools: ${TOOL_NAMES.join(', ')}` }), isError: true };
   const args = fillNulls(tool.parameters, rawArgs ?? {});
   const problems = validate(tool.parameters, args);
-  if (problems.length) return { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true };
+  if (problems.length) return delivered(ctx, { content: JSON.stringify({ error: `invalid arguments: ${problems.join('; ')}` }), isError: true });
+  const finishing = tool.name === 'finish' && !!ctx.steer;
+  // words that came with a result of this same reply were never read: finish waits, and names them again
+  if (finishing && (ctx.state.unread?.length || !ctx.steer!.seal())) {
+    const unread = ctx.state.unread ?? [];
+    const refused = finishRefused([...unread, ...took(ctx)]);
+    // over MCP there are no turns to count: the refusal itself is what the model reads before it finishes again
+    if (ctx.state.turn === undefined) ctx.state.unread = [];
+    return { content: refused, isError: true };
+  }
   try {
     const out = await tool.run(ctx, args);
     if (out.summary) { ctx.state.summaries.push(out.summary); ctx.emit({ type: 'tool', name: tool.name, summary: out.summary }); }
     const content = typeof out.content === 'string' ? out.content : JSON.stringify(out.content);
-    return { content, images: out.images, isError: false, summary: out.summary };
+    // finish sealed the box: nothing can be waiting
+    return delivered(ctx, { content, images: out.images, isError: false, summary: out.summary });
   } catch (err: any) {
+    if (finishing) ctx.steer!.unseal();
     if (ctx.signal?.aborted) throw err;
-    if (err instanceof ToolInputError) return { content: JSON.stringify({ error: err.message }), isError: true };
+    if (err instanceof ToolInputError) return delivered(ctx, { content: JSON.stringify({ error: err.message }), isError: true });
     if (err instanceof AIError) throw err;
     // part of the engine may still be writing: the job must end and keep the project (index.ts editHost)
     if (err?.code === 'ENGINE_STUCK') throw err;
     // Engine failures arrive as {code, userMessage}
     const msg = err?.userMessage ?? err?.message ?? String(err);
-    return { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true };
+    return delivered(ctx, { content: JSON.stringify({ error: `${tool.name} failed: ${msg}`, code: err?.code ?? null }), isError: true });
   }
+}
+
+/** The person's added words, recorded as given to the model. */
+function took(ctx: ToolContext): string[] {
+  const added = ctx.steer?.take() ?? [];
+  if (added.length) {
+    ctx.state.added = [...(ctx.state.added ?? []), ...added];
+    ctx.state.unread = [...(ctx.state.unread ?? []), ...added];
+  }
+  return added;
+}
+
+/** A result with any words the person added since the last one after it (steer.ts). */
+function delivered<R extends { content: string }>(ctx: ToolContext, r: R): R {
+  const added = took(ctx);
+  return added.length ? { ...r, content: withAdded(r.content, added) } : r;
 }

@@ -1,0 +1,16 @@
+TITLE: Timeline 1
+FCM: NON-DROP FRAME
+
+001  AX       V     C        00:00:10:00 00:00:12:15 01:00:00:00 01:00:02:15
+* FROM CLIP NAME: talk.mov
+
+002  AX       V     C        00:00:30:00 00:00:31:29 01:00:02:15 01:00:04:14
+* FROM CLIP NAME: talk.mov
+
+003  AX       V     C        00:00:45:10 00:00:45:10 01:00:04:14 01:00:04:14
+003  AX       V     D    015 00:01:00:00 00:01:03:00 01:00:04:14 01:00:07:14
+* FROM CLIP NAME: talk.mov
+* TO CLIP NAME: broll.mov
+
+004  AX       AA    C        00:00:00:00 00:00:07:14 01:00:00:00 01:00:07:14
+* FROM CLIP NAME: song.mp3

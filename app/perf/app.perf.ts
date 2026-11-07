@@ -35,7 +35,8 @@ interface Rec {
   marks: Record<string, { ts: number; value: string }>
   pending: { name: string; type: string } | null
   frames: { mediaTime: number; shown: number }[]
-  /** each <video> that became the player's shown layer, with the start of the first animation frame it was seen in */
+  /** each <video> that became the player's shown layer with a decoded frame, and the start of the first animation
+   * frame it was seen so */
   layers: { el: Element; at: number }[]
 }
 declare global {
@@ -54,7 +55,7 @@ function recorder(player: string): void {
     for (const e of list.getEntries() as ElementTiming[])
       rec.paints.push({ id: e.identifier, renderTime: e.renderTime, loadTime: e.loadTime, url: e.url, el: e.element })
   }).observe({ type: 'element', buffered: true })
-  for (const type of ['click', 'keydown', 'input'])
+  for (const type of ['click', 'keydown', 'input', 'pointerup'])
     document.addEventListener(
       type,
       (e) => {
@@ -67,19 +68,23 @@ function recorder(player: string): void {
     )
   // The player loads a version in a hidden layer (opacity 0, Phone.css) and gives it data-testid="player" once its
   // first frame is ready (Player.tsx). Element Timing may record that layer's paint while it is still hidden, so the
-  // swap itself is timed too: the first animation frame in which this element is the shown layer.
+  // swap itself is timed too: the first animation frame in which this element is the shown layer and has a frame.
+  // The first layer is shown before it has loaded anything (videoLayers.ts), so being shown alone is not enough.
   let last: Element | null = null
   const watch = (t: number): void => {
-    const el = document.querySelector(player)
-    if (el && el !== last) rec.layers.push({ el, at: t })
-    last = el
+    const el = document.querySelector<HTMLVideoElement>(player)
+    if (!el) last = null
+    else if (el !== last && el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      rec.layers.push({ el, at: t })
+      last = el
+    }
     requestAnimationFrame(watch)
   }
   requestAnimationFrame(watch)
 }
 
 /** The next `type` event (keydown: Enter only) starts the moment `name`. */
-async function arm(page: Page, name: string, type: 'click' | 'keydown' | 'input'): Promise<void> {
+async function arm(page: Page, name: string, type: 'click' | 'keydown' | 'input' | 'pointerup'): Promise<void> {
   await page.evaluate(([n, t]) => void (window.__rsPerf.pending = { name: n, type: t }), [name, type] as const)
 }
 
@@ -106,9 +111,10 @@ async function paintAfter(page: Page, mark: string, id: string): Promise<{ ms: n
 }
 
 /**
- * ms from moment `mark`'s event to the player showing version `version`: the later of the shown <video>'s first paint
- * (Element Timing) and the first animation frame with it as the shown layer. Only an element that became the shown
- * layer after the event counts, so the version on screen before the click never ends the moment.
+ * ms from moment `mark`'s event to the player showing version `version`: the first animation frame with its <video>
+ * as the shown layer and a decoded frame, or that element's first paint (Element Timing) if Chromium recorded a later
+ * one. Only an element that became the shown layer after the event counts, so the version on screen before the click
+ * never ends the moment.
  */
 async function shownAfter(page: Page, mark: string, version: number): Promise<{ ms: number; url: string }> {
   try {
@@ -120,8 +126,11 @@ async function shownAfter(page: Page, mark: string, version: number): Promise<{ 
         const el = document.querySelector<HTMLVideoElement>(sel)
         if (!el || !new RegExp(`[\\\\/]v${v}[\\\\/]`).test(decodeURIComponent(el.currentSrc || el.src))) return null
         const swap = rec.layers.find((x) => x.el === el && x.at > start)
+        if (!swap) return null
+        // A layer that loaded hidden gets no Element Timing paint (Chromium skips invisible elements), so the swap,
+        // which the player makes only once the layer has a decoded frame, ends the moment then.
         const p = rec.paints.find((x) => x.id === id && x.el === el && x.renderTime > 0)
-        return swap && p ? { ms: Math.max(swap.at, p.renderTime) - start, url: p.url } : null
+        return { ms: (p ? Math.max(swap.at, p.renderTime) : swap.at) - start, url: p?.url ?? (el.currentSrc || el.src) }
       },
       [mark, version, PLAYER_SELECTOR, PLAYER] as const,
       { timeout: 60_000, polling: 100 }
@@ -133,20 +142,46 @@ async function shownAfter(page: Page, mark: string, version: number): Promise<{ 
   }
 }
 
-/** ms from moment `mark`'s input on the scrub bar to the frame at the position it asked for being on screen. */
-async function frameAfter(page: Page, mark: string): Promise<number> {
+/** ms from moment `mark`'s release on the timeline to the frame at `target` seconds, where it seeked, being on screen. */
+async function frameAfter(page: Page, mark: string, target: number): Promise<number> {
   const h = await page.waitForFunction(
-    (m) => {
+    ([m, t]) => {
       const rec = window.__rsPerf
       const at = rec.marks[m]
       if (!at) return null
-      const f = rec.frames.find((x) => x.shown > at.ts && Math.abs(x.mediaTime - Number(at.value)) <= 0.1)
+      const f = rec.frames.find((x) => x.shown > at.ts && Math.abs(x.mediaTime - t) <= 0.1)
       return f ? f.shown - at.ts : null
     },
-    mark,
+    [mark, target] as const,
     { timeout: 30_000, polling: 100 }
   )
   return (await h.jsonValue())!
+}
+
+/**
+ * The fraction of the timeline's width nearest `at` where a click lands on the bare track and seeks somewhere new. A
+ * note's mark on the track is a button that opens that note's version (Timeline.tsx tl-mark), and each run's note adds
+ * one where its scrubbing left the playhead, so a later run's click there switched versions instead of seeking. A
+ * press on the playhead starts a drag (Timeline.tsx `.tl-head`), and a click where the playhead already is seeks
+ * nowhere, so the 2% around `now` (the playhead's fraction) is skipped too.
+ */
+async function bareTrackAt(page: Page, box: { x: number; y: number; width: number; height: number }, at: number, now: number): Promise<number> {
+  const f = await page.evaluate(
+    ({ b, at, now }) => {
+      const y = b.y + b.height / 2
+      // out from `at` in 0.5% steps, alternating sides, up to 15% away
+      for (let k = 0; k <= 60; k++) {
+        const f = at + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.005
+        if (f < 0.02 || f > 0.98 || Math.abs(f - now) < 0.02) continue
+        const el = document.elementFromPoint(b.x + b.width * f, y)
+        if (el?.closest('[data-testid="timeline"]') && !el.closest('button, a, [role="button"], .tl-heads')) return f
+      }
+      return null
+    },
+    { b: box, at, now }
+  )
+  if (f === null) throw new Error(`no bare spot on the timeline within 15% of ${at}: every point there is a mark, the playhead or another control`)
+  return f
 }
 
 /** Every frame the Reel screen's shown player presents from now on. */
@@ -200,6 +235,8 @@ interface Run {
   switchBackMs: number
   /** one per SCRUB_AT position, in click order */
   scrubMs: number[]
+  /** the fraction of the timeline each scrub clicked: its SCRUB_AT position, or the nearest bare spot to it */
+  scrubAt: number[]
   noteStatusMs: number
   /** what the player's first paint was: the version's cover (poster) or a video frame */
   picture: 'poster' | 'frame'
@@ -261,22 +298,36 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
       await page.getByTestId(`log-play-${latest}`).click()
       const back = await shownAfter(page, 'back', latest)
 
-      // A person plays before scrubbing; the bar shows once the video has started. Then each click is one seek.
-      await page.locator(PLAYER_SELECTOR).evaluate(async (v: HTMLVideoElement) => {
+      // A person plays before scrubbing, then clicks the timeline under the phone (Timeline.tsx): a click seeks to
+      // where it lands when the button comes up. The player on the Reel screen has no scrub bar of its own.
+      const player = page.locator(PLAYER_SELECTOR)
+      await player.evaluate(async (v: HTMLVideoElement) => {
         v.muted = true
         await v.play()
         await new Promise((r) => setTimeout(r, 300))
         v.pause()
       })
       await page.evaluate(watchFrames, PLAYER_SELECTOR)
-      await page.getByTestId('phone').hover()
-      const box = await page.getByRole('slider', { name: 'Position in the reel' }).boundingBox()
-      if (!box) throw new Error('the scrub bar has no bounds')
+      const box = await page.getByTestId('timeline').boundingBox()
+      if (!box) throw new Error('the timeline has no bounds')
       const scrubMs: number[] = []
+      const scrubAt: number[] = []
       for (const [i, at] of SCRUB_AT.entries()) {
-        await arm(page, `scrub${i}`, 'input')
-        await page.mouse.click(box.x + box.width * at, box.y + box.height / 2)
-        scrubMs.push(await frameAfter(page, `scrub${i}`))
+        const { before, now } = await player.evaluate((v: HTMLVideoElement) => ({ before: v.currentTime, now: v.currentTime / v.duration }))
+        const f = await bareTrackAt(page, box, at, now)
+        scrubAt.push(Math.round(f * 1000) / 1000)
+        await arm(page, `scrub${i}`, 'pointerup')
+        await page.mouse.click(box.x + box.width * f, box.y + box.height / 2)
+        // where the click seeked to, read from the player once it has moved there
+        const moved = await page.waitForFunction(
+          ([sel, t]) => {
+            const v = document.querySelector<HTMLVideoElement>(sel)
+            return v && Math.abs(v.currentTime - t) > 0.05 ? v.currentTime : null
+          },
+          [PLAYER_SELECTOR, before] as const,
+          { timeout: 10_000, polling: 50 }
+        )
+        scrubMs.push(await frameAfter(page, `scrub${i}`, (await moved.jsonValue())!))
       }
 
       await page.evaluate(() => window.reel.ai.setActive('codex-cli'))
@@ -295,6 +346,7 @@ test('app timings: launch, open a reel, switch versions, scrub, note', async () 
         switchMs: sw.ms,
         switchBackMs: back.ms,
         scrubMs,
+        scrubAt,
         noteStatusMs: note.ms,
         picture: /cover\.png/.test(open.url) ? 'poster' : 'frame'
       })

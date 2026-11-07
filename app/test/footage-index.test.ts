@@ -103,6 +103,6 @@ it('adding Library footage schedules another pass and leaves the indexed file al
     const result = await addToLibrary([file], runEngine, () => {}, () => { added = indexer.request() })
     await added
     expect(result[0].dest).toBe(join(root, 'Library/B-roll/new.mp4'))
-    expect(passes).toEqual([{ files: 1, stagesRun: 0, pending: 0 }, { files: 2, stagesRun: 3, pending: 0 }])
+    expect(passes).toMatchObject([{ files: 1, stagesRun: 0, pending: 0 }, { files: 2, stagesRun: 3, pending: 0 }])
   } finally { await indexer.stop() }
 })

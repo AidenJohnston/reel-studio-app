@@ -89,6 +89,10 @@ describe('My style: where each rule came from', () => {
     expect(sourceLine(rule({ imported: { file: 'gym.xml' }, createdAt: before(24 * 21) }), NOW)).toBe('from your Premiere Pro edit gym.xml, 3 weeks ago')
     expect(sourceLine(rule({ imported: { file: 'tour.fcpxml' }, createdAt: before(24 * 8) }), NOW)).toBe('from your Final Cut Pro edit tour.fcpxml, last week')
     expect(sourceLine(rule({ imported: { file: 'gym.xml, tour.fcpxml' }, createdAt: before(24 * 8) }), NOW)).toBe('from 2 of your past edits, last week')
+    // the editor kept with the rule wins over the file's name: DaVinci Resolve writes FCPXML too
+    expect(sourceLine(rule({ imported: { file: 'Timeline 1.fcpxml', editor: 'DaVinci Resolve' }, createdAt: before(24 * 8) }), NOW)).toBe('from your DaVinci Resolve edit Timeline 1.fcpxml, last week')
+    expect(sourceLine(rule({ imported: { file: 'Bread reel/draft_content.json' }, createdAt: before(24 * 8) }), NOW)).toBe('from your CapCut edit Bread reel/draft_content.json, last week')
+    expect(sourceLine(rule({ imported: { file: 'cut.edl', editor: 'EDL' }, createdAt: before(24 * 8) }), NOW)).toBe('from your edit list cut.edl, last week')
     expect(sourceLine(rule({ byYou: true, createdAt: before(0.001) }), NOW)).toBe('added by you, just now')
     expect(sourceLine(rule({ source: note, createdAt: before(24 * 30), updatedAt: before(26) }), NOW)).toBe('from your note on “Bread reel”, edited yesterday')
   })

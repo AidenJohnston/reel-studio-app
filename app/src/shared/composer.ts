@@ -29,8 +29,14 @@ export function notePlaceholder(s: {
   making: boolean
   /** something else runs on the reel (Share's export, a look for more reels): notes wait for it too */
   busy: boolean
+  /** the keys that add a note to the version being made instead (Add now), while a note makes it */
+  addKeys?: string
+  /** the older version the next note changes (Versions > Change this one) */
+  base?: number
 }): string {
   if (s.planned) return s.answering ? 'Your editor is answering…' : s.asking ? 'Answer, or tell your editor more…' : s.hasPlan ? 'Ask your editor for a change…' : "What's this reel about?"
   if (!s.hasVersions) return 'Notes you send now wait for Version 1…'
-  return s.making ? 'Waits for this version…' : s.busy ? 'Waits for this to finish…' : 'Tell your editor…'
+  if (s.making) return s.addKeys ? `Waits for this version, or ${s.addKeys} adds it now…` : 'Waits for this version…'
+  if (s.busy) return 'Waits for this to finish…'
+  return s.base !== undefined ? `Tell your editor what to change in Version ${s.base}…` : 'Tell your editor…'
 }

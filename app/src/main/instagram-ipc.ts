@@ -6,8 +6,8 @@ import type { InstagramSession, InstagramSettings } from '../shared/instagram'
 type Handle = (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => void
 
 /**
- * Test builds keep Instagram off, so REELSTUDIO_TEST_INSTAGRAM=<handle> stands in for a connected account: its session
- * is what the preview reads (Phone.tsx). Nothing else changes.
+ * REELSTUDIO_TEST_INSTAGRAM=<handle> (test builds) stands in for a connected account without signing in: its session
+ * is what the preview reads (Phone.tsx). Nothing else changes. e2e/social.spec.ts connects for real instead.
  */
 export function testInstagramSession(handle: string): InstagramSession {
   const picture = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2" fill="#c2410c"/></svg>')}`
@@ -23,7 +23,7 @@ export function registerInstagramIpc(d: {
   testSession?: InstagramSession
 }): void {
   d.handle('instagram:configure', async (_event, value) => {
-    if (!d.dev) throw new InstagramError('IG_DISABLED', 'Instagram is available only in developer mode.')
+    if (!d.dev) throw new InstagramError('IG_DISABLED', 'Your own Instagram app can be set only in developer mode.')
     const settings = instagramSettings(value)
     await d.service.disconnect()
     await d.saveSettings(settings)

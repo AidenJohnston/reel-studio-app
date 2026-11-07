@@ -5,9 +5,10 @@ import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
-import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
+import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { NicheTurnResult } from '../shared/niche'
 import type { MemorySuggestion, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -172,7 +173,7 @@ export const createMockAI: CreateAI = ({ host }) => {
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
-  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer; base?: number; mergeParent?: number }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
@@ -193,15 +194,26 @@ export const createMockAI: CreateAI = ({ host }) => {
       const t = setTimeout(resolve, noteMs)
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
+    // like the real package: words added while it worked are read before it can finish (ai steer.ts)
+    const added: string[] = []
+    while (opts?.steer && !opts.steer.seal()) added.push(...opts.steer.take())
+    if (added.length) {
+      const edit = JSON.parse(await fs.readFile(copy, 'utf8'))
+      edit.notes[edit.notes.length - 1].text = [note, ...added].join('\n')
+      await writeJson(copy, edit)
+    }
     onEvent({ type: 'status', message: 'Making the final version', pct: 0, phase: 'final' })
-    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
+    // a note on an older version, or a combination of two, records the version(s) it came from (version-tree)
+    const from = [...(opts?.base !== undefined ? ['--parent', String(opts.base)] : []), ...(opts?.mergeParent !== undefined ? ['--merge-parent', String(opts.mergeParent)] : [])]
+    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...from, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
     const version = Number(r?.version)
     if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     const done = JSON.parse(await fs.readFile(copy, 'utf8'))
     done.notes[done.notes.length - 1].version = version
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-    return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
+    const also = added.length ? ` Also: ${added.map((w) => `"${w}"`).join(', ')}.` : ''
+    return { summary: `Done: "${note}".${also} It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 
   async function firstMusicTrack(): Promise<string | null> {
@@ -320,15 +332,18 @@ export const createMockAI: CreateAI = ({ host }) => {
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
       const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }) })
       const changed: string[] = []
-      // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
-      // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
+      // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
+      // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
+      // package does (ai editor.ts ensureAnalyzed and deterministicEdit)
       const start = await readProject(projectDir)
       const proposed = !!start.proposal && (start.cut?.keep?.length ?? 0) > 0
+      const heard = existsSync(join(projectDir, start.transcript?.file ?? 'work/transcript.json'))
 
-      if (!proposed) {
+      if (!heard) {
         status('Listening to your video', 1, 'listen')
         await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen'), signal)
-
+      }
+      if (!proposed) {
         status('Picking your best takes', 41, 'analyze')
         await host.runEngine('analyze', args, (p) => status('Picking your best takes', span(0, 50, p.pct), 'analyze'), signal)
         await host.runEngine('autocut', args, (p) => status('Picking your best takes', span(50, 100, p.pct), 'analyze'), signal)
@@ -441,6 +456,14 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
 
     // this stand-in has no fast path: every note goes through applyNote above
+    async mergeVersions(projectDir, request, onEvent, signal, opts) {
+      const r = await slowNote(projectDir, `Combine Version ${request.ours} and Version ${request.theirs}`, onEvent, signal, { ...opts, base: request.ours, mergeParent: request.theirs })
+      return { ...r, summary: `Combined Version ${request.ours} and Version ${request.theirs}.`, edit: await readProject(projectDir), report: [] }
+    },
+    // the practice editor keeps no version snapshots to compare, so every part is a choice
+    async mergeLayers() {
+      return [...MERGE_LAYERS]
+    },
     async wholeReelSetting() {
       return false
     },
@@ -536,6 +559,36 @@ export const createMockAI: CreateAI = ({ host }) => {
             words: ws.length
           }
         }),
+        notes: '',
+        attempts: 1
+      }
+    },
+
+    // The practice editor's reels across the footage archive: lines taken in file order until a reel plays for 15 s,
+    // so a short file runs on into the next one, up to three reels. It reads no words: it is a stand-in.
+    async proposeFromArchive(req, signal) {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find reels in your footage.' }
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, noteMs)
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      type Span = { ref: string; t0: number; t1: number; said: string }
+      const reels: Span[][] = []
+      let open: Span[] = []
+      const length = (spans: Span[]) => spans.reduce((t, x) => t + x.t1 - x.t0, 0)
+      for (const f of req.files) {
+        for (const l of f.lines) {
+          const last = open.at(-1)
+          if (last && last.ref === f.ref) Object.assign(last, { t1: l.e, said: `${last.said} ${l.text}` })
+          else open.push({ ref: f.ref, t0: l.s, t1: l.e, said: l.text })
+          if (length(open) >= 15 && reels.length < 3) (reels.push(open), (open = []))
+        }
+      }
+      return {
+        candidates: reels.map((spans, k) => ({
+          id: `r${k + 1}`, title: PRACTICE_REELS[k].title, why: PRACTICE_REELS[k].why, hook: spans[0].said,
+          spans, seconds: Math.round(length(spans) * 10) / 10
+        })),
         notes: '',
         attempts: 1
       }

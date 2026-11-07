@@ -197,7 +197,8 @@ export function MyStyle() {
   const keep = async () => {
     if (!lesson) return
     const chosen = lesson.rules.filter((_, i) => lesson.keep[i])
-    if (await run(() => reel.style.keepLearned(chosen, lesson.files.map((f) => f.name).join(', ')))) setLesson(null)
+    const editor = lesson.files.length === 1 ? lesson.files[0].editor : undefined
+    if (await run(() => reel.style.keepLearned(chosen, lesson.files.map((f) => f.name).join(', '), editor))) setLesson(null)
   }
 
   const kept = lesson?.keep.filter(Boolean).length ?? 0

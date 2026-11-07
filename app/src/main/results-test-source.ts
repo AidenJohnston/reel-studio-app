@@ -16,7 +16,7 @@ interface Fixture {
   /** every read answers with a rate limit */
   rateLimited?: boolean
 }
-const KEY: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:' }
+const KEY: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:', threads: 'threads:', x: 'x:', linkedin: 'linkedin:' }
 const EMPTY: InstagramMetrics = { plays: null, reach: null, likes: null, comments: null, shares: null, saves: null, averageWatchTimeMs: null, totalWatchTimeMs: null, skipRatePercent: null }
 const failure = (code: string, userMessage: string) => Object.assign(new Error(userMessage), { code, userMessage })
 

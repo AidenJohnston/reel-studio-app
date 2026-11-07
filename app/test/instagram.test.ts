@@ -39,7 +39,7 @@ afterEach(async () => {
   expect(fixtureErrors.splice(0)).toEqual([])
 })
 
-async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string; secure?: boolean } = {}) {
+async function world(opts: { enabled?: boolean; backend?: string; secure?: boolean } = {}) {
   const dir = await fs.mkdtemp(join(tmpdir(), 'ig-fixture-'))
   const project = join(dir, 'projects', 'fixture')
   const version = join(project, 'versions', 'v1')
@@ -73,7 +73,7 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
   const calls: string[] = []
   let browser: (url: string) => Promise<void> = async () => { throw new Error('unexpected browser request') }
   const service = new InstagramService({
-    dev: opts.dev ?? true, settings: async () => settings, settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), secrets,
+    settings: async () => settings, settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), secrets,
     fetch: async (url, init) => {
       calls.push(url)
       const step = steps.shift()
@@ -95,16 +95,16 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
   })
   activeService = service
   cleanup.push({ dir, service })
-  const seed = (extra = {}) => store.save({ accessToken: TOKEN, expiresAt: now + 30 * DAY, issuedAt: now - 2 * DAY, accountId: '123', username: 'fixture_creator', appId: '456', brokerUrl: BROKER, ...extra })
+  const seed = (extra = {}) => store.save({ accessToken: TOKEN, expiresAt: now + 30 * DAY, issuedAt: now - 2 * DAY, accountId: '123', username: 'fixture_creator', appId: '456', brokerUrl: BROKER, uploadPass: 'sealed-pass', ...extra })
   const finished = () => steps.push({ url: `${GRAPH}/900?fields=status_code`, body: { status_code: 'FINISHED' } })
   const profile = (body: unknown = PROFILE) => steps.push({ url: `${GRAPH}/me?fields=user_id,username,account_type`, body })
-  const stage = (image = false) => {
-    steps.push({ url: `${BROKER}/api/instagram/uploads`, method: 'POST', body: {
+  const stage = (image = false, trial?: string) => {
+    steps.push({ url: `${BROKER}/v1/instagram/uploads`, method: 'POST', body: {
       video: { upload_url: 'https://storage.example/video?signature=fake', public_url: 'https://storage.example/video.mp4' },
       ...(image ? { cover: { upload_url: 'https://storage.example/cover?signature=fake', public_url: 'https://storage.example/cover.jpg' } } : {})
     }, inspect: (init) => {
       expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
-      expect(JSON.parse(String(init.body))).toEqual({ video_size: 19, cover_size: image ? 24 : null })
+      expect(JSON.parse(String(init.body))).toEqual({ video_size: 19, cover_size: image ? 24 : null, upload_pass: 'sealed-pass' })
     } })
     steps.push({ url: 'https://storage.example/video?signature=fake', method: 'PUT', inspect: async (init) => {
       expect(new Headers(init.headers).has('authorization')).toBe(false)
@@ -117,7 +117,7 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
     steps.push({ url: `${GRAPH}/123/media`, method: 'POST', body: { id: '900' }, inspect: (init) => {
       const form = new URLSearchParams(String(init.body))
       expect(Object.fromEntries(form)).toEqual({ media_type: 'REELS', video_url: 'https://storage.example/video.mp4', caption: INPUT.caption,
-        ...(image ? { cover_url: 'https://storage.example/cover.jpg' } : { thumb_offset: '800' }) })
+        ...(image ? { cover_url: 'https://storage.example/cover.jpg' } : { thumb_offset: '800' }), ...(trial ? { trial_params: trial } : {}) })
     } })
   }
   const publish = () => steps.push({ url: `${GRAPH}/123/media_publish`, method: 'POST', body: { id: '789' }, inspect: (init) => {
@@ -126,23 +126,28 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
   const published = async () => {
     await fs.writeFile(join(project, 'instagram-publish.json'), JSON.stringify({ schemaVersion: 1, versions: { v1: { state: 'published', accountId: '123', containerId: '900', inputHash: '0'.repeat(64), post: POST } } }))
   }
+  /** The sign-in service's link (docs/signin.md): Instagram's page for app 456, back through the service. */
+  const link = (sealed: string, change: Record<string, string> = {}, origin = 'https://www.instagram.com') => {
+    const u = new URL(`${origin}/oauth/authorize`)
+    u.search = new URLSearchParams({ client_id: '456', redirect_uri: `${BROKER}/v1/instagram/callback`, response_type: 'code', scope: SCOPES.join(','), state: sealed, ...change }).toString()
+    return u.toString()
+  }
   const oauth = (permissions = SCOPES, account: unknown = PROFILE) => {
     let state = ''
     let loopback = ''
     let challenge = ''
-    steps.push({ url: `${BROKER}/api/instagram/oauth/start`, method: 'POST', inspect: (init) => {
+    steps.push({ url: `${BROKER}/v1/instagram/start`, method: 'POST', respond: async (init) => {
       const body = JSON.parse(String(init.body))
-      expect(body.app_id).toBe('456')
       expect(body.code_challenge_method).toBe('S256')
       expect(body).not.toHaveProperty('client_secret')
       state = body.state; loopback = body.loopback_uri; challenge = body.code_challenge
       expect(new URL(loopback).hostname).toBe('127.0.0.1')
+      return Response.json({ authorize_url: link('sealed-by-the-service') })
     } })
     browser = async (raw) => {
       const url = new URL(raw)
       expect(url.origin + url.pathname).toBe('https://www.instagram.com/oauth/authorize')
-      expect(url.searchParams.get('scope')?.split(',')).toEqual(SCOPES)
-      expect(url.searchParams.get('redirect_uri')).toBe(`${BROKER}/api/instagram/oauth/callback`)
+      expect(url.searchParams.get('state')).toBe('sealed-by-the-service')
       const callback = new URL(loopback)
       const malformedStatus = await new Promise<number | undefined>((resolve, reject) => {
         const req = httpRequest(callback, { path: 'http://[', signal: AbortSignal.timeout(10_000) }, (res) => {
@@ -158,14 +163,16 @@ async function world(opts: { dev?: boolean; enabled?: boolean; backend?: string;
       callback.searchParams.set('state', state)
       expect((await fetch(callback)).status).toBe(200)
     }
-    steps.push({ url: `${BROKER}/api/instagram/oauth/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 60 * DAY / 1000, permissions }, inspect: (init) => {
+    steps.push({ url: `${BROKER}/v1/instagram/complete`, method: 'POST', body: { access_token: TOKEN, token_type: 'bearer', expires_in: 60 * DAY / 1000, permissions, upload_pass: 'sealed-pass' }, inspect: (init) => {
       const body = JSON.parse(String(init.body))
-      expect(body.state).toBe(state)
+      expect(body.handoff).toBe('fabricated-handoff-123456')
       expect(createHash('sha256').update(body.code_verifier).digest('base64url')).toBe(challenge)
     } })
     if (SCOPES.every((s) => permissions.includes(s))) steps.push({ url: `${GRAPH}/me?fields=user_id,username,account_type,profile_picture_url`, body: account })
   }
-  return { dir, project, version, store, service, steps, calls, seed, profile, stage, finished, publish, published, oauth,
+  /** A start answered with `url` instead of Instagram's own page for this app. */
+  const badLink = (url: string) => steps.push({ url: `${BROKER}/v1/instagram/start`, method: 'POST', body: { authorize_url: url } })
+  return { dir, project, version, store, service, steps, calls, seed, profile, stage, finished, publish, published, oauth, link, badLink,
     cancelAtEncryption: () => { cancelDuringEncryption = true },
     tick: (ms: number) => { now += ms }, done: () => expect(steps).toEqual([]) }
 }
@@ -255,8 +262,8 @@ describe('Instagram fixture HTTP', () => {
     await w.seed(); w.profile({ ...PROFILE, account_type: 'PERSONAL' })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'IG_PROFESSIONAL' }); w.done()
   })
-  it('blocks all network and browser work when the developer gate is off', async () => {
-    const w = await world({ dev: false })
+  it('blocks all network and browser work while Instagram isn’t open', async () => {
+    const w = await world({ enabled: false })
     await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_DISABLED' })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'IG_DISABLED' })
     await expect(w.service.insights('fixture', 1, '789')).rejects.toMatchObject({ code: 'IG_DISABLED' })
@@ -264,12 +271,29 @@ describe('Instagram fixture HTTP', () => {
     expect(await w.service.session()).toEqual({ connected: false })
     expect(w.calls).toEqual([])
   })
-  it('blocks a disabled setting and insecure keychain before OAuth', async () => {
-    const w = await world({ enabled: false })
-    await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_DISABLED' })
+  it('blocks an insecure keychain before OAuth', async () => {
     const insecure = await world({ backend: 'basic_text' })
     await expect(insecure.service.connect()).rejects.toMatchObject({ code: 'IG_SECURE_STORAGE' })
-    expect([...w.calls, ...insecure.calls]).toEqual([])
+    expect(insecure.calls).toEqual([])
+  })
+  it('opens only Instagram’s own sign-in page for this app, sending the person back through the service', async () => {
+    const w = await world()
+    // the browser stand-in throws if it is opened, so IG_RESPONSE here also means nothing was opened
+    for (const url of [w.link('s', {}, 'https://instagram.example'), w.link('s', { client_id: '999' }), w.link('s', { redirect_uri: 'https://evil.example/v1/instagram/callback' })]) {
+      w.badLink(url)
+      await expect(w.service.connect()).rejects.toMatchObject({ code: 'IG_RESPONSE' })
+    }
+    expect(await w.store.load()).toBeNull(); w.done()
+  })
+  it('posts a trial reel and keeps that it was one', async () => {
+    const w = await world(); await w.seed(); w.profile(); w.stage(false, '{"graduation_strategy":"MANUAL"}'); w.finished(); w.publish()
+    const post = await w.service.publish({ ...INPUT, trial: { graduation: 'MANUAL' } })
+    expect(post).toEqual({ ...POST, trial: { graduation: 'MANUAL' } })
+    const outcomes = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
+    expect(outcomes.versions.v1['789']).toMatchObject({ platform: 'instagram', trial: { graduation: 'MANUAL' } })
+    // asking again returns the same post, still a trial
+    w.profile()
+    expect(await w.service.publish({ ...INPUT, trial: { graduation: 'MANUAL' } })).toEqual(post); w.done()
   })
   it('publishes a local video with its JPEG cover and makes retries return the same post', async () => {
     const w = await world(); await w.seed(); w.profile(); w.stage(true); w.finished(); w.publish()
@@ -396,7 +420,7 @@ describe('Instagram fixture HTTP', () => {
   })
   it('refuses an unapproved signed upload host before sending video bytes', async () => {
     const w = await world(); await w.seed(); w.profile()
-    w.steps.push({ url: `${BROKER}/api/instagram/uploads`, method: 'POST', body: { video: { upload_url: 'https://unapproved.example/upload', public_url: 'https://storage.example/video.mp4' } } })
+    w.steps.push({ url: `${BROKER}/v1/instagram/uploads`, method: 'POST', body: { video: { upload_url: 'https://unapproved.example/upload', public_url: 'https://storage.example/video.mp4' } } })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'IG_UPLOAD_HOST' }); w.done()
   })
   it('does not overwrite a corrupt outcomes file', async () => {
