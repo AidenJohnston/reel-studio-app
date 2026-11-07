@@ -132,6 +132,72 @@ export function Composer({
   const pct = job ? Math.min(1, job.overall / 100, reached) : 0
   const left = job ? timeLeftWords(job) : null
 
+  // the moment chip: attached (filled, with its ×) or offered (outlined, with Point at a spot under its caret)
+  const moment = plain ? null : chip || auto ? (
+    <span className="tchip" data-auto={chip ? undefined : true} data-testid="moment-chip">
+      {chip?.spot && <span className="spot-n">{chip.spot.n}</span>}
+      {/* "At 0:07", as a note's moment is said (aiNoteText): a bare time beside the box read as a clock */}
+      At {chip ? chipLabel(chip) : clock(second)}
+      <button
+        className="x"
+        aria-label="Remove the moment"
+        onClick={() => {
+          if (chip) onChip(null)
+          else onDropAuto()
+          inputRef.current?.focus()
+        }}
+        data-testid="moment-remove"
+      >
+        <Icon name="x" size={12} stroke={2} />
+      </button>
+    </span>
+  ) : (
+    <span className="tchip-split">
+      <button
+        className="tchip suggest"
+        onClick={() => {
+          onChip({ at: playhead.get() })
+          inputRef.current?.focus()
+        }}
+        aria-label={`Attach the moment on screen, ${clock(second)}`}
+        title="About this moment"
+        disabled={checking}
+        data-testid="moment-suggest"
+      >
+        <Icon name="plus" size={12} stroke={2} />
+        At {clock(second)}
+      </button>
+      <button
+        ref={caret}
+        className="tchip suggest caret"
+        aria-label="More ways to say where"
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        disabled={checking}
+        onClick={() => setMenu((m) => !m)}
+        data-testid="moment-menu"
+      >
+        <Icon name="chevron-down" size={12} stroke={2} />
+      </button>
+      <PopMenu open={menu} onClose={() => setMenu(false)} anchor={caret} label="Say where" style={{ left: 0, bottom: 'calc(100% + 6px)', width: 220 }} origin="bottom left">
+        <button
+          className="mi"
+          role="menuitem"
+          onClick={() => {
+            setMenu(false)
+            onPoint()
+          }}
+          data-testid="point-at-spot"
+        >
+          <Icon name="comment-plus" size={16} /> Point at a spot
+          <span className="r">
+            <kbd className="kbd">C</kbd>
+          </span>
+        </button>
+      </PopMenu>
+    </span>
+  )
+
   return (
     <div className={`cbox${focus ? ' focus' : ''}${connect ? ' bare' : ''}`} data-note-drop={!connect || undefined} data-testid={connect ? undefined : 'note-drop'}>
       <div className={`stripwrap${strip ? ' on' : ''}`}>
@@ -220,21 +286,26 @@ export function Composer({
       </div>
       {connect ?? (
         <>
+          {/* the note's context in one row above its words: the version it changes and its moment. Beside the words,
+              the moment left them three lines at the narrowest window (UI climb, consistency re-score 3). */}
           {base && (
-            <span className="base-chip" data-testid="note-base">
-              New version from Version {base.n}
-              <button
-                className="x"
-                aria-label={`Change the newest version instead of Version ${base.n}`}
-                onClick={() => {
-                  base.onClear()
-                  inputRef.current?.focus()
-                }}
-                data-testid="note-base-clear"
-              >
-                <Icon name="x" size={12} stroke={2} />
-              </button>
-            </span>
+            <div className="cctx">
+              <span className="base-chip" data-testid="note-base">
+                New version from Version {base.n}
+                <button
+                  className="x"
+                  aria-label={`Change the newest version instead of Version ${base.n}`}
+                  onClick={() => {
+                    base.onClear()
+                    inputRef.current?.focus()
+                  }}
+                  data-testid="note-base-clear"
+                >
+                  <Icon name="x" size={12} stroke={2} />
+                </button>
+              </span>
+              {moment}
+            </div>
           )}
           <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
           {alert && (
@@ -247,70 +318,7 @@ export function Composer({
               <Icon name="paperclip" size={18} />
             </button>}
             <div className="cfield">
-              {plain ? null : chip || auto ? (
-                <span className="tchip" data-auto={chip ? undefined : true} data-testid="moment-chip">
-                  {chip?.spot && <span className="spot-n">{chip.spot.n}</span>}
-                  {/* "At 0:07", as a note's moment is said (aiNoteText): a bare time beside the box read as a clock */}
-                  At {chip ? chipLabel(chip) : clock(second)}
-                  <button
-                    className="x"
-                    aria-label="Remove the moment"
-                    onClick={() => {
-                      if (chip) onChip(null)
-                      else onDropAuto()
-                      inputRef.current?.focus()
-                    }}
-                    data-testid="moment-remove"
-                  >
-                    <Icon name="x" size={12} stroke={2} />
-                  </button>
-                </span>
-              ) : (
-                <span className="tchip-split">
-                  <button
-                    className="tchip suggest"
-                    onClick={() => {
-                      onChip({ at: playhead.get() })
-                      inputRef.current?.focus()
-                    }}
-                    aria-label={`Attach the moment on screen, ${clock(second)}`}
-                    title="About this moment"
-                    disabled={checking}
-                    data-testid="moment-suggest"
-                  >
-                    <Icon name="plus" size={12} stroke={2} />
-                    At {clock(second)}
-                  </button>
-                  <button
-                    ref={caret}
-                    className="tchip suggest caret"
-                    aria-label="More ways to say where"
-                    aria-haspopup="menu"
-                    aria-expanded={menu}
-                    disabled={checking}
-                    onClick={() => setMenu((m) => !m)}
-                    data-testid="moment-menu"
-                  >
-                    <Icon name="chevron-down" size={12} stroke={2} />
-                  </button>
-                  <PopMenu open={menu} onClose={() => setMenu(false)} anchor={caret} label="Say where" style={{ left: 0, bottom: 'calc(100% + 6px)', width: 220 }} origin="bottom left">
-                    <button
-                      className="mi"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenu(false)
-                        onPoint()
-                      }}
-                      data-testid="point-at-spot"
-                    >
-                      <Icon name="comment-plus" size={16} /> Point at a spot
-                      <span className="r">
-                        <kbd className="kbd">C</kbd>
-                      </span>
-                    </button>
-                  </PopMenu>
-                </span>
-              )}
+              {!base && moment}
               <textarea
                 ref={inputRef}
                 rows={1}

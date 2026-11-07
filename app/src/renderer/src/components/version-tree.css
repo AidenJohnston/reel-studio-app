@@ -35,19 +35,27 @@
 /* the notes header's Notes | Versions switch sits at its far end */
 .notes-h .segmented { margin-left: auto; }
 
-/* in the note box: the version the next note changes, when it is not the newest. Inset 12 px like the attachment
-   chips (reel.css .cbox .att-chips) so the two rows share the box's inner edge, and 24 px tall like the moment chip
-   beside the words, with its × a 24 px target that hangs into the padding as the moment chip's does. */
+/* in the note box: the version the next note changes, when it is not the newest, with the note's moment beside it
+   (Composer.tsx .cctx). The row is inset 12 px like the attachment chips (reel.css .cbox .att-chips) so the rows share
+   the box's inner edge; the chip is 24 px tall like the moment chip, its × a 24 px target hanging into its padding. */
+.cctx { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 12px 0; }
 .base-chip {
-  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; height: 24px; padding: 0 8px; margin: 12px 0 0 12px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px;
   background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; white-space: nowrap;
 }
 .base-chip .x { border: 0; background: none; width: 24px; height: 24px; margin: 0 -8px 0 -4px; padding: 0; display: grid; place-items: center; border-radius: 999px; color: var(--ink-3); cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .base-chip .x:hover { background: var(--wash); color: var(--ink); } }
 
 /* Combine */
-.cb-with { display: flex; align-items: center; gap: 12px; font-weight: 600; }
-.cb-with .input { max-width: 200px; }
+/* "Take parts from" and its picker on the parts' edges: the label where theirs start, the picker drawn like the
+   model chips (connect.css .mchip: a 28 px pill, ring, up-down mark) and ending where their switches end */
+.cb-with { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; }
+.cb-with select.input {
+  width: auto; max-width: 200px; height: 28px; padding: 0 32px 0 12px; border: 0; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 560; background-position: right 12px center; background-size: 12px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23474D49' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5'/%3E%3Cpath d='m7 9 5-5 5 5'/%3E%3C/svg%3E");
+}
+.cb-with select.input:focus { box-shadow: var(--focus); }
 .cb-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .cb-part { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }
 .cb-part > span { font-weight: 600; }

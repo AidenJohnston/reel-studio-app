@@ -30,8 +30,11 @@ export interface ConsistencyFinding {
 
 export interface ConsistencyAllow {
   rule: ConsistencyRule
-  /** Matched with closest(): the element or anything inside it. */
+  /** Matched with closest(): the element or anything inside it, unless `exact`. */
   selector: string
+  /** Only the matched element itself: an exception about a container's own box (its top padding under the title bar)
+   * must not cover everything inside it. */
+  exact?: boolean
   /** off-scale only: limit the entry to these properties. */
   props?: string[]
 }
@@ -96,7 +99,8 @@ export function auditConsistency(opts: { allow: ConsistencyAllow[]; scale: Consi
       if (a.rule !== rule) return false
       if (a.props && prop && !a.props.includes(prop)) return false
       try {
-        return !!el.closest(a.selector) || (!!other && !!other.closest(a.selector))
+        const hit = (e: Element) => (a.exact ? e.matches(a.selector) : !!e.closest(a.selector))
+        return hit(el) || (!!other && hit(other))
       } catch {
         return false
       }

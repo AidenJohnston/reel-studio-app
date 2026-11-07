@@ -15,6 +15,13 @@ export const SCALE: ConsistencyScale = {
 
 export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason: string })[] = [
   {
+    rule: 'off-scale',
+    selector: '.log > :first-child',
+    exact: true,
+    props: ['margin-top'],
+    reason: "margin-top: auto (reel.css .log): a short log sits just above the note box, so a version's words and the box that answers them stay together; the used length is the room left."
+  },
+  {
     rule: 'row-heights',
     selector: '.vt-row',
     reason: "A version's row in the Versions view is one 48 px button, the row itself (VersionTree.tsx .vt-main), with its two text actions beside it at the 24 px target minimum: a list row and its links, not peer buttons in a toolbar."
@@ -50,18 +57,21 @@ export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason:
   {
     rule: 'off-scale',
     selector: '.tb-main',
+    exact: true,
     props: ['padding-right'],
     reason: "The page's gutter plus its scroll bar's (--gutter + --sbw, shell.css): the title bar's actions end where the page's content does, beside the scroll bar the page always keeps room for."
   },
   {
     rule: 'off-scale',
     selector: '.tb-side',
+    exact: true,
     props: ['padding-left'],
     reason: "Room for the macOS traffic lights (shared/chrome.ts): the system draws them there, at its own position."
   },
   {
     rule: 'off-scale',
     selector: '#sidebar, main.main, .fr-stage, .fr-welcome',
+    exact: true,
     props: ['padding-top', 'margin-top'],
     reason: "The title-bar row's height (52 px, shared/chrome.ts, measured from T3 Code's row so the traffic lights centre on it): what sits under the row starts there."
   },

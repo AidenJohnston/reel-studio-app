@@ -72,7 +72,7 @@
 .rr-unit { font-size: var(--fs-md); font-weight: 560; color: var(--ink-2); }
 .rr-stat > span { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 .rr-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-width: 64ch; color: var(--ink-2); }
-.rr-limits { margin-top: 10px; max-width: 64ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
+.rr-limits { margin-top: 12px; max-width: 64ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 
 /* ---- the niche chat (NicheSheet) ---- */
 .ns-head { display: grid; gap: 4px; }

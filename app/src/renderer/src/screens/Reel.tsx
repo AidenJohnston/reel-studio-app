@@ -851,7 +851,9 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           quiet={!!compare || !!drawer || aiOff}
           why={job ? (d.job?.kind === 'propose' ? 'Wait for your editor to finish looking.' : 'Wait for this version to finish.') : undefined}
           onSaveCaption={savePost}
-          onCover={() => openDrawer('cover')}
+          // Change opens Cover in the edit already open, so a waiting hand edit stays the one being changed (openDrawer
+          // starts a new edit). An older version on screen shows its cover without Change: Cover edits the newest.
+          onCover={older ? undefined : () => (drawer ? setDrawer('cover') : openDrawer('cover'))}
         />
       )}
       <span className="rt-more">

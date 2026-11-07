@@ -70,6 +70,11 @@ test('fails if a consistency rule misses its case or flags the near miss beside 
     expect(allowed.allowed).toBe(1)
     expect(allowed.findings.some((f) => f.selector === '#pad-off')).toBe(false)
     expect(allowed.findings.some((f) => f.selector === '#gap-off')).toBe(true)
+    // an exact entry covers its element only, not what is inside it (#pad-off sits in its cell, a div of the page)
+    const exact = await page.evaluate(auditConsistency, { allow: [{ rule: 'off-scale' as const, selector: 'body > div', exact: true }], scale: SCALE })
+    expect(exact.findings.some((f) => f.selector === '#pad-off')).toBe(true)
+    const inside = await page.evaluate(auditConsistency, { allow: [{ rule: 'off-scale' as const, selector: 'body > div' }], scale: SCALE })
+    expect(inside.findings.some((f) => f.selector === '#pad-off')).toBe(false)
   } finally {
     await app.close()
   }

@@ -1,5 +1,7 @@
 /* Compare › Side by side (SideBySide.tsx): two phones of one size, in step, over one control row */
-.modal.wide:has(.sbs) { width: min(760px, 94vw); }
+/* as wide as the two pictures and the gap between them, so the pictures' outer edges are the title's and the control
+   row's (a fixed 760 px left each picture inset in its column) */
+.modal.wide:has(.sbs) { width: min(calc(2 * min(58vh, 560px) * 9 / 16 + 16px + 2 * var(--space-s)), 94vw); }
 .sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
 .sbs-phone { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
 /* a true 9:16 phone picture at any window size: the width is the column's or the one a 58vh-tall phone would have,
