@@ -146,6 +146,8 @@ describe('usage data', () => {
     await first.usage.record(JOB)
     first.state.sharing = { ...ON, on: false } // saved, and the app quit before the delete
     const restarted = createUsage({ dir: () => first.dir, sharing: async () => first.state.sharing, version: '1.2.3', platform: 'win32', log: () => {}, endpoint: null })
+    // even before (or without) the cleanup, nothing reads as waiting while sharing is off
+    expect(await restarted.read()).toEqual([])
     void restarted.reconcile()
     expect(await restarted.read()).toEqual([])
     expect(existsSync(first.dir)).toBe(false)
@@ -156,7 +158,18 @@ describe('usage data', () => {
     const oldId = readFileSync(join(dir, 'install-id'), 'utf8')
     const off = { ...ON, on: false }
     state.sharing = off // the delete never happened
-    await usage.changeSharing(off, ON, async () => { state.sharing = ON })
+    await usage.changeSharing(ON, async () => { state.sharing = ON })
+    expect(await usage.read()).toEqual([])
+    await usage.record(JOB)
+    expect((await usage.read()).map((l) => l.install)).not.toContain(oldId)
+  })
+  // fails if two quick changes each act on the choice saved before either (review of the audit fix)
+  it('fails if an opt-out and a quick opt-in in a row leave the old queue behind', async () => {
+    const { dir, state, usage } = setup(ON)
+    await usage.record(JOB)
+    const oldId = readFileSync(join(dir, 'install-id'), 'utf8')
+    const off = { ...ON, on: false }
+    await Promise.all([usage.changeSharing(off, async () => { state.sharing = off }), usage.changeSharing(ON, async () => { state.sharing = ON })])
     expect(await usage.read()).toEqual([])
     await usage.record(JOB)
     expect((await usage.read()).map((l) => l.install)).not.toContain(oldId)

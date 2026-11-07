@@ -174,14 +174,25 @@ export function createUsage(d: UsageDeps) {
   }
 
   /**
-   * Settings › Privacy changed sharing from `before` to `after`; `save` writes the settings. Turned on, the folder is
-   * emptied first, so a queue an earlier opt-out failed to delete (a quit mid-way, a locked file) is never reused.
-   * Turned off or narrowed, the settings are saved first and the lines go after.
+   * Settings › Privacy changed sharing to `after`; `save` writes the settings. One step on the queue, from reading
+   * the saved choice to the cleanup, so two changes in a row can't each act on a stale one. Turned on, the folder is
+   * emptied first, so a queue an earlier opt-out failed to delete (a quit mid-way, a locked file) is never reused;
+   * if that fails, nothing is saved. Turned off or narrowed, the settings are saved first and the lines go after.
    */
-  async function changeSharing(before: DataSharing, after: DataSharing, save: () => Promise<unknown>): Promise<void> {
-    if (after.on && !before.on) await serial(removeAll)
-    await save()
-    await applySharing(after)
+  function changeSharing(after: DataSharing, save: () => Promise<unknown>): Promise<void> {
+    return serial(async () => {
+      if (after.on && !(await d.sharing()).on) await removeAll()
+      await save()
+      await apply(after)
+    })
+  }
+
+  /** The waiting lines, as the saved choice allows: nothing with sharing off, even if a delete failed. */
+  function read(): Promise<UsageLine[]> {
+    return serial(async () => {
+      const s = await d.sharing()
+      return s.on ? (await lines()).filter((l) => s[l.part]) : []
+    })
   }
 
   /** Posts what is waiting to the endpoint and drops what it accepted. No endpoint, or sharing off: nothing. */
@@ -206,7 +217,7 @@ export function createUsage(d: UsageDeps) {
     })
   }
 
-  return { record, read: () => serial(lines), applySharing, reconcile, changeSharing, send, clear: () => applySharing({ asked: true, on: false, usage: false, quality: false, posts: false }) }
+  return { record, read, applySharing, reconcile, changeSharing, send, clear: () => applySharing({ asked: true, on: false, usage: false, quality: false, posts: false }) }
 }
 
 export type Usage = ReturnType<typeof createUsage>

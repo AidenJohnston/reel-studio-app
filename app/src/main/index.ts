@@ -1066,7 +1066,7 @@ function registerIpc(): void {
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
     const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
     // off deletes what was kept and a part switched off loses its lines; on starts from an empty folder (usage.ts)
-    await usage.changeSharing((await loadSettings()).sharing, sharing, () => saveSettings({ sharing }))
+    await usage.changeSharing(sharing, () => saveSettings({ sharing }))
     if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })

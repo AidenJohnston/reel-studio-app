@@ -216,21 +216,21 @@ export class ResultsRefresh {
     for (const source of this.o.sources) {
       const memory = s.platforms[source.platform]
       const now = this.now()
-      if (memory.state.state === 'waiting' && Date.parse(memory.state.until) > now) continue
-      // another account's followers, or followers of an account no longer connected, are not kept; a new account's
-      // are read in this run rather than a day later
-      const forgetAudience = (keep: string | null) => {
-        if (s.audience.some((x) => x.platform === source.platform && x.accountId !== keep)) {
-          s.audience = s.audience.filter((x) => x.platform !== source.platform || x.accountId === keep)
-          memory.audienceAt = null
-        }
+      // account() reads only local state, so it is asked even while the platform waits out a rate limit
+      let account: string | null = null
+      let lookup: { failed: unknown } | null = null
+      try { account = await source.account() } catch (e) { lookup = { failed: e } }
+      // another account's followers, or those of an account no longer connected (or that can't be told), are not
+      // kept; a new account's are read at its next run rather than a day later
+      if (s.audience.some((x) => x.platform === source.platform && (lookup || x.accountId !== account))) {
+        s.audience = s.audience.filter((x) => x.platform !== source.platform || (!lookup && x.accountId === account))
+        memory.audienceAt = null
       }
-      let account: string | null
-      try { account = await source.account() } catch (e) {
-        memory.state = errorKind(e) === 'reconnect' ? { state: 'reconnect', message: message(e, 'Connect again in Settings.') } : { state: 'not-connected' }
+      if (memory.state.state === 'waiting' && Date.parse(memory.state.until) > now) continue
+      if (lookup) {
+        memory.state = errorKind(lookup.failed) === 'reconnect' ? { state: 'reconnect', message: message(lookup.failed, 'Connect again in Settings.') } : { state: 'not-connected' }
         continue
       }
-      forgetAudience(account)
       if (account === null) { memory.state = { state: 'not-connected' }; continue }
       const mine = posts.filter((p) => p.platform === source.platform && p.accountId === account)
       const due = mine

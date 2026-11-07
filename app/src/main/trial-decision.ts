@@ -96,15 +96,20 @@ export function decideTrial(one: InsightPost, two: InsightPost): TrialVerdict {
   const lift = trail > 0 ? (lead - trail) / trail * 100 : Infinity
   const p = twoSidedP(ca, cb)
   const views = `Try 1 got ${count(a)} ${a === 1 ? 'view' : 'views'} and Try 2 got ${count(b)}.`
-  if (ca === cb || p >= MAX_P || lift < MIN_LIFT_PERCENT) {
-    const older = ageOne > ageTwo ? 1 : 2
+  const older = ageOne > ageTwo ? 1 : 2
+  // the comparison took the leader's extra time out, and the reason says so
+  const fair = adjusted && winner === older ? ', allowing for its extra time up' : ''
+  if (ca === cb) {
     // equal after the adjustment: the older try's whole lead is what its extra time could have given it
-    return { kind: 'too-close', reason: adjusted && ca === cb && (older === 1 ? a > b : b > a)
+    return { kind: 'too-close', reason: adjusted && (older === 1 ? a > b : b > a)
       ? `${views} Try ${older} has been up longer, which is enough to explain its lead, so neither one wins.`
       : `${views} A gap that small could be luck, so neither one wins.` }
   }
+  if (p >= MAX_P)
+    return { kind: 'too-close', reason: `${views} Try ${winner} is ahead${fair}, but with ${count(a + b)} views between them a gap that size could be luck, so neither one wins.` }
+  if (lift < MIN_LIFT_PERCENT)
+    return { kind: 'too-close', reason: `${views} Try ${winner} got ${Math.round(lift)}% more${fair}, short of the ${MIN_LIFT_PERCENT}% lead a winner needs.` }
   const liftText = Number.isFinite(lift) ? `${Math.round(lift)}% more` : 'all of them'
-  const fair = adjusted && winner === (ageOne > ageTwo ? 1 : 2) ? ', allowing for its extra time up' : ''
   return {
     kind: 'winner', winner, liftPercent: Number.isFinite(lift) ? lift : null, pValue: p,
     reason: `${views} Try ${winner} got ${liftText}${fair}. With ${count(a + b)} views between them, a gap this big happens by chance less than 1 time in 20.`

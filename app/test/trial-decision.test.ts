@@ -55,9 +55,16 @@ describe('decideTrial', () => {
   it('takes the older try’s extra time out before comparing', () => {
     expect(decideTrial(post(48_000, at(48)), post(60_000, at(60), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('Try 2 has been up longer') })
     // a real lead survives: 80,000 views in 60 hours is at least 64,000 at 48, a third ahead
-    expect(decideTrial(post(48_000, at(48)), post(80_000, at(60), 2))).toMatchObject({ kind: 'winner', winner: 2, reason: expect.stringContaining('allowing for its extra time up') })
+    const v = decideTrial(post(48_000, at(48)), post(80_000, at(60), 2))
+    expect(v).toMatchObject({ kind: 'winner', winner: 2, reason: expect.stringContaining('allowing for its extra time up') })
+    if (v.kind === 'winner') expect(v.liftPercent).toBeCloseTo(100 / 3, 6)
+    // the same in the other order, Try 1 older: 75 views in 60 hours is 60 at 48, and 60 against 40 could be luck
+    // (raw, 75 against 40 would have won)
+    expect(decideTrial(post(75, at(60)), post(40, at(48), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('could be luck') })
+    // clearly not luck but under the lift floor once adjusted: 70,000 in 60 hours is 56,000 at 48, 17% ahead
+    expect(decideTrial(post(48_000, at(48)), post(70_000, at(60), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('short of the 20% lead') })
   })
-  // fails if the younger try is credited with the older try's leveling off: it must beat the older try's whole count
+  // guards the fix against over-correcting: the younger try must beat the older try's whole count, no more
   it('holds the younger try to the older try’s whole count', () => {
     expect(decideTrial(post(55_000, at(48)), post(50_000, at(60), 2)).kind).toBe('too-close')
     expect(decideTrial(post(61_000, at(48)), post(50_000, at(60), 2))).toMatchObject({ kind: 'winner', winner: 1 })

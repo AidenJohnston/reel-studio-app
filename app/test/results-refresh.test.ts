@@ -142,9 +142,13 @@ it('shows followers only for the account connected now, and reads a new accountâ
   const w = await world([])
   let account: string | null = 'A'
   const reads: string[] = []
+  let limited = false
   const ig: ResultsSource = {
     platform: 'instagram', account: async () => account, read: async () => undefined,
-    audience: async () => { reads.push(account!); return { accountId: account!, followers: { age: [{ key: account!, value: 1 }], gender: [], country: [], city: [] } } }
+    audience: async () => {
+      if (limited) throw Object.assign(new Error('Wait.'), { code: 'IG_RATE_LIMIT', userMessage: 'Wait.' })
+      reads.push(account!); return { accountId: account!, followers: { age: [{ key: account!, value: 1 }], gender: [], country: [], city: [] } }
+    }
   }
   let now = T0
   const r = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [ig], now: () => now })
@@ -157,7 +161,10 @@ it('shows followers only for the account connected now, and reads a new accountâ
   await r.refresh()
   expect(reads).toEqual(['A', 'B'])
   expect(await r.audience()).toMatchObject([{ accountId: 'B', followers: { age: [{ key: 'B' }] } }])
-  // disconnected: nothing shows, and B's followers aren't kept after the next run
+  // disconnected while waiting out a rate limit: B's followers still aren't kept, so reconnecting B shows nothing old
+  now += 2 * DAY
+  limited = true
+  expect((await r.refresh()).platforms.instagram).toMatchObject({ state: 'waiting' })
   account = null
   expect(await r.audience()).toEqual([])
   await r.refresh()
