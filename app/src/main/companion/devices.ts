@@ -94,6 +94,17 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
   const listeners = new Set<() => void>()
   let saving: Promise<void> = Promise.resolve()
 
+  const removedListeners = new Set<(ids: string[]) => void>()
+  const removed = (ids: string[]): void => {
+    for (const l of removedListeners) {
+      try {
+        l(ids)
+      } catch {
+        /* a listener's mistake never breaks a removal */
+      }
+    }
+  }
+
   const changed = (): void => {
     for (const l of listeners) {
       try {
@@ -167,7 +178,10 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     const f = await load()
     const keep = f.devices.filter((d) => now() - d.lastSeenAt < DEVICE_IDLE_MS)
     if (keep.length !== f.devices.length) {
+      const gone = f.devices.filter((d) => !keep.includes(d)).map((d) => d.id)
       f.devices = keep
+      // before the save, so a failed write still ends what they have open
+      removed(gone)
       await save()
       changed()
     }
@@ -204,8 +218,13 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     return 'fresh'
   }
 
+  // Accepted nonces live in memory only, so after a restart a request captured just before it would pass the nonce
+  // check again. Nothing signed before this launch is accepted instead: a replay from before the restart is too old,
+  // and the page, refused, reads the clock again and signs afresh (client.ts call). One second of overlap remains
+  // (time is whole seconds), shorter than any restart of the app.
+  const launchS = Math.floor(now() / 1000)
   const timeOk = (time: unknown): time is number =>
-    typeof time === 'number' && Number.isInteger(time) && Math.abs(time - now() / 1000) <= CLOCK_SKEW_S
+    typeof time === 'number' && Number.isInteger(time) && time >= launchS && Math.abs(time - now() / 1000) <= CLOCK_SKEW_S
 
   const view = ({ secret: _s, ...d }: Stored): Device => ({ ...d, scopes: [...d.scopes] })
 
@@ -320,9 +339,24 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const before = f.devices.length
       f.devices = f.devices.filter((d) => d.id !== id)
       if (f.devices.length === before) return false
+      removed([id])
       await save()
       changed()
       return true
+    },
+
+    /**
+     * Still paired and not idle past DEVICE_IDLE_MS, without waiting: an open event stream asks before every write,
+     * since a device can cross its idle limit while its stream stays open and no request comes to sweep it.
+     */
+    isActive(id: string): boolean {
+      return !!data && data.devices.some((d) => d.id === id && now() - d.lastSeenAt < DEVICE_IDLE_MS)
+    },
+
+    /** Devices removed by hand or for being idle: their open streams and downloads must end (companion-ipc.ts). */
+    onRemoved(cb: (ids: string[]) => void): () => void {
+      removedListeners.add(cb)
+      return () => removedListeners.delete(cb)
     },
 
     onChange(cb: () => void): () => void {

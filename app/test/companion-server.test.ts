@@ -227,6 +227,32 @@ describe('calls', () => {
   })
 })
 
+describe('after a restart', () => {
+  it('fails if a request captured before the app restarted runs again after it', async () => {
+    // the same devices file, read by the app before and after a restart ten seconds later
+    const dir = mkdtempSync(join(tmpdir(), 'rs-devices-restart-'))
+    let t = Date.now()
+    const before = createDeviceRegistry({ dir, secrets: null, log: () => {}, now: () => t })
+    const p = before.startPairing('phone', ['view', 'note'])
+    const secret = fromHex(p.secret, 32)!
+    const paired = await before.completePairing({ pairing: p.pairing, name: 'iPhone', sig: sign(secret, pairMessage(p.pairing, 'iPhone')) })
+    if (typeof paired === 'string') throw new Error(paired)
+    await before.flushed()
+    const body = JSON.stringify({ method: 'projects.note', args: ['family-time', { requestId: 'req-00000009', text: 'cut this' }] })
+    const time = Math.floor(t / 1000)
+    const h = { device: paired.id, time, nonce: 'a'.repeat(32), sig: sign(secret, callMessage(paired.id, time, 'a'.repeat(32), body)) }
+    expect(await before.checkCall(h, body)).toMatchObject({ id: paired.id })
+
+    t += 10_000
+    const after = createDeviceRegistry({ dir, secrets: null, log: () => {}, now: () => t })
+    expect(await after.checkCall(h, body)).toBe('stale')
+    // the page, refused, signs again with the clock as it is now, and that goes through
+    const now = Math.floor(t / 1000)
+    const fresh = { device: paired.id, time: now, nonce: 'b'.repeat(32), sig: sign(secret, callMessage(paired.id, now, 'b'.repeat(32), body)) }
+    expect(await after.checkCall(fresh, body)).toMatchObject({ id: paired.id })
+  })
+})
+
 describe('media', () => {
   it('serves byte ranges of a version with a signed link, and refuses an unsigned or expired one', async () => {
     const d = await pairDevice()
@@ -304,6 +330,17 @@ describe('events', () => {
     server.revoke(d.device)
     expect(await s.next()).toEqual({ type: 'revoked' })
     await s.ended
+  })
+
+  it('fails if a device that went idle past its limit keeps hearing events on a stream it opened before', async () => {
+    const d = await pairDevice()
+    const s = await stream(eventsPath(d))
+    expect(await s.next()).toEqual({ type: 'ready' })
+    clock += DEVICE_IDLE_MS + 1
+    server.publish(contractEvent('job:event', { type: 'done', jobId: 'job-1', slug: 'family-time', summary: 'done' })!)
+    expect(await s.next()).toEqual({ type: 'revoked' })
+    await s.ended
+    expect(s.events).toEqual([])
   })
 
   it('refuses an unsigned stream', async () => {
