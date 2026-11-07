@@ -11,6 +11,7 @@ import { NOTE_DROP_DONE } from '../App'
 import { BrandMark } from './brand'
 import { Icon } from './icons'
 import { byKeyboard, reducedMotion } from './motion'
+import { deviceRatio, usePhoneShape } from './Phone'
 import { planAnswerer, type AnswererMark } from './plan-who'
 import { Qr } from './SendToPhone'
 import { Button, PickFiles, Spinner, useFileDrop } from './ui'
@@ -197,7 +198,7 @@ function Lines({
           <li key={i} className={`pl-row${l.done ? ' done' : ''}`}>
             <label className="pl-tick">
               <input type="checkbox" checked={!!l.done} disabled={readOnly} onChange={() => onTick(kind, i)} aria-label={`${one} ${i + 1} done`} data-testid={`plan-${kind}-tick-${i}`} />
-              <span aria-hidden>{l.done ? <Icon name="check" size={11} stroke={2.6} /> : numbered ? i + 1 : null}</span>
+              <span aria-hidden>{l.done ? <Icon name="check" size={10} stroke={2.6} /> : numbered ? i + 1 : null}</span>
             </label>
             <PlanField value={l.text} label={`${one} ${i + 1}`} readOnly={readOnly} onCommit={(t) => onCommit(kind, i, t)} />
           </li>
@@ -343,8 +344,16 @@ export function PlannedStage({ plan, onFiles }: { plan: ReactNode; onFiles: (pat
     window.dispatchEvent(new Event(NOTE_DROP_DONE))
     onFiles(paths)
   })
+  // with no plan yet, the zone is the phone's own slot: its shape and height, where the video will play
+  const [shape] = usePhoneShape()
   return (
-    <div className={`planned${drop.over ? ' over' : ''}${plan ? ' with-plan' : ''}`} {...drop.props} data-video-drop data-testid="planned-stage">
+    <div
+      className={`planned${drop.over ? ' over' : ''}${plan ? ' with-plan' : ''}`}
+      style={{ '--slot-ratio': deviceRatio(shape) } as React.CSSProperties}
+      {...drop.props}
+      data-video-drop
+      data-testid="planned-stage"
+    >
       <div className="pd">
         {plan && (
           <div className="pd-plan" data-plan-main>
@@ -354,7 +363,7 @@ export function PlannedStage({ plan, onFiles }: { plan: ReactNode; onFiles: (pat
         )}
         {/* remounts when the plan comes or goes, so the zone fades in at its new place instead of jumping there */}
         <div key={plan ? 'beside' : 'alone'} className="pd-drop" data-testid="drop-zone">
-          <Icon name="video" size={22} />
+          <Icon name="video" size={24} />
           <div className="pd-words">
             <h2>Drop the video you filmed</h2>
             <p>A few takes are fine. Retakes and pauses come out.</p>
@@ -395,13 +404,13 @@ export function PlanChip({ plan }: { plan: ReelPlan }) {
  * Choose your editor (screens/Connect.tsx), which comes back here with the note box focused.
  */
 export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: ProviderInfo | null; hasPlan: boolean; onConnect?: () => void }) {
-  // with no editor, the two it can be; connected, the one that answers
-  const marks: AnswererMark[] = onConnect ? ['claude', 'openai'] : [planAnswerer(provider, 'auto')?.mark].filter((m): m is AnswererMark => !!m)
+  // with no editor, the two it can be; connected, the one that answers, by name (PlanWho)
+  const marks: AnswererMark[] = onConnect ? ['claude', 'openai'] : []
   const line = onConnect
     ? hasPlan
       ? 'Connect your editor to change the plan in a chat.'
       : 'Your editor plans it with you: a question or two, then hooks to pick from, the beats and the shots.'
-    : 'Say what it’s about. Your editor asks a question or two, then gives you hooks to pick from, the beats and the shots.'
+    : 'Plan it first: say what it’s about, and your editor asks a question or two, then gives you hooks to pick from, the beats and the shots.'
   return (
     <div className="pl-empty" data-testid={onConnect ? 'plan-connect-step' : 'plan-greeting'}>
       {marks.length > 0 && (
@@ -409,7 +418,9 @@ export function PlanEmpty({ provider, hasPlan, onConnect }: { provider: Provider
           {marks.map((m) => (m === 'server' ? <Icon key={m} name="server" size={20} /> : <BrandMark key={m} name={m} size={20} />))}
         </span>
       )}
-      <h3>{hasPlan ? 'Change the plan together' : 'Plan it before you film'}</h3>
+      {!onConnect && <PlanWho provider={provider} />}
+      {/* beside "Drop the video you filmed", the other way in: planning reads as the choice for a video not filmed yet */}
+      <h3>{hasPlan ? 'Change the plan together' : onConnect ? 'Plan it before you film' : 'Not filmed yet?'}</h3>
       <p {...(!hasPlan && { 'data-testid': 'plan-empty' })}>{line}</p>
       {onConnect && (
         <Button onClick={onConnect} data-testid="plan-connect">

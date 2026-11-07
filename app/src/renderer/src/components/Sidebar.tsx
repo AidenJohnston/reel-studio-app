@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { ProviderInfo } from '../../../shared/api'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import type { ProjectSummary, ProviderInfo } from '../../../shared/api'
+import { reel } from '../api'
+import { onReelsChanged } from './reels-changed'
+import { stateOf } from '../screens/home-state'
 import type { Go } from '../nav'
 import { Icon, type IconName } from './icons'
 import { UpdateButton } from './UpdateButton'
@@ -37,16 +40,45 @@ export const providerName = (p: ProviderInfo | null): string | null => {
   return p.label
 }
 
+/** Narrower than this, the sidebar starts as its rail, so the reel keeps the room (the lead's call, 2026-11-06, for
+ * Sam to keep or undo: at 1100 px the open sidebar took a fifth of the window). */
+const RAIL_BELOW = 1200
+/** The person's own choice, once they have folded or opened the sidebar: it wins at every width. null: none yet. */
+function chosenRail(): boolean | null {
+  try {
+    const v = localStorage.getItem(RAIL_KEY)
+    return v === '1' ? true : v === '0' ? false : null
+  } catch {
+    return null
+  }
+}
+
 /**
- * The sidebar folds to a 64 px rail (Cmd/Ctrl+\, remembered). The column takes its new width at once and the
- * page and the title row slide from where they were, so nothing reflows while it moves; from the keyboard it just changes.
+ * The sidebar folds to a 64 px rail (Cmd/Ctrl+\, remembered). Until the person folds or opens it themselves it follows
+ * the window: the rail below RAIL_BELOW, open above. The column takes its new width at once and the page and the
+ * title row slide from where they were, so nothing reflows while it moves; from the keyboard it just changes.
  */
 export function useRail(): [boolean, (byShortcut?: boolean) => void] {
-  const [rail, setRail] = useState(() => localStorage.getItem(RAIL_KEY) === '1')
+  const [rail, setRail] = useState(() => chosenRail() ?? window.innerWidth < RAIL_BELOW)
+  useEffect(() => {
+    const follow = (): void => {
+      if (chosenRail() !== null) return
+      const narrow = window.innerWidth < RAIL_BELOW
+      // the rail hides the Recent list and the resize edge: focus on either moves to the toggle first, as a fold by
+      // hand does
+      const focused = document.activeElement
+      if (narrow && (focused?.classList.contains('side-resize') || focused?.closest('.side-recent'))) sidebarToggle()?.focus()
+      setRail(narrow)
+    }
+    window.addEventListener('resize', follow)
+    return () => window.removeEventListener('resize', follow)
+  }, [])
   // byKeyboard() does not count Cmd/Ctrl shortcuts (motion.ts), so the shortcut says so itself
   const toggle = useCallback((byShortcut = false) => {
-    // folding hides the resize edge: focus on it moves to the toggle first, so it isn't left on nothing
-    if (document.activeElement?.classList.contains('side-resize')) sidebarToggle()?.focus()
+    // folding hides the resize edge and the Recent list: focus on either moves to the toggle first, so it isn't left
+    // on nothing
+    const focused = document.activeElement
+    if (focused?.classList.contains('side-resize') || focused?.closest('.side-recent')) sidebarToggle()?.focus()
     const moving = Array.from(document.querySelectorAll<HTMLElement>('.main, .tb-main'))
     // where each is on screen now, partway through a slide included
     const before = moving.map((el) => el.getBoundingClientRect().left)
@@ -184,19 +216,127 @@ function SideResizer() {
   )
 }
 
+/** How many reels the sidebar lists: enough to move between the ones in hand, not a second Reels page. */
+const RECENT_MAX = 6
+
+/**
+ * The reels in hand, newest first, under the nav (as T3 Code lists its threads), so moving from one reel to another
+ * doesn't go through Reels. A dot says which are being made or need you; the open one is marked. Folded to the rail,
+ * it hides with the labels.
+ */
+/** A New reel nothing was done with yet (no video, no word said, its first name): main discards it when it is left
+ * (store.ts isUntouchedPlanned), and listed here it only repeated the New reel button above. */
+const untouched = (r: ProjectSummary): boolean => r.noVideo && r.title === 'New reel' && r.updatedAt === r.createdAt
+
+function SideRecent({ current, go, onListed }: { current: string | null; go: Go; onListed: (listed: boolean) => void }) {
+  const [list, setList] = useState<ProjectSummary[] | null>(null)
+  /** the jobs already seen: a new one (a first edit, a Resume, a note) reads the list once, as a reel it starts on
+   * may be listed as stopped, or not at all (a New reel keeps its slug when its video comes in) */
+  const seenJobs = useRef(new Set<string>())
+  useEffect(() => {
+    let alive = true
+    // one read at a time: a burst of events asks once more after the read in flight, so answers arrive in order and a
+    // late one never puts back an older list
+    let reading = false
+    let again = false
+    const load = (): void => {
+      if (reading) return void (again = true)
+      reading = true
+      reel.projects
+        .list()
+        .then(
+          (p) => {
+            if (alive) setList(p.filter((r) => !untouched(r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_MAX))
+          },
+          () => alive && setList([])
+        )
+        .finally(() => {
+          reading = false
+          if (alive && again) {
+            again = false
+            load()
+          }
+        })
+    }
+    load()
+    // a reel made, finished or stopped anywhere changes its line here too: a job's first status, a kept render, and how
+    // it ends or pauses (its words, tools and moments change nothing listed)
+    const off = reel.jobs.onEvent((e) => {
+      if (e.type === 'status') {
+        if (seenJobs.current.has(e.jobId)) return
+        seenJobs.current.add(e.jobId)
+        return load()
+      }
+      if ((e.type === 'render' && !e.draft) || e.type === 'done' || e.type === 'error' || e.type === 'cancelled' || e.type === 'paused') load()
+    })
+    const offQueue = reel.queue.onChange(load)
+    const offRenamed = onReelsChanged(load)
+    return () => {
+      alive = false
+      off()
+      offQueue()
+      offRenamed()
+    }
+  }, [current])
+  const listed = !!current && !!list?.some((p) => p.slug === current)
+  // before paint, so no frame shows neither Reels nor the reel's row marked while moving between reels
+  useLayoutEffect(() => onListed(listed), [listed, onListed])
+  if (!list?.length) return null
+  return (
+    <nav className="side-recent" aria-label="Recent reels" data-testid="side-recent">
+      <h2 className="side-h">Recent</h2>
+      {list.map((p) => {
+        const s = stateOf(p)
+        const dot = s === 'making' ? 'making' : s === 'failed' || (s === 'paused' && !p.pausedFor) ? 'needs' : null
+        return (
+          <button
+            key={p.slug}
+            className={p.slug === current ? 'on' : undefined}
+            aria-current={p.slug === current ? 'page' : undefined}
+            onClick={() => go({ name: 'reel', slug: p.slug })}
+            title={p.title}
+            data-testid="side-reel"
+          >
+            {/* the nav's 16 px icon slot holds the state dot, so the names start where the nav's labels do */}
+            {/* told apart by shape, not colour alone: a turning ring while it is made, the alert mark when it needs you */}
+            <span className="side-slot">
+              {dot === 'making' && <span className="spin side-making" role="img" aria-label="Being made" />}
+              {dot === 'needs' && (
+                <span className="side-needs" role="img" aria-label="Needs you">
+                  <Icon name="alert" size={14} />
+                </span>
+              )}
+            </span>
+            <span className="lbl">{p.title}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
 export function Sidebar({
   section,
+  current,
+  rail,
   go,
   provider,
   userName,
   onNewReel
 }: {
   section: string
+  /** the reel on screen, marked in Recent */
+  current: string | null
+  /** folded to the rail, which hides Recent */
+  rail: boolean
   go: Go
   provider: ProviderInfo | null
   userName: string | null
   onNewReel: () => void
 }) {
+  // the open reel's row in Recent, when it is there and showing, is the one marked; otherwise Reels is
+  const [listed, setListed] = useState(false)
+  const reelRowShown = listed && !rail
   const name = providerName(provider)
   const who = userName?.trim() || 'You'
   const inSettings = section === 'settings'
@@ -213,11 +353,15 @@ export function Sidebar({
           <Icon name="plus" size={16} stroke={1.75} />
           <span className="lbl">New reel</span>
         </button>
-        {NAV.map((n) => (
+        {NAV.map((n) => {
+          // a reel open is marked by its own row in Recent, not also by Reels: one row selected at a time (Craft, goal 4:
+          // two read as current). A reel not in Recent (untouched, older than its six) or the rail hiding it: Reels.
+          const here = section === n.key && !(n.key === 'home' && reelRowShown)
+          return (
           <button
             key={n.key}
-            className={section === n.key ? 'on' : undefined}
-            aria-current={section === n.key ? 'page' : undefined}
+            className={here ? 'on' : undefined}
+            aria-current={here ? 'page' : undefined}
             onClick={() => go({ name: n.key })}
             title={n.label}
             data-testid={`nav-${n.key}`}
@@ -225,8 +369,10 @@ export function Sidebar({
             <Icon name={n.icon} size={16} stroke={1.75} />
             <span className="lbl">{n.label}</span>
           </button>
-        ))}
+          )
+        })}
       </nav>
+      <SideRecent current={current} go={go} onListed={setListed} />
       <div className="side-foot">
         <div className="side-update">
           <UpdateButton />

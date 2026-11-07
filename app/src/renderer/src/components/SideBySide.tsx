@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import type { VersionInfo } from '../../../shared/api'
 import { clock } from '../../../shared/progress'
 import { Icon } from './icons'
@@ -30,7 +30,8 @@ const DRIFT_S = 0.12
  * Compare › Side by side: both versions play at once, in step, from where the player was. The sound comes from one
  * of them (the person picks which); one Play and one scrubber drive both. Done hands the time back to the player.
  */
-export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: VersionInfo; b: VersionInfo; nameOf: (v: VersionInfo) => string; at: number; onOpen: () => void; onDone: (seconds: number) => void; onOne: (seconds: number) => void }) {
+/** onDone's `keep` is the version the person kept (Keep Version N); closing the dialog any other way keeps none. */
+export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: VersionInfo; b: VersionInfo; nameOf: (v: VersionInfo) => string; at: number; onOpen: () => void; onDone: (seconds: number, keep?: number) => void; onOne: (seconds: number) => void }) {
   const titleId = useId()
   const refs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)]
   const [sound, setSound] = useState<'a' | 'b'>('a')
@@ -101,7 +102,8 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
     for (const r of refs) r.current?.pause()
     then(clamp(lead()?.currentTime ?? time))
   }
-  const done = leave(onDone)
+  const done = leave((t) => onDone(t))
+  const keep = (n: number) => leave((t) => onDone(t, n))
 
   return (
     <Modal onClose={done} wide testid="side-by-side" labelledBy={titleId}>
@@ -142,12 +144,14 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
           max={end}
           step={0.01}
           value={Math.min(time, end || time)}
+          style={{ '--pct': `${end ? (Math.min(time, end) / end) * 100 : 0}%` } as CSSProperties}
           onChange={(e) => seek(Number(e.target.value))}
           aria-label="Where both versions are"
-          aria-valuetext={clock(time)}
+          aria-valuetext={clock(Math.floor(time))}
           data-testid="sbs-scrub"
         />
-        <span className="sbs-time">{clock(time)}</span>
+        {/* whole seconds passed, as the player's clock counts them (Reel.tsx): at 7.5 s both say 0:07 */}
+        <span className="sbs-time">{clock(Math.floor(time))}</span>
         <Segmented
           label="Sound from"
           value={sound}
@@ -163,8 +167,13 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
         <Button kind="tertiary" onClick={leave(onOne)} data-testid="sbs-one">
           Compare in one player
         </Button>
-        <Button kind="primary" onClick={done} data-testid="sbs-done">
-          Done comparing
+        {/* the choice comparing is for, as the one-player compare's Keep Version N: "Done comparing" left it unsaid
+            (Sense re-score 4). The newer one is the primary, as it is on screen when comparing starts. */}
+        <Button kind="secondary" onClick={keep(a.n)} data-testid={`sbs-keep-${a.n}`}>
+          Keep Version {a.n}
+        </Button>
+        <Button kind="primary" onClick={keep(b.n)} data-testid="sbs-done">
+          Keep Version {b.n}
         </Button>
       </div>
     </Modal>

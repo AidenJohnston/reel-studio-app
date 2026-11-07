@@ -14,12 +14,13 @@ import { test, expect, _electron as electron, type ElectronApplication, type Loc
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
+import { APP_DIR, expectViewport, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
 import { makePastEditsHome, videoFolder } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
 import { OUT, commit, counts, outlinedShot, sourceFor, writeScreen, type Finding, type ScreenResult } from './layout-audit/report'
 import { FakeHub } from '../../ai/test/fakeHub'
+import type { UpdateState } from '../src/shared/update'
 
 const ALL_SIZES: [number, number][] = [
   [1100, 720],
@@ -129,7 +130,7 @@ async function setSize(app: ElectronApplication, page: Page, [w, h]: [number, nu
     if (win.isFullScreen()) win.setFullScreen(false)
     win.setContentSize(s.w, s.h)
   }, { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight]), { timeout: 5000 }).toEqual([w, h])
+  await expectViewport(page, w, h, 5000)
   await settle(page)
 }
 
@@ -181,6 +182,8 @@ async function audit(screen: Screen): Promise<void> {
           await expect(state.ready(page)).toBeVisible({ timeout: 30_000 })
         } catch (e) {
           result.unreached.push({ state: state.id, why: String(e instanceof Error ? e.message : e).replace(/\u001b\[\d+m/g, '').split('\n').filter((l) => /\S/.test(l)).slice(0, 2).join(' ').slice(0, 240) })
+          // what the window showed instead, so an unreached state can be put down to its cause on a machine nobody watches
+          await page.screenshot({ path: join(OUT, 'unreached', `${state.id}.png`) }).catch(() => {})
           return false
         }
         result.states.push(state.id)
@@ -284,18 +287,19 @@ const SCREENS: Screen[] = [
 // the same channel main uses (update:state), as the nightly 0.1.3-nightly.20261028.8 would see 20261028.9.
 const NIGHTLY = '0.1.3-nightly.20261028.8'
 const NEXT_NIGHTLY = '0.1.3-nightly.20261028.9'
-async function sendUpdate(app: ElectronApplication, patch: Record<string, unknown>): Promise<void> {
-  const state = {
+// Typed, so a change to UpdateState fails the typecheck here: an old shape (no `notes`) made the sidebar's update
+// button throw while rendering, the page went blank, and every update state went unreached.
+async function sendUpdate(app: ElectronApplication, patch: Partial<UpdateState>): Promise<void> {
+  const state: UpdateState = {
     status: 'available',
     mode: 'page',
+    keyNeeded: false,
     autoCheck: true,
     currentVersion: NIGHTLY,
     availableVersion: NEXT_NIGHTLY,
     downloadedVersion: null,
-    releaseNotes: [{ version: NEXT_NIGHTLY, items: ['The update note no longer covers the AI status.', 'Subtitles keep their case.'], totalItems: 2 }],
-    olderNotes: 0,
-    releases: [],
     releaseUrl: `https://github.com/example/reel-studio-nightly/releases/tag/v${NEXT_NIGHTLY}`,
+    notes: [{ version: NEXT_NIGHTLY, date: '2026-10-28', text: '- The update note no longer covers the AI status.\n- Subtitles keep their case.', newer: true }],
     downloadPercent: null,
     message: null,
     errorContext: null,
@@ -479,7 +483,7 @@ SCREENS.push({
       id: 'reel-shape-menu',
       enter: async ({ page }) => {
         await openReel(page)
-        await page.getByTestId('shape').first().click()
+        await page.getByTestId('view-menu').first().click()
       },
       ready: (page) => page.getByRole('menu').first()
     },

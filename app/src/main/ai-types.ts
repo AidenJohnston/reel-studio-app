@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, NoteRunnerInfo, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
@@ -54,6 +54,25 @@ export interface TryRequest {
   variable?: TryVariable
 }
 
+/** ai propose-archive.ts: what the editor reads (engine footage digest) and what it proposes. */
+export interface ArchiveRequest {
+  files: { ref: string; name: string; duration: number; lines: { s: number; e: number; text: string }[] }[]
+  limit?: number
+}
+export interface ArchiveCandidate {
+  id: string
+  title: string
+  hook: string
+  why: string
+  spans: { ref: string; t0: number; t1: number; said: string }[]
+  seconds: number
+}
+export interface ArchiveProposal {
+  candidates: ArchiveCandidate[]
+  notes: string
+  attempts: number
+}
+
 /** What the editor reads to find more reels in one video (ai/src/propose.ts). */
 export interface ProposeReelsRequest {
   /** work/transcript.json, with the analysis's retake groups */
@@ -83,7 +102,7 @@ export interface EngineHost {
   captureWebsite?(
     url: string,
     outPath: string,
-    opts?: { layout?: 'phone' | 'desktop' }
+    opts?: { layout?: 'phone' | 'desktop'; signal?: AbortSignal }
   ): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>
   /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
    * Only the app has footage folders (app main/footage-sources.ts). */
@@ -182,6 +201,8 @@ export interface AI {
   proposeTry?(req: TryRequest, signal?: AbortSignal): Promise<{ variable: unknown; value: unknown; reason: unknown }>
   /** More reels from one video. `onEvent` hears the waits for the editor's answer. Optional: older packages lack it. */
   proposeReels?(req: ProposeReelsRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ReelProposal>
+  /** Reels across the whole footage archive (ai propose-archive.ts). Optional: older packages lack it. */
+  proposeFromArchive?(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal>
   styleRules(): Promise<StyleRule[]>
   /** The removed rule and where it was, for Undo; null when it was already gone. */
   /** The removed rule and where it was, for Undo; null when it was already gone. `forget` (default true): learning
@@ -211,6 +232,9 @@ export interface AI {
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
+  /** Settings › Editor › How notes run. Optional: older packages run every note in Reel Studio's own editor. */
+  noteRunner?(): Promise<NoteRunnerInfo>
+  setNoteRunner?(runner: NoteRunnerInfo['runner']): Promise<NoteRunnerInfo>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */
   retireSignInWithChatGPT?(): Promise<boolean>
   /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */

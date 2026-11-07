@@ -75,6 +75,14 @@ describe('frozen image assets', () => {
     expect(placed.isError, placed.content).toBe(false);
     expect(asked).toEqual([ref]);
     expect((await loadProject(dir)).broll.at(-1)!.asset).toMatch(FROZEN);
+    // and from a note, the way the app runs one: the note's host (index.ts editHost) must carry the import too
+    const model = new ScriptedModel([
+      { toolCalls: [call('add_broll', { ...place(ref), anchor: { from: 'w33', to: 'w34' } })] },
+      { toolCalls: [call('finish', { summary_for_user: 'Added the bread.' })] },
+    ]);
+    await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model, finalRender: false }).applyNote(dir, 'show the bread from my footage', () => undefined);
+    expect(asked).toEqual([ref, ref]);
+    expect((await loadProject(dir)).broll.find((b) => b.anchor.from === 'w33')?.asset).toMatch(FROZEN);
     // without the app (the AI package on its own) nothing can reach a footage folder
     host.importFootage = undefined;
     const refused = await executeTool(ctx, 'add_broll', place(ref));

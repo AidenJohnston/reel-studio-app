@@ -106,8 +106,24 @@ export function mergeVersions(input: { ours: Project; theirs: Project; take: Mer
   // a sound effect lands on one moment (#72): a kept word's start, the cut into a kept word, or a kept picture
   if (edit.sfx) {
     const pictures = new Set(edit.broll.map((b) => b.id));
+    // A sound "at the cut into w" plays where the reel jumps to w (tools.ts isCut). The other version's cut can keep
+    // w but play straight into it, with no jump: the engine then finds no moment for the sound and leaves it out.
+    const jumpsTo = (wid: string): boolean => {
+      const k = edit.cut.keep.findIndex((r) => 'from' in r && r.from === wid);
+      if (k <= 0) return false;
+      const before = edit.cut.keep[k - 1];
+      if ('clip' in before) return true;
+      const prev = idx.byId.get(before.to);
+      const here = idx.byId.get(wid);
+      return prev === undefined || here === undefined || here !== prev + 1 || idx.words[here].source !== idx.words[prev].source;
+    };
     edit.sfx = edit.sfx.filter((s, i) => {
-      const word = 'word' in s.at ? s.at.word : 'cut' in s.at ? s.at.cut : null;
+      if ('cut' in s.at) {
+        if (jumpsTo(s.at.cut)) return true;
+        report.push(`Dropped sound effect ${i + 1} (${s.sound}) because there is no cut into ${s.at.cut} any more.`);
+        return false;
+      }
+      const word = 'word' in s.at ? s.at.word : null;
       if (word !== null ? kept.has(word) : pictures.has((s.at as { broll: string }).broll)) return true;
       report.push(`Dropped sound effect ${i + 1} (${s.sound}) because ${word !== null ? `its word ${word}` : `its picture ${(s.at as { broll: string }).broll}`} is not kept.`);
       return false;

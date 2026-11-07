@@ -24,6 +24,16 @@ export interface PhoneIpcDeps {
 const EMAIL_LIMIT = 20_000_000 // most mail services stop at 20-25 MB per message
 
 let current: ShareServer | null = null
+/**
+ * Every start and stop of the link, one after another. Two quick "Make a new code" clicks would otherwise both stop
+ * the old link, both start one, and the first new link would be forgotten, still open, until its 15 minutes ran out.
+ */
+let lifetime: Promise<unknown> = Promise.resolve()
+function inTurn<T>(run: () => Promise<T>): Promise<T> {
+  const next = lifetime.then(run, run)
+  lifetime = next.catch(() => {})
+  return next
+}
 /** Cloud saves running now, by the id the renderer gave each, so Cancel stops the right one. */
 const saves = new Map<string, AbortController>()
 
@@ -66,10 +76,14 @@ function addresses(test: boolean): LanAddress[] {
   return lanAddresses()
 }
 
-export async function stopPhoneShare(): Promise<void> {
+async function stopNow(): Promise<void> {
   const s = current
   current = null
   await s?.stop()
+}
+
+export function stopPhoneShare(): Promise<void> {
+  return inTurn(stopNow)
 }
 
 // Drive saves still copying. Quitting waits for them (index.ts, before-quit): a process that exits mid-save
@@ -120,8 +134,11 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
   })
 
   /** Opens the one link: a video or a plan, on the network asked for (or the likeliest one). */
-  async function open(what: { file: string; caption: string; title: string } | { plan: ReelPlan; title: string }, address: unknown): Promise<PhoneShare> {
-    await stopPhoneShare()
+  function open(what: { file: string; caption: string; title: string } | { plan: ReelPlan; title: string }, address: unknown): Promise<PhoneShare> {
+    return inTurn(() => openNow(what, address))
+  }
+  async function openNow(what: { file: string; caption: string; title: string } | { plan: ReelPlan; title: string }, address: unknown): Promise<PhoneShare> {
+    await stopNow()
     const list = addresses(d.test)
     if (!list.length)
       throw {
@@ -164,7 +181,8 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
   // read from the reel's own app.json, never from the page: the link only ever shows what the reel holds
   d.handle('phone:startPlan', async (_e, slug: unknown, address?: unknown): Promise<PhoneShare> => {
     if (typeof slug !== 'string') throw { code: 'BAD_INPUT', userMessage: 'Try sending the plan again.' }
-    return open(await d.plan(slug), address)
+    // the read is in the link's turn too, so a Stop sent while it runs still comes after this start
+    return inTurn(async () => openNow(await d.plan(slug), address))
   })
 
   d.handle('phone:stop', () => stopPhoneShare())

@@ -10,6 +10,9 @@ import { clipboardFiles, filesFromArgv } from './intake'
 import { basename, dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { assertIpcSender, validateIpcArgs } from './ipc-guard'
+import { createRequire } from 'node:module'
+import { createOutsideAccess, type OutsideAccess } from './outside-access'
+import { createOutsideReels } from './outside-reels'
 import {
   appIconPath,
   binDir,
@@ -91,6 +94,7 @@ import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
 import { chooseSeries, groupReel } from './series'
+import { createArchiveReels, libraryRef, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -279,6 +283,17 @@ const host: EngineHost = {
   importFootage: (ref) => importFootage(ref)
 }
 
+// Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
+const archiveReels = createArchiveReels({
+  jobs: { start: (...a) => jobs.start(...a), get: (id) => jobs.get(id) },
+  ai: () => ai,
+  runEngine,
+  root: reelStudioRoot,
+  file: () => join(settingsDir(), 'archive-reels.json'),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryRef(ref, libraryDir())),
+  startFirstEdit: (slug, init) => startFirstEdit(slug, init)
+})
+
 /** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
 async function importFootage(ref: string): Promise<string> {
   const { abs } = await footageSources.resolve(ref)
@@ -326,6 +341,18 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
+/** Settings › Storage is moving the library: no job or manual edit may start until the new place is in use, or it
+ * would take its project folder from the old place and its bookkeeping from the new one. */
+let rootMoving = false
+const refuseWhileRootMoves = (): void => {
+  if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+}
+/** Counts finished library moves. Work that reads paths, awaits, then starts a job takes this first and checks it
+ * just before jobs.start: a move that finished in between means its paths point at the old place. */
+let rootGeneration = 0
+const sameRootSince = (generation: number): void => {
+  if (generation !== rootGeneration) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try again.' }
+}
 const footageSources = createFootageSources({
   load: async () => (await loadSettings()).footageSources,
   save: async (footageSources) => void (await saveSettings({ footageSources })),
@@ -438,7 +465,10 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
-  () => updates.assertCanStartWork(),
+  () => {
+    refuseWhileRootMoves()
+    updates.assertCanStartWork()
+  },
   footageIndex,
   // and so do the pictures of each change made before its draft
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
@@ -602,7 +632,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,
@@ -722,12 +752,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
+    const st = await readAppState(slug)
     const copyIn = async (title: string, files: string[]) => {
       const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
+      // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
+      const keepOrder = st.fromArchive ? ['--keep-order'] : []
       await runEngine(
         'init',
-        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(files),
+        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
         // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
         (p) =>
@@ -741,7 +774,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
-    const st = await readAppState(slug)
     const from = st.from
     if (from) await prepareReel(slug, from, () => copyIn(from.about.title, [from.media]), { resumed: !initArgs, signal })
     else if (!existsSync(join(dir, 'project.json'))) {
@@ -762,6 +794,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
+    await seedFromArchive(slug)
     startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
@@ -817,10 +851,13 @@ function safeFileName(s: string): string {
 }
 
 async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
+  const generation = rootGeneration
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
+  // the library moved while the versions were read: `dir` is the old place
+  sameRootSince(generation)
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -912,6 +949,91 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
   }
   const before = await snap(n - 1)
   return before ? versionRows(before, after, { before: await length(n - 1), after: await length(n) }) : null
+}
+
+/** A note from the Reel screen, or from another AI app through Settings › Let other AI apps use Reel Studio
+ * (outside-access.ts): either way it goes through the reel's note queue, so it shows, waits, runs and stops the same. */
+/** `steer` (Add now from the window, or add_to_running_note): the words go into the note running now when they can;
+ * otherwise they wait like any note, and `added` is false. */
+async function sendNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown): Promise<{ jobId: string | null; queued?: boolean; added?: boolean; noEditor?: true }> {
+  // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
+  // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
+  const admit = async () => {
+    const dir = projectDir(slug)
+    // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
+    // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
+    const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
+    // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
+    const typed = at !== undefined ? typedMoment(typedText) : null
+    let note = typed ? typed.rest : typedText
+    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+    if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
+    let moment: NoteMoment | undefined
+    if (at !== undefined) {
+      let asked: NoteMoment
+      try {
+        asked = parseMoment(at)
+      } catch (e) {
+        throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
+      }
+      if (typed) asked = { ...asked, at: typed.at }
+      // checked against the render it names, the one the pop-up read its words from; its words and
+      // quote come from that render, never from the page
+      const c = checkMoment(asked, await readTimeline(slug, asked.version))
+      if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
+      moment = c.moment
+      if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
+      // A setting global by nature ("smaller captions") goes without its moment, which would hide it
+      // from applyNote's no-model fast path; the chat shows the words as typed.
+      if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
+    }
+    return { typedText, note, files, base, moment }
+  }
+  const active = await ai.active().catch(() => null)
+  if (!active || !active.connected || active.id === 'none') {
+    // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
+    // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
+    return noteQueue.run(slug, async () => {
+      const { typedText, note, files, moment } = await admit()
+      // the chat keeps the words as typed, "At 0:05:" included
+      await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
+      const reply = noAiReply(note, files.length)
+      await addChat(slug, 'editor', reply.text, undefined, reply.actions)
+      return { jobId: null, noEditor: true as const }
+    })
+  }
+  const given = Number.isInteger(onVersion) ? Number(onVersion) : undefined
+  return noteQueue.send(slug, async () => {
+    const { note, files, base, moment } = await admit()
+    // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote). A branched note
+    // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
+    const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
+    return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
+  }, given ?? 0, { steer: steer === true })
+}
+
+/** Settings › Editor › "Let other AI apps use Reel Studio" (outside-access.ts); made at startup, once `ai` is loaded. */
+let outside: OutsideAccess | null = null
+function createOutside(): OutsideAccess {
+  const controls = createOutsideReels({
+    // checked as the Reel screen's own send is (ipc-guard.ts): a reel id, the words, a saved version to branch from
+    send: (slug, text, base, steer) => {
+      validateIpcArgs('projects:note', [slug, text, undefined, undefined, undefined, base])
+      return sendNote(slug, text, undefined, undefined, undefined, base, steer)
+    },
+    running: (slug) => jobs.forSlug(slug),
+    stop: (jobId, slug) => noteQueue.stop(jobId, slug)
+  })
+  return createOutsideAccess({
+    dir: join(settingsDir(), 'mcp'),
+    platform: process.platform,
+    command: process.execPath,
+    // the relay ships with the AI package (ai/relay); the app copies it beside the access file each time access turns on
+    relaySource: () => fs.readFile(createRequire(__filename).resolve('@reelstudio/ai/relay/reelstudio-mcp.js'), 'utf8'),
+    controls,
+    onChange: (st) => broadcast('outside:change', st),
+    log
+  })
 }
 
 function registerIpc(): void {
@@ -1065,9 +1187,8 @@ function registerIpc(): void {
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
     const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
-    await saveSettings({ sharing })
-    // off deletes what was kept; a part switched off loses its lines
-    await usage.applySharing(sharing)
+    // off deletes what was kept and a part switched off loses its lines; on starts from an empty folder (usage.ts)
+    await usage.changeSharing(sharing, () => saveSettings({ sharing }))
     if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
@@ -1164,20 +1285,27 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
-    if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
-    const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
-    await fs.mkdir(root, { recursive: true })
-    // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
-    await footageIndex.pause()
+    refuseWhileRootMoves()
+    if (jobs.writing()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
+    // Taken before the first await, so no job can start between this check and the new root being in use.
+    rootMoving = true
     try {
-      if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until your video is finished, then change where videos are kept.' }
-      await saveSettings({ root })
-      setRootOverride(root)
-      await ensureRoot()
-      perms.markTouched()
-      indexLibrary()
+      const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
+      await fs.mkdir(root, { recursive: true })
+      // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
+      await footageIndex.pause()
+      try {
+        await saveSettings({ root })
+        setRootOverride(root)
+        rootGeneration++
+        await ensureRoot()
+        perms.markTouched()
+        indexLibrary()
+      } finally {
+        footageIndex.resume()
+      }
     } finally {
-      footageIndex.resume()
+      rootMoving = false
     }
     return appInfo()
   })
@@ -1319,6 +1447,20 @@ function registerIpc(): void {
     if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
     return (await saveSettings({ checkEdits: on })).checkEdits
   })
+  // Settings › Editor › How notes run: Reel Studio's editor, or the editor in use's own app with Reel Studio's tools
+  handle('ai:noteRunner', async () => (await ai.noteRunner?.()) ?? { runner: 'reelstudio', app: null })
+  handle('ai:setNoteRunner', async (_e, runner: 'reelstudio' | 'app') => {
+    if (!ai.setNoteRunner) throw { code: 'NOT_READY', userMessage: 'This editor runs notes only in Reel Studio.' }
+    return ai.setNoteRunner(runner)
+  })
+  // Settings › Editor › Let other AI apps use Reel Studio
+  handle('outside:status', () => outside!.status())
+  handle('outside:setEnabled', async (_e, on: boolean) => {
+    const st = on ? await outside!.enable() : await outside!.disable()
+    await saveSettings({ outsideApps: st.on })
+    return st
+  })
+  handle('outside:reset', () => outside!.reset())
   handle('ai:openClaudeSignIn', async () => {
     const st = await claudeCode()
     if (st.state === 'ready') return
@@ -1522,64 +1664,12 @@ function registerIpc(): void {
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
   handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown) =>
-    submitNote(slug, text, attachments, at, onVersion, requestedBase, steer))
-  // The note path for the window and for a paired phone (main/companion): one admission, one queue. `steer` (Add now)
-  // comes only from the window: the phone queues every note.
-  async function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }> {
-    // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
-    // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
-    const admit = async () => {
-      const dir = projectDir(slug)
-      // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
-      // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
-      const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
-      // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
-      const typed = at !== undefined ? typedMoment(typedText) : null
-      let note = typed ? typed.rest : typedText
-      if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-      if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
-      let moment: NoteMoment | undefined
-      if (at !== undefined) {
-        let asked: NoteMoment
-        try {
-          asked = parseMoment(at)
-        } catch (e) {
-          throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
-        }
-        if (typed) asked = { ...asked, at: typed.at }
-        // checked against the render it names, the one the pop-up read its words from; its words and
-        // quote come from that render, never from the page
-        const c = checkMoment(asked, await readTimeline(slug, asked.version))
-        if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
-        moment = c.moment
-        if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
-        // A setting global by nature ("smaller captions") goes without its moment, which would hide it
-        // from applyNote's no-model fast path; the chat shows the words as typed.
-        if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
-      }
-      return { typedText, note, files, base, moment }
-    }
-    const active = await ai.active().catch(() => null)
-    if (!active || !active.connected || active.id === 'none') {
-      // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
-      // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      return noteQueue.run(slug, async () => {
-        const { typedText, note, files, moment } = await admit()
-        // the chat keeps the words as typed, "At 0:05:" included
-        await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
-        const reply = noAiReply(note, files.length)
-        await addChat(slug, 'editor', reply.text, undefined, reply.actions)
-        return { jobId: null }
-      })
-    }
-    const given = Number.isInteger(onVersion) ? Number(onVersion) : undefined
-    return noteQueue.send(slug, async () => {
-      const { note, files, base, moment } = await admit()
-      // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote). A branched note
-      // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
-      const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
-      return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
-    }, given ?? 0, { steer: steer === true })
+    sendNote(slug, text, attachments, at, onVersion, requestedBase, steer)
+  )
+  // The note path for a paired phone (main/companion): sendNote, as the window and an outside AI app send. The phone
+  // sends no `steer` (Add now), so its notes always queue.
+  function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown): ReturnType<typeof sendNote> {
+    return sendNote(slug, text, attachments, at, onVersion)
   }
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
@@ -1617,7 +1707,10 @@ function registerIpc(): void {
   })
   handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
     if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
-    await chooseSeries(slug, series)
+    // as a manual edit (projects:update): an Edit it myself job publishes the project it read before its render,
+    // so a series picked meanwhile would be written over while app.json still says it was chosen. Refused (BUSY,
+    // which the picker shows) while a job runs, and no job starts during this write.
+    await jobs.hold(slug, () => chooseSeries(slug, series))
     return detail(slug)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
@@ -1670,6 +1763,7 @@ function registerIpc(): void {
   // a job like any other, so the updater waits for it (main/updater.ts counts running jobs)
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
+    const generation = rootGeneration
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before sharing.' }
     const version = await finishedExportVersion(slug, n)
@@ -1687,6 +1781,8 @@ function registerIpc(): void {
       : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
+    // the versions and project above were read before several awaits: a library move since then makes them stale
+    sameRootSince(generation)
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
@@ -1810,6 +1906,9 @@ function registerIpc(): void {
   })
   handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
   handle('footage:status', () => footageIndex.status())
+  handle('footage:findReels', () => archiveReels.find())
+  handle('footage:reels', () => archiveReels.status())
+  handle('footage:makeReels', (_e, ids: string[]) => archiveReels.make(ids))
 
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()
@@ -2314,6 +2413,10 @@ app.whenReady().then(async () => {
   // fontsDir: Library › Fonts shows each bundled font in its own face
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
+  // first on usage's queue, so nothing reads it before a cut-short opt-out is finished (usage.ts reconcile)
+  void usage.reconcile().catch((err) => log(`[usage] reconcile: ${String(err?.message ?? err)}`))
+  outside = createOutside()
+  if (settings.outsideApps) await outside.enable().catch((e) => log(`[outside] ${String(e?.userMessage ?? e)}`))
   registerIpc()
   void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
   createWindow()
@@ -2392,7 +2495,7 @@ app.on('before-quit', (e) => {
     quitting = true
     footageSources.stop()
     noteQueue.quit()
-    await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop()]).finally(() => app.quit())
+    await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop(), outside?.close()]).finally(() => app.quit())
   })()
 })
 let askingToQuit = false

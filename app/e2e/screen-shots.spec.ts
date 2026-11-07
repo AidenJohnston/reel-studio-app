@@ -8,7 +8,8 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { expectViewport, launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import type { UpdateState } from '../src/shared/update'
 
 const OUT = process.env.REELSTUDIO_SHOTS_OUT
 const ONLY = process.env.REELSTUDIO_SHOTS_STATES ? new Set(process.env.REELSTUDIO_SHOTS_STATES.split(',')) : null
@@ -27,16 +28,17 @@ type State = { id: string; enter: (c: Ctx) => Promise<void>; leave?: (c: Ctx) =>
 
 async function setSize({ app, page }: Ctx, [w, h]: [number, number]): Promise<void> {
   await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([w, h])
+  await expectViewport(page, w, h)
   await page.waitForTimeout(350)
 }
 
 const NIGHTLY = '0.1.3-nightly.20261028.9'
 async function offerNightly({ app }: Ctx): Promise<void> {
-  const state = {
-    status: 'available', mode: 'page', autoCheck: true, currentVersion: '0.1.3-nightly.20261028.8', availableVersion: NIGHTLY, downloadedVersion: null,
-    releaseNotes: [{ version: NIGHTLY, items: ['The update note no longer covers the AI status.', 'Subtitles keep their case.'], totalItems: 2 }],
-    olderNotes: 0, releases: [], releaseUrl: null, downloadPercent: null, message: null, errorContext: null, snoozed: false
+  // typed: an old shape without `notes` blanks the page (the update button throws while rendering)
+  const state: UpdateState = {
+    status: 'available', mode: 'page', keyNeeded: false, autoCheck: true, currentVersion: '0.1.3-nightly.20261028.8', availableVersion: NIGHTLY, downloadedVersion: null,
+    notes: [{ version: NIGHTLY, date: '2026-10-28', text: '- The update note no longer covers the AI status.\n- Subtitles keep their case.', newer: true }],
+    releaseUrl: null, downloadPercent: null, message: null, errorContext: null, snoozed: false
   }
   await app.evaluate(({ BrowserWindow }, st) => BrowserWindow.getAllWindows()[0].webContents.send('update:state', st), state)
 }

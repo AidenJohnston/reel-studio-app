@@ -244,7 +244,8 @@ export function VendorRows({
   onDisconnect,
   details,
   hubLeads = false,
-  onAttention
+  onAttention,
+  onReady
 }: {
   active: ProviderInfo | null
   lead: boolean
@@ -256,6 +257,8 @@ export function VendorRows({
   hubLeads?: boolean
   /** a sign-in or check the person started is running or failed here: that row holds the filled button */
   onAttention?: (on: boolean) => void
+  /** whether one of the person's apps is signed in and ready to use (ConnectAI orders CLIProxyAPI's row by it) */
+  onReady?: (ready: boolean) => void
 }) {
   const [info, setInfo] = useState<Record<VendorId, VendorInfo | null>>({ claude: null, chatgpt: null })
   // The click before main's first step: "Use Claude Code" checks Claude with one short message, which shows no step.
@@ -265,6 +268,8 @@ export function VendorRows({
   const [lookFailed, setLookFailed] = useState<Record<VendorId, boolean>>({ claude: false, chatgpt: false })
   const infoRef = useRef(info)
   infoRef.current = info
+  const anyReady = info.claude?.state === 'ready' || info.chatgpt?.state === 'ready'
+  useEffect(() => onReady?.(anyReady), [anyReady, onReady])
   const announce = useRef(onConnected)
   announce.current = onConnected
 
@@ -676,7 +681,7 @@ function Step({ state, children }: { state: 'now' | 'done' | 'later'; children: 
   return (
     <li className={`vstep ${state}`}>
       <span className="vstep-mark" aria-hidden>
-        {state === 'now' ? <Spinner /> : state === 'done' ? <Icon name="check" size={13} stroke={2.4} /> : <span className="vstep-dot" />}
+        {state === 'now' ? <Spinner /> : state === 'done' ? <Icon name="check" size={14} stroke={2.4} /> : <span className="vstep-dot" />}
       </span>
       <span className="vstep-what">{children}</span>
     </li>

@@ -437,6 +437,19 @@ describe('project store', () => {
     expect((await fs.readdir(home)).filter((n) => n.endsWith('.tmp'))).toEqual([])
   })
 
+  it('fails if a write that Stop reached before its rename still replaces the file (a stopped hand edit published)', async () => {
+    const { home } = setupPaths()
+    const f = join(home, 'project.json')
+    await writeJson(f, { version: 1 })
+    const stop = new AbortController()
+    stop.abort()
+    for (const durable of [false, true]) {
+      await expect(writeJson(f, { version: 2 }, { durable, signal: stop.signal })).rejects.toMatchObject({ code: 'CANCELLED' })
+      expect(JSON.parse(await fs.readFile(f, 'utf8'))).toEqual({ version: 1 })
+    }
+    expect((await fs.readdir(home)).filter((n) => n.endsWith('.tmp'))).toEqual([])
+  })
+
   it('shows an attached clip the AI placed, now its frozen copy, with the attachment\'s still', async () => {
     setupPaths()
     await ensureRoot()

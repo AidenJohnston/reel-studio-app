@@ -38,6 +38,7 @@ it('keeps missing numbers unknown', () => {
 it('refuses answers it cannot read', () => {
   for (const bad of [null, {}, { data: [{ name: 'fb_reels_total_plays', values: [{ value: -1 }] }] },
     { data: [{ name: 'fb_reels_total_plays', values: [{ value: 1 }, { value: 2 }] }] },
+    { data: [{ name: 'fb_reels_total_plays', values: [{ value: 10.5 }] }] },
     { data: [{ name: 'x', values: [] }, { name: 'x', values: [] }] }])
     expect(() => parseFacebookReel(bad)).toThrow(expect.objectContaining({ code: 'FB_RESPONSE' }))
 })

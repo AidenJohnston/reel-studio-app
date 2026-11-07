@@ -553,22 +553,13 @@ function Stage({
                   <div>
                     {!finished && (
                       <>
-                        <div className="steps on">
-                          <div>
-                            <ul aria-label="Steps" data-testid="steps-list">
-                              <StepRows steps={steps} />
-                            </ul>
-                          </div>
-                        </div>
-                        {/* the sample's sounds play on its cuts and its cover, so their switch sits on its progress */}
+                        {/* the tray as the Reel screen draws it (Composer.tsx): its row, the open steps under it, and the
+                            hairline that is the progress bar. The open list's current row has the spinner, so the row
+                            has none. The sample's sounds play on its cuts and its cover, so their switch sits on its row. */}
                         <div className="strip" data-testid="note-progress">
-                          <span className="bar" aria-hidden>
-                            <i style={{ transform: `scaleX(${(doneCount + (current ? 0.5 : 0)) / steps.length})` }} />
-                          </span>
-                          <span className="spin light" aria-hidden />
                           <span className="fr-strip-t" role="status">
                             <b>Making Version 1</b>
-                            {/* the list above names the step; the strip says how far along */}
+                            {/* the list under it names the step; the row says how far along */}
                             <span className="m">{current ? ` · Step ${steps.indexOf(current) + 1} of ${steps.length}` : ''}</span>
                           </span>
                           <span className="sp" />
@@ -577,6 +568,16 @@ function Stage({
                             <span className="sr-only">Sound effects: {soundOn ? 'on' : 'off'}</span>
                           </button>
                         </div>
+                        <div className="steps on">
+                          <div>
+                            <ul aria-label="Steps" data-testid="steps-list">
+                              <StepRows steps={steps} />
+                            </ul>
+                          </div>
+                        </div>
+                        <span className="tray-bar" aria-hidden>
+                          <i style={{ transform: `scaleX(${(doneCount + (current ? 0.5 : 0)) / steps.length})` }} />
+                        </span>
                       </>
                     )}
                   </div>
@@ -624,6 +625,8 @@ function Stage({
             )}
             {pane === 'editor' && (
               <Button kind={ai ? 'primary' : 'secondary'} onClick={() => void finish()} disabled={leaving} data-testid={ai ? 'editor-continue' : 'not-now'}>
+                {/* short: it shares the footer with the speech model's download line, which a longer label cut at
+                    1100 px (layout-audit); the line above says what a reel is without an editor */}
                 {ai ? 'Continue' : 'Not now'}
               </Button>
             )}

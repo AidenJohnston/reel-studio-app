@@ -53,14 +53,12 @@ export function hubConfigCandidates(env: NodeJS.ProcessEnv, platform: NodeJS.Pla
 export function configsOfRunning(psOutput: string): string[] {
   const out: string[] = []
   for (const line of psOutput.split('\n')) {
-    const words = line.trim().split(/\s+/)
-    if (!words[0] || !/(^|\/)(cliproxyapi|cli-proxy-api)[\w.-]*$/i.test(words[0])) continue
-    for (let i = 1; i < words.length; i++) {
-      const w = words[i]
-      const eq = /^--?config=(.+)$/.exec(w)
-      if (eq) out.push(eq[1])
-      else if ((w === '--config' || w === '-config') && words[i + 1]) out.push(words[i + 1])
-    }
+    const cmd = line.trim()
+    const bin = cmd.split(/\s/, 1)[0]
+    if (!bin || !/(^|\/)(cliproxyapi|cli-proxy-api)[\w.-]*$/i.test(bin)) continue
+    // ps joins the arguments with spaces and never quotes them, so "Application Support" in a path reads like two
+    // words. CLIProxyAPI takes no other operands, so the config path runs to the next flag or the end of the line.
+    for (const m of cmd.slice(bin.length).matchAll(/\s--?config(?:=|\s+)(.+?)(?=\s+--?[A-Za-z]|$)/g)) out.push(m[1])
   }
   return out.filter((p) => posix.isAbsolute(p))
 }
@@ -68,7 +66,8 @@ export function configsOfRunning(psOutput: string): string[] {
 function runningConfigs(platform: NodeJS.Platform): Promise<string[]> {
   if (platform === 'win32') return Promise.resolve([])
   return new Promise((resolve) => {
-    execFile('/bin/ps', ['-axo', 'command'], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? [] : configsOfRunning(String(stdout))))
+    // -ww, as orphans.ts uses: without a terminal, BSD ps cuts each line to 79 columns, which can end a config path early
+    execFile('/bin/ps', ['-ww', '-axo', 'command'], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? [] : configsOfRunning(String(stdout))))
   })
 }
 
@@ -107,9 +106,15 @@ export function parseHubConfig(text: string, file: string): HubConfig | null {
   return { file, host, port, tls, keys }
 }
 
-/** How a path is said in the row: the home folder as ~. */
-export function shownPath(file: string, home = homedir()): string {
-  return home && file.startsWith(home) ? `~${file.slice(home.length)}` : file
+/**
+ * How a path is said in the row: on a Mac or Linux the home folder as ~, as their own tools write it. Windows has no
+ * such shorthand, so its paths stay whole. Only the folder itself counts, not one whose name merely begins the same
+ * (/Users/sam is not the home of /Users/samuel).
+ */
+export function shownPath(file: string, home = homedir(), platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32' || !home) return file
+  const base = home.endsWith('/') ? home.slice(0, -1) : home
+  return file === base || file.startsWith(`${base}/`) ? `~${file.slice(base.length)}` : file
 }
 
 export type Lookup = (host: string) => Promise<{ address: string; family: number }[]>
@@ -200,17 +205,17 @@ export async function detectHub(d: DetectDeps): Promise<HubDetection> {
     }
     for (const key of cfg.keys) {
       const n = await probe(d.fetch, where.origin, key)
-      if (typeof n === 'number') return { state: 'ready', origin: where.origin, models: n, keySource: shownPath(file, d.home), key, file }
+      if (typeof n === 'number') return { state: 'ready', origin: where.origin, models: n, keySource: shownPath(file, d.home, d.platform), key, file }
       if (n === 'refused') answered ??= { origin: where.origin, file, refused: true }
     }
     if (!answered && (await probe(d.fetch, where.origin, null)) !== null) answered = { origin: where.origin, file, refused: cfg.keys.length > 0 }
   }
-  if (answered) return { state: 'needs-key', origin: answered.origin, keySource: shownPath(answered.file, d.home), file: answered.file, ...(answered.refused ? { keyRefused: true } : {}) }
+  if (answered) return { state: 'needs-key', origin: answered.origin, keySource: shownPath(answered.file, d.home, d.platform), file: answered.file, ...(answered.refused ? { keyRefused: true } : {}) }
   if (!test) {
     const origin = `http://127.0.0.1:${DEFAULT_HUB_PORT}`
     if ((await probe(d.fetch, origin, null)) !== null) return { state: 'needs-key', origin }
   }
-  if (elsewhere) return { state: 'elsewhere', host: elsewhere.host, keySource: shownPath(elsewhere.file, d.home) }
+  if (elsewhere) return { state: 'elsewhere', host: elsewhere.host, keySource: shownPath(elsewhere.file, d.home, d.platform) }
   return { state: 'none', ...(test ? {} : { looked: `127.0.0.1:${DEFAULT_HUB_PORT}` }) }
 }
 

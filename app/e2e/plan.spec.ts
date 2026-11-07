@@ -189,7 +189,7 @@ test('with no editor, planning asks to connect it first; connected, the chat on 
   await expect(page.locator('.reel-page')).toHaveAttribute('data-slug', slug)
   await expect(page.getByTestId('note-input')).toBeFocused()
   await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', "What's this reel about?")
-  await expect(page.getByTestId('plan-greeting')).toContainText('Plan it before you film')
+  await expect(page.getByTestId('plan-greeting')).toContainText('Not filmed yet?')
   await expect(page.getByTestId('plan-who')).toHaveAttribute('title', 'Claude (your Claude Code app), the model it picks')
   await expect(page.getByTestId('plan-connect-step')).toHaveCount(0)
   await app.close()

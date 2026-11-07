@@ -88,7 +88,8 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'jobs:cancel': case 'cloud:cancel': case 'style:remove': case 'style:restore': case 'style:add': ok = text(first) && first.length > 0; break
     case 'style:update': ok = text(first) && first.length > 0 && object(second) && (second.text === undefined || text(second.text)) && (second.paused === undefined || typeof second.paused === 'boolean'); break
     case 'app:setPhoneView': ok = first === 'instagram' || first === 'clean'; break
-    case 'app:setTimeline': ok = typeof first === 'boolean'; break
+    case 'app:setTimeline': case 'outside:setEnabled': ok = typeof first === 'boolean'; break
+    case 'ai:setNoteRunner': ok = first === 'reelstudio' || first === 'app'; break
     case 'devices:setOn': case 'devices:openInBrowser': ok = typeof first === 'boolean'; break
     case 'devices:pair': ok = (first === 'phone' || first === 'browser') && typeof second === 'boolean'; break
     case 'devices:remove': ok = text(first) && /^[0-9a-f]{32}$/.test(first); break
@@ -105,6 +106,9 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break
     case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second) && (third === undefined || EDITORS.includes(third as never)); break
     case 'library:preview': ok = path(first); break
+    // a pick names 1 to 5 of the proposal's candidates (ai propose.ts REEL_LIMIT), each once
+    case 'footage:makeReels': ok = Array.isArray(first) && first.length >= 1 && first.length <= 5 && new Set(first).size === first.length &&
+      first.every((id) => text(id) && /^r\d+$/.test(id)); break
     case 'footage:removeSource': ok = text(first) && /^src-[0-9a-f]{8,32}$/.test(first); break
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break

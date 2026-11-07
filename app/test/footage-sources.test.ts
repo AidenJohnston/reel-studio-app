@@ -1,14 +1,14 @@
-import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse, relative, sep } from 'node:path'
 import { expect, it } from 'vitest'
 import { createFootageSources, sourceId, type SavedSource } from '../src/main/footage-sources'
 
-function setup() {
+function setup(already: SavedSource[] = []) {
   const base = mkdtempSync(join(tmpdir(), 'rs-footage-ü '))
   const root = join(base, 'Movies', 'Reel Studio')
   mkdirSync(join(root, 'Library'), { recursive: true })
-  let saved: SavedSource[] = []
+  let saved: SavedSource[] = already
   const changes: number[] = []
   const sources = createFootageSources({
     load: async () => saved,
@@ -79,4 +79,15 @@ it('fails if a Footage/ path the editor passes can reach a file outside its fold
   ]) await expect(sources.resolve(ref), ref).rejects.toMatchObject({ code })
   renameSync(drive, join(base, 'unplugged'))
   await expect(sources.resolve(`Footage/${id}/day 1/take.mp4`)).rejects.toMatchObject({ code: 'FOLDER_OFFLINE', userMessage: 'Plug in Drive to use this clip.' })
+})
+
+// audit 06 F01: a whole drive added as a footage folder (E:\ on Windows, / here) refused every clip on it
+it('fails if a clip on a footage folder that is a whole drive is refused', async () => {
+  const take = join(realpathSync.native(mkdtempSync(join(tmpdir(), 'rs-drive-'))), 'take.mp4')
+  writeFileSync(take, 'video')
+  const drive = parse(take).root
+  const id = sourceId(drive)
+  const { sources } = setup([{ id, path: drive, addedAt: 'then' }])
+  const rel = relative(drive, take).split(sep).join('/')
+  expect((await sources.resolve(`Footage/${id}/${rel}`)).abs).toBe(take)
 })

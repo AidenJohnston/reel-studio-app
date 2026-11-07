@@ -71,6 +71,9 @@ each ran on (the renderer's main thread, the GPU process, the compositor), so a 
 cause, and what the page painted in the 600 ms after the click, by element and area. The same trace covers the
 600 ms before the click (`stillTasks`, `stillPaints`): what the step does with nobody touching it, so the work the click
 adds is the difference. A Paint's area is what Chromium re-recorded, not what the GPU rastered; the GPU tasks' time is
-the raster. `REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
+the raster. Nodes are listed most-repainted first; a paint with no clip carries Chromium's unbounded rectangle, so it
+is counted in `unbounded` and left out of `area`. `REELSTUDIO_PERF_MOTION_PRESS=key` presses "Use it" with Enter instead of a click: the app's keyboard mode turns
+off the status line's settle-in, so the two runs side by side show what that transition costs.
+`REELSTUDIO_PERF_RUNS` sets the runs (default 6 here); `REELSTUDIO_PERF_OUT_MOTION` the
 report's path.
 

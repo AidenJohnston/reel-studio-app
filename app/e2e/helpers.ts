@@ -114,6 +114,17 @@ export async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) })
 }
 
+/**
+ * Picks an item in the Reel screen's View menu under the phone (PreviewControls.tsx ViewMenu): `view-instagram`,
+ * `view-clean`, `shape-<id>` or `timeline-toggle`. Opens the menu first unless it is open; picking closes it.
+ */
+export async function viewMenu(page: Page, item: string): Promise<void> {
+  // the button says whether its menu is open: a menu that is closing is still on screen for its exit
+  const button = page.getByTestId('view-menu')
+  if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click()
+  await page.getByTestId('view-menu-list').getByTestId(item).click()
+}
+
 /** The account row at the bottom of the sidebar opens Settings. */
 export async function openSettings(page: Page): Promise<void> {
   await page.getByTestId('account').click()
@@ -236,7 +247,21 @@ export async function dropFiles(page: Page, testId: string, paths: string[], rel
 export const USE_CLAUDE_CODE = 'Use Claude (your Claude Code app)'
 export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)'
 /** Any "Claude Code" that is not "Claude Code app" would be the app calling itself Claude Code. */
+/**
+ * The page at w x h CSS px, as near as the screen allows. At 150% scaling Windows sizes the window in whole device
+ * pixels, so a 720 px tall window came out 722 on the Windows executor (requests uiclimb-1, uiclimb-3) and every spec
+ * that waited for exactly 720 stopped there. Within 2 px is the size asked for; the layout under test is the same.
+ */
+export async function expectViewport(page: Page, w: number, h: number, timeout?: number): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(([w, h]) => Math.abs(innerWidth - w) <= 2 && Math.abs(innerHeight - h) <= 2, [w, h]), timeout ? { timeout } : {})
+    .toBe(true)
+}
+
 export const CLAUDE_CODE_MISNAMED = /Claude Code(?! app)/
+
+/** What the app calls the computer it runs on in its copy ("Not on this Mac.", "5 models on this PC"). */
+export const THIS_COMPUTER = process.platform === 'darwin' ? 'this Mac' : 'this PC'
 
 /**
  * Clicks "Use Claude (your Claude Code app)" on the Connect panel in view, if this computer's Claude Code app is

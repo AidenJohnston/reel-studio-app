@@ -126,8 +126,77 @@ export function Composer({
   const now = firstSteps?.find((s) => s.state === 'now')
   // Version 1 names its step, unless the step is waiting on the editor: then the wait is what is happening
   const current = firstSteps && !job?.waiting ? (now ? STEP_LABEL[now.id] : null) : job?.message
-  const pct = job ? Math.min(1, job.overall / 100) : 0
+  // the time-based percent, but never past the end of the step in progress: the last phase holds five of Version 1's
+  // nine steps, and a bar nearly full over four ticks read as wrong (Sense, goal 3)
+  const reached = firstSteps?.length ? firstSteps.filter((s) => s.state !== 'todo').length / firstSteps.length : 1
+  const pct = job ? Math.min(1, job.overall / 100, reached) : 0
   const left = job ? timeLeftWords(job) : null
+
+  // the moment chip: attached (filled, with its ×) or offered (outlined, with Point at a spot under its caret)
+  const moment = plain ? null : chip || auto ? (
+    <span className="tchip" data-auto={chip ? undefined : true} data-testid="moment-chip">
+      {chip?.spot && <span className="spot-n">{chip.spot.n}</span>}
+      {/* "At 0:07", as a note's moment is said (aiNoteText): a bare time beside the box read as a clock */}
+      At {chip ? chipLabel(chip) : clock(second)}
+      <button
+        className="x"
+        aria-label="Remove the moment"
+        onClick={() => {
+          if (chip) onChip(null)
+          else onDropAuto()
+          inputRef.current?.focus()
+        }}
+        data-testid="moment-remove"
+      >
+        <Icon name="x" size={12} stroke={2} />
+      </button>
+    </span>
+  ) : (
+    <span className="tchip-split">
+      <button
+        className="tchip suggest"
+        onClick={() => {
+          onChip({ at: playhead.get() })
+          inputRef.current?.focus()
+        }}
+        aria-label={`Attach the moment on screen, ${clock(second)}`}
+        title="About this moment"
+        disabled={checking}
+        data-testid="moment-suggest"
+      >
+        <Icon name="plus" size={12} stroke={2} />
+        At {clock(second)}
+      </button>
+      <button
+        ref={caret}
+        className="tchip suggest caret"
+        aria-label="More ways to say where"
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        disabled={checking}
+        onClick={() => setMenu((m) => !m)}
+        data-testid="moment-menu"
+      >
+        <Icon name="chevron-down" size={12} stroke={2} />
+      </button>
+      <PopMenu open={menu} onClose={() => setMenu(false)} anchor={caret} label="Say where" style={{ left: 0, bottom: 'calc(100% + 6px)', width: 220 }} origin="bottom left">
+        <button
+          className="mi"
+          role="menuitem"
+          onClick={() => {
+            setMenu(false)
+            onPoint()
+          }}
+          data-testid="point-at-spot"
+        >
+          <Icon name="comment-plus" size={16} /> Point at a spot
+          <span className="r">
+            <kbd className="kbd">C</kbd>
+          </span>
+        </button>
+      </PopMenu>
+    </span>
+  )
 
   return (
     <div className={`cbox${focus ? ' focus' : ''}${connect ? ' bare' : ''}`} data-note-drop={!connect || undefined} data-testid={connect ? undefined : 'note-drop'}>
@@ -135,33 +204,14 @@ export function Composer({
         <div>
           {stripShown && strip === 'job' && job && (
             <>
-              <div className={`steps${stepsOpen ? ' on' : ''}`} inert={!stepsOpen || undefined}>
-                <div>
-                  <ul aria-label="Steps" data-testid="steps-list">
-                    {firstSteps
-                      ? <StepRows steps={firstSteps} />
-                      : steps.map((s, i) => (
-                          <li key={`${i}-${s}`} className={i === steps.length - 1 ? 'st-now' : 'st-done'}>
-                            <StepMark state={i === steps.length - 1 ? 'now' : 'done'} />
-                            <span className="sl">
-                              <StepText s={s} note={running} />
-                            </span>
-                          </li>
-                        ))}
-                  </ul>
-                  {under}
-                </div>
-              </div>
               <div className="strip" data-testid="note-progress">
                 {/* announced once per step, not on every tick of the time left */}
                 <span className="sr-only" role="status">
                   {making ? `Making Version ${making}` : job.message}
                   {making && current ? `, ${current}` : ''}
                 </span>
-                <span className="bar" aria-hidden>
-                  <i style={{ transform: `scaleX(${pct})` }} />
-                </span>
-                {job.thinking ? <Thinking /> : <span className="spin light" aria-hidden />}
+                {/* one live mark: the open list's current row has the spinner, so the strip shows it only when shut */}
+                {(!stepsOpen || job.waiting) && (job.thinking ? <Thinking /> : <span className="spin" aria-hidden />)}
                 {/* The time left is the one number a waiting person wants, so it leads and is never cut short. The line
                     above the box already says "Making Version N", which needs no repeating here: the column has no room
                     for both beside Steps and Stop. Before there is an estimate, the version leads. */}
@@ -190,13 +240,33 @@ export function Composer({
                 <span className="sp" />
                 {!noSteps && (
                   <button className="sbtn" aria-expanded={stepsOpen} onClick={() => setStepsToggled((t) => (t === job.jobId ? null : job.jobId))} data-testid="steps">
-                    Steps <Icon name={stepsOpen ? 'chevron-down' : 'up'} size={12} stroke={2} />
+                    Steps <Icon name="chevron-down" size={12} stroke={2} className={stepsOpen ? 'flip' : undefined} />
                   </button>
                 )}
                 <button className="sbtn" onClick={onStop} data-testid="stop">
                   Stop
                 </button>
               </div>
+              <div className={`steps${stepsOpen ? ' on' : ''}`} inert={!stepsOpen || undefined}>
+                <div>
+                  <ul aria-label="Steps" data-testid="steps-list">
+                    {firstSteps
+                      ? <StepRows steps={firstSteps} />
+                      : steps.map((s, i) => (
+                          <li key={`${i}-${s}`} className={i === steps.length - 1 ? 'st-now' : 'st-done'}>
+                            <StepMark state={i === steps.length - 1 ? 'now' : 'done'} />
+                            <span className="sl">
+                              <StepText s={s} note={running} />
+                            </span>
+                          </li>
+                        ))}
+                  </ul>
+                  {under}
+                </div>
+              </div>
+              <span className="tray-bar" aria-hidden>
+                <i style={{ transform: `scaleX(${pct})` }} />
+              </span>
             </>
           )}
           {stripShown && strip === 'held' && (
@@ -216,21 +286,26 @@ export function Composer({
       </div>
       {connect ?? (
         <>
+          {/* the note's context in one row above its words: the version it changes and its moment. Beside the words,
+              the moment left them three lines at the narrowest window (UI climb, consistency re-score 3). */}
           {base && (
-            <span className="base-chip" data-testid="note-base">
-              New version from Version {base.n}
-              <button
-                className="x"
-                aria-label={`Change the newest version instead of Version ${base.n}`}
-                onClick={() => {
-                  base.onClear()
-                  inputRef.current?.focus()
-                }}
-                data-testid="note-base-clear"
-              >
-                <Icon name="x" size={12} stroke={2} />
-              </button>
-            </span>
+            <div className="cctx">
+              <span className="base-chip" data-testid="note-base">
+                New version from Version {base.n}
+                <button
+                  className="x"
+                  aria-label={`Change the newest version instead of Version ${base.n}`}
+                  onClick={() => {
+                    base.onClear()
+                    inputRef.current?.focus()
+                  }}
+                  data-testid="note-base-clear"
+                >
+                  <Icon name="x" size={12} stroke={2} />
+                </button>
+              </span>
+              {moment}
+            </div>
           )}
           <AttachmentChips chips={att.chips} busy={att.busy} onRemove={(a) => void att.remove(a)} />
           {alert && (
@@ -240,72 +315,10 @@ export function Composer({
           )}
           <div className="cin">
             {!plain && <button className="att" onClick={att.choose} disabled={checking} aria-label="Attach a picture or a clip" title="Attach a picture or a clip" data-testid="note-attach">
-              <Icon name="paperclip" size={17} />
+              <Icon name="paperclip" size={18} />
             </button>}
             <div className="cfield">
-              {plain ? null : chip || auto ? (
-                <span className="tchip" data-auto={chip ? undefined : true} data-testid="moment-chip">
-                  {chip?.spot && <span className="spot-n">{chip.spot.n}</span>}
-                  {chip ? chipLabel(chip) : clock(second)}
-                  <button
-                    className="x"
-                    aria-label="Remove the moment"
-                    onClick={() => {
-                      if (chip) onChip(null)
-                      else onDropAuto()
-                      inputRef.current?.focus()
-                    }}
-                    data-testid="moment-remove"
-                  >
-                    <Icon name="x" size={12} stroke={2} />
-                  </button>
-                </span>
-              ) : (
-                <span className="tchip-split">
-                  <button
-                    className="tchip suggest"
-                    onClick={() => {
-                      onChip({ at: playhead.get() })
-                      inputRef.current?.focus()
-                    }}
-                    aria-label={`Attach the moment on screen, ${clock(second)}`}
-                    title="About this moment"
-                    disabled={checking}
-                    data-testid="moment-suggest"
-                  >
-                    <Icon name="plus" size={12} stroke={2} />
-                    {clock(second)}
-                  </button>
-                  <button
-                    ref={caret}
-                    className="tchip suggest caret"
-                    aria-label="More ways to say where"
-                    aria-haspopup="menu"
-                    aria-expanded={menu}
-                    disabled={checking}
-                    onClick={() => setMenu((m) => !m)}
-                    data-testid="moment-menu"
-                  >
-                    <Icon name="chevron-down" size={12} stroke={2} />
-                  </button>
-                  <PopMenu open={menu} onClose={() => setMenu(false)} anchor={caret} label="Say where" style={{ left: 0, bottom: 'calc(100% + 6px)', width: 220 }} origin="bottom left">
-                    <button
-                      className="mi"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenu(false)
-                        onPoint()
-                      }}
-                      data-testid="point-at-spot"
-                    >
-                      <Icon name="comment-plus" size={16} /> Point at a spot
-                      <span className="r">
-                        <kbd className="kbd">C</kbd>
-                      </span>
-                    </button>
-                  </PopMenu>
-                </span>
-              )}
+              {!base && moment}
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -356,7 +369,7 @@ function StepMark({ state }: { state: Step['state'] }) {
         <Icon name="check" size={8} stroke={3} />
       </span>
     )
-  if (state === 'now') return <span className="spin light" aria-label="Now" />
+  if (state === 'now') return <span className="spin" aria-label="Now" />
   return <span className={`todo${state === 'todo' ? '' : ' passed'}`} aria-label={state === 'todo' ? 'To do' : state === 'skipped' ? 'Skipped' : 'Stopped'} />
 }
 

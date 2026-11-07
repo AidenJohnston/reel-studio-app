@@ -14,6 +14,10 @@
 #         "Open Anyway" path (docs/install-mac.md). With a certificate, run sign-mac.sh instead and hand out its dmg.
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE   # set by Electron-based shells; would make electron-builder tools run as plain node
+# electron-builder 26 require()s packages that are ES modules only (@noble/hashes 2), which needs Node 22.12 or newer;
+# older Node fails late with ERR_REQUIRE_ESM. CI uses 24.
+node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' ||
+  { echo "Node $(node -v) is too old to package Reel Studio: use Node 22.12 or newer (CI uses 24)." >&2; exit 1; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
@@ -53,7 +57,8 @@ if [ "$SPIKE" = 1 ]; then
   EXTRA=(-c.appId=dev.reelstudio.spike "-c.productName=Reel Studio Spike" -c.extraMetadata.name=reel-studio-spike)
 else
   if [ "$SKIP_UI" = 0 ]; then
-    (cd "$REPO" && npm install --no-audit --no-fund       && { [ ! -f ai/package.json ] || npm run build --workspace ai; }       && npm run build --workspace app)
+    # ci, not install: exactly what package-lock.json records, never a newer version a range allows
+    (cd "$REPO" && npm ci --no-audit --no-fund       && { [ ! -f ai/package.json ] || npm run build --workspace ai; }       && npm run build --workspace app)
   fi
   if [ -f "$REPO/ai/package.json" ]; then
     # guard: a packaged app without @reelstudio/ai in its dependencies silently runs the mock AI

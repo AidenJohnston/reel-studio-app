@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { usePresence } from './motion'
 
-const ITEMS = '[role=menuitem]:not([disabled]), [role=menuitemradio]:not([disabled])'
+const ITEMS = '[role=menuitem]:not([disabled]), [role=menuitemradio]:not([disabled]), [role=menuitemcheckbox]:not([disabled])'
 
 /**
  * A menu that grows from its trigger (`origin`), takes focus on its checked or first item, moves with the

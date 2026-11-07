@@ -408,7 +408,7 @@ export function PostSheet({
     body = (
       <form
         className="stack"
-        style={{ gap: 14 }}
+        style={{ gap: 12 }}
         noValidate
         onSubmit={(e) => {
           e.preventDefault()
