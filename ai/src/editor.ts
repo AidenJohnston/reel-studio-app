@@ -662,6 +662,8 @@ async function checkInHarness(deps: EditorDeps, harness: Harness, ctx: ToolConte
 
 /** The reply to a note whose edit ended where it started (applyNote). */
 const UNDONE_REPLY = "That left your video the same as before, so I didn't make a new version.";
+/** after the model's own words on a note that changed nothing in the video */
+const NOTHING_CHANGED = "(Your video didn't change, so there's no new version.)";
 
 /** The receipt of the version a note made: only a final render made one (a failed final falls back to a draft). */
 function finalReceipt(ctx: ToolContext): EditReceipt | undefined {
@@ -796,8 +798,12 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
       .finally(() => (deps.checker && deps.checker !== provider ? deps.checker.dispose?.() : undefined));
     const said = harnessed ?? review?.summary ?? honestSummary(r, ctx.state) ?? 'I saved your preference.';
     // a note that changed nothing is saved too: its id in project.json is how the app's note queue knows it ran
+    // Nothing changed, yet the model's finish can still claim an edit ("I made the captions bigger", live harness-1106-10:
+    // applied [] and no version). Its words stay, since they may answer a question, but the reply says the video is as
+    // it was. A reply that is only a question needs no such line.
     const summary = nothing
-      ? r.finished || 'I looked, but I was not sure what to change. Could you say it another way?'
+      ? (r.finished ? (/^[^.!]*\?$/.test(r.finished.trim()) ? r.finished : `${r.finished.trim()} ${NOTHING_CHANGED}`)
+        : 'I looked, but I was not sure what to change. Could you say it another way?')
       : undone ? withStyleEcho(question ?? UNDONE_REPLY, ctx.state)
       : withStyleEcho(review?.record.verdict === 'unresolved' ? `${said} ${unresolvedLine(review.record.rounds.at(-1)!.fixes)}` : said, ctx.state);
     // this note's files, plus files attached to an earlier note that THIS note put in the video ("when I say X")
