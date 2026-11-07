@@ -20,6 +20,7 @@ import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
 import { OUT, commit, counts, outlinedShot, sourceFor, writeScreen, type Finding, type ScreenResult } from './layout-audit/report'
 import { FakeHub } from '../../ai/test/fakeHub'
+import type { UpdateState } from '../src/shared/update'
 
 const ALL_SIZES: [number, number][] = [
   [1100, 720],
@@ -286,18 +287,19 @@ const SCREENS: Screen[] = [
 // the same channel main uses (update:state), as the nightly 0.1.3-nightly.20261028.8 would see 20261028.9.
 const NIGHTLY = '0.1.3-nightly.20261028.8'
 const NEXT_NIGHTLY = '0.1.3-nightly.20261028.9'
-async function sendUpdate(app: ElectronApplication, patch: Record<string, unknown>): Promise<void> {
-  const state = {
+// Typed, so a change to UpdateState fails the typecheck here: an old shape (no `notes`) made the sidebar's update
+// button throw while rendering, the page went blank, and every update state went unreached.
+async function sendUpdate(app: ElectronApplication, patch: Partial<UpdateState>): Promise<void> {
+  const state: UpdateState = {
     status: 'available',
     mode: 'page',
+    keyNeeded: false,
     autoCheck: true,
     currentVersion: NIGHTLY,
     availableVersion: NEXT_NIGHTLY,
     downloadedVersion: null,
-    releaseNotes: [{ version: NEXT_NIGHTLY, items: ['The update note no longer covers the AI status.', 'Subtitles keep their case.'], totalItems: 2 }],
-    olderNotes: 0,
-    releases: [],
     releaseUrl: `https://github.com/example/reel-studio-nightly/releases/tag/v${NEXT_NIGHTLY}`,
+    notes: [{ version: NEXT_NIGHTLY, date: '2026-10-28', text: '- The update note no longer covers the AI status.\n- Subtitles keep their case.', newer: true }],
     downloadPercent: null,
     message: null,
     errorContext: null,

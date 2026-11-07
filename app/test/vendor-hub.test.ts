@@ -6,7 +6,7 @@ import * as http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FakeHub } from '../../ai/test/fakeHub'
-import { configsOfRunning, confirmHub, detectHub, hubConfigCandidates, localAddress, parseHubConfig, type Lookup } from '../src/main/vendor-hub'
+import { configsOfRunning, confirmHub, detectHub, hubConfigCandidates, localAddress, parseHubConfig, shownPath, type Lookup } from '../src/main/vendor-hub'
 
 // The test folder is a real folder on the computer running the tests, so a path found in it is joined the way this
 // computer joins paths: on Windows a macOS platform would give `C:\...\rs-hub-x/config.yaml`.
@@ -45,6 +45,14 @@ describe('reading CLIProxyAPI’s config', () => {
     const ps = ['/opt/homebrew/bin/cliproxyapi --config /Users/creator/Library/Application Support/CLIProxyAPI/config.yaml',
       '/usr/local/bin/cli-proxy-api -config=/srv/my hub/config.yaml -no-browser'].join('\n')
     expect(configsOfRunning(ps)).toEqual(['/Users/creator/Library/Application Support/CLIProxyAPI/config.yaml', '/srv/my hub/config.yaml'])
+  })
+})
+
+describe('the config path in the row', () => {
+  it('fails if Windows shows a ~ path, or a folder that only begins like the home folder is shortened', () => {
+    expect(shownPath('/Users/sam/.cli-proxy-api/config.yaml', '/Users/sam', 'darwin')).toBe('~/.cli-proxy-api/config.yaml')
+    expect(shownPath('/Users/samuel/config.yaml', '/Users/sam', 'darwin')).toBe('/Users/samuel/config.yaml')
+    expect(shownPath('C:\\Users\\sam\\.cli-proxy-api\\config.yaml', 'C:\\Users\\sam', 'win32')).toBe('C:\\Users\\sam\\.cli-proxy-api\\config.yaml')
   })
 })
 
