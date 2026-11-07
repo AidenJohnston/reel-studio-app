@@ -25,6 +25,7 @@ import pytest
 from PIL import Image
 
 from reelengine import broll
+from reelengine.proto import EngineError
 
 from . import fixtures as fx
 
@@ -268,3 +269,32 @@ def test_a_split_view_shows_the_speaker_from_the_current_cut(tmp_path):
     red, blue = colours
     assert red[0] > 150 and red[2] < 100, red
     assert blue[2] > 150 and blue[0] < 100, blue
+
+
+def test_a_phone_view_encode_cut_short_is_made_again_on_retry(tmp_path, monkeypatch):
+    # Fails if a phone-above-speaker band whose encode was cut short (a timeout or a killed engine)
+    # is left where the next render takes it as finished: every retry then fails on the broken file.
+    pdir = tmp_path / "p"
+    fx.make_project(pdir, fx.synth_video(tmp_path / "talk.mp4", dur=6.0), keep=((0.5, 5.0),))
+    card = fx.synth_clip(tmp_path / "card.mp4", dur=2.0, w=320, h=568)
+    bg = tmp_path / "band.png"
+    Image.new("RGB", (1080, 768), (237, 235, 231)).save(bg)
+    real_run, cut_short = broll.run, []
+
+    def run(cmd, *args, **kw):
+        if kw.get("what") == "phone top" and not cut_short:
+            cut_short.append(cmd[-1])
+            Path(cmd[-1]).write_bytes(b"\x00\x00\x00\x18ftypisom")    # ffmpeg had only begun the file
+            raise EngineError("TIMEOUT", "phone top exceeded 120s", "This step took too long.")
+        return real_run(cmd, *args, **kw)
+    monkeypatch.setattr(broll, "run", run)
+
+    ctx = fx.make_ctx(pdir)
+
+    def phone_view():
+        return broll._phone_split(ctx, {"t0": 1.0, "t1": 2.0}, card, bg, (320, 568), (380, 576, 320, 400), {},
+                                  "b1-phone")
+    with pytest.raises(EngineError):
+        phone_view()
+    out = phone_view()
+    assert cut_short and broll.probe(out, ctx)["has_video"]

@@ -1136,10 +1136,17 @@ def _phone_split(ctx, plan, card_mov, top_bg_png, card_size, face, params, stem)
     top = d / f"{stem}-top-{_key(round(dur, 3), *_rate_key(fps), _enc(ctx))}.mp4"
     if not top.exists():
         cw, chh = card_size
-        run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",
-             "-loop", "1", "-framerate", str(fps), "-t", f"{dur:.3f}", "-i", str(top_bg_png), "-i", str(card_mov),
-             "-filter_complex", f"[0:v]format=rgba[b];[b][1:v]overlay={(W - cw) // 2}:{(th - chh) // 2}:format=auto,format=yuv420p[o]",
-             "-map", "[o]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(top)], timeout=max(120, dur * 30), what="phone top")
+        # Existing is what makes `top` a cache hit, so ffmpeg writes beside it and the file is renamed
+        # into place only once whole: a timed-out or killed encode must not leave a truncated hit.
+        tmp = top.with_name(top.stem + ".part.mp4")
+        try:
+            run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin",
+                 "-loop", "1", "-framerate", str(fps), "-t", f"{dur:.3f}", "-i", str(top_bg_png), "-i", str(card_mov),
+                 "-filter_complex", f"[0:v]format=rgba[b];[b][1:v]overlay={(W - cw) // 2}:{(th - chh) // 2}:format=auto,format=yuv420p[o]",
+                 "-map", "[o]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(tmp)], timeout=max(120, dur * 30), what="phone top")
+            tmp.replace(top)
+        finally:
+            tmp.unlink(missing_ok=True)
     return _split_video(ctx, plan["t0"], plan["t1"], top, "video", 0.0, params, face, stem)
 
 
