@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
 import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { NicheTurnResult } from '../shared/niche'
-import type { MemorySuggestion, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import type { MemorySuggestion, NoteRunnerInfo, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
 import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
@@ -236,6 +236,13 @@ export const createMockAI: CreateAI = ({ host }) => {
   const state = { claude: startState(mode.claude), chatgpt: startState(mode.chatgpt) }
   const plan: { claude?: string; chatgpt?: string } = mode.claude === 'ready' ? { claude: 'max' } : {}
   let chosen: 'claude-cli' | 'codex-cli' | null = null
+  // Settings › How notes run, as the real package keeps it (ai index.ts noteRunner). REELSTUDIO_MOCK_HARNESS=refused:
+  // the app's self-test fails on the first note run in the app, so that note runs on Reel Studio's editor instead.
+  let runInApp = false
+  let fellBack: NoteRunnerInfo['fellBack']
+  const runnerApp = (): NoteRunnerInfo['app'] =>
+    chosen === 'claude-cli' && state.claude === 'ready' ? 'claude-code' : chosen === 'codex-cli' && state.chatgpt === 'ready' ? 'codex' : null
+  const noteRunner = async (): Promise<NoteRunnerInfo> => ({ runner: runInApp && runnerApp() ? 'app' : 'reelstudio', app: runnerApp(), ...(fellBack ? { fellBack } : {}) })
   let checking: AbortController | null = null
   const cliStatus = (v: 'claude' | 'chatgpt'): ClaudeCodeStatus => ({
     state: state[v],
@@ -427,7 +434,19 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
+    noteRunner,
+    async setNoteRunner(runner) {
+      if (runner === 'app' && !runnerApp()) throw { code: 'not_available', userMessage: 'Connect your Claude Code app or Codex app as your editor first.' }
+      runInApp = runner === 'app'
+      fellBack = undefined
+      return noteRunner()
+    },
     async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
+      const app = runnerApp()
+      if (runInApp && app && !fellBack && process.env.REELSTUDIO_MOCK_HARNESS === 'refused') {
+        fellBack = { app, reason: 'claude_cli: MCP refused', at: new Date().toISOString() }
+        onEvent({ type: 'status', phase: 'edit', message: `${app} self-test failed (claude_cli: MCP refused). Using the text-protocol provider for this session.` })
+      }
       if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)

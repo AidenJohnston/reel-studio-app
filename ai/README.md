@@ -94,20 +94,22 @@ Anthropic adapter (mock HTTP SSE), CLI protocol,
 agent loop with a scripted model, and replays of real recorded `claude -p` sessions (`fixtures/`).
 Re-record: `RECORD_LIVE=1 npx vitest run test/fixtures.test.ts`.
 
-## Dev MCP runners
+## MCP runners
 
-With the dev flag enabled, `ai-settings.json` may select `harness: "claude-code"` with
-`active: "claude-cli"`, or `harness: "codex"` with `active: "codex-cli"`.
-The dev CLI also accepts `--harness claude-code|codex` on `apply-note`.
+Settings › Editor › How notes run (`setNoteRunner('app')`) writes `harness: "claude-code"` or
+`harness: "codex"` to `ai-settings.json`. It applies only while the matching app is the editor in use
+(`active: "claude-cli"` or `"codex-cli"`) and that app is installed and signed in; otherwise notes
+run in Reel Studio's own loop. The dev CLI also accepts `--harness claude-code|codex` on `apply-note`.
 The first AI note checks a nonce round-trip through the selected CLI and relay before exposing
 editing tools. Failure logs its reason in a status event and selects the existing text provider
-for the rest of that app session. Cancelling the probe permits a new probe on the next note.
+for the rest of that app session, and `noteRunner().fellBack` reports it to Settings. Choosing the
+app again forgets the failed probe. Cancelling the probe permits a new probe on the next note.
 
 Codex flags were checked against codex-cli 0.163.0. The runner uses `exec --sandbox read-only`,
 ignores user configuration and rules, and disables shell, image, browser, app, plugin and agent
 features. It forwards relay credentials through environment variables, not command arguments.
 This CLI still advertises `apply_patch`; no supported switch to remove it was established.
-The read-only sandbox remains required, and Codex remains dev only. MCP image delivery in Codex
+The read-only sandbox remains required. MCP image delivery in Codex
 has not been verified, so its runner reports no image support.
 
 This base does not include #73. Its backend entry point is `ApplyNoteOptions.checkEdits` or the

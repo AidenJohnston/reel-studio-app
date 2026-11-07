@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, OutsideStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -129,6 +129,8 @@ const api: ReelApi = {
     vendorSignIn: (v) => call('ai:vendorSignIn', v),
     vendorSignInWithCode: (v) => call('ai:vendorSignInWithCode', v),
     onVendor: (cb) => on<VendorInfo>('ai:vendor', cb),
+    noteRunner: () => call('ai:noteRunner'),
+    setNoteRunner: (runner) => call('ai:setNoteRunner', runner),
     checkEdits: () => call('ai:checkEdits'),
     setCheckEdits: (on) => call('ai:setCheckEdits', on),
     lookUps: () => call('ai:lookUps'),
@@ -146,6 +148,12 @@ const api: ReelApi = {
     editorAccounts: () => call('ai:editorAccounts'),
     test: (role) => call('ai:test', role),
     onChange: (cb) => on<ProviderInfo>('ai:change', cb)
+  },
+  outside: {
+    status: () => call('outside:status'),
+    setEnabled: (on) => call('outside:setEnabled', on),
+    reset: () => call('outside:reset'),
+    onChange: (cb) => on<OutsideStatus>('outside:change', cb)
   },
   projects: {
     list: () => call('projects:list'),

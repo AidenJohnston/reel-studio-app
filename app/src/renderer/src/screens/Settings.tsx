@@ -12,6 +12,7 @@ import { useUpdateState } from '../components/update'
 import { AutoUpdatesControl, autoUpdatesLine, LegalText, UpdateSettingsRow, useUpdateKey, WhatsNew } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 import { CHECKS_NOTE, Privacy } from '../components/ModelsAndPrivacy'
+import { NoteRunnerRow, OutsideAppsRow } from '../components/AiApps'
 import { TitleBarSlot } from '../components/titlebar'
 import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type SettingId } from '../components/settings-index'
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
@@ -251,6 +252,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                   control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
                 />
               )}
+              <NoteRunnerRow onError={(m) => notify(m, 'error')} />
+              <OutsideAppsRow onError={(m) => notify(m, 'error')} />
             </Section>
 
             <Section id="privacy">
