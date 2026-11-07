@@ -611,7 +611,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,
