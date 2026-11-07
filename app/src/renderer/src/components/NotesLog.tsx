@@ -462,7 +462,7 @@ export function NotesLog({
         </article>
       ))}
       {waiting.map((q, i) => (
-        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} making={making} canAdd={!!runningNote && q.branch === runningNote.branch} onEditHand={onEditHand} onError={onError} />
+        <QueuedRow key={q.id} slug={slug} q={q} i={i} count={waiting.length} held={held} making={making} canAdd={!!runningNote && making !== null && q.branch === runningNote.branch} onEditHand={onEditHand} onError={onError} />
       ))}
     </div>
   )
@@ -646,7 +646,9 @@ function QueuedRow({ slug, q, i, count, held, making, canAdd, onEditHand, onErro
         <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}${q.branch !== undefined ? `, from Version ${q.branch}` : ''}`}</span>
         {draft === null && (
           <span className="q-acts">
-            {canAdd && !q.hand && !q.attachments.length && (
+            {/* only with a version being made to join: as a job ends, Reel clears it before the log's data catches up
+                (review round 4), and Add said "Add now" with nothing named */}
+            {canAdd && making !== null && !q.hand && !q.attachments.length && (
               <button
                 className="lk"
                 title="Add this to the version being made now"
@@ -655,7 +657,7 @@ function QueuedRow({ slug, q, i, count, held, making, canAdd, onEditHand, onErro
                 }
                 data-testid="queue-add"
               >
-                {making !== null ? `Add to Version ${making}` : 'Add now'}
+                Add to Version {making}
               </button>
             )}
             <button className="lk" onClick={() => (q.hand ? onEditHand(q.id) : setDraft(q.text))} data-testid="queue-edit">
