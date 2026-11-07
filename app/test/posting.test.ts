@@ -4,7 +4,7 @@
 // shared/posting.ts. Nothing secret ever reaches the log.
 import { describe, expect, it, vi } from 'vitest'
 import { createPostingService, isVideoLink, postingConfig, troubleOf, userErrorFor, GIVE_UP_MS, type PendingEntry, type PostingDeps, type StoredSession } from '../src/main/posting'
-import { POSTING_ERRORS, FIELD_ERRORS, PRICING_URL } from '../src/shared/posting'
+import { POSTING_ERRORS, FIELD_ERRORS, PRICING_URL, failedAction } from '../src/shared/posting'
 import type { PostingStatus, PostProgress, PostRequest } from '../src/shared/api'
 import { createFakePosting, type FakePosting } from './fake-posting'
 
@@ -505,10 +505,14 @@ describe('posting', () => {
     await t.svc.post(req())
     expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 0, total: 600_000 })
     t.fake.state.faults.length = 0
-    for (const status of [429, 503]) {
-      t.fake.state.faults.push({ on: 'status', status, body: { error: 'server_error' } })
+    // busy, failing for a moment, or an answer that can't be read: none of them is the end of the post
+    for (const [status, body] of [[429, { error: 'rate_limited' }], [503, { error: 'server_error' }], [200, {}]] as const) {
+      t.fake.state.faults.push({ on: 'status', status, body })
       expect(await t.svc.pending('my-video', 2)).toMatchObject({ total: 600_000 })
     }
+    // and Finish posting meeting the rate limit keeps it too
+    t.fake.state.faults.push({ on: 'status', status: 429, body: { error: 'rate_limited' } })
+    expect(await t.svc.resume(t.pending[0].uploadId)).toMatchObject({ step: 'failed', canResume: true, error: { code: 'RATE_LIMITED' } })
     expect(t.pending).toHaveLength(1)
   })
 
@@ -525,6 +529,9 @@ describe('posting', () => {
     t.fake.state.faults.length = 0
     // the app opens again: the sheet asks what is pending
     expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 600_000, total: 600_000 })
+    // Start over would post it twice: refused, and the post stays
+    await expect(t.svc.discard(t.pending[0].uploadId)).rejects.toMatchObject({ code: 'ALREADY_POSTED', userMessage: POSTING_ERRORS.ALREADY_POSTED })
+    expect(t.pending).toHaveLength(1)
     const p = await t.svc.resume(t.pending[0].uploadId)
     expect(p.step).toBe('done')
     expect(p.result).toMatchObject({ videoId: 'dQw4w9WgXcQ' })
@@ -851,7 +858,7 @@ describe('posting: the links after a post', () => {
     expect(p.result).toMatchObject({ videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', studioUrl: 'https://studio.youtube.com/video/dQw4w9WgXcQ/edit' })
   })
 
-  it("a video id that isn't one: SERVER, and the post is not offered again", async () => {
+  it("a video id that isn't one: the post is not offered again, and the words say YouTube has it", async () => {
     const t = await ready()
     intercept(t, async (_c, real) => {
       const res = await real()
@@ -859,7 +866,9 @@ describe('posting: the links after a post', () => {
       if (b?.status === 'done') b.video.id = '../../evil?x='
       return new Response(JSON.stringify(b), { status: res.status })
     })
-    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: false, error: { code: 'SERVER' } })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'failed', canResume: false, error: { code: 'POSTED_UNREADABLE' } })
+    expect(failedAction(p)).toBeNull()
     expect(t.pending).toEqual([])
   })
 })

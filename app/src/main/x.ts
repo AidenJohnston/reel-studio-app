@@ -17,7 +17,7 @@ import type { InstagramSecretStore } from './instagram-store'
 import { serviceOrigin } from './instagram-http'
 import { SocialError, type MetaFetch } from './meta-http'
 import { signinCallback } from './signin-callback'
-import { atomicSocialFile, withSocialFile } from './social-store'
+import { atomicSocialFile, restoreSocialFile, snapshotSocialFile, withSocialFile } from './social-store'
 
 export const X_API = 'https://api.x.com/2'
 const TEXT_MAX = 280
@@ -226,13 +226,12 @@ export class XService {
           token, refresh: text(data.refresh_token), expiresAt: this.now() + (typeof data.expires_in === 'number' ? data.expires_in : invalid()) * 1000,
           userId: id(me.id), username: text(me.username), clientId: cfg.clientId, brokerUrl: cfg.brokerUrl
         }
-        const previous = await this.load().catch(() => null)
+        const before = await snapshotSocialFile(this.file())
         signal.throwIfAborted()
         await this.save(c)
         // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
         if (signal.aborted) {
-          if (previous) await this.save(previous)
-          else await fs.rm(this.file(), { force: true })
+          await restoreSocialFile(this.file(), before)
           throw new SocialError('X_CANCELLED', 'X connection was cancelled.')
         }
         return { connected: true, accountId: c.userId, username: c.username }

@@ -206,6 +206,16 @@ function resultOf(video: any, asked: PostPrivacy): PostResult {
   }
 }
 
+/** resultOf for an upload YouTube has all of. The post is forgotten either way (the same unreadable answer would
+ * come back on every Finish posting), so an id that can't be read says the video is on YouTube, never "try again". */
+function postedResult(video: any, asked: PostPrivacy): PostResult {
+  try {
+    return resultOf(video, asked)
+  } catch {
+    throw fail('POSTED_UNREADABLE')
+  }
+}
+
 /** The only links openLink opens: a video's watch page, short link or YouTube Studio page. */
 export function isVideoLink(raw: unknown): boolean {
   let u: URL
@@ -532,7 +542,7 @@ export function createPostingService(d: PostingDeps) {
     const finish = async (video: unknown): Promise<PostProgress> => {
       await dropPending(entry.uploadId)
       d.log(`[posting] posted ${entry.uploadId} (${entry.size} bytes)`)
-      return emit(r, 'done', { sent: entry.size, result: resultOf(video, asked) })
+      return emit(r, 'done', { sent: entry.size, result: postedResult(video, asked) })
     }
     /** What the server's GET says, as the next step: a number = carry on from there. */
     const settle = async (b: any): Promise<number | PostProgress> => {
@@ -700,12 +710,13 @@ export function createPostingService(d: PostingDeps) {
         const u = e instanceof PostingError ? e : fail('SERVER')
         if (!(e instanceof PostingError)) d.log(`[posting] ${r.uploadId ?? 'post'}: ${String(e)}`)
         else d.log(`[posting] ${r.uploadId ?? 'post'} failed: ${u.code}`)
-        // Kept: a dropped connection or a server error part way (Finish posting: YouTube keeps what it has), and a
-        // lost sign-in (uploads outlive it: sign in, then finish).
-        const keep = u.code === 'OFFLINE' || u.code === 'SERVER' || u.code === 'SIGNED_OUT' || u.code === 'FILE_CHANGED'
+        // Kept: a dropped connection, a server error or a rate limit part way (Finish posting: YouTube keeps what it
+        // has, and may already have all of it), and a lost sign-in (uploads outlive it: sign in, then finish).
+        const again = u.code === 'OFFLINE' || u.code === 'SERVER' || u.code === 'RATE_LIMITED'
+        const keep = again || u.code === 'SIGNED_OUT' || u.code === 'FILE_CHANGED'
         if (r.uploadId && !keep) await dropPending(r.uploadId)
         const kept = !!r.uploadId && (await pendingList()).some((x) => x.uploadId === r.uploadId)
-        return emit(r, 'failed', { error: asUser(u), canResume: (u.code === 'OFFLINE' || u.code === 'SERVER') && kept })
+        return emit(r, 'failed', { error: asUser(u), canResume: again && kept })
       } finally {
         running = null
       }
@@ -770,7 +781,7 @@ export function createPostingService(d: PostingDeps) {
       r.asked = asked
       if (g?.status === 'done') {
         await dropPending(entry.uploadId)
-        return emit(r, 'done', { sent: entry.size, result: resultOf(g.video, asked) })
+        return emit(r, 'done', { sent: entry.size, result: postedResult(g.video, asked) })
       }
       if (g?.status === 'cancelled') throw new Cancelled()
       if (g?.status !== 'uploading') throw g?.status === 'expired' ? fail('EXPIRED') : failedReason(g?.error)
@@ -865,6 +876,8 @@ export function createPostingService(d: PostingDeps) {
       // YouTube has all of it, but the answer to the last chunk was lost: Finish posting reports the video. Forgetting
       // it here would offer Post again, which uploads the same video a second time.
       if (a.status === 200 && a.body?.status === 'done') return shown(entry.size)
+      // an answer it can't read is not an end either; only failed, cancelled, expired or gone forget the post
+      if (a.status === 200 && !['failed', 'cancelled', 'expired'].includes(a.body?.status)) return shown(entry.sent ?? 0)
       if (a.status === 401) {
         await lostSession()
         return null
@@ -877,7 +890,13 @@ export function createPostingService(d: PostingDeps) {
       off()
       if (typeof uploadId !== 'string') return
       const s = await session()
-      if (s) await request('DELETE', `/v1/uploads/${encodeURIComponent(uploadId)}`, { auth: s.session })
+      if (!s) throw fail('SIGNED_OUT')
+      const a = await request('DELETE', `/v1/uploads/${encodeURIComponent(uploadId)}`, { auth: s.session })
+      // Start over forgets the post only as Stop does: once the server says it stopped it, or no longer has it.
+      // YouTube already having all of it, or no answer, keeps it, so posting again can't put the video up twice.
+      if (!a.net && a.status === 200 && a.body?.status === 'done') throw fail('ALREADY_POSTED')
+      if (a.net) throw fail('OFFLINE')
+      if (!((a.status === 200 && a.body?.ok === true) || a.status === 404)) throw fail('SERVER')
       await dropPending(uploadId)
     },
     async openLink(url: unknown): Promise<void> {
