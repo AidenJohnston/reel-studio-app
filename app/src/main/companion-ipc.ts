@@ -74,6 +74,10 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
   }
 
   const changed = async (): Promise<void> => d.send('devices:change', await status())
+  // Removed by hand or forgotten for being idle: either way its event streams and downloads end now.
+  devices.onRemoved((ids) => {
+    for (const id of ids) server?.revoke(id)
+  })
   devices.onChange(() => {
     // A device just paired: the code is used up, so the pairing sheet on the computer closes.
     if (pairingUrl && !devices.pairingOpen()) pairingUrl = null
@@ -160,7 +164,6 @@ export function registerCompanionIpc(d: CompanionIpcDeps) {
   d.handle('devices:remove', async (_e, id: unknown) => {
     if (typeof id !== 'string') throw { code: 'BAD_REQUEST', userMessage: 'That device is no longer paired.' }
     await devices.remove(id)
-    server?.revoke(id)
     return status()
   })
 

@@ -333,15 +333,18 @@ export const createMockAI: CreateAI = ({ host }) => {
       const status = (message: string, pct: number, phase?: Phase, note?: string): void =>
         onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }), ...(note ? { note } : {}) })
       const changed: string[] = []
-      // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
-      // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
+      // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
+      // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
+      // package does (ai editor.ts ensureAnalyzed and deterministicEdit)
       const start = await readProject(projectDir)
       const proposed = !!start.proposal && (start.cut?.keep?.length ?? 0) > 0
+      const heard = existsSync(join(projectDir, start.transcript?.file ?? 'work/transcript.json'))
 
-      if (!proposed) {
+      if (!heard) {
         status('Listening to your video', 1, 'listen')
         await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen', p.note), signal)
-
+      }
+      if (!proposed) {
         status('Picking your best takes', 41, 'analyze')
         await host.runEngine('analyze', args, (p) => status('Picking your best takes', span(0, 50, p.pct), 'analyze'), signal)
         await host.runEngine('autocut', args, (p) => status('Picking your best takes', span(50, 100, p.pct), 'analyze'), signal)
@@ -557,6 +560,36 @@ export const createMockAI: CreateAI = ({ host }) => {
             words: ws.length
           }
         }),
+        notes: '',
+        attempts: 1
+      }
+    },
+
+    // The practice editor's reels across the footage archive: lines taken in file order until a reel plays for 15 s,
+    // so a short file runs on into the next one, up to three reels. It reads no words: it is a stand-in.
+    async proposeFromArchive(req, signal) {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find reels in your footage.' }
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, noteMs)
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      type Span = { ref: string; t0: number; t1: number; said: string }
+      const reels: Span[][] = []
+      let open: Span[] = []
+      const length = (spans: Span[]) => spans.reduce((t, x) => t + x.t1 - x.t0, 0)
+      for (const f of req.files) {
+        for (const l of f.lines) {
+          const last = open.at(-1)
+          if (last && last.ref === f.ref) Object.assign(last, { t1: l.e, said: `${last.said} ${l.text}` })
+          else open.push({ ref: f.ref, t0: l.s, t1: l.e, said: l.text })
+          if (length(open) >= 15 && reels.length < 3) (reels.push(open), (open = []))
+        }
+      }
+      return {
+        candidates: reels.map((spans, k) => ({
+          id: `r${k + 1}`, title: PRACTICE_REELS[k].title, why: PRACTICE_REELS[k].why, hook: spans[0].said,
+          spans, seconds: Math.round(length(spans) * 10) / 10
+        })),
         notes: '',
         attempts: 1
       }

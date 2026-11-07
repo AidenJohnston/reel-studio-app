@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ProjectDetail, ProjectSummary } from '../src/shared/api'
 import {
-  callMessage, eventsMessage, mediaMessage, mediaRef, pairMessage, parsePairingFragment, sign, CONTRACT_VERSION, type ContractEvent
+  callMessage, eventsMessage, mediaMessage, mediaRef, pairMessage, parsePairingFragment, sign, CLOCK_SKEW_S, CONTRACT_VERSION, type ContractEvent
 } from '../src/shared/contract'
 import { fromHex } from '../src/shared/sha256'
 import { mediaUrl } from '../src/main/media-url'
@@ -227,6 +227,52 @@ describe('calls', () => {
   })
 })
 
+describe('replays', () => {
+  // A whole second, so the edge of a signature's window falls exactly on a millisecond the test can reach.
+  const T0 = 1_800_000_000_000
+  const body = JSON.stringify({ method: 'projects.note', args: ['family-time', { requestId: 'req-00000009', text: 'cut this' }] })
+
+  async function pairedRegistry(dir: string, at: () => number) {
+    const reg = createDeviceRegistry({ dir, secrets: null, log: () => {}, now: at })
+    const p = reg.startPairing('phone', ['view', 'note'])
+    const secret = fromHex(p.secret, 32)!
+    const paired = await reg.completePairing({ pairing: p.pairing, name: 'iPhone', sig: sign(secret, pairMessage(p.pairing, 'iPhone')) })
+    if (typeof paired === 'string') throw new Error(paired)
+    const signed = (time: number, nonce: string) => ({ device: paired.id, time, nonce, sig: sign(secret, callMessage(paired.id, time, nonce, body)) })
+    return { reg, id: paired.id, signed }
+  }
+
+  it('fails if a request captured before the app restarted runs again after it, even one signed ahead of the clock', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rs-devices-restart-'))
+    let t = T0
+    const { reg, id, signed } = await pairedRegistry(dir, () => t)
+    // a phone whose clock ran two minutes ahead since it last read the computer's
+    const captured = signed(T0 / 1000 + 120, 'a'.repeat(32))
+    expect(await reg.checkCall(captured, body)).toMatchObject({ id })
+    await reg.flushed()
+
+    t += 10_000
+    const after = createDeviceRegistry({ dir, secrets: null, log: () => {}, now: () => t })
+    expect(await after.checkCall(captured, body)).toBe('replayed')
+  })
+
+  it('fails if a request can be replayed at the last moment its signature is still accepted', async () => {
+    let t = T0
+    const { reg, signed } = await pairedRegistry(mkdtempSync(join(tmpdir(), 'rs-devices-edge-')), () => t)
+    const ahead = signed(T0 / 1000 + CLOCK_SKEW_S, 'c'.repeat(32))
+    expect(await reg.checkCall(ahead, body)).not.toBeTypeOf('string')
+    t = T0 + 2 * CLOCK_SKEW_S * 1000
+    expect(await reg.checkCall(ahead, body)).toBe('replayed')
+  })
+
+  it("fails if a freshly signed call is refused after the computer's clock moves back", async () => {
+    let t = T0
+    const { reg, id, signed } = await pairedRegistry(mkdtempSync(join(tmpdir(), 'rs-devices-back-')), () => t)
+    t = T0 - 60_000
+    expect(await reg.checkCall(signed(Math.floor(t / 1000), 'd'.repeat(32)), body)).toMatchObject({ id })
+  })
+})
+
 describe('media', () => {
   it('serves byte ranges of a version with a signed link, and refuses an unsigned or expired one', async () => {
     const d = await pairDevice()
@@ -304,6 +350,17 @@ describe('events', () => {
     server.revoke(d.device)
     expect(await s.next()).toEqual({ type: 'revoked' })
     await s.ended
+  })
+
+  it('fails if a device that went idle past its limit keeps hearing events on a stream it opened before', async () => {
+    const d = await pairDevice()
+    const s = await stream(eventsPath(d))
+    expect(await s.next()).toEqual({ type: 'ready' })
+    clock += DEVICE_IDLE_MS + 1
+    server.publish(contractEvent('job:event', { type: 'done', jobId: 'job-1', slug: 'family-time', summary: 'done' })!)
+    expect(await s.next()).toEqual({ type: 'revoked' })
+    await s.ended
+    expect(s.events).toEqual([])
   })
 
   it('refuses an unsigned stream', async () => {

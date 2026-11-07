@@ -91,6 +91,7 @@ import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
 import { chooseSeries, groupReel } from './series'
+import { createArchiveReels, libraryRef, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -278,6 +279,17 @@ const host: EngineHost = {
   reelStudioRoot,
   importFootage: (ref) => importFootage(ref)
 }
+
+// Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
+const archiveReels = createArchiveReels({
+  jobs: { start: (...a) => jobs.start(...a), get: (id) => jobs.get(id) },
+  ai: () => ai,
+  runEngine,
+  root: reelStudioRoot,
+  file: () => join(settingsDir(), 'archive-reels.json'),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryRef(ref, libraryDir())),
+  startFirstEdit: (slug, init) => startFirstEdit(slug, init)
+})
 
 /** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
 async function importFootage(ref: string): Promise<string> {
@@ -737,12 +749,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
+    const st = await readAppState(slug)
     const copyIn = async (title: string, files: string[]) => {
       const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
+      // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
+      const keepOrder = st.fromArchive ? ['--keep-order'] : []
       await runEngine(
         'init',
-        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(files),
+        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
         // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
         (p) =>
@@ -756,7 +771,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
-    const st = await readAppState(slug)
     const from = st.from
     if (from) await prepareReel(slug, from, () => copyIn(from.about.title, [from.media]), { resumed: !initArgs, signal })
     else if (!existsSync(join(dir, 'project.json'))) {
@@ -777,6 +791,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
+    await seedFromArchive(slug)
     startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
@@ -1838,6 +1854,9 @@ function registerIpc(): void {
   })
   handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
   handle('footage:status', () => footageIndex.status())
+  handle('footage:findReels', () => archiveReels.find())
+  handle('footage:reels', () => archiveReels.status())
+  handle('footage:makeReels', (_e, ids: string[]) => archiveReels.make(ids))
 
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()
