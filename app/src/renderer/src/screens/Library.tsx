@@ -5,6 +5,7 @@ import { reel, userMessage } from '../api'
 import { Button, FOLDER_APP, PickFiles, Spinner } from '../components/ui'
 import { Icon } from '../components/icons'
 import { FootageFolders } from '../components/FootageFolders'
+import { ArchiveReels } from '../components/ArchiveReels'
 import { TitleBarSlot } from '../components/titlebar'
 import '../components/library.css'
 import '../components/fonts.css'
@@ -368,6 +369,7 @@ export function Library({ added }: { added?: { results: DropResult[]; at: number
       )}
       <div id="lib-panel" role="tabpanel" aria-labelledby={`lib-tab-${tab}`} className="lib-panel" data-testid={`library-panel-${tab}`}>
         {tab === 'videos' && <FootageFolders say={setResult} />}
+        {tab === 'videos' && <ArchiveReels say={setResult} />}
         {bins && !files.length && (
           <div className="lib-empty" data-testid="library-empty">
             <h2>{current.empty[0]}</h2>

@@ -42,3 +42,31 @@ it('a speech check that hangs is stopped at its deadline, and the usual thread c
   expect(threads).toEqual([null])
   expect(models.status().checkFailed).toBe(true)
 }, 20_000)
+
+it('a result saved by the check from before the GPU was proved runs again once; a current one does not', async () => {
+  setupPaths()
+  const model = join(modelsDir(), 'small.en')
+  mkdirSync(model, { recursive: true })
+  for (const f of ['model.bin', 'config.json', 'tokenizer.json']) writeFileSync(join(model, f), 'x')
+  const runEngine = createEngineRunner({ python: () => PYTHON, env: () => ({ ...engineEnv(), PYTHONPATH: FAKE_ENGINE, FAKE_ENGINE_SPEECH_CHECK: '0' }) })
+  const checkWith = async (loaded: SpeechCheckResult | null): Promise<SpeechCheckResult[]> => {
+    const saved: SpeechCheckResult[] = []
+    const models = createModelManager({
+      runEngine,
+      onChange: () => undefined,
+      loadCheck: async () => loaded,
+      saveCheck: async (r) => void saved.push(r),
+      useThreads: () => undefined,
+      gate: createWorkGate(),
+      checkDeadlineMs: 15_000,
+      log: () => undefined
+    })
+    await models.checkInBackground()
+    return saved
+  }
+  const [current] = await checkWith(null)
+  expect(current).toBeDefined()
+  // an NVIDIA computer's record from the old check: this machine, no thread count, no check marker
+  expect(await checkWith({ machine: current.machine, threads: null })).toHaveLength(1)
+  expect(await checkWith(current)).toHaveLength(0)
+}, 60_000)

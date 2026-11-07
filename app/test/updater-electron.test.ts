@@ -1,13 +1,13 @@
 // The electron-updater backend (main/updater-electron.ts) with a fake electron-updater and a fake site: which
 // request carries the download key, what a 401, 403 or 404 from the update server does, and the Mac bundle check.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import type { UpdateCheckResult, UpdateInfo } from 'electron-updater'
-import { SAME_FOR_EVERYONE, UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller, type InstallStep, type UpdaterLike } from '../src/main/updater-electron'
+import { SAME_FOR_EVERYONE, UPDATE_FEED_URL, electronUpdaterBackend, installerRefusal, macBundleCheck, windowsInstaller, windowsInstallerFacts, type InstallStep, type UpdaterLike, type WindowsInstallerFacts } from '../src/main/updater-electron'
 import { LATEST_URL, UPDATE_PAGE, type FetchLike } from '../src/main/update-check'
 import { createUpdater } from '../src/main/updater'
 import { updateAction } from '../src/shared/update'
@@ -242,11 +242,55 @@ it.skipIf(process.platform !== 'darwin')('fails if installation accepts a mismat
   }
 })
 
+describe('Windows installer check', () => {
+  const signed = { status: 'Valid', subject: 'CN=Reel Studio, O=Reel Studio' }
+  const facts = (installer: Partial<WindowsInstallerFacts['installer']>, running: WindowsInstallerFacts['running'] = signed): WindowsInstallerFacts => ({
+    running,
+    installer: { ...signed, productVersion: '0.1.3', ...installer }
+  })
+
+  it('fails if an unsigned installer, one from another publisher, or an older one labelled newer would be run', () => {
+    expect(installerRefusal(facts({}), '0.1.3', '0.1.2')).toBeNull()
+    expect(installerRefusal(facts({ productVersion: '0.1.3.0' }), '0.1.3', '0.1.2')).toBeNull()
+    // no publisher pin in an unsigned build: electron-updater would accept anything, so this copy updates from the page
+    expect(installerRefusal(facts({}, { status: 'NotSigned', subject: null }), '0.1.3', '0.1.2')).toMatch(/not signed/)
+    expect(installerRefusal(facts({ status: 'NotSigned', subject: null }), '0.1.3', '0.1.2')).toMatch(/not signed/)
+    expect(installerRefusal(facts({ status: 'HashMismatch' }), '0.1.3', '0.1.2')).toMatch(/not signed/)
+    expect(installerRefusal(facts({ subject: 'CN=Someone Else' }), '0.1.3', '0.1.2')).toMatch(/someone else/)
+    // the feed says 0.1.3, the installer inside is 0.1.1 from the same publisher
+    expect(installerRefusal(facts({ productVersion: '0.1.1' }), '0.1.3', '0.1.2')).toMatch(/0\.1\.1/)
+    expect(installerRefusal(facts({ productVersion: '0.1.2' }), '0.1.2', '0.1.2')).toMatch(/not the newer/)
+  })
+
+  // Windows' own answers: node.exe is signed by its publisher, a plain file is not.
+  it.runIf(process.platform === 'win32')('fails if the real check accepts an unsigned file, or misreads a signed one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rs-win-installer-'))
+    try {
+      const unsigned = join(dir, 'Reel-Studio-Setup-0.1.3-x64.exe')
+      writeFileSync(unsigned, 'MZ not really a program')
+      const copy = join(dir, 'node copy.exe')
+      copyFileSync(process.execPath, copy)
+      const plain = await windowsInstallerFacts(unsigned)
+      expect(plain.running.status).toBe('Valid')
+      expect(plain.installer.status).not.toBe('Valid')
+      await expect(windowsInstaller('0.0.1').verify(unsigned, '0.1.3')).rejects.toThrow(/not signed/)
+      // the same publisher as this node.exe: accepted when the release names the version the file carries
+      const own = (await windowsInstallerFacts(copy)).installer.productVersion!
+      await expect(windowsInstaller('0.0.1').verify(copy, own)).resolves.toBeUndefined()
+      await expect(windowsInstaller('0.0.1').verify(copy, '999.0.0')).rejects.toThrow(/not the newer release/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
+
 it('fails if Windows installs without its progress window or the Mac hands Squirrel an unchecked bundle', async () => {
   const calls: { platform: string; args: unknown[] }[] = []
   const checked: string[] = []
   const mac = { ...macBundleCheck('0.1.2'), verify: async (file: string) => void checked.push(file) }
-  for (const [platform, install] of [['win32', windowsInstaller], ['darwin', mac]] as const) {
+  const signed = { status: 'Valid', subject: 'CN=Reel Studio' }
+  const win = windowsInstaller('0.1.2', async () => ({ running: signed, installer: { ...signed, productVersion: '0.1.3' } }))
+  for (const [platform, install] of [['win32', win], ['darwin', mac]] as const) {
     const updater = new FakeUpdater(info('0.1.3', install.fileName('0.1.3')), `${platform}-download`)
     updater.quitAndInstall = (...args: unknown[]) => void calls.push({ platform, args })
     const { backend } = wire(updater, { install })

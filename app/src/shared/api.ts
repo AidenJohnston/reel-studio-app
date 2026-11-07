@@ -407,7 +407,7 @@ export type Phase = 'prepare' | 'listen' | 'analyze' | 'firstLook' | 'edit' | 'f
  */
 export type JobUpdate =
   /** pct restarts per step unless aggregate marks whole-job progress. thinking = waiting on AI. */
-  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean; /** the message is the wait for the editor itself (ai agent.ts waitWords) */ waiting?: boolean; noAI?: boolean }
+  | { type: 'status'; message: string; pct?: number; aggregate?: true; phase?: Phase; thinking?: boolean; /** the message is the wait for the editor itself (ai agent.ts waitWords) */ waiting?: boolean; noAI?: boolean; /** the engine's line for beside the current step, e.g. why listening is slow (engine proto.progress) */ note?: string }
   | { type: 'tool'; name: string; summary: string }
   /** A line for main.log only: how a model turn spent its time (ai agent.ts turnTrace). */
   | { type: 'trace'; text: string }
@@ -600,6 +600,29 @@ export type FootageIndexStatus =
   | { state: 'idle' | 'paused' }
   | { state: 'indexing'; stage: string; pct: number; message: string }
   | { state: 'error'; message: string }
+
+/** Reels the editor found across the footage archive (main/archive-reels.ts), each with the reel made from it. */
+export interface ArchiveStatus {
+  state: 'idle' | 'finding' | 'error'
+  /** what the editor is doing, or why the last look failed */
+  message?: string
+  jobId?: string
+  candidates: {
+    id: string
+    title: string
+    hook: string
+    why: string
+    /** ref: Library/... or Footage/<folder>/<file> */
+    spans: { ref: string; t0: number; t1: number; said: string }[]
+    seconds: number
+    /** the reel made from it, or null */
+    made: string | null
+  }[]
+  notes: string
+  /** the footage had more to read than one look reads */
+  truncated: boolean
+  at: string | null
+}
 
 /** A folder or drive of someone's videos, indexed where it is (main/footage-sources.ts). */
 export interface FootageSource {
@@ -1229,6 +1252,10 @@ export interface ReelApi {
     addSource(): Promise<FootageSource[]>
     removeSource(id: string): Promise<FootageSource[]>
     status(): Promise<FootageIndexStatus>
+    /** Reels across all the read footage (main/archive-reels.ts): the editor's look, what it found, and making them. */
+    findReels(): Promise<{ jobId: string }>
+    reels(): Promise<ArchiveStatus>
+    makeReels(ids: string[]): Promise<{ made: { id: string; slug: string }[] }>
   }
   style: {
     rules(): Promise<StyleRule[]>

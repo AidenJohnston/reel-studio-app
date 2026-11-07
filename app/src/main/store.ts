@@ -28,6 +28,7 @@ import type {
 import { mediaUrl } from './media-url'
 import { COPY_GONE, POSTER, canCopyAgain } from './first-video'
 import type { ReelSeed } from './propose-reels'
+import type { ArchiveSeed } from './archive-reels'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import { keptIds } from '../shared/cut'
 import { readCaptionLines } from '../shared/subtitle-lines'
@@ -68,6 +69,8 @@ export interface AppState {
   proposal?: StoredProposal
   /** This reel was made from another reel's proposal: what it is seeded from, kept so a resume can seed it again. */
   from?: ReelSeed
+  /** Made from a pick of reels across the footage archive: seeded once its copy is in (main/archive-reels.ts). */
+  fromArchive?: ArchiveSeed
   /** The person chose this reel's series (or no series) themselves: automatic grouping leaves it alone (main/series.ts). */
   seriesChosen?: boolean
   /** The files Version 1 copies its video from, kept until the copy is in (project.json written): a first edit stopped
