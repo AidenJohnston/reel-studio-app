@@ -23,6 +23,12 @@
 /* drawn as the player's scrubbers are (preview.css .stage-scrub): a 4 px bar, the part played filled, a 12 px knob */
 .sbs-scrub::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--ink) var(--pct, 0%), var(--line-strong) var(--pct, 0%)); }
 .sbs-scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: var(--ink); border: 0; }
+/* forced colours, as the timeline does (reel.css .tl-rail): the played part and knob in text colour, the rest grey */
+@media (forced-colors: active) {
+  .sbs-scrub { forced-color-adjust: none; }
+  .sbs-scrub::-webkit-slider-runnable-track { background: linear-gradient(90deg, CanvasText var(--pct, 0%), GrayText var(--pct, 0%)); }
+  .sbs-scrub::-webkit-slider-thumb { background: CanvasText; }
+}
 .sbs-time { font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); min-width: 34px; }
 @media (max-width: 560px) { .sbs-bar { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .sbs-pp { transition: none; } }
