@@ -201,6 +201,10 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
     lead_cap = HEAD_LEAD if is_first else max(0.0, gap_cap - AFTER_SHARE)
     tail_cap = TAIL_KEEP if is_last else min(AFTER_SHARE, gap_cap)
     lo, hi = run_bounds(words, i0, i1, src_dur, tail_cap)
+    # the bounds that are a removed neighbouring word (the frame rounding below never crosses those)
+    src = words[i0]["source"]
+    word_lo = lo if i0 > 0 and words[i0 - 1]["source"] == src else -math.inf
+    word_hi = hi if i1 + 1 < len(words) and words[i1 + 1]["source"] == src else math.inf
     first_s, last_e = ws[0]["s"], ws[-1]["e"]
     start = min(first_s, max(lo, first_s - lead_cap, 0.0))
     end = max(last_e, min(hi, last_e + tail_cap))
@@ -235,13 +239,26 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
         pieces.append([cursor, end])
 
     out = []
+    rate = fps or 30.0
     for s, e in pieces:
-        s2, e2 = snap(s, fps), snap(e, fps)
+        # Onto the frame grid OUTWARD: a piece's start to the frame at or before it, its end to the frame at
+        # or after it, so rounding keeps a little more air and never cuts into a kept word (to the nearest
+        # frame, a word shorter than half a frame right after a cut was lost whole: audit 11 P1). Never past
+        # the run's bounds, though: outside them is a word the cut removed, which must not come back. Where
+        # a removed word ends less than a frame before a kept one starts there is no clean frame between
+        # them, and the removed word stays out; the kept word then loses under a frame at that edge.
+        s2 = math.floor(s * rate + EPS) / rate
+        if s2 < word_lo - EPS:
+            s2 = math.ceil(word_lo * rate - EPS) / rate
+        e2 = math.ceil(e * rate - EPS) / rate
+        if e2 > word_hi + EPS:
+            e2 = math.floor(word_hi * rate + EPS) / rate
+        s2, e2 = round(s2, 6), round(e2, 6)
         if src_dur:
-            e2 = min(e2, math.floor(src_dur * (fps or 30.0) + EPS) / (fps or 30.0))
+            e2 = min(e2, math.floor(src_dur * rate + EPS) / rate)
         if e2 - s2 >= frame - EPS:
-            if out and abs(out[-1][1] - s2) < EPS:
-                out[-1][1] = e2           # snapped shut: merge
+            if out and s2 <= out[-1][1] + EPS:
+                out[-1][1] = max(out[-1][1], e2)    # a cut under two frames closes: one piece, no frame twice
             else:
                 out.append([s2, e2])
     return [(round(s, 6), round(e, 6)) for s, e in out]
@@ -350,7 +367,9 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         # Split a merged contiguous range only at a declared join. The two pieces
         # still show exactly the same source frames and have the same total length.
         for wi, previous_end, join, kk in markers:
-            t = snap(words[wi]["s"], fps)
+            # the frame at or before the word: plan_run snaps a piece's start down, so the piece that
+            # holds the word starts there or earlier (to the nearest frame, a one-frame piece was skipped)
+            t = round(math.floor(words[wi]["s"] * (fps or 30.0) + EPS) / (fps or 30.0), 6)
             for si, seg in enumerate(run_segs):
                 if seg.src_start <= t < seg.src_end:
                     prior_word_in_piece = any(w["e"] > seg.src_start + EPS and w["s"] < t

@@ -1778,7 +1778,8 @@ const tools: ToolDef[] = [
       let sameSong = false;
       let frozen: MusicFrozen | undefined;
       if (args.track) {
-        const cur = (await loadProject(ctx.projectDir)).music;
+        // the edit this call changes: inside a note, the note's copy, whose song may differ from the live one
+        const cur = (await loadProject(ctx.projectDir, ctx.note?.file)).music;
         const current = cur.track ? resolveAsset(ctx, cur.track) : null;
         const asked = String(args.track).startsWith('asset_') ? null : resolveAsset(ctx, args.track);
         const kept = cur.frozen?.track === cur.track ? cur.frozen : undefined;

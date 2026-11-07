@@ -356,8 +356,9 @@ def build_audio(ctx, voice_wav) -> Path:
     if voice.shape[0] == 0:
         raise EngineError("NO_AUDIO", f"{voice_wav} has no audio", "This video has no sound. Try a different file.")
     dur = voice.shape[0] / SR
-    win = getattr(ctx, "window", None)
-    offset = float(win[0]) if win and abs((win[1] - win[0]) - dur) < 0.5 else 0.0
+    # The voice is always the full cut (render.build_audio); a preview window slices the finished mix
+    # afterwards, so the song is never shifted here (a near-full window used to shift it twice: audit 11)
+    offset = 0.0
     track = None
     if mcfg.get("enabled", True) and mcfg.get("track"):
         track = resolve_asset(ctx, song_ref(mcfg))
@@ -750,7 +751,9 @@ def accent_beats(ctx) -> list[float]:
     if not mcfg.get("enabled", True) or not mcfg.get("track"):
         return []
     try:
-        path = resolve_asset(ctx, mcfg["track"])
+        # the file the mix plays (the frozen copy, song_ref), never the Library song it was copied from,
+        # which may since have been replaced or deleted (audit 11)
+        path = resolve_asset(ctx, song_ref(mcfg))
         stat = path.stat()
         key = (str(path), stat.st_size, stat.st_mtime_ns)
         cached = getattr(ctx, "_accent_analysis", None)
