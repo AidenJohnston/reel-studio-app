@@ -263,6 +263,9 @@ function refusedReset(limits: LimitWindow[] | undefined): string | null {
 
 export function runProcess(cmd: string, args: string[], input: string, opts: { cwd?: string; signal?: AbortSignal; timeoutMs?: number; env?: NodeJS.ProcessEnv; onLine?: (line: string) => void } = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
+    // An abort listener added after the abort never runs, so a request stopped before this point would
+    // start the CLI, hand it the prompt and wait for it to finish on its own.
+    if (opts.signal?.aborted) return reject(new AIError('cancelled', 'Stopped.'));
     const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = ''; let stderr = ''; let killed = false; let seen = 0;
     child.stdout.setEncoding('utf8').on('data', (d) => {

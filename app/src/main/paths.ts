@@ -2,9 +2,9 @@
 // This module never imports electron: index.ts calls initPaths() with the electron values,
 // and tests call it with temp folders.
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { PRODUCT_NAME, type Channel } from '../shared/channel'
 
 export interface PathContext {
@@ -94,6 +94,23 @@ const within = (child: string, parent: string): boolean => {
 }
 
 /**
+ * Where a folder really is, with every link and junction on the way resolved, even when its last parts don't exist
+ * yet (a library folder the app is about to create). A part it can't read throws: the caller refuses, rather than
+ * comparing a path it could not check.
+ */
+function realPlace(path: string): string {
+  let at = resolve(path)
+  const missing: string[] = []
+  while (!existsSync(at)) {
+    const up = dirname(at)
+    if (up === at) break
+    missing.unshift(basename(at))
+    at = up
+  }
+  return join(realpathSync.native(at), ...missing)
+}
+
+/**
  * Settings › Storage: the library folder for a folder the person picked. Picking the library folder itself keeps it;
  * any other folder gets one inside it. The nightly refuses a folder that is, holds, or sits inside a stable library,
  * so it cannot write into the person's real reels. `stableRoots` adds the root the stable app saved, if it has one.
@@ -101,7 +118,10 @@ const within = (child: string, parent: string): boolean => {
 export function chosenRoot(picked: string, stableRoots: string[] = stableLibraryRoots()): string {
   const name = libraryFolderName()
   const root = picked.split(/[\\/]/).filter(Boolean).pop() === name ? picked : join(picked, name)
-  if (isNightly() && stableRoots.some((s) => within(root, s) || within(s, root))) {
+  // Compared where both really are: a "Reel Studio (Nightly)" inside the picked folder can be a link or junction to
+  // the stable library, and the nightly would then write the person's real reels through it.
+  const real = isNightly() ? realPlace(root) : root
+  if (isNightly() && stableRoots.some((s) => within(real, realPlace(s)) || within(realPlace(s), real))) {
     throw Object.assign(new Error(`refusing ${root}: it overlaps the stable app's library`), {
       code: 'STABLE_LIBRARY',
       userMessage: `That folder holds Reel Studio's own library. ${name} keeps its reels in a separate folder; pick another place.`

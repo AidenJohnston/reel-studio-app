@@ -2,6 +2,7 @@
 
     {"event":"progress","stage":"transcribe","pct":42,"message":"Listening to your video"}
     {"event":"progress","stage":"moments","pct":30,"message":"...","ready":{"kind":"still","t":2.4,"file":"..."}}
+    {"event":"progress","stage":"transcribe","pct":9,"message":"...","note":"<a line the app shows beside the step>"}
     {"event":"done","result":{...}}
     {"event":"error","code":"NO_AUDIO","message":"<dev detail>","userMessage":"..."}
 
@@ -60,15 +61,17 @@ def emit(obj: dict) -> None:
         out.flush()
 
 
-def progress(stage: str, pct: float, message: str, force: bool = False) -> None:
-    """Throttled to ~10 lines a second per stage so a fast loop cannot flood the app."""
+def progress(stage: str, pct: float, message: str, force: bool = False, note: str | None = None) -> None:
+    """Throttled to ~10 lines a second per stage so a fast loop cannot flood the app. `note` is a line the app
+    shows beside the current step (why it is slow, say); a line with one is never dropped."""
     pct = max(0.0, min(100.0, float(pct)))
     now = time.monotonic()
-    if not force and stage == _LAST["stage"] and now - _LAST["t"] < 0.1 and pct < 100.0 \
+    if not force and note is None and stage == _LAST["stage"] and now - _LAST["t"] < 0.1 and pct < 100.0 \
             and abs(pct - _LAST["pct"]) < 5.0:
         return
     _LAST.update(t=now, pct=pct, stage=stage)
-    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message})
+    emit({"event": "progress", "stage": stage, "pct": round(pct, 1), "message": message,
+          **({"note": note} if note else {})})
 
 
 def ready(stage: str, pct: float, message: str, what: dict) -> None:
