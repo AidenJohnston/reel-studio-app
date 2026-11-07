@@ -17,9 +17,18 @@ describe('notesLog', () => {
       msg('you', 'Use w12 for the lower third', { jobId: 'j1', outcome: 'failed' }),
       msg('editor', 'I could not find "w12" in your Library.', { jobId: 'j1' })
     ]
-    const log = notesLog({ chat, made: [], versions: [v(1)], running: null, source: null, now })
+    const log = notesLog({ chat, made: [], versions: [v(1)], running: null, sources: [], now })
     expect(log[1]).toMatchObject({ ask: { text: 'Use w12 for the lower third' }, result: { kind: 'failed', text: 'I could not find "w12" in your Library.' } })
     expect(noteToRetry(chat, log[1].key)).toBe('Use w12 for the lower third')
+  })
+
+  // the dev multi-clip run (footage-1106-2): a reel cut from three videos said "Your video, take 1 red.mp4"
+  it('fails if a reel cut from several videos names only the first', () => {
+    const take = (n: number) => ({ path: `media/take0${n}.mp4`, originalName: `take ${n}.mp4` })
+    const first = (n: number) => notesLog({ chat: [], made: [], versions: [v(1)], running: null, sources: [1, 2, 3, 4].slice(0, n).map(take), now })[0].ask.text
+    expect([first(1), first(3), first(4)]).toEqual([
+      'Your video, take 1.mp4', 'Your 3 videos, take 1.mp4, take 2.mp4 and take 3.mp4', 'Your 4 videos, take 1.mp4, take 2.mp4 and 2 more',
+    ])
   })
 
   it('fails if Try again sends something other than the stored note, or sends anything for an entry with none', () => {
@@ -42,7 +51,7 @@ describe('notesLog', () => {
       made: [],
       versions: [v(1), v(2)],
       running: null,
-      source: null,
+      sources: [],
       now
     })
     const shown = JSON.stringify(log.map((e) => [e.ask.text, e.result && 'text' in e.result ? e.result.text : null]))
@@ -62,7 +71,7 @@ describe('notesLog', () => {
       made: [],
       versions: [v(1)],
       running: null,
-      source: null,
+      sources: [],
       now
     })
     expect(log.at(-1)).toMatchObject({ ask: { text: 'add music' }, result: { kind: 'stopped' }, extra: [{ text: 'I found 3 more reels in this video.' }] })
@@ -85,7 +94,7 @@ describe('notesLog', () => {
       versions: [v(1, 21), v(2), v(3)],
       running: { id: 'j4', kind: 'note' },
       // fails if the line names the copy Reel Studio made (media/take01.mov) instead of the file the person brought in
-      source: { path: 'media/take01.mov', originalName: 'IMG_2207.MOV' },
+      sources: [{ path: 'media/take01.mov', originalName: 'IMG_2207.MOV' }],
       now
     })
     expect(log.map((e) => [e.day, e.ask.kind, e.ask.text, e.result])).toEqual([
@@ -105,7 +114,7 @@ describe('notesLog', () => {
       made: [],
       versions: [v(1)],
       running: null,
-      source: null,
+      sources: [],
       now
     })
     expect(log[1].result).toMatchObject({ kind: 'reply', actions: ['open-captions'] })
@@ -119,7 +128,7 @@ describe('notesLog', () => {
       msg('editor', 'No mixer.', { plan: true, script }),
       msg('you', 'shorter please', { plan: true, jobId: 's2' })
     ]
-    const base = { made: [], source: null, now }
+    const base = { made: [], sources: [], now }
     expect(notesLog({ ...base, chat: planning, versions: [], running: { id: 's2', kind: 'script' }, planned: true }).map((e) => [e.ask.text, e.result])).toEqual([
       ['sourdough without a mixer', { kind: 'script', script }],
       ['shorter please', { kind: 'writing' }]
@@ -143,7 +152,7 @@ describe('notesLog', () => {
       msg('you', 'shorter hook', { plan: true, jobId: 'p3', outcome: 'done' }),
       msg('editor', 'I made that change.', { plan: true, planTurn: 'plan' })
     ]
-    const base = { made: [], source: null, now, versions: [], running: null }
+    const base = { made: [], sources: [], now, versions: [], running: null }
     expect(notesLog({ ...base, chat: planning, planned: true, plan }).map((e) => e.result)).toEqual([
       { kind: 'question', text: 'Who is it for?' },
       { kind: 'proposed', text: 'Here is a plan.', card: false },
@@ -174,7 +183,7 @@ describe('waitingRows', () => {
 // job's reply carries its id (main/jobs.ts), so the first attempt's failure must not become the retry's result.
 describe('a note tried again', () => {
   const log = (chat: ChatMessage[], versions: VersionInfo[]) =>
-    notesLog({ chat, made: [], versions, running: null, source: null, now })
+    notesLog({ chat, made: [], versions, running: null, sources: [], now })
   const rows = (entries: ReturnType<typeof log>) => entries.map((e) => [e.ask.kind, e.ask.text, e.result])
 
   it('fails if a retry that made a version shows the first attempt\'s failure, even with another note in between', () => {
@@ -221,7 +230,7 @@ describe('a "Remember this for next time?" question', () => {
       msg('editor', 'They are already big.', { jobId: 'j1', version: 1 }),
       question
     ]
-    const note = notesLog({ chat, made: [], versions: [v(1)], running: null, source: null, now })[1]
+    const note = notesLog({ chat, made: [], versions: [v(1)], running: null, sources: [], now })[1]
     expect(note.result).not.toMatchObject({ text: question.text })
     expect(note.extra.map((m) => [m.text, m.actions])).toContainEqual([question.text, ['remember-yes', 'remember-no']])
   })

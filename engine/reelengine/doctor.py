@@ -57,7 +57,10 @@ def run() -> dict:
     except ImportError as exc:
         add(False, "faster-whisper", str(exc), "pip install faster-whisper")
     gpu = transcribe.cuda_available()
-    add(True, "GPU for listening", "NVIDIA CUDA" if gpu else "none (uses the CPU; slower but fine)")
+    # A counted card is not a usable one: without the CUDA libraries (the packaged app has none) listening falls back
+    # to the CPU (transcribe.load_model), so this says only what it knows.
+    add(True, "GPU for listening", "NVIDIA card found; used only if its CUDA libraries load, else the CPU" if gpu
+        else "none (uses the CPU; slower but fine)")
     root = tools.root_dir()
     try:
         free = shutil.disk_usage(root if root.exists() else root.anchor).free

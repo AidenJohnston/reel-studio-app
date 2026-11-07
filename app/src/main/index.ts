@@ -91,6 +91,7 @@ import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
 import { createFootageSources } from './footage-sources'
 import { chooseSeries, groupReel } from './series'
+import { createArchiveReels, libraryRef, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -279,6 +280,17 @@ const host: EngineHost = {
   importFootage: (ref) => importFootage(ref)
 }
 
+// Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
+const archiveReels = createArchiveReels({
+  jobs: { start: (...a) => jobs.start(...a), get: (id) => jobs.get(id) },
+  ai: () => ai,
+  runEngine,
+  root: reelStudioRoot,
+  file: () => join(settingsDir(), 'archive-reels.json'),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryRef(ref, libraryDir())),
+  startFirstEdit: (slug, init) => startFirstEdit(slug, init)
+})
+
 /** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
 async function importFootage(ref: string): Promise<string> {
   const { abs } = await footageSources.resolve(ref)
@@ -326,6 +338,18 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
+/** Settings › Storage is moving the library: no job or manual edit may start until the new place is in use, or it
+ * would take its project folder from the old place and its bookkeeping from the new one. */
+let rootMoving = false
+const refuseWhileRootMoves = (): void => {
+  if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+}
+/** Counts finished library moves. Work that reads paths, awaits, then starts a job takes this first and checks it
+ * just before jobs.start: a move that finished in between means its paths point at the old place. */
+let rootGeneration = 0
+const sameRootSince = (generation: number): void => {
+  if (generation !== rootGeneration) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try again.' }
+}
 const footageSources = createFootageSources({
   load: async () => (await loadSettings()).footageSources,
   save: async (footageSources) => void (await saveSettings({ footageSources })),
@@ -438,7 +462,10 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
-  () => updates.assertCanStartWork(),
+  () => {
+    refuseWhileRootMoves()
+    updates.assertCanStartWork()
+  },
   footageIndex,
   // and so do the pictures of each change made before its draft
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
@@ -602,7 +629,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,
@@ -722,12 +749,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
+    const st = await readAppState(slug)
     const copyIn = async (title: string, files: string[]) => {
       const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
+      // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
+      const keepOrder = st.fromArchive ? ['--keep-order'] : []
       await runEngine(
         'init',
-        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(files),
+        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
         // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
         (p) =>
@@ -741,7 +771,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
-    const st = await readAppState(slug)
     const from = st.from
     if (from) await prepareReel(slug, from, () => copyIn(from.about.title, [from.media]), { resumed: !initArgs, signal })
     else if (!existsSync(join(dir, 'project.json'))) {
@@ -762,6 +791,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
+    await seedFromArchive(slug)
     startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
@@ -817,10 +848,13 @@ function safeFileName(s: string): string {
 }
 
 async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
+  const generation = rootGeneration
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
+  // the library moved while the versions were read: `dir` is the old place
+  sameRootSince(generation)
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -1163,20 +1197,27 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
-    if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
-    const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
-    await fs.mkdir(root, { recursive: true })
-    // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
-    await footageIndex.pause()
+    refuseWhileRootMoves()
+    if (jobs.writing()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
+    // Taken before the first await, so no job can start between this check and the new root being in use.
+    rootMoving = true
     try {
-      if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until your video is finished, then change where videos are kept.' }
-      await saveSettings({ root })
-      setRootOverride(root)
-      await ensureRoot()
-      perms.markTouched()
-      indexLibrary()
+      const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
+      await fs.mkdir(root, { recursive: true })
+      // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
+      await footageIndex.pause()
+      try {
+        await saveSettings({ root })
+        setRootOverride(root)
+        rootGeneration++
+        await ensureRoot()
+        perms.markTouched()
+        indexLibrary()
+      } finally {
+        footageIndex.resume()
+      }
     } finally {
-      footageIndex.resume()
+      rootMoving = false
     }
     return appInfo()
   })
@@ -1669,6 +1710,7 @@ function registerIpc(): void {
   // a job like any other, so the updater waits for it (main/updater.ts counts running jobs)
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
+    const generation = rootGeneration
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before sharing.' }
     const version = await finishedExportVersion(slug, n)
@@ -1686,6 +1728,8 @@ function registerIpc(): void {
       : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
+    // the versions and project above were read before several awaits: a library move since then makes them stale
+    sameRootSince(generation)
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
@@ -1809,6 +1853,9 @@ function registerIpc(): void {
   })
   handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
   handle('footage:status', () => footageIndex.status())
+  handle('footage:findReels', () => archiveReels.find())
+  handle('footage:reels', () => archiveReels.status())
+  handle('footage:makeReels', (_e, ids: string[]) => archiveReels.make(ids))
 
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()

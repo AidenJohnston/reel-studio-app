@@ -44,6 +44,23 @@ describe('CLI JSON protocol', () => {
   });
 });
 
+describe('Stop before the CLI starts', () => {
+  // fails if a request already stopped (Stop pressed while the turn was being prepared) still starts the CLI and hands
+  // it the prompt, which then runs until it finishes or times out
+  it('rejects as stopped without running the CLI', async () => {
+    const dir = tmpDir();
+    const ran = path.join(dir, 'ran.txt');
+    const script = path.join(dir, 'fake-claude.js');
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(ran)}, 'ran');process.stdin.resume();`);
+    const p = new ClaudeCliProvider({ bin: process.execPath, binArgs: [script] });
+    const stop = new AbortController();
+    stop.abort();
+    await expect(p.complete({ system: 'SYS', tools: toolSchemas(['finish']), messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }], signal: stop.signal }))
+      .rejects.toMatchObject({ code: 'cancelled' });
+    expect(fs.existsSync(ran)).toBe(false);
+  });
+});
+
 describe('waiting for Claude, said as it is', () => {
   // fails if the CLI's retries, its thinking and the start of its answer stay invisible (notes waited 543 s and 544 s
   // on one call while the screen said "Watching your video and planning the edit")

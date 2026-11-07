@@ -53,14 +53,12 @@ export function hubConfigCandidates(env: NodeJS.ProcessEnv, platform: NodeJS.Pla
 export function configsOfRunning(psOutput: string): string[] {
   const out: string[] = []
   for (const line of psOutput.split('\n')) {
-    const words = line.trim().split(/\s+/)
-    if (!words[0] || !/(^|\/)(cliproxyapi|cli-proxy-api)[\w.-]*$/i.test(words[0])) continue
-    for (let i = 1; i < words.length; i++) {
-      const w = words[i]
-      const eq = /^--?config=(.+)$/.exec(w)
-      if (eq) out.push(eq[1])
-      else if ((w === '--config' || w === '-config') && words[i + 1]) out.push(words[i + 1])
-    }
+    const cmd = line.trim()
+    const bin = cmd.split(/\s/, 1)[0]
+    if (!bin || !/(^|\/)(cliproxyapi|cli-proxy-api)[\w.-]*$/i.test(bin)) continue
+    // ps joins the arguments with spaces and never quotes them, so "Application Support" in a path reads like two
+    // words. CLIProxyAPI takes no other operands, so the config path runs to the next flag or the end of the line.
+    for (const m of cmd.slice(bin.length).matchAll(/\s--?config(?:=|\s+)(.+?)(?=\s+--?[A-Za-z]|$)/g)) out.push(m[1])
   }
   return out.filter((p) => posix.isAbsolute(p))
 }
@@ -68,7 +66,8 @@ export function configsOfRunning(psOutput: string): string[] {
 function runningConfigs(platform: NodeJS.Platform): Promise<string[]> {
   if (platform === 'win32') return Promise.resolve([])
   return new Promise((resolve) => {
-    execFile('/bin/ps', ['-axo', 'command'], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? [] : configsOfRunning(String(stdout))))
+    // -ww, as orphans.ts uses: without a terminal, BSD ps cuts each line to 79 columns, which can end a config path early
+    execFile('/bin/ps', ['-ww', '-axo', 'command'], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? [] : configsOfRunning(String(stdout))))
   })
 }
 

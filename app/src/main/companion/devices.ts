@@ -29,6 +29,11 @@ interface Stored extends Device {
 
 interface StoreFile {
   v: 1
+  /**
+   * Nonces of accepted requests still inside their signature window, with when each was accepted. Kept on disk so a
+   * request captured before a restart can't run again after it.
+   */
+  nonces?: [string, number][]
   installationId: string
   devices: Stored[]
 }
@@ -44,7 +49,11 @@ export const DEVICE_IDLE_MS = 30 * 24 * 3600_000
 export const PAIR_TRIES_PER_MIN = 20
 /** lastSeenAt is written at most this often, so a playing video doesn't rewrite the file on every range request. */
 const TOUCH_WRITE_MS = 10 * 60_000
-const NONCE_KEEP_MS = 2 * CLOCK_SKEW_S * 1000
+/**
+ * A signed time is accepted from CLOCK_SKEW_S before it to CLOCK_SKEW_S after it, both ends included, so its nonce is
+ * kept that whole span plus a second.
+ */
+const NONCE_KEEP_MS = (2 * CLOCK_SKEW_S + 1) * 1000
 const NONCE_MAX = 10_000
 export const NAME_MAX = 60
 
@@ -94,6 +103,17 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
   const listeners = new Set<() => void>()
   let saving: Promise<void> = Promise.resolve()
 
+  const removedListeners = new Set<(ids: string[]) => void>()
+  const removed = (ids: string[]): void => {
+    for (const l of removedListeners) {
+      try {
+        l(ids)
+      } catch {
+        /* a listener's mistake never breaks a removal */
+      }
+    }
+  }
+
   const changed = (): void => {
     for (const l of listeners) {
       try {
@@ -135,13 +155,16 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
           )
         }
       : { v: 1, installationId: random(16).toString('hex'), devices: [] }
+    for (const e of valid(f) && Array.isArray(f.nonces) ? f.nonces : []) {
+      if (Array.isArray(e) && typeof e[0] === 'string' && NONCE.test(e[0]) && typeof e[1] === 'number' && now() - e[1] < NONCE_KEEP_MS) nonces.set(e[0], e[1])
+    }
     if (!valid(f)) await save()
     return data!
   }
 
   /** Writes the list. Rejects when the write fails (pairing and removal say so); later saves still run. */
   function save(): Promise<void> {
-    const snapshot = JSON.stringify(data)
+    const snapshot = JSON.stringify({ ...data, nonces: [...nonces] })
     const run = saving.catch(() => {}).then(async () => {
       await fs.mkdir(o.dir, { recursive: true })
       const write = async (file: string, body: string | Buffer): Promise<void> => {
@@ -167,7 +190,10 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     const f = await load()
     const keep = f.devices.filter((d) => now() - d.lastSeenAt < DEVICE_IDLE_MS)
     if (keep.length !== f.devices.length) {
+      const gone = f.devices.filter((d) => !keep.includes(d)).map((d) => d.id)
       f.devices = keep
+      // before the save, so a failed write still ends what they have open
+      removed(gone)
       await save()
       changed()
     }
@@ -189,9 +215,10 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
 
   /**
    * Remembers a nonce for as long as its signature could still be accepted. Only expired ones are dropped: dropping a
-   * live one would let its request be replayed. A full cache refuses new requests until some expire.
+   * live one would let its request be replayed. A full cache refuses new requests until some expire. The nonce is on
+   * disk before its request runs, so a restart doesn't forget it; when it can't be written the request is refused.
    */
-  function freshNonce(nonce: unknown): 'fresh' | 'replayed' | 'busy' {
+  async function freshNonce(nonce: unknown): Promise<'fresh' | 'replayed' | 'busy'> {
     if (typeof nonce !== 'string' || !NONCE.test(nonce)) return 'replayed'
     const t = now()
     for (const [n, at] of nonces) {
@@ -201,8 +228,16 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
     if (nonces.has(nonce)) return 'replayed'
     if (nonces.size >= NONCE_MAX) return 'busy'
     nonces.set(nonce, t)
+    try {
+      await save()
+    } catch {
+      return 'busy'
+    }
     return 'fresh'
   }
+
+  /** Still paired and active after a wait: the device may have been removed or gone idle meanwhile. */
+  const stillThere = (d: Stored): boolean => !!data && data.devices.includes(d) && now() - d.lastSeenAt < DEVICE_IDLE_MS
 
   const timeOk = (time: unknown): time is number =>
     typeof time === 'number' && Number.isInteger(time) && Math.abs(time - now() / 1000) <= CLOCK_SKEW_S
@@ -276,8 +311,9 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const time = Number(h.time)
       if (!timeOk(time)) return 'stale'
       if (!sigOk(h.sig, hmac(d.secret, callMessage(d.id, time, String(h.nonce), body)))) return 'bad-signature'
-      const fresh = freshNonce(h.nonce)
+      const fresh = await freshNonce(h.nonce)
       if (fresh !== 'fresh') return fresh
+      if (!stillThere(d)) return 'unknown'
       touch(d)
       return view(d)
     },
@@ -289,8 +325,9 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const time = Number(q.t)
       if (!timeOk(time)) return 'stale'
       if (!sigOk(q.s, hmac(d.secret, eventsMessage(d.id, time, String(q.n))))) return 'bad-signature'
-      const fresh = freshNonce(q.n)
+      const fresh = await freshNonce(q.n)
       if (fresh !== 'fresh') return fresh
+      if (!stillThere(d)) return 'unknown'
       touch(d)
       return view(d)
     },
@@ -320,9 +357,24 @@ export function createDeviceRegistry(o: DeviceRegistryOptions) {
       const before = f.devices.length
       f.devices = f.devices.filter((d) => d.id !== id)
       if (f.devices.length === before) return false
+      removed([id])
       await save()
       changed()
       return true
+    },
+
+    /**
+     * Still paired and not idle past DEVICE_IDLE_MS, without waiting: an open event stream asks before every write,
+     * since a device can cross its idle limit while its stream stays open and no request comes to sweep it.
+     */
+    isActive(id: string): boolean {
+      return !!data && data.devices.some((d) => d.id === id && now() - d.lastSeenAt < DEVICE_IDLE_MS)
+    },
+
+    /** Devices removed by hand or for being idle: their open streams and downloads must end (companion-ipc.ts). */
+    onRemoved(cb: (ids: string[]) => void): () => void {
+      removedListeners.add(cb)
+      return () => removedListeners.delete(cb)
     },
 
     onChange(cb: () => void): () => void {

@@ -14,6 +14,12 @@ const WATCH_MS = 3000
 const TRACE_MS = 600
 /** the user-timing mark the click sets, found in the trace to split it */
 const CLICK_MARK = 'rs-use-claude'
+/**
+ * How "Use it" is pressed: `pointer` (default) clicks it; `key` focuses it and presses Enter. A key press puts the app
+ * in keyboard mode (components/motion.ts, `html.kb`), where the status line's settle-in and other step transitions
+ * are off, so comparing the two says how much of the jank those transitions cause.
+ */
+const PRESS = process.env.REELSTUDIO_PERF_MOTION_PRESS === 'key' ? 'key' : 'pointer'
 
 interface Loaf {
   start: number
@@ -81,8 +87,10 @@ interface PaintedNode {
   node: string
   paints: number
   /** CSS px² of the rectangles Paint recorded, summed: how often and how much was re-recorded, not what the GPU
-   * rastered (that is the GPU tasks' time) */
+   * rastered (that is the GPU tasks' time). Paints with no bounds (unbounded) are counted apart, not in it. */
   area: number
+  /** paints whose recorded rectangle was Chromium's unbounded one (no clip), which has no meaningful area */
+  unbounded: number
 }
 interface Task {
   process: string
@@ -114,18 +122,24 @@ function clickAt(events: TraceEvent[]): number {
 /** Whether a trace event starts in [from, to), both ms from the click. */
 const within = (e: TraceEvent, click: number, from: number, to: number): boolean => e.ts >= click + from * 1000 && e.ts < click + to * 1000
 
+/** Chromium writes an unclipped Paint's rectangle as its "infinite" one, about ±2^24 px a side. */
+const UNBOUNDED_PX = 1e6
+
+type Painted = { paints: number; area: number; unbounded: number }
+
 /** The page's Paint events starting in [from, to) ms from the click, summed by DOM node. */
-function paintsByNode(events: TraceEvent[], click: number, from: number, to: number): Map<number, { paints: number; area: number }> {
-  const out = new Map<number, { paints: number; area: number }>()
+function paintsByNode(events: TraceEvent[], click: number, from: number, to: number): Map<number, Painted> {
+  const out = new Map<number, Painted>()
   for (const e of events) {
     const id = e.args?.data?.nodeId
     const q = e.args?.data?.clip
     if (e.name !== 'Paint' || id === undefined || !q || q.length !== 8 || !within(e, click, from, to)) continue
     const xs = [q[0], q[2], q[4], q[6]]
     const ys = [q[1], q[3], q[5], q[7]]
-    const area = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys))
-    const n = out.get(id) ?? { paints: 0, area: 0 }
-    out.set(id, { paints: n.paints + 1, area: n.area + area })
+    const unbounded = [...xs, ...ys].some((v) => Math.abs(v) > UNBOUNDED_PX)
+    const area = unbounded ? 0 : (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys))
+    const n = out.get(id) ?? { paints: 0, area: 0, unbounded: 0 }
+    out.set(id, { paints: n.paints + 1, area: n.area + area, unbounded: n.unbounded + (unbounded ? 1 : 0) })
   }
   return out
 }
@@ -147,10 +161,10 @@ function longestTasks(events: TraceEvent[], click: number, from: number, to: num
     .map((e) => ({ process: proc.get(e.pid) ?? String(e.pid), thread: thread.get(`${e.pid}:${e.tid}`) ?? String(e.tid), name: e.name, ms: Math.round((e.dur ?? 0) / 100) / 10, at: Math.round((e.ts - click) / 1000) }))
 }
 
-/** The largest painted nodes, each named as a selector would name it: tag, test id, classes. */
-async function describePaints(cdp: CDPSession, painted: Map<number, { paints: number; area: number }>): Promise<PaintedNode[]> {
+/** The most repainted nodes (then the largest), each named as a selector would name it: tag, test id, classes. */
+async function describePaints(cdp: CDPSession, painted: Map<number, Painted>): Promise<PaintedNode[]> {
   const out: PaintedNode[] = []
-  for (const [backendNodeId, n] of [...painted].sort((a, b) => b[1].area - a[1].area).slice(0, 8)) {
+  for (const [backendNodeId, n] of [...painted].sort((a, b) => b[1].paints - a[1].paints || b[1].area - a[1].area).slice(0, 8)) {
     let node = `backend node ${backendNodeId}`
     try {
       const { node: d } = await cdp.send('DOM.describeNode', { backendNodeId })
@@ -162,7 +176,7 @@ async function describePaints(cdp: CDPSession, painted: Map<number, { paints: nu
     } catch {
       // the node is gone from the page since it painted
     }
-    out.push({ node, paints: n.paints, area: Math.round(n.area) })
+    out.push({ node, paints: n.paints, area: Math.round(n.area), unbounded: n.unbounded })
   }
   return out
 }
@@ -217,7 +231,11 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
       // waits for the button to be ready before clicking, so a mark set beforehand could fall well before the click)
       await use.evaluate((el, m) => el.addEventListener('click', () => performance.mark(m), { capture: true, once: true }), CLICK_MARK)
       await page.waitForTimeout(TRACE_MS)
-      const useClaude = await measure(page, () => use.click())
+      const useClaude = await measure(page, async () => {
+        if (PRESS === 'pointer') return use.click()
+        await use.focus()
+        await page.keyboard.press('Enter')
+      })
       const ended = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()))
       await cdp.send('Tracing.end')
       await ended
@@ -245,6 +263,7 @@ test('first-run motion: the welcome fly-in and "Use it" on Claude', async () => 
   const report = {
     what: 'Reel Studio first-run motion (app/perf/README.md)',
     reportOnly: 'No thresholds. maxGapMs is the longest time between two animation frames in the 3 s after the click.',
+    useClaudePressedBy: PRESS,
     machine: { platform: process.platform, release: release(), cpu: cpus()[0]?.model ?? null, cpus: cpus().length },
     summary,
     runs

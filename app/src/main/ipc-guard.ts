@@ -105,6 +105,9 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'style:reveal': ok = text(first) && /^[0-9a-f]{16}$/.test(first); break
     case 'style:keepLearned': ok = Array.isArray(first) && first.every((r) => object(r) && text(r.text) && text(r.evidence)) && text(second) && (third === undefined || EDITORS.includes(third as never)); break
     case 'library:preview': ok = path(first); break
+    // a pick names 1 to 5 of the proposal's candidates (ai propose.ts REEL_LIMIT), each once
+    case 'footage:makeReels': ok = Array.isArray(first) && first.length >= 1 && first.length <= 5 && new Set(first).size === first.length &&
+      first.every((id) => text(id) && /^r\d+$/.test(id)); break
     case 'footage:removeSource': ok = text(first) && /^src-[0-9a-f]{8,32}$/.test(first); break
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break

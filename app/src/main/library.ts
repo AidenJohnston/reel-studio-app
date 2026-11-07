@@ -7,6 +7,7 @@ import { mediaUrl } from './media-url'
 import type { DropResult, LibraryBin, LibraryFile } from '../shared/api'
 import type { RunEngine } from './engine'
 import { logDuration } from './diagnostics'
+import { isInside } from './path-inside'
 
 // .3gp too: the engine reads it (probe.py VIDEO_EXT), and a footage folder's .3gp clip must be importable
 export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts', '.3gp'])
@@ -194,7 +195,7 @@ export async function addToLibrary(files: string[], runEngine: RunEngine, log: (
     const st = await fs.stat(f).catch(() => null)
     if (!st) out.push({ file: f, name: basename(f), bin: null, dest: null, reason: 'This file could not be found.' })
     else if (st.isDirectory()) out.push({ file: f, name: basename(f), bin: null, dest: null, reason: 'This is a folder. Open it and drop the files inside.' })
-    else if (resolve(f).startsWith(lib)) out.push({ file: f, name: basename(f), bin: binForFolder(f), dest: f })
+    else if (isInside(resolve(f), lib)) out.push({ file: f, name: basename(f), bin: binForFolder(f), dest: f })
     else todo.push(f)
   }
   for (const f of todo.filter((t) => FONT_EXT.has(extname(t).toLowerCase()))) {

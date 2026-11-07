@@ -15,7 +15,10 @@ def _media_name(i: int, src: Path) -> str:
     return f"take{i:02d}{ext}"
 
 
-def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exports: bool = False) -> dict:
+def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exports: bool = False,
+        keep_order: bool = False) -> dict:
+    """`keep_order`: the sources are s1, s2, ... in the order given, never by capture time. A reel cut from parts
+    of several files (app archive-reels.ts) names each part's file by that position."""
     project_dir = Path(project_dir)
     if projmod.project_file(project_dir).exists():
         raise EngineError("PROJECT_EXISTS", f"{project_dir} already has a project.json",
@@ -35,7 +38,7 @@ def run(project_dir: Path, title: str, files: list, slug: str = None, faster_exp
         infos.append((f, info))
 
     # Partial dates cannot order the undated files, so preserve the whole drop order in that case.
-    if all(info.get("capturedAt") for _, info in infos):
+    if not keep_order and all(info.get("capturedAt") for _, info in infos):
         infos.sort(key=lambda entry: entry[1]["capturedAt"])
 
     proj = projmod.new_project(title, slug=slug or projmod.slugify(project_dir.name, projmod.slugify(title)))
