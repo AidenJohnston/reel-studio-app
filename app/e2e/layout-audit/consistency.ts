@@ -330,12 +330,25 @@ export function auditConsistency(opts: { allow: ConsistencyAllow[]; scale: Consi
     return (column && (/center/.test(ps.alignItems) || /center/.test(css(child).alignSelf))) || (flex && !column && /center/.test(ps.justifyContent)) ||
       (/grid/.test(ps.display) && (/center/.test(ps.justifyItems) || /center/.test(css(child).justifySelf)))
   }
-  // text centred on its own, or inside a box its parent centres (a caption under a centred picture): it starts wherever
-  // the centring puts it, so its left edge is no one's stack partner
+  // a box whose children are laid one under another: their left edges are set by it, not by any centring above it
+  const stacks = (p: Element): boolean => {
+    const ps = css(p)
+    if (/flex/.test(ps.display) && !ps.flexDirection.startsWith('column')) return false
+    return Array.from(p.children).filter((c) => boxOf(c).height > 0).length > 1
+  }
+  // text centred on its own, or in a row its parent centres (a caption under a centred picture): it starts wherever the
+  // centring puts it, so its left edge is no one's stack partner. The walk up stops at a box that stacks its children:
+  // text stacked inside a centred wrapper still lines up with its siblings (review round 2).
   const centred = (el: Element): boolean => {
     if (/center/.test(css(el).textAlign) || (/flex|grid/.test(css(el).display) && /center/.test(css(el).justifyContent))) return true
     let node: Element = el
-    for (let i = 0; i < 3 && node.parentElement && node.parentElement !== document.body; i++, node = node.parentElement) if (centredBy(node, node.parentElement)) return true
+    for (let i = 0; i < 3; i++) {
+      const p = node.parentElement
+      if (!p || p === document.body) return false
+      if (centredBy(node, p)) return true
+      if (stacks(p)) return false
+      node = p
+    }
     return false
   }
   const objs: Obj[] = []

@@ -36,6 +36,8 @@ const cells = [
   `<div id="far-a" style="width:200px;height:20px;background:#ccc"></div><div id="far-b" style="width:200px;height:20px;margin:8px 0 0 40px;background:#ccc"></div>`,
   // edge-near-miss near miss: a caption its column centres (110 px in) over text 115 px in is not a stack pair
   `<div style="display:flex;flex-direction:column;align-items:center;width:280px"><div style="width:100px;height:40px;background:#ccc"></div><div id="cap-centred" style="width:60px">Version 1</div></div><div id="cap-below" style="margin:8px 0 0 115px">Sound from</div>`,
+  // ...but two lines stacked inside a wrapper that is centred still line up with each other: 6 px off is caught
+  `<div style="display:flex;flex-direction:column;align-items:center;width:280px"><div style="width:240px"><div id="nest-a" style="width:200px">first line</div><div id="nest-b" style="width:200px;margin:8px 0 0 6px">second line</div></div></div>`,
   // concentric: a 14 px fill 6 px inside a 14 px surface / an 8 px one
   `<div style="width:120px;padding:6px;border-radius:14px;background:#ddd"><div id="inner-rad" style="height:30px;border-radius:14px;background:#bbb"></div></div>` +
     `<div style="width:120px;padding:6px;margin-top:8px;border-radius:14px;background:#ddd"><div id="inner-ok" style="height:30px;border-radius:8px;background:#bbb"></div></div>`
@@ -61,6 +63,7 @@ test('fails if a consistency rule misses its case or flags the near miss beside 
         'sibling-gaps #gaps-off',
         'stack-axis #stack-off',
         'edge-near-miss #near-a',
+        'edge-near-miss #nest-a',
         'concentric #inner-rad'
       ].sort()
     )
