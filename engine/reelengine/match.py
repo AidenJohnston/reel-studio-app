@@ -159,7 +159,8 @@ def best_action(outgoing: list, incoming: list, planned: tuple) -> dict:
     if best["motion"] >= ACTION_MIN:
         return {**best, "matched": True}
     return {**best, "matched": False,
-            "why": f"nothing moves on both sides of this cut ({best['motion']:.3f}, a cut on action needs {ACTION_MIN})"}
+            # four places: at three, 0.0196 printed as "0.020, needs 0.02" (cutting1106-5 survey)
+            "why": f"nothing moves on both sides of this cut ({best['motion']:.4f}, a cut on action needs {ACTION_MIN:.4f})"}
 
 
 def frame_grid(lo: float, hi: float, fps: float) -> list:
