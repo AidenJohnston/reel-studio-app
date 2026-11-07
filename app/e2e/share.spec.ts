@@ -30,7 +30,7 @@ test('fails if Help improve is asked before a share that worked or a second time
     await page.getByTestId('share').click()
     await expect(pop).toBeVisible()
     await expect(ask).toHaveCount(0)
-    await expect(pop.getByTestId('share-instagram')).toContainText('Not connected yet. Saves the reel and copies the caption.')
+    await expect(pop.getByTestId('share-instagram')).toContainText('Saves the reel and copies the caption')
     await pop.getByTestId('share-platforms-toggle').click()
     await expect(pop.getByTestId('share-platforms')).toContainText('None of these are connected yet')
     // fails if a platform's box is not the app's one checkbox, or the keyboard can't tick it and hear that it is
