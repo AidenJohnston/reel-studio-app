@@ -260,6 +260,9 @@ export async function expectViewport(page: Page, w: number, h: number, timeout?:
 
 export const CLAUDE_CODE_MISNAMED = /Claude Code(?! app)/
 
+/** What the app calls the computer it runs on in its copy ("Not on this Mac.", "5 models on this PC"). */
+export const THIS_COMPUTER = process.platform === 'darwin' ? 'this Mac' : 'this PC'
+
 /**
  * Clicks "Use Claude (your Claude Code app)" on the Connect panel in view, if this computer's Claude Code app is
  * signed in. Nothing picks it on its own (it spends the person's own Claude plan), so a run that wants it says so.

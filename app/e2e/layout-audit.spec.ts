@@ -181,6 +181,8 @@ async function audit(screen: Screen): Promise<void> {
           await expect(state.ready(page)).toBeVisible({ timeout: 30_000 })
         } catch (e) {
           result.unreached.push({ state: state.id, why: String(e instanceof Error ? e.message : e).replace(/\u001b\[\d+m/g, '').split('\n').filter((l) => /\S/.test(l)).slice(0, 2).join(' ').slice(0, 240) })
+          // what the window showed instead, so an unreached state can be put down to its cause on a machine nobody watches
+          await page.screenshot({ path: join(OUT, 'unreached', `${state.id}.png`) }).catch(() => {})
           return false
         }
         result.states.push(state.id)
