@@ -133,7 +133,9 @@ test('Insights: results read, explained and opened at the posted version', async
 // No results yet: the page says so at the top, and Your recent reels sits right under it on the same edge (it was left at
 // the window's foot with half a screen of nothing above it).
 test('fails if, on an empty Insights page, Your recent reels is not right under the empty state on its left edge', async () => {
-  const { app, page } = await launch({}, { realViewport: true })
+  // a profile of its own: the file's shared one has the first test's posted reels, so its page is not empty
+  const dirs = { REELSTUDIO_USER_DATA: join(BASE, 'insights-empty', 'data'), REELSTUDIO_ROOT: join(BASE, 'insights-empty', 'Reel Studio') }
+  const { app, page } = await launch(dirs, { realViewport: true })
   try {
     await passFirstRun(page)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900))

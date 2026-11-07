@@ -217,7 +217,8 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
     const also = added.length ? ` Also: ${added.map((w) => `"${w}"`).join(', ')}.` : ''
-    if (bigger) return { summary: `I made the subtitles bigger, so they read at a glance on a phone.${also}`, version, styleRulesAdded: [], changed: ['captions'] }
+    const took = added.length ? `, and took in what you added: ${added.map((w) => `"${w}"`).join(', ')}` : ''
+    if (bigger) return { summary: `I made the subtitles bigger, so they read at a glance on a phone${took}.`, version, styleRulesAdded: [], changed: ['captions'] }
     return { summary: `Done: "${note}".${also} It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 

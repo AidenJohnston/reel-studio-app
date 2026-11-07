@@ -318,8 +318,23 @@ const SCENES: Scene[] = [
     ready: byTestId('note-progress')
   },
   {
+    // Add now (note-add.spec): a second note written while the first is made waits in a row that can join it
+    id: 'reel-add-now',
+    enter: async ({ page }) => {
+      await page.getByTestId('note-input').fill('and keep them white')
+      await page.getByTestId('send').click()
+      await expect(page.getByTestId('queue-row')).toHaveCount(1)
+    },
+    ready: byTestId('queue-add')
+  },
+  {
     id: 'reel-versions',
     enter: async ({ page, gate }) => {
+      // the waiting note joins the one being made, as a person who wrote it would have it
+      if (await page.getByTestId('queue-add').isVisible()) {
+        await page.getByTestId('queue-add').click()
+        await expect(page.getByTestId('note-added')).toBeVisible()
+      }
       for (const n of [2, 3, 4, 5, 6]) gate(n)
       await expect(page.getByTestId('log-play-2')).toBeVisible({ timeout: 240_000 })
       await expect(page.getByTestId('note-progress')).toHaveCount(0, { timeout: 120_000 })
@@ -335,6 +350,60 @@ const SCENES: Scene[] = [
       await pauseAt(page, MOMENT)
     },
     ready: byTestId('done-compare')
+  },
+  {
+    // Compare › Side by side (side-by-side.spec): both versions at once, opened where the compare was paused
+    id: 'reel-side-by-side',
+    enter: async ({ page }) => {
+      if (!(await page.getByTestId('side-by-side').isVisible())) await page.getByTestId('compare-side-by-side').click()
+      await expect
+        .poll(() => page.evaluate(() => Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid^="sbs-video-"]')).every((v) => v.paused && v.readyState >= 2)), { timeout: 20_000 })
+        .toBe(true)
+    },
+    ready: byTestId('side-by-side')
+  },
+  {
+    // the Versions view (version-tree.spec), a row's actions shown as the pointer finds them
+    id: 'reel-version-tree',
+    enter: async ({ page }) => {
+      // back to one player (the layout is remembered), then keep the newest and switch the column
+      if (await page.getByTestId('sbs-one').isVisible()) await page.getByTestId('sbs-one').click()
+      if (await page.getByTestId('done-compare').isVisible()) await page.getByTestId('done-compare').click()
+      await page.getByTestId('notes-view-versions').click()
+    },
+    ready: byTestId('version-tree'),
+    pose: async (page) => {
+      await page.mouse.move(2, 2)
+      await page.getByTestId('vt-1').hover()
+      await expect(page.getByTestId('vt-change-1')).toBeVisible()
+    }
+  },
+  {
+    id: 'reel-combine',
+    enter: async ({ page }) => {
+      await page.getByTestId('vt-2').hover()
+      await page.getByTestId('vt-combine-2').click()
+      await expect(page.getByTestId('combine-reading')).toHaveCount(0, { timeout: 30_000 })
+    },
+    ready: byTestId('combine')
+  },
+  {
+    // an older version on screen: the title bar names it and offers the way back and a note on it
+    id: 'reel-older-version',
+    enter: async ({ page }) => {
+      if (await page.getByTestId('combine').isVisible()) await page.getByTestId('combine-cancel').click()
+      await page.getByTestId('vt-play-1').click()
+      await pauseAt(page, MOMENT)
+    },
+    ready: byTestId('version-change-this')
+  },
+  {
+    id: 'reel-change-older',
+    enter: async ({ page }) => {
+      await page.getByTestId('version-change-this').click()
+      await expect(page.getByTestId('note-input')).toHaveAttribute('placeholder', /Version 1/)
+    },
+    ready: byTestId('note-base')
   },
   ...(['cut', 'captions', 'music', 'broll', 'cover'] as const).map(
     (key): Scene => ({
