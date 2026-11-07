@@ -389,6 +389,18 @@ def smoke(plat: str, rt: Path) -> None:
     subprocess.run([str(py), "-I", "-c", code, str(model), str(REPO / "engine")], check=True)
 
 
+def up_to_date(rt: Path, fingerprint: dict) -> bool:
+    """Whether rt already holds this exact runtime with its Python packages installed. A --no-pip run (a cross-fetch)
+    writes the same fingerprint without installing anything, so its manifest says so, and a later normal run installs
+    the packages instead of shipping a runtime without them. A manifest from before that flag rebuilds once."""
+    try:
+        m = json.loads((rt / "runtime-manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (m.get("fingerprint") == fingerprint and m.get("dependencies") is True
+            and (rt / "python").exists() and (rt / "ffmpeg").exists())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--platform", choices=sorted(PLATFORMS), default=None)
@@ -418,20 +430,16 @@ def main() -> None:
     req_hash = sha256_of(REQUIREMENTS_HASHED)
     manifest_path = rt / "runtime-manifest.json"
     fingerprint = {"pbs": PBS_TAG + PBS_PY, "req": req_hash, "licenses": [sha256_of(LICENSES / n) for n in sorted(REQUIRED_LICENSES)], "ffmpeg": [PLATFORMS[plat][k]["sha256"] for k in PLATFORMS[plat] if k.endswith("_zip")]}
-    if manifest_path.exists() and not args.force and not args.no_pip:
-        try:
-            m = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if m.get("fingerprint") == fingerprint and (rt / "python").exists() and (rt / "ffmpeg").exists():
-                log("runtime for %s is up to date (use --force to rebuild)" % plat)
-                return
-        except ValueError:
-            pass
+    if not args.force and not args.no_pip and up_to_date(rt, fingerprint):
+        log("runtime for %s is up to date (use --force to rebuild)" % plat)
+        return
     t0 = time.time()
     manifest = {"platform": plat, "fingerprint": fingerprint, "built": time.strftime("%Y-%m-%dT%H:%M:%S")}
     manifest.update(install_python(plat, rt, args.no_pip))
     manifest.update(install_ffmpeg(plat, rt))
     if not args.no_pip:
         smoke(plat, rt)
+    manifest["dependencies"] = not args.no_pip
     manifest["size_mb"] = {"python": round(dir_size(rt / "python") / 1e6, 1), "ffmpeg": round(dir_size(rt / "ffmpeg") / 1e6, 1)}
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     log("done in %.0fs: %s" % (time.time() - t0, json.dumps(manifest["size_mb"])))

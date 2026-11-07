@@ -172,6 +172,23 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
     res.write(chunk)
   }
 
+  const REVOKED = `data: ${JSON.stringify({ type: 'revoked' } satisfies ContractEvent)}\n\n`
+
+  /**
+   * A stream's writes (ready, keep-alives, events) go only to a device still paired and not idle past its limit. A
+   * device that crossed the limit while its stream stayed open is told it's revoked, and the stream ends.
+   */
+  const writeTo = (res: ServerResponse, chunk: string): void => {
+    const s = streams.get(res)
+    if (!s) return
+    if (!o.devices.isActive(s.device)) {
+      write(res, REVOKED)
+      endStream(res)
+      return
+    }
+    write(res, chunk)
+  }
+
   async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     if (path === '/' || path === '/index.html') {
       const html = await fs.readFile(join(o.staticDir, 'companion.html')).catch(() => null)
@@ -233,12 +250,12 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
     if (mine.length >= LIMITS.streamsPerDevice) endStream(mine[0][0])
     if (streams.size >= LIMITS.streams) return json(res, 503, { error: 'BUSY' })
     res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
-    const timer = setInterval(() => write(res, ': keep-alive\n\n'), LIMITS.keepAliveMs)
+    const timer = setInterval(() => writeTo(res, ': keep-alive\n\n'), LIMITS.keepAliveMs)
     timer.unref?.()
     streams.set(res, { device: device.id, timer })
     // The response's close, not the request's: a GET's request side can finish long before the stream does.
     res.on('close', () => endStream(res))
-    write(res, `data: ${JSON.stringify({ type: 'ready' } satisfies ContractEvent)}\n\n`)
+    writeTo(res, `data: ${JSON.stringify({ type: 'ready' } satisfies ContractEvent)}\n\n`)
   }
 
   async function media(req: IncomingMessage, res: ServerResponse, ref: string, q: URLSearchParams): Promise<void> {
@@ -366,14 +383,13 @@ export async function startCompanionServer(o: CompanionServerOptions): Promise<C
     origin,
     publish(e) {
       const line = `data: ${JSON.stringify(e)}\n\n`
-      for (const res of [...streams.keys()]) write(res, line)
+      for (const res of [...streams.keys()]) writeTo(res, line)
     },
     revoke(deviceId) {
       for (const [res, d] of [...sending]) if (d === deviceId) res.destroy()
-      const line = `data: ${JSON.stringify({ type: 'revoked' } satisfies ContractEvent)}\n\n`
       for (const [res, s] of [...streams]) {
         if (s.device !== deviceId) continue
-        write(res, line)
+        write(res, REVOKED)
         endStream(res)
       }
     },

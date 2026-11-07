@@ -36,8 +36,8 @@ export function useActiveEditor(): [ProviderInfo | null, (p: ProviderInfo) => vo
 
 /**
  * Choose your editor: one component for the first run, Settings › Editor, the Connect screen, the composer with no
- * editor and a failed Version 1. CLIProxyAPI comes first when it runs on this computer (one click, the key read from
- * its config); then the person's own Claude Code and Codex apps, each with its plan; then Advanced (your own server, an
+ * editor and a failed Version 1. CLIProxyAPI comes first (one click, the key read from its config), or, not found while
+ * one of the person's own apps is ready, under Advanced; then the Claude Code and Codex apps, each with its plan; then Advanced (your own server, an
  * API key), closed. The editor in use shows its accounts, plans and limits, a Test, and a model for each stage. It
  * has no scroll area of its own: it fits the column it is given. `stagesOpen`: the stage list shows open (Settings).
  */
@@ -46,6 +46,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   const [hub, lookForHub] = useHub()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [vendorAttention, setVendorAttention] = useState(false)
+  const [vendorReady, setVendorReady] = useState(false)
   // a Settings search for your own server or an API key opens Advanced, where they are
   const hits = useContext(SearchHits)
   const searchedAdvanced = !!hits && (hits.has('own-server') || hits.has('api-key'))
@@ -73,6 +74,10 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   const [othersOpen, setOthersOpen] = useState(false)
   // CLIProxyAPI is the recommended choice: while nothing is connected its Use it is the one filled button
   const hubLeads = !anyOn && !!hub && (hub.state === 'ready' || hub.state === 'needs-key')
+  // Not found here while one of the person's own apps is ready: it waits under Advanced, with the person's own server
+  // and an API key. First, a first-timer met a row that could not be used above the one that could; after the app,
+  // still a name they had to read past: both Sense judges (goal 3) named it first, round after round.
+  const hubTrails = !hubOn && hub?.state === 'none' && vendorReady
   const details = anyOn ? (
     <>
       <EditorDetails active={active} stages={stages} />
@@ -86,6 +91,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       lead={!anyOn && !hubLeads}
       hubLeads={hubLeads && !vendorAttention}
       onAttention={setVendorAttention}
+      onReady={setVendorReady}
       onConnected={connected}
       onDisconnect={() => void disconnect()}
       details={details}
@@ -102,7 +108,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       status={<ConnectedMark testid="ai-connected" />}
       tone="ok"
       action={
-        <Button size="small" kind="tertiary" onClick={() => void disconnect()} data-testid="use-no-ai">
+        <Button size="small" onClick={() => void disconnect()} data-testid="use-no-ai">
           Disconnect
         </Button>
       }
@@ -111,14 +117,18 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
     </ProviderRow>
   )
 
+  const hubRow = (
+    <HubRow hub={hub} on={hubOn} primary={hubLeads && !vendorAttention} onConnected={connected} onDisconnect={() => void disconnect()} onLook={lookForHub}>
+      {hubOn ? details : null}
+    </HubRow>
+  )
+
   return (
     <div className="picker" data-testid="editor-setup">
       <div className="prov" role="group" aria-label="Choose your editor" data-testid="ai-picker">
         {otherRow}
-        {/* always the first row: found, asking for a key, elsewhere, or not running here */}
-        <HubRow hub={hub} on={hubOn} primary={hubLeads && !vendorAttention} onConnected={connected} onDisconnect={() => void disconnect()} onLook={lookForHub}>
-          {hubOn ? details : null}
-        </HubRow>
+        {/* the first row: found, asking for a key, elsewhere, or not running here with nothing else ready */}
+        {!hubTrails && hubRow}
         {hubOn ? (
           // CLIProxyAPI is the editor: the person's own apps wait behind one quiet line
           <Disclosure label="Other editors" hint="Claude Code app, Codex app" open={othersOpen} onToggle={() => setOthersOpen((o) => !o)} testid="other-editors">
@@ -127,6 +137,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
         ) : (
           vendorRows
         )}
+        {hubTrails && !advanced && hubRow}
       </div>
       {active?.error && !active.connected && (
         <p className="pv-note error" role="alert">
@@ -135,6 +146,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       )}
       {advanced && (
         <Disclosure label="Advanced" hint="Your own server or an API key" open={advancedOpen || searchedAdvanced} onToggle={() => setAdvancedOpen((o) => !o)} testid="ai-advanced">
+          {hubTrails && <div className="prov">{hubRow}</div>}
           <Connections onConnected={connected} />
           <AnthropicKey active={active} onConnected={connected} />
         </Disclosure>

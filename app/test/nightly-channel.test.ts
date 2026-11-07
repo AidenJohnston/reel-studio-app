@@ -1,7 +1,7 @@
 // The nightly is its own app beside the stable one (shared/channel.ts): the version alone picks the channel, the
 // build gives it its own identity, its data stays apart except the shared speech models, its library never touches
 // the stable app's reels, and it never takes the stable app's updates from the site's feed.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -153,6 +153,16 @@ describe('nightly library', () => {
 
     computer('darwin', 'stable')
     expect(chosenRoot(join(c.home, 'Documents'))).toBe(join(c.home, 'Documents', 'Reel Studio'))
+  })
+
+  it("fails if the nightly accepts an ordinary folder whose 'Reel Studio (Nightly)' links to the stable library", () => {
+    const c = computer(process.platform)
+    mkdirSync(c.stable.movies, { recursive: true })
+    const elsewhere = join(c.home, 'Elsewhere')
+    mkdirSync(elsewhere, { recursive: true })
+    // a junction on Windows needs no special rights; a directory link elsewhere
+    symlinkSync(c.stable.movies, join(elsewhere, 'Reel Studio (Nightly)'), 'junction')
+    expect(() => chosenRoot(elsewhere, [c.stable.documents, c.stable.movies])).toThrow(/stable app's library/)
   })
 })
 

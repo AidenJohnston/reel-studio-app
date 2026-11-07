@@ -218,6 +218,24 @@ export class StyleStore {
     });
   }
 
+  /**
+   * Takes back waiting memories drafted from post results that `current`, the complete set results support now, no
+   * longer contains: a trial read again went the other way, so the suggestion's evidence is gone (and with it the
+   * chance of an opposite suggestion waiting beside it). Rules, memories from notes and hand edits, and the person's
+   * refusals are untouched, and a withdrawn memory may be suggested again if its evidence comes back. Returns how many
+   * were taken back; writes only when that is more than none.
+   */
+  async withdrawUnsupportedResults(current: ProposalDraft[]): Promise<number> {
+    return this.serial(async () => {
+      const data = await this.readForLearning();
+      const supported = new Set(current.map((d) => normalize(cleanRuleText(d.text))));
+      const proposals = (data.proposals ?? []).filter((p) => p.from.kind !== 'results' || supported.has(normalize(p.text)));
+      const gone = (data.proposals?.length ?? 0) - proposals.length;
+      if (gone) await this.write({ ...data, proposals });
+      return gone;
+    });
+  }
+
   /** The memories waiting for the person, oldest first. Nothing when the file can't be read. */
   async proposals(): Promise<MemoryProposal[]> {
     return (await this.serial(() => this.read()).catch(() => null))?.proposals ?? [];

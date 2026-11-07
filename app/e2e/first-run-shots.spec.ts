@@ -9,7 +9,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, dropFiles, launch, makeMedia, modelReady, toEditorStep } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, modelReady, toEditorStep, viewMenu } from './helpers'
 
 const OUT = process.env.REELSTUDIO_SHOTS_OUT
 
@@ -80,13 +80,12 @@ test('first run and phone pictures at four sizes', async () => {
     await atEverySize(page, '07-reel')
 
     for (const id of ['reel', 'iphone-se', 'iphone-17', 'iphone-pro-max']) {
-      await page.getByTestId('shape').click()
-      await page.getByTestId(`shape-${id}`).click()
+      await viewMenu(page, `shape-${id}`)
       await snap(page, `08-shape-${id}`)
     }
-    await page.getByTestId('view-clean').click()
+    await viewMenu(page, 'view-clean')
     await snap(page, '09-clean')
-    await page.getByTestId('view-instagram').click()
+    await viewMenu(page, 'view-instagram')
 
     await page.getByTestId('full-screen').click()
     await expect(page.getByTestId('full-stage')).toBeVisible()

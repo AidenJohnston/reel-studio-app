@@ -51,9 +51,11 @@ function positiveVersion(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 }
 function text(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
-function metric(value: unknown, file: string): number | null {
+/** Counts of people or actions are whole numbers; the trial rule's binomial test needs them so (trial-decision.ts). */
+const COUNTS = new Set<InsightMetric>(['plays', 'reach', 'shares', 'saves', 'comments', 'likes'])
+function metric(value: unknown, file: string, name: InsightMetric): number | null {
   if (value === null) return null
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return badData(file)
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (COUNTS.has(name) && !Number.isSafeInteger(value))) return badData(file)
   return value
 }
 function emptyValues(): InsightValues {
@@ -119,7 +121,7 @@ function parsePost(value: unknown, project: string, version: number, key: string
   if (value.metrics !== null) {
     if (!object(value.metrics) || value.observedAt === null) return badData(file)
     // A metric the platform doesn't report is missing from the saved record (older records have no likes or skip rate).
-    for (const name of METRICS) if (name !== 'completionEstimate') metrics[name] = value.metrics[name] === undefined ? null : metric(value.metrics[name], file)
+    for (const name of METRICS) if (name !== 'completionEstimate') metrics[name] = value.metrics[name] === undefined ? null : metric(value.metrics[name], file, name)
     if (metrics.skipRatePercent !== null && metrics.skipRatePercent > 100) return badData(file)
   }
   return { project, version, postId: value.postId, accountId: value.accountId, platform: value.platform,

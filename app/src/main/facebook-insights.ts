@@ -23,6 +23,8 @@ const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : incomplete()
 const amount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : incomplete()
+/** Plays, people and actions are whole numbers; a fraction means a damaged answer (and the trial rule needs integers). */
+const whole = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : incomplete()
 
 export type FacebookFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -74,21 +76,21 @@ export function parseFacebookReel(data: unknown): InstagramMetrics {
     if (!Array.isArray(list) || list.length > 1) return incomplete()
     values.set(name, list.length ? record(list[0]).value : null)
   }
-  const num = (name: string): number | null => {
+  const num = (name: string, read: (v: unknown) => number = amount): number | null => {
     const v = values.get(name)
-    return v === undefined || v === null ? null : amount(v)
+    return v === undefined || v === null ? null : read(v)
   }
   // Reactions arrive as { REACTION_LIKE: n, REACTION_LOVE: n, ... }; all of them are likes to the person.
   const reactions = values.get('post_video_likes_by_reaction_type')
   const likes = reactions === undefined || reactions === null ? null
-    : typeof reactions === 'number' ? amount(reactions) : Object.values(record(reactions)).reduce((sum: number, n) => sum + amount(n), 0)
+    : typeof reactions === 'number' ? whole(reactions) : Object.values(record(reactions)).reduce((sum: number, n) => sum + whole(n), 0)
   // Social actions arrive split by type ({ COMMENT, SHARE }) or, on some Pages, as one number that can't be split.
   const social = values.get('post_video_social_actions')
   const split = social && typeof social === 'object' ? record(social) : null
   // A breakdown leaves out a type nobody did, so a missing key is zero.
-  const part = (key: string) => split ? (split[key] === undefined ? 0 : amount(split[key])) : null
+  const part = (key: string) => split ? (split[key] === undefined ? 0 : whole(split[key])) : null
   return {
-    plays: num('fb_reels_total_plays'), reach: num('post_impressions_unique'), likes,
+    plays: num('fb_reels_total_plays', whole), reach: num('post_impressions_unique', whole), likes,
     comments: part('COMMENT'), shares: part('SHARE'), saves: null,
     averageWatchTimeMs: num('post_video_avg_time_watched'), totalWatchTimeMs: num('post_video_view_time'), skipRatePercent: null
   }

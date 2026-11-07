@@ -28,10 +28,13 @@ async function world() {
   const steps: Step[] = []
   const errors: unknown[] = []
   let browser = async (_url: string): Promise<void> => { throw new Error('unexpected browser') }
+  // runs once, inside the next encrypted save: a person pressing Cancel while the sign-in is being written
+  let duringSave: (() => void) | null = null
+  const saving = () => { const f = duringSave; duringSave = null; f?.() }
   // a reversible stand-in for the OS keychain
   const secrets = {
     isEncryptionAvailable: () => true,
-    encryptString: (v: string) => Buffer.from(v, 'utf8').reverse(),
+    encryptString: (v: string) => { saving(); return Buffer.from(v, 'utf8').reverse() },
     decryptString: (b: Buffer) => Buffer.from(b).reverse().toString('utf8')
   }
   const service = new FacebookService({
@@ -92,7 +95,7 @@ async function world() {
     } })
   }
   const PAGES = [{ id: '76', name: 'Read only', access_token: 'nope', tasks: ['ANALYZE'] }, { id: '77', name: 'My Page', access_token: PAGE_TOKEN, tasks: ['CREATE_CONTENT', 'ANALYZE'] }]
-  return { dir, project, steps, service, connect, publishSteps, resume, PAGES, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
+  return { dir, project, steps, service, connect, publishSteps, resume, PAGES, duringSave: (fn: () => void) => { duringSave = fn }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
 }
 
 const INPUT = { slug: 'fixture', version: 1, description: 'A reel #fb' }
@@ -104,6 +107,13 @@ describe('Facebook', () => {
     expect(s).toEqual({ connected: true, userName: 'Sam Creator', page: { id: '77', name: 'My Page' }, pages: [{ id: '77', name: 'My Page' }], expiresAt: NOW + 5_000_000_000 })
     expect(JSON.stringify(s)).not.toContain(PAGE_TOKEN)
     expect(await w.service.session()).toEqual(s); w.done()
+  })
+
+  it('cancelling while the sign-in is being saved connects nothing', async () => {
+    const w = await world(); w.connect(w.PAGES)
+    w.duringSave(() => w.service.cancelConnect())
+    await expect(w.service.connect()).rejects.toMatchObject({ code: 'FB_CANCELLED' })
+    expect(await w.service.session()).toEqual({ connected: false }); w.done()
   })
 
   it('says plainly when the account can’t post to any Page, and saves nothing', async () => {

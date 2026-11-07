@@ -25,10 +25,13 @@ async function world() {
   const steps: Step[] = []
   const errors: unknown[] = []
   let browser = async (_url: string): Promise<void> => { throw new Error('unexpected browser') }
+  // runs once, inside the next encrypted save: a person pressing Cancel while the sign-in is being written
+  let duringSave: (() => void) | null = null
+  const saving = () => { const f = duringSave; duringSave = null; f?.() }
   const service = new ThreadsService({
     settings: async () => ({ appId: '3333', brokerUrl: BROKER, mediaOrigins: ['https://media.example'] }),
     settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), now: () => NOW, waitMs: 0,
-    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => Buffer.from(v).reverse(), decryptString: (b) => Buffer.from(b).reverse().toString() },
+    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => { saving(); return Buffer.from(v).reverse() }, decryptString: (b) => Buffer.from(b).reverse().toString() },
     openExternal: (url) => browser(url),
     fetch: async (url, init) => {
       const step = steps.shift()
@@ -72,7 +75,7 @@ async function world() {
     } })
   }
   const status = (s: string) => steps.push({ url: `${THREADS_GRAPH}/600?fields=status,error_message`, body: { status: s } })
-  return { dir, project, steps, service, connect, upload, status, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
+  return { dir, project, steps, service, connect, upload, duringSave: (fn: () => void) => { duringSave = fn }, status, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
 }
 
 const INPUT = { slug: 'fixture', version: 1, text: 'On Threads #reel' }
@@ -91,6 +94,13 @@ describe('Threads', () => {
     await fs.writeFile(join(w.project, 'versions', 'v1', 'export.mp4'), 'made again')
     expect(await w.service.publish(INPUT)).toEqual(post)
     await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'TH_ALREADY_POSTED' }); w.done()
+  })
+
+  it('cancelling while the sign-in is being saved connects nothing', async () => {
+    const w = await world(); w.connect()
+    w.duringSave(() => w.service.cancelConnect())
+    await expect(w.service.connect()).rejects.toMatchObject({ code: 'TH_CANCELLED' })
+    expect(await w.service.session()).toEqual({ connected: false }); w.done()
   })
 
   it('won’t publish a container made from an older export of the version', async () => {

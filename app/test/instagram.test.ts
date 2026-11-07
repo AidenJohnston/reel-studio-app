@@ -331,6 +331,13 @@ describe('Instagram fixture HTTP', () => {
     await expect(w.service.insights('fixture', 1, '789')).rejects.toMatchObject({ code: 'IG_RATE_LIMIT', userMessage: expect.stringContaining('Wait') })
     await expect(fs.access(join(w.project, 'outcomes.json'))).rejects.toThrow(); w.done()
   })
+  // fails if a fractional count is saved, where it would later break the trial rule's binomial test (audit 05-results)
+  it('refuses a count that isn’t a whole number and saves nothing', async () => {
+    const w = await world(); await w.seed(); await w.published()
+    w.steps.push({ url: insightsUrl, body: { data: [{ name: 'views', values: [{ value: 10.5 }] }] } })
+    await expect(w.service.insights('fixture', 1, '789')).rejects.toMatchObject({ code: 'IG_RESPONSE' })
+    await expect(fs.access(join(w.project, 'outcomes.json'))).rejects.toThrow(); w.done()
+  })
   it('never publishes a container that Instagram could not process', async () => {
     const w = await world(); await w.seed(); w.profile(); w.stage()
     w.steps.push({ url: `${GRAPH}/900?fields=status_code`, body: { status_code: 'ERROR', status: TOKEN } })

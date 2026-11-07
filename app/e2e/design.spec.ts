@@ -6,7 +6,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, dropFiles, launch, makeMedia, newProjectFolder, passFirstRun, projectFolders, shot, openSettings } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, newProjectFolder, passFirstRun, projectFolders, shot, openSettings, viewMenu } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'design-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
@@ -100,9 +100,9 @@ test('design: drop anywhere, working, reel tools, shortcuts, confirm dialogs, co
   await expect(page.getByTestId('ig-overlay')).toBeVisible()
   await page.evaluate(() => (document.querySelector('[data-testid=player]') as HTMLVideoElement).pause())
   await shot(page, 'd-04-reel-instagram-view')
-  await page.getByTestId('view-clean').click()
+  await viewMenu(page, 'view-clean')
   await expect(page.getByTestId('ig-overlay')).toBeHidden()
-  await page.getByTestId('view-instagram').click()
+  await viewMenu(page, 'view-instagram')
   await expect(page.getByTestId('ig-overlay')).toBeVisible()
 
   // Press and hold the video for the original; a click still only plays and pauses.

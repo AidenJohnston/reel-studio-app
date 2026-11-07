@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, NoteRunnerInfo, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
@@ -102,7 +102,7 @@ export interface EngineHost {
   captureWebsite?(
     url: string,
     outPath: string,
-    opts?: { layout?: 'phone' | 'desktop' }
+    opts?: { layout?: 'phone' | 'desktop'; signal?: AbortSignal }
   ): Promise<{ path: string; url: string; site: string; title: string; width: number; height: number }>
   /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
    * Only the app has footage folders (app main/footage-sources.ts). */
@@ -232,6 +232,9 @@ export interface AI {
   claudeCodeStatus?(): Promise<ClaudeCodeStatus>
   /** A fresh look at the person's own Codex app (`bin` stays in main). */
   codexStatus?(): Promise<ClaudeCodeStatus & { chatgptMoved?: boolean }>
+  /** Settings › Editor › How notes run. Optional: older packages run every note in Reel Studio's own editor. */
+  noteRunner?(): Promise<NoteRunnerInfo>
+  setNoteRunner?(runner: NoteRunnerInfo['runner']): Promise<NoteRunnerInfo>
   /** Once at start-up: signs out a saved "Sign in with ChatGPT" session (retired) and clears it as the choice. */
   retireSignInWithChatGPT?(): Promise<boolean>
   /** The person's own servers (provider 'custom'). Optional: older packages and the mock lack them. */

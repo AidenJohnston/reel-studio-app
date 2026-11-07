@@ -25,11 +25,15 @@ async function world() {
   const errors: unknown[] = []
   let now = NOW
   let failSave = false
+  let failRead = false
+  // runs once, inside the next encrypted save: a person pressing Cancel while the sign-in is being written
+  let duringSave: (() => void) | null = null
+  const saving = () => { const f = duringSave; duringSave = null; f?.() }
   let browser = async (_url: string): Promise<void> => { throw new Error('unexpected browser') }
   const service = new XService({
     settings: async () => ({ clientId: 'x-client', brokerUrl: BROKER }),
     settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), now: () => now, waitMs: 0,
-    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => { if (failSave) throw new Error('disk full'); return Buffer.from(v).reverse() }, decryptString: (b) => Buffer.from(b).reverse().toString() },
+    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => { saving(); if (failSave) throw new Error('disk full'); return Buffer.from(v).reverse() }, decryptString: (b) => { if (failRead) { failRead = false; throw new Error('keychain busy') } return Buffer.from(b).reverse().toString() } },
     openExternal: (url) => browser(url),
     fetch: async (url, init) => {
       const step = steps.shift()
@@ -74,7 +78,7 @@ async function world() {
     steps.push({ url: `${X_API}/media/upload/1234/finalize`, method: 'POST', body: { data: { id: '1234', processing_info: { state: 'pending', check_after_secs: 1 } } } })
     steps.push({ url: `${X_API}/media/upload?command=STATUS&media_id=1234`, body: { data: { processing_info: { state: 'succeeded' } } } })
   }
-  return { dir, project, steps, service, connect, upload, later: (ms: number) => { now += ms }, breakSaving: () => { failSave = true }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
+  return { dir, project, steps, service, connect, upload, later: (ms: number) => { now += ms }, breakSaving: () => { failSave = true }, duringSave: (fn: () => void) => { duringSave = fn }, breakReading: (on: boolean) => { failRead = on }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
 }
 
 const INPUT = { slug: 'fixture', version: 1, text: 'On X #reel' }
@@ -93,6 +97,23 @@ describe('X', () => {
     expect(outcomes.versions.v1['x:5555']).toMatchObject({ platform: 'x', apiVersion: 'v2' })
     expect(await w.service.publish(INPUT)).toEqual(post)
     await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'X_ALREADY_POSTED' }); w.done()
+  })
+
+  it('cancelling while the sign-in is being saved connects nothing', async () => {
+    const w = await world(); w.connect()
+    w.duringSave(() => w.service.cancelConnect())
+    await expect(w.service.connect()).rejects.toMatchObject({ code: 'X_CANCELLED' })
+    expect(await w.service.session()).toEqual({ connected: false }); w.done()
+  })
+
+  it('a cancelled reconnect keeps the connection that was there, even when it couldn’t be read just then', async () => {
+    const w = await world(); w.connect(); await w.service.connect()
+    w.connect()
+    w.breakReading(true) // the next read of the saved connection fails
+    w.duringSave(() => w.service.cancelConnect())
+    await expect(w.service.connect()).rejects.toMatchObject({ code: 'X_CANCELLED' })
+    w.breakReading(false)
+    expect(await w.service.session()).toEqual({ connected: true, accountId: '99', username: 'e2e_x' }); w.done()
   })
 
   it('refreshes the two-hour token through the service and keeps X’s new refresh token', async () => {

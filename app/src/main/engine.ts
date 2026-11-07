@@ -15,6 +15,8 @@ export interface EngineProgress {
   pct: number
   message: string
   ready?: EngineReady
+  /** a line to show beside the current step (engine proto.progress), e.g. why listening is slow */
+  note?: string
 }
 
 export interface EngineError {
@@ -24,7 +26,7 @@ export interface EngineError {
 }
 
 export type EngineEvent =
-  | { event: 'progress'; stage: string; pct: number; message: string; ready?: EngineReady }
+  | { event: 'progress'; stage: string; pct: number; message: string; ready?: EngineReady; note?: string }
   | { event: 'done'; result: unknown }
   | { event: 'error'; code: string; message?: string; userMessage: string }
 
@@ -69,7 +71,8 @@ export function parseEngineLine(line: string): EngineEvent | null {
         stage: String(o.stage ?? ''),
         pct,
         message: typeof o.message === 'string' ? o.message : '',
-        ...(ready ? { ready } : {})
+        ...(ready ? { ready } : {}),
+        ...(typeof o.note === 'string' && o.note ? { note: o.note } : {})
       }
     }
     case 'done':
@@ -216,8 +219,10 @@ export function createEngineRunner(cfg: RunnerConfig) {
         // Windows kills by pid, and an engine that has already exited may have handed its pid on
         const exited = child.exitCode !== null || child.signalCode !== null
         const kill = child.pid && !(exited && process.platform === 'win32') ? killTree(child.pid) : true
-        void Promise.all([kill, gone]).then(([killed, clean]) =>
-          rejectPromise(killed && clean ? cancelled() : stuck(child.pid)))
+        // An engine that outlives SIGKILL (stuck in disk or device I/O) never exits, so `gone` would never settle and
+        // Stop would hang: once the kill has failed, the job ends as ENGINE_STUCK, which keeps the project closed (jobs.ts).
+        void Promise.resolve(kill).then((killed) =>
+          killed ? gone.then((clean) => rejectPromise(clean ? cancelled() : stuck(child.pid))) : rejectPromise(stuck(child.pid)))
       }
       signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -227,7 +232,8 @@ export function createEngineRunner(cfg: RunnerConfig) {
           log(`[engine ${command} stdout] ${line}`)
           return
         }
-        if (ev.event === 'progress') onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message, ...(ev.ready ? { ready: ev.ready } : {}) })
+        if (ev.event === 'progress')
+          onProgress?.({ stage: ev.stage, pct: ev.pct, message: ev.message, ...(ev.ready ? { ready: ev.ready } : {}), ...(ev.note ? { note: ev.note } : {}) })
         else if (ev.event === 'done') result = { ok: true, value: ev.result }
         else result = { ok: false, err: { code: ev.code, userMessage: ev.userMessage, message: ev.message } }
       })

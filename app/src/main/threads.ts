@@ -17,7 +17,7 @@ import type { InstagramSecretStore } from './instagram-store'
 import { serviceOrigin } from './instagram-http'
 import { metaApi, SocialError, type MetaFetch } from './meta-http'
 import { signinCallback } from './signin-callback'
-import { atomicSocialFile, withSocialFile } from './social-store'
+import { atomicSocialFile, restoreSocialFile, snapshotSocialFile, withSocialFile } from './social-store'
 
 export const THREADS_VERSION = 'v1.0'
 export const THREADS_GRAPH = `https://graph.threads.com/${THREADS_VERSION}`
@@ -235,8 +235,14 @@ export class ThreadsService {
         const expiresIn = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : invalid()
         const me = await request(this.o.fetch, `${THREADS_GRAPH}/me?fields=id,username`, { method: 'GET', headers: { authorization: `Bearer ${token}` } }, signal)
         const c: Credentials = { token, expiresAt: this.now() + expiresIn * 1000, issuedAt: this.now(), userId: id(me.id), username: text(me.username), appId: cfg.appId, brokerUrl: cfg.brokerUrl, uploadPass: text(data.upload_pass) }
+        const before = await snapshotSocialFile(this.file())
         signal.throwIfAborted()
         await this.save(c)
+        // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
+        if (signal.aborted) {
+          await restoreSocialFile(this.file(), before)
+          throw new SocialError('TH_CANCELLED', 'Threads connection was cancelled.')
+        }
         return { connected: true, accountId: c.userId, username: c.username, expiresAt: c.expiresAt }
       } finally {
         listener.close()

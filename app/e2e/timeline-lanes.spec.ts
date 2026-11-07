@@ -9,7 +9,7 @@ import { test, expect, type ElectronApplication, type Locator, type Page } from 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, passFirstRun, shot } from './helpers'
+import { BASE, launch, makeMedia, makeReel, passFirstRun, shot, viewMenu } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'lanes-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
@@ -241,19 +241,20 @@ test('timeline toggle: hiding gives the phone the height, is remembered, and bri
   await makeReel(page, media.video)
   // the app is launched twice: these find their element on the page there is now
   const slider = () => page.getByRole('slider', { name: /^Time in your reel/ })
-  const toggle = () => page.getByRole('button', { name: 'Show timeline' })
+  // the timeline's switch is in the View menu under the phone; its button says when the timeline is hidden
+  const view = () => page.getByTestId('view-menu')
   const height = async () => (await page.getByTestId('player').boundingBox())!.height
   await expect(slider()).toBeVisible()
-  await expect(toggle()).toHaveAttribute('aria-pressed', 'true')
+  await expect(view()).not.toHaveAttribute('aria-label', /timeline hidden/)
   expect(await timelineItem(app)).toBe(true)
   const tall = await height()
 
-  // View › Show Timeline, with focus on the timeline: it goes, the phone grows, and focus waits on the button
+  // View › Show Timeline, with focus on the timeline: it goes, the phone grows, and focus waits on the View button
   await slider().focus()
   await clickTimelineItem(app)
   await expect(slider()).toHaveCount(0)
-  await expect(toggle()).toHaveAttribute('aria-pressed', 'false')
-  await expect(toggle()).toBeFocused()
+  await expect(view()).toHaveAttribute('aria-label', /timeline hidden$/)
+  await expect(view()).toBeFocused()
   await expect.poll(height).toBeGreaterThan(tall + 40)
   // Edit it myself works without it
   await page.getByTestId('edit-myself').click()
@@ -270,8 +271,8 @@ test('timeline toggle: hiding gives the phone the height, is remembered, and bri
   expect(await timelineItem(app)).toBe(false)
   await shot(page, 'lanes-07-timeline-hidden')
 
-  // the Reel screen's button brings it back, and the menu follows; the keyboard reaches it from the play button
-  await toggle().click()
+  // the Reel screen's View menu brings it back, and the app menu follows; the keyboard reaches it from the play button
+  await viewMenu(page, 'timeline-toggle')
   await expect(slider()).toBeVisible()
   expect(await timelineItem(app)).toBe(true)
   await page.getByTestId('play').focus()

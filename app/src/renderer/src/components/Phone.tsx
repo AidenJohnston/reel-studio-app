@@ -125,6 +125,9 @@ export function shapeVars(s: Shape): CSSProperties {
     '--ig-home': s.home,
     '--reel-l': pct(reel.x / s.w),
     '--reel-t': pct(reel.y / s.h),
+    // Clean (no Instagram over it): the same part of the reel shows, moved down by half the tab bar's strip it leaves
+    // empty, so it sits in the middle of the screen, as a phone plays a video, instead of over a black band at the foot
+    '--reel-t-clean': pct((reel.y + (s.h - viewer.h) / 2 - viewer.y) / s.h),
     '--reel-w': pct(reel.w / s.w),
     '--reel-h': pct(reel.h / s.h),
     '--reel-clip': `inset(${clip.map((c, i) => pct(Math.max(0, c) / (i % 2 ? reel.w : reel.h))).join(' ')})`,

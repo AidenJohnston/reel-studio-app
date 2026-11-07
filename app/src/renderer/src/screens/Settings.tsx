@@ -12,6 +12,7 @@ import { useUpdateState } from '../components/update'
 import { AutoUpdatesControl, autoUpdatesLine, LegalText, UpdateSettingsRow, useUpdateKey, WhatsNew } from '../components/UpdateSettings'
 import { useNotify } from '../App'
 import { CHECKS_NOTE, Privacy } from '../components/ModelsAndPrivacy'
+import { NoteRunnerRow, OutsideAppsRow } from '../components/AiApps'
 import { TitleBarSlot } from '../components/titlebar'
 import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type SettingId } from '../components/settings-index'
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
@@ -247,10 +248,12 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               {lookUps !== null && (
                 <SettingRow
                   id="look-ups"
-                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: Claude Code or Codex, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
+                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: your Claude Code app or Codex app, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
                   control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
                 />
               )}
+              <NoteRunnerRow onError={(m) => notify(m, 'error')} />
+              <OutsideAppsRow onError={(m) => notify(m, 'error')} />
             </Section>
 
             <Section id="privacy">
@@ -439,7 +442,7 @@ function ListeningModel({ shared }: { shared: boolean }) {
       control={
         s.installed ? (
           <span className="sval ok" data-testid="model-ready">
-            <Icon name="check" size={13} stroke={2.4} />
+            <Icon name="check" size={14} stroke={2.4} />
             Ready
           </span>
         ) : s.checking ? (

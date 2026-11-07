@@ -126,11 +126,21 @@ export interface AISettings {
   /** each connection's key is its own encrypted file, never in here */
   connections?: CustomConnection[];
   activeConnection?: string;
-  /** Dev only: the selected CLI runs notes with the app's tools over MCP. "Double-check each edit" is the app's
-   * setting (#73), passed with each note. */
+  /** Settings › Editor › How notes run: the person's own Claude Code or Codex app runs each note with Reel Studio's
+   * tools over MCP, when it is also the editor in use (noteHarness). Unset: Reel Studio's own loop. "Double-check each
+   * edit" is the app's setting (#73), passed with each note. */
   harness?: 'claude-code' | 'codex';
   /** set when the old in-app "Sign in with ChatGPT" was signed out on upgrade; cleared once the Codex app is chosen */
   chatgptMoved?: boolean;
+}
+
+/** Settings › Editor › How notes run. `app`: the editor in use's own app, offered only while it is the active editor and
+ * installed and signed in; null hides the choice. `fellBack`: this session's self-test failed, so its notes ran on Reel
+ * Studio's editor instead (SessionHarness). */
+export interface NoteRunnerInfo {
+  runner: 'reelstudio' | 'app';
+  app: 'claude-code' | 'codex' | null;
+  fellBack?: { app: 'claude-code' | 'codex'; reason: string; at: string };
 }
 
 export interface CustomConnection {
@@ -738,24 +748,47 @@ export function createAI(opts: CreateAIOptions) {
     }
   }
 
-  /** What runs a note's AI turns: Claude Code or Codex over MCP behind the dev setting, else our own loop (undefined). */
+  /** The app the editor in use runs in, when it can run notes over MCP: the active editor is that app, and the app is
+   * installed and signed in (the same detection the editor uses, localClaude.ts and localCodex.ts). */
+  async function harnessApp(): Promise<{ app: 'claude-code' | 'codex'; bin?: string } | null> {
+    const id = (await active()).id;
+    if (id === 'claude-cli') { const c = await localClaude(); return c.state === 'ready' ? { app: 'claude-code', ...(c.bin ? { bin: c.bin } : {}) } : null; }
+    if (id === 'codex-cli') { const c = await localCodex(); return c.state === 'ready' ? { app: 'codex', ...(c.bin ? { bin: c.bin } : {}) } : null; }
+    return null;
+  }
+
+  async function noteRunner(): Promise<NoteRunnerInfo> {
+    const found = await harnessApp();
+    const s = await settings();
+    return { runner: found && s.harness === found.app ? 'app' : 'reelstudio', app: found?.app ?? null, ...(lastFallback ? { fellBack: lastFallback } : {}) };
+  }
+
+  /** What runs a note's AI turns: the person's Claude Code or Codex app over MCP (Settings › How notes run), else our
+   * own loop (undefined). One SessionHarness per app, binary and model for the app session: its self-test runs once. */
   const sessionHarnesses = new Map<string, Harness>();
+  /** the last self-test that failed this session, for Settings (NoteRunnerInfo.fellBack) */
+  let lastFallback: NoteRunnerInfo['fellBack'];
   async function noteHarness(provider: ModelProvider | null): Promise<Harness | undefined> {
     if (opts.harnessOverride) return opts.harnessOverride;
-    if (!opts.dev || opts.providerOverride || !provider) return undefined;
+    if (opts.providerOverride || !provider) return undefined;
     const s = await settings();
-    const id = (await active()).id;
-    if (!((s.harness === 'claude-code' && id === 'claude-cli') || (s.harness === 'codex' && id === 'codex-cli'))) return undefined;
-    // one way to find each CLI: localClaude.ts and localCodex.ts, as the editor itself uses
-    const bin = s.harness === 'claude-code' ? (await localClaude()).bin : (await localCodex()).bin;
-    const key = JSON.stringify([s.harness, bin, s.cliModel]);
+    if (!s.harness) return undefined;
+    const found = await harnessApp();
+    if (!found || found.app !== s.harness) return undefined;
+    const app = found.app;
+    // the editor's model as Settings › Models chose it (Auto: the app's own saved model), as modelProvider runs it
+    const choice = modelForRole(app === 'codex' ? 'codex-cli' : 'claude-cli', 'editor', await roleChoices()) ?? (app === 'codex' ? s.codexModel : s.cliModel);
+    const picked = app === 'codex' ? codexChoice(choice) : claudeCodeChoice(choice);
+    const key = JSON.stringify([app, found.bin, choice]);
     let harness = sessionHarnesses.get(key);
     if (!harness) {
-      const o = { model: s.cliModel, env: env(), ...(bin ? { bin } : {}) };
-      const native = s.harness === 'codex' ? new CodexHarness(o) : new ClaudeCodeHarness(o);
-      harness = new SessionHarness(native, () => s.harness === 'codex'
-        ? new CodexCliProvider(o)
-        : new ClaudeCliProvider({ ...o, session: true }));
+      const o = { env: env(), ...(found.bin ? { bin: found.bin } : {}) };
+      // the Codex runner takes a model only; its reasoning level stays the app's own
+      const native = app === 'codex' ? new CodexHarness({ ...o, ...(picked.model ? { model: picked.model } : {}) }) : new ClaudeCodeHarness({ ...o, ...picked });
+      harness = new SessionHarness(native, () => app === 'codex'
+        ? new CodexCliProvider({ ...o, ...picked })
+        : new ClaudeCliProvider({ ...o, ...picked, session: true }),
+      (reason) => { lastFallback = { app, reason, at: new Date().toISOString() }; });
       sessionHarnesses.set(key, harness);
     }
     return harness;
@@ -840,6 +873,19 @@ export function createAI(opts: CreateAIOptions) {
     },
     /** Stops the check call setActive('claude-cli') is making; setActive then throws AIError 'cancelled' and saves nothing. */
     cancelCheck(): void { checking?.abort(); },
+    /** Settings › Editor › How notes run. */
+    noteRunner,
+    /** `app` runs notes in the editor in use's own app; refused unless that app is offered (noteRunner().app). Choosing
+     * again forgets this session's self-test, so the next note tries the app again. */
+    async setNoteRunner(runner: 'reelstudio' | 'app'): Promise<NoteRunnerInfo> {
+      if (runner !== 'reelstudio' && runner !== 'app') throw new AIError('bad_request', 'Choose how notes run.');
+      const found = await harnessApp();
+      if (runner === 'app' && !found) throw new AIError('not_available', 'Connect your Claude Code app or Codex app as your editor first.');
+      await saveSettings({ harness: runner === 'app' ? found!.app : undefined });
+      sessionHarnesses.clear();
+      lastFallback = undefined;
+      return noteRunner();
+    },
     /** A fresh look at the person's own Claude Code app: state, version, plan kind and the binary path (for the
      * app's sign-in window). Never an e-mail, organization or token. */
     async claudeCodeStatus(): Promise<LocalClaude> { return localClaude(true); },
@@ -1167,7 +1213,8 @@ export function createAI(opts: CreateAIOptions) {
     async approveStyleProposal(p: StyleProposal) { return style.approve(p); },
     /** The user said No to AgentResult.styleProposal. */
     async declineStyleProposal(p: StyleProposal) { return style.decline(p); },
-    /** Memories drafted from post results (learning.ts learn(), read-only); the app passes each to proposeMemory. */
+    /** Memories drafted from post results (learning.ts learn(), which also takes back waiting ones the results no
+     * longer support); the app passes each to proposeMemory. */
     async learnFromResults(): Promise<ProposalDraft[]> { return learn(path.join(opts.host.reelStudioRoot(), 'Projects'), style); },
     /** Keeps a drafted memory waiting for the person (at most three). Never a rule until they keep it. */
     async proposeMemory(d: ProposalDraft) { return style.propose(d); },
@@ -1204,6 +1251,8 @@ function editHost(host: EngineHost, owner: string | undefined) {
       renderAnimation: (template, params, outPath) => host.renderAnimation(template, params, outPath),
       reelStudioRoot: () => host.reelStudioRoot(),
       ...(host.captureWebsite ? { captureWebsite: host.captureWebsite.bind(host) } : {}),
+      // a search_footage hit is copied into the Library by the app; without this a note could find footage but never place it
+      ...(host.importFootage ? { importFootage: host.importFootage.bind(host) } : {}),
     } satisfies EngineHost,
     stuck: () => stuck,
     async settle<T>(edit: Promise<T>): Promise<T> {

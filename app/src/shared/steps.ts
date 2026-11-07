@@ -87,6 +87,10 @@ export function createFirstEditSteps() {
     result(id: StepId, text: string): void {
       results[id] = text
     },
+    /** A line beside the step happening now (why it is slow, say), until that step's result replaces it. */
+    note(text: string): void {
+      results[ORDER[cur]] = text
+    },
     steps(): Step[] {
       return ORDER.map((id, i) => ({
         id,

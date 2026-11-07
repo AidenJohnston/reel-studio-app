@@ -20,7 +20,7 @@ import { PhonePlayer } from '../components/Player'
 import type { SubtitleLook } from '../../../shared/caption-presets'
 import { PhoneViewSwitch, usePhoneShape, usePhoneView } from '../components/Phone'
 import { FullStage } from '../components/FullStage'
-import { ShapeMenu, SpeedMenu } from '../components/PreviewControls'
+import { SpeedMenu, ViewMenu } from '../components/PreviewControls'
 import { createPlayhead, usePlayhead, type Playhead } from '../components/playhead'
 import { createTransport, useTransport, type Transport } from '../components/transport'
 import { versionOnScreen, versionsShown } from '../components/videoLayers'
@@ -28,6 +28,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { useNoteAttachments } from '../components/NoteAttachments'
 import { NotesLog, useVersionRows, type FirstState } from '../components/NotesLog'
+import { reelsChanged } from '../components/reels-changed'
 import { Composer, region, type Chip } from '../components/Composer'
 import { Timeline, type TimelineMark } from '../components/Timeline'
 import { lanesOf, pictureWhy, type Lanes } from '../../../shared/lanes'
@@ -39,7 +40,7 @@ import { Outs } from '../components/Outs'
 import { PopMenu } from '../components/PopMenu'
 import { TitleBarSlot } from '../components/titlebar'
 import { ConnectAI, ModelDownload } from '../components/connect'
-import { PlanCard, PlanChip, PlanEmpty, PlannedStage, PlanWho, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
+import { PlanCard, PlanChip, PlanEmpty, PlannedStage, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
 import { ReelsFound } from '../components/ReelsFound'
 import { ChangePicture, ChangeTag, useChangeMoment } from '../components/ChangeMoments'
 import { byKeyboard, reducedMotion } from '../components/motion'
@@ -55,11 +56,11 @@ const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
 }
 
 const pinsKey = (slug: string): string => `rs.pins.${slug}`
-/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the button that
- * shows it when it is hidden. */
+/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the View menu's
+ * button, whose menu shows it, when it is hidden. */
 const keyboardBackToTimeline = (): void => {
   if (byKeyboard())
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="timeline-toggle"]')?.focus())
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="view-menu"]')?.focus())
 }
 const typing = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null
@@ -613,6 +614,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     if (!t || t === d.title) return
     try {
       await reel.projects.update(slug, { title: t })
+      reelsChanged()
       await load()
     } catch (e) {
       notify(userMessage(e), 'error')
@@ -802,7 +804,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
       )}
       {tagged && (
         <span className={`rt-ver${older ? ' older' : ''}`} data-testid="version-on-screen">
-          Version {tagged.n}
+          {/* comparing, the title says so: the switch on the phone was the only sign of it (Sense, goal 3) */}
+          {compare ? `Comparing Version ${compare.a} and ${compare.b}` : `Version ${tagged.n}`}
         </span>
       )}
       {taggedName && (
@@ -848,6 +851,9 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           quiet={!!compare || !!drawer || aiOff}
           why={job ? (d.job?.kind === 'propose' ? 'Wait for your editor to finish looking.' : 'Wait for this version to finish.') : undefined}
           onSaveCaption={savePost}
+          // Change opens Cover in the edit already open, so a waiting hand edit stays the one being changed (openDrawer
+          // starts a new edit). An older version on screen shows its cover without Change: Cover edits the newest.
+          onCover={older ? undefined : () => (drawer ? setDrawer('cover') : openDrawer('cover'))}
         />
       )}
       <span className="rt-more">
@@ -915,8 +921,9 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
           <button className="cmp-side" onClick={() => pickLayout('side')} data-testid="compare-side-by-side">
             Side by side
           </button>
+          {/* names the one it keeps on screen, the one Share sends: "Done comparing" left the choice unsaid (Sense, goal 3) */}
           <button className="cmp-done" onClick={() => (setCompare(null), keyboardBackToTimeline())} data-testid="done-compare">
-            Done comparing
+            Keep Version {selected ?? compare.b}
           </button>
         </div>
       )}
@@ -942,14 +949,14 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   )
 
   // Comparing shows the reel without Instagram's header and buttons: the switch sits on the top edge of the picture,
-  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back on Done.
+  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back when a version is kept.
   const shownView = compare ? 'clean' : phoneView
   const viewSwitch = compare ? (
     <span className="view-held" data-testid="phone-view-held">
       <span inert>
         <PhoneViewSwitch value={shownView} onChange={() => undefined} />
       </span>
-      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back on Done comparing.</span>
+      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back when you keep a version.</span>
     </span>
   ) : (
     <PhoneViewSwitch value={phoneView} onChange={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))} />
@@ -1041,16 +1048,13 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                     onPlay={(n) => !drawer && watch(n)}
                   />}
                   <TransportRow transport={transport} playhead={playhead}>
-                    <ShapeMenu />
-                    {viewSwitch}
-                    <IconButton
-                      icon="timeline"
-                      label="Show timeline"
-                      shortcut={TIMELINE_SHORTCUT}
-                      className="tl-toggle"
-                      aria-pressed={timelineShown}
-                      onClick={() => void setTimelineShown(!timelineShown).catch((e) => notify(userMessage(e), 'error'))}
-                      data-testid="timeline-toggle"
+                    <ViewMenu
+                      view={shownView}
+                      onView={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))}
+                      held={!!compare}
+                      timeline={timelineShown}
+                      onTimeline={(shown) => void setTimelineShown(shown).catch((e) => notify(userMessage(e), 'error'))}
+                      timelineShortcut={TIMELINE_SHORTCUT}
                     />
                     <IconButton icon="fullscreen" label="Full screen" shortcut="F" aria-keyshortcuts="F" onClick={() => setFull(true)} data-testid="full-screen" />
                   </TransportRow>
@@ -1088,10 +1092,12 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
             />
           ) : (
             <>
-              <div className="notes-h">
-                <h2>{planned ? 'Plan with your editor' : notesView === 'versions' && d.versions.length > 1 ? 'Versions' : 'Notes for your editor'}</h2>
-                {planned && !aiOff && <PlanWho provider={provider} />}
-                {!planned && d.versions.length > 1 && (
+              {/* The column's name is for screen readers: the title bar is the one header row across the screen, and the note
+                  box says what the column is for. With two versions or more, the column's one control switches the log
+                  for the version tree, on a row of its own. */}
+              <h2 className="sr-only">{planned ? 'Plan with your editor' : notesView === 'versions' && d.versions.length > 1 ? 'Versions' : 'Notes for your editor'}</h2>
+              {!planned && d.versions.length > 1 && (
+                <div className="notes-h">
                   <Segmented
                     label="Show"
                     value={notesView}
@@ -1102,8 +1108,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                     onPick={setNotesView}
                     testid="notes-view"
                   />
-                )}
-              </div>
+                </div>
+              )}
               {planned && !providerChecked ? null : planned && aiOff ? (
                 <PlanEmpty
                   provider={null}
@@ -1284,8 +1290,9 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
             setPlayRequest(null)
             if (transport.get().playing) transport.toggle()
           }}
-          onDone={(t) => {
+          onDone={(t, keep) => {
             transport.seek(t)
+            if (keep !== undefined) setSelected(keep)
             setCompare(null)
             keyboardBackToTimeline()
           }}

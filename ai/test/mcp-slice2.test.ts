@@ -40,11 +40,15 @@ it.each(['refused', 'no-roundtrip'])('falls back for the whole session when the 
     { toolCalls: [{ id: 'f1', name: 'finish', args: { summary_for_user: 'Fallback one.' } }] },
     { toolCalls: [{ id: 'f2', name: 'finish', args: { summary_for_user: 'Fallback two.' } }] },
   ]);
-  const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model) });
+  // Settings › How notes run says it after it happens: once per failed self-test, with its reason
+  const fellBack: string[] = [];
+  const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model, (why) => fellBack.push(why)) });
   const statuses: string[] = [];
   const event = (e: { type: string; message?: string }) => { if (e.type === 'status') statuses.push(e.message ?? ''); };
-  expect((await ai.applyNote(s.dir, 'one', event)).summary).toBe('Fallback one.');
-  expect((await ai.applyNote(s.dir, 'two', event)).summary).toBe('Fallback two.');
+  expect((await ai.applyNote(s.dir, 'one', event)).summary).toMatch(/^Fallback one\./);
+  expect((await ai.applyNote(s.dir, 'two', event)).summary).toMatch(/^Fallback two\./);
+  expect(fellBack).toHaveLength(1);
+  expect(fellBack[0]).toMatch(probe === 'refused' ? /MCP refused|claude/i : /no_roundtrip/);
   expect((await fs.readFile(s.starts, 'utf8')).trim().split('\n')).toEqual(['probe']);
   expect(statuses.join('\n')).toMatch(/claude-code.*self-test.*(?:failed|harness_|round.trip)/i);
   expect(model.requests).toHaveLength(2);
@@ -68,6 +72,8 @@ it('runs Codex through the relay under read-only sandbox with shell and image to
   expect(argv.some((x) => /bypass|danger-full-access/.test(x))).toBe(false);
   expect(argv).toContain('--strict-config');
   expect(argv.some((x) => x.startsWith('mcp_servers.reelstudio.enabled_tools='))).toBe(true);
+  // no model chosen: the Codex app's own default for the person's plan, as the Codex editor runs it
+  expect(argv).not.toContain('--model');
 });
 
 it('does not save a Codex note over its token budget', async () => {
@@ -96,7 +102,7 @@ it('logs why Codex is unavailable before using the session text fallback', async
   const ai = createAI({ host: s.host, settingsDir: tmpDir(), providerOverride: model, harnessOverride: new SessionHarness(s.harness, () => model) });
   const statuses: string[] = [];
   const result = await ai.applyNote(s.dir, 'hello', (e) => { if (e.type === 'status') statuses.push(e.message); });
-  expect(result.summary).toBe('Fallback.');
+  expect(result.summary).toMatch(/^Fallback\./);
   expect(statuses.join('\n')).toMatch(/self-test failed.*capacity/i);
 });
 
@@ -136,6 +142,6 @@ it('keeps concurrent text fallbacks in separate CLI sessions', async () => {
   const results = [await first];
   await fs.writeFile(release, 'go');
   results.push(await second);
-  expect(results.map((r) => r.summary)).toEqual(['Separate fallback.', 'Separate fallback.']);
+  expect(results.map((r) => r.summary)).toEqual([expect.stringMatching(/^Separate fallback\./), expect.stringMatching(/^Separate fallback\./)]);
   expect(await fs.readFile(interrupted, 'utf8').catch(() => '')).toBe('');
 });

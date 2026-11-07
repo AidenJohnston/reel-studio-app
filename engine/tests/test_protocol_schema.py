@@ -52,6 +52,18 @@ def test_progress_throttle_and_shape():
     assert lines[-1] == {"event": "done", "result": {"ok": True}}
 
 
+def test_a_progress_line_with_a_note_is_never_throttled_away():
+    """The note says why a step is slow (transcribe.py CPU_FALLBACK_NOTE); the throttle must not eat it."""
+    buf = io.StringIO()
+    proto.set_stream(buf)
+    proto.progress("transcribe", 9, "Waking up the listening model", force=True)
+    proto.progress("transcribe", 9, "Listening to your video", note="Slower")
+    proto.progress("transcribe", 9.5, "Listening to your video")
+    proto.set_stream(None)
+    lines = [json.loads(l) for l in buf.getvalue().splitlines()]
+    assert [l.get("note") for l in lines] == [None, "Slower"]
+
+
 def test_stdout_is_json_lines_only_in_a_real_process(tmp_path):
     """Library chatter must never reach stdout: run the CLI as the app does."""
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
