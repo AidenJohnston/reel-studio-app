@@ -35,6 +35,15 @@ def _signature(path: Path) -> tuple:
     return st.st_size, st.st_mtime_ns
 
 
+def _change(path: Path) -> int:
+    """What a copy tool that keeps a file's size and modified time can't keep: the change time on macOS and Linux
+    (a write or a replacement always sets it), the file id on Windows (a replacement is a new file; there the
+    stat ctime is creation time, which copy tools set back). Like git's index, it decides when bytes are read
+    again; it isn't proof, and an in-place rewrite on Windows that keeps the time still passes."""
+    st = path.stat()
+    return st.st_ino if os.name == "nt" else st.st_ctime_ns
+
+
 def _unchanged(path: Path, signature: tuple, digest: str | None = None) -> None:
     if _signature(path) != signature or (digest is not None and file_hash(path) != digest):
         raise EngineError("FOOTAGE_CHANGED", f"{path.name} changed during indexing",
@@ -72,6 +81,10 @@ def _open(root: Path) -> sqlite3.Connection:
                 raise
             db.execute("CREATE TABLE IF NOT EXISTS text_fts("
                        "text TEXT, hash TEXT, s REAL, e REAL, kind TEXT, model TEXT)")
+        # an index from before `change` existed: its rows are trusted as they are, and take the value they have now
+        # on the next run, so an upgrade never re-reads a whole archive
+        if "change" not in {row[1] for row in db.execute("PRAGMA table_info(paths)")}:
+            db.execute("ALTER TABLE paths ADD COLUMN change INT")
         db.commit()
         if not _has_fts(db):
             log("Footage search: SQLite FTS5 is unavailable; using literal text search.")
@@ -275,19 +288,22 @@ def _scan(db, place: str, folder: Path, kinds: set, stages) -> list[tuple]:
             continue
         rel = path.relative_to(folder).as_posix()
         try:
-            signature = _signature(path)
-            old = db.execute("SELECT size, mtime_ns, hash FROM paths WHERE place=? AND rel=?", (place, rel)).fetchone()
+            signature, change = _signature(path), _change(path)
+            old = db.execute("SELECT size, mtime_ns, hash, change FROM paths WHERE place=? AND rel=?",
+                             (place, rel)).fetchone()
             # Metadata only skips completed files. Pending analysis must establish identity
             # from bytes again, including after a replacement that kept size and mtime.
             complete = old and all(_done(db, old[2], stage, version) for stage, version in stages)
-            digest = old[2] if complete and tuple(old[:2]) == signature else file_hash(path)
+            same = complete and tuple(old[:2]) == signature and old[3] in (None, change)
+            digest = old[2] if same else file_hash(path)
             _unchanged(path, signature)
         except (OSError, EngineError):
             if place == "Library" or folder.is_dir():
                 raise
             raise _Gone(place)
         rels.add(rel)
-        db.execute("INSERT OR REPLACE INTO paths VALUES (?, ?, ?, ?, ?)", (place, rel, *signature, digest))
+        db.execute("INSERT OR REPLACE INTO paths(place, rel, size, mtime_ns, hash, change) VALUES (?, ?, ?, ?, ?, ?)",
+                   (place, rel, *signature, digest, change))
         found.append((place, path, digest, signature))
     if place != "Library" and not folder.is_dir():
         raise _Gone(place)
@@ -536,9 +552,70 @@ def _current(folder: Path | None, row) -> bool:
     path = folder / row["rel"]
     try:
         return (path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(folder.resolve())
-                and _signature(path) == (row["size"], row["mtime_ns"]))
+                and _signature(path) == (row["size"], row["mtime_ns"])
+                and row["change"] in (None, _change(path)))
     except OSError:
         return False
+
+
+# The words an archive proposal reads (ai propose-archive.ts), at most this many characters of lines. A budget
+# with no measurement behind it: about 15,000 tokens, under every connected model's window with room to answer.
+DIGEST_CHARS = 60_000
+
+
+def digest(root: Path, *, max_chars: int = DIGEST_CHARS, refs: list[str] | None = None) -> dict:
+    """Every indexed video that is here and was listened to, with its lines (the sentence windows search
+    matches) and their times, for proposing reels across the whole archive. A file on an unplugged drive
+    is left out: nothing could be made from it. Audio files are left out too: a reel is cut from video.
+    Files past `max_chars` are left out and `truncated` says so. Each file carries its content `hash`, so a
+    reel made later can check it is the same file (`refs`: only these files, as the app does then, each hashed
+    again and left out if its bytes differ from what was indexed)."""
+    root = Path(root).resolve()
+    database = root / ".index" / "index.sqlite"
+    if not database.is_file():
+        return {"files": [], "truncated": False}
+    out, used, truncated = [], 0, False
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("BEGIN")
+        folders = {row["id"]: (root / "Library" if row["id"] == "Library" else Path(row["root"]))
+                   for row in db.execute("SELECT id, root FROM places")}
+        hashes = [row[0] for row in db.execute(
+            "SELECT DISTINCT hash FROM text_fts WHERE kind='speech' ORDER BY hash")]
+        entries = []
+        for digest_ in hashes:
+            paths = db.execute("SELECT * FROM paths WHERE hash=? ORDER BY place != 'Library', place, rel",
+                               (digest_,)).fetchall()
+            current = next((p for p in paths if _current(folders.get(p["place"]), p)), None)
+            if current is None or Path(current["rel"]).suffix.lower() not in probe.VIDEO_EXT:
+                continue
+            if refs is not None:
+                if ref_of(current["place"], current["rel"]) not in refs:
+                    continue
+                # a reel is about to be cut from it: the bytes themselves, since a swap can keep size and time
+                try:
+                    if file_hash(folders[current["place"]] / current["rel"]) != digest_:
+                        continue
+                except OSError:
+                    continue
+            model = db.execute("SELECT model FROM text_fts WHERE hash=? LIMIT 1", (digest_,)).fetchone()[0]
+            if not _done(db, digest_, f"transcript:{model}", TRANSCRIPT_VERSION):
+                continue
+            lines = [{"s": round(r["s"], 2), "e": round(r["e"], 2), "text": r["text"]} for r in db.execute(
+                "SELECT s, e, text FROM text_fts WHERE hash=? AND model=? ORDER BY s", (digest_, model))]
+            duration = db.execute("SELECT duration FROM files WHERE hash=?", (digest_,)).fetchone()[0]
+            entries.append((current["place"], current["rel"], {
+                "ref": ref_of(current["place"], current["rel"]), "name": Path(current["rel"]).name,
+                "hash": digest_, "duration": duration, "lines": lines}))
+        # a stable order the person would recognise: the Library first, then each folder, by path
+        for _, _, entry in sorted(entries, key=lambda e: (e[0] != "Library", e[0], e[1])):
+            size = sum(len(line["text"]) for line in entry["lines"])
+            if used + size > max_chars:
+                truncated = True
+                continue
+            used += size
+            out.append(entry)
+    return {"files": out, "truncated": truncated}
 
 
 def search(root: Path, query: str, *, limit: int = 8) -> dict:

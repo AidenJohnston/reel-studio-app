@@ -33,6 +33,7 @@ import * as editor from './editor';
 import { nicheTurn, NicheTurnInput, NicheTurnResult } from './niche';
 import { proposeTry, type TryProposal, type TryRequest } from './trial';
 import { proposeReels, type ProposeReelsRequest, type ReelProposal } from './propose';
+import { proposeFromArchive, type ArchiveProposal, type ArchiveRequest } from './propose-archive';
 import { refuseIfOpen } from './owner';
 
 export * from './types';
@@ -77,6 +78,8 @@ export { checkTryProposal, TRY_VARIABLES } from './trial';
 export type { TryProposal, TryRequest, TryVariable } from './trial';
 export { checkReelProposal, proposeReels } from './propose';
 export type { ProposeReelsRequest, ReelCandidate, ReelProposal } from './propose';
+export { checkArchiveProposal, formatArchive, proposeFromArchive, FILES_PER_REEL } from './propose-archive';
+export type { ArchiveCandidate, ArchiveFile, ArchiveLine, ArchiveProposal, ArchiveRequest, ArchiveSpan } from './propose-archive';
 export { ATTACHMENT_REF, MAX_ATTACHMENTS_PER_NOTE, readAttachment, listAttachments, validateAttachments, placedAssets } from './attachments';
 export type { AttachmentInfo } from './attachments';
 
@@ -1191,6 +1194,10 @@ export function createAI(opts: CreateAIOptions) {
     /** More reels from one video: the distinct reels the editor finds in its transcript, best first (propose.ts). */
     async proposeReels(req: ProposeReelsRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ReelProposal> {
       return proposeReels(prompts, await modelProvider('finder'), req, signal, onEvent);
+    },
+    /** Reels across the whole footage archive: line ranges from the indexed files, best first (propose-archive.ts). */
+    async proposeFromArchive(req: ArchiveRequest, signal?: AbortSignal, onEvent?: (e: AgentEvent) => void): Promise<ArchiveProposal> {
+      return proposeFromArchive(prompts, await modelProvider('finder'), req, signal, onEvent);
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string, options?: { forget?: boolean }) { return style.remove(id, options); },
