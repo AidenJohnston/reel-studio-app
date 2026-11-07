@@ -730,7 +730,8 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
     let ctx = await begin();
     const { p: p0 } = await load(ctx);
     // "smaller captions", "quieter music": one direct change and the final render, no AI turns
-    let fast = deps.fastNotes === false || attached.length || (opts.checkEdit && deps.harness) ? null : planFastNote(note, p0);
+    // with "Double-check each edit" on, every note goes where the check runs: the direct path below saves before it
+    let fast = deps.fastNotes === false || attached.length || opts.checkEdit ? null : planFastNote(note, p0);
     // words added before a direct change starts need the model to read them; once sealed, later ones become the next note
     if (fast && opts.steer && !opts.steer.seal()) fast = null;
     if (fast) {

@@ -69,7 +69,7 @@ export interface EngineHost {
   renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string>;
   reelStudioRoot(): string;
   /** Screenshot of a web page into outPath (PNG). Only the Electron app has one (offscreen window). */
-  captureWebsite?(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop' }): Promise<CaptureResult>;
+  captureWebsite?(url: string, outPath: string, opts?: { layout?: 'phone' | 'desktop'; signal?: AbortSignal }): Promise<CaptureResult>;
   /** A Footage/<folder>/<file> path from search_footage, copied into the Library: returns its Library/... path.
    * Only the app has footage folders (app main/footage-sources.ts). */
   importFootage?(ref: string): Promise<string>;

@@ -176,7 +176,7 @@ export async function readJson<T>(path: string, fallback: T): Promise<T> {
  * On Windows a rename over a file that someone is reading fails with EPERM/EBUSY/EACCES for a few
  * milliseconds, so retry before giving up, and never leave the temp file behind.
  */
-export async function writeJson(path: string, data: unknown, opts: { durable?: boolean } = {}): Promise<void> {
+export async function writeJson(path: string, data: unknown, opts: { durable?: boolean; signal?: AbortSignal } = {}): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
   const text = JSON.stringify(data, null, 2) + '\n'
   if (!opts.durable) await fs.writeFile(tmp, text, 'utf8')
@@ -189,7 +189,7 @@ export async function writeJson(path: string, data: unknown, opts: { durable?: b
       await fh.close()
     }
   }
-  await renameWithRetry(tmp, path)
+  await renameWithRetry(tmp, path, 40, opts.signal)
   if (opts.durable) await syncRename(path)
 }
 
@@ -204,9 +204,12 @@ async function syncRename(path: string): Promise<void> {
   }
 }
 
-export async function renameWithRetry(from: string, to: string, tries = 40): Promise<void> {
+/** `signal`: a job's Stop. Checked before each try, so a write Stop reaches in time replaces nothing (the rename is
+ * the commit: once it is submitted, the write stands). */
+export async function renameWithRetry(from: string, to: string, tries = 40, signal?: AbortSignal): Promise<void> {
   for (let i = 0; ; i++) {
     try {
+      if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
       await fs.rename(from, to)
       return
     } catch (e) {
@@ -238,10 +241,10 @@ export function readProject(slug: string): Promise<ProjectJson> {
   return serialized(p, async () => JSON.parse(await fs.readFile(p, 'utf8')) as ProjectJson)
 }
 
-export async function writeProject(slug: string, project: ProjectJson): Promise<void> {
+export async function writeProject(slug: string, project: ProjectJson, opts: { durable?: boolean; signal?: AbortSignal } = {}): Promise<void> {
   project.updatedAt = new Date().toISOString()
   const file = join(projectDir(slug), 'project.json')
-  await serialized(file, () => writeJson(file, project))
+  await serialized(file, () => writeJson(file, project, opts))
 }
 
 const STATE_UNREADABLE = { code: 'STATE_UNREADABLE', userMessage: 'I could not read this video\'s notes right now. Try again in a moment.' }
