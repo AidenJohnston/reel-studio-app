@@ -7,8 +7,9 @@ import { BASE, launch, makeMedia, makeReel, openSettings, passFirstRun, shot } f
 test('fails if a note added while a version is made is lost, waits for its own version, or does not show under the note it joined', async () => {
   test.setTimeout(10 * 60_000)
   const media = makeMedia()
-  // the practice editor takes 6 s per note, long enough to add to it
-  const { app, page } = await launch({ REELSTUDIO_USER_DATA: join(BASE, 'add-now', 'data'), REELSTUDIO_ROOT: join(BASE, 'add-now', 'Reel Studio'), REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '6000' })
+  // the practice editor takes 25 s per note, long enough to add to it: at 6 s, a Windows run at 100% CPU spent the
+  // whole note on the steps before Add now (a screenshot among them), and the note was saved first (harness-1106-6)
+  const { app, page } = await launch({ REELSTUDIO_USER_DATA: join(BASE, 'add-now', 'data'), REELSTUDIO_ROOT: join(BASE, 'add-now', 'Reel Studio'), REELSTUDIO_MOCK_CLAUDE: 'ready', REELSTUDIO_MOCK_NOTE: '25000' })
   try {
     test.skip((await page.evaluate(() => window.reel.app.info())).ai !== 'mock', 'the mock plays the connected editor')
     await passFirstRun(page)
