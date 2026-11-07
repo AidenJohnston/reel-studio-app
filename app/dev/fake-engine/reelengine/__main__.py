@@ -318,6 +318,8 @@ def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
     file, out = take(args, "--project-file"), take(args, "--out")
+    # a branched note or a merge names the version(s) it was made from, as the real engine's version.json records
+    parent, merge_parent = take(args, "--parent"), take(args, "--merge-parent")
     data = load(proj, file)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
@@ -350,6 +352,11 @@ def cmd_render(args: list[str]) -> dict:
                     "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
                     str(vdir / "cover.png")], check=False, capture_output=True)
     (vdir / "verify.json").write_text(json.dumps({"ok": True, "duration": dur}), "utf-8")
+    if not draft:
+        meta = {"parent": int(parent) if parent else (n - 1 or None)}
+        if merge_parent:
+            meta["parents"] = [meta["parent"], int(merge_parent)]
+        (vdir / "version.json").write_text(json.dumps(meta), "utf-8")
     # The render's timeline, as the real engine writes it (docs/versions.md). This stand-in plays the
     # source straight through, so it is one segment.
     timeline = {"duration": dur, "segmentsDetail": [{"source": src["id"], "src_start": 0.0, "src_end": dur, "out_start": 0.0}]}

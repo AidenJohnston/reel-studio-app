@@ -5,7 +5,7 @@ import { Button, Spinner } from '../components/ui'
 import { reel } from '../api'
 import type { Go } from '../nav'
 import { RecentReels } from '../components/RecentReels'
-import type { InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
+import type { InsightMetric, InsightPlatform, InsightReel, InsightTrialResult, InsightsSummary, ResultsPlatformState, ResultsStatus, TrialChange } from '../../../shared/insights'
 import { ago, audienceLines, bestReel, compact, percent, PLATFORM_NAMES, reelLine, seconds } from '../../../shared/insight-words'
 import '../components/library.css'
 import '../components/insights.css'
@@ -209,13 +209,21 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
   const where = join([...new Set(r.posts.map((p) => PLATFORM_NAMES[p.platform]))])
   const watched = t.completionEstimate ?? null
   const missing = (what: string) => `${where} ${r.posts.length > 1 ? 'don’t' : 'doesn’t'} report ${what}`
+  // A number that rests on some of the reel's posts (TikTok gives no watch time) says which: "from Instagram only".
+  const partial = (m: InsightMetric): string | null => r.totals.coverage[m] > 0 && r.totals.coverage[m] < r.posts.length
+    ? `from ${join([...new Set(r.posts.filter((p) => p.metrics[m] !== null).map((p) => PLATFORM_NAMES[p.platform]))])} only` : null
   // The column heads are hidden from screen readers, so each number says what it is.
-  const cell = (label: string, value: string | null, what: string) => (
-    <span className="ins-n" title={value === null ? missing(what) : undefined}>
-      <span className="sr-only">{label}: </span>
-      {value ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
-    </span>
-  )
+  const cell = (label: string, value: string | null, what: string, m?: InsightMetric) => {
+    const only = m ? partial(m) : null
+    return (
+      <span className="ins-n" title={value === null ? missing(what) : only ? `${label} ${only}` : undefined}>
+        <span className="sr-only">{label}: </span>
+        {value ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
+        {value !== null && only && <span className="sr-only">, {only}</span>}
+      </span>
+    )
+  }
+  const watchedOnly = partial(watched !== null ? 'completionEstimate' : 'averageWatchTimeMs')
   const watchedText = watched !== null ? percent(watched) : t.averageWatchTimeMs !== null ? seconds(t.averageWatchTimeMs) : null
   const line = reelLine(r, all)
   const score = useEditScore(r.project, r.version)
@@ -239,11 +247,12 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
         )}
       </div>
       {cell('Views', t.plays === null ? null : compact(t.plays), 'views')}
-      <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : undefined}>
-        <span><span className="sr-only">Watched on average: </span>{watchedText ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}</span>
+      <span className="ins-n ins-watch" title={watchedText === null ? missing('watch time') : watchedOnly ? `Watched ${watchedOnly}` : undefined}>
+        <span><span className="sr-only">Watched on average: </span>{watchedText ?? <><span aria-hidden>–</span><span className="sr-only">not reported</span></>}
+          {watchedText !== null && watchedOnly && <span className="sr-only">, {watchedOnly}</span>}</span>
         {watched !== null && <i className="ins-bar" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, watched)})` }} /></i>}
       </span>
-      {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips')}
+      {cell('Skipped in the first 3 seconds', t.skipRatePercent === null ? null : `${Math.round(t.skipRatePercent)}%`, 'skips', 'skipRatePercent')}
       {cell('Shares', t.shares === null ? null : compact(t.shares), 'shares')}
       {cell('Saves', t.saves === null ? null : compact(t.saves), 'saves')}
     </li>

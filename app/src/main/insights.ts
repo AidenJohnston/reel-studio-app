@@ -7,7 +7,7 @@ import type {
 import { decideTrial } from './trial-decision'
 
 const DAY = 86_400_000
-const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook']
+const PLATFORMS: InsightPlatform[] = ['instagram', 'tiktok', 'facebook', 'threads', 'x', 'linkedin']
 const METRICS: InsightMetric[] = ['plays', 'reach', 'averageWatchTimeMs', 'completionEstimate', 'skipRatePercent', 'shares', 'saves', 'comments', 'likes']
 /** Rates and averages, weighted by plays when posts are combined; every other metric is a count and is summed. */
 const PER_PLAY = new Set<InsightMetric>(['averageWatchTimeMs', 'completionEstimate', 'skipRatePercent'])
@@ -15,9 +15,9 @@ const LABELS: Record<InsightMetric, string> = {
   plays: 'Plays', reach: 'Reach', averageWatchTimeMs: 'Average watch time', completionEstimate: 'Estimated watch fraction',
   skipRatePercent: 'Skip rate', shares: 'Shares', saves: 'Saves', comments: 'Comments', likes: 'Likes'
 }
-const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' }
-const KEY_PREFIX: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:' }
-const API_VERSION: Record<InsightPlatform, RegExp> = { instagram: /^v26\.0$/, tiktok: /^v2$/, facebook: /^v\d{2}\.0$/ }
+const PLATFORM_LABELS: Record<InsightPlatform, string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', threads: 'Threads', x: 'X', linkedin: 'LinkedIn' }
+const KEY_PREFIX: Record<InsightPlatform, string> = { instagram: '', tiktok: 'tiktok:', facebook: 'facebook:', threads: 'threads:', x: 'x:', linkedin: 'linkedin:' }
+const API_VERSION: Record<InsightPlatform, RegExp> = { instagram: /^v26\.0$/, tiktok: /^v2$/, facebook: /^v\d{2}\.0$/, threads: /^v1\.0$/, x: /^v2$/, linkedin: /^\d{6}$/ }
 const TRIAL_CHANGES = new Set(['video', 'hook', 'caption', 'cover', 'brightness'])
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 // These thresholds are unvalidated heuristics, with no significance or calibration study.
@@ -93,7 +93,7 @@ function parseTrials(value: unknown, project: string): InsightTrial[] {
   })
 }
 function isPlatform(value: unknown): value is InsightPlatform {
-  return value === 'instagram' || value === 'tiktok' || value === 'facebook'
+  return (PLATFORMS as unknown[]).includes(value)
 }
 /**
  * outcomes.json `trial`, written by publish (shared/insights.ts PostTrial). Absent on an ordinary post. A trial reel
@@ -166,10 +166,15 @@ function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 :
 function refs(posts: InsightPost[]): InsightPostRef[] {
   return posts.map(({ project, version, platform, accountId, postId }) => ({ project, version, platform, accountId, postId }))
 }
+/**
+ * A per-play rate over the posts that report it, weighted by their plays. A reel posted to Instagram and TikTok keeps
+ * Instagram's watch time instead of losing it because TikTok gives none; `coverage` says how many posts it rests on,
+ * and anything comparing periods (complete()) still requires every post.
+ */
 function weighted(posts: InsightPost[], name: InsightMetric): number | null {
-  if (!posts.length || posts.some((p) => p.metrics.plays === null || p.metrics[name] === null)) return null
-  const plays = posts.reduce((sum, p) => sum + (p.metrics.plays ?? 0), 0)
-  return plays > 0 ? posts.reduce((sum, p) => sum + (p.metrics[name] ?? 0) * (p.metrics.plays ?? 0), 0) / plays : null
+  const known = posts.filter((p) => p.metrics.plays !== null && p.metrics[name] !== null)
+  const plays = known.reduce((sum, p) => sum + (p.metrics.plays ?? 0), 0)
+  return plays > 0 ? known.reduce((sum, p) => sum + (p.metrics[name] ?? 0) * (p.metrics.plays ?? 0), 0) / plays : null
 }
 function totals(posts: InsightPost[]): InsightTotals {
   const metrics = emptyValues()

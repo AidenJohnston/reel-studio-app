@@ -37,23 +37,21 @@ Configure these non-secret settings through `tiktok.configure`:
 - Register `http://127.0.0.1:*/tiktok/callback` as the Desktop redirect URI. TikTok documents wildcard ports for random loopback listeners.
 - Add Content Posting API with Upload enabled. Enable Direct Post if needed.
 - Request `user.info.basic`, `video.upload` and `video.list`; add `video.publish` for Direct Post. Configure Display API access for video statistics.
-- Keep the client secret on the HTTPS broker host. Put only the public client key and broker origin in Reel Studio.
+- Put the client key and secret in the sign-in service's settings (`docs/signin.md`); the app reads only the public key from it.
 - Complete the required app and scope reviews. Obtain the Content Posting audit before enabling public Direct Post; unaudited clients remain private-only and TikTok may require a private creator account.
 
-## Authorization broker
+## Authorization through the sign-in service
 
-`app/src/server/tiktok-broker.ts` exports `createTikTokBroker`, a Web Request to
-Response handler. Mount it at `POST /api/tiktok/oauth/token` on the configured
-HTTPS origin. Supply the client key, server-held client secret and a server fetch
-implementation. The Electron entry point does not import this module. Deployment
-needs a request body limit, rate limiting and logs that omit bodies, headers and
-query credentials. The broker is source code here; it has not been deployed.
+Settings › Posting › TikTok has Connect, and Share has Post to TikTok. The client key and whether the app is audited
+come from Reel Studio's sign-in service (`docs/signin.md`, `GET /v1/platforms`), which holds the client secret and
+adds it at `POST /v1/tiktok/token` (code and refresh exchanges) and `POST /v1/tiktok/revoke` (Disconnect). The
+developer settings above still win under `REELSTUDIO_DEV=1`.
 
 The desktop generates a fresh state and verifier per connection, listens on
 127.0.0.1, and opens TikTok's v2 authorization URL. TikTok specifies a **hex**
 SHA-256 challenge for Desktop PKCE. The listener rejects a wrong or repeated
 state and accepts one authorization code. It sends the code, redirect URI and
-verifier to the broker, which adds the secret and exchanges them at
+verifier to the sign-in service, which adds the secret and exchanges them at
 `/v2/oauth/token/`. The code is decoded by URLSearchParams once.
 
 Inbox upload plus stats requests `user.info.basic,video.list,video.upload`.
@@ -64,10 +62,10 @@ the separately scoped username field.
 
 Electron safeStorage encrypts access and refresh tokens in
 `tiktok-credentials.bin`. Plaintext fallback storage is refused. Sessions returned
-to the renderer contain no tokens. Refresh goes through the broker, uses the
+to the renderer contain no tokens. Refresh goes through the sign-in service, uses the
 rotated refresh token, and verifies that the account did not change. Disconnect
-aborts queued and running operations before clearing credentials. It disconnects
-locally; it does not revoke the grant at TikTok.
+aborts queued and running operations, clears credentials, then asks TikTok through
+the sign-in service to revoke the grant (best effort, 5 seconds at most).
 
 ## Publishing and recovery
 

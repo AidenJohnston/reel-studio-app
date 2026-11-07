@@ -3,6 +3,11 @@
 import type { EditScore } from './edit-score'
 import type { TikTokApi } from './tiktok'
 import type { InstagramApi } from './instagram'
+import type { SocialStatus } from './social'
+import type { FacebookApi } from './facebook'
+import type { ThreadsApi } from './threads'
+import type { XApi } from './x'
+import type { LinkedInApi } from './linkedin'
 import type { InsightsOptions, InsightsSummary, ResultsStatus } from './insights'
 import type { WrappedReport } from './wrapped'
 // Types shared by the main process, the preload bridge and the renderer.
@@ -144,6 +149,8 @@ export interface ChatMessage {
   moment?: NoteMoment
   /** The job this note started, and how that job ended (the marks on the scrub bar, shared/moments.ts). */
   jobId?: string
+  /** Words added to the note with this id while it ran (Add now): the notes show them under that note. */
+  steerOf?: string
   outcome?: NoteOutcome
   /** Said while planning, before the reel had a video. */
   plan?: true
@@ -243,6 +250,9 @@ export interface QueuedNote {
   branch?: number
   /** Set while its note job runs: `base` = the version it started from. */
   attempt?: { base: number }
+  /** Words added to this note while it ran (Add now), oldest first. Its next run, after Stop or a failure, reads them
+   * with its own words. */
+  steers?: { id: string; text: string; moment?: NoteMoment }[]
   /** A change made in "Edit it myself" rather than a note: it runs without the editor (`text` says what it changes). */
   hand?: { edit: HandEdit; changes: number }
 }
@@ -864,7 +874,8 @@ export interface ExportResult {
 export interface PlatformExportResult {
   folder: string
   /** `try` is set only when two versions were exported. A Try 2 on Try 1's video shares Try 1's `video` file. */
-  files: { platform: Platform; try?: 1 | 2; video: string; cover: string; captionFile: string; caption: string }[]
+  /** `version`: the version each file was made from (Try 2 can be another version). */
+  files: { platform: Platform; try?: 1 | 2; version: number; video: string; cover: string; captionFile: string; caption: string }[]
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */
@@ -954,11 +965,15 @@ export interface CloudDrive {
   label: 'iCloud Drive' | 'Google Drive'
 }
 
+/** The parts of a version that can come from either of two when combining them (ai version-merge.ts MERGE_FIELDS). */
+export type MergeLayer = 'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover'
+export const MERGE_LAYERS: readonly MergeLayer[] = ['cut', 'captions', 'music', 'zooms', 'broll', 'sfx', 'cover']
+
 /** version-merge: which version each layer of the new one comes from (docs/version-merge.md). */
 export interface MergeRequest {
   ours: number
   theirs: number
-  take: Record<'cut' | 'captions' | 'music' | 'zooms' | 'broll' | 'sfx' | 'cover', 'ours' | 'theirs'>
+  take: Record<MergeLayer, 'ours' | 'theirs'>
 }
 
 export interface ReelApi {
@@ -975,6 +990,12 @@ export interface ReelApi {
   wrapped: { report(): Promise<WrappedReport> }
   tiktok: TikTokApi
   instagram: InstagramApi
+  /** Instagram and TikTok through the sign-in service (shared/social.ts). `fresh` asks the service again now. */
+  social: { status(fresh?: boolean): Promise<SocialStatus> }
+  facebook: FacebookApi
+  threads: ThreadsApi
+  x: XApi
+  linkedin: LinkedInApi
   app: {
     info(): Promise<AppInfo>
     clipboardFiles(): Promise<string[]>
@@ -1054,6 +1075,9 @@ export interface ReelApi {
     /** Settings > "Double-check each edit" (off by default). */
     checkEdits(): Promise<boolean>
     setCheckEdits(on: boolean): Promise<boolean>
+    /** Settings > "Look things up in parallel" (main/settings.ts lookUps) */
+    lookUps(): Promise<boolean>
+    setLookUps(on: boolean): Promise<boolean>
     connections(): Promise<ConnectionInfo[]>
     saveConnection(input: ConnectionInput): Promise<SaveConnectionResult>
     removeConnection(id: string): Promise<void>
@@ -1104,10 +1128,14 @@ export interface ReelApi {
      * `attachments`: `work/assets/attach-*` refs from notes.attach* (main re-checks each one).
      * `moment`: a "Just here" note's place; main writes it into the text the AI reads. `onVersion`: the version on
      * screen while it was written (default: the moment's). `base`: a saved version the note changes instead of the
-     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn. */
-    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number): Promise<{ jobId: string | null; queued?: boolean }>
+     * newest, which makes the new version a branch from it (docs/versions.md). queued = it waits its turn.
+     * `steer`: add the words to the note running now instead (queue.steer); `added` says whether they made it in
+     * time, and a note too late for it waits to run next. */
+    note(slug: string, text: string, attachments?: string[], moment?: NoteMoment, onVersion?: number, base?: number, steer?: boolean): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }>
     /** One version's layers with another's, as a new version (docs/version-merge.md). */
     mergeVersions(slug: string, request: MergeRequest): Promise<{ jobId: string }>
+    /** The parts two saved versions differ in, so Combine asks only about those. */
+    mergeLayers(slug: string, ours: number, theirs: number): Promise<MergeLayer[]>
     /** Every word version `n` (0 = the Preview) plays, on its own output clock, and its length. Read
      * fresh from that render's manifest each call, with the segments it was cut from. null when the render
      * left no timeline to read. */
@@ -1168,6 +1196,9 @@ export interface ReelApi {
     cancel(slug: string, id: string): Promise<void>
     /** -1 = one place earlier, 1 = one place later */
     move(slug: string, id: string, by: -1 | 1): Promise<void>
+    /** Add now: a waiting note's words go into the note running now, which reads them before it finishes. False when
+     * that note had already finished: this one stays first in line. */
+    steer(slug: string, id: string): Promise<{ added: boolean }>
     /** Send now: runs the waiting notes again, from the first, after Stop, a failed note or a restart, and ends a
      * paused job's wait. */
     runNext(slug: string): Promise<void>
@@ -1337,7 +1368,7 @@ export interface ReelApi {
     clear(): Promise<UpdateKeyStatus>
     onChange(cb: (s: UpdateKeyStatus) => void): () => void
   }
-  /** Posting to YouTube (main/posting.ts). Hidden unless REELSTUDIO_POSTING=1. */
+  /** Posting to YouTube (main/posting.ts). Hidden only with REELSTUDIO_POSTING=0. */
   posting: {
     status(): Promise<PostingStatus>
     /** Settings > "Sign in": trades the download key for this computer's sign-in. Rejects NO_KEY, BAD_KEY, ENDED. */
@@ -1371,7 +1402,7 @@ export type PostPrivacy = 'private' | 'unlisted' | 'public'
 
 /** What Settings and the Post sheet show. Never the key, the session or any Google token. */
 export interface PostingStatus {
-  /** REELSTUDIO_POSTING=1 (and a usable server address) */
+  /** Not turned off with REELSTUDIO_POSTING=0, and a usable server address */
   enabled: boolean
   /** A download key is saved (automatic updates on) */
   hasKey: boolean

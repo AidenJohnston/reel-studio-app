@@ -105,10 +105,18 @@ import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animat
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
-import { TikTokService } from './tiktok'
+import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
-import { InstagramService } from './instagram'
+import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom, xFrom, linkedinFrom } from './signin-config'
+import { LinkedInService } from './linkedin'
+import { XService } from './x'
+import { ThreadsService } from './threads'
+import { FacebookService } from './facebook'
+import { registerSocialIpc } from './social-ipc'
+import { testPlatformFetch } from './test-platforms'
+import { SIGNIN_URL } from '../shared/config'
 import { registerInsightsIpc } from './insights-ipc'
 import { registerReferencesIpc } from './references-ipc'
 import { createReferenceLibrary } from './references'
@@ -127,7 +135,8 @@ import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
-import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { MERGE_LAYERS, MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { mergeWords } from '../shared/combine'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
@@ -457,7 +466,9 @@ const jobs = createJobManager(
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
-async function startNote(slug: string, { id: noteId, text, attachments, moment, branch }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+async function startNote(slug: string, { id: noteId, text: own, attachments, moment, branch, steers, steer }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+  // words added on an earlier run (Add now) are part of the note from the start this time
+  const text = [own, ...(steers ?? []).map((x) => x.text)].join('\n')
   const dir = projectDir(slug)
   const startedAt = Date.now()
   let editor: string | null = null
@@ -478,11 +489,11 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
-      const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
-      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}) }
+      const { checkEdits: checkEdit, lookUps: helpers } = await loadSettings() // Settings > "Double-check each edit", "Look things up in parallel"
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, helpers, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
       // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part";
       // what it says back while it works reaches the progress card in the person's own words
-      const aiText = aiNoteText(text, moment)
+      const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
       await recordMadeWith(dir, r)
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
@@ -504,7 +515,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
   jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry), { note: HAND_MESSAGE, record })
-const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log })
+const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log, words: (q) => aiNoteText(q.text, q.moment) })
 
 const models = createModelManager({
   runEngine,
@@ -928,20 +939,39 @@ function registerIpc(): void {
     showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
   })
   registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
+  // Instagram and TikTok connect through Reel Studio's sign-in service (docs/signin.md): its list of platforms says
+  // which can be connected. A developer's own app (REELSTUDIO_DEV=1 and saved instagram*/tiktok* settings) wins.
+  const platformFetch = TEST && process.env.REELSTUDIO_TEST_PLATFORMS
+    ? testPlatformFetch(process.env.REELSTUDIO_TEST_PLATFORMS, (url, init) => fetch(url, init))
+    : (url: string, init: RequestInit) => fetch(url, init)
+  const signin = new SigninDirectory({ baseUrl: signinUrl(process.env, SIGNIN_URL, log), fetch: platformFetch, now: () => Date.now(), log })
+  const ownApps = async () => {
+    if (!DEV_PROVIDERS || TEST) return { instagram: null, tiktok: null }
+    const saved = await loadSettings()
+    const ig = instagramSettings(saved), tt = tiktokSettings(saved)
+    return { instagram: ig.instagramEnabled ? ig : null, tiktok: tt.tiktokEnabled ? tt : null }
+  }
+  // test runs never open the browser: e2e/social.spec.ts reads the link here and plays the person signing in
+  const openSignin = (url: string) => {
+    if (!TEST) return shell.openExternal(url)
+    ;(globalThis as { __reelstudioOpened?: string }).__reelstudioOpened = url
+    log('[signin] test run: browser not opened')
+    return Promise.resolve()
+  }
   const tiktok = new TikTokService({
-    dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
-    secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
+    settings: async () => (await ownApps()).tiktok ?? tiktokFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
   })
   registerTikTokIpc({ handle, service: tiktok, dev: DEV_PROVIDERS && !TEST, saveSettings })
   app.on('before-quit', () => { tiktok.stop() })
   const instagram = new InstagramService({
-    dev: DEV_PROVIDERS && !TEST,
-    settings: loadSettings,
+    settings: async () => (await ownApps()).instagram ?? instagramFrom(await signin.get(), signin.baseUrl),
     settingsDir: settingsDir(),
     projectsDir,
+    exportsDir: () => binDir('exports'),
     secrets: safeStorage,
-    fetch: (url, init) => fetch(url, init),
-    openExternal: (url) => shell.openExternal(url),
+    fetch: platformFetch,
+    openExternal: openSignin,
     coverJpeg: (bytes) => {
       const image = nativeImage.createFromBuffer(bytes)
       if (image.isEmpty()) throw new InstagramError('IG_COVER', 'The cover image could not be read. Export this version again.')
@@ -957,14 +987,61 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
-  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  const facebook = new FacebookService({
+    settings: async () => facebookFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('facebook:session', () => facebook.session())
+  handle('facebook:connect', () => facebook.connect())
+  handle('facebook:cancelConnect', () => facebook.cancelConnect())
+  handle('facebook:disconnect', () => facebook.disconnect())
+  handle('facebook:choosePage', (_e, pageId) => facebook.choosePage(pageId))
+  handle('facebook:publish', (_e, input) => facebook.publish(input))
+  app.on('before-quit', () => { facebook.stop() })
+  const threads = new ThreadsService({
+    settings: async () => threadsFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('threads:session', () => threads.session())
+  handle('threads:connect', () => threads.connect())
+  handle('threads:cancelConnect', () => threads.cancelConnect())
+  handle('threads:disconnect', () => threads.disconnect())
+  handle('threads:publish', (_e, input) => threads.publish(input))
+  app.on('before-quit', () => { threads.stop() })
+  const xPosting = new XService({
+    settings: async () => xFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('x:session', () => xPosting.session())
+  handle('x:connect', () => xPosting.connect())
+  handle('x:cancelConnect', () => xPosting.cancelConnect())
+  handle('x:disconnect', () => xPosting.disconnect())
+  handle('x:publish', (_e, input) => xPosting.publish(input))
+  app.on('before-quit', () => { xPosting.stop() })
+  const linkedin = new LinkedInService({
+    settings: async () => linkedinFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('linkedin:session', () => linkedin.session())
+  handle('linkedin:connect', () => linkedin.connect())
+  handle('linkedin:cancelConnect', () => linkedin.cancelConnect())
+  handle('linkedin:disconnect', () => linkedin.disconnect())
+  handle('linkedin:publish', (_e, input) => linkedin.publish(input))
+  app.on('before-quit', () => { linkedin.stop() })
+  registerSocialIpc({
+    handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
+    own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
+  })
+  // Facebook reads the Page posts go to; a reel on another of the person's Pages is read when that Page is chosen again.
   const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
     ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
     : [
         { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
           read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
         { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
-          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) },
+        { platform: 'facebook', account: async () => { const s = await facebook.session(); return s.connected ? s.page.id : null },
+          read: (slug, version, postId) => facebook.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
     projectsRoot: projectsDir, stateDir: settingsDir(), sources,
@@ -1249,6 +1326,11 @@ function registerIpc(): void {
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
   handle('ai:checkEdits', async () => (await loadSettings()).checkEdits)
+  handle('ai:lookUps', async () => (await loadSettings()).lookUps)
+  handle('ai:setLookUps', async (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
+    return (await saveSettings({ lookUps: on })).lookUps
+  })
   handle('ai:setCheckEdits', async (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
     return (await saveSettings({ checkEdits: on })).checkEdits
@@ -1455,10 +1537,11 @@ function registerIpc(): void {
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
-  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) =>
-    submitNote(slug, text, attachments, at, onVersion, requestedBase))
-  // The note path for the window and for a paired phone (main/companion): one admission, one queue.
-  async function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown): Promise<{ jobId: string | null; queued?: boolean }> {
+  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown) =>
+    submitNote(slug, text, attachments, at, onVersion, requestedBase, steer))
+  // The note path for the window and for a paired phone (main/companion): one admission, one queue. `steer` (Add now)
+  // comes only from the window: the phone queues every note.
+  async function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown): Promise<{ jobId: string | null; queued?: boolean; added?: boolean }> {
     // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
     // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
     const admit = async () => {
@@ -1512,15 +1595,33 @@ function registerIpc(): void {
       // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
       const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
       return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
-    }, given ?? 0)
+    }, given ?? 0, { steer: steer === true })
   }
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
     const dir = projectDir(slug)
     if (!ai.mergeVersions) throw { code: 'MERGE_UNAVAILABLE', userMessage: 'This editor does not support combining versions. Update Reel Studio and try again.' }
+    if (!request || typeof request !== 'object' || !request.take || typeof request.take !== 'object') throw { code: 'BAD_MERGE', userMessage: 'Choose which version each part comes from.' }
     const merge = ai.mergeVersions.bind(ai)
-    const jobId = jobs.start(slug, 'note', (emit, signal, { id, owner }) => merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) }))
+    // the notes show it as what was asked, with the version it made as its result
+    const asked = mergeWords(request)
+    let jobId = ''
+    jobId = jobs.start(
+      slug,
+      'note',
+      async (emit, signal, { id, owner }) => {
+        const r = await merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) })
+        return { summary: [r.summary, ...r.report].join(' '), ...(r.version !== undefined ? { version: r.version } : {}), made: { by: 'note', summary: asked } }
+      },
+      { note: asked, record: (s) => void s.chat.push(stamp({ from: 'you', text: asked, jobId })) }
+    )
     return { jobId }
+  })
+  handle('projects:mergeLayers', async (_e, slug: string, ours: number, theirs: number) => {
+    const saved = (await readProject(slug)).version ?? 0
+    for (const n of [ours, theirs]) if (!Number.isInteger(n) || n < 1 || n > saved) throw { code: 'BAD_VERSION', userMessage: 'Pick two saved versions of this reel.' }
+    // an older AI package: every part is a choice
+    return ai.mergeLayers ? ai.mergeLayers(projectDir(slug), ours, theirs) : [...MERGE_LAYERS]
   })
   handle('projects:versionRows', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 1) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
@@ -1683,6 +1784,7 @@ function registerIpc(): void {
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
+  handle('queue:steer', (_e, slug: string, id: string) => noteQueue.steer(slug, String(id)))
   // Send now / Run next: a held queue goes on, and a paused job's wait ends (main/pause.ts)
   handle('queue:runNext', async (_e, slug: string) => {
     pauser.cancel(slug)
@@ -1909,7 +2011,7 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
-  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  // Posting to YouTube (main/posting.ts), on unless REELSTUDIO_POSTING=0. It signs in with the same download key.
   setupPosting({
     handle,
     env: process.env,

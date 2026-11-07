@@ -17,7 +17,8 @@ import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type Set
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
 import '../components/settings.css'
 import { StockKeys } from '../components/stock-keys'
-import { PostingRows, useInstagramLine } from '../components/PostingSettings'
+import { PostingRows } from '../components/PostingSettings'
+import { SocialRows } from '../components/SocialSettings'
 import { DevicesRows } from '../components/Devices'
 
 /** Where the older section names (nav.ts) land now: a section, or one row of it. */
@@ -86,7 +87,6 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
 
   const update = useUpdateState()
   const updateKey = useUpdateKey()
-  const instagramLine = useInstagramLine()
   const [legal, setLegal] = useState<LegalDoc | null>(null)
   const [savingExports, setSavingExports] = useState(false)
   // The switch moves when pressed (#146), goes back if saving fails, and stays disabled until the save is done:
@@ -99,6 +99,23 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   useEffect(() => {
     reel.ai.checkEdits().then(setCheckEdits).catch(() => {})
   }, [])
+  // Look things up in parallel (main/settings.ts lookUps): off by default, like Double-check
+  const [lookUps, setLookUps] = useState<boolean | null>(null)
+  const [savingLookUps, setSavingLookUps] = useState(false)
+  useEffect(() => {
+    reel.ai.lookUps().then(setLookUps).catch(() => {})
+  }, [])
+  const toggleLookUps = async () => {
+    if (lookUps === null) return
+    setSavingLookUps(true)
+    try {
+      setLookUps(await reel.ai.setLookUps(!lookUps))
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    } finally {
+      setSavingLookUps(false)
+    }
+  }
   const toggleCheckEdits = async () => {
     if (checkEdits === null) return
     setSavingChecks(true)
@@ -227,6 +244,13 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                   control={<Switch on={checkEdits} disabled={savingChecks} labelledBy="set-check-edits" onToggle={() => void toggleCheckEdits()} testid="check-edits" />}
                 />
               )}
+              {lookUps !== null && (
+                <SettingRow
+                  id="look-ups"
+                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: Claude Code or Codex, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
+                  control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
+                />
+              )}
             </Section>
 
             <Section id="privacy">
@@ -312,7 +336,7 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
 
             <Section id="posting">
               <PostingRows />
-              <SettingRow id="instagram" line={instagramLine} control={<span className="sval">Not connected</span>} />
+              <SocialRows />
             </Section>
 
             <Section id="devices" desc="Your reels stay on this computer. A paired phone or browser reaches them over your Wi-Fi; no account is needed.">

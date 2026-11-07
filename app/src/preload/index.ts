@@ -46,6 +46,36 @@ const api: ReelApi = {
     publish: (input) => call('instagram:publish', input),
     insights: (slug, version, postId) => call('instagram:insights', slug, version, postId)
   },
+  social: { status: (fresh) => call('social:status', fresh === true) },
+  facebook: {
+    session: () => call('facebook:session'),
+    connect: () => call('facebook:connect'),
+    cancelConnect: () => call('facebook:cancelConnect'),
+    disconnect: () => call('facebook:disconnect'),
+    choosePage: (pageId) => call('facebook:choosePage', pageId),
+    publish: (input) => call('facebook:publish', input)
+  },
+  threads: {
+    session: () => call('threads:session'),
+    connect: () => call('threads:connect'),
+    cancelConnect: () => call('threads:cancelConnect'),
+    disconnect: () => call('threads:disconnect'),
+    publish: (input) => call('threads:publish', input)
+  },
+  x: {
+    session: () => call('x:session'),
+    connect: () => call('x:connect'),
+    cancelConnect: () => call('x:cancelConnect'),
+    disconnect: () => call('x:disconnect'),
+    publish: (input) => call('x:publish', input)
+  },
+  linkedin: {
+    session: () => call('linkedin:session'),
+    connect: () => call('linkedin:connect'),
+    cancelConnect: () => call('linkedin:cancelConnect'),
+    disconnect: () => call('linkedin:disconnect'),
+    publish: (input) => call('linkedin:publish', input)
+  },
   app: {
     info: () => call('app:info'),
     clipboardFiles: () => call('app:clipboardFiles'),
@@ -101,6 +131,8 @@ const api: ReelApi = {
     onVendor: (cb) => on<VendorInfo>('ai:vendor', cb),
     checkEdits: () => call('ai:checkEdits'),
     setCheckEdits: (on) => call('ai:setCheckEdits', on),
+    lookUps: () => call('ai:lookUps'),
+    setLookUps: (on) => call('ai:setLookUps', on),
     connections: () => call('ai:connections'),
     saveConnection: (input) => call('ai:saveConnection', input),
     removeConnection: (id) => call('ai:removeConnection', id),
@@ -127,8 +159,9 @@ const api: ReelApi = {
     planSay: (slug, text) => call('projects:planSay', slug, text),
     setPlan: (slug, plan) => call('projects:setPlan', slug, plan),
     resume: (slug, basic) => call('projects:resume', slug, basic),
-    note: (slug, text, attachments, moment, onVersion, base) => call('projects:note', slug, text, attachments, moment, onVersion, base),
+    note: (slug, text, attachments, moment, onVersion, base, steer) => call('projects:note', slug, text, attachments, moment, onVersion, base, steer),
     mergeVersions: (slug, request) => call('projects:mergeVersions', slug, request),
+    mergeLayers: (slug, ours, theirs) => call('projects:mergeLayers', slug, ours, theirs),
     timeline: (slug, n) => call('projects:timeline', slug, n),
     versionRows: (slug, n) => call('projects:versionRows', slug, n),
     update: (slug, patch) => call('projects:update', slug, patch),
@@ -161,6 +194,7 @@ const api: ReelApi = {
     edit: (slug, id, text) => call('queue:edit', slug, id, text),
     cancel: (slug, id) => call('queue:cancel', slug, id),
     move: (slug, id, by) => call('queue:move', slug, id, by),
+    steer: (slug, id) => call('queue:steer', slug, id),
     runNext: (slug) => call('queue:runNext', slug),
     clear: (slug) => call('queue:clear', slug),
     onChange: (cb) => on<string>('queue:change', cb)
