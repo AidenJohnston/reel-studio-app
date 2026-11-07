@@ -34,6 +34,12 @@ export function validateMergeRequest(request: unknown): asserts request is Merge
   validateMergeTake(r.take);
 }
 
+/** The layers two versions of one video differ in: the only ones a person needs to choose between when combining them. */
+export function differingLayers(ours: Project, theirs: Project): MergeLayer[] {
+  return (Object.keys(MERGE_FIELDS) as MergeLayer[]).filter((layer) =>
+    MERGE_FIELDS[layer].some((field) => JSON.stringify(ours[field] ?? null) !== JSON.stringify(theirs[field] ?? null)));
+}
+
 /** Pure layer selection. The transcript resolves word ids; no clocks, model calls, or input mutation. */
 export function mergeVersions(input: { ours: Project; theirs: Project; take: MergeTake }, transcript: Transcript): MergeResult {
   validateMergeTake(input.take);

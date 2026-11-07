@@ -1,6 +1,6 @@
 // The provider-neutral agent loop: model -> tool calls -> results -> model ... until `finish`.
 import { AgentEvent, AIError, ChatMessage, ImagePart, ModelProvider, TokenUsage, ToolCall, ToolResultMsg, WaitSignal, CompletionResponse } from './types';
-import { executeTool, operationStatus, toolSchemas, ToolContext, discardAssetCandidates } from './tools';
+import { executeTool, operationStatus, toolByName, toolSchemas, ToolContext, discardAssetCandidates } from './tools';
 
 /** What the person sees while a tool runs. */
 export const STAGE: Record<string, { message: string; pct: number }> = {
@@ -32,6 +32,7 @@ export const STAGE: Record<string, { message: string; pct: number }> = {
   read_references: { message: 'Reading your reference reels', pct: 12 },
   render_draft: { message: 'Making a preview', pct: 82 },
   look_at_frames: { message: 'Checking how it looks', pct: 88 },
+  look_up: { message: 'Looking things up', pct: 52 },
   finish: { message: 'Almost done', pct: 92 },
 };
 
@@ -58,6 +59,8 @@ export interface RunAgentOptions {
   parallel?: number;
   /** images that go WITH the task in the first user message (a note's attached files, one still each) */
   taskImages?: ImagePart[];
+  /** a helper's run (helpers.ts): what it fetched outlives the run, for the editor that asked */
+  keepCandidates?: boolean;
 }
 
 /** Runs the read-only `preload` tools and returns the text appended to the task. */
@@ -165,7 +168,7 @@ const FORMAT_CORRECTION = 'Your last reply could not be read, so nothing ran. Re
 /** Tools that only read, search, add new files or remove files they made themselves (resolve_asset): a run of them in one reply is
  * independent, so they execute together. Everything that changes project.json, renders, or makes an
  * animation (one renderer) runs alone, in the order the model wrote it. */
-export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'search_footage', 'list_library', 'read_references', 'search_images', 'fetch_image', 'resolve_asset', 'cover_candidates']);
+export const PARALLEL_SAFE = new Set(['get_project', 'get_transcript', 'search_footage', 'list_library', 'read_references', 'search_images', 'fetch_image', 'resolve_asset', 'cover_candidates', 'look_up']);
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -191,6 +194,8 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
   const results: ToolResultMsg[] = [];
   const one = async (call: ToolCall): Promise<ToolResultMsg> => {
     if (o.ctx.state.finished !== null) return { callId: call.id, name: call.name, content: JSON.stringify({ skipped: 'finish was already called' }), isError: true };
+    // a tool the task does not offer is refused here too, as the MCP relay refuses it (mcp/run.ts): a helper must never change the edit
+    if (o.tools && !o.tools.includes(toolByName(call.name)?.name ?? call.name)) return { callId: call.id, name: call.name, content: JSON.stringify({ error: `the tool "${call.name}" is not available in this task` }), isError: true };
     const stage = STAGE[call.name];
     if (stage) o.onEvent({ type: 'status', message: operationStatus(o.ctx, call.name, call.args) ?? stage.message, pct: stage.pct, phase: 'edit' });
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
@@ -209,7 +214,7 @@ async function runCalls(o: RunAgentOptions, calls: ToolCall[]): Promise<ToolResu
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
   try { return await agentLoop(o); } finally {
     // a provider whose dispose throws must not leave this run's candidate stills and downloads on disk
-    try { await o.provider.dispose?.(); } finally { await discardAssetCandidates(o.ctx); }
+    try { await o.provider.dispose?.(); } finally { if (!o.keepCandidates) await discardAssetCandidates(o.ctx); }
   }
 }
 
@@ -230,6 +235,9 @@ async function agentLoop(o: RunAgentOptions): Promise<RunAgentResult> {
     }
     if (o.signal?.aborted) throw new AIError('cancelled', 'Stopped.');
     steps++;
+    // this turn's request carries every result so far: the words they brought are read now (steer.ts)
+    o.ctx.state.turn = (o.ctx.state.turn ?? 0) + 1;
+    o.ctx.state.unread = [];
     let res;
     for (let attempt = 0; ; attempt++) {
       const thinking = thinkingMessage(messages);

@@ -51,7 +51,7 @@ async function world() {
     }
   })
   cleanup.push({ dir, service })
-  const connect = (pages: unknown[]) => {
+  const connect = (pages: unknown[], permissions = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts']) => {
     let back = ''
     let state = ''
     let challenge = ''
@@ -68,7 +68,7 @@ async function world() {
       cb.search = new URLSearchParams({ state, handoff: 'sealed-handoff-from-the-service' }).toString()
       expect((await fetch(cb)).status).toBe(200)
     }
-    steps.push({ url: `${BROKER}/v1/facebook/complete`, method: 'POST', body: { access_token: USER, token_type: 'bearer', expires_in: 5_000_000, permissions: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'] },
+    steps.push({ url: `${BROKER}/v1/facebook/complete`, method: 'POST', body: { access_token: USER, token_type: 'bearer', expires_in: 5_000_000, permissions },
       inspect: (init) => { expect(createHash('sha256').update(JSON.parse(String(init.body)).code_verifier).digest('base64url')).toBe(challenge) } })
     steps.push({ url: `${FACEBOOK_GRAPH}/me?fields=name`, body: { name: 'Sam Creator' } })
     steps.push({ url: `${FACEBOOK_GRAPH}/me/accounts?fields=id,name,access_token,tasks&limit=100`, body: { data: pages } })
@@ -150,6 +150,32 @@ describe('Facebook', () => {
     w.publishSteps(0, { respond: async () => { throw new Error('connection reset') } })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'FB_PUBLISH_UNKNOWN' })
     await expect(w.service.publish(INPUT)).rejects.toMatchObject({ code: 'FB_PUBLISH_UNKNOWN' }); w.done()
+  })
+
+  // fails if a reading is dropped (publishing's saveOutcome never overwrites a saved post) or is read with the wrong token
+  it('reads a posted reel’s numbers with its Page’s token and saves them over the post', async () => {
+    const w = await world(); w.connect(w.PAGES, ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights', 'pages_manage_engagement'])
+    await w.service.connect()
+    w.publishSteps(0)
+    await w.service.publish(INPUT)
+    w.steps.push({
+      url: `${FACEBOOK_GRAPH}/555/video_insights?metric=fb_reels_total_plays%2Cpost_impressions_unique%2Cpost_video_avg_time_watched%2Cpost_video_view_time%2Cpost_video_social_actions%2Cpost_video_likes_by_reaction_type&period=lifetime`,
+      inspect: (init) => { expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${PAGE_TOKEN}`) },
+      body: { data: [{ name: 'fb_reels_total_plays', values: [{ value: 1200 }] }, { name: 'post_video_social_actions', values: [{ value: { SHARE: 4, COMMENT: 9 } }] }] }
+    })
+    const read = await w.service.insights('fixture', 1, '555')
+    const saved = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8')).versions.v1['facebook:555']
+    expect(saved).toEqual(read)
+    expect(saved).toMatchObject({ accountId: '77', observedAt: new Date(NOW).toISOString(), metrics: { plays: 1200, shares: 4, comments: 9, reach: null } }); w.done()
+  })
+
+  // fails if the app calls Graph for numbers it wasn't allowed to read, or the refresh can't tell the person to reconnect
+  it('asks to reconnect, without a request, when reading the Page’s results wasn’t allowed', async () => {
+    const w = await world(); w.connect(w.PAGES); await w.service.connect()
+    w.publishSteps(0)
+    await w.service.publish(INPUT)
+    await expect(w.service.insights('fixture', 1, '555')).rejects.toMatchObject({ code: 'FB_PERMISSION' })
+    await expect(w.service.insights('fixture', 1, '999')).rejects.toMatchObject({ code: 'FB_POST' }); w.done()
   })
 
   it('disconnect forgets the account and asks Facebook to end the access', async () => {

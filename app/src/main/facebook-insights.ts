@@ -14,7 +14,7 @@ export const FACEBOOK_REEL_METRICS = [
 ] as const
 
 export class FacebookError extends Error {
-  constructor(readonly code: 'FB_NETWORK' | 'FB_RATE_LIMIT' | 'FB_TOKEN' | 'FB_PERMISSION' | 'FB_RESPONSE' | 'FB_API', readonly userMessage: string) {
+  constructor(readonly code: 'FB_NETWORK' | 'FB_RATE_LIMIT' | 'FB_TOKEN' | 'FB_PERMISSION' | 'FB_POST' | 'FB_RESPONSE' | 'FB_API', readonly userMessage: string) {
     super(userMessage)
   }
 }
@@ -52,6 +52,10 @@ function facebookError(status: number, data: unknown): FacebookError {
   if (status === 429 || code === 4 || code === 17 || code === 32 || code === 613 || code === 80001)
     return new FacebookError('FB_RATE_LIMIT', 'Facebook has reached a request limit. Wait a while before trying again.')
   if (status === 401 || code === 190) return new FacebookError('FB_TOKEN', 'Your Facebook connection has expired. Connect Facebook again in Settings.')
+  // A deleted or hidden reel (404, or code 100 with subcode 33, "object does not exist"): this post only, so the
+  // results refresh carries on with the others. Other code 100 answers mean the request itself is wrong and stay FB_API.
+  if (status === 404 || (code === 100 && error.error_subcode === 33))
+    return new FacebookError('FB_POST', 'This reel is no longer on Facebook, or this Page can’t see it.')
   if (status === 403 || code === 10 || code === 200 || code === 283)
     return new FacebookError('FB_PERMISSION', 'Facebook did not allow reading this reel’s results. Connect Facebook again and allow insights.')
   return new FacebookError('FB_API', 'Facebook could not finish this request. Try again later.')

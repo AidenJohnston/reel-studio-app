@@ -1,6 +1,6 @@
 // Mirror of the @reelstudio/ai interface (docs/architecture.md section 8). The real package is loaded at
 // runtime when it exists; until then ai-mock.ts implements the same shape.
-import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
+import type { EditorAccounts, EditorModel, JobUpdate, LimitWindow, MemorySuggestion, ModelRole, RuleCheck, StyleProposal, StyleRule, MergeLayer, MergeRequest, ProjectJson, ReelCandidateView, Word } from '../shared/api'
 import type { PlanTurn } from '../shared/plan'
 import type { Niche, NicheTurn, NicheTurnResult } from '../shared/niche'
 import type { TryVariable } from '../shared/platforms'
@@ -137,6 +137,13 @@ export interface SecretStore {
   getSelectedStorageBackend?(): string
 }
 
+/** Words the person adds to a running note (ai/src/steer.ts; the app's side is main/steer.ts). */
+export interface NoteSteer {
+  take(): string[]
+  seal(): boolean
+  unseal(): void
+}
+
 export interface AI {
   providers(): Promise<ProviderStatus[]>
   active(): Promise<ProviderStatus>
@@ -160,9 +167,11 @@ export interface AI {
     note: string,
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
-    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; base?: number }
+    opts?: { attachments?: string[]; id?: string; saveStyleRules?: boolean; owner?: string; jobId?: string; checkEdit?: boolean; helpers?: boolean; base?: number; steer?: NoteSteer }
   ): Promise<AgentResult>
   mergeVersions?(projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult & { edit: ProjectJson; report: string[] }>
+  /** The parts two saved versions differ in. Optional: older packages lack it. */
+  mergeLayers?(projectDir: string, ours: number, theirs: number): Promise<MergeLayer[]>
   /** The words are a whole-reel setting applyNote does without the model ("smaller captions"). */
   wholeReelSetting(projectDir: string, note: string): Promise<boolean>
   planTurn(input: PlanTurnInput, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<PlanTurnResult>

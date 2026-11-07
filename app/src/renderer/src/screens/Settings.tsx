@@ -99,6 +99,23 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
   useEffect(() => {
     reel.ai.checkEdits().then(setCheckEdits).catch(() => {})
   }, [])
+  // Look things up in parallel (main/settings.ts lookUps): off by default, like Double-check
+  const [lookUps, setLookUps] = useState<boolean | null>(null)
+  const [savingLookUps, setSavingLookUps] = useState(false)
+  useEffect(() => {
+    reel.ai.lookUps().then(setLookUps).catch(() => {})
+  }, [])
+  const toggleLookUps = async () => {
+    if (lookUps === null) return
+    setSavingLookUps(true)
+    try {
+      setLookUps(await reel.ai.setLookUps(!lookUps))
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    } finally {
+      setSavingLookUps(false)
+    }
+  }
   const toggleCheckEdits = async () => {
     if (checkEdits === null) return
     setSavingChecks(true)
@@ -225,6 +242,13 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
                   id="check-edits"
                   line={`${CHECKS_NOTE} before you see it, and your editor fixes what the check finds. Notes take longer and use more of your AI plan.`}
                   control={<Switch on={checkEdits} disabled={savingChecks} labelledBy="set-check-edits" onToggle={() => void toggleCheckEdits()} testid="check-edits" />}
+                />
+              )}
+              {lookUps !== null && (
+                <SettingRow
+                  id="look-ups"
+                  line="When a note needs pictures of several things, Reel Studio asks a second AI to find them at the same time as your editor: Claude Code or Codex, whichever your editor is not, if it is signed in, or else your editor again. It only looks things up, never changes your video, and uses more of your AI plan."
+                  control={<Switch on={lookUps} disabled={savingLookUps} labelledBy="set-look-ups" onToggle={() => void toggleLookUps()} testid="look-ups" />}
                 />
               )}
             </Section>
