@@ -671,13 +671,19 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
     # the speaker half is cut from the source with reframe_vf: a flipped take must not reuse an
     # unflipped file (an unmirrored project keeps the key it always had)
     flip = ("mirror",) if any_mirrored(ctx) else ()
-    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), *flip, *_rate_key(fps), _enc(ctx))}.mp4"
+    # The source spans, files and reframe behind the speaker half are part of the name too: a changed cut
+    # can play other footage in the same output window, and the old file would show the previous cut.
+    pieces = source_spans(ctx, t0, t1)
+    speaker = []
+    for sid, a, b, _o in pieces:
+        sp = source_path(ctx, sid)
+        speaker.append((sid, round(a, 3), round(b, 3), sp and _asset_sig(sp), reframe_vf(ctx, sid)))
+    out = d / f"{stem}-{_key(round(t0, 3), round(t1, 3), round(cin, 3), speaker, *flip, *_rate_key(fps), _enc(ctx))}.mp4"
     if out.exists():
         return out
     dur = t1 - t0
     th, crop_y, _ = split_geometry(ctx, face, params)
     bh = H - th
-    pieces = source_spans(ctx, t0, t1)
     if not pieces:
         raise EngineError("SPLIT_NO_SOURCE", "split-top window has no source video", "I couldn't find your video for this part.")
     args, chains = [], []

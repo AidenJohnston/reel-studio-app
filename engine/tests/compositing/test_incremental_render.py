@@ -22,6 +22,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
+
+from reelengine import broll
 
 from . import fixtures as fx
 
@@ -233,3 +236,35 @@ def test_every_state_renders_the_same_after_any_history(tmp_path, media):
                 diffs.append(f"after '{text}': {kind} report: {_report(w_res, warm)} vs {_report(c_res, cold)}")
 
     assert not diffs, "a render reused something that no longer matched the project:\n" + "\n".join(diffs)
+
+
+def _speaker_colour(mp4: Path, png: Path) -> tuple:
+    """The colour near the bottom of a split view's frame at 0.5 s, inside the speaker half."""
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-ss", "0.5", "-i", str(mp4), "-frames:v", "1", str(png)],
+                   check=True)
+    im = Image.open(png).convert("RGB")
+    return im.getpixel((im.width // 2, im.height - 10))
+
+
+def test_a_split_view_shows_the_speaker_from_the_current_cut(tmp_path):
+    # Fails if the split-top layer made for one cut is reused after the cut changes under the same
+    # output window: the speaker half would show the earlier cut's footage while the voice follows the new one.
+    take = tmp_path / "take.mp4"     # red for the first 4 s, blue after
+    subprocess.run([fx.FFMPEG, "-y", "-v", "error", "-filter_complex",
+                    "color=c=0xd02020:s=1080x1920:r=30:d=4[a];color=c=0x2020d0:s=1080x1920:r=30:d=4[b];"
+                    "[a][b]concat=n=2:v=1:a=0", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                    str(take)], check=True)
+    top = tmp_path / "top.png"
+    Image.new("RGB", (1080, 768), (128, 128, 128)).save(top)
+    pdir = tmp_path / "p"
+    colours = []
+    # The same length kept from the red part and then the blue part, so the window 1-2 s is the same
+    # output window in both cuts. Words start every 0.4 s from 0.05 s (fixtures.make_project).
+    for i, keep in enumerate(((0.45, 3.25), (4.45, 7.25))):
+        fx.make_project(pdir, take, keep=(keep,))
+        ctx = fx.make_ctx(pdir)
+        out = broll._split_video(ctx, 1.0, 2.0, top, "image", 0.0, {}, (380, 576, 320, 400), "b1-split", top_png=top)
+        colours.append(_speaker_colour(out, tmp_path / f"frame-{i}.png"))
+    red, blue = colours
+    assert red[0] > 150 and red[2] < 100, red
+    assert blue[2] > 150 and blue[0] < 100, blue
