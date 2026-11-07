@@ -29,9 +29,13 @@ const cells = [
   // stack-axis: a column whose narrow children share no edge or centre / the same, centred
   `<div id="stack-off" style="display:flex;flex-direction:column;align-items:flex-start;width:280px"><div style="width:100px;height:20px;background:#ccc"></div><div style="width:120px;height:20px;margin-left:20px;background:#ccc"></div></div>` +
     `<div id="stack-ok" style="display:flex;flex-direction:column;align-items:center;width:280px;margin-top:8px"><div style="width:100px;height:20px;background:#ccc"></div><div style="width:160px;height:20px;background:#ccc"></div></div>`,
+  // stack-axis near miss: a grid of two columns, narrower than it, is not one column (each column has its own edge)
+  `<div id="stack-grid" style="display:grid;grid-template-columns:120px 120px;gap:8px;width:280px"><div style="height:20px;background:#ccc"></div><div style="height:20px;background:#ccc"></div><div style="height:20px;background:#ccc"></div><div style="height:20px;background:#ccc"></div></div>`,
   // edge-near-miss: two surfaces stacked 6 px off / 40 px off (a deliberate inset)
   `<div id="near-a" style="width:200px;height:20px;background:#ccc"></div><div id="near-b" style="width:200px;height:20px;margin:8px 0 0 6px;background:#ccc"></div>`,
   `<div id="far-a" style="width:200px;height:20px;background:#ccc"></div><div id="far-b" style="width:200px;height:20px;margin:8px 0 0 40px;background:#ccc"></div>`,
+  // edge-near-miss near miss: a caption its column centres (110 px in) over text 115 px in is not a stack pair
+  `<div style="display:flex;flex-direction:column;align-items:center;width:280px"><div style="width:100px;height:40px;background:#ccc"></div><div id="cap-centred" style="width:60px">Version 1</div></div><div id="cap-below" style="margin:8px 0 0 115px">Sound from</div>`,
   // concentric: a 14 px fill 6 px inside a 14 px surface / an 8 px one
   `<div style="width:120px;padding:6px;border-radius:14px;background:#ddd"><div id="inner-rad" style="height:30px;border-radius:14px;background:#bbb"></div></div>` +
     `<div style="width:120px;padding:6px;margin-top:8px;border-radius:14px;background:#ddd"><div id="inner-ok" style="height:30px;border-radius:8px;background:#bbb"></div></div>`

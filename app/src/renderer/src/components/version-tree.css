@@ -20,7 +20,7 @@
 /* The row's actions show on hover or focus, and always on a touch screen. At rest they take no width, so the row's
    second line ("from Versions 4 and 3 · just now") has the whole row; opacity alone kept their width and cut it. The
    buttons stay focusable while hidden, and focusing one opens them. */
-.vt-acts { display: flex; gap: 10px; flex: none; max-width: 0; overflow: hidden; opacity: 0; transition: opacity 120ms var(--ease-out); }
+.vt-acts { display: flex; gap: 12px; flex: none; max-width: 0; overflow: hidden; opacity: 0; transition: opacity 120ms var(--ease-out); }
 .vt-acts .lk { border: 0; background: none; padding: 0; min-height: 24px; font: inherit; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; cursor: pointer; white-space: nowrap; }
 .vt-acts .lk:disabled { color: var(--ink-4); cursor: default; }
 .vt-row:focus-within .vt-acts { opacity: 1; max-width: none; overflow: visible; }
@@ -35,17 +35,18 @@
 /* the notes header's Notes | Versions switch sits at its far end */
 .notes-h .segmented { margin-left: auto; }
 
-/* in the note box: the version the next note changes, when it is not the newest. Inset like the attachment chips
-   (reel.css .cbox .att-chips) so the two rows share the box's inner edge; at 0 it touched the box's top border. */
+/* in the note box: the version the next note changes, when it is not the newest. Inset 12 px like the attachment
+   chips (reel.css .cbox .att-chips) so the two rows share the box's inner edge, and 24 px tall like the moment chip
+   beside the words, with its × a 24 px target that hangs into the padding as the moment chip's does. */
 .base-chip {
-  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start; height: 26px; padding: 0 1px 0 10px; margin: 10px 0 0 10px; border-radius: 999px;
-  background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; height: 24px; padding: 0 8px; margin: 12px 0 0 12px; border-radius: 999px;
+  background: var(--sunk); color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; white-space: nowrap;
 }
-.base-chip .x { border: 0; background: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; color: var(--ink-3); cursor: pointer; }
+.base-chip .x { border: 0; background: none; width: 24px; height: 24px; margin: 0 -8px 0 -4px; padding: 0; display: grid; place-items: center; border-radius: 999px; color: var(--ink-3); cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .base-chip .x:hover { background: var(--wash); color: var(--ink); } }
 
 /* Combine */
-.cb-with { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.cb-with { display: flex; align-items: center; gap: 12px; font-weight: 600; }
 .cb-with .input { max-width: 200px; }
 .cb-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .cb-part { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }

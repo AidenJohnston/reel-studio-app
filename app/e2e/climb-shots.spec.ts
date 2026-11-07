@@ -50,6 +50,21 @@ async function setSize(c: Ctx, [w, h]: [number, number]): Promise<void> {
   await settle(c.page)
 }
 
+/**
+ * The pointer out of the way, with nothing under it. A resize can leave a row hovered (the share panel's first row
+ * kept its wash at 1100 px with the pointer parked in the corner), so it moves again until no control is hovered,
+ * and the shot fails loudly rather than judging a hover nobody asked for.
+ */
+async function parkPointer(page: Page, [w, h]: [number, number]): Promise<void> {
+  const hovered = () => page.evaluate(() => document.querySelector(':is(button, a, input, select, textarea, label, [role="button"], [role="menuitem"], [role="tab"], [role="option"], [role="radio"], [role="checkbox"], [role="switch"], [role="link"]):hover')?.outerHTML.slice(0, 120) ?? null)
+  for (const [x, y] of [[w - 2, h - 2], [w - 3, h - 3], [w - 2, h - 40], [2, h - 2]]) {
+    await page.mouse.move(x, y)
+    // checked once what the move set off has settled: the stray hover came back after the move, not before it
+    await settle(page)
+    if (!(await hovered())) return
+  }
+  throw new Error(`a control stays hovered with the pointer parked: ${await hovered()}`)
+}
 /** Until finite animations end (at most 1.5 s), then two frames: measure what the person ends up seeing. */
 async function settle(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -586,12 +601,14 @@ test('climb scenes at two sizes', async () => {
         else {
           // the text caret blinks: keep it out of the picture so two runs match
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
-          await page.mouse.move(size[0] - 2, size[1] - 2)
+          await parkPointer(page, size)
         }
         await settle(page)
-        await page.screenshot({ path: join(OUT!, `${name}.png`), scale: 'css' })
+        // measured before the picture: taking one can let the Mac's own cursor hover what lies under it (the share
+        // panel's first row at 1100 px), which the audit then read as a painted box the picture never showed
         audit[name] = await page.evaluate(auditConsistency, { allow: CONSISTENCY_ALLOW.filter((a) => !a.scenes || a.scenes.includes(scene.id)), scale: SCALE })
         metrics[name] = await page.evaluate(spaceMetrics)
+        await page.screenshot({ path: join(OUT!, `${name}.png`), scale: 'css' })
       }
     }
     if (!ONLY || ONLY.has('motion')) {

@@ -144,10 +144,11 @@ export function SideBySide({ a, b, nameOf, at, onOpen, onDone, onOne }: { a: Ver
           value={Math.min(time, end || time)}
           onChange={(e) => seek(Number(e.target.value))}
           aria-label="Where both versions are"
-          aria-valuetext={clock(time)}
+          aria-valuetext={clock(Math.floor(time))}
           data-testid="sbs-scrub"
         />
-        <span className="sbs-time">{clock(time)}</span>
+        {/* whole seconds passed, as the player's clock counts them (Reel.tsx): at 7.5 s both say 0:07 */}
+        <span className="sbs-time">{clock(Math.floor(time))}</span>
         <Segmented
           label="Sound from"
           value={sound}

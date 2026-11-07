@@ -360,8 +360,8 @@ html.kb .switch { transition: none; }
 .segmented > button[aria-checked="true"] { color: var(--ink); }
 @media (hover: hover) and (pointer: fine) { .segmented > button[aria-checked="false"]:hover { color: var(--ink); } }
 .segmented > button:focus-visible { outline-offset: 0; }
-/* beside a transport row's 32 px controls the track is 32 px too: one height per row */
-:is(.fr-tr-row, .stage-row) .segmented > button { height: 28px; }
+/* beside a transport row's 32 px controls (Side by side's play button too) the track is 32 px: one height per row */
+:is(.fr-tr-row, .stage-row, .sbs-bar) .segmented > button { height: 28px; }
 .seg-thumb {
   position: absolute; top: 2px; bottom: 2px; left: 2px; border-radius: 999px; background: var(--surface); pointer-events: none;
   box-shadow: 0 1px 2px rgba(22, 30, 26, .12), 0 0 0 .5px rgba(22, 30, 26, .08); transition: transform 180ms cubic-bezier(.2, .8, .2, 1);

@@ -1,6 +1,6 @@
 /* Compare › Side by side (SideBySide.tsx): two phones of one size, in step, over one control row */
 .modal.wide:has(.sbs) { width: min(760px, 94vw); }
-.sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-width: 0; }
+.sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
 .sbs-phone { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
 /* a true 9:16 phone picture at any window size: the width is the column's or the one a 58vh-tall phone would have,
    whichever is smaller, and the height follows it. Sizing by a fixed height and capping the width squeezed the box
@@ -11,13 +11,13 @@
 .sbs-phone figcaption { display: flex; gap: 8px; align-items: baseline; min-width: 0; max-width: 100%; font-size: var(--fs-base); }
 .sbs-phone figcaption b { font-weight: 650; white-space: nowrap; }
 .sbs-phone figcaption span { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sbs-bar { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sbs-bar { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sbs-pp {
   width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; cursor: pointer;
   transition: transform 120ms var(--ease-out);
 }
 .sbs-pp:active { transform: scale(.97); }
 .sbs-scrub { flex: 1; min-width: 60px; accent-color: var(--ink); }
-.sbs-time { font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: var(--fs-sm); min-width: 34px; }
+.sbs-time { font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); min-width: 34px; }
 @media (max-width: 560px) { .sbs-bar { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .sbs-pp { transition: none; } }

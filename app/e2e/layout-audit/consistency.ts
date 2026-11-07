@@ -286,8 +286,13 @@ export function auditConsistency(opts: { allow: ConsistencyAllow[]; scale: Consi
       }
     }
 
-    // a column whose children are narrower than it: they share an edge or a centre
-    if (!isRow && ch.length >= 2) {
+    // a column whose children are narrower than it: they share an edge or a centre. Only a true column, each child
+    // below the one before; a grid of two or more columns (Pace's 2 x 2 version buttons) has an edge per column.
+    const oneColumn = () => {
+      const byY = [...boxes].sort((a, b) => a.top - b.top)
+      return byY.every((b, i) => i === 0 || b.top >= byY[i - 1].bottom - 1)
+    }
+    if (!isRow && ch.length >= 2 && oneColumn()) {
       const pr = el.getBoundingClientRect()
       const narrow = boxes.filter((b) => b.width < pr.width - 2)
       if (narrow.length >= 2) {
@@ -314,7 +319,21 @@ export function auditConsistency(opts: { allow: ConsistencyAllow[]; scale: Consi
     return null
   }
   const contentLeft = (el: Element, r: DOMRect): number => r.left + (parseFloat(css(el).borderLeftWidth) || 0) + (parseFloat(css(el).paddingLeft) || 0)
-  const centred = (el: Element): boolean => /center/.test(css(el).textAlign) || (/flex|grid/.test(css(el).display) && /center/.test(css(el).justifyContent))
+  const centredBy = (child: Element, p: Element): boolean => {
+    const ps = css(p)
+    const flex = /flex/.test(ps.display)
+    const column = flex && ps.flexDirection.startsWith('column')
+    return (column && (/center/.test(ps.alignItems) || /center/.test(css(child).alignSelf))) || (flex && !column && /center/.test(ps.justifyContent)) ||
+      (/grid/.test(ps.display) && (/center/.test(ps.justifyItems) || /center/.test(css(child).justifySelf)))
+  }
+  // text centred on its own, or inside a box its parent centres (a caption under a centred picture): it starts wherever
+  // the centring puts it, so its left edge is no one's stack partner
+  const centred = (el: Element): boolean => {
+    if (/center/.test(css(el).textAlign) || (/flex|grid/.test(css(el).display) && /center/.test(css(el).justifyContent))) return true
+    let node: Element = el
+    for (let i = 0; i < 3 && node.parentElement && node.parentElement !== document.body; i++, node = node.parentElement) if (centredBy(node, node.parentElement)) return true
+    return false
+  }
   const objs: Obj[] = []
   for (const el of all) {
     const r = boxOf(el)

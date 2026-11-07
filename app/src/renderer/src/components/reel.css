@@ -6,7 +6,8 @@
 
 /* ---- the title-bar row: the title (click to rename), the version on screen, Back to latest ---- */
 .rt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.reel-title { -webkit-app-region: no-drag; pointer-events: auto; min-width: 0; cursor: text; border-radius: 6px; padding: 2px 6px; margin-left: -6px; }
+/* 32 px tall, as the title row's buttons (Back to latest, Change this one) are: one control height in the row */
+.reel-title { -webkit-app-region: no-drag; pointer-events: auto; min-width: 0; cursor: text; border-radius: var(--r-sm); padding: 6px; margin-left: -6px; }
 @media (hover: hover) and (pointer: fine) { .reel-title:hover { background: var(--wash); } }
 .reel-title-input { height: 32px; min-height: 32px; padding: 0 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; width: min(420px, 40vw); }
 .rt-ver { flex: none; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }

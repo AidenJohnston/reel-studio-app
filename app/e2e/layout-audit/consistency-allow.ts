@@ -15,6 +15,11 @@ export const SCALE: ConsistencyScale = {
 
 export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason: string })[] = [
   {
+    rule: 'row-heights',
+    selector: '.vt-row',
+    reason: "A version's row in the Versions view is one 48 px button, the row itself (VersionTree.tsx .vt-main), with its two text actions beside it at the 24 px target minimum: a list row and its links, not peer buttons in a toolbar."
+  },
+  {
     rule: 'off-scale',
     selector: '[data-testid="ig-overlay"]',
     reason: "Instagram's own screen, drawn at the phone's scale (Phone.css sizes it in cqw from a 393 pt iPhone), so its type, icons and gaps are Instagram's measurements times the phone's size, not the app's scale."
