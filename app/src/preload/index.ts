@@ -232,7 +232,10 @@ const api: ReelApi = {
     sources: () => call('footage:sources'),
     addSource: () => call('footage:addSource'),
     removeSource: (id) => call('footage:removeSource', id),
-    status: () => call('footage:status')
+    status: () => call('footage:status'),
+    findReels: () => call('footage:findReels'),
+    reels: () => call('footage:reels'),
+    makeReels: (ids) => call('footage:makeReels', ids)
   },
   style: {
     rules: () => call('style:rules'),

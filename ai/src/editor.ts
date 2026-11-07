@@ -990,8 +990,10 @@ export function plannedScript(p: object): string {
 
 // ---------------------------------------------------------------- one of several reels from one video
 
+const howManyVideos = (r: ProposedReel): string => (Array.isArray(r.files) && r.files.length > 1 ? 'several videos' : 'one video');
+
 /** project.json `proposal`: this reel is one the editor proposed from another reel's video (app propose-reels.ts). */
-interface ProposedReel { title?: unknown; hook?: unknown; why?: unknown }
+interface ProposedReel { title?: unknown; hook?: unknown; why?: unknown; archive?: unknown; files?: unknown }
 const proposalOf = (p: object): ProposedReel | null => {
   const r = (p as { proposal?: unknown }).proposal;
   return r && typeof r === 'object' && typeof (r as ProposedReel).title === 'string' ? r as ProposedReel : null;
@@ -1006,6 +1008,9 @@ export function proposedReel(p: object): string {
   if (!r) return '';
   const hook = typeof r.hook === 'string' && r.hook.trim() ? ` It opens on: "${r.hook.trim()}".` : '';
   const why = typeof r.why === 'string' && r.why.trim() ? ` ${r.why.trim()}` : '';
+  // app main/archive-reels.ts: proposed from the creator's whole footage, its cut the proposed spans as clips
+  if (r.archive === true) return `\n\nThis reel was proposed from the creator's footage: the lines it is made of come from ${howManyVideos(r)}. It is about: ${String(r.title).trim()}.${hook}${why}
+Its cut is already set to those parts of the videos, in order (CURRENT CUT in get_transcript). Keep inside them: tighten the edges, take the clean take of any line said twice, drop filler. Do not add parts of the videos outside them.`;
   return `\n\nThis reel is one of several from the same video. It is about: ${String(r.title).trim()}.${hook}${why}
 Its cut is already set to those words (CURRENT CUT in get_transcript). Keep inside it: tighten it, take the clean take of any line said twice, drop filler. Do not add words from elsewhere in the video.`;
 }

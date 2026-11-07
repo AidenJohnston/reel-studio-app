@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from conftest import mkwords
-from reelengine import audio_env, broll, captions, cut, init, project, render, tools, transcribe, verify
+from reelengine import audio_env, broll, captions, cli, cut, init, project, render, tools, transcribe, verify
 from reelengine.proto import EngineError
 
 
@@ -307,3 +307,9 @@ def test_batch_intake_orders_capture_times_and_transcribes_only_audio(tmp_path, 
     unsorted = tmp_path / "drop-order"
     init.run(unsorted, "Drop order", [files[0], media["silent"], files[2]])
     assert [s["originalName"] for s in project.load(unsorted)["sources"]] == ["late.mov", "silent.mp4", "early.mov"]
+
+    # fails if a reel cut from parts of several files (app archive-reels.ts) gets its files renumbered by date
+    given = tmp_path / "given-order"
+    parsed = cli.build_parser().parse_args(["init", "--project", str(given), "--title", "Given", "--keep-order", *map(str, files)])
+    parsed.fn(parsed)
+    assert [s["originalName"] for s in project.load(given)["sources"]] == ["late.mov", "silent.mov", "early.mov"]
