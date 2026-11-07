@@ -246,20 +246,21 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
         # after a cut was lost whole (audit 11 P1); always outward added up to two frames of air per cut.
         # Never past a removed neighbouring word, which must not come back: where one ends less than a frame
         # before a kept word starts there is no clean frame between them, the removed word stays out, and
-        # the kept word loses under a frame at that edge.
-        held = [w for w in ws if w["e"] > s + EPS and w["s"] < e - EPS]
-        speech_s = min((max(w["s"], s) for w in held), default=e)
-        speech_e = max((min(w["e"], e) for w in held), default=s)
-        s2 = round(s * rate) / rate
-        if s2 > speech_s + EPS:
-            s2 = math.floor(s * rate + EPS) / rate
-        if s2 < word_lo - EPS:
-            s2 = math.ceil(word_lo * rate - EPS) / rate
-        e2 = round(e * rate) / rate
-        if e2 < speech_e - EPS:
-            e2 = math.ceil(e * rate - EPS) / rate
-        if e2 > word_hi + EPS:
-            e2 = math.floor(word_hi * rate + EPS) / rate
+        # the kept word loses under a frame at that edge. When holding both neighbours off would leave the
+        # kept speech no frame at all, the kept speech wins and a sliver of the neighbours plays.
+        speech = [(a, b) for a, b in _spoken(ws) if b > s + EPS and a < e - EPS]
+        speech_s = min((max(a, s) for a, _ in speech), default=e)
+        speech_e = max((min(b, e) for _, b in speech), default=s)
+        s1 = round(s * rate) / rate
+        if s1 > speech_s + EPS:
+            s1 = math.floor(s * rate + EPS) / rate
+        e1 = round(e * rate) / rate
+        if e1 < speech_e - EPS:
+            e1 = math.ceil(e * rate - EPS) / rate
+        s2 = math.ceil(word_lo * rate - EPS) / rate if s1 < word_lo - EPS else s1
+        e2 = math.floor(word_hi * rate + EPS) / rate if e1 > word_hi + EPS else e1
+        if speech and e2 - s2 < frame - EPS:
+            s2, e2 = s1, e1
         s2, e2 = round(s2, 6), round(e2, 6)
         if src_dur:
             e2 = min(e2, math.floor(src_dur * rate + EPS) / rate)
@@ -269,6 +270,21 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
             else:
                 out.append([s2, e2])
     return [(round(s, 6), round(e, 6)) for s, e in out]
+
+
+def _spoken(ws: list) -> list:
+    """[(start, end)] of speech in these words: each word's span less its internal `gaps` (silences
+    inside one transcript word, which plan_run may cut)."""
+    out = []
+    for w in ws:
+        a = w["s"]
+        for qs, qe in sorted(w.get("gaps") or []):
+            if qs > a:
+                out.append((a, min(qs, w["e"])))
+            a = max(a, qe)
+        if w["e"] > a:
+            out.append((a, w["e"]))
+    return out
 
 
 def clip_span(item: dict, sources: dict) -> tuple[float, float]:
