@@ -181,7 +181,8 @@ export function registerPhoneIpc(d: PhoneIpcDeps): void {
   // read from the reel's own app.json, never from the page: the link only ever shows what the reel holds
   d.handle('phone:startPlan', async (_e, slug: unknown, address?: unknown): Promise<PhoneShare> => {
     if (typeof slug !== 'string') throw { code: 'BAD_INPUT', userMessage: 'Try sending the plan again.' }
-    return open(await d.plan(slug), address)
+    // the read is in the link's turn too, so a Stop sent while it runs still comes after this start
+    return inTurn(async () => openNow(await d.plan(slug), address))
   })
 
   d.handle('phone:stop', () => stopPhoneShare())
