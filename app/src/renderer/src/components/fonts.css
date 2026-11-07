@@ -1,0 +1,7 @@
+/* Library › Fonts (screens/Library.tsx Fonts): one row per face, the sample drawn in the face itself, then its name
+   and licence; the same hairline rows as songs (library.css). */
+.lib-font {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 260px); gap: 14px; align-items: center;
+  min-height: 56px; padding: 8px 0; box-shadow: inset 0 1px 0 var(--line);
+}
+.lib-font-sample { min-width: 0; font-size: 22px; line-height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }

@@ -12,7 +12,7 @@
 .phone-steps > div + div { box-shadow: inset 0 1px 0 var(--line); }
 .phone-steps details ol { margin-top: 4px; }
 .phone-steps ol { margin: 0; padding-left: 20px; color: var(--ink-2); }
-.phone-steps li { margin: 3px 0; }
+.phone-steps li { margin: 4px 0; }
 .phone-more summary { cursor: pointer; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
 .phone-more[open] summary { margin-bottom: 6px; }
 .phone-net { gap: 8px; cursor: pointer; }
@@ -21,9 +21,9 @@
 .phone-way + .phone-way { box-shadow: inset 0 1px 0 var(--line); }
 .phone-way > .icon { margin-top: 2px; color: var(--ink-2); }
 .phone-way p { margin-top: 2px; }
-.cloud-buttons { gap: 6px; margin-top: 10px; }
+.cloud-buttons { gap: 6px; margin-top: 12px; }
 /* busy, not disabled: it keeps focus, but no hover or press says it would do anything */
 .cloud-buttons .btn[aria-disabled='true'] { opacity: .5; cursor: default; pointer-events: none; }
-.cloud-note { margin-top: 10px; }
+.cloud-note { margin-top: 12px; }
 .cloud-note p + p, .cloud-note p + .link { margin-top: 4px; }
 .cloud-sites { gap: 6px; }

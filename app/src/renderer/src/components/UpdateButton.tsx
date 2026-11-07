@@ -50,7 +50,7 @@ function StatusIcon({ s }: { s: UpdateState }) {
       {kind === 'failed' && <span className="update-dot failed" />}
       {kind === 'downloaded' && (
         <span className="update-badge">
-          <Icon name="check" size={9} stroke={3.5} />
+          <Icon name="check" size={10} stroke={3.5} />
         </span>
       )}
     </span>

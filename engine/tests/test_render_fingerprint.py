@@ -1,4 +1,6 @@
-"""Saved renders are reusable only with the engine that made them."""
+"""Saved renders and cached covers are reusable only while what made them is unchanged."""
+from types import SimpleNamespace
+
 import pytest
 
 import reelengine
@@ -42,3 +44,27 @@ def test_unknown_engine_version_cannot_reuse_a_saved_render(tmp_path, legacy_fin
         })
 
     assert render.pick_version(tmp_path, proj) == 2
+
+
+def test_replacing_the_source_video_in_place_makes_a_new_cover(tmp_path, monkeypatch):
+    # Fails if the cover cache serves the old video's cover after the source file is replaced while
+    # project.json, the transcript and the face track stay the same.
+    proj, _ = saved_project(tmp_path)
+    proj["sources"][0]["id"] = "s1"
+    source = tmp_path / "media" / "take.mp4"
+
+    def render_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png, warnings):
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        out_png.write_bytes(src_paths["s1"].read_bytes())    # the cover shows what the source holds
+        return out_png
+    monkeypatch.setattr(render, "render_cover", render_cover)
+    ctx = SimpleNamespace(project_dir=tmp_path, work=tmp_path / "work", draft=False)
+
+    def cover() -> bytes:
+        out = tmp_path / "out" / "cover.png"
+        render.CoverJob(ctx, proj, None, {}, {"s1": source}, {}, out, []).result()
+        return out.read_bytes()
+
+    assert cover() == b"unchanged source"
+    source.write_bytes(b"replacement footage")      # a different size, so mtime resolution cannot hide it
+    assert cover() == b"replacement footage"

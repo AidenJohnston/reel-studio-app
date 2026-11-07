@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { learnStyle, type ImportRecord, type RefItem } from '../src/shared/learn-style'
+import { editorOf, learnStyle, type ImportRecord, type RefItem } from '../src/shared/learn-style'
 
 // Records in the shape engine/reelengine/reference_import.py returns (25 fps Premiere, frames as values).
 const at = (start: number, dur: number) => ({ start: { value: start * 25, rate: 25 }, duration: { value: dur * 25, rate: 25 } })
@@ -39,6 +39,46 @@ describe('Learn from my past edits', () => {
       'Let shots run long, about 8 seconds each.',
       'Use a quick dissolve between shots.'
     ])
+  })
+
+  // DaVinci Resolve starts a timeline at 01:00:00:00, and its FCPXML places clips from there
+  it('fails if an FCPXML timeline that starts at one hour is read as an hour long, or its opening title is missed', () => {
+    const h = 3600
+    const main = Array.from({ length: 10 }, (_, i) => clip(h + i * 2, 2))
+    const lesson = learnStyle([
+      {
+        source: { adapter: 'fcpx_xml', writer: 'DaVinci Resolve' },
+        timelines: [{ name: 'Timeline 1', globalStart: { value: h * 25, rate: 25 }, tracks: [{ name: '0', kind: 'Video', items: main }, { name: '1', kind: 'Video', items: [title(h + 0.5)] }] }]
+      }
+    ])
+    expect(lesson.rules.map((r) => r.text)).toEqual([
+      'Keep reels around 20 seconds.',
+      'Cut to a new shot every 2 seconds or so.',
+      'Use straight cuts between shots, no transitions.',
+      'Open with a title on screen in the first few seconds.'
+    ])
+  })
+
+  it('fails if a blank lead-in on a Premiere timeline is dropped, making a later title an opening one', () => {
+    const main = Array.from({ length: 10 }, (_, i) => clip(5 + i * 2, 2))
+    const lesson = learnStyle([record([{ name: '0', kind: 'Video', items: main }, { name: '1', kind: 'Video', items: [title(5.5)] }])])
+    expect(lesson.rules[0].text).toBe('Keep reels around 25 seconds.')
+    expect(lesson.rules.map((r) => r.text)).not.toContain('Open with a title on screen in the first few seconds.')
+  })
+
+  it('fails if a song on an EDL, which names clips but not their files, is not heard as music', () => {
+    const song: RefItem = { type: 'clip', name: 'song.mp3', trackRange: at(0, 20), media: { kind: 'file', url: null, name: 'song.mp3' } }
+    const lesson = learnStyle([record([{ name: 'V', kind: 'Video', items: [clip(0, 20)] }, { name: 'A', kind: 'Audio', items: [song] }])])
+    expect(lesson.rules.map((r) => r.text)).toContain('Put music under the talking.')
+  })
+
+  it('fails if a lesson names the wrong editor for a Resolve FCPXML, a CapCut project or an EDL', () => {
+    const of = (source: ImportRecord['source']) => editorOf({ source, timelines: [] })
+    expect(of({ adapter: 'fcpx_xml' })).toBe('Final Cut Pro')
+    expect(of({ adapter: 'fcpx_xml', writer: 'DaVinci Resolve' })).toBe('DaVinci Resolve')
+    expect(of({ adapter: 'capcut', writer: 'JianYing' })).toBe('CapCut')
+    expect(of({ adapter: 'cmx_3600' })).toBe('EDL')
+    expect(of({ adapter: 'fcp_xml' })).toBe('Premiere Pro')
   })
 
   it('fails if an export with nothing on its timeline yields rules', () => {

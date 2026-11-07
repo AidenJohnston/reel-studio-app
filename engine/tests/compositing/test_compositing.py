@@ -324,6 +324,20 @@ def _mix(tmp_path, media, level, automation=()):
     return ctx, out, json.loads(Path(out).with_suffix(".json").read_text())
 
 
+def test_a_near_full_preview_window_mixes_the_song_where_the_full_render_does(tmp_path, media):
+    """Fails if the mixer shifts the song by a window's start: render slices the finished full-cut mix
+    at that start afterwards, so a window covering almost the whole reel heard the song twice as late."""
+    ctx = _ctx(tmp_path, media["video"])
+    fx.set_project(ctx, music={"enabled": True, "track": str(media["song"]), "startAt": 1.0, "level": "under-voice",
+                               "automation": [], "fadeOut": 1.0})
+    voice = fx.cut_voice(ctx, tmp_path / "voice.wav")
+    full = music.decode(music.build_audio(ctx, voice), ctx).copy()
+    ctx.window = (0.2, ctx.duration)
+    windowed = music.decode(music.build_audio(ctx, voice), ctx)
+    assert windowed.shape == full.shape
+    assert np.abs(windowed - full).max() < 1e-4
+
+
 @pytest.mark.parametrize("level,gap", [("under-voice", 19.0), ("quiet", 24.0), ("loud-intro", 19.0)])
 def test_build_audio_levels(tmp_path, media, level, gap):
     ctx, out, rep = _mix(tmp_path, media, level)
@@ -581,3 +595,29 @@ def test_reanchored_clip_layer_matches_its_new_window(tmp_path, media, treatment
         assert got == pytest.approx(lay.t1 - lay.t0, abs=0.1), (treatment, t1, got, lay.t0, lay.t1)
         longest = max(longest, got)
     assert longest > 2.0
+
+
+def test_reanchored_video_phone_above_the_speaker_gets_a_band_as_long_as_its_window(tmp_path, media):
+    # A close-up leaves no room beside the face, so the phone goes in a band above the speaker. The
+    # band was named without its length: widening the card reused the one-word band, and the phone
+    # froze on its last frame for the rest of the window.
+    ctx = _ctx(tmp_path, media["video"])
+    box = [330.0, 700.0, 420.0, 500.0]
+    track = {"version": placement.TRACK_VERSION, "width": W, "height": H, "fps": 3.0, "detector": "test",
+             "samples": [{"t": t / 3, "box": box, "core": placement.core_from_box(box), "score": 1.0}
+                         for t in range(0, 72)], "median": box, "found": 1.0}
+    (ctx.project_dir / "work" / "face-s1.json").write_text(json.dumps(track), encoding="utf-8")
+
+    def seconds(p):
+        return float(subprocess.run([fx.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                     str(p)], capture_output=True, text=True, check=True).stdout)
+    windows = []
+    for t1 in (2.1, 5.0):                     # one word first, then a longer span, same b-roll id
+        fx.set_project(ctx, broll=[_item(ctx, 1, 2.0, t1, "phone-card", media["clip"])])
+        lay = next(l for l in broll.build_layers(ctx) if l.kind == "video")
+        rec = json.loads((ctx.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"][0]
+        assert rec["zone"] == "split-top", rec
+        windows.append(lay.t1 - lay.t0)
+    assert windows[1] > windows[0] + 1.0
+    bands = sorted(seconds(p) for p in (ctx.work / "layers").glob("b1-*-top-*.mp4"))
+    assert bands and bands[-1] == pytest.approx(windows[1], abs=0.1), (bands, windows)

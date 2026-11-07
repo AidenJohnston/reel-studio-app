@@ -14,7 +14,7 @@ export const FACEBOOK_REEL_METRICS = [
 ] as const
 
 export class FacebookError extends Error {
-  constructor(readonly code: 'FB_NETWORK' | 'FB_RATE_LIMIT' | 'FB_TOKEN' | 'FB_PERMISSION' | 'FB_RESPONSE' | 'FB_API', readonly userMessage: string) {
+  constructor(readonly code: 'FB_NETWORK' | 'FB_RATE_LIMIT' | 'FB_TOKEN' | 'FB_PERMISSION' | 'FB_POST' | 'FB_RESPONSE' | 'FB_API', readonly userMessage: string) {
     super(userMessage)
   }
 }
@@ -23,6 +23,8 @@ const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : incomplete()
 const amount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : incomplete()
+/** Plays, people and actions are whole numbers; a fraction means a damaged answer (and the trial rule needs integers). */
+const whole = (value: unknown): number => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : incomplete()
 
 export type FacebookFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -52,6 +54,10 @@ function facebookError(status: number, data: unknown): FacebookError {
   if (status === 429 || code === 4 || code === 17 || code === 32 || code === 613 || code === 80001)
     return new FacebookError('FB_RATE_LIMIT', 'Facebook has reached a request limit. Wait a while before trying again.')
   if (status === 401 || code === 190) return new FacebookError('FB_TOKEN', 'Your Facebook connection has expired. Connect Facebook again in Settings.')
+  // A deleted or hidden reel (404, or code 100 with subcode 33, "object does not exist"): this post only, so the
+  // results refresh carries on with the others. Other code 100 answers mean the request itself is wrong and stay FB_API.
+  if (status === 404 || (code === 100 && error.error_subcode === 33))
+    return new FacebookError('FB_POST', 'This reel is no longer on Facebook, or this Page can’t see it.')
   if (status === 403 || code === 10 || code === 200 || code === 283)
     return new FacebookError('FB_PERMISSION', 'Facebook did not allow reading this reel’s results. Connect Facebook again and allow insights.')
   return new FacebookError('FB_API', 'Facebook could not finish this request. Try again later.')
@@ -70,21 +76,21 @@ export function parseFacebookReel(data: unknown): InstagramMetrics {
     if (!Array.isArray(list) || list.length > 1) return incomplete()
     values.set(name, list.length ? record(list[0]).value : null)
   }
-  const num = (name: string): number | null => {
+  const num = (name: string, read: (v: unknown) => number = amount): number | null => {
     const v = values.get(name)
-    return v === undefined || v === null ? null : amount(v)
+    return v === undefined || v === null ? null : read(v)
   }
   // Reactions arrive as { REACTION_LIKE: n, REACTION_LOVE: n, ... }; all of them are likes to the person.
   const reactions = values.get('post_video_likes_by_reaction_type')
   const likes = reactions === undefined || reactions === null ? null
-    : typeof reactions === 'number' ? amount(reactions) : Object.values(record(reactions)).reduce((sum: number, n) => sum + amount(n), 0)
+    : typeof reactions === 'number' ? whole(reactions) : Object.values(record(reactions)).reduce((sum: number, n) => sum + whole(n), 0)
   // Social actions arrive split by type ({ COMMENT, SHARE }) or, on some Pages, as one number that can't be split.
   const social = values.get('post_video_social_actions')
   const split = social && typeof social === 'object' ? record(social) : null
   // A breakdown leaves out a type nobody did, so a missing key is zero.
-  const part = (key: string) => split ? (split[key] === undefined ? 0 : amount(split[key])) : null
+  const part = (key: string) => split ? (split[key] === undefined ? 0 : whole(split[key])) : null
   return {
-    plays: num('fb_reels_total_plays'), reach: num('post_impressions_unique'), likes,
+    plays: num('fb_reels_total_plays', whole), reach: num('post_impressions_unique', whole), likes,
     comments: part('COMMENT'), shares: part('SHARE'), saves: null,
     averageWatchTimeMs: num('post_video_avg_time_watched'), totalWatchTimeMs: num('post_video_view_time'), skipRatePercent: null
   }

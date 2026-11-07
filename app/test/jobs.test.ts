@@ -33,6 +33,30 @@ async function stuckVideo() {
   return { slug, dir, partial, jobs, id, appJsonWhileRunning }
 }
 
+describe('while the library is moving', () => {
+  it('fails if a manual edit can start, or a running one does not count as writing', async () => {
+    setupPaths()
+    mkdirSync(projectDir('a-reel'), { recursive: true })
+    writeFileSync(join(projectDir('a-reel'), 'project.json'), JSON.stringify({ broll: [] }))
+    let moving = false
+    const jobs = createJobManager(() => undefined, () => undefined, undefined, undefined, undefined, () => {
+      if (moving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+    })
+    let finish!: () => void
+    const editing = jobs.hold('a-reel', () => new Promise<void>((r) => (finish = r)))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(jobs.writing()).toBe(true)
+    finish()
+    await editing
+    expect(jobs.writing()).toBe(false)
+
+    moving = true
+    let ran = false
+    await expect(jobs.hold('a-reel', async () => void (ran = true))).rejects.toMatchObject({ code: 'BUSY' })
+    expect(ran).toBe(false)
+  })
+})
+
 describe('a job whose engine would not stop', () => {
   it('keeps the video closed, its partial version in place and app.json as the job left it', async () => {
     const { slug, dir, partial, jobs, id, appJsonWhileRunning } = await stuckVideo()

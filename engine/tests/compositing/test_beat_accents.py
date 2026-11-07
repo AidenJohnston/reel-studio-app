@@ -210,3 +210,26 @@ def test_snapping_cannot_drop_a_neighbouring_sfx_hit(tmp_path, monkeypatch):
     placed, left = sfx.plan(ctx)
     assert left == []
     assert [p["t"] for p in placed] == pytest.approx([1.1, 3.1])
+
+
+def test_accents_follow_the_frozen_song_the_mix_plays_not_the_library_file(tmp_path, click_track):
+    """Fails if beat landing reads the Library song after the mix has frozen a copy of it: once that
+    Library file is replaced (here by one whose beats fall half a beat later) or deleted, cards would
+    land off the beat you hear, or stop landing at all."""
+    lib = tmp_path / "Library" / "Music"
+    lib.mkdir(parents=True)
+    subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-f", "lavfi", "-i",
+                    f"aevalsrc=if(lt(mod(t+{PERIOD / 2}\\,{PERIOD})\\,0.015)\\,0.8*sin(2*PI*1000*t)\\,0):s=48000:d=12",
+                    "-ac", "2", str(lib / "song.flac")], check=True)          # the replaced Library file
+    frozen = tmp_path / "work" / "assets" / "frozen"
+    frozen.mkdir(parents=True)
+    shutil.copy2(click_track, frozen / "song.flac")                           # what the mix plays
+    ctx, _ = context(tmp_path, click_track, beatAccents=True,
+                     music={"track": "Library/Music/song.flac", "startAt": 0, "enabled": True,
+                            "frozen": {"track": "Library/Music/song.flac", "path": "work/assets/frozen/song.flac"}})
+    for _ in range(2):
+        beats = music.accent_beats(ctx)
+        assert len(beats) >= 8
+        assert all(abs(b / PERIOD - round(b / PERIOD)) * PERIOD < 1 / 30 for b in beats), beats
+        (lib / "song.flac").unlink(missing_ok=True)                           # and once it is gone
+        ctx._accent_analysis = None

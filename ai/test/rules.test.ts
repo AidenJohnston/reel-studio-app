@@ -139,7 +139,7 @@ describe('a note and the checked rules', () => {
     expect(host.rulesFiles.every((f) => f.rules.length === 0)).toBe(true);
     // a note that changes nothing says so too
     const idle = await ai(new ScriptedModel([finish('Nothing to change.')])).applyNote(dir, 'looks good, thanks', () => undefined);
-    expect(idle.summary).toMatch(/^Nothing to change\. I couldn't check your My style rule/);
+    expect(idle.summary).toMatch(/^Nothing to change\. \(Your video didn't change, so there's no new version\.\) I couldn't check your My style rule/);
   });
 
   it('a first edit measures the rules too, and fixes a reel that breaks one', async () => {

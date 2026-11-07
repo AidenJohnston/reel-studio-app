@@ -1,21 +1,26 @@
 // The shared Library: <Reel Studio>/Library/{Raw takes,B-roll,Music,Images,Exports}, plus the bundled sound effects.
 import { existsSync, promises as fs } from 'node:fs'
 import { basename, dirname, extname, join, resolve } from 'node:path'
-import { BIN_FOLDERS, binDir, libraryDir, reelStudioRoot, sfxPackDir, type BinKey } from './paths'
+import { BIN_FOLDERS, binDir, fontsDir, libraryDir, reelStudioRoot, sfxPackDir, type BinKey } from './paths'
+import { fontNames } from './fonts'
 import { mediaUrl } from './media-url'
 import type { DropResult, LibraryBin, LibraryFile } from '../shared/api'
 import type { RunEngine } from './engine'
 import { logDuration } from './diagnostics'
+import { isInside } from './path-inside'
 
-export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts'])
+// .3gp too: the engine reads it (probe.py VIDEO_EXT), and a footage folder's .3gp clip must be importable
+export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mts', '.3gp'])
 export const AUDIO_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 export const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.heic'])
+export const FONT_EXT = new Set(['.ttf', '.otf'])
 
 const LABELS: Record<Exclude<BinKey, 'exports'>, string> = {
   raw: 'Videos of you',
   broll: 'Extra clips',
   music: 'Music',
-  images: 'Pictures'
+  images: 'Pictures',
+  fonts: 'Your fonts'
 }
 
 export const isVideo = (p: string): boolean => VIDEO_EXT.has(extname(p).toLowerCase())
@@ -48,7 +53,7 @@ async function readCredits(dir: string): Promise<Record<string, unknown> | null>
 /** Library/<bin> as the Library screen shows it. Finished reels are not listed: they live on Reels (ux-foundation-b.md section 6). */
 export async function listLibrary(): Promise<LibraryBin[]> {
   const out: LibraryBin[] = []
-  for (const key of ['images', 'broll', 'raw', 'music'] as const) {
+  for (const key of ['images', 'broll', 'raw', 'music', 'fonts'] as const) {
     const dir = binDir(key)
     const files: LibraryFile[] = []
     let names: string[] = []
@@ -63,14 +68,37 @@ export async function listLibrary(): Promise<LibraryBin[]> {
       const p = join(dir, name)
       const st = await fs.stat(p).catch(() => null)
       if (!st?.isFile()) continue
+      if (key === 'fonts' && !FONT_EXT.has(extname(name).toLowerCase())) continue
       const licence = credits ? creditLine(credits[name]) : 'Licence unknown'
-      files.push({ name, path: p, url: mediaUrl(p, st.mtimeMs), size: st.size, modifiedAt: st.mtime.toISOString(), ...(licence ? { licence } : {}) })
+      const font = key === 'fonts' ? await readFontNames(p) : undefined
+      if (key === 'fonts' && !font) continue
+      files.push({ name, path: p, url: mediaUrl(p, st.mtimeMs), size: st.size, modifiedAt: st.mtime.toISOString(), ...(licence ? { licence } : {}), ...(font ? { font } : {}) })
     }
     files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     out.push({ key, label: LABELS[key], dir, files })
   }
   out.push(await soundEffects())
+  out.push(await fontPack())
   return out
+}
+
+async function readFontNames(p: string): Promise<{ family: string; full: string } | undefined> {
+  return fontNames(await fs.readFile(p).catch(() => Buffer.alloc(0))) ?? undefined
+}
+
+/** The caption fonts that come with Reel Studio (packaging/fonts, all SIL Open Font License; SOURCES.md there). */
+async function fontPack(): Promise<LibraryBin> {
+  const dir = fontsDir()
+  const files: LibraryFile[] = []
+  for (const name of dir ? (await fs.readdir(dir).catch(() => [])).sort() : []) {
+    if (!FONT_EXT.has(extname(name).toLowerCase())) continue
+    const p = join(dir!, name)
+    const st = await fs.stat(p)
+    const font = await readFontNames(p)
+    if (!font) continue
+    files.push({ name, path: p, url: mediaUrl(p, st.mtimeMs), size: st.size, modifiedAt: st.mtime.toISOString(), licence: 'SIL Open Font License', font })
+  }
+  return { key: 'fontpack', label: 'Come with Reel Studio', dir: dir ?? '', files }
 }
 
 interface PackSound {
@@ -167,9 +195,21 @@ export async function addToLibrary(files: string[], runEngine: RunEngine, log: (
     const st = await fs.stat(f).catch(() => null)
     if (!st) out.push({ file: f, name: basename(f), bin: null, dest: null, reason: 'This file could not be found.' })
     else if (st.isDirectory()) out.push({ file: f, name: basename(f), bin: null, dest: null, reason: 'This is a folder. Open it and drop the files inside.' })
-    else if (resolve(f).startsWith(lib)) out.push({ file: f, name: basename(f), bin: binForFolder(f), dest: f })
+    else if (isInside(resolve(f), lib)) out.push({ file: f, name: basename(f), bin: binForFolder(f), dest: f })
     else todo.push(f)
   }
+  for (const f of todo.filter((t) => FONT_EXT.has(extname(t).toLowerCase()))) {
+    const ok = !!fontNames(await fs.readFile(f).catch(() => Buffer.alloc(0)))
+    if (!ok) {
+      out.push({ file: f, name: basename(f), bin: null, dest: null, reason: 'This font file could not be read.' })
+      continue
+    }
+    await fs.mkdir(binDir('fonts'), { recursive: true })
+    const dest = uniqueDest(binDir('fonts'), basename(f))
+    await fs.copyFile(f, dest)
+    out.push({ file: f, name: basename(f), bin: 'fonts', dest })
+  }
+  todo.splice(0, todo.length, ...todo.filter((t) => !FONT_EXT.has(extname(t).toLowerCase())))
   if (!todo.length) return finish(out)
   try {
     const res: any = await logDuration(`[library] classify fileCount=${todo.length}`, log, () =>

@@ -90,6 +90,16 @@ describe('explicit version layers', () => {
     expect(result.report).toContain('Adjusted b-roll a to end at kept word w2.');
   });
 
+  it('fails if a sound at a cut is kept, unreported, when the chosen cut plays straight through that word', () => {
+    const versions = pair();
+    // theirs jumped from w1 to w3, with a whoosh on that cut; ours keeps every word, so nothing jumps into w3
+    versions.theirs.cut.keep = [range(0, 1), range(3, 5)];
+    versions.theirs.sfx = [{ at: { cut: 'w3' }, sound: 'whoosh-quick' }];
+    const { edit, report } = api.mergeVersions({ ...versions, take: { ...take, sfx: 'theirs' } }, transcript);
+    expect(edit.sfx).toEqual([]);
+    expect(report).toContain('Dropped sound effect 1 (whoosh-quick) because there is no cut into w3 any more.');
+  });
+
   // #72's sound effects land on one moment, a picture's among them: one on a dropped picture goes with it
   it('drops a sound effect whose picture was dropped', () => {
     const versions = pair();
@@ -236,4 +246,25 @@ it.each([null, { ours: 1, theirs: 2, take: { cut: 'ours' } }])('returns a specif
     code: 'bad_merge', userMessage: expect.stringMatching(/choose/i),
   });
   expect(await fs.readFile(path.join(dir, 'project.json'), 'utf8')).toBe(before);
+});
+
+describe('which layers two versions differ in', () => {
+  it('names each changed layer once, and nothing for a change outside the layers (the post caption)', () => {
+    const { ours, theirs } = pair();
+    expect(api.differingLayers(ours, theirs)).toEqual(['cut', 'captions', 'music', 'zooms', 'broll', 'sfx', 'cover']);
+    const music = structuredClone(ours);
+    music.music.level = 'quiet';
+    music.post.caption = 'Only the post changed besides the music';
+    expect(api.differingLayers(ours, music)).toEqual(['music']);
+    const post = structuredClone(ours);
+    post.post.caption = 'Different words for the post';
+    expect(api.differingLayers(ours, post)).toEqual([]);
+  });
+
+  it('a mirrored source counts as a change of the cut, which owns the sources', () => {
+    const { ours } = pair();
+    const mirrored = structuredClone(ours);
+    mirrored.sources[0].mirror = true;
+    expect(api.differingLayers(ours, mirrored)).toEqual(['cut']);
+  });
 });

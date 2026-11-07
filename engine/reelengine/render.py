@@ -1767,7 +1767,7 @@ def stills(project_dir: Path, times: list, width: int, root: Optional[Path] = No
                           for sid in src_meta for vals in [{f["videoFrom"][sid] for f in out}]}}
 
 
-def cover_key(ctx, proj: dict) -> str:
+def cover_key(ctx, proj: dict, src_paths: dict) -> str:
     """Everything cover.render reads: the cover settings, the sources, the format, the cut (it picks
     from kept moments), the transcript and face track it scores against, the draft flag (a preview
     scores fewer frames) and the cover code itself."""
@@ -1778,9 +1778,19 @@ def cover_key(ctx, proj: dict) -> str:
             return round(p.stat().st_mtime, 3)
         except OSError:
             return 0.0
+
+    def st(p) -> list:
+        try:
+            s = Path(p).stat()
+            return [str(p), s.st_size, s.st_mtime_ns]
+        except OSError:
+            return [str(p), None, None]
     pdir = Path(ctx.project_dir)
     here = Path(__file__).parent
+    # The source files' size and mtime, as voice_signature keys them: a video replaced in place keeps
+    # the same project entry, and without these the old cover would be served from the cache.
     data = {"cover": proj.get("cover"), "sources": proj.get("sources"), "format": proj.get("format"),
+            "sourceFiles": {k: st(v) for k, v in sorted(src_paths.items())},
             "cut": proj.get("cut"), "draft": bool(ctx.draft),
             "files": [mt(pdir / "work" / "transcript.json"), mt(pdir / "work" / "face.json"),
                       *(mt(f) for f in sorted((pdir / "work").glob("face-*.json"))),
@@ -1798,7 +1808,7 @@ class CoverJob:
         # no progress from the thread: it would interleave "Making your cover" with the encode's percent
         quiet = dataclasses.replace(ctx, progress=None) if dataclasses.is_dataclass(ctx) else ctx
         cache = Path(ctx.project_dir) / "work" / "render" / "cover-cache"
-        key = cover_key(ctx, proj)
+        key = cover_key(ctx, proj, src_paths)
 
         def work():
             t0 = time.time()

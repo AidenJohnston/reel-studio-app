@@ -252,12 +252,20 @@ export function App() {
       <TitleBarProvider>
         <div className={`shell ${platform}${rail ? ' rail' : ''}${arriving ? ' arriving' : ''}`}>
           <TitleBar rail={rail} onToggle={toggleRail} />
-          <Sidebar section={section} go={go} provider={provider} userName={info.userName} onNewReel={() => void newReel(go, notify)} />
+          <Sidebar
+            section={section}
+            current={shown.name === 'reel' ? shown.slug : null}
+            rail={rail}
+            go={go}
+            provider={provider}
+            userName={info.userName}
+            onNewReel={() => void newReel(go, notify)}
+          />
           <TitleBarMain />
           <main className="main">
             <ErrorBoundary resetKey={JSON.stringify(screen)} onReset={() => go({ name: 'home' })}>
               {screen.name === 'home' && <Home go={go} />}
-              {screen.name === 'reel' && <Reel key={screen.slug} slug={screen.slug} at={screen.version} go={go} />}
+              {screen.name === 'reel' && <Reel key={screen.slug} slug={screen.slug} at={screen.version} go={go} draft={screen.draft} />}
               {screen.name === 'library' && <Library added={libraryAdded} />}
               {screen.name === 'style' && <MyStyle />}
               {screen.name === 'insights' && <Insights go={go} />}

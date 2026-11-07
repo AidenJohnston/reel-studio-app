@@ -1,14 +1,16 @@
 // "Learn from my past edits": the edits found on this computer, by app, ticked and read in one click.
-// A Final Cut Pro library or a Premiere Pro project can't be read as it is; each app says once how to export one,
+// A Final Cut Pro library or a Premiere Pro project can't be read as it is; each app says once how to export one
+// (a CapCut project is read as it is, and DaVinci Resolve's exports are FCPXML, listed with Final Cut Pro's),
 // and the list looks again whenever the window comes back into focus, so a new export appears by itself.
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { PastEdit, PastEditCounts, StyleLesson } from '../../../shared/api'
+import { styleEditors } from '../../../shared/style-editors'
 import { reel, userMessage } from '../api'
 import { FOLDER_APP, IS_MAC, Modal, Spinner } from '../components/ui'
 import { Icon } from '../components/icons'
 import '../components/learn.css'
 
-const APPS: PastEdit['app'][] = ['Final Cut Pro', 'Premiere Pro']
+const APPS: PastEdit['app'][] = ['Final Cut Pro', 'Premiere Pro', 'CapCut']
 /** Ticked when the list opens: the newest readable edits. More can be ticked; each takes a moment to read. */
 const TICKED = 8
 const KIND_WORD: Record<PastEdit['kind'], string> = {
@@ -16,12 +18,17 @@ const KIND_WORD: Record<PastEdit['kind'], string> = {
   fcpxmld: 'XML export',
   'premiere-xml': 'XML export',
   fcpbundle: 'Library',
-  prproj: 'Project'
+  prproj: 'Project',
+  capcut: 'Project'
 }
 const EXPORT_HOW: Record<PastEdit['app'], string> = {
   'Final Cut Pro': 'In Final Cut Pro, select the project, then choose File › Export XML…',
-  'Premiere Pro': 'In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML…'
+  'Premiere Pro': 'In Premiere Pro, open the project, then choose File › Export › Final Cut Pro XML…',
+  // never shown: every CapCut project found is readable
+  CapCut: 'CapCut projects are read as they are.'
 }
+const RESOLVE_HOW = 'In DaVinci Resolve, choose File › Export › Timeline… and save it as FCPXML.'
+const EDITORS = styleEditors(IS_MAC)
 const COMPUTER = IS_MAC ? 'Mac' : 'PC'
 
 function day(iso: string): string {
@@ -168,14 +175,15 @@ export function LearnSheet({ onClose, onLearned }: { onClose: () => void; onLear
         {none && (
           <div className="learn-none" data-testid="learn-none">
             <p className="learn-none-h">
-              {cut ? `No Final Cut Pro or Premiere Pro edits among the newest files on this ${COMPUTER}.` : `No Final Cut Pro or Premiere Pro edits on this ${COMPUTER} yet.`}
+              {cut ? `No edits from ${EDITORS} among the newest files on this ${COMPUTER}.` : `No edits from ${EDITORS} on this ${COMPUTER} yet.`}
             </p>
             <ul className="learn-ways">
               <li>
                 <b>Export one from your editor.</b>
                 <span>
                   {IS_MAC && <>{EXPORT_HOW['Final Cut Pro']} </>}
-                  {EXPORT_HOW['Premiere Pro']} Save it anywhere in your home folder and it appears here.
+                  {EXPORT_HOW['Premiere Pro']} {RESOLVE_HOW} Save it anywhere in your home folder and it appears here. CapCut
+                  projects appear by themselves.
                 </span>
               </li>
               <li>

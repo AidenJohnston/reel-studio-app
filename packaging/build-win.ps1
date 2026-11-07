@@ -19,6 +19,10 @@ param(
   [string]$Compression = "normal"  # store | normal | maximum
 )
 $ErrorActionPreference = "Stop"
+# electron-builder 26 require()s packages that are ES modules only (@noble/hashes 2), which needs Node 22.12 or newer;
+# older Node fails late with ERR_REQUIRE_ESM. CI uses 24.
+$nodeVersion = (node -p "process.versions.node").Trim()
+if ([version]$nodeVersion -lt [version]"22.12.0") { throw "Node $nodeVersion is too old to package Reel Studio: use Node 22.12 or newer (CI uses 24)." }
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue   # set by Electron-based shells; would make electron-builder tools run as plain node
 $Packaging = $PSScriptRoot
 $Repo = Split-Path $Packaging -Parent
@@ -74,7 +78,8 @@ if ($Spike) {
 } else {
   Push-Location $Repo
   if (-not $SkipUiBuild) {
-    npm.cmd install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    # ci, not install: exactly what package-lock.json records, never a newer version a range allows
+    npm.cmd ci --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     if (Test-Path (Join-Path $Repo "ai\package.json")) {
       npm.cmd run build --workspace ai; if ($LASTEXITCODE -ne 0) { throw "ai build failed" }   # app loads @reelstudio/ai from ai/dist at run time
     }

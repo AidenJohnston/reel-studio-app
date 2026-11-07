@@ -5,9 +5,10 @@ import { constants, existsSync, promises as fs } from 'node:fs'
 import { basename, join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { serialized, writeJson } from './store'
-import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, PlanTurnResult, ProviderStatus } from './ai-types'
+import type { AgentEvent, AgentResult, AI, ClaudeCodeStatus, CreateAI, NoteSteer, PlanTurnResult, ProviderStatus } from './ai-types'
 import type { NicheTurnResult } from '../shared/niche'
-import type { MemorySuggestion, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import type { MemorySuggestion, NoteRunnerInfo, Phase, RuleCheck, StyleProposal, StyleRule } from '../shared/api'
+import { MERGE_LAYERS } from '../shared/api'
 
 const MUSIC_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'])
 
@@ -172,11 +173,15 @@ export const createMockAI: CreateAI = ({ host }) => {
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
-  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string }): Promise<AgentResult> {
+  async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer; base?: number; mergeParent?: number }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
-    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: ['note'], at: new Date().toISOString() }]
+    // the climb's editor (REELSTUDIO_MOCK_FIRST_EDIT=editor) does what a note about bigger subtitles asks, so the new
+    // version's "What changed" and reply read as an editor's would
+    const bigger = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor' && /\bsubtitles? bigger\b/i.test(note)
+    if (bigger) p.captions = { ...p.captions, style: { ...p.captions?.style, size: 125 } }
+    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: [bigger ? 'captions' : 'note'], at: new Date().toISOString() }]
     await fs.mkdir(join(copy, '..'), { recursive: true })
     await writeJson(copy, p)
     onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
@@ -193,15 +198,28 @@ export const createMockAI: CreateAI = ({ host }) => {
       const t = setTimeout(resolve, noteMs)
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
+    // like the real package: words added while it worked are read before it can finish (ai steer.ts)
+    const added: string[] = []
+    while (opts?.steer && !opts.steer.seal()) added.push(...opts.steer.take())
+    if (added.length) {
+      const edit = JSON.parse(await fs.readFile(copy, 'utf8'))
+      edit.notes[edit.notes.length - 1].text = [note, ...added].join('\n')
+      await writeJson(copy, edit)
+    }
     onEvent({ type: 'status', message: 'Making the final version', pct: 0, phase: 'final' })
-    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
+    // a note on an older version, or a combination of two, records the version(s) it came from (version-tree)
+    const from = [...(opts?.base !== undefined ? ['--parent', String(opts.base)] : []), ...(opts?.mergeParent !== undefined ? ['--merge-parent', String(opts.mergeParent)] : [])]
+    const r = await host.runEngine('render', ['--project', dir, '--project-file', copy, ...from, ...(opts?.owner ? ['--owner', opts.owner] : [])], (pr) => onEvent({ type: 'status', message: pr.message || 'Making the final version', pct: pr.pct, phase: 'final' }), signal)
     const version = Number(r?.version)
     if (signal?.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
     const done = JSON.parse(await fs.readFile(copy, 'utf8'))
     done.notes[done.notes.length - 1].version = version
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-    return { summary: `Done: "${note}". It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
+    const also = added.length ? ` Also: ${added.map((w) => `"${w}"`).join(', ')}.` : ''
+    const took = added.length ? `, and took in what you added: ${added.map((w) => `"${w}"`).join(', ')}` : ''
+    if (bigger) return { summary: `I made the subtitles bigger, so they read at a glance on a phone${took}.`, version, styleRulesAdded: [], changed: ['captions'] }
+    return { summary: `Done: "${note}".${also} It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 
   async function firstMusicTrack(): Promise<string | null> {
@@ -218,6 +236,13 @@ export const createMockAI: CreateAI = ({ host }) => {
   const state = { claude: startState(mode.claude), chatgpt: startState(mode.chatgpt) }
   const plan: { claude?: string; chatgpt?: string } = mode.claude === 'ready' ? { claude: 'max' } : {}
   let chosen: 'claude-cli' | 'codex-cli' | null = null
+  // Settings › How notes run, as the real package keeps it (ai index.ts noteRunner). REELSTUDIO_MOCK_HARNESS=refused:
+  // the app's self-test fails on the first note run in the app, so that note runs on Reel Studio's editor instead.
+  let runInApp = false
+  let fellBack: NoteRunnerInfo['fellBack']
+  const runnerApp = (): NoteRunnerInfo['app'] =>
+    chosen === 'claude-cli' && state.claude === 'ready' ? 'claude-code' : chosen === 'codex-cli' && state.chatgpt === 'ready' ? 'codex' : null
+  const noteRunner = async (): Promise<NoteRunnerInfo> => ({ runner: runInApp && runnerApp() ? 'app' : 'reelstudio', app: runnerApp(), ...(fellBack ? { fellBack } : {}) })
   let checking: AbortController | null = null
   const cliStatus = (v: 'claude' | 'chatgpt'): ClaudeCodeStatus => ({
     state: state[v],
@@ -244,6 +269,9 @@ export const createMockAI: CreateAI = ({ host }) => {
       return [{ id: 'claude', connected: false, label: 'Claude' }, claudeProvider(), cliProvider('chatgpt'), NOT_CONNECTED]
     },
     async active() {
+      // the climb's screenshots (REELSTUDIO_MOCK_FIRST_EDIT=editor) start with no editor and choose the Claude Code app,
+      // as a person does; the practice editor is a test's own and never on a person's screen
+      if (process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor') return chosen === 'claude-cli' && state.claude === 'ready' ? claudeProvider() : NOT_CONNECTED
       if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
@@ -318,17 +346,24 @@ export const createMockAI: CreateAI = ({ host }) => {
       const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
-      const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }) })
+      // Tests only (REELSTUDIO_MOCK_FIRST_EDIT=editor): the first edit an editor makes, its steps and its own words, so a
+      // screenshot set shows the path a person with an editor sees (e2e/climb-shots.spec.ts)
+      const editor = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor'
+      const status = (message: string, pct: number, phase?: Phase, note?: string): void =>
+        onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 || editor ? {} : { noAI: true }), ...(note ? { note } : {}) })
       const changed: string[] = []
-      // one of several reels from one video (main/propose-reels.ts): its words are heard and its cut is set already,
-      // as the real package keeps them (ai editor.ts ensureAnalyzed and deterministicEdit)
+      // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
+      // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
+      // package does (ai editor.ts ensureAnalyzed and deterministicEdit)
       const start = await readProject(projectDir)
       const proposed = !!start.proposal && (start.cut?.keep?.length ?? 0) > 0
+      const heard = existsSync(join(projectDir, start.transcript?.file ?? 'work/transcript.json'))
 
-      if (!proposed) {
+      if (!heard) {
         status('Listening to your video', 1, 'listen')
-        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen'), signal)
-
+        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen', p.note), signal)
+      }
+      if (!proposed) {
         status('Picking your best takes', 41, 'analyze')
         await host.runEngine('analyze', args, (p) => status('Picking your best takes', span(0, 50, p.pct), 'analyze'), signal)
         await host.runEngine('autocut', args, (p) => status('Picking your best takes', span(50, 100, p.pct), 'analyze'), signal)
@@ -353,6 +388,7 @@ export const createMockAI: CreateAI = ({ host }) => {
         await new Promise((r) => setTimeout(r, hold))
       }
 
+      if (editor) status('Picking takes and pictures', 50, 'edit')
       status('Adding music', 56)
       const track = await firstMusicTrack()
       const p = await readProject(projectDir)
@@ -361,7 +397,17 @@ export const createMockAI: CreateAI = ({ host }) => {
         changed.push('music')
         onEvent({ type: 'tool', name: 'choose_music', summary: `Picked a song: ${track.split('/').pop()}` })
       }
-      // No post caption here: nothing smart ran, so the user writes it ("Post caption: add your own").
+      // No post caption on a basic version: nothing smart ran, so the user writes it ("Post caption: add your own"). An
+      // editor writes one, as ai/src/tools.ts write_post does: the caption, exactly 5 hashtags, search keywords.
+      if (editor) {
+        p.post = {
+          caption: "You don't need a mixer for good bread. Four things and a little time.",
+          hashtags: ['#bread', '#breadmaking', '#homebaking', '#baking', '#easyrecipes'],
+          keywords: ['bread', 'no mixer', 'home baking']
+        }
+        changed.push('post')
+        onEvent({ type: 'tool', name: 'write_post', summary: 'Wrote your caption and hashtags' })
+      }
       const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
       const lower = rules.some((r) => r.payload?.case === 'lower' && !r.paused)
       if (lower) p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
@@ -376,8 +422,9 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       const did = proposed ? 'the proposed part of the video kept and subtitles added' : 'pauses cut and subtitles added'
       return {
-        summary:
-          (track
+        summary: editor
+          ? 'I kept your clean take of each line and cut the false start, the filler and the long pauses. Subtitles and a cover are on.'
+          : (track
             ? `Basic version: ${did}, with your song underneath. Connect an editor to pick your best takes and add pictures.`
             : `Basic version: ${did}. Add a song for music, and connect an editor to pick your best takes and add pictures.`) +
           (lower ? ' Subtitles are lowercase, from My style.' : ''),
@@ -387,7 +434,19 @@ export const createMockAI: CreateAI = ({ host }) => {
       }
     },
 
+    noteRunner,
+    async setNoteRunner(runner) {
+      if (runner === 'app' && !runnerApp()) throw { code: 'not_available', userMessage: 'Connect your Claude Code app or Codex app as your editor first.' }
+      runInApp = runner === 'app'
+      fellBack = undefined
+      return noteRunner()
+    },
     async applyNote(projectDir, note, onEvent, signal, opts): Promise<AgentResult> {
+      const app = runnerApp()
+      if (runInApp && app && !fellBack && process.env.REELSTUDIO_MOCK_HARNESS === 'refused') {
+        fellBack = { app, reason: 'claude_cli: MCP refused', at: new Date().toISOString() }
+        onEvent({ type: 'status', phase: 'edit', message: `${app} self-test failed (claude_cli: MCP refused). Using the text-protocol provider for this session.` })
+      }
       if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
@@ -441,6 +500,14 @@ export const createMockAI: CreateAI = ({ host }) => {
     },
 
     // this stand-in has no fast path: every note goes through applyNote above
+    async mergeVersions(projectDir, request, onEvent, signal, opts) {
+      const r = await slowNote(projectDir, `Combine Version ${request.ours} and Version ${request.theirs}`, onEvent, signal, { ...opts, base: request.ours, mergeParent: request.theirs })
+      return { ...r, summary: `Combined Version ${request.ours} and Version ${request.theirs}.`, edit: await readProject(projectDir), report: [] }
+    },
+    // the practice editor keeps no version snapshots to compare, so every part is a choice
+    async mergeLayers() {
+      return [...MERGE_LAYERS]
+    },
     async wholeReelSetting() {
       return false
     },
@@ -536,6 +603,36 @@ export const createMockAI: CreateAI = ({ host }) => {
             words: ws.length
           }
         }),
+        notes: '',
+        attempts: 1
+      }
+    },
+
+    // The practice editor's reels across the footage archive: lines taken in file order until a reel plays for 15 s,
+    // so a short file runs on into the next one, up to three reels. It reads no words: it is a stand-in.
+    async proposeFromArchive(req, signal) {
+      if (!(noteMs > 0)) throw { code: 'NO_AI', userMessage: 'Connect an editor to find reels in your footage.' }
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, noteMs)
+        signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
+      })
+      type Span = { ref: string; t0: number; t1: number; said: string }
+      const reels: Span[][] = []
+      let open: Span[] = []
+      const length = (spans: Span[]) => spans.reduce((t, x) => t + x.t1 - x.t0, 0)
+      for (const f of req.files) {
+        for (const l of f.lines) {
+          const last = open.at(-1)
+          if (last && last.ref === f.ref) Object.assign(last, { t1: l.e, said: `${last.said} ${l.text}` })
+          else open.push({ ref: f.ref, t0: l.s, t1: l.e, said: l.text })
+          if (length(open) >= 15 && reels.length < 3) (reels.push(open), (open = []))
+        }
+      }
+      return {
+        candidates: reels.map((spans, k) => ({
+          id: `r${k + 1}`, title: PRACTICE_REELS[k].title, why: PRACTICE_REELS[k].why, hook: spans[0].said,
+          spans, seconds: Math.round(length(spans) * 10) / 10
+        })),
         notes: '',
         attempts: 1
       }

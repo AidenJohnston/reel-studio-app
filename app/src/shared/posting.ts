@@ -24,6 +24,9 @@ export type PostingErrorCode =
   | 'SERVER'
   | 'NOT_A_FINISHED_VIDEO'
   | 'FILE_CHANGED'
+  | 'STOP_UNCONFIRMED'
+  | 'ALREADY_POSTED'
+  | 'POSTED_UNREADABLE'
   | 'BUSY'
 
 export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, string> = {
@@ -46,6 +49,10 @@ export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, stri
   SERVER: 'Something went wrong on the posting server. Try again in a few minutes.',
   NOT_A_FINISHED_VIDEO: 'Only a finished video can be posted. Export it first.',
   FILE_CHANGED: 'The video changed since this post started. Click Start over.',
+  ALREADY_POSTED: 'YouTube already has all of this video, so starting over would post it twice. Click Finish posting to see it.',
+  POSTED_UNREADABLE: "YouTube has this video, but Reel Studio couldn't read the posting server's answer about it. Find it in YouTube Studio before posting it again.",
+  STOP_UNCONFIRMED:
+    "The posting server didn't confirm that this post stopped, and YouTube may already have all of it, so it's kept. Click Finish posting to check: it carries on from what YouTube has and never posts it twice.",
   BUSY: 'Another video is being posted. Wait for it to finish.'
 }
 
@@ -195,7 +202,6 @@ export const megabytes = (n: number): string => `${Math.round(n / 1_000_000)}`
 export const SETTINGS_COPY = {
   heading: 'Posting',
   intro: 'Post a finished video to your channels from Reel Studio. It posts only when you click Post.',
-  coming: 'Instagram, TikTok, Facebook, LinkedIn and X are coming.',
   privacy: "Your Google sign-in stays on Reel Studio's posting server, never on this computer. Your video passes through it to YouTube and isn't kept.",
   noKey: 'Signing in uses the download key from your receipt email.',
   disconnectTitle: 'Disconnect YouTube?',
@@ -236,6 +242,8 @@ export function failedAction(p: PostProgress): FailedAction | null {
   switch (p.error?.code) {
     case 'ENDED':
       return null // the message carries Subscribe again
+    case 'POSTED_UNREADABLE':
+      return null // it is on YouTube: any button here would post it twice
     case 'SIGNED_OUT':
       return 'sign_in'
     case 'RECONNECT':

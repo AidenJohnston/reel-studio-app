@@ -475,3 +475,11 @@ it('fails if the check asks the editor\'s model instead of the "Checks each edit
   expect(editor.editorRequests.length).toBeGreaterThanOrEqual(3); // the note's two turns and the repair's
   expect(disposed).toBe(1);
 });
+
+it('fails if "Double-check each edit" skips a direct change such as "smaller captions"', async () => {
+  const { dir, host, size } = await noteProject();
+  const model = new Roles([[call('set_caption_style', { size: size - 20 }), call('render_draft')], [call('finish', { summary_for_user: 'Smaller captions.' })]], [pass()]);
+  await createAI({ host, settingsDir: tmpDir('settings '), providerOverride: model }).applyNote(dir, 'smaller captions', () => {}, undefined, CHECK);
+  expect(model.checkerRequests).toHaveLength(1);
+  expect((await loadProject(dir)).captions.style.size).toBe(size - 20);
+});

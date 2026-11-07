@@ -6,9 +6,10 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import type { LibraryPreview } from '../shared/api'
+import { isStrictlyInsideFolder } from './inside-folder'
 import { binForFolder, isVideo, AUDIO_EXT } from './library'
 import { mediaUrl } from './media-url'
-import { ffmpegPath, ffprobePath, libraryPreviewDir, sfxPackDir } from './paths'
+import { binDir, ffmpegPath, ffprobePath, libraryPreviewDir, sfxPackDir } from './paths'
 
 // A Library file is untrusted input: only local files and the media demuxers, so a playlist (an HLS or concat
 // file renamed .mp4) can't make ffmpeg open other files or the network. The same list as engine asset_preview.py.
@@ -85,7 +86,16 @@ const pending = new Map<string, Promise<LibraryPreview>>()
 
 export async function libraryPreview(file: string): Promise<LibraryPreview> {
   const kind = kindOf(file)
+  // The checks above read the path as written. A file in a bin can be a link to anywhere (a shared drive, a folder
+  // set up by hand), and ffmpeg would follow it, so the file itself must resolve inside its folder's real place. A
+  // whole bin that is a link to another folder still works: both sides are resolved. The same rule as reel-media:
+  // (media.ts).
+  const bin = binForFolder(file)
+  const [real, folder] = await Promise.all([fs.realpath(file), fs.realpath(bin ? binDir(bin) : sfxPackDir())])
+  if (!isStrictlyInsideFolder(real, folder)) throw { code: 'BAD_ARGS', userMessage: 'That file has no preview.' }
+  file = real
   const st = await fs.stat(file)
+  if (!st.isFile()) throw { code: 'BAD_ARGS', userMessage: 'That file has no preview.' }
   const key = createHash('sha1').update(`${resolve(file)}\0${st.size}\0${st.mtimeMs}`).digest('hex')
   const json = join(libraryPreviewDir(), `${key}.json`)
   const kept = await fs.readFile(json, 'utf8').then((t) => JSON.parse(t) as LibraryPreview, () => null)

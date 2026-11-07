@@ -161,10 +161,14 @@ Notes the app stream needs:
   (they fall back to `npx electron-builder@26.15.3`).
 * ffmpeg is pinned to 7.1.1 on purpose (see THIRD_PARTY.md): `reelengine.tools.filters()` mis-parses the 2-character
   flag column that FFmpeg 8/9 print for `ffmpeg -filters`.
-* The bundled ctranslate2 is CPU-only. `get_cuda_device_count()` still reports an NVIDIA card, but loading a model
-  on it fails with `cublas64_12.dll not found`, so the engine's cuda->cpu fallback in `load_model` is what keeps
-  transcription working on NVIDIA machines (it does). `doctor` reports "GPU for listening: OK" there, which is
-  optimistic. A real GPU pack (nvidia-cublas/cudnn wheels, ~700 MB) would have to be an optional download.
+* The packaged runtime ships no CUDA libraries, so listening runs on the CPU even on NVIDIA machines.
+  `get_cuda_device_count()` still reports the card, but loading a model on it fails with `cublas64_12.dll not
+  found`; `load_model` proves the GPU in a child process first (`cuda_selftest`) and falls back to the CPU. The
+  speech check proves it the same way before skipping the CPU thread count, and the first edit's Listening row says
+  "Slower: listening on the processor, not your graphics card" (`CPU_FALLBACK_NOTE`). Using the GPU would mean
+  bundling cuBLAS and cuDNN (the `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` wheels, several hundred MB) under
+  NVIDIA's own license terms, not an open-source license: a size and licensing decision, best as an optional
+  download.
 * First launch after install is slow on Windows (about 15 s before `import numpy, cv2, ...` finishes: Defender scans
   the freshly written files). Show "Getting ready" UI on the first engine call; later launches take ~1.5 s.
 * Icons: `packaging/icons/icon.icns` / `icon.ico` (the config points at them).

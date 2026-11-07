@@ -44,6 +44,20 @@ def test_dense_window_stream_matches_buffered_frames(tmp_path):
     assert actual == expected
 
 
+def test_dense_window_starting_between_frames_picks_what_a_single_seek_does(tmp_path):
+    # Fails if the one-decode window counts frames from its start time instead of from the first frame
+    # at or after it: starting at 0.010 s (between frames 0 and 1 at 30 fps), 0.033 s would get frame 2
+    # where `-ss 0.033` returns frame 1, so the cover scores a frame one later than the one it shows.
+    path = tmp_path / "clip.mp4"
+    _clip(path)
+    times = [0.010, 0.033, 0.05, 0.08]
+    assert compose_util._dense_window(times, compose_util.probe(path)) is not None     # the path under test
+    dense = [frame.tobytes() for _, frame in compose_util.decode_frames(path, 1, 160, times=times)]
+    single = [frame.tobytes() for t in times for _, frame in compose_util.decode_frames(path, 1, 160, times=[t])]
+    assert len(set(single)) == 3        # 0.010 and 0.033 are both frame 1; 0.05 and 0.08 are frames 2 and 3
+    assert dense == single
+
+
 def test_dense_window_reaps_ffmpeg_when_consumer_stops(tmp_path, monkeypatch):
     path = tmp_path / "clip.mp4"
     _clip(path)

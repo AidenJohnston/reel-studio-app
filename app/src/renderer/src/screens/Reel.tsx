@@ -10,14 +10,17 @@ import { pausedSentence, pausedWords } from '../../../shared/pause'
 import type { Step } from '../../../shared/steps'
 import { droppedPaths, reel, userMessage } from '../api'
 import type { Go } from '../nav'
-import { Button, Confirm, IS_MAC, IconButton, PickFiles, Spinner } from '../components/ui'
+import { Button, Confirm, IS_MAC, IconButton, MOD, PickFiles, Segmented, Spinner } from '../components/ui'
+import { CombineDialog, VersionTree } from '../components/VersionTree'
+import { SideBySide, saveLayout, savedLayout, type CompareLayout } from '../components/SideBySide'
 import { NOTIFY_ASKED, markNotifyAsked } from '../components/permissions'
 import { Icon } from '../components/icons'
+import { SeriesPicker } from '../components/SeriesPicker'
 import { PhonePlayer } from '../components/Player'
 import type { SubtitleLook } from '../../../shared/caption-presets'
 import { PhoneViewSwitch, usePhoneShape, usePhoneView } from '../components/Phone'
 import { FullStage } from '../components/FullStage'
-import { ShapeMenu, SpeedMenu } from '../components/PreviewControls'
+import { SpeedMenu, ViewMenu } from '../components/PreviewControls'
 import { createPlayhead, usePlayhead, type Playhead } from '../components/playhead'
 import { createTransport, useTransport, type Transport } from '../components/transport'
 import { versionOnScreen, versionsShown } from '../components/videoLayers'
@@ -25,6 +28,7 @@ import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
 import { ShowMeHow, type Tab } from './ShowMeHow'
 import { useNoteAttachments } from '../components/NoteAttachments'
 import { NotesLog, useVersionRows, type FirstState } from '../components/NotesLog'
+import { reelsChanged } from '../components/reels-changed'
 import { Composer, region, type Chip } from '../components/Composer'
 import { Timeline, type TimelineMark } from '../components/Timeline'
 import { lanesOf, pictureWhy, type Lanes } from '../../../shared/lanes'
@@ -36,7 +40,7 @@ import { Outs } from '../components/Outs'
 import { PopMenu } from '../components/PopMenu'
 import { TitleBarSlot } from '../components/titlebar'
 import { ConnectAI, ModelDownload } from '../components/connect'
-import { PlanCard, PlanChip, PlanEmpty, PlannedStage, PlanWho, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
+import { PlanCard, PlanChip, PlanEmpty, PlannedStage, columnVideoDrop, markPlanConnect, usePlanAfterConnect } from '../components/Plan'
 import { ReelsFound } from '../components/ReelsFound'
 import { ChangePicture, ChangeTag, useChangeMoment } from '../components/ChangeMoments'
 import { byKeyboard, reducedMotion } from '../components/motion'
@@ -52,11 +56,11 @@ const ACTION_TAB: Partial<Record<ChatAction, Tab>> = {
 }
 
 const pinsKey = (slug: string): string => `rs.pins.${slug}`
-/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the button that
- * shows it when it is hidden. */
+/** After closing something from the keyboard, focus lands on the timeline rather than the page, or on the View menu's
+ * button, whose menu shows it, when it is hidden. */
 const keyboardBackToTimeline = (): void => {
   if (byKeyboard())
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="timeline-toggle"]')?.focus())
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="timeline"], [data-testid="view-menu"]')?.focus())
 }
 const typing = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null
@@ -83,7 +87,7 @@ interface Pin {
  * editor in a column on the right. Version 1 is made here, a reel with no video is planned here, and Edit it myself
  * takes the column's place.
  */
-export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
+export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: number; go: Go; draft?: string }) {
   const notify = useNotify()
   const [d, setD] = useState<ProjectDetail | null>(null)
   // `at`: the version to show first; the newest when it's gone or not given (line ~234 keeps a version that exists)
@@ -118,6 +122,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [providerChecked, setProviderChecked] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [pickingSeries, setPickingSeries] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [more, setMore] = useState(false)
   const moreBtn = useRef<HTMLButtonElement>(null)
@@ -129,6 +134,13 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   const [warmOriginal, setWarmOriginal] = useState(false)
   const [preview, setPreview] = useState<{ look: SubtitleLook; text: string; at: number } | null>(null)
   const [compare, setCompare] = useState<{ a: number; b: number } | null>(null)
+  // Versions: the older version the next note changes, the notes column's view, and Combine's starting version
+  const [base, setBase] = useState<number | null>(null)
+  const [notesView, setNotesView] = useState<'notes' | 'versions'>('notes')
+  const [combine, setCombine] = useState<number | null>(null)
+  // Compare as one player that switches, or both versions at once (SideBySide), as the person last chose
+  const [layout, setLayout] = useState<CompareLayout>(savedLayout)
+  const pickLayout = (l: CompareLayout) => (setLayout(l), saveLayout(l))
   const [landed, setLanded] = useState<number | null>(null)
   const [unwatched, setUnwatched] = useState<number | null>(null)
   // the version whose arrival crosses over the one on screen
@@ -185,7 +197,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     }
   }, [transport, playhead])
   const [shownSrc, setShownSrc] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(startDraft ?? '')
   const [chip, setChip] = useState<Chip>(null)
   const [alert, setAlert] = useState<string | null>(null)
   const [notifyAsk, setNotifyAsk] = useState(false)
@@ -345,6 +357,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
 
   const version = d ? (d.versions.find((v) => v.n === selected) ?? d.versions[d.versions.length - 1]) : undefined
   const changePreview = job?.preview && d?.versions.length ? job.preview.video : null
+  // Compare › Side by side is open (SideBySide.tsx): both versions there, for as long as both still exist
+  const sideBySide = !!compare && layout === 'side' && !!d?.versions.some((v) => v.n === compare.a) && !!d?.versions.some((v) => v.n === compare.b)
   // A running job's pictures of the change it is making, before its draft (none while comparing or in Edit it
   // myself, where a preview waits too).
   const change = useChangeMoment(job && !compare && !drawer ? job.moments : null, job?.jobId ?? null)
@@ -431,7 +445,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
               : null,
             planned: d.status === 'planned',
             plan: d.plan,
-            source: d.project.sources?.[0] ?? null,
+            sources: d.project.sources ?? [],
             now: new Date()
           })
         : [],
@@ -506,8 +520,11 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   // the moment attached by itself: the person stopped on it, and the video is still there
   const autoMoment = stoppedOn && !playing && hasVersions && !chip
 
-  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined) => {
-    const r = await reel.projects.note(slug, text, files, moment, version?.n)
+  const note = async (text: string, files: string[] | undefined, moment: NoteMoment | undefined, add = false) => {
+    const on = !add && base !== null && base !== latestN ? base : undefined
+    const r = await reel.projects.note(slug, text, files, moment, version?.n, on, add || undefined)
+    setBase(null)
+    if (add && r.added === false) notify('That version was already being saved, so your note runs next on its own.', 'info')
     if (r.jobId) setJob((cur) => (cur?.jobId === r.jobId ? cur : { ...EMPTY_LIVE, jobId: r.jobId, message: 'Reading your note' }))
     await load()
   }
@@ -522,7 +539,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     return words.length ? noteMoment(c.at, n, words, c.to) : noSpeech(c.at)
   }
 
-  const send = async () => {
+  /** `add`: into the version being made now (Add now), when it can still take it */
+  const send = async (add = false) => {
     const text = draft.trim()
     const files = att.chips
     if ((!text && !files.length) || att.busy || !providerChecked) return
@@ -557,7 +575,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     setStoppedOn(false)
     att.clear()
     try {
-      await note(words || 'Put this here', files.length ? files.map((f) => f.asset) : undefined, moment)
+      await note(words || 'Put this here', files.length ? files.map((f) => f.asset) : undefined, moment, add)
       if (spot && chip) {
         const next = [...pins, { n: spot.n, at: chip.at, x: spot.x, y: spot.y, text: text || 'Change this' }]
         localStorage.setItem(pinsKey(slug), JSON.stringify(next))
@@ -596,6 +614,7 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     if (!t || t === d.title) return
     try {
       await reel.projects.update(slug, { title: t })
+      reelsChanged()
       await load()
     } catch (e) {
       notify(userMessage(e), 'error')
@@ -703,7 +722,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     const i = d.versions.findIndex((v) => v.n === b)
     if (i < 1) return
     setPointing(false)
-    setCompare({ a: d.versions[i - 1].n, b })
+    // against the version it was made from: on a branch that is not the one numbered just before it
+    setCompare({ a: d.versions[i].parent ?? d.versions[i - 1].n, b })
     setSelected(b)
   }
 
@@ -719,6 +739,9 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   const held = d.queueHeld ? waitingRows(d.queue, entries).length : 0
   const nextSpot = Math.max(0, ...pins.map((p) => p.n)) + 1
   const lastResult = entries[entries.length - 1]?.result?.kind
+  // a note making the next version can take more words (Add now); a change made by hand or Version 1 cannot
+  const running = d.queue.find((q) => q.attempt && !q.hand)
+  const addable = d.job?.kind === 'note' && making !== null && !!running && running.branch === undefined
   const placeholder = notePlaceholder({
     planned,
     hasPlan: !!d.plan,
@@ -726,7 +749,9 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
     asking: lastResult === 'question',
     hasVersions,
     making: making !== null,
-    busy: !!job
+    busy: !!job,
+    ...(addable && base === null ? { addKeys: `${MOD}Enter` } : {}),
+    ...(base !== null && base !== latestN ? { base } : {})
   })
   const showComposer = (planned && !aiOff) || hasVersions || first?.kind === 'making'
   const planCard = d.plan && (
@@ -779,7 +804,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
       )}
       {tagged && (
         <span className={`rt-ver${older ? ' older' : ''}`} data-testid="version-on-screen">
-          Version {tagged.n}
+          {/* comparing, the title says so: the switch on the phone was the only sign of it (Sense, goal 3) */}
+          {compare ? `Comparing Version ${compare.a} and ${compare.b}` : `Version ${tagged.n}`}
         </span>
       )}
       {taggedName && (
@@ -790,6 +816,19 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
       {older && !compare && (
         <Button kind="tertiary" size="small" onClick={() => watch(latestN!)} data-testid="version-latest">
           Back to latest
+        </Button>
+      )}
+      {older && !compare && !aiOff && base !== older.n && (
+        <Button
+          kind="tertiary"
+          size="small"
+          onClick={() => {
+            setBase(older.n)
+            noteField.current?.focus()
+          }}
+          data-testid="version-change-this"
+        >
+          Change this one
         </Button>
       )}
     </span>
@@ -812,6 +851,9 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
           quiet={!!compare || !!drawer || aiOff}
           why={job ? (d.job?.kind === 'propose' ? 'Wait for your editor to finish looking.' : 'Wait for this version to finish.') : undefined}
           onSaveCaption={savePost}
+          // Change opens Cover in the edit already open, so a waiting hand edit stays the one being changed (openDrawer
+          // starts a new edit). An older version on screen shows its cover without Change: Cover edits the newest.
+          onCover={older ? undefined : () => (drawer ? setDrawer('cover') : openDrawer('cover'))}
         />
       )}
       <span className="rt-more">
@@ -840,6 +882,16 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
           >
             <Icon name="scissors" size={16} /> More reels from this video
           </button>
+          <button
+            className="mi"
+            role="menuitem"
+            disabled={!hasVersions}
+            title={!hasVersions ? 'Wait for Version 1.' : undefined}
+            onClick={() => (setMore(false), setPickingSeries(true))}
+            data-testid="series"
+          >
+            <Icon name="folder" size={16} /> {d.series ? `Series: ${d.series}` : 'Series…'}
+          </button>
           <button className="mi danger" role="menuitem" disabled={!!job} onClick={() => (setMore(false), setConfirmDelete(true))} data-testid="delete">
             <Icon name="trash" size={16} /> Delete…
           </button>
@@ -866,8 +918,12 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
               </button>
             ))}
           </div>
+          <button className="cmp-side" onClick={() => pickLayout('side')} data-testid="compare-side-by-side">
+            Side by side
+          </button>
+          {/* names the one it keeps on screen, the one Share sends: "Done comparing" left the choice unsaid (Sense, goal 3) */}
           <button className="cmp-done" onClick={() => (setCompare(null), keyboardBackToTimeline())} data-testid="done-compare">
-            Done comparing
+            Keep Version {selected ?? compare.b}
           </button>
         </div>
       )}
@@ -893,14 +949,14 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
   )
 
   // Comparing shows the reel without Instagram's header and buttons: the switch sits on the top edge of the picture,
-  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back on Done.
+  // and at 1100 × 720 the full-height phone leaves no room above it. The person's own view comes back when a version is kept.
   const shownView = compare ? 'clean' : phoneView
   const viewSwitch = compare ? (
     <span className="view-held" data-testid="phone-view-held">
       <span inert>
         <PhoneViewSwitch value={shownView} onChange={() => undefined} />
       </span>
-      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back on Done comparing.</span>
+      <span className="sr-only">Comparing shows the reel without Instagram. Your view comes back when you keep a version.</span>
     </span>
   ) : (
     <PhoneViewSwitch value={phoneView} onChange={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))} />
@@ -921,7 +977,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
                   poster={hasVersions ? version?.cover : null}
                   className={[landing !== null && 'landing', tag === 'Original' && d.project.sources?.[0]?.mirror === true && 'mirrored-original'].filter(Boolean).join(' ') || undefined}
                   autoPlayMuted={!!changePreview || !hasVersions}
-                  playRequest={!changePreview && playRequest?.n === version?.n ? playRequest?.ask : undefined}
+                  // Side by side plays both versions itself: the player under it takes no play request meanwhile
+                  playRequest={!changePreview && !sideBySide && playRequest?.n === version?.n ? playRequest?.ask : undefined}
                   onPlayRequestHandled={() => setPlayRequest(null)}
                   subtitle={drawer && preview ? preview : null}
                   still={drawer && preview && d.sourceVideo ? `${d.sourceVideo}#t=${preview.at.toFixed(2)}` : null}
@@ -991,16 +1048,13 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
                     onPlay={(n) => !drawer && watch(n)}
                   />}
                   <TransportRow transport={transport} playhead={playhead}>
-                    <ShapeMenu />
-                    {viewSwitch}
-                    <IconButton
-                      icon="timeline"
-                      label="Show timeline"
-                      shortcut={TIMELINE_SHORTCUT}
-                      className="tl-toggle"
-                      aria-pressed={timelineShown}
-                      onClick={() => void setTimelineShown(!timelineShown).catch((e) => notify(userMessage(e), 'error'))}
-                      data-testid="timeline-toggle"
+                    <ViewMenu
+                      view={shownView}
+                      onView={(v) => void setPhoneView(v).catch((e) => notify(userMessage(e), 'error'))}
+                      held={!!compare}
+                      timeline={timelineShown}
+                      onTimeline={(shown) => void setTimelineShown(shown).catch((e) => notify(userMessage(e), 'error'))}
+                      timelineShortcut={TIMELINE_SHORTCUT}
                     />
                     <IconButton icon="fullscreen" label="Full screen" shortcut="F" aria-keyshortcuts="F" onClick={() => setFull(true)} data-testid="full-screen" />
                   </TransportRow>
@@ -1038,10 +1092,24 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
             />
           ) : (
             <>
-              <div className="notes-h">
-                <h2>{planned ? 'Plan with your editor' : 'Notes for your editor'}</h2>
-                {planned && !aiOff && <PlanWho provider={provider} />}
-              </div>
+              {/* The column's name is for screen readers: the title bar is the one header row across the screen, and the note
+                  box says what the column is for. With two versions or more, the column's one control switches the log
+                  for the version tree, on a row of its own. */}
+              <h2 className="sr-only">{planned ? 'Plan with your editor' : notesView === 'versions' && d.versions.length > 1 ? 'Versions' : 'Notes for your editor'}</h2>
+              {!planned && d.versions.length > 1 && (
+                <div className="notes-h">
+                  <Segmented
+                    label="Show"
+                    value={notesView}
+                    options={[
+                      { key: 'notes', label: 'Notes' },
+                      { key: 'versions', label: 'Versions' }
+                    ]}
+                    onPick={setNotesView}
+                    testid="notes-view"
+                  />
+                </div>
+              )}
               {planned && !providerChecked ? null : planned && aiOff ? (
                 <PlanEmpty
                   provider={null}
@@ -1051,10 +1119,26 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
                     connect()
                   }}
                 />
+              ) : notesView === 'versions' && d.versions.length > 1 ? (
+                <VersionTree
+                  versions={d.versions}
+                  queue={d.queue}
+                  shown={onScreen?.n ?? version?.n ?? null}
+                  nameOf={nameOf}
+                  busy={!!job}
+                  base={base}
+                  onPlay={watch}
+                  onChange={(n) => {
+                    setBase(n === latestN ? null : n)
+                    noteField.current?.focus()
+                  }}
+                  onCombine={setCombine}
+                />
               ) : (
                 <NotesLog
                   slug={slug}
                   madeWith={Object.fromEntries(d.versions.flatMap((v) => (v.madeWith ? [[v.n, v.madeWith]] : [])))}
+                  madeFrom={Object.fromEntries(d.versions.flatMap((v) => (v.parent !== null ? [[v.n, v.parent]] : [])))}
                   entries={entries}
                   queue={d.queue}
                   held={d.queueHeld}
@@ -1181,6 +1265,8 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
                       ) : null
                     }
                     onSend={() => void send()}
+                    onAdd={addable && base === null && !att.chips.length ? () => void send(true) : undefined}
+                    base={base !== null && base !== latestN ? { n: base, onClear: () => setBase(null) } : null}
                     onStop={() => job?.jobId && void reel.jobs.cancel(job.jobId)}
                     onRunNext={() => void reel.queue.runNext(slug).catch((e) => notify(userMessage(e), 'error'))}
                     onClear={() => void reel.queue.clear(slug).catch((e) => notify(userMessage(e), 'error'))}
@@ -1193,6 +1279,55 @@ export function Reel({ slug, at, go }: { slug: string; at?: number; go: Go }) {
         </div>
       </div>
 
+      {sideBySide && compare && (
+        <SideBySide
+          a={d.versions.find((v) => v.n === compare.a)!}
+          b={d.versions.find((v) => v.n === compare.b)!}
+          nameOf={nameOf}
+          at={playhead.get()}
+          onOpen={() => {
+            // a Watch pressed just before still waits for its video to show: it would start under the dialog with sound
+            setPlayRequest(null)
+            if (transport.get().playing) transport.toggle()
+          }}
+          onDone={(t, keep) => {
+            transport.seek(t)
+            if (keep !== undefined) setSelected(keep)
+            setCompare(null)
+            keyboardBackToTimeline()
+          }}
+          onOne={(t) => {
+            transport.seek(t)
+            pickLayout('one')
+          }}
+        />
+      )}
+      {combine !== null && (
+        <CombineDialog
+          slug={slug}
+          versions={d.versions}
+          ours={combine}
+          busy={!!job}
+          onClose={() => setCombine(null)}
+          onStarted={(jobId) => {
+            setCombine(null)
+            setNotesView('notes')
+            setJob((cur) => (cur?.jobId === jobId ? cur : { ...EMPTY_LIVE, jobId, message: 'Combining the two versions' }))
+            void load()
+          }}
+        />
+      )}
+      {pickingSeries && (
+        <SeriesPicker
+          slug={slug}
+          current={d.series}
+          onClose={() => setPickingSeries(false)}
+          onSaved={() => {
+            setPickingSeries(false)
+            void load()
+          }}
+        />
+      )}
       {confirmDelete && (
         <Confirm
           title="Delete this reel?"

@@ -1,5 +1,5 @@
 // Posting's status (main/posting.ts), kept current by main: sign-in, connect, disconnect, a subscription that ended.
-// Nothing about posting shows unless it is turned on (REELSTUDIO_POSTING=1, `enabled`).
+// Nothing about posting shows when it is turned off (REELSTUDIO_POSTING=0, `enabled`).
 import { useEffect, useState } from 'react'
 import type { PostingStatus } from '../../../shared/api'
 import { reel } from '../api'

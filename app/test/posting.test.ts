@@ -4,7 +4,7 @@
 // shared/posting.ts. Nothing secret ever reaches the log.
 import { describe, expect, it, vi } from 'vitest'
 import { createPostingService, isVideoLink, postingConfig, troubleOf, userErrorFor, GIVE_UP_MS, type PendingEntry, type PostingDeps, type StoredSession } from '../src/main/posting'
-import { POSTING_ERRORS, FIELD_ERRORS, PRICING_URL } from '../src/shared/posting'
+import { POSTING_ERRORS, FIELD_ERRORS, PRICING_URL, failedAction } from '../src/shared/posting'
 import type { PostingStatus, PostProgress, PostRequest } from '../src/shared/api'
 import { createFakePosting, type FakePosting } from './fake-posting'
 
@@ -110,10 +110,10 @@ const secretsIn = (t: ReturnType<typeof world>, text: string) => {
 
 describe('postingConfig (REELSTUDIO_POSTING, REELSTUDIO_POSTING_URL)', () => {
   const D = 'https://post.getreelstudio.com'
-  it('is off unless REELSTUDIO_POSTING=1', () => {
-    expect(postingConfig({}, D, () => {})).toEqual({ enabled: false, baseUrl: D })
-    expect(postingConfig({ REELSTUDIO_POSTING: 'true' }, D, () => {}).enabled).toBe(false)
+  it('is on for everyone, and off only with REELSTUDIO_POSTING=0', () => {
+    expect(postingConfig({}, D, () => {})).toEqual({ enabled: true, baseUrl: D })
     expect(postingConfig({ REELSTUDIO_POSTING: '1' }, D, () => {})).toEqual({ enabled: true, baseUrl: D })
+    expect(postingConfig({ REELSTUDIO_POSTING: '0' }, D, () => {})).toEqual({ enabled: false, baseUrl: D })
   })
   it('takes https anywhere, and http only on this computer; strips the trailing slash', () => {
     const on = (u: string) => postingConfig({ REELSTUDIO_POSTING: '1', REELSTUDIO_POSTING_URL: u }, D, () => {})
@@ -484,7 +484,7 @@ describe('posting', () => {
     expect(t.pending).toHaveLength(1)
   })
 
-  it('pending(): a changed file or a finished upload is forgotten', async () => {
+  it('pending(): a changed file is forgotten', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, times: 1 })
     t.fake.state.faults.push({ on: 'status', network: true, times: 100 })
@@ -498,13 +498,45 @@ describe('posting', () => {
     expect(t.pending).toEqual([])
   })
 
-  it('pending(): offline, it still offers Finish posting with what was confirmed', async () => {
+  it('pending(): offline, or the server busy or failing for a moment, it still offers Finish posting', async () => {
     const t = await ready()
     t.fake.state.faults.push({ on: 'chunk', network: true, keepBytes: UNIT, times: 1 })
     t.fake.state.faults.push({ on: 'status', network: true, times: 1000 })
     await t.svc.post(req())
     expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 0, total: 600_000 })
+    t.fake.state.faults.length = 0
+    // busy, failing for a moment, or an answer that can't be read: none of them is the end of the post
+    for (const [status, body] of [[429, { error: 'rate_limited' }], [503, { error: 'server_error' }], [200, {}]] as const) {
+      t.fake.state.faults.push({ on: 'status', status, body })
+      expect(await t.svc.pending('my-video', 2)).toMatchObject({ total: 600_000 })
+    }
+    // and Finish posting meeting the rate limit keeps it too
+    t.fake.state.faults.push({ on: 'status', status: 429, body: { error: 'rate_limited' } })
+    expect(await t.svc.resume(t.pending[0].uploadId)).toMatchObject({ step: 'failed', canResume: true, error: { code: 'RATE_LIMITED' } })
     expect(t.pending).toHaveLength(1)
+  })
+
+  it('pending(): YouTube had the whole video but its answer was lost: offered as Finish posting, never posted twice', async () => {
+    const t = await ready()
+    // the last chunk lands, its answer is lost, and the server can't be asked before the post gives up
+    intercept(t, async (call, real) => {
+      const res = await real()
+      if (call.method === 'PUT' && uploaded(t).status === 'done') throw new TypeError('network')
+      return res
+    })
+    t.fake.state.faults.push({ on: 'status', network: true, times: 1000 })
+    expect((await t.svc.post(req())).step).toBe('failed')
+    t.fake.state.faults.length = 0
+    // the app opens again: the sheet asks what is pending
+    expect(await t.svc.pending('my-video', 2)).toMatchObject({ sent: 600_000, total: 600_000 })
+    // Start over would post it twice: refused, and the post stays
+    await expect(t.svc.discard(t.pending[0].uploadId)).rejects.toMatchObject({ code: 'ALREADY_POSTED', userMessage: POSTING_ERRORS.ALREADY_POSTED })
+    expect(t.pending).toHaveLength(1)
+    const p = await t.svc.resume(t.pending[0].uploadId)
+    expect(p.step).toBe('done')
+    expect(p.result).toMatchObject({ videoId: 'dQw4w9WgXcQ' })
+    expect(t.fake.state.calls.filter((c) => c.startsWith('POST /v1/uploads'))).toHaveLength(1)
+    expect(t.pending).toEqual([])
   })
 
   it('a stopped post older than 3 days is not offered (the server has given up on it)', async () => {
@@ -556,6 +588,27 @@ describe('posting', () => {
     expect(uploaded(t).status).toBe('done')
     expect(t.pending).toEqual([])
     expect(t.progress.at(-1)?.step).toBe('done')
+  })
+
+  it('Stop when the answers to the last chunk and to Stop are both lost: kept, and Finish posting reports the video', async () => {
+    const t = await ready()
+    intercept(t, async (call, real) => {
+      if (call.method === 'DELETE' && call.path.startsWith('/v1/uploads/')) throw new TypeError('network')
+      const res = await real()
+      if (call.method === 'PUT' && uploaded(t).status === 'done') {
+        void t.svc.cancel()
+        throw new TypeError('network')
+      }
+      return res
+    })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'failed', canResume: true, error: { code: 'STOP_UNCONFIRMED', userMessage: POSTING_ERRORS.STOP_UNCONFIRMED } })
+    expect(t.pending).toHaveLength(1)
+    t.deps.fetch = t.fake.fetch
+    const done = await t.svc.resume(t.pending[0].uploadId)
+    expect(done.step).toBe('done')
+    expect(t.fake.state.calls.filter((c) => c.startsWith('POST /v1/uploads'))).toHaveLength(1)
+    expect(t.pending).toEqual([])
   })
 
   it('Stop while waiting to try again', async () => {
@@ -805,7 +858,7 @@ describe('posting: the links after a post', () => {
     expect(p.result).toMatchObject({ videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', studioUrl: 'https://studio.youtube.com/video/dQw4w9WgXcQ/edit' })
   })
 
-  it("a video id that isn't one: SERVER, and the post is not offered again", async () => {
+  it("a video id that isn't one: the post is not offered again, and the words say YouTube has it", async () => {
     const t = await ready()
     intercept(t, async (_c, real) => {
       const res = await real()
@@ -813,7 +866,9 @@ describe('posting: the links after a post', () => {
       if (b?.status === 'done') b.video.id = '../../evil?x='
       return new Response(JSON.stringify(b), { status: res.status })
     })
-    expect(await t.svc.post(req())).toMatchObject({ step: 'failed', canResume: false, error: { code: 'SERVER' } })
+    const p = await t.svc.post(req())
+    expect(p).toMatchObject({ step: 'failed', canResume: false, error: { code: 'POSTED_UNREADABLE' } })
+    expect(failedAction(p)).toBeNull()
     expect(t.pending).toEqual([])
   })
 })

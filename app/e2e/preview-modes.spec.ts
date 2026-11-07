@@ -9,7 +9,7 @@
 // Run: npx playwright test e2e/preview-modes.spec.ts (after npm run build).
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { join } from 'node:path'
-import { BASE, dropFiles, launch, makeMedia, modelReady, painted, passSample, shot } from './helpers'
+import { BASE, dropFiles, launch, makeMedia, modelReady, painted, passSample, shot, viewMenu } from './helpers'
 
 const player = (page: Page) =>
   page.evaluate(() => {
@@ -26,9 +26,10 @@ const rect = (page: Page, sel: string) =>
 
 const focusedTestId = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName)
 
-async function pick(page: Page, scope: Page | Locator, menu: 'speed' | 'shape', item: string): Promise<void> {
-  await scope.getByTestId(menu).click()
-  await scope.getByTestId(`${menu}-${item}`).click()
+/** A playback speed from the speed pill's menu, on the Reel screen or the full-screen stage. */
+async function pickSpeed(scope: Page | Locator, rate: string): Promise<void> {
+  await scope.getByTestId('speed').click()
+  await scope.getByTestId(`speed-${rate}`).click()
 }
 
 test('fails if speed, full screen or the phone shapes stop working, applying or coming back as they were', async () => {
@@ -64,7 +65,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
     })
 
     await test.step('speed: picked from the menu, at its own pitch, kept on a version switch and a restart', async () => {
-      await pick(page, page, 'speed', '0.5')
+      await pickSpeed(page, '0.5')
       await expect.poll(() => player(page).then((p) => [p.rate, p.pitch])).toEqual([0.5, true])
       await expect(page.getByTestId('speed')).toHaveText('0.5×')
       await expect(page.getByTestId('speed')).toBeFocused()
@@ -94,7 +95,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await expect(page.getByTestId('announce')).toHaveText('Speed 1×')
       for (let i = 0; i < 3; i++) await page.keyboard.press('<')
       await expect.poll(() => player(page).then((p) => p.rate)).toBe(0.5)
-      await pick(page, page, 'speed', '1')
+      await pickSpeed(page, '1')
       await expect.poll(() => player(page).then((p) => p.rate)).toBe(1)
     })
 
@@ -133,7 +134,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await page.keyboard.press('Space')
       await expect.poll(() => player(page).then((p) => p.paused)).toBe(true)
 
-      await pick(page, stage, 'speed', '2')
+      await pickSpeed(stage, '2')
       await expect.poll(() => player(page).then((p) => p.rate)).toBe(2)
       await expect(page.getByTestId('speed').first()).toHaveText('2×')
 
@@ -174,7 +175,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await expect(page.getByTestId('note-input')).toHaveValue('f')
       await expect(stage).toHaveCount(0)
       await page.getByTestId('note-input').fill('')
-      await pick(page, page, 'speed', '1')
+      await pickSpeed(page, '1')
     })
 
     await test.step('phone shapes: the proportion, the trim and the safe band on each, kept after a restart', async () => {
@@ -185,8 +186,8 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
         { id: 'iphone-pro-max', label: 'iPhone 17 Pro Max', ratio: 440 / 956, said: 'off each side' }
       ]
       for (const s of SHAPES) {
-        await pick(page, page, 'shape', s.id)
-        await expect(page.getByTestId('shape')).toHaveAttribute('aria-label', `Phone shape, ${s.label}`)
+        await viewMenu(page, `shape-${s.id}`)
+        await expect(page.getByTestId('view-menu')).toHaveAttribute('aria-label', `View: Instagram, ${s.label}`)
         await expect(page.getByTestId('announce')).toContainText(s.said)
         await expect.poll(() => rect(page, '.stage .phone-screen').then((r) => Math.abs(r.w / r.h - s.ratio) < 0.004), { message: `${s.label}: the screen's proportion` }).toBe(true)
         const screen = await rect(page, '.stage .phone-screen')
@@ -219,7 +220,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await page.getByTestId('tab-captions').click()
       await expect(page.getByTestId('safe-band')).toBeVisible()
       for (const s of SHAPES) {
-        await pick(page, page, 'shape', s.id)
+        await viewMenu(page, `shape-${s.id}`)
         const band = await rect(page, '[data-testid="safe-band"]')
         const screen = await rect(page, '.stage .phone-screen')
         expect(band.x >= screen.x - 0.5 && band.y >= screen.y - 0.5 && band.x + band.w <= screen.x + screen.w + 0.5 && band.y + band.h <= screen.y + screen.h + 0.5, `${s.label}: band on the screen`).toBe(true)
@@ -235,7 +236,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       await page.keyboard.press('Escape')
 
       // the longest name, at the smallest window and just above where the name hides: the row stays inside the stage
-      await pick(page, page, 'shape', 'iphone-pro-max')
+      await viewMenu(page, 'shape-iphone-pro-max')
       for (const size of [{ width: 1100, height: 720 }, { width: 1180, height: 760 }, { width: 1240, height: 800 }]) {
         await page.setViewportSize(size)
         await expect
@@ -249,7 +250,7 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
       }
       await page.setViewportSize({ width: 1280, height: 820 })
 
-      await pick(page, page, 'shape', 'iphone-17')
+      await viewMenu(page, 'shape-iphone-17')
       await page.getByTestId('full-screen').click()
       await expect(page.getByTestId('full-stage')).toBeVisible()
       await expect.poll(() => rect(page, '.stage-v .phone-screen').then((r) => Math.abs(r.w / r.h - 402 / 874) < 0.004)).toBe(true)
@@ -258,8 +259,8 @@ test('fails if speed, full screen or the phone shapes stop working, applying or 
 
       await page.reload()
       await page.getByTestId('project-card').first().click()
-      await expect(page.getByTestId('shape')).toHaveAttribute('aria-label', 'Phone shape, iPhone 17')
-      await pick(page, page, 'shape', 'reel')
+      await expect(page.getByTestId('view-menu')).toHaveAttribute('aria-label', 'View: Instagram, iPhone 17')
+      await viewMenu(page, 'shape-reel')
     })
   } finally {
     await app.close()

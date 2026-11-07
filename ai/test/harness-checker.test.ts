@@ -37,12 +37,12 @@ async function report(o: HarnessRun, value: unknown) {
   return tool.execute(value);
 }
 
-async function setup(editor: Harness, checker: Harness) {
+async function setup(editor: Harness, checker?: Harness) {
   const { root, dir } = await makeProject();
   const host = new FakeHost(root);
   await firstVersion(dir, host);
   const before = await fsp.readFile(path.join(dir, 'project.json'));
-  const deps: EditorDeps = { host, prompts: new Prompts(), style: new StyleStore(() => root), harness: editor, checkerHarness: checker, fastNotes: false };
+  const deps: EditorDeps = { host, prompts: new Prompts(), style: new StyleStore(() => root), harness: editor, ...(checker ? { checkerHarness: checker } : {}), fastNotes: false };
   const run = (signal?: AbortSignal) => applyNote(deps, new ScriptedModel([]), dir, 'Give the pauses more room.', () => undefined, signal, { checkEdit: true });
   return { dir, before, run, host, deps };
 }
@@ -156,6 +156,23 @@ describe('checking a note with the other harness', () => {
     expect(result.summary).toContain(finding.problem);
     expect((await loadProject(s.dir)).notes?.at(-1)?.reply).toBe(result.summary);
     expect((await loadProject(s.dir)).cut.gapCap).toBe(0.5);
+  });
+
+  it('with no other app signed in to check it, the checker model reviews the note instead of failing it', async () => {
+    const s = await setup(scripted('claude-code', [(o) => finishEdit(o, 0.4)]));
+    let asked = 0;
+    const scores = { asked: 5, nothingElse: 4, hook: 4, pacing: 3, captions: 4, visuals: 3, sound: 4 };
+    s.deps.checker = {
+      id: 'fake', supportsImages: true,
+      async complete() {
+        asked++;
+        return { text: JSON.stringify({ verdict: 'pass', fixes: [], scores }), toolCalls: [], usage: { input: 1, output: 1 } };
+      },
+    };
+    const r = await s.run();
+    expect(r.version).toBe(2);
+    expect(asked).toBeGreaterThan(0);
+    expect((await loadProject(s.dir)).cut.gapCap).toBe(0.4);
   });
 
   it('discards a repair when its checker cannot finish', async () => {

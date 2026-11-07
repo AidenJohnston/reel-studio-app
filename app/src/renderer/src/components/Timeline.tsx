@@ -258,18 +258,17 @@ export function Timeline({
   return (
     <div className="tl" onPointerDown={down} onPointerMove={hover} onPointerLeave={clearHover}>
       {/* a lane's icon only beside a lane with something on it: three icons by one drawn lane read as a puzzle. Each
-          keeps its own row (reel.css), so nothing moves when a lane fills. */}
+          keeps its own row (reel.css), so nothing moves when a lane fills. The rail is always your video, so its icon
+          always shows: the gutter is never empty, and the rail never looks indented from the phone above it. */}
       <span className="tl-gutter" aria-hidden data-testid="lane-gutter">
         {laneFull.pictures && (
           <span className="tl-lane-icon pics" title="Pictures">
             <Icon name="image" size={16} stroke={1.5} />
           </span>
         )}
-        {laneFull.video && (
-          <span className="tl-lane-icon video" title="Your video">
-            <Icon name="film" size={16} stroke={1.5} />
-          </span>
-        )}
+        <span className="tl-lane-icon video" title="Your video">
+          <Icon name="film" size={16} stroke={1.5} />
+        </span>
         {laneFull.sound && (
           <span className="tl-lane-icon sound" title="Sound">
             <Icon name="music" size={16} stroke={1.5} />
@@ -341,7 +340,7 @@ export function Timeline({
                 onClick={() => (v ? onPlay(v) : transport.seek(at))}
                 data-testid="timeline-mark"
               >
-                {v ? <Icon name="check" size={9} stroke={3} /> : null}
+                {v ? <Icon name="check" size={10} stroke={3} /> : null}
                 {items.length > 1 && <span className="n">{items.length}</span>}
                 {lit === id && (
                   <span className={`tl-tip${tipSide(at)}`}>

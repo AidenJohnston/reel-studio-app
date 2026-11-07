@@ -218,14 +218,69 @@ export function macBundleCheck(running: string): InstallStep {
   }
 }
 
-// The NSIS installer is checked by electron-updater itself: its SHA-512 must match latest.yml, which the update
-// server renders from the same release manifest, and download() above requires that yml's version to equal the one
-// latest.json named. A signed build carries publisherName in app-update.yml (packaging/make-config.js writes it
-// from RS_AZURE_PUBLISHER), and electron-updater then refuses an installer signed by anyone else before install()
-// runs. Unsigned builds carry none, so electron-updater skips that check.
-export const windowsInstaller: InstallStep = {
-  // the NSIS installer people download (packaging/electron-builder.yml nsis.artifactName); latest.yml names it
-  fileName: (version) => `Reel-Studio-Setup-${version}-x64.exe`,
-  showInstaller: true,
-  verify: async () => {}
+/** What Windows says about the running app and a downloaded installer (windowsInstaller reads it). */
+export interface WindowsInstallerFacts {
+  /** Get-AuthenticodeSignature's Status: 'Valid', 'NotSigned', 'HashMismatch', ... */
+  running: { status: string; subject: string | null }
+  installer: { status: string; subject: string | null; productVersion: string | null }
+}
+
+/**
+ * Why a downloaded Windows installer must not be run as `selected`, or null when it may. electron-updater checks only
+ * that the file matches latest.yml's SHA-512, and the publisher only when the running build carries publisherName in
+ * app-update.yml, which an unsigned build does not. So a feed that serves a self-consistent yml could hand over any
+ * installer. Here the installer itself must be signed by the same publisher as this copy, and must say it is the
+ * newer version the release named: a feed labelling an older installer as newer can't downgrade the app.
+ */
+export function installerRefusal(facts: WindowsInstallerFacts, selected: string, running: string): string | null {
+  if (facts.running.status !== 'Valid' || !facts.running.subject) return 'This copy of Reel Studio is not signed, so it updates from the download page.'
+  if (facts.installer.status !== 'Valid' || !facts.installer.subject) return 'The update is not signed.'
+  if (facts.installer.subject !== facts.running.subject) return 'The update is signed by someone else.'
+  // the installer's ProductVersion string is the app version (electron-builder NSIS); allow the four-part Windows
+  // form of a plain x.y.z too
+  const v = facts.installer.productVersion?.trim() ?? ''
+  const same = v === selected || (/^\d+\.\d+\.\d+$/.test(selected) && v === `${selected}.0`)
+  if (!same || !isNewer(selected, running)) return `The update installer says it is version ${v || 'unknown'}, not the newer release ${selected}.`
+  return null
+}
+
+/** `env` without `key`, matched as Windows does, ignoring case. */
+function withoutKey(env: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => k.toLowerCase() !== key.toLowerCase()))
+}
+
+/** Reads WindowsInstallerFacts with Windows' own PowerShell (paths go in by environment, never into the script). */
+export async function windowsInstallerFacts(installer: string, runningExe = process.execPath): Promise<WindowsInstallerFacts> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    '$r = Get-AuthenticodeSignature -LiteralPath $env:RS_RUNNING_EXE',
+    '$i = Get-AuthenticodeSignature -LiteralPath $env:RS_UPDATE_FILE',
+    '$v = (Get-Item -LiteralPath $env:RS_UPDATE_FILE).VersionInfo.ProductVersion',
+    '[pscustomobject]@{',
+    '  running = @{ status = $r.Status.ToString(); subject = $(if ($r.SignerCertificate) { $r.SignerCertificate.Subject } else { $null }) }',
+    '  installer = @{ status = $i.Status.ToString(); subject = $(if ($i.SignerCertificate) { $i.SignerCertificate.Subject } else { $null }); productVersion = $v }',
+    '} | ConvertTo-Json -Compress -Depth 3'
+  ].join('\n')
+  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const { stdout } = await promisify(execFile)(
+    powershell,
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    // Without PSModulePath, Windows PowerShell uses its own module folders. One inherited from PowerShell 7 (the app
+    // started from a pwsh terminal) points it at 7's Microsoft.PowerShell.Security, which it can't load, and the
+    // signature check could never pass.
+    { env: { ...withoutKey(process.env, 'PSModulePath'), RS_RUNNING_EXE: runningExe, RS_UPDATE_FILE: installer }, windowsHide: true, timeout: 60_000 }
+  )
+  return JSON.parse(stdout) as WindowsInstallerFacts
+}
+
+/** The NSIS installer people download (packaging/electron-builder.yml nsis.artifactName); latest.yml names it. */
+export function windowsInstaller(running: string, facts: (file: string) => Promise<WindowsInstallerFacts> = windowsInstallerFacts): InstallStep {
+  return {
+    fileName: (version) => `Reel-Studio-Setup-${version}-x64.exe`,
+    showInstaller: true,
+    async verify(file, selected) {
+      const why = installerRefusal(await facts(file), selected, running)
+      if (why) throw new Error(why)
+    }
+  }
 }

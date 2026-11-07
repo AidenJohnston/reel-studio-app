@@ -5,11 +5,14 @@ import { versionRows, type VersionRow } from '../shared/version-diff'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, net, powerMonitor, powerSaveBlocker, safeStorage, shell, type IpcMainInvokeEvent, Notification } from 'electron'
 import { existsSync, promises as fs, appendFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { clipboardFiles, filesFromArgv } from './intake'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { assertIpcSender, validateIpcArgs } from './ipc-guard'
+import { createRequire } from 'node:module'
+import { createOutsideAccess, type OutsideAccess } from './outside-access'
+import { createOutsideReels } from './outside-reels'
 import {
   appIconPath,
   binDir,
@@ -20,8 +23,10 @@ import {
   engineMode,
   ffmpegPath,
   ffprobePath,
+  fontsDir,
   initPaths,
   legalFile,
+  libraryDir,
   libraryPreviewDir,
   noteStagingDir,
   noteStagingRoot,
@@ -87,6 +92,9 @@ import { mediaUrl } from './media-url'
 import { withRenderSlot } from './render-slot'
 import { titleVersion } from './version-title'
 import { createFootageIndexer } from './footage-index'
+import { createFootageSources } from './footage-sources'
+import { chooseSeries, groupReel } from './series'
+import { createArchiveReels, libraryRef, seedFromArchive } from './archive-reels'
 import { createProxyBuilds } from './proxy-builds'
 import { WINDOW_SHOWN } from '../shared/perf-marks'
 import { USAGE_ENDPOINT } from '../shared/config'
@@ -100,10 +108,18 @@ import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animat
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
-import { TikTokService } from './tiktok'
+import { TikTokService, tiktokSettings } from './tiktok'
 import { registerTikTokIpc } from './tiktok-ipc'
-import { InstagramService } from './instagram'
+import { InstagramService, instagramSettings } from './instagram'
 import { registerInstagramIpc, testInstagramSession } from './instagram-ipc'
+import { facebookFrom, instagramFrom, SigninDirectory, signinUrl, threadsFrom, tiktokFrom, xFrom, linkedinFrom } from './signin-config'
+import { LinkedInService } from './linkedin'
+import { XService } from './x'
+import { ThreadsService } from './threads'
+import { FacebookService } from './facebook'
+import { registerSocialIpc } from './social-ipc'
+import { testPlatformFetch } from './test-platforms'
+import { SIGNIN_URL } from '../shared/config'
 import { registerInsightsIpc } from './insights-ipc'
 import { registerReferencesIpc } from './references-ipc'
 import { createReferenceLibrary } from './references'
@@ -121,8 +137,9 @@ import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vend
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
-import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule } from '../shared/api'
-import { MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
+import { MERGE_LAYERS, MODEL_ROLES, type ModelChoice, type ModelRole } from '../shared/api'
+import { mergeWords } from '../shared/combine'
 import { COVER_SUGGESTIONS } from '../shared/cover'
 import { coverScanOwner, createCoverScans, parseCoverCandidates } from './cover-scan'
 import { noAiReply } from '../shared/notes'
@@ -152,6 +169,10 @@ import { takeNote } from './note-intake'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createWindowHolder } from './window-holder'
+import { registerCompanionIpc } from './companion-ipc'
+import { insightsSummary } from './insights'
+import { timingOf, wrappedReport, type WrappedReel } from '../shared/wrapped'
+import { lanAddresses } from './phone-share'
 
 const TEST = process.env.REELSTUDIO_TEST === '1'
 // Test builds stand in for macOS's answers (permissions.ts parseFakes), and for a Mac itself (platform=darwin), so a
@@ -258,7 +279,28 @@ const host: EngineHost = {
   runEngine,
   renderAnimation: (template, params, outPath, fps) => renderAnimation(template, params, outPath, fps),
   captureWebsite: (url, outPath, opts) => captureWebsite(url, outPath, opts),
-  reelStudioRoot
+  reelStudioRoot,
+  importFootage: (ref) => importFootage(ref)
+}
+
+// Reels across the whole footage archive (archive-reels.ts). Defined after jobs and startFirstEdit exist at run time.
+const archiveReels = createArchiveReels({
+  jobs: { start: (...a) => jobs.start(...a), get: (id) => jobs.get(id) },
+  ai: () => ai,
+  runEngine,
+  root: reelStudioRoot,
+  file: () => join(settingsDir(), 'archive-reels.json'),
+  resolve: async (ref) => (ref.startsWith('Footage/') ? (await footageSources.resolve(ref)).abs : libraryRef(ref, libraryDir())),
+  startFirstEdit: (slug, init) => startFirstEdit(slug, init)
+})
+
+/** A clip from a footage folder, put in the Library so the editor can place it (footage-sources.ts). */
+async function importFootage(ref: string): Promise<string> {
+  const { abs } = await footageSources.resolve(ref)
+  await ensureRoot()
+  const [r] = await addToLibrary([abs], runEngine, log, indexLibrary)
+  if (!r?.dest) throw { code: 'IMPORT_FAILED', userMessage: r?.reason ?? 'That clip could not be added to your Library.' }
+  return 'Library/' + relative(libraryDir(), r.dest).split(sep).join('/')
 }
 
 let ai: AI
@@ -277,7 +319,12 @@ const windows = createWindowHolder<BrowserWindow>()
 
 function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
+  companion?.publish(channel, payload)
 }
+/** Settings > Phone and browser: the paired phones and browsers (main/companion-ipc.ts). Set in registerIpc. */
+let companion: ReturnType<typeof registerCompanionIpc> | null = null
+/** This computer's name for "Connected to …" on a paired phone: the host name, without ".local" and dashes. */
+const computerName = (): string => (TEST ? 'Test computer' : hostname().replace(/\.local$/i, '').replace(/[-_]+/g, ' ').trim() || 'this computer')
 
 // The window, menu, Dock/taskbar and notifications (window.ts) hear about every job too.
 const sendCommand = (c: AppCommand): void => broadcast('app:command', c)
@@ -294,8 +341,33 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
-const footageIndex = createFootageIndexer({ runEngine, root: reelStudioRoot, busy: () => jobs.runningCount() > 0 })
-const indexLibrary = (): void => { if (!TEST) void footageIndex.request() }
+/** Settings › Storage is moving the library: no job or manual edit may start until the new place is in use, or it
+ * would take its project folder from the old place and its bookkeeping from the new one. */
+let rootMoving = false
+const refuseWhileRootMoves = (): void => {
+  if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+}
+/** Counts finished library moves. Work that reads paths, awaits, then starts a job takes this first and checks it
+ * just before jobs.start: a move that finished in between means its paths point at the old place. */
+let rootGeneration = 0
+const sameRootSince = (generation: number): void => {
+  if (generation !== rootGeneration) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try again.' }
+}
+const footageSources = createFootageSources({
+  load: async () => (await loadSettings()).footageSources,
+  save: async (footageSources) => void (await saveSettings({ footageSources })),
+  root: reelStudioRoot,
+  changed: () => indexLibrary()
+})
+const footageIndex = createFootageIndexer({
+  runEngine,
+  root: reelStudioRoot,
+  busy: () => jobs.runningCount() > 0,
+  sources: () => footageSources.indexArgs(),
+  done: (r) => { if (r.places) footageSources.indexed(r.places) }
+})
+// Tests leave the index alone (the stand-in engine has no speech to read) unless one asks for it.
+const indexLibrary = (): void => { if (!TEST || process.env.REELSTUDIO_TEST_INDEX === '1') void footageIndex.request() }
 // Honest progress (main/progress.ts): phase times measured on this computer, per minute of video.
 const speedHistoryFile = (): string => join(settingsDir(), 'speed-history.json')
 // Paused without you (main/pause.ts): work a plan limit, no internet, sleep or a quit stopped goes on by itself.
@@ -393,7 +465,10 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
-  () => updates.assertCanStartWork(),
+  () => {
+    refuseWhileRootMoves()
+    updates.assertCanStartWork()
+  },
   footageIndex,
   // and so do the pictures of each change made before its draft
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
@@ -409,7 +484,9 @@ const jobs = createJobManager(
 )
 
 /** A note job: the AI applies it as one all-or-nothing change (ai applyNote) on the newest version. */
-async function startNote(slug: string, { id: noteId, text, attachments, moment, branch }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+async function startNote(slug: string, { id: noteId, text: own, attachments, moment, branch, steers, steer }: NoteToRun, record: (s: AppState) => void): Promise<string> {
+  // words added on an earlier run (Add now) are part of the note from the start this time
+  const text = [own, ...(steers ?? []).map((x) => x.text)].join('\n')
   const dir = projectDir(slug)
   const startedAt = Date.now()
   let editor: string | null = null
@@ -430,11 +507,11 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
       scoreEdit(slug, before, { type: 'note', on: branch ?? before })
       // saved under its queue entry's id (note-queue.ts), with the job's id in its version's receipt; the app asks
       // before anything goes into My style
-      const checkEdit = (await loadSettings()).checkEdits // Settings > "Double-check each edit"
-      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}) }
+      const { checkEdits: checkEdit, lookUps: helpers } = await loadSettings() // Settings > "Double-check each edit", "Look things up in parallel"
+      const opts = { attachments: attachments.map((f) => f.asset), id: noteId, jobId, checkEdit, helpers, saveStyleRules: false, ...(branch !== undefined ? { base: branch } : {}), ...(owner ? { owner } : {}), ...(steer ? { steer } : {}) }
       // the AI reads the moment in the note text: "At 0:08 (around "...", words w18, w19): cut this part";
       // what it says back while it works reaches the progress card in the person's own words
-      const aiText = aiNoteText(text, moment)
+      const aiText = [aiNoteText(own, moment), ...(steers ?? []).map((x) => aiNoteText(x.text, x.moment))].join('\n')
       const r: AgentResult = await ai.applyNote(dir, aiText, forPerson(emit, aiText, text), signal, opts)
       await recordMadeWith(dir, r)
       if (r.changed.length && r.version !== undefined && ai.rewordVersion) {
@@ -456,7 +533,7 @@ async function startNote(slug: string, { id: noteId, text, attachments, moment, 
 /** A change from "Edit it myself", when its turn comes: render only, never the editor (hand-edit.ts). */
 const startHand: StartHand = async (slug, entry, record) =>
   jobs.start(slug, 'rerender', handEditJob(runEngine, slug, entry), { note: HAND_MESSAGE, record })
-const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log })
+const noteQueue = createNoteQueue({ jobs, startNote, startHand, changed: (slug) => broadcast('queue:change', slug), log, words: (q) => aiNoteText(q.text, q.moment) })
 
 const models = createModelManager({
   runEngine,
@@ -555,7 +632,7 @@ const updates = createUpdater({
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
         onError: (e) => updates.installFailed(e),
-        install: process.platform === 'win32' ? windowsInstaller : macBundleCheck(app.getVersion())
+        install: process.platform === 'win32' ? windowsInstaller(app.getVersion()) : macBundleCheck(app.getVersion())
       }),
   load: loadSettings,
   save: saveSettings,
@@ -675,12 +752,15 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     record?.(s)
   }
   return jobs.start(slug, 'first-edit', async (emit, signal, { owner }) => {
+    const st = await readAppState(slug)
     const copyIn = async (title: string, files: string[]) => {
       const { fasterExports } = await loadSettings()
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
+      // an archive pick's parts name their files by position (archive-reels.ts), so its copy never re-sorts them by date
+      const keepOrder = st.fromArchive ? ['--keep-order'] : []
       await runEngine(
         'init',
-        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : [])], owner).concat(files),
+        owned(['--project', dir, '--title', title, '--slug', slug, ...(fasterExports ? ['--faster-exports'] : []), ...keepOrder], owner).concat(files),
         // A copy is instant. A clip whose frame timing varies is re-encoded first (engine init.py says
         // "Preparing your video"), which can take minutes: that gets its own step with its real percent.
         (p) =>
@@ -694,7 +774,6 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     }
     // a reel made from another reel's proposal is copied in and seeded from it, on a resume too if the app closed
     // between the two, so it never becomes an edit of the whole video
-    const st = await readAppState(slug)
     const from = st.from
     if (from) await prepareReel(slug, from, () => copyIn(from.about.title, [from.media]), { resumed: !initArgs, signal })
     else if (!existsSync(join(dir, 'project.json'))) {
@@ -715,6 +794,8 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // a reel planned before it had a video: the editor reads its script from project.json (again on a resume,
     // in case the app closed between the copy and this)
     await carryScript(slug)
+    // a reel from a pick across the footage archive: its spans become its cut (again on a resume, until they are in)
+    await seedFromArchive(slug)
     startProxy(slug, dir)
     const provider = basic ? null : await ai.active().catch(() => null)
     editor = editorName(provider)
@@ -745,6 +826,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
       s.aiEdited = aiEdited
     })
     if (r.notice?.userMessage) await addChat(slug, 'editor', r.notice.userMessage)
+    await groupReel(slug).catch((e) => log(`[series] ${slug}: ${String(e).slice(0, 300)}`))
     return replyAskingAboutStyle(r, r.summary)
   }, { pause, record: started })
 }
@@ -769,10 +851,13 @@ function safeFileName(s: string): string {
 }
 
 async function finishedExportVersion(slug: string, n: number): Promise<VersionInfo> {
+  const generation = rootGeneration
   const dir = projectDir(slug)
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
+  // the library moved while the versions were read: `dir` is the old place
+  sameRootSince(generation)
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -866,6 +951,91 @@ async function readVersionRows(slug: string, n: number): Promise<VersionRow[] | 
   return before ? versionRows(before, after, { before: await length(n - 1), after: await length(n) }) : null
 }
 
+/** A note from the Reel screen, or from another AI app through Settings › Let other AI apps use Reel Studio
+ * (outside-access.ts): either way it goes through the reel's note queue, so it shows, waits, runs and stops the same. */
+/** `steer` (Add now from the window, or add_to_running_note): the words go into the note running now when they can;
+ * otherwise they wait like any note, and `added` is false. */
+async function sendNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown): Promise<{ jobId: string | null; queued?: boolean; added?: boolean; noEditor?: true }> {
+  // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
+  // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
+  const admit = async () => {
+    const dir = projectDir(slug)
+    // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
+    // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
+    const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
+    // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
+    const typed = at !== undefined ? typedMoment(typedText) : null
+    let note = typed ? typed.rest : typedText
+    if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
+    if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
+    let moment: NoteMoment | undefined
+    if (at !== undefined) {
+      let asked: NoteMoment
+      try {
+        asked = parseMoment(at)
+      } catch (e) {
+        throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
+      }
+      if (typed) asked = { ...asked, at: typed.at }
+      // checked against the render it names, the one the pop-up read its words from; its words and
+      // quote come from that render, never from the page
+      const c = checkMoment(asked, await readTimeline(slug, asked.version))
+      if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
+      moment = c.moment
+      if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
+      // A setting global by nature ("smaller captions") goes without its moment, which would hide it
+      // from applyNote's no-model fast path; the chat shows the words as typed.
+      if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
+    }
+    return { typedText, note, files, base, moment }
+  }
+  const active = await ai.active().catch(() => null)
+  if (!active || !active.connected || active.id === 'none') {
+    // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
+    // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
+    return noteQueue.run(slug, async () => {
+      const { typedText, note, files, moment } = await admit()
+      // the chat keeps the words as typed, "At 0:05:" included
+      await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
+      const reply = noAiReply(note, files.length)
+      await addChat(slug, 'editor', reply.text, undefined, reply.actions)
+      return { jobId: null, noEditor: true as const }
+    })
+  }
+  const given = Number.isInteger(onVersion) ? Number(onVersion) : undefined
+  return noteQueue.send(slug, async () => {
+    const { note, files, base, moment } = await admit()
+    // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote). A branched note
+    // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
+    const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
+    return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
+  }, given ?? 0, { steer: steer === true })
+}
+
+/** Settings › Editor › "Let other AI apps use Reel Studio" (outside-access.ts); made at startup, once `ai` is loaded. */
+let outside: OutsideAccess | null = null
+function createOutside(): OutsideAccess {
+  const controls = createOutsideReels({
+    // checked as the Reel screen's own send is (ipc-guard.ts): a reel id, the words, a saved version to branch from
+    send: (slug, text, base, steer) => {
+      validateIpcArgs('projects:note', [slug, text, undefined, undefined, undefined, base])
+      return sendNote(slug, text, undefined, undefined, undefined, base, steer)
+    },
+    running: (slug) => jobs.forSlug(slug),
+    stop: (jobId, slug) => noteQueue.stop(jobId, slug)
+  })
+  return createOutsideAccess({
+    dir: join(settingsDir(), 'mcp'),
+    platform: process.platform,
+    command: process.execPath,
+    // the relay ships with the AI package (ai/relay); the app copies it beside the access file each time access turns on
+    relaySource: () => fs.readFile(createRequire(__filename).resolve('@reelstudio/ai/relay/reelstudio-mcp.js'), 'utf8'),
+    controls,
+    onChange: (st) => broadcast('outside:change', st),
+    log
+  })
+}
+
 function registerIpc(): void {
   // My style › Reference reels and Your niche
   const references = createReferenceLibrary({ root: reelStudioRoot, runEngine, log, mediaUrl, onChange: () => win?.webContents.send('refs:changed') })
@@ -875,20 +1045,39 @@ function registerIpc(): void {
     showItemInFolder: (file) => (TEST ? log(`[references] reveal ${file}`) : shell.showItemInFolder(file))
   })
   registerNicheIpc({ handle, root: reelStudioRoot, ai: () => ai, log, status: (s) => win?.webContents.send('niche:status', s) })
+  // Instagram and TikTok connect through Reel Studio's sign-in service (docs/signin.md): its list of platforms says
+  // which can be connected. A developer's own app (REELSTUDIO_DEV=1 and saved instagram*/tiktok* settings) wins.
+  const platformFetch = TEST && process.env.REELSTUDIO_TEST_PLATFORMS
+    ? testPlatformFetch(process.env.REELSTUDIO_TEST_PLATFORMS, (url, init) => fetch(url, init))
+    : (url: string, init: RequestInit) => fetch(url, init)
+  const signin = new SigninDirectory({ baseUrl: signinUrl(process.env, SIGNIN_URL, log), fetch: platformFetch, now: () => Date.now(), log })
+  const ownApps = async () => {
+    if (!DEV_PROVIDERS || TEST) return { instagram: null, tiktok: null }
+    const saved = await loadSettings()
+    const ig = instagramSettings(saved), tt = tiktokSettings(saved)
+    return { instagram: ig.instagramEnabled ? ig : null, tiktok: tt.tiktokEnabled ? tt : null }
+  }
+  // test runs never open the browser: e2e/social.spec.ts reads the link here and plays the person signing in
+  const openSignin = (url: string) => {
+    if (!TEST) return shell.openExternal(url)
+    ;(globalThis as { __reelstudioOpened?: string }).__reelstudioOpened = url
+    log('[signin] test run: browser not opened')
+    return Promise.resolve()
+  }
   const tiktok = new TikTokService({
-    dev: DEV_PROVIDERS && !TEST, settings: loadSettings, settingsDir: settingsDir(), projectsDir,
-    secrets: safeStorage, fetch: (url, init) => fetch(url, init), openExternal: (url) => shell.openExternal(url)
+    settings: async () => (await ownApps()).tiktok ?? tiktokFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
   })
   registerTikTokIpc({ handle, service: tiktok, dev: DEV_PROVIDERS && !TEST, saveSettings })
   app.on('before-quit', () => { tiktok.stop() })
   const instagram = new InstagramService({
-    dev: DEV_PROVIDERS && !TEST,
-    settings: loadSettings,
+    settings: async () => (await ownApps()).instagram ?? instagramFrom(await signin.get(), signin.baseUrl),
     settingsDir: settingsDir(),
     projectsDir,
+    exportsDir: () => binDir('exports'),
     secrets: safeStorage,
-    fetch: (url, init) => fetch(url, init),
-    openExternal: (url) => shell.openExternal(url),
+    fetch: platformFetch,
+    openExternal: openSignin,
     coverJpeg: (bytes) => {
       const image = nativeImage.createFromBuffer(bytes)
       if (image.isEmpty()) throw new InstagramError('IG_COVER', 'The cover image could not be read. Export this version again.')
@@ -904,14 +1093,61 @@ function registerIpc(): void {
     testSession: TEST && process.env.REELSTUDIO_TEST_INSTAGRAM ? testInstagramSession(process.env.REELSTUDIO_TEST_INSTAGRAM) : undefined
   })
   app.on('before-quit', () => { instagram.stop() })
-  // Facebook joins when publishing to it has a connection to read with (facebook-insights.ts).
+  const facebook = new FacebookService({
+    settings: async () => facebookFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('facebook:session', () => facebook.session())
+  handle('facebook:connect', () => facebook.connect())
+  handle('facebook:cancelConnect', () => facebook.cancelConnect())
+  handle('facebook:disconnect', () => facebook.disconnect())
+  handle('facebook:choosePage', (_e, pageId) => facebook.choosePage(pageId))
+  handle('facebook:publish', (_e, input) => facebook.publish(input))
+  app.on('before-quit', () => { facebook.stop() })
+  const threads = new ThreadsService({
+    settings: async () => threadsFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('threads:session', () => threads.session())
+  handle('threads:connect', () => threads.connect())
+  handle('threads:cancelConnect', () => threads.cancelConnect())
+  handle('threads:disconnect', () => threads.disconnect())
+  handle('threads:publish', (_e, input) => threads.publish(input))
+  app.on('before-quit', () => { threads.stop() })
+  const xPosting = new XService({
+    settings: async () => xFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('x:session', () => xPosting.session())
+  handle('x:connect', () => xPosting.connect())
+  handle('x:cancelConnect', () => xPosting.cancelConnect())
+  handle('x:disconnect', () => xPosting.disconnect())
+  handle('x:publish', (_e, input) => xPosting.publish(input))
+  app.on('before-quit', () => { xPosting.stop() })
+  const linkedin = new LinkedInService({
+    settings: async () => linkedinFrom(await signin.get(), signin.baseUrl), settingsDir: settingsDir(), projectsDir,
+    secrets: safeStorage, fetch: platformFetch, openExternal: openSignin
+  })
+  handle('linkedin:session', () => linkedin.session())
+  handle('linkedin:connect', () => linkedin.connect())
+  handle('linkedin:cancelConnect', () => linkedin.cancelConnect())
+  handle('linkedin:disconnect', () => linkedin.disconnect())
+  handle('linkedin:publish', (_e, input) => linkedin.publish(input))
+  app.on('before-quit', () => { linkedin.stop() })
+  registerSocialIpc({
+    handle, directory: signin, instagram, tiktok, facebook, threads, x: xPosting, linkedin,
+    own: async () => { const o = await ownApps(); return { instagram: !!o.instagram, tiktok: !!o.tiktok } }
+  })
+  // Facebook reads the Page posts go to; a reel on another of the person's Pages is read when that Page is chosen again.
   const sources: ResultsSource[] = TEST && process.env.REELSTUDIO_TEST_RESULTS
     ? testResultsSources(process.env.REELSTUDIO_TEST_RESULTS, projectsDir)
     : [
         { platform: 'instagram', account: async () => { const s = await instagram.session(); return s.connected ? s.accountId : null },
           read: (slug, version, postId) => instagram.insights(slug, version, postId), audience: () => instagram.audience() },
         { platform: 'tiktok', account: async () => { const s = await tiktok.session(); return s.connected ? s.accountId : null },
-          read: (slug, version, postId) => tiktok.insights(slug, version, postId) }
+          read: (slug, version, postId) => tiktok.insights(slug, version, postId) },
+        { platform: 'facebook', account: async () => { const s = await facebook.session(); return s.connected ? s.page.id : null },
+          read: (slug, version, postId) => facebook.insights(slug, version, postId) }
       ]
   const results = new ResultsRefresh({
     projectsRoot: projectsDir, stateDir: settingsDir(), sources,
@@ -951,9 +1187,8 @@ function registerIpc(): void {
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
     const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
-    await saveSettings({ sharing })
-    // off deletes what was kept; a part switched off loses its lines
-    await usage.applySharing(sharing)
+    // off deletes what was kept and a part switched off loses its lines; on starts from an empty folder (usage.ts)
+    await usage.changeSharing(sharing, () => saveSettings({ sharing }))
     if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
@@ -1050,20 +1285,27 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
-    if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
-    const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
-    await fs.mkdir(root, { recursive: true })
-    // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
-    await footageIndex.pause()
+    refuseWhileRootMoves()
+    if (jobs.writing()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
+    // Taken before the first await, so no job can start between this check and the new root being in use.
+    rootMoving = true
     try {
-      if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until your video is finished, then change where videos are kept.' }
-      await saveSettings({ root })
-      setRootOverride(root)
-      await ensureRoot()
-      perms.markTouched()
-      indexLibrary()
+      const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
+      await fs.mkdir(root, { recursive: true })
+      // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
+      await footageIndex.pause()
+      try {
+        await saveSettings({ root })
+        setRootOverride(root)
+        rootGeneration++
+        await ensureRoot()
+        perms.markTouched()
+        indexLibrary()
+      } finally {
+        footageIndex.resume()
+      }
     } finally {
-      footageIndex.resume()
+      rootMoving = false
     }
     return appInfo()
   })
@@ -1089,6 +1331,33 @@ function registerIpc(): void {
     send: broadcast,
     log,
     test: TEST
+  })
+  // Settings > Phone and browser: a paired phone or browser watches versions and leaves notes (main/companion-ipc.ts). It reads
+  // and notes through the same functions as the window's projects:get and projects:note.
+  companion = registerCompanionIpc({
+    handle,
+    send: broadcast,
+    dir: settingsDir(),
+    secrets: safeStorage,
+    staticDir: join(__dirname, '../renderer'),
+    service: {
+      list: () => listProjects(),
+      get: (slug) => projectWithJob(slug),
+      projectDir,
+      note: (slug, text, attachments, moment, onVersion) => submitNote(slug, text, attachments, moment, onVersion),
+      cancel: (id, slug) => noteQueue.stop(id, slug),
+      timeline: (slug, n) => readTimeline(slug, n),
+      editorConnected: async () => {
+        const a = await ai.active().catch(() => null)
+        return !!a && a.connected && a.id !== 'none'
+      },
+      appVersion: app.getVersion(),
+      computer: computerName()
+    },
+    // The e2e runs the phone page in a browser on this computer, so it listens on loopback there.
+    address: () => (TEST && process.env.REELSTUDIO_COMPANION_HOST ? process.env.REELSTUDIO_COMPANION_HOST : (lanAddresses()[0]?.address ?? null)),
+    openExternal: (url) => shell.openExternal(url),
+    log
   })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
@@ -1169,10 +1438,29 @@ function registerIpc(): void {
   const claudeCode = async () => (await ai.claudeCodeStatus?.()) ?? { state: 'missing' as const }
   handle('ai:claudeCodeStatus', async () => publicInfo(await claudeCode()))
   handle('ai:checkEdits', async () => (await loadSettings()).checkEdits)
+  handle('ai:lookUps', async () => (await loadSettings()).lookUps)
+  handle('ai:setLookUps', async (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
+    return (await saveSettings({ lookUps: on })).lookUps
+  })
   handle('ai:setCheckEdits', async (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw { code: 'BAD_INPUT', userMessage: 'That setting needs on or off.' }
     return (await saveSettings({ checkEdits: on })).checkEdits
   })
+  // Settings › Editor › How notes run: Reel Studio's editor, or the editor in use's own app with Reel Studio's tools
+  handle('ai:noteRunner', async () => (await ai.noteRunner?.()) ?? { runner: 'reelstudio', app: null })
+  handle('ai:setNoteRunner', async (_e, runner: 'reelstudio' | 'app') => {
+    if (!ai.setNoteRunner) throw { code: 'NOT_READY', userMessage: 'This editor runs notes only in Reel Studio.' }
+    return ai.setNoteRunner(runner)
+  })
+  // Settings › Editor › Let other AI apps use Reel Studio
+  handle('outside:status', () => outside!.status())
+  handle('outside:setEnabled', async (_e, on: boolean) => {
+    const st = on ? await outside!.enable() : await outside!.disable()
+    await saveSettings({ outsideApps: st.on })
+    return st
+  })
+  handle('outside:reset', () => outside!.reset())
   handle('ai:openClaudeSignIn', async () => {
     const st = await claudeCode()
     if (st.state === 'ready') return
@@ -1224,8 +1512,34 @@ function registerIpc(): void {
   })
 
   handle('projects:list', () => listProjects())
+  // Insights > Your recent reels (shared/wrapped.ts): the saved results of posted reels with each version's own timing.
+  handle('wrapped:report', async () => {
+    const summary = await insightsSummary(projectsDir(), { asOf: new Date().toISOString() })
+    const reels: WrappedReel[] = []
+    for (const r of summary.reels) {
+      const title = (await readProject(r.project).catch(() => null))?.title || r.project
+      const timeline = await readTimeline(r.project, r.version).catch(() => null)
+      // the version a note would change: the newest saved one (a draft isn't one)
+      const newest = Math.max(0, ...(await listVersions(projectDir(r.project)).catch(() => [])).filter((v) => !v.draft).map((v) => v.n))
+      const later = newest > r.version ? await readTimeline(r.project, newest).catch(() => null) : null
+      const m = r.totals.metrics
+      reels.push({
+        project: r.project, version: r.version, title, publishedAt: r.posts.map((p) => p.publishedAt).sort().at(-1) ?? '',
+        plays: m.plays, averageWatchTimeMs: m.averageWatchTimeMs, shares: m.shares, saves: m.saves, timing: timeline ? timingOf(timeline) : null,
+        ...(newest > r.version ? { latest: { version: newest, timing: later ? timingOf(later) : null } } : {})
+      })
+    }
+    // Without enough results, the newest reels made here still have their own timing to look at.
+    const made: WrappedReel[] = []
+    for (const s of (await listProjects()).filter((p) => p.version > 0).sort((a, b) => (b.versionAt ?? '').localeCompare(a.versionAt ?? '')).slice(0, 3)) {
+      const timeline = await readTimeline(s.slug, s.version).catch(() => null)
+      made.push({ project: s.slug, version: s.version, title: s.title, publishedAt: '', plays: null, averageWatchTimeMs: null, shares: null, saves: null, timing: timeline ? timingOf(timeline) : null })
+    }
+    return wrappedReport(reels, Date.now(), made)
+  })
   handle('projects:search', (_e, query: string) => searchProjects(query))
-  handle('projects:get', async (_e, slug: string) => {
+  handle('projects:get', (_e, slug: string) => projectWithJob(slug))
+  async function projectWithJob(slug: string): Promise<ProjectDetail> {
     const d = await detail(slug)
     const running = jobs.forSlug(slug)
     d.job = running
@@ -1233,7 +1547,7 @@ function registerIpc(): void {
       : null
     if (!running && d.status === 'working') d.status = 'interrupted'
     return d
-  })
+  }
   /** The videos among dropped or picked files; anything else goes to the Library. Throws when there is no video. */
   const takeVideos = async (files: string[]): Promise<{ videos: string[]; skipped: DropResult[] }> => {
     const videos = files.filter(isVideo)
@@ -1349,69 +1663,39 @@ function registerIpc(): void {
     pauser.cancel(slug)
     return { jobId: startFirstEdit(slug, null, basic === true) }
   })
-  handle('projects:note', async (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown) => {
-    // Admission (takeNote re-reads every attached file; the moment is checked against its render) runs in this
-    // video's queue lane, so removing an attachment or a staged write can't land between the check and the entry.
-    const admit = async () => {
-      const dir = projectDir(slug)
-      // never trust the page: every attached ref is re-read from THIS project's own sidecars or its staging folder, and
-      // a video kept closed refuses the note before the queue or the chat shows it (note-intake.ts)
-      const { note: typedText, files, base } = await takeNote(jobs, slug, text, attachments, requestedBase)
-      // "At 1:00: zoom in" with Just here: the typed time is the moment, and the words are the note
-      const typed = at !== undefined ? typedMoment(typedText) : null
-      let note = typed ? typed.rest : typedText
-      if (!note && !files.length) throw { code: 'EMPTY', userMessage: 'Type what you would like changed first.' }
-      if (!note && typed) note = 'Put this here' // a typed time and a file, as the pop-up says it
-      let moment: NoteMoment | undefined
-      if (at !== undefined) {
-        let asked: NoteMoment
-        try {
-          asked = parseMoment(at)
-        } catch (e) {
-          throw { code: 'BAD_MOMENT', message: String(e), userMessage: 'That moment was lost. Set the moment again, then send your note.' }
-        }
-        if (typed) asked = { ...asked, at: typed.at }
-        // checked against the render it names, the one the pop-up read its words from; its words and
-        // quote come from that render, never from the page
-        const c = checkMoment(asked, await readTimeline(slug, asked.version))
-        if ('refuse' in c) throw { code: 'BAD_MOMENT', userMessage: c.refuse }
-        moment = c.moment
-        if (moment.words.join() !== asked.words.join()) log(`[note] moment words from the page (${asked.words.join(' ')}) differ from the render's; using the render's`)
-        // A setting global by nature ("smaller captions") goes without its moment, which would hide it
-        // from applyNote's no-model fast path; the chat shows the words as typed.
-        if (!files.length && (await momentRoute(typedText, (w) => ai.wholeReelSetting(dir, w))) === 'fast') moment = undefined
-      }
-      return { typedText, note, files, base, moment }
-    }
-    const active = await ai.active().catch(() => null)
-    if (!active || !active.connected || active.id === 'none') {
-      // No AI editor: nothing can apply the note, so do not pretend. Say what they can do instead
-      // and offer the matching manual control plus "Connect ChatGPT" (grandma test, finding 8).
-      return noteQueue.run(slug, async () => {
-        const { typedText, note, files, moment } = await admit()
-        // the chat keeps the words as typed, "At 0:05:" included
-        await addChat(slug, 'you', typedText, undefined, undefined, undefined, files.map(forChat), moment)
-        const reply = noAiReply(note, files.length)
-        await addChat(slug, 'editor', reply.text, undefined, reply.actions)
-        return { jobId: null }
-      })
-    }
-    const given = Number.isInteger(onVersion) ? Number(onVersion) : undefined
-    return noteQueue.send(slug, async () => {
-      const { note, files, base, moment } = await admit()
-      // the queue entry carries the moment: its chat line shows it and the AI reads it (startNote). A branched note
-      // (version-tree) carries the saved version it changes: startNote passes it to applyNote as `base`
-      const seenVersion = given ?? moment?.version ?? (await readProject(slug)).version ?? 0
-      return { text: note, attachments: files.map(forChat), ...(moment ? { moment } : {}), ...(base !== undefined ? { branch: base } : {}), seenVersion }
-    }, given ?? 0)
-  })
+  handle('projects:note', (_e, slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown, requestedBase?: unknown, steer?: unknown) =>
+    sendNote(slug, text, attachments, at, onVersion, requestedBase, steer)
+  )
+  // The note path for a paired phone (main/companion): sendNote, as the window and an outside AI app send. The phone
+  // sends no `steer` (Add now), so its notes always queue.
+  function submitNote(slug: string, text: string, attachments?: unknown, at?: unknown, onVersion?: unknown): ReturnType<typeof sendNote> {
+    return sendNote(slug, text, attachments, at, onVersion)
+  }
   // version-merge: one version's layers with another's, as a job of its own (it is not a note, so it does not queue)
   handle('projects:mergeVersions', (_e, slug: string, request: MergeRequest) => {
     const dir = projectDir(slug)
     if (!ai.mergeVersions) throw { code: 'MERGE_UNAVAILABLE', userMessage: 'This editor does not support combining versions. Update Reel Studio and try again.' }
+    if (!request || typeof request !== 'object' || !request.take || typeof request.take !== 'object') throw { code: 'BAD_MERGE', userMessage: 'Choose which version each part comes from.' }
     const merge = ai.mergeVersions.bind(ai)
-    const jobId = jobs.start(slug, 'note', (emit, signal, { id, owner }) => merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) }))
+    // the notes show it as what was asked, with the version it made as its result
+    const asked = mergeWords(request)
+    let jobId = ''
+    jobId = jobs.start(
+      slug,
+      'note',
+      async (emit, signal, { id, owner }) => {
+        const r = await merge(dir, request, emit, signal, { id, ...(owner ? { owner } : {}) })
+        return { summary: [r.summary, ...r.report].join(' '), ...(r.version !== undefined ? { version: r.version } : {}), made: { by: 'note', summary: asked } }
+      },
+      { note: asked, record: (s) => void s.chat.push(stamp({ from: 'you', text: asked, jobId })) }
+    )
     return { jobId }
+  })
+  handle('projects:mergeLayers', async (_e, slug: string, ours: number, theirs: number) => {
+    const saved = (await readProject(slug)).version ?? 0
+    for (const n of [ours, theirs]) if (!Number.isInteger(n) || n < 1 || n > saved) throw { code: 'BAD_VERSION', userMessage: 'Pick two saved versions of this reel.' }
+    // an older AI package: every part is a choice
+    return ai.mergeLayers ? ai.mergeLayers(projectDir(slug), ours, theirs) : [...MERGE_LAYERS]
   })
   handle('projects:versionRows', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 1) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
@@ -1420,6 +1704,14 @@ function registerIpc(): void {
   handle('projects:timeline', async (_e, slug: string, n: number) => {
     if (!Number.isInteger(n) || n < 0) throw { code: 'BAD_VERSION', userMessage: 'Pick a version of this reel first.' }
     return readTimeline(slug, n)
+  })
+  handle('projects:setSeries', async (_e, slug: string, series: string | null) => {
+    if (!existsSync(join(projectDir(slug), 'project.json'))) throw { code: 'NO_VIDEO', userMessage: 'Add a video to this reel first.' }
+    // as a manual edit (projects:update): an Edit it myself job publishes the project it read before its render,
+    // so a series picked meanwhile would be written over while app.json still says it was chosen. Refused (BUSY,
+    // which the picker shows) while a job runs, and no job starts during this write.
+    await jobs.hold(slug, () => chooseSeries(slug, series))
+    return detail(slug)
   })
   handle('projects:update', async (_e, slug: string, patch: Partial<ProjectJson>) => {
     // a reel with no video yet has no project.json: only its name can change
@@ -1471,6 +1763,7 @@ function registerIpc(): void {
   // a job like any other, so the updater waits for it (main/updater.ts counts running jobs)
   handle('projects:exportPlatforms', async (_e, slug: string, n: number, value: unknown) => {
     const request = parsePlatformExportRequest(value)
+    const generation = rootGeneration
     const versions = await listVersions(projectDir(slug))
     if (![n, request.second?.version ?? n].every((m) => versions.some((v) => v.n === m))) throw { code: 'NO_VERSION', userMessage: 'Choose an available version before sharing.' }
     const version = await finishedExportVersion(slug, n)
@@ -1488,6 +1781,8 @@ function registerIpc(): void {
       : [first]
     let result: PlatformExportResult | null = null
     let failure: unknown
+    // the versions and project above were read before several awaits: a library move since then makes them stale
+    sameRootSince(generation)
     jobs.start(slug, 'export', async (emit, signal) => {
       emit({ type: 'status', message: 'Reading the finished video', pct: 1 })
       try {
@@ -1569,6 +1864,7 @@ function registerIpc(): void {
   handle('queue:edit', (_e, slug: string, id: string, text: string) => noteQueue.edit(slug, String(id), String(text ?? '')))
   handle('queue:cancel', (_e, slug: string, id: string) => noteQueue.cancel(slug, String(id)))
   handle('queue:move', (_e, slug: string, id: string, by: number) => noteQueue.move(slug, String(id), by < 0 ? -1 : 1))
+  handle('queue:steer', (_e, slug: string, id: string) => noteQueue.steer(slug, String(id)))
   // Send now / Run next: a held queue goes on, and a paused job's wait ends (main/pause.ts)
   handle('queue:runNext', async (_e, slug: string) => {
     pauser.cancel(slug)
@@ -1601,6 +1897,18 @@ function registerIpc(): void {
   })
 
   handle('library:preview', (_e, file: string) => libraryPreview(file))
+
+  handle('footage:sources', () => footageSources.list())
+  handle('footage:addSource', async () => {
+    const r = await showOpenDialog({ title: 'Choose a folder of your videos', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths.length) return footageSources.list()
+    return footageSources.add(r.filePaths[0])
+  })
+  handle('footage:removeSource', (_e, id: string) => footageSources.remove(id))
+  handle('footage:status', () => footageIndex.status())
+  handle('footage:findReels', () => archiveReels.find())
+  handle('footage:reels', () => archiveReels.status())
+  handle('footage:makeReels', (_e, ids: string[]) => archiveReels.make(ids))
 
   // Rules removed in this run of the app, for Undo; never written anywhere
   const removedRules = new Map<string, { rule: StyleRule; index: number }>()
@@ -1675,25 +1983,26 @@ function registerIpc(): void {
     let files: string[]
     if (ids) {
       files = ids.map((id) => foundEdit(id)).filter((f) => f.readable).map((f) => f.path)
-      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an XML export to learn from.' }
+      if (!files.length) throw { code: 'NOT_READABLE', userMessage: 'Choose an export or a CapCut project to learn from.' }
     } else {
       const mac = process.platform === 'darwin'
       const picker = learnPicker(mac)
       const r = await showOpenDialog({
         title: picker.title,
-        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package
+        // a .fcpxmld is a folder unless Final Cut Pro is installed to make it a package, and a CapCut project is a
+        // folder; on Windows the person picks the draft_content.json inside it
         properties: mac ? ['openFile', 'openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
-        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml'] }]
+        filters: [{ name: picker.filter, extensions: ['fcpxml', 'fcpxmld', 'xml', 'edl', 'json'] }]
       })
       if (r.canceled || !r.filePaths.length) return null
       files = r.filePaths
     }
     return readLesson(files, (file) => runEngine('import-reference', [file]), (p) => e.sender.send('style:learnProgress', p))
   })
-  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string) => {
+  handle('style:keepLearned', async (_e, rules: LearnedRule[], from: string, editor?: EditorName) => {
     if (!ai.addStyleRule) throw { code: 'NOT_READY', userMessage: 'That could not be saved to My style. Try again later.' }
     const kept: StyleRule[] = []
-    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from } }))
+    for (const rule of rules) kept.push(await ai.addStyleRule(rule.text, { imported: { file: from, ...(editor ? { editor } : {}) } }))
     return kept
   })
   handle('style:damaged', async () => (await ai.styleWasDamaged?.()) ?? false)
@@ -1782,7 +2091,7 @@ function registerIpc(): void {
     return s
   })
   handle('updateKey:clear', () => updateKey.clear())
-  // Posting to YouTube (main/posting.ts), off unless REELSTUDIO_POSTING=1. It signs in with the same download key.
+  // Posting to YouTube (main/posting.ts), on unless REELSTUDIO_POSTING=0. It signs in with the same download key.
   setupPosting({
     handle,
     env: process.env,
@@ -2101,9 +2410,15 @@ app.whenReady().then(async () => {
   }
   await carryOverClaudeCode(settings).catch((e) => log(`[ai] carry-over: ${String(e)}`))
   log(`[start] root=${reelStudioRoot()} engine=${engineMode()}:${engineDir()} python=${pythonExe()} ai=${aiSource}`)
-  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir()])
+  // fontsDir: Library › Fonts shows each bundled font in its own face
+  handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
+  // first on usage's queue, so nothing reads it before a cut-short opt-out is finished (usage.ts reconcile)
+  void usage.reconcile().catch((err) => log(`[usage] reconcile: ${String(err?.message ?? err)}`))
+  outside = createOutside()
+  if (settings.outsideApps) await outside.enable().catch((e) => log(`[outside] ${String(e?.userMessage ?? e)}`))
   registerIpc()
+  void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
   createWindow()
   // What a quit, a plan limit or no internet paused last time goes on now, or when it can (main/pause.ts). Sleep
   // was a different run of the app, so it waits only for the network.
@@ -2125,6 +2440,7 @@ app.whenReady().then(async () => {
       awake = null
     }
   }, 5000).unref()
+  await footageSources.start()
   indexLibrary()
   await updates.init()
   updates.start() // 15 s after the window, so launch is never slower
@@ -2147,9 +2463,11 @@ app.whenReady().then(async () => {
 let quitting = false
 app.on('before-quit', (e) => {
   void stopPhoneShare() // the "Send to my phone" link never outlives the app
+  void companion?.stop() // nor does the phone and browser connection
   permissionHelper.close()
   const indexing = footageIndex.status().state === 'indexing'
   if (quitting || (!jobs.runningCount() && !cloudSavesRunning() && !indexing)) {
+    footageSources.stop()
     void footageIndex.stop()
     void killAllEngines()
     return
@@ -2175,8 +2493,9 @@ app.on('before-quit', (e) => {
       for (const slug of making) await updateAppState(slug, (s) => void (s.paused = { reason: 'quit', until: null, editor: null })).catch(() => undefined)
     }
     quitting = true
+    footageSources.stop()
     noteQueue.quit()
-    await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop()]).finally(() => app.quit())
+    await Promise.allSettled([jobs.cancelAll().then(() => killAllEngines()), cloudSavesSettled(), footageIndex.stop(), outside?.close()]).finally(() => app.quit())
   })()
 })
 let askingToQuit = false

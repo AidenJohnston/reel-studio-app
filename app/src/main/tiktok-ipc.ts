@@ -8,7 +8,7 @@ export function registerTikTokIpc(d: {
   handle: Handle; service: TikTokService; dev: boolean; saveSettings: (settings: TikTokSettings) => Promise<unknown>
 }): void {
   d.handle('tiktok:configure', async (_event, value) => {
-    if (!d.dev) return fail('TT_DISABLED', 'TikTok is available only in developer mode.')
+    if (!d.dev) return fail('TT_DISABLED', 'Your own TikTok app can be set only in developer mode.')
     const settings = tiktokSettings(value)
     await d.service.disconnect(); await d.saveSettings(settings)
   })
