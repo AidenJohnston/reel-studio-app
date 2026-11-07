@@ -25,10 +25,13 @@ async function world() {
   const steps: Step[] = []
   const errors: unknown[] = []
   let browser = async (_url: string): Promise<void> => { throw new Error('unexpected browser') }
+  // runs once, inside the next encrypted save: a person pressing Cancel while the sign-in is being written
+  let duringSave: (() => void) | null = null
+  const saving = () => { const f = duringSave; duringSave = null; f?.() }
   const service = new LinkedInService({
     settings: async () => ({ clientId: 'li-client', brokerUrl: BROKER }),
     settingsDir: join(dir, 'settings'), projectsDir: () => join(dir, 'projects'), now: () => NOW, waitMs: 0,
-    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => Buffer.from(v).reverse(), decryptString: (b) => Buffer.from(b).reverse().toString() },
+    secrets: { isEncryptionAvailable: () => true, encryptString: (v) => { saving(); return Buffer.from(v).reverse() }, decryptString: (b) => Buffer.from(b).reverse().toString() },
     openExternal: (url) => browser(url),
     fetch: async (url, init) => {
       const step = steps.shift()
@@ -79,7 +82,7 @@ async function world() {
     steps.push({ url: `${LINKEDIN_API}/rest/videos/urn%3Ali%3Avideo%3AC5505`, body: { status: 'PROCESSING' } })
     steps.push({ url: `${LINKEDIN_API}/rest/videos/urn%3Ali%3Avideo%3AC5505`, body: { status: 'AVAILABLE' } })
   }
-  return { dir, project, steps, service, connect, upload, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
+  return { dir, project, steps, service, connect, upload, duringSave: (fn: () => void) => { duringSave = fn }, done: () => { expect(errors).toEqual([]); expect(steps).toEqual([]) } }
 }
 
 const INPUT = { slug: 'fixture', version: 1, text: 'On LinkedIn' }
@@ -98,6 +101,13 @@ describe('LinkedIn', () => {
     expect(outcomes.versions.v1['linkedin:urn:li:share:777']).toMatchObject({ platform: 'linkedin', apiVersion: '202610' })
     expect(await w.service.publish(INPUT)).toEqual(post)
     await expect(w.service.publish({ ...INPUT, text: 'Different words' })).rejects.toMatchObject({ code: 'LI_ALREADY_POSTED' }); w.done()
+  })
+
+  it('cancelling while the sign-in is being saved connects nothing', async () => {
+    const w = await world(); w.connect()
+    w.duringSave(() => w.service.cancelConnect())
+    await expect(w.service.connect()).rejects.toMatchObject({ code: 'LI_CANCELLED' })
+    expect(await w.service.session()).toEqual({ connected: false }); w.done()
   })
 
   it('never posts again after LinkedIn’s answer to the post was lost, and uploads only to LinkedIn', async () => {

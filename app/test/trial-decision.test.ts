@@ -4,6 +4,7 @@ import type { InsightPost } from '../src/shared/insights'
 
 const POSTED = '2026-11-01T10:00:00.000Z'
 const SETTLED = '2026-11-03T10:00:00.000Z' // exactly 48 hours later
+const at = (hours: number) => new Date(Date.parse(POSTED) + hours * 3_600_000).toISOString()
 function post(plays: number | null, observedAt: string | null = SETTLED, t: 1 | 2 = 1): InsightPost {
   return {
     project: 'p', version: 1, platform: 'instagram', accountId: '1', postId: String(t), publishedAt: POSTED, observedAt,
@@ -50,6 +51,24 @@ describe('decideTrial', () => {
     const later = { ...post(200, '2026-11-07T10:00:00.000Z', 2), publishedAt: '2026-11-03T10:00:00.000Z' }
     expect(decideTrial(post(400, '2026-11-06T10:00:00.000Z'), later).kind).not.toBe('waiting')
   })
+  // fails if a try wins on its extra time up: both at 1,000 views an hour, read at 48 and 60 hours (audit 05-results)
+  it('takes the older try’s extra time out before comparing', () => {
+    expect(decideTrial(post(48_000, at(48)), post(60_000, at(60), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('Try 2 has been up longer') })
+    // a real lead survives: 80,000 views in 60 hours is at least 64,000 at 48, a third ahead
+    const v = decideTrial(post(48_000, at(48)), post(80_000, at(60), 2))
+    expect(v).toMatchObject({ kind: 'winner', winner: 2, reason: expect.stringContaining('allowing for its extra time up') })
+    if (v.kind === 'winner') expect(v.liftPercent).toBeCloseTo(100 / 3, 6)
+    // the same in the other order, Try 1 older: 75 views in 60 hours is 60 at 48, and 60 against 40 could be luck
+    // (raw, 75 against 40 would have won)
+    expect(decideTrial(post(75, at(60)), post(40, at(48), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('could be luck') })
+    // clearly not luck but under the lift floor once adjusted: 70,000 in 60 hours is 56,000 at 48, 17% ahead
+    expect(decideTrial(post(48_000, at(48)), post(70_000, at(60), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('short of the 20% lead') })
+  })
+  // guards the fix against over-correcting: the younger try must beat the older try's whole count, no more
+  it('holds the younger try to the older try’s whole count', () => {
+    expect(decideTrial(post(55_000, at(48)), post(50_000, at(60), 2)).kind).toBe('too-close')
+    expect(decideTrial(post(61_000, at(48)), post(50_000, at(60), 2))).toMatchObject({ kind: 'winner', winner: 1 })
+  })
   // fails if a tiny sample can produce a winner
   it('needs 100 views between them', () => {
     const v = decideTrial(post(80), post(19, SETTLED, 2))
@@ -59,6 +78,8 @@ describe('decideTrial', () => {
   it('calls a small or chance gap too close', () => {
     expect(decideTrial(post(55), post(45, SETTLED, 2)).kind).toBe('too-close')
     expect(decideTrial(post(500), post(500, SETTLED, 2)).kind).toBe('too-close')
+    // significant but 19.9% ahead: the reason must not round the lead up to the 20% it falls short of
+    expect(decideTrial(post(5_995), post(5_000, SETTLED, 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('19% more, short of the 20% lead') })
     // significant (p far below 0.05) but under the 20% lift floor
     expect(decideTrial(post(10_500), post(9_500, SETTLED, 2)).kind).toBe('too-close')
   })

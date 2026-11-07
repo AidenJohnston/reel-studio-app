@@ -207,6 +207,22 @@ describe('TikTok fixture HTTP', () => {
     expect((await w.service.publish(INPUT)).state).toBe('published')
     w.stats(); expect((await w.service.insights('fixture', 1, '789')).metrics?.plays).toBe(100); w.done()
   })
+  it('links a public post whose id TikTok gives only after its review, keeping when it was published', async () => {
+    const w = await world(); await w.seed(); w.success(false, [])
+    expect(await w.service.publish(INPUT)).toMatchObject({ state: 'published', postIds: [] })
+    await expect(fs.access(join(w.project, 'outcomes.json'))).rejects.toThrow()
+    // asking again while TikTok can't answer keeps what was saved
+    w.steps.push({ path: 'post/publish/status/fetch/', status: 500, raw: true, body: { error: { code: 'internal_error' } } })
+    expect(await w.service.publish(INPUT)).toMatchObject({ state: 'published', postIds: [] })
+    w.tick(3_600_000)
+    w.status('PUBLISH_COMPLETE', 16, ['789'])
+    expect(await w.service.publish(INPUT)).toMatchObject({ state: 'published', postIds: ['789'] })
+    const out = JSON.parse(await fs.readFile(join(w.project, 'outcomes.json'), 'utf8'))
+    expect(out.versions.v1['tiktok:789']).toMatchObject({ platform: 'tiktok', publishedAt: new Date(NOW).toISOString() })
+    w.stats(); expect((await w.service.insights('fixture', 1, '789')).metrics?.plays).toBe(100)
+    // once linked, asking again asks TikTok nothing
+    expect(await w.service.publish(INPUT)).toMatchObject({ postIds: ['789'] }); w.done()
+  })
   it('falls back to inbox only on a definite creator permission rejection', async () => {
     const w = await world(); await w.seed()
     w.steps.push({ path: 'post/publish/creator_info/query/', status: 401, raw: true, body: { error: { code: 'scope_not_authorized' } } })

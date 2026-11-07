@@ -17,7 +17,7 @@ import type { InstagramSecretStore } from './instagram-store'
 import { serviceOrigin } from './instagram-http'
 import { SocialError, type MetaFetch } from './meta-http'
 import { signinCallback } from './signin-callback'
-import { atomicSocialFile, withSocialFile } from './social-store'
+import { atomicSocialFile, restoreSocialFile, snapshotSocialFile, withSocialFile } from './social-store'
 
 export const LINKEDIN_API = 'https://api.linkedin.com'
 export const LINKEDIN_VERSION = '202610'
@@ -218,8 +218,14 @@ export class LinkedInService {
           token, expiresAt: this.now() + (typeof data.expires_in === 'number' ? data.expires_in : invalid()) * 1000,
           memberId, name: text(me.name), clientId: cfg.clientId, brokerUrl: cfg.brokerUrl
         }
+        const before = await snapshotSocialFile(this.file())
         signal.throwIfAborted()
         await this.save(c)
+        // Cancel pressed while the sign-in was being saved: put back what was there, so a cancelled connect connects nothing
+        if (signal.aborted) {
+          await restoreSocialFile(this.file(), before)
+          throw new SocialError('LI_CANCELLED', 'LinkedIn connection was cancelled.')
+        }
         return { connected: true, accountId: c.memberId, name: c.name, expiresAt: c.expiresAt }
       } finally {
         listener.close()

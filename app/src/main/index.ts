@@ -1099,9 +1099,8 @@ function registerIpc(): void {
     const keys = ['asked', 'on', 'usage', 'quality', 'posts'] as const
     if (!keys.every((k) => typeof x[k] === 'boolean')) throw { code: 'BAD_INPUT', userMessage: 'Choose what to share.' }
     const sharing = Object.fromEntries(keys.map((k) => [k, x[k]])) as Record<(typeof keys)[number], boolean>
-    await saveSettings({ sharing })
-    // off deletes what was kept; a part switched off loses its lines
-    await usage.applySharing(sharing)
+    // off deletes what was kept and a part switched off loses its lines; on starts from an empty folder (usage.ts)
+    await usage.changeSharing(sharing, () => saveSettings({ sharing }))
     if (!sharing.on || !sharing.quality) scoredEdits.clear()
     return appInfo()
   })
@@ -2364,6 +2363,8 @@ app.whenReady().then(async () => {
   // fontsDir: Library › Fonts shows each bundled font in its own face
   handleMediaProtocol(() => [reelStudioRoot(), projectsDir(), noteStagingRoot(), sfxPackDir(), libraryPreviewDir(), ...[fontsDir()].filter((d): d is string => !!d)])
   setAsrThreads(await models.savedThreads()) // before any engine call can start
+  // first on usage's queue, so nothing reads it before a cut-short opt-out is finished (usage.ts reconcile)
+  void usage.reconcile().catch((err) => log(`[usage] reconcile: ${String(err?.message ?? err)}`))
   registerIpc()
   void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
   createWindow()
