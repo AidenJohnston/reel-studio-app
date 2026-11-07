@@ -38,6 +38,14 @@ describe('reading CLIProxyAPI’s config', () => {
     const ps = ['/Users/p/build/bin/cliproxyapi-current --config /opt/homebrew/etc/cliproxyapi.conf', '/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi -config=/srv/hub.yaml', 'vim --config /etc/not-this.yaml', 'cliproxyapi --config relative.yaml'].join('\n')
     expect(configsOfRunning(ps)).toEqual(['/opt/homebrew/etc/cliproxyapi.conf', '/srv/hub.yaml'])
   })
+
+  // fails if a running copy whose config is in a folder with a space (Application Support on macOS) is missed: ps prints
+  // the arguments unquoted, and read as words the path ends at "/Users/creator/Library/Application"
+  it('a running copy’s --config with spaces in it, unquoted as ps prints it, up to the next flag', () => {
+    const ps = ['/opt/homebrew/bin/cliproxyapi --config /Users/creator/Library/Application Support/CLIProxyAPI/config.yaml',
+      '/usr/local/bin/cli-proxy-api -config=/srv/my hub/config.yaml -no-browser'].join('\n')
+    expect(configsOfRunning(ps)).toEqual(['/Users/creator/Library/Application Support/CLIProxyAPI/config.yaml', '/srv/my hub/config.yaml'])
+  })
 })
 
 describe('finding the hub', () => {

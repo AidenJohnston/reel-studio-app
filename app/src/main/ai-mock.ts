@@ -342,7 +342,8 @@ export const createMockAI: CreateAI = ({ host }) => {
       // Tests only (REELSTUDIO_MOCK_FIRST_EDIT=editor): the first edit an editor makes, its steps and its own words, so a
       // screenshot set shows the path a person with an editor sees (e2e/climb-shots.spec.ts)
       const editor = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor'
-      const status = (message: string, pct: number, phase?: Phase): void => onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 || editor ? {} : { noAI: true }) })
+      const status = (message: string, pct: number, phase?: Phase, note?: string): void =>
+        onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 || editor ? {} : { noAI: true }), ...(note ? { note } : {}) })
       const changed: string[] = []
       // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
       // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
@@ -353,7 +354,7 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       if (!heard) {
         status('Listening to your video', 1, 'listen')
-        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen'), signal)
+        await host.runEngine('transcribe', args, (p) => status(p.message || 'Listening to your video', p.pct, 'listen', p.note), signal)
       }
       if (!proposed) {
         status('Picking your best takes', 41, 'analyze')
