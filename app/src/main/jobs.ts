@@ -357,6 +357,8 @@ export function createJobManager(
   /** Runs a quick change to a project (a manual edit) as its only writer: refused while a job runs
    * on it, and no job can start on it until `fn` is done. */
   async function hold<T>(slug: string, fn: (owner: string) => Promise<T>): Promise<T> {
+    // a manual edit writes the project too: refused while new work is (the library moving, an update installing)
+    assertCanStart()
     refuseIfBusy(slug)
     held.add(slug)
     try {
@@ -424,6 +426,8 @@ export function createJobManager(
       await Promise.race([Promise.all(all.map((j) => j.done)), new Promise((r) => setTimeout(r, 4000))])
     },
     runningCount: () => jobs.size,
+    /** Whether anything is writing a project now: a job or a manual edit. The library must not move meanwhile. */
+    writing: () => jobs.size > 0 || held.size > 0,
     /** Reels a version is being made for (a first edit, a note, a hand edit): what a quit asks about. */
     making: (): string[] => [...new Set([...jobs.values()].filter((j) => j.slug && (j.kind === 'first-edit' || j.kind === 'note' || j.kind === 'rerender')).map((j) => j.slug!))]
   }

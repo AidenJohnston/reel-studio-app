@@ -326,6 +326,12 @@ if (TEST) (globalThis as { __reelFeedback?: unknown }).__reelFeedback = feedback
 const testClipboard: { items: Electron.ClipboardItem[] } = { items: [] }
 if (TEST) (globalThis as { __reelClipboard?: unknown }).__reelClipboard = testClipboard
 const workGate = createWorkGate()
+/** Settings › Storage is moving the library: no job or manual edit may start until the new place is in use, or it
+ * would take its project folder from the old place and its bookkeeping from the new one. */
+let rootMoving = false
+const refuseWhileRootMoves = (): void => {
+  if (rootMoving) throw { code: 'BUSY', userMessage: 'Wait until your reels have finished moving, then try again.' }
+}
 const footageSources = createFootageSources({
   load: async () => (await loadSettings()).footageSources,
   save: async (footageSources) => void (await saveSettings({ footageSources })),
@@ -438,7 +444,10 @@ const jobs = createJobManager(
   // render events carry a playable URL (a stable copy for drafts: main/live-video.ts)
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveVideos()),
   workGate,
-  () => updates.assertCanStartWork(),
+  () => {
+    refuseWhileRootMoves()
+    updates.assertCanStartWork()
+  },
   footageIndex,
   // and so do the pictures of each change made before its draft
   ((live) => (slug: string, e) => live(projectDir(slug), e))(createLiveMoments()),
@@ -821,6 +830,8 @@ async function finishedExportVersion(slug: string, n: number): Promise<VersionIn
   let versions = await listVersions(dir)
   let v = versions.find((x) => x.n === n) ?? versions[versions.length - 1]
   if (!v) throw { code: 'NO_VERSION', userMessage: 'This reel has no version yet. Wait for Version 1, then share it.' }
+  // the library moved while the versions were read: `dir` is the old place
+  if (dir !== projectDir(slug)) throw { code: 'BUSY', userMessage: 'Your reels moved meanwhile. Try sharing again.' }
   if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'A version is still being made. Share once it’s ready.' }
   if (v.draft) {
     // A preview is not the full-quality file: make it first, as a normal job (progress, Stop, and
@@ -1164,20 +1175,26 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0]
   })
   handle('app:setRoot', async (_e, p: string) => {
-    if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
-    const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
-    await fs.mkdir(root, { recursive: true })
-    // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
-    await footageIndex.pause()
+    refuseWhileRootMoves()
+    if (jobs.writing()) throw { code: 'BUSY', userMessage: 'Wait until no reel is being made, then change where reels are kept.' }
+    // Taken before the first await, so no job can start between this check and the new root being in use.
+    rootMoving = true
     try {
-      if (jobs.runningCount()) throw { code: 'BUSY', userMessage: 'Wait until your video is finished, then change where videos are kept.' }
-      await saveSettings({ root })
-      setRootOverride(root)
-      await ensureRoot()
-      perms.markTouched()
-      indexLibrary()
+      const root = chosenRoot(p, CHANNEL === 'nightly' ? await stableLibraries(app.getPath('appData')) : undefined)
+      await fs.mkdir(root, { recursive: true })
+      // indexing pauses while the Library moves, and starts again in the new place (footage-search-tool)
+      await footageIndex.pause()
+      try {
+        await saveSettings({ root })
+        setRootOverride(root)
+        await ensureRoot()
+        perms.markTouched()
+        indexLibrary()
+      } finally {
+        footageIndex.resume()
+      }
     } finally {
-      footageIndex.resume()
+      rootMoving = false
     }
     return appInfo()
   })
