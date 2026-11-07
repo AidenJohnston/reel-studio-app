@@ -72,6 +72,8 @@ it('runs Codex through the relay under read-only sandbox with shell and image to
   expect(argv.some((x) => /bypass|danger-full-access/.test(x))).toBe(false);
   expect(argv).toContain('--strict-config');
   expect(argv.some((x) => x.startsWith('mcp_servers.reelstudio.enabled_tools='))).toBe(true);
+  // no model chosen: the Codex app's own default for the person's plan, as the Codex editor runs it
+  expect(argv).not.toContain('--model');
 });
 
 it('does not save a Codex note over its token budget', async () => {

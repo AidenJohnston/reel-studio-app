@@ -212,6 +212,9 @@ export function createOutsideAccess(o: OutsideAccessOptions) {
       if (was) changed()
     })
     sock.on('error', () => undefined)
+    // the relay never half-closes while it waits for answers: an end is the end, and nothing waiting runs after it.
+    // Calls already running finish; with fast controls, calls read in the same chunk may finish before this event.
+    sock.on('end', () => void (c.dropped = true))
     if (clients.size >= MAX_CONNECTIONS) {
       send({ error: 'Too many AI apps are connected to Reel Studio.' })
       sock.end()

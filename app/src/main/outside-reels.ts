@@ -24,6 +24,8 @@ const RECENT = 8
  * (each note is at most 4000 characters), with the totals so the agent knows what it did not see */
 const VERSIONS = 40
 const WAITING = 20
+/** reels list_reels returns, newest first: far under the relay's 1 MiB line, with the total */
+const REELS = 200
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const WORKING: Record<JobKind, string> = {
   'first-edit': 'making Version 1', note: 'running a note', rerender: 'making a version again', export: 'exporting', script: 'writing a plan', propose: 'looking for more reels'
@@ -36,7 +38,8 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
 
   return {
     async listReels() {
-      const reels = (await listProjects()).map((p) => ({
+      const all = await listProjects()
+      const reels = all.slice(0, REELS).map((p) => ({
         reel: p.slug,
         title: p.title,
         status: p.status,
@@ -44,7 +47,7 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
         notes_waiting: p.waiting,
         working_on: deps.running(p.slug) ? WORKING[deps.running(p.slug)!.kind] : null
       }))
-      return JSON.stringify({ reels })
+      return JSON.stringify({ reels_total: all.length, reels })
     },
 
     async getReel(slug) {
@@ -57,7 +60,8 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
       // what made each version, as the version menu says it: the note's own words, or the change made by hand
       const madeBy = versionChanges(versions, st.versionsMade ?? [])
       const job = deps.running(slug)
-      const ran = st.queue?.find((q) => q.attempt)
+      // the note running now: a note job, and its queue entry (a hand edit or a stale entry is not one to add to)
+      const ran = job?.kind === 'note' ? st.queue?.find((q) => q.attempt && !q.hand) : undefined
       return JSON.stringify({
         reel: slug,
         title: s.title,
@@ -98,8 +102,13 @@ export function createOutsideReels(deps: OutsideReelDeps): OutsideControls {
       const r = await deps.send(slug, text, undefined, true)
       if (r.noEditor) return 'Reel Studio has no AI editor connected, so nothing was added. The words show in the reel\'s notes.'
       if (r.added) return 'Added. The note running now reads your words before it finishes, and its version includes them. Call get_reel to see it.'
+      // it ended between the check and the send: the words started as a note of their own
+      if (r.jobId) return 'That note had just finished, so your words started as a note of their own. Call get_reel to see it.'
       // too late (it was being saved), or the running note changes another version: the words wait as their own note
-      return 'The running note could not take more words (it was finishing, or it changes a different version), so they wait as a note of their own, next in line.'
+      const held = (await readAppState(slug)).queueHeld
+      return held
+        ? 'The running note could not take more words, so they wait as a note of their own. This reel\'s notes are held after a Stop or a failed note, until the person sends them on in Reel Studio.'
+        : 'The running note could not take more words (it was finishing, or it changes a different version), so they wait as a note of their own, next in line.'
     },
 
     async stopNote(slug) {
