@@ -140,6 +140,27 @@ describe('usage data', () => {
     expect(existsSync(dir)).toBe(false)
   })
 
+  // An opt-out saves the settings, then deletes the folder; the app can quit in between (audit 05-results).
+  it('fails if what a cut-short opt-out left is readable after a restart', async () => {
+    const first = setup(ON)
+    await first.usage.record(JOB)
+    first.state.sharing = { ...ON, on: false } // saved, and the app quit before the delete
+    const restarted = createUsage({ dir: () => first.dir, sharing: async () => first.state.sharing, version: '1.2.3', platform: 'win32', log: () => {}, endpoint: null })
+    void restarted.reconcile()
+    expect(await restarted.read()).toEqual([])
+    expect(existsSync(first.dir)).toBe(false)
+  })
+  it('fails if turning sharing back on reuses a queue or install id an opt-out left behind', async () => {
+    const { dir, state, usage } = setup(ON)
+    await usage.record(JOB)
+    const oldId = readFileSync(join(dir, 'install-id'), 'utf8')
+    const off = { ...ON, on: false }
+    state.sharing = off // the delete never happened
+    await usage.changeSharing(off, ON, async () => { state.sharing = ON })
+    expect(await usage.read()).toEqual([])
+    await usage.record(JOB)
+    expect((await usage.read()).map((l) => l.install)).not.toContain(oldId)
+  })
   it('fails if an edit is scored from the wrong next step', () => {
     expect(editScore({ type: 'export' }, 3)).toBe('kept')
     expect(editScore({ type: 'note', on: 3 }, 3)).toBe('changed')

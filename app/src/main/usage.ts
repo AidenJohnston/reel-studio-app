@@ -150,18 +150,38 @@ export function createUsage(d: UsageDeps) {
     })
   }
 
-  /** After a change in Settings: sharing off deletes everything and the install id; a part turned off loses its lines. */
+  // the whole folder: the queue, the install id and any temp file a failed write left behind
+  const removeAll = (): Promise<void> => fs.rm(d.dir(), { recursive: true, force: true })
+  async function apply(s: DataSharing): Promise<void> {
+    if (!s.on) return removeAll()
+    const all = await lines()
+    const kept = all.filter((l) => s[l.part])
+    if (kept.length !== all.length) await write(kept)
+  }
+
+  /** Sharing off deletes everything and the install id; a part turned off loses its lines. */
   function applySharing(s: DataSharing): Promise<void> {
-    return serial(async () => {
-      if (!s.on) {
-        // the whole folder: the queue, the install id and any temp file a failed write left behind
-        await fs.rm(d.dir(), { recursive: true, force: true })
-        return
-      }
-      const all = await lines()
-      const kept = all.filter((l) => s[l.part])
-      if (kept.length !== all.length) await write(kept)
-    })
+    return serial(() => apply(s))
+  }
+
+  /**
+   * At start, before anything reads the queue: makes the folder match the saved settings. Settings are saved before
+   * an opt-out deletes the folder (so the choice holds even if the delete fails), and an app that quit in between
+   * would otherwise keep the old lines and install id.
+   */
+  function reconcile(): Promise<void> {
+    return serial(async () => apply(await d.sharing()))
+  }
+
+  /**
+   * Settings › Privacy changed sharing from `before` to `after`; `save` writes the settings. Turned on, the folder is
+   * emptied first, so a queue an earlier opt-out failed to delete (a quit mid-way, a locked file) is never reused.
+   * Turned off or narrowed, the settings are saved first and the lines go after.
+   */
+  async function changeSharing(before: DataSharing, after: DataSharing, save: () => Promise<unknown>): Promise<void> {
+    if (after.on && !before.on) await serial(removeAll)
+    await save()
+    await applySharing(after)
   }
 
   /** Posts what is waiting to the endpoint and drops what it accepted. No endpoint, or sharing off: nothing. */
@@ -186,7 +206,7 @@ export function createUsage(d: UsageDeps) {
     })
   }
 
-  return { record, read: () => serial(lines), applySharing, send, clear: () => applySharing({ asked: true, on: false, usage: false, quality: false, posts: false }) }
+  return { record, read: () => serial(lines), applySharing, reconcile, changeSharing, send, clear: () => applySharing({ asked: true, on: false, usage: false, quality: false, posts: false }) }
 }
 
 export type Usage = ReturnType<typeof createUsage>
