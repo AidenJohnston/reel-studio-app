@@ -164,13 +164,13 @@ test('no AI: honest first version, one connect prompt, caption controls, a song 
   // project.json only takes Library-relative paths (secfix): never the picked file's own path.
   expect(projectJson().music.track).toBe('Library/Music/happy song.mp3')
 
-  // Compare shows the reel without Instagram's header, under the switch; Done brings the person's own view back
-  // (10-28 audit, finding 6)
+  // Compare shows the reel without Instagram's header, under the switch; keeping a version brings the person's own view
+  // back (10-28 audit, finding 6). The View menu says Clean while it is held.
   const instagram = await page.getByTestId('ig-overlay').isVisible()
   await page.getByTestId('compare-3').click()
   await expect(page.getByTestId('compare')).toBeVisible()
   await expect(page.getByTestId('ig-overlay')).toBeHidden()
-  await expect(page.getByTestId('phone-view-held')).toBeVisible()
+  await expect(page.getByTestId('view-menu')).toHaveAttribute('aria-label', /^View: Clean,/)
   await shot(page, 'ux-compare-clean')
   await page.getByTestId('done-compare').click()
   await expect(page.getByTestId('ig-overlay')).toBeVisible({ visible: instagram })

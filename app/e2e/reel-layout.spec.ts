@@ -81,10 +81,15 @@ test('fails if a word in Cut, the cover slider or a link in Settings is under 24
     expect((await box(page, '[data-testid="cover-slider"]')).height).toBeGreaterThanOrEqual(24)
     await page.getByTestId('drawer-close').click()
     await page.getByTestId('account').click()
-    // design review r12: Settings' list and sections are centred in the page, as My style's column is
-    const settingsPage = await box(page, '.settings-page')
-    const mainBox = await box(page, 'main.main')
-    expect(Math.abs((settingsPage.left + settingsPage.right) / 2 - (mainBox.left + mainBox.right) / 2)).toBeLessThan(8)
+    // one left edge: the section list's words start where the screen's title does, as Reels' and Library's content does
+    // (centred, as design review r12 had it, Settings showed three left edges at 1440: title, list, sections)
+    const textLeft = (sel: string) =>
+      page.locator(sel).first().evaluate((el) => {
+        const r = document.createRange()
+        r.selectNodeContents(el)
+        return r.getBoundingClientRect().left
+      })
+    expect(Math.abs((await textLeft('[data-testid="settings-nav-editor"]')) - (await textLeft('.tb-h')))).toBeLessThan(2)
     // the GitHub releases link went with the getreelstudio.com updater; Automatic updates' "Get my link" is the same
     // .ext-link, and it shows only where updates work (not in a test build)
     for (const id of ['licence-link', 'notices-link']) {

@@ -284,8 +284,8 @@ test('the first-run column: where you are and what it shows at the top, the thre
         const labels = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="steps-list"] .sl'))
         return {
           gap: r('.fr-log-in').top - r('.fr-h').bottom,
-          // the progress sits right under what it is making, not pinned at the column's foot with nothing between
-          under: r('[data-testid="steps-list"]').top - r('.fr-log-in [role="log"]').bottom,
+          // the progress (its row, then its steps) sits right under what it is making, not pinned at the column's foot
+          under: r('[data-testid="note-progress"]').top - r('.fr-log-in [role="log"]').bottom,
           cut: labels.filter((l) => l.scrollWidth > l.clientWidth + 1 || (oneLine && l.getBoundingClientRect().height > 22)).map((l) => l.textContent)
         }
       }, oneLine)

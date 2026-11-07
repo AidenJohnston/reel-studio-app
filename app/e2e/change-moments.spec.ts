@@ -54,7 +54,7 @@ test('fails if a change\'s stills, its moment and its draft do not reach the pho
     await note(page, 'make the subtitles bigger')
     const label = page.getByTestId('change-tag').locator('.change-label')
     g.go(0)
-    await expect(label).toHaveText('Your change · 0:01', { timeout: 60_000 })
+    await expect(label).toHaveText('Your change · 0:00', { timeout: 60_000 })
     // the reel stops under the change, so its sound does not go on behind a still
     await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true)
     await shot(page, 'change-1-first-still')
@@ -81,7 +81,8 @@ test('fails if a change\'s stills, its moment and its draft do not reach the pho
 
     const states = await seen()
     const tags = states.map((s) => s.split('|')[0]).filter((t, i, a) => t && t !== a[i - 1])
-    expect(tags).toEqual(['Your change · 0:01', 'Your change · 0:02', 'Your change · 0:04', 'Your change · 0:00–0:02'])
+    // whole seconds rounded down, as the player's clock reads them (the stand-in's stills are at 0.8, 2.4 and 4.0 s)
+    expect(tags).toEqual(['Your change · 0:00', 'Your change · 0:02', 'Your change · 0:04', 'Your change · 0:00–0:02'])
     // nothing of the change shows once the Quick preview does
     const quick = states.findIndex((s) => s.endsWith('|Quick preview'))
     expect(quick).toBeGreaterThan(states.findIndex((s) => s.startsWith('Your change · 0:00–0:02')))
@@ -105,11 +106,11 @@ test('fails if a picked picture does not hold, or Stop leaves the change on the 
     g.go(1)
     await expect(label).toHaveText('Your change · 0:02', { timeout: 60_000 })
     await page.getByTestId('change-dot').first().click()
-    await expect(label).toHaveText('Your change · 0:01')
+    await expect(label).toHaveText('Your change · 0:00')
     g.go(2)
     await expect(page.getByTestId('change-dot')).toHaveCount(3)
     await page.waitForTimeout(1000)
-    await expect(label).toHaveText('Your change · 0:01')
+    await expect(label).toHaveText('Your change · 0:00')
     await shot(page, 'change-6-picked-reduced-motion')
     await page.getByTestId('stop').click()
     await expect(page.getByTestId('change-picture')).toHaveCount(0)

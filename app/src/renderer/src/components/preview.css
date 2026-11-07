@@ -6,40 +6,24 @@
 .tmenu.shape { flex: 0 1 auto; min-width: 32px; }
 .tmenu .mi-sp { width: 16px; flex: none; }
 .tpill {
-  height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; background: transparent;
-  max-width: 100%; min-width: 32px; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink); font: inherit; font-size: var(--fs-sm); font-weight: 600;
+  height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 12px; border: 0; border-radius: 999px; background: transparent;
+  max-width: 100%; min-width: 32px; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink); font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600;
   white-space: nowrap; cursor: pointer;
   transition: background-color 120ms ease, transform 120ms var(--ease-out);
 }
 .tpill:active, .transport .speed:active { transform: scale(.97); }
-.transport .speed { transition: transform 120ms var(--ease-out); }
 .tpill .icon { flex: none; color: var(--ink-2); }
 /* a long phone name gives way before the row runs past the stage */
 .shape-pick .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 html.kb :is(.tpill, .transport .speed, .stage-dock .pp, .stage-dock .speed):active { transform: none; }
 @media (hover: hover) and (pointer: fine) { .tpill:hover { background: var(--wash); } }
-/* A narrow stage (the smallest window with the sidebar open, about 417 px of row) keeps the shape's icon, its name in
-   its label, and the reel's length after the time, the number a creator watches most. To make the room, the speed
-   pill drops its ring, the icon buttons take the spec's 28 px, and Instagram | Clean its side padding. Only a stage
-   narrower than the smallest window leaves gives up the length. The full row needs about 575 px: under the phone
-   (reel.css), a 530 px phone at 1920x1080 cut "Whole reel" to "W…" at the old 500 px. */
-@container transport (max-width: 580px) {
-  .shape-pick { width: 28px; padding: 0; justify-content: center; }
-  .shape-pick .lbl { display: none; }
-  .transport .speed:not(.on) { box-shadow: none; min-width: 28px; padding: 0 4px; }
-  .transport .speed.on { min-width: 28px; padding: 0 4px; }
-  .transport .icon-btn { width: 28px; height: 28px; }
-  .transport .segmented > button { padding: 0 8px; }
-  /* with Show Timeline's button in the row too (timeline-legible), 10 px gaps ran 19 px past a 418 px row.
-     Two classes: reel.css's .tr-row loads after this file and would win a tie. */
-  .transport .tr-row { gap: 6px; }
-}
-@container transport (max-width: 400px) {
+/* The row's pills under the phone keep one size at every width: the View menu holds what took the room. */
+@container transport (max-width: 240px) {
   .transport .tc > span { display: none; }
 }
 
 /* the shape menu: the name and proportion, then what Instagram may trim */
-.shape-mi { min-height: 48px; padding: 7px 10px; align-items: flex-start; }
+.shape-mi { min-height: 48px; padding: 8px 12px 8px 8px; align-items: flex-start; }
 .shape-mi > .icon, .shape-mi > .mi-sp { margin-top: 1px; }
 .shape-mi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .shape-mi-text > span:first-child { display: flex; font-weight: 560; }
@@ -69,10 +53,10 @@ html.kb :is(.tpill, .transport .speed, .stage-dock .pp, .stage-dock .speed):acti
 html.kb .stage-backdrop { transition: none; }
 
 /* ---- the controls, under the phone at its width ---- */
-.stage-dock { width: var(--pw); display: grid; gap: 10px; color: #fff; container: stage-dock / inline-size; transition: opacity 180ms var(--ease-out); }
+.stage-dock { width: var(--pw); display: grid; gap: 8px; color: #fff; container: stage-dock / inline-size; transition: opacity 180ms var(--ease-out); }
 @starting-style { .stage-dock { opacity: 0; } }
 html.kb .stage-dock { transition: none; }
-.stage-row { display: flex; align-items: center; gap: 10px; min-width: 0; height: 32px; }
+.stage-row { display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px; }
 .stage-row.view { justify-content: center; gap: 8px; }
 /* a narrow phone (about 280 px at 1100 x 720): the shape keeps its icon, its name in its label and tooltip, and
    Instagram | Clean gives up its side padding */
@@ -89,7 +73,7 @@ html.kb .stage-dock { transition: none; }
   transition: transform 120ms var(--ease-out);
 }
 .stage-dock .pp:active { transform: scale(.94); }
-.stage-dock .tc { font-size: var(--fs-base); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stage-dock .tc { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stage-dock .tc span { color: rgba(255, 255, 255, .6); font-weight: 500; }
 /* 24 px to grab (the house minimum for a target; it was 16), the bar drawn 4 px tall on its track */
 .stage-scrub { flex: 1; min-width: 0; display: flex; height: 24px; align-items: center; }
@@ -99,8 +83,8 @@ html.kb .stage-dock { transition: none; }
 }
 .stage-scrub input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fff; border: 0; }
 .stage-dock .speed {
-  height: 32px; min-width: 44px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
-  color: #fff; font: inherit; font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; transition: transform 120ms var(--ease-out);
+  height: 32px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
+  color: #fff; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; transition: transform 120ms var(--ease-out);
 }
 .stage-dock .speed:active { transform: scale(.97); }
 .stage-dock .speed.on { background: #fff; color: var(--ink); box-shadow: none; }

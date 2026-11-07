@@ -138,7 +138,7 @@ export function ReelsFound({
                     onChange={() => setPicked((p) => (p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p, c.id]))}
                     data-testid="reels-tick"
                   />
-                  <span aria-hidden>{picked.includes(c.id) ? <Icon name="check" size={11} stroke={2.6} /> : null}</span>
+                  <span aria-hidden>{picked.includes(c.id) ? <Icon name="check" size={10} stroke={2.6} /> : null}</span>
                 </label>
               )}
               <div className="rf-body">

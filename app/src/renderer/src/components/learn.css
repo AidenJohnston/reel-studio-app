@@ -5,7 +5,7 @@
 .learn-head { display: grid; gap: 6px; padding: var(--space-s) var(--space-s) 4px; }
 .learn-head p { max-width: 52ch; }
 .learn-error { margin: 8px var(--space-s) 0; font-size: var(--fs-base); line-height: var(--lh-base); color: var(--pencil); overflow-wrap: anywhere; }
-.learn-looking { display: flex; align-items: center; gap: 8px; padding: 20px var(--space-s) 28px; color: var(--ink-2); }
+.learn-looking { display: flex; align-items: center; gap: 8px; padding: 20px var(--space-s) 24px; color: var(--ink-2); }
 
 .learn-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--space-s) 8px; }
 .learn-group + .learn-group { margin-top: 8px; }
@@ -17,7 +17,7 @@
 .learn-mark.neutral { display: grid; place-items: center; color: var(--ink-2); }
 .learn-items { list-style: none; margin: 0; padding: 0; }
 /* an edit that appears while the sheet is open (a new export) fades in, so the eye finds it (and in .learn-still) */
-.learn-item { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 9px 0; box-shadow: inset 0 1px 0 var(--line); cursor: pointer; }
+.learn-item { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 8px 0; box-shadow: inset 0 1px 0 var(--line); cursor: pointer; }
 .learn-item input { margin: 2px 0 0; flex: none; }
 .learn-item.off, .learn-item.still { cursor: default; }
 /* the tickable list closes with its own line, which the sub-group below doesn't share */
@@ -29,7 +29,7 @@
 .learn-how { margin: 2px 0 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); overflow-wrap: anywhere; }
 .learn-still { list-style: none; margin: 6px 0 0; padding: 0; }
 .learn-items > li.fresh, .learn-still > li.fresh { transition: opacity 180ms cubic-bezier(.2, .8, .2, 1); @starting-style { opacity: 0; } }
-.learn-item.still { align-items: center; padding: 5px 0; box-shadow: none; }
+.learn-item.still { align-items: center; padding: 4px 0; box-shadow: none; }
 .learn-item.still .learn-t > b { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 500; color: var(--ink-2); }
 .learn-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .learn-t > b, .learn-t > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -47,8 +47,8 @@
 .learn-ways span { color: var(--ink-2); overflow-wrap: anywhere; }
 .learn-inline { justify-self: start; margin-top: 2px; }
 
-.learn-cut { padding: 10px var(--space-s); box-shadow: inset 0 1px 0 var(--line); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); overflow-wrap: anywhere; }
-.learn-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px var(--space-s) 18px; box-shadow: inset 0 1px 0 var(--line); }
+.learn-cut { padding: 12px var(--space-s); box-shadow: inset 0 1px 0 var(--line); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.learn-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px var(--space-s) 16px; box-shadow: inset 0 1px 0 var(--line); }
 .learn-choose { margin-left: -8px; }
 .learn-foot-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-left: auto; }
 

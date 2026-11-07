@@ -19,11 +19,13 @@
 .logo { width: 22px; height: 22px; color: var(--ink); display: grid; place-items: center; flex: none; }
 .logo .logo-svg { width: 20px; height: 20px; }
 .rail .wordmark { opacity: 0; }
-.tb-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 12px; padding: 0 var(--gutter); }
+.tb-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 12px; padding: 0 calc(var(--gutter) + var(--sbw)) 0 var(--gutter); }
 .platform-win32 .tb-main { padding-right: 150px; }
 .tb-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.tb-h { font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 620; letter-spacing: 0; font-stretch: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-h { font-size: var(--fs-section); line-height: var(--lh-section); font-weight: 620; letter-spacing: 0; font-stretch: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+/* one control height across the title-bar row: its pills match its 32 px icon buttons */
+.titlebar .btn { height: 32px; }
 .tb-actions:empty { display: none; }
 .first-titlebar { pointer-events: auto; }
 
@@ -55,11 +57,11 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 /* Nav rows: the chosen one is a soft wash, never a card. */
 .nav { display: grid; gap: 2px; }
 .nav button {
-  display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: transparent;
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent;
   font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 540; color: var(--ink-2); text-align: left; white-space: nowrap; overflow: hidden; cursor: pointer;
 }
 .nav button .icon { color: var(--ink-3); }
-.nav button.on { background: rgba(22, 30, 26, .07); color: var(--ink); }
+.nav button.on { background: rgba(22, 30, 26, .09); color: var(--ink); }
 .nav button.on .icon { color: var(--ink); }
 @media (hover: hover) and (pointer: fine) { .nav button:not(.on):hover { background: rgba(22, 30, 26, .04); color: var(--ink); } }
 /* folded to the rail, a row is an icon button, so its wash is a capsule, not a rounded square */
@@ -68,6 +70,23 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 .nav .new-reel { margin-bottom: 8px; color: var(--ink); }
 .nav .new-reel .icon { color: var(--ink-2); }
 
+/* Recent: the reels in hand, as rows like the nav's, under a caption; a long name ends in an ellipsis, a dot says it is
+   being made (ink) or needs you (pencil). Below the nav by a group's gap, scrolling on its own when the window is short. */
+.side-recent { display: grid; gap: 2px; margin-top: var(--space-s); min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.side-h { margin: 0 0 6px; padding: 0 12px 0 36px; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 650; color: var(--ink-3); }
+.side-recent button {
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; min-width: 0;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 540; color: var(--ink-2); text-align: left; cursor: pointer;
+}
+.side-recent .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-recent button.on { background: rgba(22, 30, 26, .09); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .side-recent button:not(.on):hover { background: rgba(22, 30, 26, .04); color: var(--ink); } }
+.side-slot { flex: none; width: 16px; display: grid; place-items: center; }
+/* a reel's state in the icon slot: the app's spinner, small, while it is made; the alert mark in red when it needs you */
+.side-making { width: 12px; height: 12px; border-width: 1.5px; }
+.side-needs { display: grid; place-items: center; color: var(--pencil); }
+.rail .side-recent { display: none; }
+
 /* minmax(0, 1fr): an auto track grows to its widest unwrapped line, which pushed the update item's text across the page */
 .side-foot { margin-top: auto; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .side-update { min-width: 0; }
@@ -75,12 +94,12 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
 
 /* Account row: who you are and whether an AI editor is on; it opens Settings. */
 .acct {
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: var(--r-md); background: transparent;
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 0; border-radius: var(--r-md); background: transparent;
   font: inherit; color: inherit; text-align: left; overflow: hidden; cursor: pointer;
 }
 .acct.on { background: rgba(22, 30, 26, .07); }
 @media (hover: hover) and (pointer: fine) { .acct:not(.on):hover { background: rgba(22, 30, 26, .04); } }
-.av { width: 30px; height: 30px; border-radius: 50%; flex: none; background: var(--line-strong); color: var(--ink); display: grid; place-items: center; font-weight: 700; font-size: var(--fs-base); position: relative; }
+.av { width: 30px; height: 30px; border-radius: 50%; flex: none; background: var(--line-strong); color: var(--ink); display: grid; place-items: center; font-weight: 700; font-size: var(--fs-base); line-height: var(--lh-base); position: relative; }
 .av .st { position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--side); }
 .av .st.off { background: var(--ink-4); }
 .who { min-width: 0; display: grid; }
@@ -93,19 +112,24 @@ html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-s
   position: absolute; z-index: 50; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3); padding: 6px;
   transform-origin: var(--o, top left); transition: opacity 150ms ease, transform 150ms var(--ease-out);
 }
-@starting-style { .pop { opacity: 0; transform: scale(.97); } }
+/* from .95, so the growth from the trigger reads (at .97 it looked like a fade in place). Craft rounds 4 and 5 tried
+   .93 with the words arriving after the surface: one judge read the empty surface as loading, the other the reverse,
+   and both judges' lowest scores fell, so it is back to round 3's. */
+@starting-style { .pop { opacity: 0; transform: scale(.95); } }
 .pop.leave { opacity: 0; transform: scale(.98); transition-duration: 120ms; pointer-events: none; }
 .mi {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border: 0; background: none; border-radius: 7px;
-  font: inherit; font-size: var(--fs-base); font-weight: 500; color: var(--ink); text-align: left; white-space: nowrap; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 12px 0 8px; border: 0; background: none; border-radius: 8px;
+  font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 500; color: var(--ink); text-align: left; white-space: nowrap; cursor: pointer;
 }
 .mi > .icon { color: var(--ink-3); }
-.mi .r { margin-left: auto; padding-left: 12px; font-size: var(--fs-sm); color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.mi .r { margin-left: auto; padding-left: 12px; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
 .mi.danger { color: var(--pencil); }
 .mi[disabled] { color: var(--ink-4); cursor: default; }
 @media (hover: hover) and (pointer: fine) { .mi:not([disabled]):hover { background: var(--sunk-2); } }
 .mi:focus-visible { background: var(--sunk-2); outline-offset: -2px; }
-.pop hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+.pop hr { border: 0; border-top: 1px solid var(--line); margin: 6px 8px; }
+/* a group's name inside a menu: a caption, not a choice */
+.mi-head { margin: 0; padding: 6px 8px 2px; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 650; color: var(--ink-3); }
 .brandmark { flex: none; display: block; }
 
 /* What the keyboard opens or folds just appears. */

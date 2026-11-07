@@ -8,7 +8,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, passFirstRun, shot } from './helpers'
+import { BASE, launch, makeMedia, makeReel, passFirstRun, shot, viewMenu } from './helpers'
 
 const SIZES = [
   { width: 1100, height: 720 },
@@ -55,9 +55,9 @@ test('fails if the phone stops filling its column as an iPhone 17, the view is n
     await expect(page.getByTestId('ig-overlay')).toBeVisible()
     await expect(page.getByTestId('speed')).toBeVisible()
 
-    await page.getByTestId('view-clean').click()
+    await viewMenu(page, 'view-clean')
     await expect(page.getByTestId('ig-overlay')).toBeHidden()
-    await expect(page.getByTestId('view-clean')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('view-menu')).toHaveAttribute('aria-label', /^View: Clean,/)
     await expect.poll(() => page.evaluate(() => window.reel.app.info().then((i) => i.phoneView))).toBe('clean')
     await expect(page.getByTestId('speed')).toBeVisible()
 
@@ -65,11 +65,11 @@ test('fails if the phone stops filling its column as an iPhone 17, the view is n
     await page.reload()
     await page.getByTestId('project-card').first().click()
     await expect(page.getByTestId('player')).toBeVisible()
-    await expect(page.getByTestId('view-clean')).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('view-menu')).toHaveAttribute('aria-label', /^View: Clean,/)
     await expect(page.getByTestId('ig-overlay')).toBeHidden()
 
     // the safe zone shows while the subtitles are being set up, and only then
-    await page.getByTestId('view-instagram').click()
+    await viewMenu(page, 'view-instagram')
     await expect(page.getByTestId('ig-overlay')).toBeVisible()
     await expect(page.getByTestId('safe-band')).toHaveCount(0)
     await page.getByTestId('edit-myself').click()

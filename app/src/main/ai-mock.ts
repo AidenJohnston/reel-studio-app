@@ -177,7 +177,11 @@ export const createMockAI: CreateAI = ({ host }) => {
     const id = opts?.id ?? randomUUID()
     const copy = join(dir, 'work', 'notes', id, 'edit.json')
     const p = await readProject(dir)
-    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: ['note'], at: new Date().toISOString() }]
+    // the climb's editor (REELSTUDIO_MOCK_FIRST_EDIT=editor) does what a note about bigger subtitles asks, so the new
+    // version's "What changed" and reply read as an editor's would
+    const bigger = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor' && /\bsubtitles? bigger\b/i.test(note)
+    if (bigger) p.captions = { ...p.captions, style: { ...p.captions?.style, size: 125 } }
+    p.notes = [...(p.notes ?? []), { id, version: p.version ?? 0, text: note, applied: [bigger ? 'captions' : 'note'], at: new Date().toISOString() }]
     await fs.mkdir(join(copy, '..'), { recursive: true })
     await writeJson(copy, p)
     onEvent({ type: 'status', message: `Working on "${note}"`, pct: 5, phase: 'edit', thinking: true })
@@ -213,6 +217,8 @@ export const createMockAI: CreateAI = ({ host }) => {
     await writeProject(dir, done)
     onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
     const also = added.length ? ` Also: ${added.map((w) => `"${w}"`).join(', ')}.` : ''
+    const took = added.length ? `, and took in what you added: ${added.map((w) => `"${w}"`).join(', ')}` : ''
+    if (bigger) return { summary: `I made the subtitles bigger, so they read at a glance on a phone${took}.`, version, styleRulesAdded: [], changed: ['captions'] }
     return { summary: `Done: "${note}".${also} It is Version ${version}.`, version, styleRulesAdded: [], changed: ['note'] }
   }
 
@@ -263,6 +269,9 @@ export const createMockAI: CreateAI = ({ host }) => {
       return [{ id: 'claude', connected: false, label: 'Claude' }, claudeProvider(), cliProvider('chatgpt'), NOT_CONNECTED]
     },
     async active() {
+      // the climb's screenshots (REELSTUDIO_MOCK_FIRST_EDIT=editor) start with no editor and choose the Claude Code app,
+      // as a person does; the practice editor is a test's own and never on a person's screen
+      if (process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor') return chosen === 'claude-cli' && state.claude === 'ready' ? claudeProvider() : NOT_CONNECTED
       if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
@@ -337,8 +346,11 @@ export const createMockAI: CreateAI = ({ host }) => {
       const args = ['--project', projectDir, ...(opts?.owner ? ['--owner', opts.owner] : [])]
       // phases like the real package's no-AI path, so the job flow's bar and time left work here too
       const hold = Number(process.env.REELSTUDIO_MOCK_FIRST_LOOK || 0)
+      // Tests only (REELSTUDIO_MOCK_FIRST_EDIT=editor): the first edit an editor makes, its steps and its own words, so a
+      // screenshot set shows the path a person with an editor sees (e2e/climb-shots.spec.ts)
+      const editor = process.env.REELSTUDIO_MOCK_FIRST_EDIT === 'editor'
       const status = (message: string, pct: number, phase?: Phase, note?: string): void =>
-        onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 ? {} : { noAI: true }), ...(note ? { note } : {}) })
+        onEvent({ type: 'status', message, pct, ...(phase ? { phase } : {}), ...(hold > 0 || editor ? {} : { noAI: true }), ...(note ? { note } : {}) })
       const changed: string[] = []
       // one of several reels from one video (main/propose-reels.ts) has its words heard and its cut set already; one
       // cut from parts of the footage archive (main/archive-reels.ts) has its cut but is listened to here, as the real
@@ -376,6 +388,7 @@ export const createMockAI: CreateAI = ({ host }) => {
         await new Promise((r) => setTimeout(r, hold))
       }
 
+      if (editor) status('Picking takes and pictures', 50, 'edit')
       status('Adding music', 56)
       const track = await firstMusicTrack()
       const p = await readProject(projectDir)
@@ -384,7 +397,17 @@ export const createMockAI: CreateAI = ({ host }) => {
         changed.push('music')
         onEvent({ type: 'tool', name: 'choose_music', summary: `Picked a song: ${track.split('/').pop()}` })
       }
-      // No post caption here: nothing smart ran, so the user writes it ("Post caption: add your own").
+      // No post caption on a basic version: nothing smart ran, so the user writes it ("Post caption: add your own"). An
+      // editor writes one, as ai/src/tools.ts write_post does: the caption, exactly 5 hashtags, search keywords.
+      if (editor) {
+        p.post = {
+          caption: "You don't need a mixer for good bread. Four things and a little time.",
+          hashtags: ['#bread', '#breadmaking', '#homebaking', '#baking', '#easyrecipes'],
+          keywords: ['bread', 'no mixer', 'home baking']
+        }
+        changed.push('post')
+        onEvent({ type: 'tool', name: 'write_post', summary: 'Wrote your caption and hashtags' })
+      }
       const rules = await withStyle(async (s) => s.rules).catch((): StyleRule[] => [])
       const lower = rules.some((r) => r.payload?.case === 'lower' && !r.paused)
       if (lower) p.captions = { ...p.captions, style: { ...p.captions?.style, case: 'lower' } }
@@ -399,8 +422,9 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       const did = proposed ? 'the proposed part of the video kept and subtitles added' : 'pauses cut and subtitles added'
       return {
-        summary:
-          (track
+        summary: editor
+          ? 'I kept your clean take of each line and cut the false start, the filler and the long pauses. Subtitles and a cover are on.'
+          : (track
             ? `Basic version: ${did}, with your song underneath. Connect an editor to pick your best takes and add pictures.`
             : `Basic version: ${did}. Add a song for music, and connect an editor to pick your best takes and add pictures.`) +
           (lower ? ' Subtitles are lowercase, from My style.' : ''),

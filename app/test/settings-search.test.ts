@@ -43,7 +43,8 @@ describe('Settings search', () => {
 describe('Settings sections', () => {
   it("fails if the sections leave spec section 8's order, or Editor or Advanced loses a row it holds", () => {
     expect(Object.keys(SECTIONS)).toEqual(['editor', 'privacy', 'reels', 'posting', 'devices', 'about', 'advanced'])
-    // the editor component holds the models for each stage, your own server and an API key (r12: one component)
+    // the editor component holds the models for each stage, your own server and an API key (r12: one component), with
+    // Double-check, Look things up in parallel, How notes run and Let other AI apps use Reel Studio beside it
     expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'look-ups', 'note-runner', 'outside-apps', 'models', 'own-server', 'api-key'])
     const advanced = SETTING_IDS.filter((id) => SETTINGS[id].section === 'advanced')
     expect(advanced).toEqual(['stock-keys', 'engine-cache', 'logs', 'first-run'])

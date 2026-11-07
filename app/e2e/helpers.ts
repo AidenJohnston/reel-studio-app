@@ -114,6 +114,17 @@ export async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) })
 }
 
+/**
+ * Picks an item in the Reel screen's View menu under the phone (PreviewControls.tsx ViewMenu): `view-instagram`,
+ * `view-clean`, `shape-<id>` or `timeline-toggle`. Opens the menu first unless it is open; picking closes it.
+ */
+export async function viewMenu(page: Page, item: string): Promise<void> {
+  // the button says whether its menu is open: a menu that is closing is still on screen for its exit
+  const button = page.getByTestId('view-menu')
+  if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click()
+  await page.getByTestId('view-menu-list').getByTestId(item).click()
+}
+
 /** The account row at the bottom of the sidebar opens Settings. */
 export async function openSettings(page: Page): Promise<void> {
   await page.getByTestId('account').click()
