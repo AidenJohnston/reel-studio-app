@@ -479,6 +479,8 @@ const SCENES: Scene[] = [
     ready: byTestId('stage-failed')
   },
   { id: 'library', enter: async ({ page }) => (await closeAll(page), await page.getByTestId('nav-library').click()), ready: (page) => page.locator('[data-testid^="library-tab-"]').first() },
+  // Library › Videos, with Reels in your footage (the footage lane's ArchiveReels.tsx)
+  { id: 'library-videos', enter: async ({ page }) => page.getByTestId('library-tab-videos').click(), ready: byTestId('archive-reels') },
   { id: 'my-style', enter: async ({ page }) => page.getByTestId('nav-style').click(), ready: (page) => page.locator('main.main') },
   { id: 'insights', enter: async ({ page }) => page.getByTestId('nav-insights').click(), ready: (page) => page.locator('main.main') },
   { id: 'settings-editor', enter: async ({ page }) => settingsAt(page, 'editor'), ready: (page) => page.locator('[data-testid="settings-nav-editor"][aria-current="true"]') },

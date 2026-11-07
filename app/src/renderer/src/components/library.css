@@ -71,6 +71,11 @@
 .lib-empty { display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 360px; text-align: center; }
 .lib-empty h2 { font-size: var(--fs-subhead); line-height: var(--lh-subhead); font-weight: 620; }
 .lib-empty p { max-width: 40ch; color: var(--ink-2); }
+/* Under Videos' footage sections the empty clip list is one more section on their edge, titled as they are, not a
+   message centred in the room left below them (as Insights' empty page stacks its sections) */
+.lib-group.footage ~ .lib-empty { justify-items: start; align-content: start; gap: 4px; min-height: 0; margin-top: var(--space-s); text-align: left; }
+.lib-group.footage ~ .lib-empty h2 { font-size: var(--fs-base); line-height: var(--lh-base); }
+.lib-group.footage ~ .lib-empty p { max-width: 64ch; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-3); }
 
 /* ---- My style (MyStyle.tsx) ----
    One rule per row, read like a whiteboard: the kind's icon, the short line, Paused if it is, then where it came
