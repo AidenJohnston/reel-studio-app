@@ -8,7 +8,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { expectViewport, launch, makeMedia, makeReel, passFirstRun } from './helpers'
 
 const OUT = process.env.REELSTUDIO_SHOTS_OUT
 const ONLY = process.env.REELSTUDIO_SHOTS_STATES ? new Set(process.env.REELSTUDIO_SHOTS_STATES.split(',')) : null
@@ -27,7 +27,7 @@ type State = { id: string; enter: (c: Ctx) => Promise<void>; leave?: (c: Ctx) =>
 
 async function setSize({ app, page }: Ctx, [w, h]: [number, number]): Promise<void> {
   await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([w, h])
+  await expectViewport(page, w, h)
   await page.waitForTimeout(350)
 }
 

@@ -6,7 +6,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, SHOTS, launch, passFirstRun } from './helpers'
+import { BASE, expectViewport, launch, passFirstRun, SHOTS } from './helpers'
 import { makePastEditsHome } from './past-edits-home'
 
 const DIR = process.env.SHOTS_DIR ?? join(SHOTS, 'my-style')
@@ -46,7 +46,7 @@ async function sized(app: ElectronApplication, page: Page, name: string): Promis
   mkdirSync(DIR, { recursive: true })
   for (const size of SIZES) {
     await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.width, s.height), size)
-    await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([size.width, size.height])
+    await expectViewport(page, size.width, size.height)
     await page.waitForTimeout(300)
     await page.screenshot({ path: join(DIR, `${name}-${size.width}x${size.height}.png`) })
   }

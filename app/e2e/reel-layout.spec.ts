@@ -1,5 +1,5 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { launch, makeMedia, makeReel, passFirstRun } from './helpers'
+import { expectViewport, launch, makeMedia, makeReel, passFirstRun } from './helpers'
 
 const SIZES: [number, number][] = [
   [1100, 720],
@@ -10,7 +10,7 @@ const SIZES: [number, number][] = [
 
 async function setSize(app: ElectronApplication, page: Page, [w, h]: [number, number]): Promise<void> {
   await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.w, s.h), { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([w, h])
+  await expectViewport(page, w, h)
 }
 
 const box = (page: Page, sel: string) =>

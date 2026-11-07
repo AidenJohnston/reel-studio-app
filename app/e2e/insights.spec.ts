@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { BASE, launch, makeMedia, makeReel, newProjectFolder, passFirstRun, projectFolders, root, shot } from './helpers'
+import { BASE, expectViewport, launch, makeMedia, makeReel, newProjectFolder, passFirstRun, projectFolders, root, shot } from './helpers'
 
 const FIXTURE = join(BASE, 'insights-platforms.json')
 const DAY = 86_400_000
@@ -139,7 +139,7 @@ test('fails if, on an empty Insights page, Your recent reels is not right under 
   try {
     await passFirstRun(page)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900))
-    await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([1440, 900])
+    await expectViewport(page, 1440, 900)
     await page.getByTestId('nav-insights').click()
     const empty = page.getByTestId('insights-empty')
     const recent = page.getByTestId('recent-reels')
