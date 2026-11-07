@@ -7,7 +7,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, CLAUDE_CODE_MISNAMED, USE_CLAUDE_CODE, launch, openSettings, passFirstRun, shot } from './helpers'
+import { BASE, CLAUDE_CODE_MISNAMED, THIS_COMPUTER, USE_CLAUDE_CODE, launch, openSettings, passFirstRun, shot } from './helpers'
 
 async function connectScreen(claude: string, codex = 'missing') {
   const mine = mkdtempSync(join(BASE, `connect-${claude}-${codex}-`))
@@ -44,7 +44,7 @@ test('nothing on this computer: each row says so and links to its maker\'s insta
   await expect(page.getByTestId('hub-about')).toHaveAttribute('href', 'https://github.com/router-for-me/CLIProxyAPI')
   await expect(claude).toHaveAttribute('data-state', 'missing')
   await expect(chatgpt).toHaveAttribute('data-state', 'missing')
-  await expect(claude).toContainText('Not on this Mac.')
+  await expect(claude).toContainText(`Not on ${THIS_COMPUTER}.`)
   await expect(page.getByTestId('vendor-install-page-claude')).toHaveAttribute('href', 'https://code.claude.com/docs/en/setup')
   await expect(page.getByTestId('vendor-install-page-chatgpt')).toHaveAttribute('href', 'https://learn.chatgpt.com/docs/codex/cli')
   await expect(page.getByTestId('connect-claude')).toHaveCount(0) // no button that would install

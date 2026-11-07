@@ -7,14 +7,23 @@
 // Run: npm run build && npx playwright test e2e/attach.spec.ts
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BASE, chooseClaudeCode, dropFiles, launch, makeMedia, makeReel, passFirstRun, shot, openSettings } from './helpers'
 
 const MINE = mkdtempSync(join(BASE, 'attach-'))
 const ROOT = join(MINE, 'Documents', 'Reel Studio')
 const projects = (): string[] => readdirSync(join(ROOT, 'Projects')).filter((s) => !s.startsWith('.'))
-const assetsOf = (slug: string): string[] => readdirSync(join(ROOT, 'Projects', slug, 'work', 'assets')).filter((f) => f.startsWith('attach-'))
+const USER_DATA = join(MINE, 'user data')
+/**
+ * The attachment files of a note not sent yet. They wait in the app's note staging (main/attachments.ts attachDir,
+ * one folder per reel under user data) and move into the reel's work/assets when the note runs, so both are read.
+ */
+const assetsOf = (slug: string): string[] => {
+  const staging = join(USER_DATA, 'note-staging')
+  const dirs = [join(ROOT, 'Projects', slug, 'work', 'assets'), ...(existsSync(staging) ? readdirSync(staging).map((d) => join(staging, d, 'work', 'assets')) : [])]
+  return dirs.filter((d) => existsSync(d)).flatMap((d) => readdirSync(d)).filter((f) => f.startsWith('attach-'))
+}
 
 test('note attachments: paste, drop, paperclip, chips, send', async () => {
   test.setTimeout(10 * 60_000)
@@ -24,7 +33,7 @@ test('note attachments: paste, drop, paperclip, chips, send', async () => {
     execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', `color=c=0x${['ff0000', '00aa00', '0000ff'][i - 1]}:size=300x200`, '-frames:v', '1', p])
     return p
   })
-  const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: join(MINE, 'user data'), REELSTUDIO_MOCK_CLAUDE: 'ready' })
+  const { app, page } = await launch({ REELSTUDIO_ROOT: ROOT, REELSTUDIO_USER_DATA: USER_DATA, REELSTUDIO_MOCK_CLAUDE: 'ready' })
   await passFirstRun(page)
   await openSettings(page)
   expect(await chooseClaudeCode(page)).toBe(true)

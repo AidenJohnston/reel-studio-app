@@ -226,8 +226,12 @@ test('timeline lanes: pictures, your video and sounds, each named and reachable 
   await app.close()
 })
 
+// View › Show Timeline is in the Mac's app menu; Windows has no app menu (main/window.ts installMenu), so there the
+// Reel screen's own View menu is the switch, and the check is that no app menu exists to fall out of step.
+const MAC = process.platform === 'darwin'
 const timelineItem = (app: ElectronApplication) =>
   app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('show-timeline')?.checked ?? null)
+const menuSays = (shown: boolean): boolean | null => (MAC ? shown : null)
 const clickTimelineItem = (app: ElectronApplication) =>
   app.evaluate(({ Menu, BrowserWindow }) => Menu.getApplicationMenu()!.getMenuItemById('show-timeline')!.click({}, BrowserWindow.getAllWindows()[0], undefined))
 
@@ -246,12 +250,13 @@ test('timeline toggle: hiding gives the phone the height, is remembered, and bri
   const height = async () => (await page.getByTestId('player').boundingBox())!.height
   await expect(slider()).toBeVisible()
   await expect(view()).not.toHaveAttribute('aria-label', /timeline hidden/)
-  expect(await timelineItem(app)).toBe(true)
+  expect(await timelineItem(app)).toBe(menuSays(true))
   const tall = await height()
 
   // View › Show Timeline, with focus on the timeline: it goes, the phone grows, and focus waits on the View button
   await slider().focus()
-  await clickTimelineItem(app)
+  if (MAC) await clickTimelineItem(app)
+  else await viewMenu(page, 'timeline-toggle')
   await expect(slider()).toHaveCount(0)
   await expect(view()).toHaveAttribute('aria-label', /timeline hidden$/)
   await expect(view()).toBeFocused()
@@ -268,13 +273,13 @@ test('timeline toggle: hiding gives the phone the height, is remembered, and bri
   await page.locator('[data-testid=project-card]').first().click()
   await expect(page.getByTestId('play')).toBeVisible()
   await expect(slider()).toHaveCount(0)
-  expect(await timelineItem(app)).toBe(false)
+  expect(await timelineItem(app)).toBe(menuSays(false))
   await shot(page, 'lanes-07-timeline-hidden')
 
   // the Reel screen's View menu brings it back, and the app menu follows; the keyboard reaches it from the play button
   await viewMenu(page, 'timeline-toggle')
   await expect(slider()).toBeVisible()
-  expect(await timelineItem(app)).toBe(true)
+  expect(await timelineItem(app)).toBe(menuSays(true))
   await page.getByTestId('play').focus()
   await page.keyboard.press('Shift+Tab')
   await expect(page.getByTestId('timeline-part').last()).toBeFocused()

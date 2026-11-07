@@ -12,7 +12,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { BASE, launch, passFirstRun } from './helpers'
+import { BASE, expectViewport, launch, passFirstRun } from './helpers'
 
 const OUT = process.env.REELSTUDIO_SHOTS_DIR
 test.skip(!OUT, 'set REELSTUDIO_SHOTS_DIR to run')
@@ -31,7 +31,7 @@ function profile(name: string): Record<string, string> {
 
 async function size(app: ElectronApplication, page: Page, w: number, h: number): Promise<void> {
   await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h] as const)
-  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([w, h])
+  await expectViewport(page, w, h)
   await page.waitForTimeout(300)
 }
 
