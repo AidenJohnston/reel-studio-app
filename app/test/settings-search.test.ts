@@ -39,8 +39,9 @@ describe('Settings search', () => {
 describe('Settings sections', () => {
   it("fails if the sections leave spec section 8's order, or Editor or Advanced loses a row it holds", () => {
     expect(Object.keys(SECTIONS)).toEqual(['editor', 'privacy', 'reels', 'posting', 'devices', 'about', 'advanced'])
-    // the editor component holds the models for each stage, your own server and an API key (r12: one component)
-    expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'models', 'own-server', 'api-key'])
+    // the editor component holds the models for each stage, your own server and an API key (r12: one component), with
+    // Double-check and Look things up in parallel (the harness lane's switch) beside it
+    expect(SETTING_IDS.filter((id) => SETTINGS[id].section === 'editor')).toEqual(['editor', 'check-edits', 'look-ups', 'models', 'own-server', 'api-key'])
     const advanced = SETTING_IDS.filter((id) => SETTINGS[id].section === 'advanced')
     expect(advanced).toEqual(['stock-keys', 'engine-cache', 'logs', 'first-run'])
   })
