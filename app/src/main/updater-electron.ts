@@ -244,6 +244,11 @@ export function installerRefusal(facts: WindowsInstallerFacts, selected: string,
   return null
 }
 
+/** `env` without `key`, matched as Windows does, ignoring case. */
+function withoutKey(env: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => k.toLowerCase() !== key.toLowerCase()))
+}
+
 /** Reads WindowsInstallerFacts with Windows' own PowerShell (paths go in by environment, never into the script). */
 export async function windowsInstallerFacts(installer: string, runningExe = process.execPath): Promise<WindowsInstallerFacts> {
   const script = [
@@ -260,7 +265,10 @@ export async function windowsInstallerFacts(installer: string, runningExe = proc
   const { stdout } = await promisify(execFile)(
     powershell,
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { env: { ...process.env, RS_RUNNING_EXE: runningExe, RS_UPDATE_FILE: installer }, windowsHide: true, timeout: 60_000 }
+    // Without PSModulePath, Windows PowerShell uses its own module folders. One inherited from PowerShell 7 (the app
+    // started from a pwsh terminal) points it at 7's Microsoft.PowerShell.Security, which it can't load, and the
+    // signature check could never pass.
+    { env: { ...withoutKey(process.env, 'PSModulePath'), RS_RUNNING_EXE: runningExe, RS_UPDATE_FILE: installer }, windowsHide: true, timeout: 60_000 }
   )
   return JSON.parse(stdout) as WindowsInstallerFacts
 }

@@ -14,6 +14,10 @@
 #         "Open Anyway" path (docs/install-mac.md). With a certificate, run sign-mac.sh instead and hand out its dmg.
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE   # set by Electron-based shells; would make electron-builder tools run as plain node
+# electron-builder 26 require()s packages that are ES modules only (@noble/hashes 2), which needs Node 22.12 or newer;
+# older Node fails late with ERR_REQUIRE_ESM. CI uses 24.
+node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' ||
+  { echo "Node $(node -v) is too old to package Reel Studio: use Node 22.12 or newer (CI uses 24)." >&2; exit 1; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
