@@ -26,6 +26,36 @@ def test_gap_is_capped_and_words_never_cut():
     assert abs(tl.duration - sum(s.duration for s in tl.segments)) < 1e-6
 
 
+def _whole_and_once(tl, words):
+    for w in words:
+        assert any(sg.source == w["source"] and sg.src_start <= w["s"] + 1e-6 and w["e"] <= sg.src_end + 1e-6
+                   for sg in tl.segments), (w, [(sg.src_start, sg.src_end) for sg in tl.segments])
+    spans = sorted((sg.source, sg.src_start, sg.src_end) for sg in tl.segments)
+    for (sa, _, ea), (sb, b0, _) in zip(spans, spans[1:]):
+        assert sa != sb or b0 >= ea - 1e-6, f"source frames {b0}..{ea} play twice"
+
+
+def test_frame_rounding_never_drops_a_kept_word_or_plays_a_frame_twice():
+    """Fails if snapping a cut to the nearest frame moves a piece's start past a short word (the
+    audit's case: 24 fps, the 0.02 s pause cap, a 20 ms word just after a cut), or if snapping two
+    pieces outward makes them overlap."""
+    w = mkwords([(0.101, 0.121, "a"), (0.521, 0.541, "b")])
+    src = {"s1": {"duration": 2.0, "fps": 24.0}}
+    _whole_and_once(cut.build_timeline(w, [{"from": "w0", "to": "w1"}], src, gap_cap=0.02, min_saving=0.0), w)
+    for fps in (23.976, 24.0, 25.0, 29.97, 30.0, 60.0):
+        for k in range(60):
+            # short words and short gaps at every phase of the frame grid
+            t, spans = 0.05 + k * 0.0037, []
+            for j in range(6):
+                d = 0.015 + 0.011 * ((k + j) % 7)
+                spans.append((round(t, 4), round(t + d, 4), f"x{j}"))
+                t += d + 0.02 + 0.031 * ((k * 3 + j) % 9)
+            ws = mkwords(spans)
+            src = {"s1": {"duration": t + 1.0, "fps": fps}}
+            for cap, saving in ((0.02, 0.0), (0.02, 0.08), (0.25, 0.08)):
+                _whole_and_once(cut.build_timeline(ws, [{"from": "w0", "to": "w5"}], src, gap_cap=cap, min_saving=saving), ws)
+
+
 def test_segments_on_frame_grid():
     tl = cut.build_timeline(words_basic(), [{"from": "w0", "to": "w4"}], SRC)
     for s in tl.segments:
@@ -117,3 +147,24 @@ def test_remap_anchors_after_retranscription():
     assert moved == 3
     assert p["cut"]["keep"] == [{"from": "w0", "to": "w9"}]
     assert p["zooms"][0]["anchor"] == {"from": "w9", "to": "w9"}
+
+
+def test_caption_edits_follow_their_words_through_a_retranscription():
+    """Fails if a one-off correction, a line break or a line join still names a word id the new
+    transcript doesn't have: the correction silently stops applying and the break or join is lost."""
+    from reelengine import project
+    old = words_basic()
+    # every word is heard again with a new id, a few ms later
+    new = [{**w, "id": f"n{i}", "s": round(w["s"] + 0.01, 3), "e": round(w["e"] + 0.01, 3)} for i, w in enumerate(old)]
+    p = project.new_project("t")
+    p["captions"]["corrections"] = [{"from": "Every", "to": "Each", "at": "w3"},
+                                    {"from": "build things", "to": "build-things", "at": "w1", "through": "w2"},
+                                    {"from": "We", "to": "Wee"}]
+    p["captions"]["split"] = ["w2", "w4"]
+    p["captions"]["join"] = [{"from": "w2", "to": "w3"}]
+    project.remap_anchors(p, old, new)
+    assert p["captions"]["corrections"] == [{"from": "Every", "to": "Each", "at": "n3"},
+                                            {"from": "build things", "to": "build-things", "at": "n1", "through": "n2"},
+                                            {"from": "We", "to": "Wee"}]
+    assert p["captions"]["split"] == ["n2", "n4"]
+    assert p["captions"]["join"] == [{"from": "n2", "to": "n3"}]

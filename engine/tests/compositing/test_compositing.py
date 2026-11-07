@@ -324,6 +324,20 @@ def _mix(tmp_path, media, level, automation=()):
     return ctx, out, json.loads(Path(out).with_suffix(".json").read_text())
 
 
+def test_a_near_full_preview_window_mixes_the_song_where_the_full_render_does(tmp_path, media):
+    """Fails if the mixer shifts the song by a window's start: render slices the finished full-cut mix
+    at that start afterwards, so a window covering almost the whole reel heard the song twice as late."""
+    ctx = _ctx(tmp_path, media["video"])
+    fx.set_project(ctx, music={"enabled": True, "track": str(media["song"]), "startAt": 1.0, "level": "under-voice",
+                               "automation": [], "fadeOut": 1.0})
+    voice = fx.cut_voice(ctx, tmp_path / "voice.wav")
+    full = music.decode(music.build_audio(ctx, voice), ctx).copy()
+    ctx.window = (0.2, ctx.duration)
+    windowed = music.decode(music.build_audio(ctx, voice), ctx)
+    assert windowed.shape == full.shape
+    assert np.abs(windowed - full).max() < 1e-4
+
+
 @pytest.mark.parametrize("level,gap", [("under-voice", 19.0), ("quiet", 24.0), ("loud-intro", 19.0)])
 def test_build_audio_levels(tmp_path, media, level, gap):
     ctx, out, rep = _mix(tmp_path, media, level)

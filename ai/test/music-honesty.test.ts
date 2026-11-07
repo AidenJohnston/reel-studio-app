@@ -58,4 +58,24 @@ describe('choose_music honesty', () => {
       expect((await loadProject(dir)).music).toMatchObject({ track: song, frozen: first.frozen, startAt: 12, level: 'quiet' });
     }
   });
+
+  it("fails if a volume change inside a note re-freezes the note's song from a changed Library file", async () => {
+    const { ctx, dir, root } = await ctxFor();
+    const song = 'Library/Music/calm.mp3';
+    await fsp.writeFile(path.join(root, song), tinyMp3());
+    expect((await executeTool(ctx, 'choose_music', { track: song, startAt: 12, level: null })).isError).toBe(false);
+    const placed = (await loadProject(dir)).music;
+    // a note works on its own copy of the edit, which has this song; meanwhile the live project moved on to another
+    const noteFile = path.join(dir, 'work', 'note-edit.json');
+    await saveProject(dir, await loadProject(dir), noteFile);
+    await fsp.writeFile(path.join(root, 'Library/Music/other.mp3'), Buffer.concat([tinyMp3(), Buffer.from('other')]));
+    const live = await loadProject(dir);
+    live.music.track = 'Library/Music/other.mp3';
+    delete live.music.frozen;
+    await saveProject(dir, live);
+    await fsp.writeFile(path.join(root, song), Buffer.concat([tinyMp3(), Buffer.from('edited later')]));
+    const inNote = { ...ctx, note: { id: 'n1', file: noteFile, dir: path.join(dir, 'work') } };
+    expect((await executeTool(inNote, 'choose_music', { track: null, startAt: null, level: 'quiet' })).isError).toBe(false);
+    expect((await loadProject(dir, noteFile)).music).toMatchObject({ track: song, frozen: placed.frozen, startAt: 12, level: 'quiet' });
+  });
 });

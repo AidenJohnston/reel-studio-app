@@ -232,13 +232,18 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
         pieces.append([cursor, end])
 
     out = []
+    rate = fps or 30.0
     for s, e in pieces:
-        s2, e2 = snap(s, fps), snap(e, fps)
+        # Onto the frame grid OUTWARD: a piece's start to the frame at or before it, its end to the frame at
+        # or after it, so rounding only ever keeps a little more air and never cuts into a kept word (to the
+        # nearest frame, a word shorter than half a frame right after a cut was lost whole: audit 11 P1).
+        s2 = round(math.floor(s * rate + EPS) / rate, 6)
+        e2 = round(math.ceil(e * rate - EPS) / rate, 6)
         if src_dur:
-            e2 = min(e2, math.floor(src_dur * (fps or 30.0) + EPS) / (fps or 30.0))
+            e2 = min(e2, math.floor(src_dur * rate + EPS) / rate)
         if e2 - s2 >= frame - EPS:
-            if out and abs(out[-1][1] - s2) < EPS:
-                out[-1][1] = e2           # snapped shut: merge
+            if out and s2 <= out[-1][1] + EPS:
+                out[-1][1] = max(out[-1][1], e2)    # a cut under two frames closes: one piece, no frame twice
             else:
                 out.append([s2, e2])
     return [(round(s, 6), round(e, 6)) for s, e in out]

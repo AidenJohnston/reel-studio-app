@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from conftest import mkwords
-from reelengine import audio_env, broll, captions, cut, init, project, render, tools, transcribe, verify
+from reelengine import analyze, audio_env, broll, captions, cut, init, project, render, tools, transcribe, verify
 from reelengine.proto import EngineError
 
 
@@ -246,6 +246,10 @@ def test_transcribe_skips_silent_sources_and_keeps_voiced_source_words(tmp_path,
     assert [(w["w"], w["source"]) for w in transcript["words"]] == [("Goal", "s2")]
     assert [s["source"] for s in transcript["segments"]] == ["s2"]
     assert result["timings"]["audioSeconds"] == 6
+    # analyze, run on the same project (the engine CLI's `analyze` and `autocut`), skips the silent take
+    # too instead of failing to extract its audio
+    analyze.run(pdir)
+    assert set(project.read_json(pdir / "work" / "envelope.json")) == {"s2"}
 
 
 def test_init_accepts_silent_video(tmp_path, media):
