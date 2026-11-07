@@ -178,8 +178,15 @@ export class ResultsRefresh {
     }
     return { checkedAt: s.checkedAt, running: this.running !== null, platforms }
   }
-  /** What the last refresh saved about each connected account's followers. */
-  async audience(): Promise<PlatformAudience[]> { return (await this.load()).audience }
+  /**
+   * What the last refresh saved about each connected account's followers: only for the account connected now, so
+   * a disconnect or a switch to another account never shows the old account's followers, even before the next run.
+   */
+  async audience(): Promise<PlatformAudience[]> {
+    const saved = (await this.load()).audience
+    const now = new Map(await Promise.all(this.o.sources.map(async (src) => [src.platform, await src.account().catch(() => null)] as const)))
+    return saved.filter((a) => now.get(a.platform) === a.accountId)
+  }
 
   /**
    * Reads due posts (or, with `all`, every post the person can see, newest first) for each connected platform. One run
@@ -210,11 +217,20 @@ export class ResultsRefresh {
       const memory = s.platforms[source.platform]
       const now = this.now()
       if (memory.state.state === 'waiting' && Date.parse(memory.state.until) > now) continue
+      // another account's followers, or followers of an account no longer connected, are not kept; a new account's
+      // are read in this run rather than a day later
+      const forgetAudience = (keep: string | null) => {
+        if (s.audience.some((x) => x.platform === source.platform && x.accountId !== keep)) {
+          s.audience = s.audience.filter((x) => x.platform !== source.platform || x.accountId === keep)
+          memory.audienceAt = null
+        }
+      }
       let account: string | null
       try { account = await source.account() } catch (e) {
         memory.state = errorKind(e) === 'reconnect' ? { state: 'reconnect', message: message(e, 'Connect again in Settings.') } : { state: 'not-connected' }
         continue
       }
+      forgetAudience(account)
       if (account === null) { memory.state = { state: 'not-connected' }; continue }
       const mine = posts.filter((p) => p.platform === source.platform && p.accountId === account)
       const due = mine

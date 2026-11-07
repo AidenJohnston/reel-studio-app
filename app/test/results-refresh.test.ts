@@ -133,8 +133,36 @@ it('reads the audience at most once a day and keeps it', async () => {
   now += DAY
   await r.refresh()
   expect(ig.audienceReads()).toBe(2)
-  const reopened = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [] })
+  const reopened = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [ig.s] })
   expect(await reopened.audience()).toMatchObject([{ platform: 'instagram', accountId: '1', followers: { age: [{ key: '25-34', value: 3 }] } }])
+})
+
+// fails if one account's followers show while another account, or none, is connected (audit 05-results)
+it('shows followers only for the account connected now, and reads a new account’s at once', async () => {
+  const w = await world([])
+  let account: string | null = 'A'
+  const reads: string[] = []
+  const ig: ResultsSource = {
+    platform: 'instagram', account: async () => account, read: async () => undefined,
+    audience: async () => { reads.push(account!); return { accountId: account!, followers: { age: [{ key: account!, value: 1 }], gender: [], country: [], city: [] } } }
+  }
+  let now = T0
+  const r = new ResultsRefresh({ projectsRoot: () => w.projects, stateDir: w.dir, sources: [ig], now: () => now })
+  await r.refresh()
+  expect(await r.audience()).toMatchObject([{ accountId: 'A' }])
+  // switched within the day: A's followers are gone from the screen before any run, and B's are read on the next
+  account = 'B'
+  expect(await r.audience()).toEqual([])
+  now += HOUR
+  await r.refresh()
+  expect(reads).toEqual(['A', 'B'])
+  expect(await r.audience()).toMatchObject([{ accountId: 'B', followers: { age: [{ key: 'B' }] } }])
+  // disconnected: nothing shows, and B's followers aren't kept after the next run
+  account = null
+  expect(await r.audience()).toEqual([])
+  await r.refresh()
+  account = 'B'
+  expect(await r.audience()).toEqual([])
 })
 
 // fails if two refreshes at once (the hourly tick and a click) read every post twice
