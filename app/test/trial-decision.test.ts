@@ -4,6 +4,7 @@ import type { InsightPost } from '../src/shared/insights'
 
 const POSTED = '2026-11-01T10:00:00.000Z'
 const SETTLED = '2026-11-03T10:00:00.000Z' // exactly 48 hours later
+const at = (hours: number) => new Date(Date.parse(POSTED) + hours * 3_600_000).toISOString()
 function post(plays: number | null, observedAt: string | null = SETTLED, t: 1 | 2 = 1): InsightPost {
   return {
     project: 'p', version: 1, platform: 'instagram', accountId: '1', postId: String(t), publishedAt: POSTED, observedAt,
@@ -49,6 +50,17 @@ describe('decideTrial', () => {
     // a day later both have been up long enough for the gap in age to stop mattering (5 days and 4 days)
     const later = { ...post(200, '2026-11-07T10:00:00.000Z', 2), publishedAt: '2026-11-03T10:00:00.000Z' }
     expect(decideTrial(post(400, '2026-11-06T10:00:00.000Z'), later).kind).not.toBe('waiting')
+  })
+  // fails if a try wins on its extra time up: both at 1,000 views an hour, read at 48 and 60 hours (audit 05-results)
+  it('takes the older try’s extra time out before comparing', () => {
+    expect(decideTrial(post(48_000, at(48)), post(60_000, at(60), 2))).toMatchObject({ kind: 'too-close', reason: expect.stringContaining('Try 2 has been up longer') })
+    // a real lead survives: 80,000 views in 60 hours is at least 64,000 at 48, a third ahead
+    expect(decideTrial(post(48_000, at(48)), post(80_000, at(60), 2))).toMatchObject({ kind: 'winner', winner: 2, reason: expect.stringContaining('allowing for its extra time up') })
+  })
+  // fails if the younger try is credited with the older try's leveling off: it must beat the older try's whole count
+  it('holds the younger try to the older try’s whole count', () => {
+    expect(decideTrial(post(55_000, at(48)), post(50_000, at(60), 2)).kind).toBe('too-close')
+    expect(decideTrial(post(61_000, at(48)), post(50_000, at(60), 2))).toMatchObject({ kind: 'winner', winner: 1 })
   })
   // fails if a tiny sample can produce a winner
   it('needs 100 views between them', () => {
