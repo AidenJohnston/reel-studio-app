@@ -14,7 +14,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Loc
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
+import { APP_DIR, expectViewport, makeMedia, makeReel, passFirstRun, toEditorStep } from './helpers'
 import { makePastEditsHome, videoFolder } from './past-edits-home'
 import { detectLayout, type RawFinding } from './layout-audit/detect'
 import { ALLOW } from './layout-audit/allowlist'
@@ -129,7 +129,7 @@ async function setSize(app: ElectronApplication, page: Page, [w, h]: [number, nu
     if (win.isFullScreen()) win.setFullScreen(false)
     win.setContentSize(s.w, s.h)
   }, { w, h })
-  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight]), { timeout: 5000 }).toEqual([w, h])
+  await expectViewport(page, w, h, 5000)
   await settle(page)
 }
 

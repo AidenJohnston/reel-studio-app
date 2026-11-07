@@ -10,7 +10,10 @@
 .platform-win32.rail .titlebar.tb-main, .platform-linux.rail .titlebar.tb-main { left: 64px; }
 .titlebar :is(button, a, input, textarea, select, [role="button"], [contenteditable="true"]) { -webkit-app-region: no-drag; pointer-events: auto; }
 .tb-side { width: var(--side-open); flex: none; height: 100%; display: flex; align-items: center; gap: 8px; padding-left: 84px; overflow: hidden; }
-.platform-win32 .tb-side, .platform-linux .tb-side { padding-left: 12px; }
+/* No traffic lights: the toggle's icon sits over the nav icons (both centred 32 px in) and the wordmark starts where
+   the nav labels do (48 px). At 12 px with an 8 px gap the wordmark began 4 px right of the labels, a near miss on every
+   screen of the Windows climb run (uiclimb-4). */
+.platform-win32 .tb-side, .platform-linux .tb-side { padding-left: 16px; gap: 0; }
 .rail .tb-side { width: 124px; }
 .platform-win32.rail .tb-side, .platform-linux.rail .tb-side { width: 64px; }
 .wordmark { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 600; letter-spacing: -.005em; white-space: nowrap; transition: opacity 150ms var(--ease-out); pointer-events: none; }

@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { TRANSCRIPT } from '../src/renderer/src/components/first-run/sample'
 import { SIZE_PER_EM } from '../src/shared/caption-fit'
 import { createHash } from 'node:crypto'
-import { BASE, launch, makeMedia, modelReady, startReel, toEditorStep } from './helpers'
+import { BASE, expectViewport, launch, makeMedia, modelReady, startReel, toEditorStep } from './helpers'
 import { auditConsistency, type ConsistencyFinding } from './layout-audit/consistency'
 import { CONSISTENCY_ALLOW, SCALE } from './layout-audit/consistency-allow'
 
@@ -46,7 +46,7 @@ async function setSize(c: Ctx, [w, h]: [number, number]): Promise<void> {
     if (win.isFullScreen()) win.setFullScreen(false)
     win.setContentSize(s.w, s.h)
   }, { w, h })
-  await expect.poll(() => c.page.evaluate(() => [innerWidth, innerHeight]), { timeout: 5000 }).toEqual([w, h])
+  await expectViewport(c.page, w, h, 5000)
   await settle(c.page)
 }
 

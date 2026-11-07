@@ -247,6 +247,17 @@ export async function dropFiles(page: Page, testId: string, paths: string[], rel
 export const USE_CLAUDE_CODE = 'Use Claude (your Claude Code app)'
 export const CLAUDE_CODE_LABEL = 'Claude (your Claude Code app)'
 /** Any "Claude Code" that is not "Claude Code app" would be the app calling itself Claude Code. */
+/**
+ * The page at w x h CSS px, as near as the screen allows. At 150% scaling Windows sizes the window in whole device
+ * pixels, so a 720 px tall window came out 722 on the Windows executor (requests uiclimb-1, uiclimb-3) and every spec
+ * that waited for exactly 720 stopped there. Within 2 px is the size asked for; the layout under test is the same.
+ */
+export async function expectViewport(page: Page, w: number, h: number, timeout?: number): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(([w, h]) => Math.abs(innerWidth - w) <= 2 && Math.abs(innerHeight - h) <= 2, [w, h]), timeout ? { timeout } : {})
+    .toBe(true)
+}
+
 export const CLAUDE_CODE_MISNAMED = /Claude Code(?! app)/
 
 /**
