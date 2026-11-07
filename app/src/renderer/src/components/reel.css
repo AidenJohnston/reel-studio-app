@@ -372,6 +372,10 @@ html.kb .tl-sound:focus-visible { outline: 2px solid var(--ink); outline-offset:
 .nt-res .lk:disabled { opacity: .5; cursor: default; }
 .nt-res .onscreen { margin-left: auto; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .nt-res.quiet { color: var(--ink-3); }
+/* a waiting note's links keep to the row's end and, when the column is too narrow for them beside its words
+   ("Makes Version 3"), go under them rather than breaking the words over two lines */
+.nt-res.quiet:has(.q-acts) { flex-wrap: wrap; row-gap: 0; }
+.q-acts { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 /* the editor asking something waits on the person, so it reads in ink like a bubble, not as a hint */
 .nt-res.asks { color: var(--ink); }
 .nt-res.paused .t { color: var(--amber); font-weight: 600; }

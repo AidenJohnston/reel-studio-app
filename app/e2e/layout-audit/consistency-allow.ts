@@ -16,6 +16,13 @@ export const SCALE: ConsistencyScale = {
 export const CONSISTENCY_ALLOW: (ConsistencyAllow & { scenes?: string[]; reason: string })[] = [
   {
     rule: 'off-scale',
+    selector: '.q-acts',
+    exact: true,
+    props: ['margin-left'],
+    reason: "margin-left: auto (reel.css .q-acts): a waiting note's links keep to the row's end; the used length is the room left."
+  },
+  {
+    rule: 'off-scale',
     selector: '.log > :first-child',
     exact: true,
     props: ['margin-top'],

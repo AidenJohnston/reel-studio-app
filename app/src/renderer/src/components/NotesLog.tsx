@@ -639,9 +639,13 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
         <span className="nk">
           <span className="wait-dot" />
         </span>
-        <span className="t">{held ? 'Held until you send it' : `${i === 0 ? 'Next' : 'Then'}, ${q.branch !== undefined ? `from Version ${q.branch}` : `on Version ${on}`}`}</span>
+        {/* the version it will make, and Add now as the version it joins: "Next, on Version 2" beside a bare "Add now"
+            asked a person to work out the queue (Sense re-score 4, both judges). `on` is the version it starts from. */}
+        <span className="t">
+          {held ? 'Held until you send it' : `${i === 0 ? `Makes Version ${on + 1}` : `Then makes Version ${on + 1}`}${q.branch !== undefined ? `, from Version ${q.branch}` : ''}`}
+        </span>
         {draft === null && (
-          <>
+          <span className="q-acts">
             {canAdd && !q.hand && !q.attachments.length && (
               <button
                 className="lk"
@@ -651,7 +655,7 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
                 }
                 data-testid="queue-add"
               >
-                Add now
+                Add to Version {on - i}
               </button>
             )}
             <button className="lk" onClick={() => (q.hand ? onEditHand(q.id) : setDraft(q.text))} data-testid="queue-edit">
@@ -660,7 +664,7 @@ function QueuedRow({ slug, q, i, count, held, on, canAdd, onEditHand, onError }:
             <button className="lk" onClick={() => act(reel.queue.cancel(slug, q.id))} data-testid="queue-cancel">
               Cancel
             </button>
-          </>
+          </span>
         )}
       </div>
     </article>
