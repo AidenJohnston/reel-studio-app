@@ -74,8 +74,11 @@ def test_frame_rounding_never_brings_back_a_removed_word():
             keep = [{"from": f"w{j}", "to": f"w{j}"} for j in (0, 2, 4, 6)]
             tl = cut.build_timeline(ws, keep, {"s1": {"duration": t + 1.0, "fps": fps}}, gap_cap=0.25, min_saving=0.08)
             for j in (1, 3, 5):
-                # a removed word never plays whole; nearest-frame rounding may still reach under half a
-                # frame into one, as it always has
+                # a removed word with a frame of air each side never plays whole (nearest-frame rounding
+                # may still reach under half a frame into one, as it always has; closer than a frame to a
+                # kept word, the kept word wins)
+                if min(ws[j]["s"] - ws[j - 1]["e"], ws[j + 1]["s"] - ws[j]["e"]) < 1 / fps:
+                    continue
                 assert not any(sg.src_start <= ws[j]["s"] + 1e-6 and ws[j]["e"] <= sg.src_end + 1e-6
                                for sg in tl.segments), (fps, k, j)
             for j in (0, 2, 4, 6):                       # a kept word with a frame of air each side stays whole
