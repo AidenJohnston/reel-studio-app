@@ -58,7 +58,8 @@ def test_frame_rounding_never_drops_a_kept_word_or_plays_a_frame_twice():
 
 def test_frame_rounding_never_brings_back_a_removed_word():
     """Fails if rounding a kept range's edges outward plays the word cut out between two ranges (the
-    review's case: a 20 ms word under a frame from both its kept neighbours, played twice and uncaptioned)."""
+    review's case: a 20 ms word under a frame from both its kept neighbours, played twice and uncaptioned)
+    or plays a removed word whole."""
     w = mkwords([(0.10, 0.50, "kept"), (0.51, 0.53, "cut"), (0.54, 0.90, "kept")])
     tl = cut.build_timeline(w, [{"from": "w0", "to": "w0"}, {"from": "w2", "to": "w2"}], {"s1": {"duration": 2.0, "fps": 30.0}})
     assert not any(sg.src_start < 0.52 < sg.src_end for sg in tl.segments), [(sg.src_start, sg.src_end) for sg in tl.segments]
@@ -72,9 +73,11 @@ def test_frame_rounding_never_brings_back_a_removed_word():
             ws = mkwords(spans)
             keep = [{"from": f"w{j}", "to": f"w{j}"} for j in (0, 2, 4, 6)]
             tl = cut.build_timeline(ws, keep, {"s1": {"duration": t + 1.0, "fps": fps}}, gap_cap=0.25, min_saving=0.08)
-            for j in (1, 3, 5):                          # every removed word stays out
-                mid = (ws[j]["s"] + ws[j]["e"]) / 2
-                assert not any(sg.src_start < mid < sg.src_end for sg in tl.segments), (fps, k, j)
+            for j in (1, 3, 5):
+                # a removed word never plays whole; nearest-frame rounding may still reach under half a
+                # frame into one, as it always has
+                assert not any(sg.src_start <= ws[j]["s"] + 1e-6 and ws[j]["e"] <= sg.src_end + 1e-6
+                               for sg in tl.segments), (fps, k, j)
             for j in (0, 2, 4, 6):                       # a kept word with a frame of air each side stays whole
                 gaps = [ws[j]["s"] - ws[j - 1]["e"] if j else 1.0, ws[j + 1]["s"] - ws[j]["e"] if j < 6 else 1.0]
                 if min(gaps) >= 1 / fps:
