@@ -394,10 +394,14 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         # Split a merged contiguous range only at a declared join. The two pieces
         # still show exactly the same source frames and have the same total length.
         for wi, previous_end, join, kk in markers:
-            # the piece that holds the word takes the join; its nearest frame may lie past that piece's end
-            # (a one-frame piece), and then the join is at the piece's start
+            # the piece that holds the word takes the join, split at the word's nearest frame, or the frame
+            # before it when the nearest one is past the word's start (a split there put a short word whole
+            # on the outgoing side); a nearest frame past that piece's end (a one-frame piece) puts the join
+            # at the piece's start
             ws_ = words[wi]["s"]
             t = snap(ws_, fps)
+            if t > ws_ + EPS:
+                t = round(math.floor(ws_ * (fps or 30.0) + EPS) / (fps or 30.0), 6)
             for si, seg in enumerate(run_segs):
                 if seg.src_start - EPS <= ws_ < seg.src_end:
                     if not seg.src_start <= t < seg.src_end:
