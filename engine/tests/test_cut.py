@@ -87,6 +87,16 @@ def test_frame_rounding_never_brings_back_a_removed_word():
                     assert any(sg.src_start <= ws[j]["s"] + 1e-6 and ws[j]["e"] <= sg.src_end + 1e-6 for sg in tl.segments), (fps, k, j)
 
 
+def test_a_join_inside_a_merged_range_keeps_its_word_on_the_incoming_side():
+    """Fails if a join between two contiguous ranges splits at the marked word's nearest frame when that
+    frame is past the word: a 20 ms word then sits wholly before the cut, and the flash plays after it."""
+    w = mkwords([(0.1, 0.4, "a"), (0.521, 0.541, "b")])
+    keep = [{"from": "w0", "to": "w0"}, {"from": "w1", "to": "w1", "join": {"transition": "flash", "frames": 0}}]
+    tl = cut.build_timeline(w, keep, {"s1": {"duration": 2.0, "fps": 24.0}})
+    flashed = [sg for sg in tl.segments if sg.join_transition == "flash"]
+    assert len(flashed) == 1 and flashed[0].src_start <= 0.521 < flashed[0].src_end, [(sg.src_start, sg.src_end, sg.join_transition) for sg in tl.segments]
+
+
 def test_a_kept_word_squeezed_between_removed_words_still_plays():
     """Fails if a kept word whose removed neighbours are each under a frame away is dropped whole
     (holding both neighbours off leaves it no frame); it plays, with a sliver of them, as on 9e9c93b7."""
