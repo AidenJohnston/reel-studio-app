@@ -202,6 +202,9 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
     src = words[i0]["source"]
     word_lo = lo if i0 > 0 and words[i0 - 1]["source"] == src else -math.inf
     word_hi = hi if i1 + 1 < len(words) and words[i1 + 1]["source"] == src else math.inf
+    # where those removed neighbours start and end: a nearest-frame edge that reaches past one plays it whole
+    gone_s = words[i0 - 1]["s"] if word_lo > -math.inf else -math.inf
+    gone_e = words[i1 + 1]["e"] if word_hi < math.inf else math.inf
     first_s, last_e = ws[0]["s"], ws[-1]["e"]
     start = min(first_s, max(lo, first_s - lead_cap, 0.0))
     end = max(last_e, min(hi, last_e + tail_cap))
@@ -243,16 +246,21 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
         # whole: audit 11 P1). Only then does the edge go outward, to the frame before the speech starts
         # or after it ends, and that outward frame stops at a removed neighbouring word when a clean frame
         # exists between the two; when none does, the kept speech wins and under a frame of the neighbour
-        # plays. Everywhere else the cut lands exactly where nearest-frame rounding always put it.
+        # plays. A nearest frame that would play a whole removed word (one under half a frame long) stops
+        # at that word too. Everywhere else the cut lands exactly where nearest-frame rounding put it.
         speech = [(a, b) for a, b in _spoken(ws) if b > s + EPS and a < e - EPS]
         speech_s = min((max(a, s) for a, _ in speech), default=e)
         speech_e = max((min(b, e) for _, b in speech), default=s)
         s2 = round(s * rate) / rate
+        if s2 <= gone_s + EPS:                    # a removed word under half a frame long, played whole
+            s2 = math.ceil(word_lo * rate - EPS) / rate
         if s2 > speech_s + EPS:
             s2 = math.floor(s * rate + EPS) / rate
             if s2 < word_lo - EPS and math.ceil(word_lo * rate - EPS) / rate <= speech_s + EPS:
                 s2 = math.ceil(word_lo * rate - EPS) / rate
         e2 = round(e * rate) / rate
+        if e2 >= gone_e - EPS:
+            e2 = math.floor(word_hi * rate + EPS) / rate
         if e2 < speech_e - EPS:
             e2 = math.ceil(e * rate - EPS) / rate
             if e2 > word_hi + EPS and math.floor(word_hi * rate + EPS) / rate >= speech_e - EPS:

@@ -58,10 +58,13 @@ def test_hit_lands_on_its_moment_within_a_frame(tmp_path, take):
 
 
 def test_effect_on_first_kept_word_survives_a_snapped_cut(tmp_path, take):
+    """Fails if an effect on the first word of a kept range is dropped or lands off that word when the
+    range's start is snapped to the frame grid right at the word."""
     pdir = tmp_path / "proj"
     proj = fx.make_project(pdir, take)
-    # Continuous speech: the removed word ends exactly where the kept word starts.
-    # At 30 fps, snapping 2.02 s moves the segment start past that word's source start.
+    # Continuous speech: the removed word ends exactly where the kept word starts. At 30 fps the nearest
+    # frame to 2.02 s is inside the kept word, so the range starts a frame earlier and keeps it whole
+    # (audit 11: nearest-frame rounding used to start at 2.0333 and cut its first 13 ms).
     words = [
         {"id": "w0", "source": "s1", "s": 0.05, "e": 0.8, "w": "Keep"},
         {"id": "w1", "source": "s1", "s": 1.0, "e": 2.02, "w": "remove"},
@@ -72,7 +75,7 @@ def test_effect_on_first_kept_word_survives_a_snapped_cut(tmp_path, take):
     proj["sfx"] = [{"at": {"word": "w2"}, "sound": "pop-plop"}]
     (pdir / "work" / "transcript.json").write_text(json.dumps({"words": words}), encoding="utf-8")
     tl = projmod.timeline(pdir, proj, words)
-    assert tl.segments[1].src_start > words[2]["s"] + 0.001
+    assert tl.segments[1].src_start <= words[2]["s"]
     ctx = render.make_ctx(pdir, proj, tl, True, pdir, pdir / "work" / "render")
 
     placed, left = sfx.plan(ctx)
@@ -80,7 +83,7 @@ def test_effect_on_first_kept_word_survives_a_snapped_cut(tmp_path, take):
     assert left == []
     assert len(placed) == 1
     assert placed[0]["at"] == {"word": "w2"}
-    assert placed[0]["t"] == pytest.approx(tl.segments[1].out_start)
+    assert placed[0]["t"] == pytest.approx(tl.word_out_time("w2"), abs=1 / 30)
 
 
 def test_two_effects_closer_than_the_limit_play_once(tmp_path, take):
