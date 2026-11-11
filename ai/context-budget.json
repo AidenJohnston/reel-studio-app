@@ -1,11 +1,16 @@
 {
-  "firstEdit (chars)": 57625,
-  "applyNote (chars)": 52038,
-  "proofread (chars)": 21207,
-  "postKit (chars)": 21718,
-  "writeScript (chars)": 4000,
-  "pickTakes (chars)": 3000,
+  "firstEdit, api (chars)": 57625,
+  "firstEdit, cli (chars)": 57742,
+  "applyNote, api (chars)": 52038,
+  "applyNote, cli (chars)": 52155,
+  "proofread, api (chars)": 21207,
+  "proofread, cli (chars)": 21739,
+  "postKit, api (chars)": 21718,
+  "postKit, cli (chars)": 22228,
+  "writeScript, cli (chars)": 4100,
+  "pickTakes, cli (chars)": 3100,
   "system prompt (chars)": 18268,
-  "all tool definitions (chars)": 27836,
+  "all tool definitions, api (chars)": 27836,
+  "all tool definitions, cli (chars)": 27953,
   "tools (count)": 26
 }
