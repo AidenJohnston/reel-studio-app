@@ -72,8 +72,12 @@ jobs:
             const { data: current } = await github.rest.issues.listLabelsOnIssue({
               owner, repo, issue_number: pr.number, per_page: 100,
             });
+            // The files API stops at 3,000 files: with a partial list, add area labels but never remove one.
+            const partial = files.length < pr.changed_files;
+            if (partial) core.warning(`Listed ${files.length} of ${pr.changed_files} files; keeping existing area labels.`);
             for (const label of current) {
               if (!managed.has(label.name) || wanted.has(label.name)) continue;
+              if (partial && label.name.startsWith("area:")) continue;
               try {
                 await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: label.name });
               } catch (error) {

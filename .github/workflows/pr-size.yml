@@ -86,11 +86,11 @@ jobs:
 
             execFileSync("git", ["cat-file", "-e", `${baseSha}^{commit}`], { stdio: "inherit" });
             const diffArgs = ["diff", "--numstat", "--ignore-all-space", "--ignore-blank-lines", `${baseSha}...${resolvedHeadSha}`];
-            const totalChangedLines = sumNumstat(execFileSync("git", diffArgs, { encoding: "utf8" }));
-            const nonTestChangedLines = sumNumstat(
-              execFileSync("git", [...diffArgs, "--", ".", ...testExcludePathspecs], { encoding: "utf8" }),
-            );
+            const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+            const totalChangedLines = sumNumstat(git(diffArgs));
+            const nonTestChangedLines = sumNumstat(git([...diffArgs, "--", ".", ...testExcludePathspecs]));
             const testChangedLines = Math.max(0, totalChangedLines - nonTestChangedLines);
+            // Tests don't count, except in a test-only PR, which is sized by its test lines.
             const changedLines = nonTestChangedLines === 0 ? testChangedLines : nonTestChangedLines;
             const nextLabelName = resolveSizeLabel(changedLines);
 
