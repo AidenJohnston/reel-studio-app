@@ -32,13 +32,12 @@ FFMPEG8 = """Filters:
 
 
 def _parse(monkeypatch, listing):
-    tools._CACHE.pop("filters", None)
+    monkeypatch.delitem(tools._CACHE, "filters", raising=False)
     monkeypatch.setattr(tools, "ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(tools, "text_run", lambda *a, **k: subprocess.CompletedProcess(a, 0, listing, ""))
-    try:
-        return tools.filters()
-    finally:
-        tools._CACHE.pop("filters", None)
+    names = tools.filters()
+    tools._CACHE.pop("filters", None)
+    return names
 
 
 def test_ffmpeg7_listing(monkeypatch):
