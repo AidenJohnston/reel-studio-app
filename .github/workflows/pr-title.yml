@@ -1,0 +1,28 @@
+name: PR title
+
+# The title becomes the squashed commit on main, so it must be `type(scope): subject` (CONTRIBUTING.md,
+# docs/pull-requests.md). Reads only the title from the event: no checkout, no token beyond read.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Check the title format
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          types='feat|fix|perf|refactor|docs|test|build|ci|chore|revert'
+          if printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: [^ ].*[^.]$"; then
+            echo "OK: $TITLE"
+            exit 0
+          fi
+          echo "::error::The title must be 'type(scope): subject', where type is one of ${types//|/, }; the scope is optional and lowercase; the subject doesn't end with a period. Example: 'fix(captions): keep subtitles clear of the buttons'. Got: $TITLE"
+          exit 1
