@@ -4,63 +4,40 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: '17 9 * * *' # nightly: everything, on all three systems
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  # A newer push to a pull request replaces its run; a run on main always finishes, so every main commit is tested.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Decides which of the expensive jobs a pull request needs (scripts/ci/changes.mjs, shared with
+  # `npm run check:changed`). Pushes to main and manual runs run everything. Detection fails open: unknown paths run
+  # every job, and a job runs unless this says 'false', so a failed detector never skips a check.
   changes:
-    name: What changed
+    name: Changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      node: ${{ steps.pick.outputs.node }}
-      engine: ${{ steps.pick.outputs.engine }}
-      animations: ${{ steps.pick.outputs.animations }}
+      desktop: ${{ steps.detect.outputs.desktop }}
+      engine: ${{ steps.detect.outputs.engine }}
+      animations: ${{ steps.detect.outputs.animations }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          fetch-depth: 0
-      - name: Pick the jobs this change needs
-        id: pick
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # Pushes to main, the nightly run and manual runs (gh workflow run CI --ref <branch>) run everything.
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "Full run ($EVENT)"
-            { echo node=true; echo engine=true; echo animations=true; } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          files=$(git diff --no-renames --name-only "$BASE...$HEAD")
-          printf 'Changed files:\n%s\n' "$files"
-          has() { printf '%s\n' "$files" | grep -E "$1" > /dev/null && echo true || echo false; }
-          # This workflow itself: run everything.
-          self='^\.github/workflows/ci\.yml$'
-          # Node on three systems: the app and the AI editor, plus the engine (app/test/real-engine.test.ts runs it),
-          # animation metadata (ai/ generates its list from it), packaging and the root package files.
-          node=$(has "$self|^(app|ai|engine|packaging)/|^templates/animations/.*/meta\.json$|^package(-lock)?\.json$")
-          engine=$(has "$self|^engine/|^packaging/(requirements[^/]*\.txt|hash_requirements\.py)$")
-          animations=$(has "$self|^templates/")
-          echo "node=$node engine=$engine animations=$animations"
-          { echo "node=$node"; echo "engine=$engine"; echo "animations=$animations"; } >> "$GITHUB_OUTPUT"
+          fetch-depth: 2 # the merge commit and its base parent
+      - name: Detect affected jobs
+        id: detect
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/changes.mjs --github
+
+  # The cheap job: install, build, typecheck and the Node tests on Linux. Runs on every change.
   node:
-    needs: changes
-    if: needs.changes.outputs.node == 'true'
-    name: Node / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Node / ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -73,9 +50,49 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
-      - name: Install FFmpeg on Linux
-        if: runner.os == 'Linux'
+      - name: Cache Electron download
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Install FFmpeg
         run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build -w ai
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build -w app
+
+  # The same Node job on the slower macOS and Windows runners, for changes that can behave differently there.
+  desktop:
+    name: Node / ${{ matrix.os }}
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Cache Electron download
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - name: Install FFmpeg on macOS
         if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -87,10 +104,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build -w app
+
   engine:
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
     name: Engine / Python 3.11
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.engine != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -129,10 +147,11 @@ jobs:
         env:
           # runner.* is not available in a job-level env, only in a step's
           REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
+
   animations:
-    needs: changes
-    if: needs.changes.outputs.animations == 'true'
     name: Animation rendering
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.animations != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -149,13 +168,24 @@ jobs:
           cache-dependency-path: templates/animations/package-lock.json
       - run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
       - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('templates/animations/package-lock.json') }}
+      - name: Install Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system libraries
+        if: steps.chromium.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - run: npm test
+
+  # The one required CI check: passes when every job passed, or was skipped because the change didn't need it.
   ci-ok:
-    # The one required check. A job this change didn't need is skipped, and skipped counts as passed;
-    # a failed or cancelled one fails this.
     name: CI ok
-    needs: [changes, node, engine, animations]
+    needs: [changes, node, desktop, engine, animations]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
