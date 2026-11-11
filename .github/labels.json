@@ -17,12 +17,7 @@
   {
     "name": "needs-info",
     "color": "c5def5",
-    "description": "Waiting on the author for details needed to review."
-  },
-  {
-    "name": "DO NOT MERGE",
-    "color": "b60205",
-    "description": "Not ready to merge. State what must change before it is ready."
+    "description": "Issue: waiting on the reporter for details needed to act on it."
   },
   {
     "name": "size:XS",
@@ -118,6 +113,11 @@
     "name": "type:chore",
     "color": "ededed",
     "description": "Set from the PR title: upkeep that changes nothing a user sees."
+  },
+  {
+    "name": "type:revert",
+    "color": "ededed",
+    "description": "Set from the PR title: undoes an earlier change."
   },
   {
     "name": "area:app",
