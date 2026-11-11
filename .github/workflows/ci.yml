@@ -4,13 +4,56 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * *' # nightly: everything, on all three systems
 permissions:
   contents: read
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.pick.outputs.node }}
+      engine: ${{ steps.pick.outputs.engine }}
+      animations: ${{ steps.pick.outputs.animations }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Pick the jobs this change needs
+        id: pick
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Pushes to main, the nightly run and manual runs (gh workflow run CI --ref <branch>) run everything.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "Full run ($EVENT)"
+            { echo node=true; echo engine=true; echo animations=true; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE...$HEAD")
+          printf 'Changed files:\n%s\n' "$files"
+          has() { printf '%s\n' "$files" | grep -qE "$1" && echo true || echo false; }
+          # This workflow itself: run everything.
+          self='^\.github/workflows/ci\.yml$'
+          # Node on three systems: the app and the AI editor, plus the engine (app/test/real-engine.test.ts runs it),
+          # animation metadata (ai/ generates its list from it), packaging and the root package files.
+          node=$(has "$self|^(app|ai|engine|packaging)/|^templates/animations/.*/meta\.json$|^package(-lock)?\.json$")
+          engine=$(has "$self|^engine/|^packaging/(requirements[^/]*\.txt|hash_requirements\.py)$")
+          animations=$(has "$self|^templates/")
+          echo "node=$node engine=$engine animations=$animations"
+          { echo "node=$node"; echo "engine=$engine"; echo "animations=$animations"; } >> "$GITHUB_OUTPUT"
   node:
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
     name: Node / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -45,6 +88,8 @@ jobs:
       - run: npm test
       - run: npm run build -w app
   engine:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     name: Engine / Python 3.11
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -85,6 +130,8 @@ jobs:
           # runner.* is not available in a job-level env, only in a step's
           REELENGINE_CACHE: ${{ runner.temp }}/reelengine-cache
   animations:
+    needs: changes
+    if: needs.changes.outputs.animations == 'true'
     name: Animation rendering
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -104,3 +151,18 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: npm test
+  ci-ok:
+    # The one required check. A job this change didn't need is skipped, and skipped counts as passed;
+    # a failed or cancelled one fails this.
+    name: CI ok
+    needs: [changes, node, engine, animations]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Every needed job passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then exit 1; fi
