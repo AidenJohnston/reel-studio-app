@@ -1,9 +1,8 @@
 name: AI context budget
 
-# Fails when a pull request raises a number in ai/context-budget.json above main's. That file holds the fixed text each
-# AI task sends the model (prompts, tool definitions), which every user pays for on their own AI plan on every call.
-# ai/test/context-budget.test.ts keeps the file equal to the measurement, so it can't be lowered by hand to pass.
-# To accept growth on purpose, a maintainer adds the ai-context-increase label.
+# Fails when a number in ai/context-budget.json grows past main's, or a key main has disappears (a rename would dodge
+# the comparison). ai/test/context-budget.test.ts keeps the file equal to the measurement. A maintainer accepts growth
+# on purpose with the ai-context-increase label.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
@@ -38,15 +37,16 @@ jobs:
           fi
           git show "FETCH_HEAD:$BUDGET" > "$RUNNER_TEMP/main.json"
           grown=$(jq -r --slurpfile main "$RUNNER_TEMP/main.json" '
-            to_entries[]
-            | select($main[0][.key] != null and .value > $main[0][.key])
-            | "\(.key): \($main[0][.key]) -> \(.value) (+\(.value - $main[0][.key]))"
+            ($main[0] | keys[]) as $k
+            | if has($k) | not then "\($k): removed (was \($main[0][$k]))"
+              elif .[$k] > $main[0][$k] then "\($k): \($main[0][$k]) -> \(.[$k]) (+\(.[$k] - $main[0][$k]))"
+              else empty end
           ' "$BUDGET")
           if [ -z "$grown" ]; then
             echo "The AI's fixed context is not larger than main's."
             exit 0
           fi
-          printf 'The AI sends more fixed text than on main:\n%s\n' "$grown"
+          printf 'Compared with main, the AI fixed context grew or a pinned number was removed:\n%s\n' "$grown"
           if [ "$ALLOW_INCREASE" = "true" ]; then
             echo "Accepted by the ai-context-increase label."
             exit 0

@@ -1,9 +1,5 @@
-// The fixed text each AI task sends the model before any of the user's project: prompts, the data boundary and the
-// tool definitions. Two shapes: "api" (a pasted API key; tools go as JSON schemas) and "cli" (the user's Claude Code or
-// Codex; tools go as the text catalog protocolPrompt() writes). Preloaded project data is the user's own, so it is
-// left out; so is the one-line post-kit lead-in editor.ts writes inline. Every character is paid for on the user's own AI plan, on every call, so it is pinned in
-// ai/context-budget.json. This test keeps that file equal to the measurement; the "AI context budget" workflow fails a
-// pull request that raises a number unless a maintainer accepts it with the ai-context-increase label.
+// Pins the fixed text each AI task sends before the user's own data (ai/context-budget.json), in both shapes: "api"
+// (a pasted key; tools as JSON schemas) and "cli" (Claude Code; renderConversation() plus its --system-prompt).
 // After an intended change: UPDATE_CONTEXT_BUDGET=1 npm test -w ai, and commit the file.
 import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -11,41 +7,61 @@ import { join } from 'node:path';
 import { Prompts } from '../src/prompts';
 import { toolSchemas } from '../src/tools';
 import { DATA_BOUNDARY } from '../src/editor';
-import { protocolPrompt } from '../src/providers/cli';
+import { renderConversation } from '../src/providers/cli';
 
 const FILE = join(__dirname, '..', 'context-budget.json');
+const src = (file: string) => readFileSync(join(__dirname, '..', 'src', file), 'utf8');
 
 // Tool lists as editor.ts passes them (undefined = every tool). Keep in step with editor.ts.
 const POST_KIT_TOOLS = ['get_transcript', 'cover_candidates', 'set_cover', 'write_post', 'finish'];
 const PROOFREAD_TOOLS = ['add_caption_correction', 'remove_caption_correction', 'finish'];
 
+/** A string literal from the source, so the budget sees edits to it. Fails if the code around it changes shape. */
+function literal(file: string, re: RegExp): string {
+  const m = re.exec(src(file));
+  if (!m) throw new Error(`context-budget.test.ts: ${re} no longer matches src/${file}; update the test`);
+  return m[1];
+}
+
 function measure(): Record<string, number> {
   const prompts = new Prompts(join(__dirname, '..', 'prompts'));
-  // Style rules and the user's text are the user's own, so they are left out: empty here.
   const system = `${prompts.render('system', { styleRules: '' })}\n\n${DATA_BOUNDARY}\n`;
-  const tools = (names?: string[]) => JSON.stringify(toolSchemas(names)).length;
+  const claudeSystem = literal('providers/cli.ts', /'--system-prompt', '([^']+)'/);
+  const postKitLead = (needCover: boolean) => {
+    const [, cover, noCover] = /\$\{needCover \? '([^']+)' : '([^']+)'\}/.exec(src('editor.ts')) ?? [];
+    const lead = literal('editor.ts', /const task = `(The edit of this video is saved[^$]*)\$\{needCover/);
+    const tail = literal('editor.ts', /'Call write_post'\}([^$]*)\$\{deps\.prompts\.render\('firstEdit'\)/);
+    if (!cover || !noCover) throw new Error('context-budget.test.ts: the post-kit lead-in in editor.ts changed shape');
+    return `${lead}${needCover ? cover : noCover}${tail}`.replace(/\\n/g, '\n');
+  };
   const postKitSections = prompts.render('firstEdit').split(/^## /m).filter((s) => /^\d+\. (Post kit|Cover)/.test(s)).map((s) => `## ${s}`).join('\n');
-  const cli = (names?: string[], jsonOnly = false) => protocolPrompt(jsonOnly ? [] : toolSchemas(names), jsonOnly).length;
-  const firstEdit = system.length + prompts.render('firstEdit').length;
-  const applyNote = system.length + prompts.render('applyNote', { note: '' }).length;
-  const proofread = system.length + prompts.render('proofread', { captions: '' }).length;
-  const postKit = system.length + postKitSections.length;
-  const writeScript = prompts.render('writeScript', { idea: '', styleRules: '' }).length;
-  const pickTakes = prompts.render('pickTakes').length;
+  const postKit = `${postKitLead(true)}${postKitSections}`;
+
+  const api = (sys: string, task: string, names?: string[]) => sys.length + task.length + JSON.stringify(toolSchemas(names)).length;
+  const cli = (sys: string, task: string | null, names?: string[], jsonOnly = false) =>
+    claudeSystem.length + renderConversation({
+      system: sys,
+      messages: task === null ? [] : [{ role: 'user', content: [{ type: 'text', text: task }] }],
+      tools: jsonOnly ? [] : toolSchemas(names),
+      jsonOnly,
+    }).text.length;
+
+  const firstEdit = prompts.render('firstEdit');
+  const applyNote = prompts.render('applyNote', { note: '' });
+  const proofread = prompts.render('proofread', { captions: '' });
   return {
-    'firstEdit, api (chars)': firstEdit + tools(),
-    'firstEdit, cli (chars)': firstEdit + cli(),
-    'applyNote, api (chars)': applyNote + tools(),
-    'applyNote, cli (chars)': applyNote + cli(),
-    'proofread, api (chars)': proofread + tools(PROOFREAD_TOOLS),
-    'proofread, cli (chars)': proofread + cli(PROOFREAD_TOOLS),
-    'postKit, api (chars)': postKit + tools(POST_KIT_TOOLS),
-    'postKit, cli (chars)': postKit + cli(POST_KIT_TOOLS),
-    'writeScript, cli (chars)': writeScript + cli(undefined, true),
-    'pickTakes, cli (chars)': pickTakes + cli(undefined, true),
+    'firstEdit, api (chars)': api(system, firstEdit),
+    'firstEdit, cli (chars)': cli(system, firstEdit),
+    'applyNote, api (chars)': api(system, applyNote),
+    'applyNote, cli (chars)': cli(system, applyNote),
+    'proofread, api (chars)': api(system, proofread, PROOFREAD_TOOLS),
+    'proofread, cli (chars)': cli(system, proofread, PROOFREAD_TOOLS),
+    'postKit, api (chars)': api(system, postKit, POST_KIT_TOOLS),
+    'postKit, cli (chars)': cli(system, postKit, POST_KIT_TOOLS),
+    'postKit without cover, api (chars)': api(system, `${postKitLead(false)}${postKitSections}`, POST_KIT_TOOLS),
+    'writeScript, cli (chars)': cli(prompts.render('writeScript', { idea: '', styleRules: '' }), null, undefined, true),
+    'pickTakes, cli (chars)': cli(prompts.render('pickTakes'), null, undefined, true),
     'system prompt (chars)': system.length,
-    'all tool definitions, api (chars)': tools(),
-    'all tool definitions, cli (chars)': cli(),
     'tools (count)': toolSchemas().length,
   };
 }
