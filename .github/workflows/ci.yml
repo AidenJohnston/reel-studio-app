@@ -39,7 +39,7 @@ jobs:
             { echo node=true; echo engine=true; echo animations=true; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          files=$(git diff --name-only "$BASE...$HEAD")
+          files=$(git diff --no-renames --name-only "$BASE...$HEAD")
           printf 'Changed files:\n%s\n' "$files"
           has() { printf '%s\n' "$files" | grep -E "$1" > /dev/null && echo true || echo false; }
           # This workflow itself: run everything.
