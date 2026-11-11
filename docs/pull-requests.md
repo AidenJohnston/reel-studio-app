@@ -13,8 +13,12 @@ merge box), not in labels. So each person's GitHub inbox shows exactly what is t
 | Needs a decision | **assigned** to the person who decides + a comment starting `Decision needed:` with a yes/no or pick-one question | the assignee |
 | Conflicts or failing checks | the merge box and the checks | the author |
 
-Labels describe the change, never its state: `size:*`, `type:*`, `area:*` and `priority:*` (set automatically,
-except priority). There are no "waiting for CI", "has conflicts" or "ready" labels.
+Labels describe the change, never a PR's state: `size:*`, `type:*` and `area:*` (set automatically) and
+`priority:*` (set by hand). Issues may also carry triage labels such as `needs-info`.
+
+A **Request changes** review changes the PR's state only when it comes from someone with write access (a maintainer,
+or an agent working as one). Reviews from apps such as review bots are advice: read them, but they
+don't move the PR out of "ready".
 
 **Ready means:**
 - rebased on `main`;
@@ -27,10 +31,12 @@ A ready PR that goes red or conflicts and isn't fixed within a day goes back to 
 ## Who is asked
 
 - **A review request means "review this".** It lands in the reviewer's "Review requested" list.
-- **An assignee is the one person whose decision or action is blocking the PR.** It is not the author:
-  "Authored by me" already covers that.
+- **An assignee is the one person whose decision or action is blocking the PR.** Usually not the author, since
+  "Authored by me" already covers their PRs; but when an agent working for the author needs that person to decide,
+  it assigns the author.
 - **Hand a PR on** with `gh pr ready N`, then either `gh pr edit N --add-reviewer <login>` or
-  `gh pr edit N --add-assignee <login>` plus the `Decision needed:` comment.
+  `gh pr edit N --add-assignee <login>` plus the `Decision needed:` comment. Not sure who? Request review from the
+  lead maintainer.
 
 Write that comment for a stranger: this repo is public.
 
@@ -76,8 +82,19 @@ Bookmark these GitHub searches, each with `repo:getcurate/reel-studio is:open` i
 | Mine, sent back | `is:pr author:@me draft:false review:changes_requested` |
 | Mine, red | `is:pr author:@me draft:false status:failure` |
 | Reviewed and green: merge | `is:pr draft:false status:success review:approved no:assignee sort:created-asc` |
-| Mine, green, no review asked | `is:pr author:@me draft:false status:success review:none no:assignee` |
+| Mine, green, unreviewed | `is:pr author:@me draft:false status:success review:none no:assignee` (check it has no pending review request) |
 | Issues to triage | `is:issue no:assignee sort:created-asc` |
 
-Conflicting PRs have no search keyword. List them with:
-`gh pr list --json number,mergeable,isDraft --jq '.[] | select(.mergeable == "CONFLICTING" and (.isDraft | not)) | .number'`.
+Conflicting PRs have no search keyword. List them with (Bash):
+
+```sh
+gh pr list --limit 500 --json number,mergeable,isDraft --jq '.[] | select(.mergeable == "CONFLICTING" and (.isDraft | not)) | .number'
+```
+
+or in PowerShell:
+
+```powershell
+(gh pr list --limit 500 --json number,mergeable,isDraft | ConvertFrom-Json) | Where-Object { $_.mergeable -eq 'CONFLICTING' -and -not $_.isDraft } | Select-Object -ExpandProperty number
+```
+
+GitHub works out mergeability lazily: a PR shown as `UNKNOWN` isn't clean, so run it again a minute later.
