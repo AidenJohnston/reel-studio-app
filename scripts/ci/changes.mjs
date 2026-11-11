@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Decides which of CI's expensive jobs a change needs. CI's "Changes" job and `npm run check:changed` both use it, so
-// a local check runs what CI will run. The cheap job (Linux: install, build, typecheck, Node tests) always runs and is
-// not decided here.
+// Decides which of CI's longer jobs a change needs. CI's "Changes" job and `npm run check:changed` both use it, so a
+// local check runs what CI will run. The Node job (install, build, typecheck, tests on Linux, macOS and Windows) always
+// runs and is not decided here. New gated jobs (a desktop launch check, a packaging check) get a rule below.
 //
 // Rules, in order, for each changed path:
 //   1. INERT paths (docs, root Markdown, label and review config) need nothing.
@@ -29,9 +29,8 @@ const INERT = [
 const RUNS_EVERYTHING = [/^\.github\/workflows\/ci\.yml$/, /^scripts\/ci\//, /^\.gitattributes$/];
 
 export const JOBS = {
-  // Node on macOS and Windows: the app and the AI editor, the engine (app/test/real-engine.test.ts runs it), packaging,
-  // animation metadata (ai/ generates its list from it) and the root package files.
-  desktop: [/^(app|ai|engine|packaging)\//, /^templates\/animations\/[^/]+\/meta\.json$/, /^package(-lock)?\.json$/],
+  // Paths only the always-on Node job covers: known, so they don't count as unknown.
+  node: [/^(app|ai|packaging)\//, /^package(-lock)?\.json$/],
   // The engine's Python suite: its code and its pinned requirements.
   engine: [/^engine\//, /^packaging\/(requirements[^/]*\.txt|hash_requirements\.py)$/],
   // Animation rendering in headless Chromium.
@@ -39,7 +38,7 @@ export const JOBS = {
   // Owned elsewhere: the leak check has its own required workflow.
   none: [/^scripts\/leak-check\//, /^\.github\/workflows\/leak-check\.yml$/],
 };
-const JOB_NAMES = ["desktop", "engine", "animations"];
+const JOB_NAMES = ["engine", "animations"];
 
 export function decide(files) {
   const needed = new Set();
@@ -59,7 +58,7 @@ export function decide(files) {
       JOB_NAMES.forEach((job) => mark(job, `${file} (unknown path)`));
       continue;
     }
-    for (const [job] of matched) if (job !== "none") mark(job, file);
+    for (const [job] of matched) if (JOB_NAMES.includes(job)) mark(job, file);
   }
   return { jobs: Object.fromEntries(JOB_NAMES.map((job) => [job, needed.has(job)])), why };
 }
@@ -117,7 +116,7 @@ function runLocally(decision) {
     if (!existsSync(join(dir, "node_modules"))) results.push(["animation rendering", null]);
     else results.push(["animation rendering", run("animations", "npm", ["test"], { cwd: dir })]);
   }
-  if (decision.jobs.desktop) console.log("\nNote: CI also runs the Node job on macOS and Windows for this change; this machine covers one of them.");
+  console.log("\nNote: CI also runs the Node job on the other two systems; this machine covers one of them.");
   console.log("\nSummary:");
   for (const [name, ok] of results) console.log(`  ${ok === null ? "NOT RUN (set it up first, see CONTRIBUTING.md)" : ok ? "passed" : "FAILED"}  ${name}`);
   process.exit(results.some(([, ok]) => ok === false) ? 1 : 0);

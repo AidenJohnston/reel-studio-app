@@ -11,7 +11,7 @@ concurrency:
   # A newer push to a pull request replaces its run; a run on main always finishes, so every main commit is tested.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Decides which of the expensive jobs a pull request needs (scripts/ci/changes.mjs, shared with
+  # Decides which of the longer jobs a pull request needs (scripts/ci/changes.mjs, shared with
   # `npm run check:changed`). Pushes to main and manual runs run everything. Detection fails open: unknown paths run
   # every job, and a job runs unless this says 'false', so a failed detector never skips a check.
   changes:
@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      desktop: ${{ steps.detect.outputs.desktop }}
       engine: ${{ steps.detect.outputs.engine }}
       animations: ${{ steps.detect.outputs.animations }}
     steps:
@@ -33,47 +32,16 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/ci/changes.mjs --github
 
-  # The cheap job: install, build, typecheck and the Node tests on Linux. Runs on every change.
+  # Install, build, typecheck and the Node tests on all three systems, on every change. Each takes about a minute, and
+  # GitHub's standard runners cost a public repo nothing; macOS and Windows catch what Linux can't.
   node:
-    name: Node / ubuntu-24.04
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.11'
-      - name: Cache Electron download
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/electron
-          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-      - name: Install FFmpeg
-        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
-      - run: npm ci --no-audit --no-fund
-      - run: npm run build -w ai
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build -w app
-
-  # The same Node job on the slower macOS and Windows runners, for changes that can behave differently there.
-  desktop:
     name: Node / ${{ matrix.os }}
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.desktop != 'false' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -90,9 +58,13 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
+            ~/.cache/electron
             ~/Library/Caches/electron
             ~/AppData/Local/electron/Cache
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && for i in 1 2 3; do timeout 300 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 ffmpeg && break; sudo dpkg --configure -a || true; sleep 10; done && command -v ffmpeg
       - name: Install FFmpeg on macOS
         if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -185,7 +157,7 @@ jobs:
   # The one required CI check: passes when every job passed, or was skipped because the change didn't need it.
   ci-ok:
     name: CI ok
-    needs: [changes, node, desktop, engine, animations]
+    needs: [changes, node, engine, animations]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
