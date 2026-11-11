@@ -1,0 +1,55 @@
+name: AI context budget
+
+# Fails when a pull request raises a number in ai/context-budget.json above main's. That file holds the fixed text each
+# AI task sends the model (prompts, tool definitions), which every user pays for on their own AI plan on every call.
+# ai/test/context-budget.test.ts keeps the file equal to the measurement, so it can't be lowered by hand to pass.
+# To accept growth on purpose, a maintainer adds the ai-context-increase label.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-context-budget-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  budget:
+    name: AI context budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BUDGET: ai/context-budget.json
+      ALLOW_INCREASE: ${{ contains(github.event.pull_request.labels.*.name, 'ai-context-increase') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: ai/context-budget.json
+          sparse-checkout-cone-mode: false
+      - name: Compare with main
+        run: |
+          git fetch --quiet --depth=1 origin main
+          if ! git cat-file -e "FETCH_HEAD:$BUDGET" 2>/dev/null; then
+            echo "main has no AI context budget yet."
+            exit 0
+          fi
+          git show "FETCH_HEAD:$BUDGET" > "$RUNNER_TEMP/main.json"
+          grown=$(jq -r --slurpfile main "$RUNNER_TEMP/main.json" '
+            to_entries[]
+            | select($main[0][.key] != null and .value > $main[0][.key])
+            | "\(.key): \($main[0][.key]) -> \(.value) (+\(.value - $main[0][.key]))"
+          ' "$BUDGET")
+          if [ -z "$grown" ]; then
+            echo "The AI's fixed context is not larger than main's."
+            exit 0
+          fi
+          printf 'The AI sends more fixed text than on main:\n%s\n' "$grown"
+          if [ "$ALLOW_INCREASE" = "true" ]; then
+            echo "Accepted by the ai-context-increase label."
+            exit 0
+          fi
+          echo "::error file=$BUDGET::The AI's fixed context grew. Cut the added text, or ask a maintainer to add the ai-context-increase label if the growth is worth what every user pays for it on every call."
+          exit 1
