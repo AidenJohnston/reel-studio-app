@@ -51,7 +51,7 @@ or PR for a rebase: the old one stays open as a duplicate.
 ## Titles
 
 The PR title becomes the squashed commit on `main`: `type(scope): subject`, in plain words, saying what changes for
-the user where it can. A check enforces the format.
+the user where it can. The **PR title** check (`.github/workflows/pr-title.yml`) enforces the format.
 
 ## Rules for agents
 
@@ -75,7 +75,8 @@ Bookmark these GitHub searches, each with `repo:getcurate/reel-studio is:open` i
 | Decide or act | `assignee:@me` |
 | Mine, sent back | `is:pr author:@me draft:false review:changes_requested` |
 | Mine, red | `is:pr author:@me draft:false status:failure` |
-| Ready to merge | `is:pr draft:false status:success -review:changes_requested no:assignee sort:created-asc` |
+| Reviewed and green: merge | `is:pr draft:false status:success review:approved no:assignee sort:created-asc` |
+| Mine, green, no review asked | `is:pr author:@me draft:false status:success review:none no:assignee` |
 | Issues to triage | `is:issue no:assignee sort:created-asc` |
 
 Conflicting PRs have no search keyword. List them with:
