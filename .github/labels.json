@@ -22,32 +22,32 @@
   {
     "name": "size:XS",
     "color": "0e8a16",
-    "description": "0-9 effective changed lines."
+    "description": "Under 30 changed lines, tests excluded. No automatic AI review."
   },
   {
     "name": "size:S",
     "color": "5ebd3e",
-    "description": "10-29 effective changed lines."
+    "description": "30-149 changed lines, tests excluded."
   },
   {
     "name": "size:M",
     "color": "fbca04",
-    "description": "30-99 effective changed lines."
+    "description": "150-499 changed lines, tests excluded."
   },
   {
     "name": "size:L",
     "color": "fe7d37",
-    "description": "100-499 effective changed lines."
+    "description": "500-1,499 changed lines, tests excluded."
   },
   {
     "name": "size:XL",
     "color": "d93f0b",
-    "description": "500-999 effective changed lines."
+    "description": "1,500-2,999 changed lines, tests excluded. Gets the deeper AI review."
   },
   {
     "name": "size:XXL",
     "color": "b60205",
-    "description": "1,000+ effective changed lines."
+    "description": "3,000+ changed lines, tests excluded. Deeper AI review; consider splitting."
   },
   {
     "name": "priority:P0",

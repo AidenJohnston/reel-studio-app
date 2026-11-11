@@ -62,11 +62,12 @@ jobs:
                 }, 0);
 
             const resolveSizeLabel = (totalChangedLines) => {
-              if (totalChangedLines < 10) return "size:XS";
-              if (totalChangedLines < 30) return "size:S";
-              if (totalChangedLines < 100) return "size:M";
-              if (totalChangedLines < 500) return "size:L";
-              if (totalChangedLines < 1000) return "size:XL";
+              // Fitted to this repo's PRs (median ~330 lines); XS and XL+ also pick the AI review tier.
+              if (totalChangedLines < 30) return "size:XS";
+              if (totalChangedLines < 150) return "size:S";
+              if (totalChangedLines < 500) return "size:M";
+              if (totalChangedLines < 1500) return "size:L";
+              if (totalChangedLines < 3000) return "size:XL";
               return "size:XXL";
             };
 
