@@ -1,14 +1,7 @@
 #!/usr/bin/env node
-// Decides which of CI's longer jobs a change needs. CI's "Changes" job and `npm run check:changed` both use it, so a
-// local check runs what CI will run. The Node job (install, build, typecheck, tests on Linux, macOS and Windows) always
-// runs and is not decided here. New gated jobs (a desktop launch check, a packaging check) get a rule below.
-//
-// Rules, in order, for each changed path:
-//   1. INERT paths (docs, root Markdown, label and review config) need nothing.
-//   2. RUNS_EVERYTHING paths (this script, the CI workflow) need every job.
-//   3. A path that matches one or more JOBS rules needs those jobs.
-//   4. Any other path needs every job: unknown paths fail open, so a new folder can't slip through untested.
-// If the list of changed files can't be worked out, every job runs.
+// Decides which of CI's gated jobs a change needs; CI and `npm run check:changed` share it. The Node job always runs.
+// Per changed path: INERT needs nothing, RUNS_EVERYTHING needs every job, a JOBS match needs those jobs, and any other
+// path needs every job (unknown paths fail open). If the changed files can't be listed, every job runs.
 //
 //   node scripts/ci/changes.mjs --github            in CI: diff the PR's merge commit, write outputs to $GITHUB_OUTPUT
 //   node scripts/ci/changes.mjs --print [files...]  print the decision for these files, or for this branch vs origin/main
@@ -104,8 +97,7 @@ function run(label, cmd, args, opts = {}) {
 function runLocally(decision) {
   report(decision);
   const results = [];
-  // Always: what CI's Linux job runs.
-  results.push(["build, typecheck and Node tests", run("build ai", "npm", ["run", "build", "-w", "ai"]) && run("typecheck", "npm", ["run", "typecheck"]) && run("tests", "npm", ["test"])]);
+  results.push(["build, typecheck and Node tests", run("build ai", "npm", ["run", "build", "-w", "ai"]) && run("typecheck", "npm", ["run", "typecheck"]) && run("tests", "npm", ["test"]) && run("build app", "npm", ["run", "build", "-w", "app"])]);
   if (decision.jobs.engine) {
     const python = join("engine", ".venv", process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
     if (!existsSync(python)) results.push(["engine tests", null]);
@@ -116,10 +108,9 @@ function runLocally(decision) {
     if (!existsSync(join(dir, "node_modules"))) results.push(["animation rendering", null]);
     else results.push(["animation rendering", run("animations", "npm", ["test"], { cwd: dir })]);
   }
-  console.log("\nNote: CI also runs the Node job on the other two systems; this machine covers one of them.");
-  console.log("\nSummary:");
+  console.log("\nCI also runs the Node job on the other two systems.\nSummary:");
   for (const [name, ok] of results) console.log(`  ${ok === null ? "NOT RUN (set it up first, see CONTRIBUTING.md)" : ok ? "passed" : "FAILED"}  ${name}`);
-  process.exit(results.some(([, ok]) => ok === false) ? 1 : 0);
+  process.exit(results.every(([, ok]) => ok === true) ? 0 : 1);
 }
 
 const [mode, ...rest] = process.argv.slice(2);

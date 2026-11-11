@@ -8,12 +8,11 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
-  # A newer push to a pull request replaces its run; a run on main always finishes, so every main commit is tested.
+  # A run on main always finishes, so every main commit is tested.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Decides which of the longer jobs a pull request needs (scripts/ci/changes.mjs, shared with
-  # `npm run check:changed`). Pushes to main and manual runs run everything. Detection fails open: unknown paths run
-  # every job, and a job runs unless this says 'false', so a failed detector never skips a check.
+  # Which gated jobs a pull request needs (scripts/ci/changes.mjs). Pushes to main and manual runs run everything, and a
+  # gated job runs unless this says 'false', so a failed detector never skips a check.
   changes:
     name: Changes
     runs-on: ubuntu-24.04
@@ -32,8 +31,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/ci/changes.mjs --github
 
-  # Install, build, typecheck and the Node tests on all three systems, on every change. Each takes about a minute, and
-  # GitHub's standard runners cost a public repo nothing; macOS and Windows catch what Linux can't.
+  # Every change, on all three systems.
   node:
     name: Node / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -154,7 +152,7 @@ jobs:
         run: npx playwright install-deps chromium
       - run: npm test
 
-  # The one required CI check: passes when every job passed, or was skipped because the change didn't need it.
+  # Passes when every job passed or was skipped as not needed.
   ci-ok:
     name: CI ok
     needs: [changes, node, engine, animations]
