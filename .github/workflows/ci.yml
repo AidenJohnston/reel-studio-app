@@ -41,7 +41,7 @@ jobs:
           fi
           files=$(git diff --name-only "$BASE...$HEAD")
           printf 'Changed files:\n%s\n' "$files"
-          has() { printf '%s\n' "$files" | grep -qE "$1" && echo true || echo false; }
+          has() { printf '%s\n' "$files" | grep -E "$1" > /dev/null && echo true || echo false; }
           # This workflow itself: run everything.
           self='^\.github/workflows/ci\.yml$'
           # Node on three systems: the app and the AI editor, plus the engine (app/test/real-engine.test.ts runs it),
