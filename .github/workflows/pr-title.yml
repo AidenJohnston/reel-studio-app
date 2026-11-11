@@ -19,10 +19,12 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # The title is never printed: the runner reads "::" and "##[" in output as commands.
           types='feat|fix|perf|refactor|docs|test|build|ci|chore|revert'
-          if printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: ([^ .]|[^ ].*[^.])$"; then
-            echo "OK: $TITLE"
+          if [[ "$TITLE" != *$'\n'* && "$TITLE" != *$'\r'* ]] &&
+            printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: ([^[:space:].]|[^[:space:]].*[^[:space:].])$"; then
+            echo "The title is type(scope): subject."
             exit 0
           fi
-          echo "::error::The title must be 'type(scope): subject', where type is one of ${types//|/, }; the scope is optional and lowercase; the subject doesn't end with a period. Example: 'fix(captions): keep subtitles clear of the buttons'. Got: $TITLE"
+          echo "::error::The title must be one line, 'type(scope): subject', where type is one of ${types//|/, }; the scope is optional and lowercase; the subject doesn't end with a period or a space. Example: 'fix(captions): keep subtitles clear of the buttons'."
           exit 1
