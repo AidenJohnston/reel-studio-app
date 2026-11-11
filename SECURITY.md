@@ -2,25 +2,28 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately, not in a public issue or pull request.
+Please report security problems privately, never in a public issue, pull request or discussion. Either way works:
 
-- **Preferred:** on GitHub, open this repository's **Security** tab and choose **Report a vulnerability**. Only the
-  maintainers see the report, and we can work on a fix with you there.
-- **No GitHub account:** use the support contact on [getreelstudio.com](https://getreelstudio.com) and say it is a
-  security report. We will move it to a private advisory.
+- **On GitHub:** this repository's **Security** tab, **Report a vulnerability**. The report stays private, and we can
+  work on a fix with you there.
+- **By e-mail:** the support address on [getreelstudio.com](https://getreelstudio.com). Say it is a security report.
 
-Include what you found, how to reproduce it, the Reel Studio version and your operating system. Leave out anything
-private, such as your own videos or API keys.
+Include what you found and its security impact, how to reproduce it, the Reel Studio version and your operating
+system. Leave out anything private, such as your own videos or API keys.
 
-We aim to reply within 3 working days and to tell you when a fix ships. We credit reporters in the release notes
-unless you ask us not to.
+We aim to reply within 3 working days. Please give us a chance to ship a fix before you disclose it publicly; we will
+agree a date with you and ask how you would like to be credited.
 
 ## What counts
 
-The desktop app, its bundled engine and AI editor, the update and download service it talks to
-(`dl.getreelstudio.com`), and this repository's workflows. Problems in Claude Code, Codex or other tools Reel Studio
-drives belong with their vendors. Reel Studio never handles your sign-in to them.
+- The desktop app, its bundled engine and AI editor, including how it stores and sends an API key you paste in.
+- The update and download service it talks to (`dl.getreelstudio.com`).
+- This repository's workflows.
+
+Problems inside Claude Code, Codex or other tools Reel Studio drives belong with their vendors. Reel Studio never sees
+your sign-in to those tools.
 
 ## Supported versions
 
-Security fixes go into the latest release. Updating is the fix for older versions.
+Security fixes ship in a new release. The current version is the one the app's update check offers
+(`dl.getreelstudio.com`); older versions don't get backported fixes.
