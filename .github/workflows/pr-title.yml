@@ -20,7 +20,7 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
           types='feat|fix|perf|refactor|docs|test|build|ci|chore|revert'
-          if printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: [^ ].*[^.]$"; then
+          if printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: ([^ .]|[^ ].*[^.])$"; then
             echo "OK: $TITLE"
             exit 0
           fi
