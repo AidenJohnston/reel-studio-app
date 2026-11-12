@@ -22,32 +22,32 @@
   {
     "name": "size:XS",
     "color": "0e8a16",
-    "description": "Under 30 changed lines, tests excluded. No automatic AI review."
+    "description": "Under 30 changed lines. Tests count only in a test-only PR."
   },
   {
     "name": "size:S",
     "color": "5ebd3e",
-    "description": "30-149 changed lines, tests excluded."
+    "description": "30-149 changed lines. Tests count only in a test-only PR."
   },
   {
     "name": "size:M",
     "color": "fbca04",
-    "description": "150-499 changed lines, tests excluded."
+    "description": "150-499 changed lines. Tests count only in a test-only PR."
   },
   {
     "name": "size:L",
     "color": "fe7d37",
-    "description": "500-1,499 changed lines, tests excluded."
+    "description": "500-1,499 changed lines. Tests count only in a test-only PR."
   },
   {
     "name": "size:XL",
     "color": "d93f0b",
-    "description": "1,500-2,999 changed lines, tests excluded. Gets the deeper AI review."
+    "description": "1,500-2,999 changed lines. Tests count only in a test-only PR."
   },
   {
     "name": "size:XXL",
     "color": "b60205",
-    "description": "3,000+ changed lines, tests excluded. Deeper AI review; consider splitting."
+    "description": "3,000+ changed lines. Tests count only in a test-only PR. Consider splitting."
   },
   {
     "name": "priority:P0",
