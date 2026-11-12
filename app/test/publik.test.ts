@@ -244,9 +244,14 @@ describe('Sign in with publik: stopping part way', () => {
     t.sign.stop()
   })
 
-  it('fails if Sign out says it worked when the connection could not be removed, or forgets what to remove', async () => {
-    const t = publik({ claimed: true, balance: 1, stored: { key: 'pk_live_old', install_id: 'i0', claim_url: null, connection_id: 'c_publik' }, dropFails: true })
-    await expect(t.sign.signOut()).rejects.toMatchObject({ userMessage: 'Close other apps, then try again.' })
+  it('fails if a Cancel whose undo fails forgets the connection Sign out must remove, or says it was cancelled', async () => {
+    let release: () => void = () => {}
+    const t = publik({ claimed: true, balance: 1, slowSave: new Promise<void>((r) => (release = r)), dropFails: true })
+    const done = t.sign.start()
+    await until(() => t.s.saving)
+    t.sign.cancel()
+    release()
+    expect(await done).toMatchObject({ step: 'failed', message: PUBLIK_WORDS.stillOn })
     expect(t.saved()?.connection_id).toBe('c_publik')
   })
 })

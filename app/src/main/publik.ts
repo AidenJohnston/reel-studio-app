@@ -38,7 +38,8 @@ export const PUBLIK_WORDS = {
   offline: 'Reel Studio’s AI isn’t reachable. Check you’re online, then try again.',
   notReady: 'Reel Studio’s AI isn’t ready in this version yet. Try Sign in with ChatGPT.',
   ended: 'Your Reel Studio AI sign-in ended. Sign in again.',
-  failed: 'The sign-in didn’t finish. Try again.'
+  failed: 'The sign-in didn’t finish. Try again.',
+  stillOn: 'The sign-in stopped, but Reel Studio’s AI is still connected. Use Sign out in Settings to remove it.'
 } as const
 
 export interface PublikCredential {
@@ -359,13 +360,18 @@ export function createPublikSignIn(deps: PublikDeps) {
       if (signal.aborted) return cancelled()
       emit({ step: 'checking', message: PUBLIK_WORDS.connecting })
       const id = await deps.useKey(c.key, c.connection_id)
+      // the connection's id is kept before anything else, so Sign out can always find it
+      if (id !== c.connection_id) await deps.store.save({ ...c, connection_id: id })
       if (signal.aborted) {
-        // Cancel (or the flag turned off) while the key was being checked and saved: take it back out
-        await deps.dropKey(id).catch(() => {})
+        // Cancel (or the flag turned off) while the key was being checked or saved: take it back out
+        try {
+          await deps.dropKey(id)
+        } catch {
+          return emit({ step: 'failed', problem: 'failed', message: PUBLIK_WORDS.stillOn })
+        }
         await deps.store.save({ key: c.key, install_id: c.install_id, claim_url: c.claim_url })
         return cancelled()
       }
-      if (id !== c.connection_id) await deps.store.save({ ...c, connection_id: id })
       startCounting(c.key)
       return emit({ step: 'done', message: PUBLIK_WORDS.done, ...(already ? { already: true } : {}) })
     } catch (e) {

@@ -5,10 +5,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { easyAiOn, easyAiTest, setupEasyAi, type EasyAiDeps } from '../src/main/easy-ai'
+import { credentialStore } from '../src/main/publik'
 import { CODEX_PACKAGES, CODEX_VERSION, codexBinIn } from '../src/main/codex-fetch'
 import type { VendorConnect } from '../src/main/vendor-connect'
 
-function setup(saved: boolean, env: NodeJS.ProcessEnv = {}) {
+function setup(saved: boolean, env: NodeJS.ProcessEnv = {}, over: Partial<EasyAiDeps> = {}) {
   const handlers = new Map<string, (e: unknown, ...a: unknown[]) => unknown>()
   const userData = mkdtempSync(join(tmpdir(), 'easy-'))
   const calls: string[] = []
@@ -39,12 +40,26 @@ function setup(saved: boolean, env: NodeJS.ProcessEnv = {}) {
     openExternal: (u) => void calls.push(`open ${u}`),
     broadcast: () => {},
     aiChanged: () => {},
-    log: () => {}
+    log: () => {},
+    ...over
   }
   const easy = setupEasyAi(deps)
   const call = (c: string, ...a: unknown[]) => Promise.resolve(handlers.get(c)!(null, ...a))
   return { easy, call, calls, userData }
 }
+
+// a stand-in for safeStorage that can encrypt, so the credential is kept in its file
+const BOX = { isEncryptionAvailable: () => true, encryptString: (s: string) => Buffer.from(Buffer.from(s).map((b) => b ^ 0x33)), decryptString: (b: Buffer) => Buffer.from(b.map((x) => x ^ 0x33)).toString() }
+
+describe('signing out of Reel Studio’s AI', () => {
+  it('fails if Sign out says it worked when the saved connection could not be removed, or loses what to remove', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'easy-out-'))
+    await credentialStore(join(dir, 'publik.bin'), BOX).save({ key: 'pk_live_x', install_id: 'i1', claim_url: null, connection_id: 'c_publik' })
+    const t = setup(true, {}, { settingsDir: dir, secrets: BOX, ai: { saveConnection: async () => ({ status: { connected: false } }), removeConnection: async () => Promise.reject({ code: 'locked', userMessage: 'Close other apps, then try again.' }), active: async () => ({ id: 'custom', connected: true, connectionId: 'c_publik' }) } })
+    await expect(t.call('ai:guidedSignOut', 'publik')).rejects.toMatchObject({ userMessage: 'Close other apps, then try again.' })
+    expect(await credentialStore(join(dir, 'publik.bin'), BOX).load()).toMatchObject({ connection_id: 'c_publik' })
+  })
+})
 
 describe('the easy-AI flag', () => {
   it('fails if the guided setup can run, or the app’s own Codex is found, while the flag is off', async () => {

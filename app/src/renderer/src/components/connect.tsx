@@ -76,6 +76,20 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   const guided = !!easy?.on && !anyOn
   const [otherWaysOpen, setOtherWaysOpen] = useState(false)
   const [signOutError, setSignOutError] = useState<string | null>(null)
+  // A guided sign-in connects whoever showed this picker (the first run, the Connect screen) when it is done. Here,
+  // not in the guided rows: the editor change that hides those rows can arrive before the done step does.
+  const easyOn = !!easy?.on
+  useEffect(() => {
+    if (!easyOn) return
+    let live = true
+    const off = reel.ai.onGuided((i) => {
+      if (i.step === 'done') void reel.ai.active().then((p) => live && connected(p), () => {})
+    })
+    return () => {
+      live = false
+      off()
+    }
+  }, [easyOn, connected])
   const hubOn = anyOn && active.id === 'custom' && active.label === 'CLIProxyAPI'
   const otherOn = anyOn && !hubOn && !['claude-cli', 'codex-cli'].includes(active.id)
   const [othersOpen, setOthersOpen] = useState(false)
@@ -191,7 +205,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
     <div className="picker" data-testid="editor-setup">
       {guided && easy ? (
         <>
-          <GuidedChoices easy={easy} onConnected={connected} />
+          <GuidedChoices easy={easy} />
           <Disclosure label="Other ways" open={otherWaysOpen || searchedAdvanced} onToggle={() => setOtherWaysOpen((o) => !o)} testid="other-ways">
             {body}
           </Disclosure>
