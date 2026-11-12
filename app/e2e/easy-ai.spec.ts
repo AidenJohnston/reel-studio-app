@@ -80,6 +80,16 @@ test.afterAll(async () => {
   await new Promise((r) => server?.close(r))
 })
 
+/** The app's own lines about the guided setup (main.log), for a failure message: they hold no key or URL. */
+function appLog(userData: string): string {
+  try {
+    const lines = readFileSync(join(userData, 'logs', 'main.log'), 'utf8').split(/\r?\n/)
+    return lines.filter((l) => /\[easy-ai\]|\[vendor\]|\[ipc ai:guided/.test(l)).slice(-20).join('\n') || 'main.log has no guided-setup lines'
+  } catch {
+    return 'no main.log'
+  }
+}
+
 /** A fresh profile whose user-data folder has a space and an accent, as a real Windows account can. */
 function profile(name: string) {
   const root = join(BASE, `easy-${name}`)
@@ -156,8 +166,12 @@ test('Sign in with ChatGPT on a computer with no Codex: one press gets it ready,
     await expect(row).toHaveAttribute('data-step', 'getting')
     await expect(row).toContainText('Getting ChatGPT ready on this computer')
     await shot(page, 'easy-ai-02-chatgpt-getting')
-    // the sentence first: if the row failed instead, this assertion prints what it said
-    await expect(row).toContainText('A ChatGPT page opened in your browser', { timeout: 30_000 })
+    // the sentence first: if the row failed instead, this assertion prints what it said, with the app's own log of why
+    await expect(row)
+      .toContainText('A ChatGPT page opened in your browser', { timeout: 30_000 })
+      .catch((e: Error) => {
+        throw new Error(`${e.message}\n\nThe app's log:\n${appLog(p.userData)}`)
+      })
     await expect(row).toHaveAttribute('data-step', 'waiting')
     await shot(page, 'easy-ai-03-chatgpt-waiting')
     // the sign-in finishes on its own; the editor is ChatGPT and the first run's button says Continue
