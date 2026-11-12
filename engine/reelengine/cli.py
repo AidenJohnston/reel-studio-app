@@ -233,7 +233,7 @@ def cmd_analyze_music(args):
     """Tempo, energy, mood, loudness curve and a suggested start point for a song. `file` may be a
     path or a Library/... reference (resolved against the Reel Studio root). `--library`: every song
     in Library/Music at once (one process; the AI listens to the whole library on each edit).
-    Cached per file."""
+    `--fps`: also the beat grid to store in project.music.beats (beats.quantise). Cached per file."""
     from . import tools
     if args.library:
         lib = tools.root_dir(args.root) / "Library" / "Music"
@@ -263,6 +263,9 @@ def cmd_analyze_music(args):
         raise EngineError("MUSIC_MISSING", f"no such song: {p}", "I can't find that song. Pick another one.")
     progress("music", 10, "Listening to the song", force=True)
     r = dict(_music_features(p))
+    if args.fps:
+        from . import beats
+        r["beatGrid"] = beats.quantise(r.get("beats") or [], args.fps)
     if args.no_beats:
         r.pop("beats", None)
     if not args.curve:
@@ -383,6 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--track")
     sp.add_argument("--root")
     sp.add_argument("--no-beats", action="store_true")
+    sp.add_argument("--fps", type=float, help="add beatGrid: the beats as whole frames at this rate")
     sp.add_argument("--curve", action="store_true", help="include the 5 s loudness curve")
     sp.add_argument("--library", action="store_true", help="every song in Library/Music (features only)")
     return p

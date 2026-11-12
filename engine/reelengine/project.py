@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from . import beats as beatmod
 from . import cut as cutmod
 from . import safepath
 from .proto import EngineError
@@ -237,7 +238,8 @@ def timeline(project_dir: Path, proj: dict, words: Optional[list] = None) -> cut
                           "There's nothing in the edit yet. Let me pick your takes first.")
     return cutmod.build_timeline(words, keep, source_meta(proj),
                                  gap_cap=float(c.get("gapCap", cutmod.GAP_CAP)),
-                                 min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)))
+                                 min_saving=float(c.get("minSaving", cutmod.MIN_SAVING)),
+                                 beats=beatmod.synced(proj, "cuts"))
 
 
 def _anchor_slots(proj: dict):
@@ -256,6 +258,9 @@ def _anchor_slots(proj: dict):
     for a in ((proj.get("music") or {}).get("automation") or []):
         yield a, "fromWord", "from"
         yield a, "toWord", "to"
+    for d in (proj.get("music") or {}).get("drops") or []:
+        yield d, "from", "from"
+        yield d, "to", "to"
     for h in ((proj.get("captions") or {}).get("hidden") or []):
         yield h, "from", "from"
         yield h, "to", "to"

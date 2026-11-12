@@ -4,7 +4,8 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Sfx, Transcript, TREATMENTS, Word, WordAnchor,
+  Analysis, BEAT_KINDS, BeatGrid, BeatKind, Broll, LIBRARY_FOLDERS, LibraryKind, MusicDrop, MusicLevel, Project, Sfx,
+  Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
@@ -584,14 +585,19 @@ async function librarySongs(ctx: ToolContext): Promise<any[] | null> {
 
 export const MUSIC_TAIL_S = 0.3;
 
-/** Song facts from engine `analyze-music` (tempo, energy, a calm start point). Null if unavailable. */
-async function analyzeMusic(ctx: ToolContext, ref: string): Promise<any | null> {
+/** Song facts from engine `analyze-music` (tempo, energy, the start point on its attack) for the model, and
+ * the beat grid to store in music.beats (never shown to the model). Null if unavailable. */
+async function analyzeMusic(ctx: ToolContext, ref: string, fps: number): Promise<{ song: any; beats: BeatGrid | null } | null> {
   try {
-    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats'], 'Listening to the song');
+    const r = await engine(ctx, 'analyze-music', [ref, '--no-beats', '--fps', String(fps)], 'Listening to the song');
     if (!r || typeof r !== 'object') return null;
+    const grid = r.beatGrid;
     return {
-      duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
-      arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      song: {
+        duration: r.duration, bpm: r.bpm, energy: r.energy, mood: r.mood, tags: r.tags, suggestedStartAt: r.suggestedStartAt,
+        arrivals: Array.isArray(r.arrivals) ? r.arrivals.map((a: any) => ({ at: a.at, riseDb: a.riseDb })) : undefined,
+      },
+      beats: grid && Array.isArray(grid.frames) && grid.frames.length ? { fps: grid.fps, frames: grid.frames } : null,
     };
   } catch {
     return null;
@@ -840,7 +846,7 @@ const tools: ToolDef[] = [
     description: 'Pick the song (a Library/Music path from list_library) or null for no music. level: under-voice (default) | quiet | loud-intro.',
     parameters: S.obj({
       track: S.opt(S.str('e.g. "Library/Music/song.mp3", or null to remove music')),
-      startAt: S.opt(S.num('seconds into the song to start; leave null and the engine enters on a calm bar before the first big hit', { minimum: 0 })),
+      startAt: S.opt(S.num('seconds into the song to start; leave null and it starts on the first hit of a calm bar before the big build', { minimum: 0 })),
       level: S.opt(S.enum(['under-voice', 'quiet', 'loud-intro'])),
     }),
     async run(ctx, args) {
@@ -864,15 +870,20 @@ const tools: ToolDef[] = [
         ref = r.ref;
         abs = r.abs;
       }
-      const prev = (await loadProject(ctx.projectDir)).music;
-      // a new song with no start point: start where the engine hears a calm bar before the build
-      const song = abs && ref !== prev.track ? await analyzeMusic(ctx, abs) : null;
+      const { p: before } = await load(ctx);
+      const prev = before.music;
+      // a new song with no start point: start on the attack the engine hears after a calm bar
+      const heard = abs && ref !== prev.track ? await analyzeMusic(ctx, abs, before.format.fps) : null;
+      const song = heard?.song ?? null;
       const startAt = args.startAt !== null && args.startAt !== undefined ? args.startAt
         : (song && typeof song.suggestedStartAt === 'number' ? song.suggestedStartAt : (ref !== prev.track ? 0 : undefined));
       await mutate(ctx, 'music', (p) => {
         p.music.track = ref;
         p.music.enabled = ref !== null;
         if (startAt !== undefined) p.music.startAt = startAt;
+        if (ref !== prev.track) {          // another song's beats would put cuts between this one's
+          if (heard?.beats) p.music.beats = heard.beats; else delete p.music.beats;
+        }
         if (args.level) p.music.level = args.level as MusicLevel;
         // hand edits end the song WITH the last word (a ~0.3 s tail), not a long fade under it
         if (ref !== null && ref !== prev.track) p.music.fadeOut = MUSIC_TAIL_S;
@@ -897,6 +908,55 @@ const tools: ToolDef[] = [
       await mutate(ctx, 'music', (p) => { p.music.automation = args.automation; });
       const down = args.automation.some((a: any) => a.gainDb < 0);
       return { content: { ok: true }, summary: args.automation.length ? (down ? 'Turned the music down in places' : 'Lifted the music at the big moment') : 'Evened out the music' };
+    },
+  },
+  {
+    name: 'set_sound_moments',
+    description: 'Editor sound moves, only when the note asks for them; null leaves one as it is. '
+      + 'onBeat: what lands on the song\'s beats ("cuts", "zooms", "broll"; each moves at most a few frames). '
+      + 'drops: lines the music cuts out for and comes back on the next beat after ("cut the music on \'you\'re full of crap\'"); one or two at most. '
+      + 'reverbThrow: an echo tail on the last word.',
+    parameters: S.obj({
+      onBeat: S.opt(S.arr(S.enum(BEAT_KINDS), '[] = nothing on the beat')),
+      drops: S.opt(S.arr(S.obj({ from: S.str('first word id of the line'), to: S.str('last word id of the line') }), '[] = none')),
+      reverbThrow: S.opt(S.bool()),
+    }),
+    async run(ctx, args) {
+      const { p, t } = await load(ctx);
+      const onBeat: BeatKind[] | null = args.onBeat ? [...new Set<BeatKind>(args.onBeat)] : null;
+      const drops: MusicDrop[] | null = args.drops;
+      drops?.forEach((d, i) => checkAnchor(t, d, `drops[${i}]`));
+      const music = p.music.enabled && p.music.track;
+      if (!music && (onBeat?.length || drops?.length)) {
+        return {
+          content: { ok: false, note: 'This video has no song, so nothing can land on the beat or drop out. Tell the user plainly and offer to add a song from their Library. Do not say you changed it.' },
+          summary: 'No song to time to',
+        };
+      }
+      let heard: Awaited<ReturnType<typeof analyzeMusic>> = null;
+      if (onBeat?.length && !p.music.beats) {        // a song chosen before beats were stored: listen to it once now
+        const song = resolveAsset(ctx, p.music.track!);
+        heard = song ? await analyzeMusic(ctx, song.abs, p.format.fps) : null;
+        if (!heard?.beats) throw new ToolInputError('no steady beat was found in this song, so there is nothing to land on: tell the user and leave onBeat null');
+      }
+      // landing on beats moves the picture; drops and the echo are only heard
+      await mutate(ctx, onBeat ? 'beat' : 'music', (q) => {
+        if (heard?.beats) q.music.beats = heard.beats;
+        if (onBeat) { if (onBeat.length) q.music.onBeat = onBeat; else delete q.music.onBeat; }
+        if (drops) { if (drops.length) q.music.drops = drops.map(({ from, to }) => ({ from, to })); else delete q.music.drops; }
+        if (args.reverbThrow === true) q.voice = { ...q.voice, reverbThrow: true };
+        else if (args.reverbThrow === false && q.voice) {
+          delete q.voice.reverbThrow;
+          if (!Object.keys(q.voice).length) delete q.voice;
+        }
+      });
+      const said = [
+        onBeat && (onBeat.length ? `Put the ${onBeat.join(' and ').replace('broll', 'pictures')} on the beat` : 'Took the edits off the beat'),
+        drops && (drops.length ? `Dropped the music for ${drops.length === 1 ? 'a line' : `${drops.length} lines`}` : 'Kept the music playing'),
+        args.reverbThrow === true ? 'Added an echo on the last word' : args.reverbThrow === false ? 'Took the echo off the last word' : null,
+      ].filter(Boolean);
+      return { content: { ok: true, music: { onBeat: ctx.project!.music.onBeat ?? [], drops: ctx.project!.music.drops ?? [] }, voice: ctx.project!.voice ?? {} },
+        summary: said.join('. ') || 'Left the sound as it was' };
     },
   },
   {

@@ -171,7 +171,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 | Area | Modules |
 |---|---|
 | Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
-| Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
+| Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, drops, the reverb throw, loudness), `beats.py` (the stored beat grid and landing moments on it), `sfx.py` (sound effects), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
 mixed audio. Captions always sit on top of b-roll. Graphics stay out of the eyes-to-chin zone and the caption
@@ -207,6 +207,8 @@ startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, p
 backwards in the frames it looks at, or when a note says the video is mirrored), `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_sfx` (built-in sound effects, each hitting on a word, a b-roll's appearance or a cut; the engine plays at
 most one every 2 seconds, under the voice),
+`set_sound_moments(onBeat, drops, reverbThrow)` (jump cuts, zooms and b-roll entrances on the song's stored beat
+grid; the music dropping out for a named line and back on the next beat; an echo tail on the last word),
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
 

@@ -9,7 +9,7 @@ import { FakeHost, makeProject, tinyPng } from './helpers';
 
 const SPEC_TOOLS = ['get_project', 'get_transcript', 'set_cut', 'set_gap_cap', 'set_caption_style', 'add_caption_correction', 'remove_caption_correction',
   'list_library', 'choose_music', 'set_music_automation', 'add_broll', 'update_broll', 'remove_broll', 'search_images',
-  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_sfx', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
+  'fetch_image', 'capture_website', 'make_animation', 'set_zoom', 'set_sfx', 'set_sound_moments', 'set_mirror', 'cover_candidates', 'set_cover', 'write_post', 'add_style_rule', 'render_draft', 'look_at_frames', 'finish'];
 
 async function ctxFor(): Promise<{ ctx: ToolContext; host: FakeHost; dir: string; root: string; events: AgentEvent[] }> {
   const { root, dir } = await makeProject();
@@ -149,6 +149,46 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).sfx).toHaveLength(3);
     await executeTool(ctx, 'set_sfx', { sfx: [] });
     expect('sfx' in JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8'))).toBe(false);
+  });
+
+  it('sound moments: the beat grid is stored with the song, then cuts land on it, a line drops the music, the last word echoes', async () => {
+    const { ctx, root, dir, host } = await ctxFor();
+    for (const f of ['calm.mp3', 'other.mp3']) await fsp.writeFile(path.join(root, 'Library', 'Music', f), 'x');
+    const none = { onBeat: null, drops: null, reverbThrow: null };
+    // no song: nothing to time to, and the reply must say so
+    const bare = JSON.parse((await executeTool(ctx, 'set_sound_moments', { ...none, drops: [{ from: 'w3', to: 'w5' }] })).content);
+    expect(bare.ok).toBe(false);
+    expect((await loadProject(dir)).music.drops).toBeUndefined();
+
+    host.engineAssets = true;
+    const grid = { fps: 30, frames: [15, 30, 45] };
+    host.songInfo = { ...host.songInfo, beatGrid: grid };
+    await executeTool(ctx, 'choose_music', { track: 'calm.mp3', startAt: null, level: null });
+    expect(host.calls.find((c) => c.command === 'analyze-music')!.args).toEqual(expect.arrayContaining(['--fps', '30']));
+    expect((await loadProject(dir)).music).toMatchObject({ startAt: 7.5, beats: grid });
+
+    const r = await executeTool(ctx, 'set_sound_moments', { onBeat: ['cuts', 'cuts', 'zooms'], drops: [{ from: 'w3', to: 'w5' }], reverbThrow: true });
+    expect(r.isError, r.content).toBe(false);
+    let p = await loadProject(dir);
+    expect(p.music).toMatchObject({ onBeat: ['cuts', 'zooms'], drops: [{ from: 'w3', to: 'w5' }] });
+    expect(p.voice).toEqual({ reverbThrow: true });
+    expect((await executeTool(ctx, 'set_sound_moments', { ...none, drops: [{ from: 'w3', to: 'wX' }] })).isError).toBe(true);
+    // null leaves each one alone; empty lists and false take them off without leaving keys behind
+    await executeTool(ctx, 'set_sound_moments', { ...none, reverbThrow: false });
+    p = await loadProject(dir);
+    expect(p.music.onBeat).toEqual(['cuts', 'zooms']);
+    await executeTool(ctx, 'set_sound_moments', { onBeat: [], drops: [], reverbThrow: null });
+    const raw = JSON.parse(await fsp.readFile(path.join(dir, 'project.json'), 'utf8'));
+    expect(['onBeat' in raw.music, 'drops' in raw.music, 'voice' in raw]).toEqual([false, false, false]);
+
+    // another song drops the first one's beats; asking for the beat then listens to it once
+    host.songInfo = { ...host.songInfo, beatGrid: undefined };
+    await executeTool(ctx, 'choose_music', { track: 'other.mp3', startAt: 2, level: null });
+    expect((await loadProject(dir)).music.beats).toBeUndefined();
+    expect((await executeTool(ctx, 'set_sound_moments', { ...none, onBeat: ['broll'] })).isError).toBe(true);
+    host.songInfo = { ...host.songInfo, beatGrid: grid };
+    expect((await executeTool(ctx, 'set_sound_moments', { ...none, onBeat: ['broll'] })).isError).toBe(false);
+    expect((await loadProject(dir)).music).toMatchObject({ beats: grid, onBeat: ['broll'], startAt: 2 });
   });
 
   it('offers exactly the sounds the engine ships', () => {

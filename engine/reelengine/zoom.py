@@ -9,11 +9,14 @@ pipeline's zooms.py, keeping its rules:
   * release invisibly: if a zoom would end while a face-hiding b-roll is up, it holds until that
     b-roll's exit cut instead of visibly snapping back
   * zooms never overlap: a later zoom cuts the earlier one short (a hard punch to the new framing)
+  * with music.onBeat "zooms", the punch-in lands on the nearest beat up to BEAT_EARLY before its
+    word or BEAT_LATE after it (beats.py)
 
 A1's render applies each span as a crop-and-scale of the cut video about (cx, cy).
 """
 from __future__ import annotations
 
+from . import beats
 from .compose_util import fmt_of, log, word_end, word_start
 
 try:
@@ -33,6 +36,8 @@ DEFAULT_SCALE = 1.12
 MAX_SCALE = 2.0
 TAIL = 0.05           # hold a hair past the last word so the release is not on a syllable
 EYE_BIAS = 0.12       # centre this fraction of a face-height above the face's middle
+BEAT_EARLY = 0.15     # a zoom on the beat may punch in this much before its word...
+BEAT_LATE = 0.06      # ...or this much after it (later reads as a missed hit)
 
 
 def clamp_centre(scale: float, cx: float, cy: float, W: int, H: int) -> tuple[float, float]:
@@ -44,6 +49,7 @@ def clamp_centre(scale: float, cx: float, cy: float, W: int, H: int) -> tuple[fl
 def build_zooms(ctx, with_broll: bool = True) -> list:
     """project.zooms -> [ZoomSpan] on the output clock, sorted, non-overlapping."""
     W, H, fps = fmt_of(ctx)
+    grid = beats.synced(ctx.project, "zooms")
     spans = []
     for i, z in enumerate((ctx.project or {}).get("zooms") or []):
         anc = z.get("anchor") or {}
@@ -54,6 +60,7 @@ def build_zooms(ctx, with_broll: bool = True) -> list:
             log(f"zoom {i}: anchor {a}..{b} is not in the cut; skipped")
             continue
         t1 += TAIL
+        t0 = beats.snap(t0, grid, BEAT_EARLY, BEAT_LATE)
         scale = min(MAX_SCALE, max(1.0, float(z.get("scale", DEFAULT_SCALE) or DEFAULT_SCALE)))
         if scale <= 1.001 or t1 - t0 < 1.0 / fps:
             continue

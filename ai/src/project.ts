@@ -30,9 +30,16 @@ export interface Captions { enabled: boolean; style: CaptionStyle; corrections: 
 
 export type MusicLevel = 'under-voice' | 'quiet' | 'loud-intro';
 export interface MusicAutomation { fromWord: string; toWord: string; gainDb: number }
+/** The song's beats, stored when it is chosen: whole frames of SONG time at fps (engine beats.py). */
+export interface BeatGrid { fps: number; frames: number[] }
+export const BEAT_KINDS = ['cuts', 'zooms', 'broll'] as const;
+export type BeatKind = (typeof BEAT_KINDS)[number];
+/** A line the music drops out for: gone just before `from`, back on the first beat after `to`. */
+export interface MusicDrop { from: string; to: string }
 export interface Music {
   enabled: boolean; track: string | null; startAt: number; level: MusicLevel | string;
-  automation: MusicAutomation[]; fadeOut: number; [k: string]: unknown;
+  automation: MusicAutomation[]; fadeOut: number;
+  beats?: BeatGrid; onBeat?: BeatKind[]; drops?: MusicDrop[]; [k: string]: unknown;
 }
 
 export const TREATMENTS = [
@@ -71,6 +78,8 @@ export interface Project {
   zooms: Zoom[];
   /** absent = no sound effects */
   sfx?: Sfx[];
+  /** reverbThrow: an echo tail on the last word (engine music.reverb_throw); absent = none */
+  voice?: { reverbThrow?: boolean };
   cover: Cover;
   post: Post;
   notes: NoteEntry[];
@@ -154,6 +163,7 @@ export function validateProject(p: unknown, transcript?: Transcript): string[] {
     q.broll.forEach((b: any, i: number) => check(b.anchor, `broll[${i}] (${b.id})`));
     q.zooms.forEach((z: any, i: number) => check(z.anchor, `zooms[${i}]`));
     (q.music?.automation ?? []).forEach((m: any, i: number) => check({ from: m.fromWord, to: m.toWord }, `music.automation[${i}]`));
+    (q.music?.drops ?? []).forEach((d: any, i: number) => check(d, `music.drops[${i}]`));
     (q.sfx ?? []).forEach((e: any, i: number) => {
       const w = e.at?.word ?? e.at?.cut;
       if (w) check({ from: w, to: w }, `sfx[${i}]`);

@@ -19,6 +19,7 @@ Common notes and the tool that handles them:
 - "The caption says X but I said Y": add_caption_correction from X to Y. "Captions are too big", "move them down": set_caption_style.
 - "Zoom in when I say X", "too much zooming": set_zoom on those words, or remove the zoom.
 - "Add a whoosh when the picture comes in", "a pop on that", "no sound effects": set_sfx on those moments, or an empty list. Add sound effects only when the note asks for them.
+- "Cut the music on 'X'", "cuts on the beat", "echo on the last word": set_sound_moments (drops on that line, onBeat, reverbThrow).
 - "My video is mirrored", "it's backwards", "the writing is backwards", "flip it": set_mirror with on true. "It wasn't mirrored", "flip it back", "undo the flip": set_mirror with on false. Look at the frames to confirm text in the room now reads the right way.
 - "Different cover": set_cover at a better face frame in raw-take seconds. "Change the caption or hashtags": write_post (always exactly 5 hashtags).
 

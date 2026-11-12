@@ -14,6 +14,10 @@ is never split, and only silence is ever removed.
 
 Cut points are snapped to the SOURCE frame grid, so each segment's picture (whole frames) and sound
 (sample-exact) have the same length and the concat cannot drift the picture against the sound.
+
+With a beat grid (music.onBeat has "cuts", beats.py), each jump cut lands on the nearest beat it can
+reach by moving only the air after the outgoing range's last word: at most BEAT_REACH, never into
+that word and never into the next word in the source. A cut that can't reach a beat stays put.
 Pure functions; no ffmpeg in here.
 """
 from __future__ import annotations
@@ -21,8 +25,9 @@ from __future__ import annotations
 import bisect
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Sequence
 
+from . import beats as beatmod
 from .proto import EngineError
 from .render_ctx import Segment
 
@@ -31,6 +36,8 @@ MIN_SAVING = 0.08       # never splice for less than this
 AFTER_SHARE = 0.08      # of the kept air, at most this much stays with the OUTGOING word
 HEAD_LEAD = 0.10        # air before the very first word of the video
 TAIL_KEEP = 0.35        # ring-out after the very last word
+BEAT_REACH = 0.15       # a jump cut moves at most this far to land on a beat
+WORD_CLEAR = 0.03       # ...and stays this far clear of the words on either side
 EPS = 1e-6
 
 
@@ -197,16 +204,44 @@ def plan_run(words: list, i0: int, i1: int, gap_cap: float, min_saving: float, f
     return [(round(s, 6), round(e, 6)) for s, e in out]
 
 
+def land_cut_on_beat(seg: Segment, word_e: float, limit: float, fps: float, out: float,
+                     beats: Sequence[float]) -> float:
+    """Move the end of `seg` (the outgoing range's last piece, which ends at output time `out`) so the
+    cut after it lands on the nearest reachable beat. Returns how far the cut moved (0 if no beat is
+    in reach). Only the air after the last word changes: never earlier than word_e + WORD_CLEAR,
+    never later than `limit` (the next word in the source, or the source's end)."""
+    lo = min(seg.src_end, max(word_e + WORD_CLEAR, seg.src_end - BEAT_REACH))
+    hi = max(seg.src_end, min(limit, seg.src_end + BEAT_REACH))
+    b = beatmod.nearest(out, beats, out - (seg.src_end - lo), out + (hi - seg.src_end))
+    if b is None:
+        return 0.0
+    end = snap(seg.src_end + (b - out), fps)
+    if not lo - EPS <= end <= hi + EPS:          # the source frame grid rounded it out of reach
+        return 0.0
+    moved = round(end - seg.src_end, 6)
+    seg.src_end = end
+    return moved
+
+
 def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_CAP,
-                   min_saving: float = MIN_SAVING) -> Timeline:
-    """sources: {sid: {"duration": float, "fps": float}}."""
+                   min_saving: float = MIN_SAVING, beats: Sequence[float] = ()) -> Timeline:
+    """sources: {sid: {"duration": float, "fps": float}}. beats: output-clock beat times that the
+    jump cuts land on (beats.synced), or empty."""
     runs = merge_contiguous(words, resolve_ranges(words, keep))
     segments, words_out, first_pos = [], [], {}
-    out = 0.0
+    out, last_word = 0.0, None
     for n, (i0, i1) in enumerate(runs):
         src = words[i0]["source"]
         meta = sources.get(src) or {}
         fps = float(meta.get("fps") or 30.0)
+        if beats and segments:
+            p1 = last_word          # the previous range's last word: the cut comes right after it
+            p_src = words[p1]["source"]
+            p_meta = sources.get(p_src) or {}
+            nxt = words[p1 + 1] if p1 + 1 < len(words) and words[p1 + 1]["source"] == p_src else None
+            limit = nxt["s"] - WORD_CLEAR if nxt else float(p_meta.get("duration") or segments[-1].src_end)
+            out += land_cut_on_beat(segments[-1], words[p1]["e"], limit, float(p_meta.get("fps") or 30.0),
+                                    out, beats)
         pieces = plan_run(words, i0, i1, gap_cap, min_saving, fps, float(meta.get("duration") or 0.0),
                           is_first=(n == 0), is_last=(n == len(runs) - 1))
         run_segs = []
@@ -235,6 +270,7 @@ def build_timeline(words: list, keep: list, sources: dict, gap_cap: float = GAP_
         run_segs[0].first_word = words[i0]["id"]
         run_segs[-1].last_word = words[i1]["id"]
         segments.extend(run_segs)
+        last_word = i1
     index = {w["id"]: i for i, w in enumerate(words)}
     kept_index = sorted({index[wid] for wid in first_pos})
     return Timeline(segments=segments, duration=round(out, 6), words_out=words_out,

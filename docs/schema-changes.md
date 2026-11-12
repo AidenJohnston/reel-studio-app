@@ -62,3 +62,22 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   voice's speech loudness, 6 dB more while the voice is talking, `gainDb` (-24 to +12) on top but never above 4 dB
   under the voice, and its sample peak stays 3 dB under the voice's loudest peak. Word and cut anchors are
   remapped after a re-transcription like the others. Written by the AI's `set_sfx`; an empty list removes the field.
+  At most one effect, plus one per 8 seconds of video, plays; the rest are left out the same way.
+
+## 2026-11-12 (beat sync, music drops, reverb throw)
+
+- `music.beats` (`{fps, frames}`, absent = none): the song's beat grid, each beat a whole frame of SONG time,
+  written by `choose_music` when it picks a song (engine `analyze-music --fps`) and removed when the song changes.
+  Stored rather than re-detected so the same project always lands the same edits on the same frames.
+- `music.onBeat` (array of `"cuts"`, `"zooms"`, `"broll"`, absent = none): those land on the nearest beat in
+  reach. A jump cut moves at most 0.15 s by changing only the air after the outgoing word; a zoom punches in up to
+  0.15 s before its word or 0.06 s after; a b-roll entrance moves up to 0.15 s earlier or 0.1 s later.
+- `music.drops` (`[{from, to}]` word ids, absent = none): the music is gone 40 ms before `from` and comes back on
+  the first beat within 1 s after `to` ends (0.15 s after it with no beat in reach). The song keeps running
+  underneath. Remapped after a re-transcription like the other anchors.
+- `voice.reverbThrow` (boolean, absent = false): an echo tail on the last kept word (its final 0.7 s at most),
+  peaking 8 dB under the voice and fading out if it is still ringing when the video ends.
+- All three are written by the AI's `set_sound_moments`; turning one off removes its field.
+- Defaults that change the sound of existing projects: the music no longer fades in (a 5 ms de-click instead);
+  `analyze-music` now suggests a start on the song's first attack after the calm bar, and its beats sit on the
+  attacks (they were 20 to 45 ms early, and could drift between the beats on a long song).
