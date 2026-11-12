@@ -1,10 +1,5 @@
-// Pins what each AI task sends the model (ai/context-budget.json): the real requests, captured by running the editor
-// against a fake model and a fixed tiny project, so the user's own data is the same every run. Two shapes: "api"
-// (system, messages and tool schemas as JSON) and "cli" (what a live Claude Code session is sent: --system-prompt plus
-// renderConversation() to start, renderDelta() for each later turn). A tripwire for the main path of every task and its
-// retries (no tool call, malformed reply, invalid JSON), not proof of every branch: note attachments, image
-// follow-ups and provider errors are not exercised.
-// After an intended change: UPDATE_CONTEXT_BUDGET=1 npm test -w ai, and commit the file.
+// Pins the size of every request the AI tasks send (ai/context-budget.json). Not exercised: note attachments, image
+// follow-ups, provider errors. After an intended change: UPDATE_CONTEXT_BUDGET=1 npm test -w ai, then commit the file.
 import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -23,7 +18,7 @@ const claudeSystem = (() => {
 })();
 
 const api = (r: CompletionRequest) => r.system.length + JSON.stringify(r.messages).length + JSON.stringify(r.tools).length;
-/** A live session continues when this request is the previous one plus the model's reply and more (cli.ts sessionTurn). */
+/** Mirrors ClaudeCliProvider.sessionTurn: a continuing live session is sent only the new messages. */
 const continues = (prev: CompletionRequest | undefined, r: CompletionRequest) =>
   !!prev && prev.system === r.system && r.messages.length > prev.messages.length + 1 && r.messages[prev.messages.length]?.role === 'assistant';
 const cli = (r: CompletionRequest, prev?: CompletionRequest) =>
@@ -33,7 +28,6 @@ const firstUserText = (r: CompletionRequest) => {
   return m && m.role === 'user' ? m.content.filter((p) => p.type === 'text').map((p: any) => p.text).join('\n') : '';
 };
 
-/** Every request the model gets, in order, tagged with the task it belongs to ("other" if none matches). */
 async function capture(): Promise<{ kind: string; req: CompletionRequest; prev?: CompletionRequest }[]> {
   const prompts = new Prompts(join(__dirname, '..', 'prompts'));
   const starts = (name: 'firstEdit' | 'applyNote' | 'proofread' | 'writeScript' | 'pickTakes', text: string) =>
@@ -58,7 +52,7 @@ async function capture(): Promise<{ kind: string; req: CompletionRequest; prev?:
   const keepAll = (n: number) => call('set_cut', { keep: [{ from: 'w0', to: `w${n - 1}` }] });
   const runs: ScriptedModel[] = [];
 
-  // 1. Every task on its main path (writeScript and pickTakes retry, since the fake model sends no JSON).
+  // 1. Every task. writeScript and pickTakes also retry: the fake model sends no JSON.
   const { root, dir, transcript } = await project();
   const model = new ScriptedModel([{ toolCalls: [keepAll(transcript.words.length)] }]);
   const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: model });
@@ -68,14 +62,13 @@ async function capture(): Promise<{ kind: string; req: CompletionRequest; prev?:
   await pickTakes(transcript, model).catch(() => undefined);
   runs.push(model);
 
-  // 2. A reply with no tool call, then a malformed one: the agent's two correction messages.
+  // 2. The agent's corrections for a reply with no tool call and a malformed one.
   const second = await project();
   const misses = new ScriptedModel([{ text: 'Let me look first.' }, { text: '{"tool_calls": [', malformed: true }]);
   await createAI({ host: new FakeHost(second.root), settingsDir: tmpDir('settings '), providerOverride: misses })
     .firstEdit(second.dir, () => undefined).catch(() => undefined);
   runs.push(misses);
 
-  // 3. A script written on the first try.
   const ok = new ScriptedModel([{ text: '{"hook":"h","script":"s","onScreenText":["x"]}' }]);
   await createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: ok }).writeScript('x', () => undefined).catch(() => undefined);
   runs.push(ok);
@@ -89,8 +82,6 @@ async function capture(): Promise<{ kind: string; req: CompletionRequest; prev?:
 describe('AI context budget', () => {
   it('ai/context-budget.json matches what the tasks send', async () => {
     const all = await capture();
-    // Every request is pinned (retries and follow-up turns included), plus totals, so a longer or an extra request of
-    // any kind raises a number the workflow compares with main.
     const measured: Record<string, number> = {};
     const n: Record<string, number> = {};
     for (const { kind, req, prev } of all) {

@@ -1,8 +1,6 @@
 name: AI context budget
 
-# Fails when a number in ai/context-budget.json grows past main's, or a key main has disappears (a rename would dodge
-# the comparison). ai/test/context-budget.test.ts keeps the file equal to the measurement. A maintainer accepts growth
-# on purpose with the ai-context-increase label.
+# A removed key fails too: renaming one would otherwise dodge the comparison.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
