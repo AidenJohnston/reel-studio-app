@@ -1,0 +1,179 @@
+// "Sign in with ChatGPT" on a computer with no Codex app (docs/architecture.md section 6, Providers): the app gets
+// OpenAI's own `codex` CLI itself, the same package OpenAI's installer fetches (scripts/install/install.ps1 and
+// install.sh in openai/codex), and keeps it in its own folder. Nothing else on the computer changes: no PATH entry,
+// no shortcut, nothing outside userData.
+//
+// Fetched on first use, not bundled: the package is 166 MB on a Mac and 201 MB on Windows, most people who pick
+// ChatGPT already have Codex, and a bundled copy would age with every installer. It is pinned to one release and
+// each archive is checked against the SHA-256 that release publishes (codex-package_SHA256SUMS, the same values as
+// GitHub's asset digests) before anything is unpacked. Codex is Apache-2.0 (openai/codex LICENSE), so fetching and
+// running it alongside AGPL-3.0 Reel Studio is allowed; THIRD_PARTY.md lists it.
+import { createHash, randomUUID } from 'node:crypto'
+import { createWriteStream, existsSync, promises as fs } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { join, posix, win32 } from 'node:path'
+
+export const CODEX_VERSION = '0.167.2'
+
+/** codex-package_SHA256SUMS of rust-v0.167.2 (2026-11-11), one per target this app ships on. */
+export const CODEX_PACKAGES: Record<string, { asset: string; sha256: string; bytes: number }> = {
+  'win32-x64': { asset: 'codex-package-x86_64-pc-windows-msvc.tar.gz', sha256: '20b0f94105f40b617bf209b1679b8674ab6d3d8f303e767ae43cf1860a8705da', bytes: 201_559_461 },
+  'win32-arm64': { asset: 'codex-package-aarch64-pc-windows-msvc.tar.gz', sha256: '61d852fb27769c76344a977cdcc5701bb0172606674e45addf0c12962ad6e8ef', bytes: 186_789_602 },
+  'darwin-arm64': { asset: 'codex-package-aarch64-apple-darwin.tar.gz', sha256: 'e791290651bce41938fb160b5de2bd9ff8bcf3401ca3e236c73f485fca4be1bb', bytes: 166_599_161 }
+}
+
+export const codexPackageUrl = (asset: string): string => `https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/${asset}`
+
+/** The archive, the unpacked package (about three times the archive) and room to spare. */
+const SPACE_FACTOR = 5
+
+export type FetchProblem = 'unsupported' | 'offline' | 'disk' | 'bad_download' | 'cancelled' | 'failed'
+
+export class CodexFetchError extends Error {
+  constructor(readonly problem: FetchProblem, message: string) {
+    super(message)
+  }
+}
+
+export const FETCH_MESSAGES: Record<Exclude<FetchProblem, 'cancelled'>, string> = {
+  unsupported: 'ChatGPT can’t be set up on this kind of computer yet. Try Other ways below.',
+  offline: 'The download stopped. Check you’re online, then try again.',
+  disk: 'Your disk is too full. Free up 1 GB, then try again.',
+  bad_download: 'The download came through damaged. Try again.',
+  failed: 'Getting ChatGPT ready didn’t work. Try again.'
+}
+
+export interface CodexPackage {
+  asset: string
+  sha256: string
+  bytes: number
+  url: string
+}
+
+export interface CodexFetchDeps {
+  /** where the package lives: <userData>/codex */
+  dir: string
+  platform: NodeJS.Platform
+  arch: string
+  fetch?: typeof fetch
+  /** unpacks a .tar.gz into `dest` (default: the system's own tar) */
+  extract?: (archive: string, dest: string, signal: AbortSignal) => Promise<void>
+  /** free bytes on the disk holding `dir` (default: fs.statfs) */
+  freeBytes?: (dir: string) => Promise<number>
+  /** tests only: another package to fetch (a local server and its hash) */
+  pkg?: CodexPackage
+  systemRoot?: string
+}
+
+export function codexPackage(platform: NodeJS.Platform, arch: string): CodexPackage | null {
+  const p = CODEX_PACKAGES[`${platform}-${arch}`]
+  return p ? { ...p, url: codexPackageUrl(p.asset) } : null
+}
+
+/** The binary inside an unpacked package (install.ps1 / install.sh: bin/codex.exe, bin/codex). */
+export function codexBinIn(release: string, platform: NodeJS.Platform): string {
+  return (platform === 'win32' ? win32 : posix).join(release, 'bin', platform === 'win32' ? 'codex.exe' : 'codex')
+}
+
+/** The release folder: one per pinned hash, so a new pin never reuses an old unpack. */
+const releaseDir = (dir: string, pkg: CodexPackage): string => join(dir, `${CODEX_VERSION}-${pkg.sha256.slice(0, 12)}`)
+
+/** The binary when this pin is already unpacked here (its marker is written last), else null. Never downloads. */
+export function installedCodex(d: Pick<CodexFetchDeps, 'dir' | 'platform' | 'arch' | 'pkg'>): string | null {
+  const pkg = d.pkg ?? codexPackage(d.platform, d.arch)
+  if (!pkg) return null
+  const release = releaseDir(d.dir, pkg)
+  const bin = codexBinIn(release, d.platform)
+  return existsSync(join(release, '.complete')) && existsSync(bin) ? bin : null
+}
+
+function systemTar(platform: NodeJS.Platform, systemRoot: string): string {
+  // Windows 10 1803 and later ship bsdtar as System32\tar.exe, which reads .tar.gz; install.ps1 uses the same one.
+  return platform === 'win32' ? win32.join(systemRoot, 'System32', 'tar.exe') : '/usr/bin/tar'
+}
+
+function tarExtract(platform: NodeJS.Platform, systemRoot: string) {
+  return (archive: string, dest: string, signal: AbortSignal): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(systemTar(platform, systemRoot), ['-xzf', archive, '-C', dest], { windowsHide: true, stdio: 'ignore', signal })
+      child.on('error', reject)
+      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exited ${code}`))))
+    })
+}
+
+async function statfsFree(dir: string): Promise<number> {
+  const s = await fs.statfs(dir)
+  return Number(s.bavail) * Number(s.bsize)
+}
+
+const isDiskFull = (e: unknown): boolean => ['ENOSPC', 'EDQUOT'].includes(String((e as NodeJS.ErrnoException)?.code))
+
+/**
+ * The Codex binary, fetched and unpacked if this pin isn't here yet. Progress is 0-100 over the download. Throws
+ * CodexFetchError with plain words; a cancel (signal) leaves nothing behind but the folder it started from.
+ */
+export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProgress?: (pct: number) => void): Promise<string> {
+  const pkg = d.pkg ?? codexPackage(d.platform, d.arch)
+  if (!pkg) throw new CodexFetchError('unsupported', FETCH_MESSAGES.unsupported)
+  const done = installedCodex({ ...d, pkg })
+  if (done) return done
+
+  const release = releaseDir(d.dir, pkg)
+  const stage = join(d.dir, `.staging-${randomUUID().slice(0, 8)}`)
+  const archive = join(d.dir, `.download-${randomUUID().slice(0, 8)}.tar.gz`)
+  const cancelled = (): CodexFetchError => new CodexFetchError('cancelled', 'Stopped.')
+  try {
+    await fs.mkdir(d.dir, { recursive: true })
+    const free = await (d.freeBytes ?? statfsFree)(d.dir).catch(() => Infinity)
+    if (free < pkg.bytes * SPACE_FACTOR) throw new CodexFetchError('disk', FETCH_MESSAGES.disk)
+
+    let res: Response
+    try {
+      res = await (d.fetch ?? fetch)(pkg.url, { signal, redirect: 'follow' })
+    } catch {
+      throw signal.aborted ? cancelled() : new CodexFetchError('offline', FETCH_MESSAGES.offline)
+    }
+    if (!res.ok || !res.body) throw new CodexFetchError('offline', FETCH_MESSAGES.offline)
+    const total = Number(res.headers.get('content-length')) || pkg.bytes
+    const hash = createHash('sha256')
+    const out = createWriteStream(archive)
+    let got = 0
+    let shown = -1
+    try {
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        hash.update(chunk)
+        got += chunk.byteLength
+        if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
+        const pct = Math.min(99, Math.floor((got / total) * 100))
+        if (pct !== shown) onProgress?.((shown = pct))
+      }
+    } catch (e) {
+      throw signal.aborted ? cancelled() : isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('offline', FETCH_MESSAGES.offline)
+    } finally {
+      await new Promise<void>((r) => out.end(r))
+    }
+    if (signal.aborted) throw cancelled()
+    // Nothing from the download is unpacked or run unless it is byte for byte the pinned package.
+    if (hash.digest('hex') !== pkg.sha256) throw new CodexFetchError('bad_download', FETCH_MESSAGES.bad_download)
+
+    await fs.mkdir(stage, { recursive: true })
+    try {
+      await (d.extract ?? tarExtract(d.platform, d.systemRoot ?? 'C:\\Windows'))(archive, stage, signal)
+    } catch (e) {
+      throw signal.aborted ? cancelled() : isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed)
+    }
+    if (!existsSync(codexBinIn(stage, d.platform))) throw new CodexFetchError('failed', FETCH_MESSAGES.failed)
+    if (d.platform !== 'win32') await fs.chmod(codexBinIn(stage, d.platform), 0o755)
+    await fs.writeFile(join(stage, '.complete'), `${pkg.sha256}\n`)
+    await fs.rm(release, { recursive: true, force: true })
+    await fs.rename(stage, release)
+    onProgress?.(100)
+    return codexBinIn(release, d.platform)
+  } catch (e) {
+    if (e instanceof CodexFetchError) throw e
+    throw isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed)
+  } finally {
+    await fs.rm(archive, { force: true }).catch(() => {})
+    await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
+  }
+}

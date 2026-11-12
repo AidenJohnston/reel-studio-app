@@ -103,7 +103,7 @@ const PRACTICE_REELS = [
   { title: 'Bake it hot in a closed pot', why: 'I kept the bake on its own, because it needs nothing said before it.' }
 ]
 
-export const createMockAI: CreateAI = ({ host }) => {
+export const createMockAI: CreateAI = ({ host, managedCodex }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
 
   /** Read as the real package reads it (ai/src/style.ts): no file is an empty My style, a damaged one is kept as a copy
@@ -235,7 +235,11 @@ export const createMockAI: CreateAI = ({ host }) => {
     m === 'ready' ? 'ready' : m === 'broken' ? 'broken' : ['signed_out', 'browser', 'signs_in', 'free', 'port_reserved', 'code_off', 'port_in_use', 'status_unknown'].includes(m) ? 'signed_out' : 'missing'
   const state = { claude: startState(mode.claude), chatgpt: startState(mode.chatgpt) }
   const plan: { claude?: string; chatgpt?: string } = mode.claude === 'ready' ? { claude: 'max' } : {}
-  let chosen: 'claude-cli' | 'codex-cli' | null = null
+  let chosen: 'claude-cli' | 'codex-cli' | 'custom' | null = null
+  // A saved connection to an OpenAI-compatible server, as the real package keeps one (the guided Reel Studio AI
+  // sign-in saves publik's key this way). Saving asks the server once, so a test sees the key and model arrive there.
+  let custom: { id: string; label: string; baseURL: string; model: string; key: string } | null = null
+  const customProvider = (): ProviderStatus => ({ id: 'custom', connected: true, label: custom!.label, connectionId: custom!.id })
   // Settings › How notes run, as the real package keeps it (ai index.ts noteRunner). REELSTUDIO_MOCK_HARNESS=refused:
   // the app's self-test fails on the first note run in the app, so that note runs on Reel Studio's editor instead.
   let runInApp = false
@@ -275,6 +279,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
+      if (chosen === 'custom' && custom) return customProvider()
       return NOT_CONNECTED
     },
     async setActive(id) {
@@ -296,7 +301,8 @@ export const createMockAI: CreateAI = ({ host }) => {
           }
         }
         chosen = id
-      } else chosen = null
+      } else if (id === 'custom' && custom) chosen = 'custom'
+      else chosen = null
     },
     cancelCheck() {
       checking?.abort()
@@ -305,7 +311,35 @@ export const createMockAI: CreateAI = ({ host }) => {
       return claudeStatus()
     },
     async codexStatus() {
+      // the Codex app Reel Studio fetched (easy-ai.ts) is found like the real package finds it: signed out at first
+      if (state.chatgpt === 'missing' && managedCodex?.()) state.chatgpt = 'signed_out'
       return cliStatus('chatgpt')
+    },
+    async connections() {
+      return custom ? [{ id: custom.id, label: custom.label, kind: 'openai' as const, baseURL: custom.baseURL, model: custom.model, supportsImages: false, hasKey: true, active: chosen === 'custom' }] : []
+    },
+    async saveConnection(input) {
+      const key = input.key?.trim() || (custom && input.id === custom.id ? custom.key : '')
+      const fail = (userMessage: string) => ({ status: { id: 'custom' as const, connected: false, label: input.label, error: { code: 'connection_error', userMessage } }, error: { code: 'connection_error', userMessage } })
+      try {
+        const res = await fetch(`${input.baseURL.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+          body: JSON.stringify({ model: input.model, max_tokens: 1, messages: [{ role: 'user', content: 'Reply with OK.' }] })
+        })
+        if (!res.ok) return fail('The server did not accept that key. Check the key, then paste it again.')
+      } catch {
+        return fail('Something went wrong talking to your server. Try again.')
+      }
+      custom = { id: input.id ?? custom?.id ?? `c_${randomUUID().slice(0, 8)}`, label: input.label, baseURL: input.baseURL, model: input.model, key }
+      chosen = 'custom'
+      const status = customProvider()
+      return { status, connection: { id: custom.id, label: custom.label, kind: 'openai' as const, baseURL: custom.baseURL, model: custom.model, supportsImages: false, hasKey: true, active: true } }
+    },
+    async removeConnection(id) {
+      if (custom?.id !== id) return
+      custom = null
+      if (chosen === 'custom') chosen = null
     },
     async retireSignInWithChatGPT() {
       return false

@@ -46,6 +46,9 @@ export interface Settings extends InstagramSettings, TikTokSettings, UpdateMemor
   soundEffects: boolean
   /** Settings › Editor › "Let other AI apps use Reel Studio" (main/outside-access.ts): off until the person turns it on */
   outsideApps: boolean
+  /** Settings › Advanced › "Easier AI sign-in" (main/easy-ai.ts): the guided ChatGPT and Reel Studio AI sign-ins.
+   * Off until the person turns it on; REELSTUDIO_EASY_AI=1 turns it on for one run. */
+  easyAi: boolean
   /** Library › Videos › Footage folders (footage-sources.ts) */
   footageSources: SavedSource[]
 }
@@ -68,6 +71,7 @@ const DEFAULTS: Settings = {
   timeline: true,
   soundEffects: true,
   outsideApps: false,
+  easyAi: false,
   footageSources: [],
   // Connection and publishing stay opt-in until the broker and Meta app have been configured.
   instagramEnabled: false, instagramAppId: null, instagramBrokerUrl: null, instagramUploadOrigins: [],

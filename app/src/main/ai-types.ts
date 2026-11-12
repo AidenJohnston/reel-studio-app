@@ -291,6 +291,8 @@ export interface CreateAIOptions {
   cliEnv?: () => NodeJS.ProcessEnv
   /** draw what each reply of the AI changed before its draft (`moment` events) */
   moments?: boolean
+  /** the Codex app Reel Studio fetched for "Sign in with ChatGPT" (main/easy-ai.ts), or null; detection looks here last */
+  managedCodex?: () => string | null
 }
 
 export type CreateAI = (opts: CreateAIOptions) => AI

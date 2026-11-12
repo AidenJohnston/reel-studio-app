@@ -9,6 +9,7 @@ import { HubRow, VendorRows, useHub } from './vendor-connect'
 import { EditorDetails, StageModels, useStages } from './editor-limits'
 import { SETTINGS } from './settings-index'
 import { SearchHits } from './settings-rows'
+import { GuidedChoices, useEasyAi } from './AiSetup'
 import './connect.css'
 
 /** What Reel Studio makes with no editor connected. Nobody says "I" here: no editor is there to say it. */
@@ -69,11 +70,16 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   }
 
   const anyOn = !!active && active.connected && active.id !== 'none'
+  // the easy-AI flag (main/easy-ai.ts): while nothing is connected, the guided choices come first and today's rows
+  // wait under Other ways, with no filled button of their own. Off, everything below renders as it always has.
+  const easy = useEasyAi()
+  const guided = !!easy?.on && !anyOn
+  const [otherWaysOpen, setOtherWaysOpen] = useState(false)
   const hubOn = anyOn && active.id === 'custom' && active.label === 'CLIProxyAPI'
   const otherOn = anyOn && !hubOn && !['claude-cli', 'codex-cli'].includes(active.id)
   const [othersOpen, setOthersOpen] = useState(false)
   // CLIProxyAPI is the recommended choice: while nothing is connected its Use it is the one filled button
-  const hubLeads = !anyOn && !!hub && (hub.state === 'ready' || hub.state === 'needs-key')
+  const hubLeads = !anyOn && !guided && !!hub && (hub.state === 'ready' || hub.state === 'needs-key')
   // Not found here while one of the person's own apps is ready: it waits under Advanced, with the person's own server
   // and an API key. First, a first-timer met a row that could not be used above the one that could; after the app,
   // still a name they had to read past: both Sense judges (goal 3) named it first, round after round.
@@ -88,7 +94,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   const vendorRows = (
     <VendorRows
       active={active}
-      lead={!anyOn && !hubLeads}
+      lead={!anyOn && !hubLeads && !guided}
       hubLeads={hubLeads && !vendorAttention}
       onAttention={setVendorAttention}
       onReady={setVendorReady}
@@ -108,9 +114,16 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       status={<ConnectedMark testid="ai-connected" />}
       tone="ok"
       action={
-        <Button size="small" onClick={() => void disconnect()} data-testid="use-no-ai">
-          Disconnect
-        </Button>
+        easy?.on && active.id === 'custom' && active.label === REEL_STUDIO_AI ? (
+          // the guided Reel Studio AI sign-in: Sign out removes its key and connection, not only the choice
+          <Button size="small" onClick={() => void reel.ai.guidedSignOut('publik').then(() => disconnect())} data-testid="guided-sign-out-publik">
+            Sign out
+          </Button>
+        ) : (
+          <Button size="small" onClick={() => void disconnect()} data-testid="use-no-ai">
+            Disconnect
+          </Button>
+        )
       }
     >
       {details}
@@ -123,8 +136,8 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
     </HubRow>
   )
 
-  return (
-    <div className="picker" data-testid="editor-setup">
+  const body = (
+    <>
       <div className="prov" role="group" aria-label="Choose your editor" data-testid="ai-picker">
         {otherRow}
         {/* the first row: found, asking for a key, elsewhere, or not running here with nothing else ready */}
@@ -156,9 +169,27 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
           {WITHOUT_EDITOR}
         </p>
       )}
+    </>
+  )
+
+  return (
+    <div className="picker" data-testid="editor-setup">
+      {guided && easy ? (
+        <>
+          <GuidedChoices easy={easy} onConnected={connected} />
+          <Disclosure label="Other ways" open={otherWaysOpen || searchedAdvanced} onToggle={() => setOtherWaysOpen((o) => !o)} testid="other-ways">
+            {body}
+          </Disclosure>
+        </>
+      ) : (
+        body
+      )}
     </div>
   )
 }
+
+/** the connection the guided Reel Studio AI sign-in saves (main/publik.ts PUBLIK_LABEL) */
+const REEL_STUDIO_AI = 'Reel Studio AI'
 
 const isOn = (p: ProviderInfo | null, id: ProviderInfo['id']): boolean => !!p && p.connected && p.id === id
 

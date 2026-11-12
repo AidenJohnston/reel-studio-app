@@ -34,6 +34,8 @@ export interface CodexDetectOptions {
   platform?: NodeJS.Platform;
   exists?: (p: string) => boolean;
   listDir?: (dir: string) => string[];
+  /** a Codex the app fetched itself (app main/codex-fetch.ts): used only when the person has none of their own */
+  fallbackBin?: string;
 }
 
 const RUN_TIMEOUT_MS = 15_000;
@@ -162,6 +164,7 @@ export async function detectCodex(o: CodexDetectOptions = {}): Promise<LocalCode
   const exists = o.exists ?? defaultExists;
   let bin: string | null = o.bin === undefined ? findCodex(env, platform, exists, o.listDir ?? defaultListDir) : o.bin;
   if (!bin && o.bin === undefined && platform === 'darwin') bin = await codexFromLoginShell(run, env, exists);
+  if (!bin && o.bin === undefined && o.fallbackBin && path.isAbsolute(o.fallbackBin) && exists(o.fallbackBin)) bin = o.fallbackBin;
   if (!bin) return { state: 'missing', installed: false, signedIn: false, reason: CODEX_MESSAGES.missing };
 
   let version: string | undefined;

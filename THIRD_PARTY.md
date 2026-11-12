@@ -8,6 +8,22 @@ The installed app carries this file and the full license texts under `resources/
 (`THIRD_PARTY.md`, `texts/gpl-3.0.txt`, `texts/lgpl-3.0.txt`, `texts/lgpl-2.1.txt`, `texts/yunet-MIT.txt`,
 `texts/t3code-MIT.txt`, `texts/npm-licenses.txt`). `fetch_runtime.py` refuses to build a bundle if any of the texts is missing or altered.
 
+## Fetched on first use (never bundled)
+
+### OpenAI Codex CLI (Apache-2.0)
+
+Only with Settings › Advanced › Easier AI sign-in on, and only when "Sign in with ChatGPT" finds no Codex app on the
+computer. The app downloads OpenAI's own release package, the same file OpenAI's installer uses, checks it against the
+SHA-256 below before unpacking it, and keeps it in its own folder (`<user data>/codex`). It runs it as the person's
+ChatGPT editor, exactly like a Codex app they installed themselves (docs/architecture.md section 6). Source and
+license: https://github.com/openai/codex (Apache-2.0). Pinned in `app/src/main/codex-fetch.ts`.
+
+| Platform | File (at `https://github.com/openai/codex/releases/download/rust-v0.167.2/<file>`) | SHA-256 |
+| --- | --- | --- |
+| Windows x64 | `codex-package-x86_64-pc-windows-msvc.tar.gz` | `20b0f94105f40b617bf209b1679b8674ab6d3d8f303e767ae43cf1860a8705da` |
+| Windows arm64 | `codex-package-aarch64-pc-windows-msvc.tar.gz` | `61d852fb27769c76344a977cdcc5701bb0172606674e45addf0c12962ad6e8ef` |
+| macOS arm64 | `codex-package-aarch64-apple-darwin.tar.gz` | `e791290651bce41938fb160b5de2bd9ff8bcf3401ca3e236c73f485fca4be1bb` |
+
 ## Bundled programs (downloaded at build time, shipped inside the app)
 
 ### FFmpeg and FFprobe (GPL v3), built by this project

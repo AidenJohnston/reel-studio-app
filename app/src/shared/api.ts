@@ -745,6 +745,39 @@ export interface VendorInfo {
   deviceCode?: { url: string; code: string }
 }
 
+/**
+ * The guided AI setup behind the easy-AI flag (main/easy-ai.ts): "Sign in with ChatGPT" (Codex, fetched by the app
+ * when it is missing) and "Use Reel Studio's AI" (publik). getting = the app is fetching ChatGPT's helper (pct);
+ * waiting = a page is open in the browser for the person; checking = the app is confirming; done = it is the editor.
+ */
+export type GuidedRoute = 'chatgpt' | 'publik'
+export type GuidedStep = 'idle' | 'checking' | 'getting' | 'waiting' | 'done' | 'failed'
+/** expired: the sign-in page waited too long. signed_out: a saved sign-in ended. needs_plan: publik has no AI time. */
+export type GuidedProblem = 'cancelled' | 'expired' | 'failed' | 'offline' | 'disk' | 'signed_out' | 'needs_plan'
+export interface GuidedInfo {
+  route: GuidedRoute
+  step: GuidedStep
+  /** getting: the download, 0-100 */
+  pct?: number
+  /** one plain sentence for the person */
+  message?: string
+  problem?: GuidedProblem
+  /** done with no sign-in: it was already signed in */
+  already?: boolean
+  /** waiting: Open the page again works */
+  canReopen?: boolean
+  /** ChatGPT's sign-in with a code (its browser sign-in could not open its port): what to type on OpenAI's page */
+  deviceCode?: { url: string; code: string }
+}
+export interface EasyAiInfo {
+  /** the flag: Settings › Advanced, or REELSTUDIO_EASY_AI=1 */
+  on: boolean
+  /** this build can offer publik (it has publik's app token) */
+  publik: boolean
+  /** a saved Reel Studio AI sign-in that ended since the app started (problem signed_out), to say so once */
+  publikNotice?: GuidedInfo
+}
+
 /** What the page learns about it. Never the account (no e-mail, no organization), never a path. */
 export interface ClaudeCodeInfo {
   state: ClaudeCodeState
@@ -1090,6 +1123,18 @@ export interface ReelApi {
      * only on the person's own click, since Codex clears the credentials it has when a sign-in starts. */
     vendorSignIn(v: VendorId): Promise<VendorInfo>
     onVendor(cb: (i: VendorInfo) => void): () => void
+    /** The guided setup (main/easy-ai.ts). Every call but easyStatus refuses while the flag is off. */
+    easyStatus(): Promise<EasyAiInfo>
+    /** Settings › Advanced › Easier AI sign-in */
+    setEasyAi(on: boolean): Promise<EasyAiInfo>
+    /** Starts (or joins) a guided sign-in; resolves when it ends. Every step also arrives on onGuided. */
+    guidedStart(route: GuidedRoute): Promise<GuidedInfo>
+    guidedCancel(route: GuidedRoute): Promise<void>
+    /** waiting: opens the sign-in page again */
+    guidedReopen(route: GuidedRoute): Promise<void>
+    /** publik: signs out (its key and connection are removed) */
+    guidedSignOut(route: GuidedRoute): Promise<void>
+    onGuided(cb: (i: GuidedInfo) => void): () => void
     /** Settings › Editor › How notes run: Reel Studio's editor, or the editor in use's own app with Reel Studio's tools. */
     noteRunner(): Promise<NoteRunnerInfo>
     setNoteRunner(runner: NoteRunnerInfo['runner']): Promise<NoteRunnerInfo>

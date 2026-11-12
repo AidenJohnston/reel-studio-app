@@ -2,7 +2,7 @@
 // Instagram API v26.0: https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login
 // The only bridge between the page and the main process. The page never sees Node or ipcRenderer.
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, OutsideStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo } from '../shared/api'
+import type { AppCommand, DevicesStatus, JobEvent, ModelStatus, OutsideStatus, PhoneEvent, PostingStatus, PostProgress, ProviderInfo, ReelApi, UpdateKeyStatus, VendorInfo, GuidedInfo } from '../shared/api'
 import type { UpdateState } from '../shared/update'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -129,6 +129,13 @@ const api: ReelApi = {
     vendorSignIn: (v) => call('ai:vendorSignIn', v),
     vendorSignInWithCode: (v) => call('ai:vendorSignInWithCode', v),
     onVendor: (cb) => on<VendorInfo>('ai:vendor', cb),
+    easyStatus: () => call('ai:easyStatus'),
+    setEasyAi: (on) => call('ai:setEasyAi', on),
+    guidedStart: (route) => call('ai:guidedStart', route),
+    guidedCancel: (route) => call('ai:guidedCancel', route),
+    guidedReopen: (route) => call('ai:guidedReopen', route),
+    guidedSignOut: (route) => call('ai:guidedSignOut', route),
+    onGuided: (cb) => on<GuidedInfo>('ai:guided', cb),
     noteRunner: () => call('ai:noteRunner'),
     setNoteRunner: (runner) => call('ai:setNoteRunner', runner),
     checkEdits: () => call('ai:checkEdits'),
