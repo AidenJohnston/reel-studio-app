@@ -99,8 +99,9 @@ export function FirstRun({ onDone, onVideo, platform }: { onDone: () => Promise<
           </div>
           <PickFiles kind="primary" size="big" label="Choose a video" accept={VIDEO_TYPES} onFiles={(paths) => void take(paths)} disabled={making} testid="welcome-choose" />
           <p className="w-drop">or drop it anywhere here</p>
+          {/* no promises here: what is free and what stays on this computer differ by what a person turns on (posting,
+              an AI that looks at stills), so the welcome makes none */}
           <p className="w-foot">
-            Free, no account. Your videos stay on this {computer}.{' '}
             <button className="w-how" onClick={begin} data-testid="get-started">
               See how it works
             </button>
