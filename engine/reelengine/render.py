@@ -1,5 +1,7 @@
-"""`render [--draft] [--window a:b]`: project.json -> versions/vN/{export.mp4, cover.png, verify.json}
-for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+"""`render [--draft] [--window a:b] [--rules file]`: project.json -> versions/vN/{export.mp4, cover.png,
+verify.json} for a final render; drafts and window previews overwrite versions/preview/ (docs/versions.md).
+With --rules, the result's `lint` says which checkable My style rules this render breaks (lint.py),
+and a final render that breaks one the rules file lists in `stopOn` returns before its encode.
 
 Order of operations (docs/architecture.md section 5): cut video (+ zooms) -> overlay layers by z -> captions burned
 last -> mux the audio. The audio is built FIRST, as its own file: the cut voice (sample-exact
@@ -25,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from . import captions as capmod, cut as cutmod, project as projmod, safepath, tools
+from . import captions as capmod, cut as cutmod, lint as lintmod, project as projmod, safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -693,6 +695,25 @@ def read_broll_report(project_dir: Path) -> list:
     return out
 
 
+def mix_measured(audio: Path) -> Optional[dict]:
+    """The mix report of the audio this render used. The voice-only fallback has no music in it."""
+    music = _opt_module("music")
+    if music is not None and audio.name.startswith("mix-") and hasattr(music, "mix_report"):
+        return music.mix_report(audio)
+    return {"music": None}
+
+
+def read_rules(path: Optional[str]) -> Optional[tuple]:
+    """`--rules`: the rules file (lint.py), parsed strictly before any work starts."""
+    if path is None:
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise EngineError("BAD_RULE", f"rules file: {exc}", "I couldn't read your My style rules. Please try again.") from None
+    return lintmod.parse_rules(text)
+
+
 def check_fontselect(stderr: str, font_path: Path) -> Optional[str]:
     """libass logs which file it actually used. Anything other than our font = silent substitution."""
     hits = [ln for ln in stderr.splitlines() if "fontselect:" in ln]
@@ -722,8 +743,9 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, rules: Optional[str] = None) -> dict:
     t_start = time.time()
+    checks = read_rules(rules)
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
     if first_look:
@@ -775,12 +797,14 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
 
     # 2. b-roll layers + zooms (A2)
     t = time.time()
-    layers, zooms = [], []
+    layers, zooms, shown = [], [], []
     broll = _opt_module("broll")
     if broll is not None and proj.get("broll"):
         progress(STAGE, 12, "Placing your pictures", force=True)
         try:
             layers = list(broll.build_layers(ctx) or [])
+            # this build's records (a failed build leaves the last render's file behind)
+            shown = projmod.read_json(project_dir / "work" / "layers" / "layers.json").get("items") or []
         except EngineError as exc:
             log(f"# b-roll skipped: {exc.message}")
             warnings.append(f"The b-roll was left out of this version: {exc.user_message}")
@@ -830,6 +854,22 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         shutil.copy2(font_path, fonts / Path(font_path).name)
         if not win:
             projmod.write_json(project_dir / "work" / "captions.json", {"cues": cap_report})
+
+    # Every rule is measured on what was just built, before the encode: a final render that breaks
+    # one the app asked to stop on returns now, without spending a minute or two on a video.
+    lint = None
+    if checks is not None and not win:
+        gone = {g["id"] for g in gone_rows}
+        lint = lintmod.lint(checks[0], cues=cap_report, fmt=(W, H), mix=mix_measured(audio),
+                            broll=[r for r in shown if r.get("id") not in gone], duration=tl.duration)
+        if not draft and any(f["id"] in checks[1] for f in lint["failures"]):
+            try:
+                vdir.rmdir()            # the version folder made above, still empty
+            except OSError:
+                pass
+            progress(STAGE, 100, "Checking your rules", force=True)
+            return {"version": version, "preview": preview, "draft": draft, "encoded": False, "lint": lint,
+                    "warnings": warnings, "timings": timings}
 
     # 4. the picture
     if win:
@@ -895,7 +935,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
             warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
-    result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
+    result = {"version": version, "preview": preview, "encoded": True, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
               "size": [out_w, out_h], "layers": len(layers), "zooms": len(zooms),
@@ -921,6 +961,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         projmod.write_json(vdir / ("verify.json" if not win else f"verify_{name[:-4]}.json"), rep)
         result["verify"] = {"ok": rep["ok"], "fails": rep["fails"], "warns": rep["warns"]}
         timings["verify"] = round(time.time() - t, 2)
+
+    if lint is not None:
+        result["lint"] = lint
 
     timings["total"] = round(time.time() - t_start, 2)
     result["timings"] = timings

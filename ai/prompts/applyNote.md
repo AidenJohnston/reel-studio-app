@@ -40,6 +40,7 @@ Ask: would this note still make sense on a video that does not exist yet? If yes
 - A rule has no times, no specific words from this video, no file names.
 - Turn the specific note into the general habit behind it. "Music is too loud at the start" becomes "Keep music quieter under talking." "That picture covered my eyes" becomes "Never put pictures over my eyes or mouth." "Put the price on 20 bucks" becomes "Show prices on screen when I say them."
 - At most one rule per note. Write it as one plain sentence the user can read in their "My style" list, under about 15 words.
+- When the habit is one the app can measure, also pass its `check`: fewer words per caption (captions.maxWords), captions no bigger or no smaller (captions.maxSize, captions.minSize), music further under the voice (music.underVoiceDb), no picture on the face (broll.keepOut.face) or over the eyes and mouth (broll.keepOut.eyes). The app takes the number from the finished video, words the rule itself and checks it on every render. Leave `check` null for anything else.
 - Do not propose a rule that already exists in the saved style rules. Do not propose a rule for a typo fix, a wrong word, or a one-time placement fix.
 
 ## 3. Render and confirm
