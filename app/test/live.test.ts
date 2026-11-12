@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JobEvent } from '../src/shared/api'
 import { EMPTY_LIVE, PREVIEW_LABEL, liveFromDetail, reduceLive, type LiveState } from '../src/shared/live'
-import { createLiveVideos, LIVE_DIR } from '../src/main/live-video'
+import { createLiveMoments, createLiveVideos, LIVE_DIR } from '../src/main/live-video'
 import { createJobManager } from '../src/main/jobs'
 import { pathFromMediaUrl } from '../src/main/media-url'
 import { projectDir } from '../src/main/store'
@@ -54,9 +54,19 @@ describe('reduceLive (the renderer side of the contract)', () => {
   })
 
   it('an event from a different job starts from scratch', () => {
-    const old = fold([status({ overall: 80 }), { ...J, type: 'reply', text: 'old' }])
+    const old = fold([status({ overall: 80 }), { ...J, type: 'reply', text: 'old' }, { ...J, type: 'moment', kind: 'still', t: 1, image: 'reel-media://f/m0' }])
     const s = fold([status({ jobId: 'j2', overall: 5 })], old)
-    expect(s).toMatchObject({ jobId: 'j2', overall: 5, reply: null })
+    expect(s).toMatchObject({ jobId: 'j2', overall: 5, reply: null, moments: [] })
+  })
+
+  it('keeps the newest pictures of a change, in the order they were made', () => {
+    const still = (n: number): JobEvent => ({ ...J, type: 'moment', kind: 'still', t: n, image: `reel-media://f/m${n}` })
+    const win: JobEvent = { ...J, type: 'moment', kind: 'window', from: 3, to: 5, video: 'reel-media://f/w' }
+    const s = fold([still(1), still(2), still(3), win, still(4)])
+    expect(s.moments).toEqual([
+      { kind: 'still', image: 'reel-media://f/m2', t: 2 }, { kind: 'still', image: 'reel-media://f/m3', t: 3 },
+      { kind: 'window', video: 'reel-media://f/w', from: 3, to: 5 }, { kind: 'still', image: 'reel-media://f/m4', t: 4 }
+    ])
   })
 
   it('a screen opened mid-job starts from projects:get', () => {
@@ -97,7 +107,60 @@ describe('live videos (main): a draft plays from a copy the engine never overwri
   })
 })
 
+describe('live moments (main): a still or window plays from a copy the next run never touches', () => {
+  it('copies each into work/live under rotating names, and refuses files outside the preview folder', async () => {
+    const { home } = setupPaths()
+    const dir = join(home, 'pm')
+    const moments = join(dir, 'versions', 'preview', 'moments')
+    mkdirSync(moments, { recursive: true })
+    const still = join(moments, 'still_000072.png')
+    const live = createLiveMoments()
+    const names: string[] = []
+    for (const body of ['a', 'b', 'c', 'd', 'e']) {
+      writeFileSync(still, body)            // the engine draws the same frame again on its next run
+      const f = pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'still', t: 2.4, file: still }))!)
+      expect(readFileSync(f, 'utf8')).toBe(body)
+      names.push(f)
+    }
+    expect(new Set(names.slice(0, 4)).size).toBe(4)   // a run's three stills and the one before never share a copy
+    expect(names[4]).toBe(names[0])
+    const win = join(dir, 'versions', 'preview', 'window_1.0-3.0.mp4')
+    writeFileSync(win, 'w')
+    expect(pathFromMediaUrl((await live(dir, { type: 'moment', kind: 'window', from: 1, to: 3, file: win }))!)).toMatch(/moment-window-[ab]\.mp4$/)
+    const outside = join(home, 'elsewhere.png')
+    writeFileSync(outside, 'x')
+    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: outside })).toBeNull()
+    expect(await live(dir, { type: 'moment', kind: 'still', t: 1, file: join(dir, 'project.json') })).toBeNull()
+  })
+})
+
 describe('job manager (main): the contract on the wire', () => {
+  it('sends moments in the order they were made, and none after the job was stopped', async () => {
+    setupPaths()
+    const slug = 'stopped'
+    mkdirSync(projectDir(slug), { recursive: true })
+    const events: JobEvent[] = []
+    let releaseSlow = (): void => undefined
+    const slow = new Promise<void>((r) => (releaseSlow = r))
+    const jobs = createJobManager((e) => events.push(e), () => undefined, undefined, undefined, async (_s, e) => {
+      if (e.kind === 'still' && e.t === 1) await slow                   // the first copy is the slow one
+      if (e.kind === 'still' && e.t === 3) await new Promise((r) => setTimeout(r, 20))   // done only after the stop
+      return `reel-media://f/${e.kind}-${e.kind === 'still' ? e.t : e.from}`
+    })
+    jobs.start(slug, 'note', async (emit) => {
+      emit({ type: 'moment', kind: 'still', t: 1, file: 'a.png' })
+      emit({ type: 'moment', kind: 'still', t: 2, file: 'b.png' })
+      setTimeout(releaseSlow, 30)
+      await new Promise((r) => setTimeout(r, 60))
+      emit({ type: 'moment', kind: 'still', t: 3, file: 'c.png' })
+      throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+    })
+    await jobs.forSlug(slug)?.done
+    await new Promise((r) => setTimeout(r, 30))
+    expect(events.filter((e) => e.type === 'moment').map((e) => e.type === 'moment' && e.kind === 'still' && e.t)).toEqual([1, 2])
+    expect(events.at(-1)).toMatchObject({ type: 'cancelled' })
+  })
+
   it('keeps thinking across the once-a-second repeats, adds video to renders before done, passes reply + heard', async () => {
     setupPaths()
     const slug = 'wire'
@@ -107,7 +170,8 @@ describe('job manager (main): the contract on the wire', () => {
       (e) => events.push(e),
       () => undefined,
       { loadHistory: async () => ({ v: 1, phases: {} }), saveHistory: async () => undefined, mediaSeconds: async () => 30, tickMs: 15 },
-      async (s, e) => (e.firstLook ? `reel-media://f/${s}/look` : null)
+      async (s, e) => (e.firstLook ? `reel-media://f/${s}/look` : null),
+      async (s, e) => (e.kind === 'still' ? `reel-media://f/${s}/still` : null)
     )
     jobs.start(slug, 'first-edit', async (emit) => {
       emit({ type: 'status', message: 'Listening to your video', pct: 50, phase: 'listen' })
@@ -117,6 +181,8 @@ describe('job manager (main): the contract on the wire', () => {
       await new Promise((r) => setTimeout(r, 80))
       emit({ type: 'tool', name: 'set_cut', summary: 'Kept your best takes' })
       emit({ type: 'reply', text: 'Done soon.' })
+      emit({ type: 'moment', kind: 'still', t: 2.4, file: join(projectDir(slug), 'versions', 'preview', 'moments', 'still_000072.png') })
+      emit({ type: 'moment', kind: 'window', from: 1, to: 3, file: join(projectDir(slug), 'gone.mp4') })   // no copy: not sent
       return { summary: 'ok', version: 1, quiet: true }
     })
     await jobs.forSlug(slug)?.done
@@ -131,6 +197,8 @@ describe('job manager (main): the contract on the wire', () => {
     expect(events.findIndex((e) => e.type === 'render')).toBeLessThan(events.findIndex((e) => e.type === 'done'))
     expect(events.find((e) => e.type === 'heard')).toMatchObject({ words: ['hello'] })
     expect(events.find((e) => e.type === 'reply')).toMatchObject({ text: 'Done soon.' })
+    expect(events.filter((e) => e.type === 'moment')).toEqual([{ jobId: expect.any(String), slug, type: 'moment', kind: 'still', t: 2.4, image: `reel-media://f/${slug}/still` }])
+    expect(events.findIndex((e) => e.type === 'moment')).toBeLessThan(events.findIndex((e) => e.type === 'done'))
     expect(events.filter((e) => e.type === 'status').every((e) => e.type === 'status' && typeof e.overall === 'number' && typeof e.pct === 'number')).toBe(true)
     // no time left before the video's length is known (it would only jump up later), then a number
     const statuses = events.filter((e) => e.type === 'status')

@@ -102,6 +102,13 @@ def cmd_frames(args):
     return frames.run(_project(args), times, file=Path(args.file) if args.file else None)
 
 
+def cmd_moments(args):
+    from . import moments
+    if args.mark:
+        return moments.mark(_project(args))
+    return moments.run(_project(args), root=Path(args.root) if args.root else None, draft=not args.no_draft)
+
+
 def cmd_captions(args):
     from . import captions
     return captions.write_for_project(_project(args))
@@ -342,9 +349,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("verify", cmd_verify, "check an mp4")
     sp.add_argument("file")
     sp.add_argument("--expect-duration", type=float)
-    sp = add("frames", cmd_frames, "extract frames from the latest render")
+    sp = add("frames", cmd_frames, "stills of the edit: from a render that is up to date, else drawn directly")
     sp.add_argument("--times", required=True)
     sp.add_argument("--file")
+    sp = add("moments", cmd_moments, "stills of what the last edit changed, then the window around them, then the draft")
+    sp.add_argument("--mark", action="store_true", help="only record the project as it is as the state shown")
+    sp.add_argument("--no-draft", action="store_true", help="stop after the stills and the window")
+    sp.add_argument("--root")
     add("captions", cmd_captions, "write the caption file only (debug)")
     add("doctor", cmd_doctor, "check the install")
     sp = add("search-images", cmd_search_images, "find freely licensed pictures on the web")
