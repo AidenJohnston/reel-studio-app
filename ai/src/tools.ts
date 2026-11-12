@@ -605,6 +605,7 @@ async function analyzeMusic(ctx: ToolContext, ref: string, fps: number): Promise
 }
 
 const ANIM_PARAMS = animationParamsSchema();
+const sfxIdsWithEnergy = (energy: number) => SFX_SOUNDS.filter((s) => s.energy === energy).map((s) => s.id).join(', ');
 
 interface AnimContext { t0: number; region?: { x: number; y: number; w: number; h: number }; layout?: 'top' | 'full'; words: TimedWord[]; exact: boolean }
 
@@ -912,13 +913,11 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_sound_moments',
-    description: 'Editor sound moves, only when the note asks for them; null leaves one as it is. '
-      + 'onBeat: what lands on the song\'s beats ("cuts", "zooms", "broll"; each moves at most a few frames). '
-      + 'drops: lines the music cuts out for and comes back on the next beat after ("cut the music on \'you\'re full of crap\'"); one or two at most. '
-      + 'reverbThrow: an echo tail on the last word.',
+    description: 'Only when the note asks; null leaves a field as it is. onBeat: these land on the song\'s beats. '
+      + 'drops: lines the music cuts out for, back on the next beat (one or two at most). reverbThrow: an echo on the last word.',
     parameters: S.obj({
-      onBeat: S.opt(S.arr(S.enum(BEAT_KINDS), '[] = nothing on the beat')),
-      drops: S.opt(S.arr(S.obj({ from: S.str('first word id of the line'), to: S.str('last word id of the line') }), '[] = none')),
+      onBeat: S.opt(S.arr(S.enum(BEAT_KINDS))),
+      drops: S.opt(S.arr(S.obj({ from: S.str('first word id'), to: S.str('last word id') }))),
       reverbThrow: S.opt(S.bool()),
     }),
     async run(ctx, args) {
@@ -1161,7 +1160,7 @@ const tools: ToolDef[] = [
     description: 'Replace all sound effects. Add them only when the user\'s note asks for sound effects. Most lines get none, and a video with none is fine. Each one hits exactly on its moment, given by one of at.word (that word starts), at.broll (that b-roll appears) or at.cut (the cut into the kept range that starts with that word). Prefer short sounds (energy 1 and 2); a long one (energy 3) at most once. A riser builds for 1.5 to 3 seconds BEFORE its moment. The engine plays one at a time, at most one every 2 seconds, and keeps each one under the voice. Empty list = none.',
     parameters: S.obj({
       sfx: S.arr(S.obj({
-        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds, name and energy (how long it carries: 1 a tap, 2 a short swell, 3 long): ${SFX_SOUNDS.map((s) => `${s.id} ${s.energy}`).join(', ')}`),
+        sound: S.enum(SFX_SOUNDS.map((s) => s.id), `Built-in sounds. Energy (how long it carries) is 1, a tap, except 2, a short swell: ${sfxIdsWithEnergy(2)}; and 3, long: ${sfxIdsWithEnergy(3)}`),
         at: S.obj({
           word: S.opt(S.str('word id: the sound hits as this word starts (a zoom or caption lands there)')),
           broll: S.opt(S.str('b-roll id: the sound hits as that b-roll appears')),
