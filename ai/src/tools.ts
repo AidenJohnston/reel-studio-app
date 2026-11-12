@@ -461,7 +461,7 @@ function rulesFeedback(ctx: ToolContext): { myStyleRules?: { rule: string; probl
   const byId = new Map(ctx.rules!.active.map((r) => [r.id, r]));
   return {
     myStyleRules: unmet.map((f) => ({ rule: byId.get(f.id)?.text ?? f.id, problem: failureText(f, byId.get(f.id)?.check) })),
-    note: 'This preview breaks the user\'s My style rules (see myStyleRules). The app measures them on every render and the note is not done until they hold: change the project to meet them before finish.',
+    note: 'This preview breaks the user\'s My style rules or Reel Studio\'s defaults (see myStyleRules). The app measures them on every render and the edit is not done until they hold: change the project to meet them before finish. A "Reel Studio default" gives way when the note or the user\'s My style asks otherwise.',
   };
 }
 
@@ -801,7 +801,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_gap_cap',
-    description: 'Longest pause (seconds) kept between words. ~0.12 tight, 0.25-0.4 for slow heartfelt delivery.',
+    description: 'Longest pause (seconds) kept between words. 0.25 is the default; 0.3-0.4 for slow heartfelt delivery; tighter only when the user asks.',
     parameters: S.obj({ seconds: S.num('0.05 to 1.0', { minimum: 0.02, maximum: 2 }) }),
     async run(ctx, args) {
       await mutate(ctx, 'cut', (p) => { p.cut.gapCap = args.seconds; });
@@ -1122,7 +1122,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_zoom',
-    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punchlines and key lines, and on face-only stretches with no b-roll (about 3-6 per minute, never two back to back). Empty list = no zooms.',
+    description: 'Replace all zoom-ins. Each zoom spans one whole line, from its first word to its last; scale ~1.08-1.15. Use on punch lines (the named word, the reveal, the comic line), not every line: at most about 6 per minute, never two back to back, none in the first 3 s beside the hook title. Empty list = no zooms.',
     parameters: S.obj({ zooms: S.arr(S.obj({ anchor: ANCHOR, scale: S.num('1.0-1.5', { minimum: 1, maximum: 1.6 }) })) }),
     async run(ctx, args) {
       const { t } = await load(ctx);
@@ -1299,8 +1299,6 @@ const tools: ToolDef[] = [
       // pictures clumped in one half: a long run held up by zooms alone reads as unedited
       const noPicture = ctx.transcript ? faceOnlyStretches(p, ctx.transcript, 10, false) : [];
       if (noPicture.length) notes.push(`${noPicture.length === 1 ? 'One stretch has' : `${noPicture.length} stretches have`} no picture for over 10 s (see noPicture; zooms alone): the pictures are clumped. Put a picture or an animation on something said in the middle of each (a word card does not count: a real thing, place, number, list or quote).`);
-      const perMin = (p.zooms.length * 60) / Math.max(20, typeof r.duration === 'number' ? r.duration : 60);
-      if (perMin > 10) notes.push(`${p.zooms.length} zooms is about ${Math.round(perMin)} a minute, which reads as constant: keep 4 to 8 a minute, on punchlines and in the middle of bare stretches (set_zoom replaces the list).`);
       const pops = popCards(p);
       if (pops.length > 2) notes.push(`${pops.length} big word cards (see wordCards): they read as filler and each one stays up about 2 s, past the end of a short line. Keep at most 2 (a number or a name the viewer must remember); replace the rest with a picture or an animation, or remove them.`);
       const flashes = await shortFlashes(ctx, p, ctx.transcript);
@@ -1380,7 +1378,7 @@ const tools: ToolDef[] = [
       if (unmet.length && !ctx.state.dirty?.size && !ctx.state.finishRefused) {
         ctx.state.finishRefused = true;
         const fb = rulesFeedback(ctx).myStyleRules!;
-        throw new ToolInputError(`Not finished: the newest render breaks the user's My style rule${fb.length > 1 ? 's' : ''}: ${fb.map((r) => `"${r.rule}" (${r.problem})`).join('; ')}. Change the project to meet ${fb.length > 1 ? 'them' : 'it'}, then call finish. The final video is checked without a preview. If the note itself asks for the opposite, call finish again and say so.`);
+        throw new ToolInputError(`Not finished: the newest render breaks ${fb.length > 1 ? 'these rules' : 'this rule'}: ${fb.map((r) => `"${r.rule}" (${r.problem})`).join('; ')}. Change the project to meet ${fb.length > 1 ? 'them' : 'it'}, then call finish. The final video is checked without a preview. If the note itself asks for the opposite, or the user's My style does for a "Reel Studio default", call finish again and say so.`);
       }
       ctx.state.finished = cleanSummary(args.summary_for_user);
       return { content: { ok: true } };
