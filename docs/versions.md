@@ -11,8 +11,13 @@ never a pile of preview-only folders an AI run left behind.
   v2/
   preview/       the ONE scratch folder for previews, overwritten every time:
                  draft.mp4, window_<a>-<b>.mp4 (only the latest window), cover.png, verify.json,
-                 render_draft.json, project.json
+                 render_draft.json, project.json,
+                 moments/still_<frame>.png (the latest `moments` run's stills, replaced by the next run)
 ```
+
+`work/moments/base.json` is the project (and its animation files' sizes and times) as the screen last
+showed it: `moments` compares the project with it to find what an edit changed, and replaces it when a
+run finishes.
 
 Rules:
 
@@ -25,7 +30,9 @@ Rules:
    same edit overwrites it); otherwise it makes `v(N+1)`.
 5. `cover` (cover only) writes into `vN` when that edit already has its `export.mp4`, else into
    `preview/`.
-6. `frames` reads the newest full render, preview or final (never a window slice).
+6. `frames` reads the newest full render, preview or final (never a window slice), whose manifest
+   carries the project's current picture key. When none does, it draws the stills from the project
+   into `preview/frames/` without making a preview.
 
 ## Render result (engine `done.result`)
 
