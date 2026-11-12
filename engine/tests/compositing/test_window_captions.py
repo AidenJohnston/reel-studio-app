@@ -43,7 +43,7 @@ def test_window_starting_mid_line_shows_the_full_videos_lines(tmp_path, monkeypa
     tfile.write_text(json.dumps({"words": words}), encoding="utf-8")
 
     full = render.run(pdir, draft=True, root=tmp_path, verify=False)
-    boxes = [c["box"] for c in json.loads((pdir / "work" / "captions.json").read_text(encoding="utf-8"))["cues"]]
+    boxes = [c["box"] for c in json.loads((Path(full["versionDir"]) / "captions.json").read_text(encoding="utf-8"))["cues"]]
     # Word k plays at output 0.05 + 0.4k s for 0.3 s, three words to a line: "SO HERE IS", "THE SHORT
     # VIDEOS", "EVERYONE MAKES AND". 0.6 s is inside "HERE" and 2.6 s inside "EVERYONE", so the window
     # starts and ends mid-line and mid-word, on the frame grid.
