@@ -91,10 +91,11 @@ validated each time `setup` or `run` starts: the engine must read an HLG stand-i
 rotated one as rotated, or the harness refuses.
 
 The `synthetic` entries are generated with the pinned FFmpeg at setup: stand-ins for a 4K HEVC
-SDR talking head, the same clip as 10-bit HLG, a variable-frame-rate clip, a rotated clip, and a
-90 s take cut to about 20 s. Their speech is shaped tones whose word times are written straight into
-the transcript. They exercise decode, scale, tonemap, captions and audio at phone-like sizes; they
-say nothing about how real faces and voices compress.
+SDR talking head, the same clip as 10-bit HLG, a variable-frame-rate clip, a rotated clip, a
+90 s take cut to about 20 s, and a 5-minute 4K HEVC take cut to about 45 s from five stretches
+spread across it (where decoding cut-away footage costs most). Their speech is shaped tones whose
+word times are written straight into the transcript. They exercise decode, scale, tonemap, captions
+and audio at phone-like sizes; they say nothing about how real faces and voices compress.
 
 A real take is an entry `{"id": "...", "takeDir": "harness/<id>"}`, resolved under
 `$REELENGINE_TEST_TAKES` (where the engine tests already read raw takes). Its folder has the same
