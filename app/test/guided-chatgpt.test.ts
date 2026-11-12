@@ -80,7 +80,11 @@ describe('Sign in with ChatGPT, guided', () => {
     const t = world({ state: 'missing', login: w.login })
     const done = t.g.start()
     await until(() => t.kinds().includes('waiting'))
-    expect(t.steps.find((s) => s.step === 'getting')).toMatchObject({ pct: 40, message: CHATGPT_WORDS.getting })
+    // the download's progress shows while it runs, from 0
+    expect(t.steps.filter((s) => s.step === 'getting').map((s) => [s.pct, s.message])).toEqual([
+      [0, CHATGPT_WORDS.getting],
+      [40, CHATGPT_WORDS.getting]
+    ])
     expect(t.steps.at(-1)).toMatchObject({ step: 'waiting', message: CHATGPT_WORDS.waiting, canReopen: true })
     w.finish({ code: 0 })
     expect(await done).toMatchObject({ route: 'chatgpt', step: 'done', message: CHATGPT_WORDS.done })

@@ -16,7 +16,7 @@ const PKG: CodexPackage = { asset: 'test.tar.gz', url: 'https://example.test/cod
 
 function serve(body: Buffer, opts: { failAt?: number; onChunk?: (n: number) => void } = {}) {
   let calls = 0
-  const fetch = (async (_url: string, init?: RequestInit) => {
+  const fakeFetch = (async (_url: string, init?: RequestInit) => {
     calls++
     const signal = init?.signal
     let sent = 0
@@ -32,8 +32,8 @@ function serve(body: Buffer, opts: { failAt?: number; onChunk?: (n: number) => v
       }
     })
     return new Response(stream, { status: 200, headers: { 'content-length': String(body.length) } })
-  }) as unknown as typeof fetch
-  return { fetch, calls: () => calls }
+  }) as unknown as typeof globalThis.fetch
+  return { fetch: fakeFetch, calls: () => calls }
 }
 
 /** The package's layout (install.ps1 / install.sh: bin/codex) written where tar would unpack it. */

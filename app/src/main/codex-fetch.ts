@@ -143,7 +143,7 @@ export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProg
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
         hash.update(chunk)
         got += chunk.byteLength
-        if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
+        if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()))
         const pct = Math.min(99, Math.floor((got / total) * 100))
         if (pct !== shown) onProgress?.((shown = pct))
       }

@@ -35,8 +35,15 @@ export interface ChatgptDeps {
   emit(i: GuidedInfo): void
 }
 
+/** one guided sign-in in flight; `code`: the code sign-in's page, once Codex printed it */
+interface Run {
+  ctrl: AbortController
+  done: Promise<GuidedInfo>
+  code?: { url: string }
+}
+
 export function createGuidedChatgpt(deps: ChatgptDeps) {
-  let run: { ctrl: AbortController; done: Promise<GuidedInfo>; code?: { url: string } } | null = null
+  let run: Run | null = null
   let last: GuidedInfo = { route: 'chatgpt', step: 'idle' }
   const emit = (i: Omit<GuidedInfo, 'route'>): GuidedInfo => {
     last = { route: 'chatgpt', ...i }
@@ -55,7 +62,7 @@ export function createGuidedChatgpt(deps: ChatgptDeps) {
     return emit({ step: 'failed', problem: 'failed', message: i.message || CHATGPT_WORDS.failed })
   }
 
-  const onStep = (r: NonNullable<typeof run>) => (i: VendorInfo): void => {
+  const onStep = (r: Run) => (i: VendorInfo): void => {
     if (r.ctrl.signal.aborted) return
     if (i.step === 'signing_in' && i.deviceCode) {
       if (!r.code) {
@@ -67,7 +74,7 @@ export function createGuidedChatgpt(deps: ChatgptDeps) {
     else if (i.step === 'checking') emit({ step: 'checking', message: CHATGPT_WORDS.checking })
   }
 
-  async function flow(r: NonNullable<typeof run>): Promise<GuidedInfo> {
+  async function flow(r: Run): Promise<GuidedInfo> {
     const signal = r.ctrl.signal
     emit({ step: 'checking', message: CHATGPT_WORDS.looking })
     let st = await deps.status()
@@ -107,7 +114,7 @@ export function createGuidedChatgpt(deps: ChatgptDeps) {
     /** Starts, or joins the sign-in already running. */
     start(): Promise<GuidedInfo> {
       if (run) return run.done
-      const r = { ctrl: new AbortController() } as NonNullable<typeof run>
+      const r = { ctrl: new AbortController() } as Run
       r.done = flow(r)
         .catch(() => emit({ step: 'failed', problem: 'failed', message: CHATGPT_WORDS.failed }))
         .finally(() => {

@@ -245,10 +245,17 @@ export interface PublikDeps {
   sessionMs?: number
 }
 
+/** one sign-in in flight; `page`: the publik page it opened, for Open the page again */
+interface Run {
+  ctrl: AbortController
+  done: Promise<GuidedInfo>
+  page?: string
+}
+
 export function createPublikSignIn(deps: PublikDeps) {
   const pollMs = deps.pollMs ?? POLL_MS
   const limitMs = deps.limitMs ?? POLL_LIMIT_MS
-  let run: { ctrl: AbortController; done: Promise<GuidedInfo>; page?: string } | null = null
+  let run: Run | null = null
   let last: GuidedInfo = { route: 'publik', step: 'idle' }
   let timer: ReturnType<typeof setInterval> | null = null
   const emit = (i: Omit<GuidedInfo, 'route'>): GuidedInfo => {
@@ -299,7 +306,7 @@ export function createPublikSignIn(deps: PublikDeps) {
     return emit({ step: 'failed', problem: 'failed', message: typeof said === 'string' && said ? said : PUBLIK_WORDS.failed })
   }
 
-  async function flow(r: NonNullable<typeof run>): Promise<GuidedInfo> {
+  async function flow(r: Run): Promise<GuidedInfo> {
     const signal = r.ctrl.signal
     const cancelled = (): GuidedInfo => emit({ step: 'idle', problem: 'cancelled' })
     emit({ step: 'checking', message: PUBLIK_WORDS.connecting })
@@ -359,7 +366,7 @@ export function createPublikSignIn(deps: PublikDeps) {
     status: (): GuidedInfo => last,
     start(): Promise<GuidedInfo> {
       if (run) return run.done
-      const r = { ctrl: new AbortController() } as NonNullable<typeof run>
+      const r = { ctrl: new AbortController() } as Run
       r.done = flow(r).finally(() => {
         if (run === r) run = null
       })
