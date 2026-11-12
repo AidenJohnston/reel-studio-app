@@ -85,8 +85,8 @@ checks as a tick or a cross.
 | Reviewed: merge when green | `is:pr draft:false review:approved no:assignee sort:created-asc` |
 | Issues to triage | `is:issue no:assignee sort:created-asc` |
 
-Search can't filter by check results: its `status:` qualifier reads GitHub's older commit statuses, which GitHub
-Actions doesn't set, so it never matches here. Filter by checks with `gh` instead (Bash):
+Don't filter on check results in search: its `status:` qualifier is unreliable here and shows recent PRs whose checks
+passed as pending. Filter by checks with `gh` instead (Bash):
 
 ```sh
 # mine, red
