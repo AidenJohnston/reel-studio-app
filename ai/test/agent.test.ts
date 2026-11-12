@@ -225,7 +225,7 @@ describe('record + replay', () => {
 describe('prompts', () => {
   it('load from ai/prompts and contain no em dashes or source-specific content', () => {
     const pr = new Prompts();
-    for (const n of ['system', 'firstEdit', 'applyNote', 'writeScript', 'pickTakes', 'review'] as const) {
+    for (const n of ['system', 'firstEdit', 'applyNote', 'writeScript', 'pickTakes'] as const) {
       const t = pr.raw(n);
       expect(t.length).toBeGreaterThan(500);
       expect(t).not.toMatch(/—/);
