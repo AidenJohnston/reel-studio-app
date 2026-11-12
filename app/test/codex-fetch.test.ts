@@ -2,7 +2,8 @@
 // and the unpack is a stand-in that writes the package's layout, so these run the same on every system.
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, promises as fs, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, promises as fs, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { codexBinIn, CodexFetchError, ensureCodex, FETCH_MESSAGES, installedCodex, type CodexPackage } from '../src/main/codex-fetch'
@@ -101,6 +102,22 @@ describe('getting the Codex app', () => {
     const blocked = { ...d, freeBytes: async (dir: string) => (rmSync(dir, { recursive: true, force: true }), writeFileSync(dir, 'x'), 10e9) }
     const err = await ensureCodex({ ...blocked, fetch: serve(BYTES).fetch, extract: fakeExtract() }, new AbortController().signal).catch((e) => e)
     expect([err.problem, err.message]).toEqual(['failed', FETCH_MESSAGES.failed])
+  })
+
+  it('fails if a user folder with letters outside Windows’ code page cannot unpack the package with the system tar', async () => {
+    // packed by the system tar in a plain folder, unpacked by the app's own unpack into one named with é and 中文
+    const src = mkdtempSync(join(tmpdir(), 'codexsrc-'))
+    mkdirSync(join(src, 'bin'))
+    writeFileSync(codexBinIn(src, PLATFORM), 'stand-in')
+    const tar = PLATFORM === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar'
+    execFileSync(tar, ['-czf', 'p.tar.gz', 'bin'], { cwd: src })
+    const bytes = readFileSync(join(src, 'p.tar.gz'))
+    const dir = join(mkdtempSync(join(tmpdir(), 'codex-')), 'Zoë 中文', 'codex')
+    const bin = await ensureCodex(
+      { dir, platform: PLATFORM, arch: 'x64', pkg: { ...PKG, sha256: sha(bytes), bytes: bytes.length }, freeBytes: async () => 10e9, fetch: serve(bytes).fetch, systemRoot: process.env.SystemRoot },
+      new AbortController().signal
+    )
+    expect(readFileSync(bin, 'utf8')).toBe('stand-in')
   })
 
   it('fails if a computer the pin has no package for downloads anything', async () => {

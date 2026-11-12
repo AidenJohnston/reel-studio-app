@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
-import { join, posix, win32 } from 'node:path'
+import { basename, dirname, join, posix, win32 } from 'node:path'
 
 export const CODEX_VERSION = '0.167.2'
 
@@ -102,10 +102,19 @@ function systemTar(platform: NodeJS.Platform, systemRoot: string): string {
   return platform === 'win32' ? win32.join(systemRoot, 'System32', 'tar.exe') : '/usr/bin/tar'
 }
 
+/**
+ * Windows' tar.exe reads its arguments in the system's legacy code page (936 on a Chinese Windows, 1252 on an English
+ * one), so a folder with letters outside it ("Zoë" on code page 936) reached tar as "Zo?" and the unpack failed
+ * (Windows 11, request l2-ai-setup-6). tar starts in the folder holding both the archive and the staging folder and
+ * gets only their names, which this file chose and are plain ASCII; the folder itself goes to Windows as the working
+ * directory, which takes any letters.
+ */
 function tarExtract(platform: NodeJS.Platform, systemRoot: string) {
   return (archive: string, dest: string, signal: AbortSignal): Promise<void> =>
     new Promise((resolve, reject) => {
-      const child = spawn(systemTar(platform, systemRoot), ['-xzf', archive, '-C', dest], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], signal })
+      const here = dirname(archive)
+      if (dirname(dest) !== here) return reject(new Error('the archive and the staging folder must sit side by side'))
+      const child = spawn(systemTar(platform, systemRoot), ['-xzf', basename(archive), '-C', basename(dest)], { cwd: here, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], signal })
       let said = ''
       child.stderr?.on('data', (b: Buffer) => void (said = (said + String(b)).slice(-300)))
       child.on('error', reject)
