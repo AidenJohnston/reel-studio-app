@@ -80,7 +80,6 @@ const P: Record<string, ReactNode> = {
   ),
   'chevron-left': <path d="m15 18-6-6 6-6" />,
   'chevron-right': <path d="m9 18 6-6-6-6" />,
-  'chevron-down': <path d="m6 9 6 6 6-6" />,
   music: (
     <>
       <path d="M9 18V5l12-2v13" />
