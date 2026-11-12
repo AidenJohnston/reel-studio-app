@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import {
   Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
   anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
-  nextBrollId, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem,
+  captionsUnderInstagram, nextBrollId, normalizeKeep, captionCorrectionProblem, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
@@ -856,12 +856,15 @@ const tools: ToolDef[] = [
       maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
       case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
       color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
-      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher', { minimum: 0.05, maximum: 0.95 })),
+      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 }, { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
     }),
     async run(ctx, args) {
+      let warning: string | null = null;
       await mutate(ctx, 'captions', (p) => {
+        const shownUnder = () => (p.captions.enabled ? captionsUnderInstagram(p.format, p.captions.style) : null);
+        const underBefore = shownUnder();
         if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
         const style = p.captions.style;
@@ -875,8 +878,12 @@ const tools: ToolDef[] = [
         // The picker trusts a saved `preset` name over the fields. Once the look itself changes the name is wrong,
         // and without it the picker matches the look by its fields.
         if (captionLook(style) !== before) delete style.preset;
+        // The person may post elsewhere, so a position in Instagram's bottom band is allowed. When a change of size or
+        // position leaves shown captions there, or turns them on there, the model is told so it can pass it on.
+        const under = shownUnder();
+        if (under && under !== underBefore) warning = `${under} Tell the person this in one plain sentence.`;
       });
-      return { content: { ok: true, captions: ctx.project!.captions }, summary: 'Adjusted the captions' };
+      return { content: { ok: true, captions: ctx.project!.captions, ...(warning ? { warning } : {}) }, summary: 'Adjusted the captions' };
     },
   },
   {
