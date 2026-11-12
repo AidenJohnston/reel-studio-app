@@ -161,7 +161,7 @@ export const CONNECT_NOTES: Record<ConnectOutcome, string | null> = {
 
 export const POST_COPY = {
   heading: 'Post to YouTube',
-  noKey: 'Posting uses the download key from your receipt email, so Reel Studio's posting service knows you subscribe. Copy the link from that email, then paste it here.',
+  noKey: "Posting uses the download key from your receipt email, so Reel Studio's posting service knows you subscribe. Copy the link from that email, then paste it here.",
   ended: 'Posting needs an active subscription, and yours has ended.',
   signedOut: 'This computer was signed out of posting, maybe with Sign out everywhere. Sign in again to post.',
   signIn: 'Sign in to post from this computer. It uses the download key from your receipt email. If your YouTube channel is already connected, you can post straight after.',
