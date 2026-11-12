@@ -762,7 +762,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   const swapPicture = async (id: string) => {
     try {
       const r = await reel.library.choose('images')
-      const name = r.find((x) => x.bin === 'images' && x.dest)?.dest?.split(/[\/]/).pop()
+      const name = r.find((x) => x.bin === 'images' && x.dest)?.dest?.split(/[\\/]/).pop()
       const g = name ? pictureEdit(id, (b) => ({ ...b, asset: `Library/Images/${name}` })) : null
       if (g) await timelineEdit(g)
     } catch (e) {

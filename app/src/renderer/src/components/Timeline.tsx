@@ -71,7 +71,7 @@ export function Timeline({
   marks: TimelineMark[]
   onRange: (r: { at: number; to: number }) => void
   onPlay: (v: number) => void
-  /** the version's lanes, or what Edit it myself makes of them while it is open; null until they are known */
+  /** the version's lanes; null until they are known (Edit it myself has its own timeline, TrackTimeline.tsx) */
   lanes?: Lanes | null
   selectedSound?: string | null
   onSound?: (key: string) => void

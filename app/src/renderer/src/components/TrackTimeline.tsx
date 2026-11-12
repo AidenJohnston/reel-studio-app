@@ -45,7 +45,7 @@ const tenths = (t: number): string => `${clock(Math.floor(t))}.${Math.floor((t %
 
 type Drag =
   | { kind: 'scrub' }
-  | { kind: 'trim'; part: number; side: 'start' | 'end'; stops: TrimStop[]; stop: TrimStop | null }
+  | { kind: 'trim'; part: number; side: 'start' | 'end'; stop: TrimStop | null }
   | { kind: 'broll'; id: string; how: BrollDrag; anchor: Broll['anchor'] | null; ghost: { t0: number; t1: number } | null }
   | { kind: 'song'; startAt: number }
 
@@ -226,12 +226,12 @@ export function TrackTimeline(props: TrackTimelineProps) {
     const stops = trimStops(p, side, version.words, words, draft.kept)
     const at = side === 'start' ? p.t0 : p.t1
     let stop = nearestStop(stops, at)
-    setDrag({ kind: 'trim', part, side, stops, stop })
+    setDrag({ kind: 'trim', part, side, stop })
     press(
       ev,
       (t) => {
         stop = nearestStop(stops, t)
-        setDrag({ kind: 'trim', part, side, stops, stop })
+        setDrag({ kind: 'trim', part, side, stop })
       },
       () => send(stop && trimGesture(stop, said))
     )
