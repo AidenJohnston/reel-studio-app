@@ -1593,7 +1593,7 @@ const tools: ToolDef[] = [
     async run(ctx, args) {
       const seed = args.seed === null || args.seed === undefined ? randomInt(0, 2 ** 31) : args.seed;
       await mutate(ctx, 'cutStyle', (p) => { p.cutStyle = { preset: args.preset as CutPreset, seed }; });
-      return { content: { ok: true, cutStyle: { preset: args.preset, seed }, settings: CUT_STYLES[args.preset as CutPreset] }, summary: `Set cut style to ${args.preset} (seed ${seed})` };
+      return { content: { ok: true, cutStyle: { preset: args.preset, seed }, settings: CUT_STYLES[args.preset as CutPreset] }, summary: `Picked a ${args.preset} pace` };
     },
   },
   {

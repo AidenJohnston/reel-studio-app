@@ -155,7 +155,7 @@ export function createModelManager(deps: ModelDeps) {
         const code = (e as NodeJS.ErrnoException).code
         log(`[model] could not copy ${copy.dir}: ${String(e)}`)
         if (code === 'ENOSPC')
-          return set({ checking: false, pct: 0, error: "There isn't enough free space for the listening model. Free up about 500 MB, then try again." })
+          return set({ checking: false, pct: 0, error: "There isn't enough free space for the listening download, so free up about 500 MB and try again." })
       }
     }
     return set({ checking: false, pct: 0 })

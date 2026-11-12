@@ -94,7 +94,7 @@ test('Insights: results read, explained and opened at the posted version', async
     // fails if a posted version's edit checks don't sit beside its results, with what failed named (the stand-in engine's
     // score reports its unnormalized sound as off target: app/dev/fake-engine score)
     await expect(firstRow.getByTestId('insights-checks')).toHaveText(' · 2 of 3 checks pass')
-    await expect(firstRow.getByTestId('insights-checks-off')).toHaveText('In the edit: loudness −19.6 LUFS, off target.')
+    await expect(firstRow.getByTestId('insights-checks-off')).toHaveText('In the edit: loudness, quieter than most reels.')
     // fails if the trial's verdict isn't the trial rule's, or its reason isn't shown
     const trial = page.getByTestId('insights-trial')
     await expect(trial.getByTestId('insights-verdict')).toHaveText('Try 2 won')

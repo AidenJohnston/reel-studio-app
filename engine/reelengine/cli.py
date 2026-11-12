@@ -20,8 +20,8 @@ from .proto import EngineError, progress
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         raise EngineError("BAD_ARGS", f"{self.prog}: {message}",
-                          "Reel Studio sent the engine a request it didn't understand. "
-                          "Please try again or reinstall the app.")
+                          "Something inside Reel Studio went wrong, "
+                          "so try again or reinstall the app.")
 
 
 def _project(args) -> Path:
@@ -40,7 +40,7 @@ def _in_work(args, option: str):
     path = (pdir / value).resolve()
     if not path.is_relative_to(pdir / "work"):
         raise EngineError("UNSAFE_PATH", f"--{option.replace('_', '-')} {value} is outside {pdir / 'work'}",
-                          "Reel Studio asked the engine to use a file outside this video's folder.")
+                          "Reel Studio stopped because a file was outside this video's folder, so try again.")
     return path
 
 
@@ -136,7 +136,7 @@ def cmd_make_variant(args):
     try:
         value = json.loads(args.value) if args.value is not None else None
     except (ValueError, TypeError):
-        raise EngineError("BAD_VARIANT", "--value must be JSON", "The trial choice must be valid JSON.")
+        raise EngineError("BAD_VARIANT", "--value must be JSON", "That choice couldn't be read, so try again.")
     return create_variant(_project(args), args.variable, value=value, project_file=_in_work(args, "project_file"))
 
 
@@ -190,7 +190,7 @@ def cmd_match_joins(args):
         try:
             edit["cut"]["keep"] = json.loads(args.keep)
         except (ValueError, TypeError):
-            raise EngineError("BAD_ARGS", "--keep must be JSON", "Reel Studio sent a cut the engine couldn't read.")
+            raise EngineError("BAD_ARGS", "--keep must be JSON", "Reel Studio couldn't read this cut, so try again.")
     keep = edit["cut"]["keep"]
     if args.every and isinstance(keep, list):
         # ask the question for every join that could hold one: after the first range, never next to a clip
@@ -763,7 +763,7 @@ def main(argv=None) -> int:
         args = parser.parse_args(argv)
         if not getattr(args, "fn", None):
             raise EngineError("BAD_ARGS", "no command given",
-                              "Reel Studio didn't tell the engine what to do. Please try again.")
+                              "Something inside Reel Studio went wrong, so try again.")
         # commands without a project (footage search, Library indexing) have nothing to own
         if getattr(args, "project", None) and args.command not in NOT_PROJECT_WRITES:
             from . import owner

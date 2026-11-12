@@ -384,7 +384,7 @@ def open_image(path: Path):
         img.load()
     except FileNotFoundError:
         raise EngineError("ASSET_MISSING", f"not found: {p}",
-                          "A picture for your b-roll is missing. It may have been moved or deleted.") from None
+                          "A picture in this reel was moved or deleted, so put it back or choose another.") from None
     except Exception as e:
         raise EngineError("ASSET_UNREADABLE", f"{p.name}: {e}",
                           "I couldn't open one of your pictures. Try a different file.") from None

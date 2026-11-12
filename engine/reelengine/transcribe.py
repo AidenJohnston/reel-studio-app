@@ -68,8 +68,8 @@ def default_model() -> str:
 def require_model(name: str) -> Path:
     if not model_present(name):
         raise EngineError("MODEL_MISSING", f"speech model {name!r} not found in {model_dir(name)}",
-                          "Reel Studio needs to download its listening model first (about "
-                          "500 MB, one time only).")
+                          "Reel Studio needs a one-time download of about 500 MB before it can listen, "
+                          "so open it again with the internet on.")
     return model_dir(name)
 
 
@@ -175,8 +175,8 @@ def _index_files(base: str, repo: str) -> list:
         info = _http_json(f"{base}/api/models/{repo}?blobs=true")
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise EngineError("OFFLINE", f"could not reach {base}: {exc}",
-                          "I couldn't connect to the internet to download the listening model. "
-                          "Check your connection and try again.")
+                          "Reel Studio couldn't reach the internet for its one-time listening download, "
+                          "so check your connection and try again.")
     files = []
     for sib in info.get("siblings", []) or []:
         fname = sib.get("rfilename")
@@ -184,7 +184,7 @@ def _index_files(base: str, repo: str) -> list:
             continue
         if not _safe_rfilename(fname):
             raise EngineError("BAD_MODEL_INDEX", f"refusing model file name {fname!r}",
-                              "The listening model download looked wrong, so I stopped. Please try again later.")
+                              "The listening download looked wrong, so it stopped; try again later.")
         lfs = sib.get("lfs") or {}
         sha = str(lfs.get("sha256") or "").lower() or None
         files.append((fname, int(lfs.get("size") or sib.get("size") or 0), sha))
@@ -236,7 +236,7 @@ def download_model(name: str) -> dict:
     repo = MODEL_REPOS.get(name)
     if not repo:
         raise EngineError("BAD_MODEL", f"unknown model {name!r}; known: {sorted(MODEL_REPOS)}",
-                          "That listening model isn't one Reel Studio knows about.")
+                          "Reel Studio doesn't know that listening download, so choose another in Settings.")
     dest = model_dir(name)
     with _download_lock(dest):
         return _download_unlocked(name, repo, dest)
@@ -244,7 +244,7 @@ def download_model(name: str) -> dict:
 
 def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
     if model_present(name):
-        progress("download", 100, "The listening model is ready", force=True)
+        progress("download", 100, "Ready to listen", force=True)
         return {"model": name, "path": str(dest), "downloaded": False}
     base = os.environ.get("REELENGINE_MODEL_MIRROR", "https://huggingface.co").rstrip("/")
     progress("download", 0, "Getting ready to download", force=True)
@@ -270,7 +270,7 @@ def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
 
         def on_bytes(got, _done=done_bytes):
             progress("download", (_done + got) / total * 100,
-                     f"Downloading the listening model ({(_done + got) / 1e6:.0f} of {total / 1e6:.0f} MB)")
+                     f"Getting ready to listen ({(_done + got) / 1e6:.0f} of {total / 1e6:.0f} MB)")
         for verify_try in range(2):
             try:
                 _fetch_part(url, part, size, on_bytes)
@@ -289,14 +289,14 @@ def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
                     log(f"# {fname}: checksum mismatch; downloading it again")
                     continue
                 raise EngineError("DOWNLOAD_CORRUPT", f"{fname}: sha256 mismatch after two downloads",
-                                  "The listening model downloaded with errors. Please try again.")
+                                  "The listening download came through damaged, so try again.")
             break
         os.replace(part, target)
         done_bytes += size
     if not model_present(name):
         raise EngineError("DOWNLOAD_INCOMPLETE", f"{dest} is missing model files after download",
                           "The download didn't finish properly. Please try again.")
-    progress("download", 100, "The listening model is ready", force=True)
+    progress("download", 100, "Ready to listen", force=True)
     return {"model": name, "path": str(dest), "downloaded": True, "bytes": total}
 
 
@@ -467,7 +467,7 @@ def speech_check(name: Optional[str] = None) -> dict:
         return {"threads": None, "default": default, "device": "cuda", "runs": [], "complete": True}
     from faster_whisper import WhisperModel
     from faster_whisper.vad import get_vad_model
-    progress("speech-check", 0, "Getting the listening model ready for this computer", force=True)
+    progress("speech-check", 0, "Getting ready to listen on this computer", force=True)
     get_vad_model()              # loaded once, on first use: keep that out of the first count's time
     duration = len(audio_env.read_wav(SPEECH_CHECK_WAV)) / 16000
     cands = thread_candidates(default, fast_cores())
@@ -486,10 +486,10 @@ def speech_check(name: Optional[str] = None) -> dict:
         runs.append({"threads": n, "seconds": round(seconds, 3),
                      "words": [(w["w"], w["s"], w["e"]) for w in words]})
         log(f"# speech check: {n} thread(s) {seconds:.2f}s, {len(words)} words")
-        progress("speech-check", 100 * (i + 1) / len(cands), "Getting the listening model ready for this computer")
+        progress("speech-check", 100 * (i + 1) / len(cands), "Getting ready to listen on this computer")
     if not runs[0]["words"]:
         raise EngineError("SPEECH_CHECK_EMPTY", "the speech check sample produced no words",
-                          "The listening model didn't hear the test recording. Reel Studio will keep its usual settings.")
+                          "Reel Studio didn't hear its test recording, so it keeps its usual settings.")
     return {"threads": choose_threads(runs), "default": default, "device": "cpu",
             "complete": len(runs) == len(cands),
             "runs": [{"threads": r["threads"], "seconds": r["seconds"],
@@ -522,7 +522,7 @@ def load_model(name: str, prefer: Optional[str] = None):
             last = exc
             log(f"# whisper on {device} unavailable ({type(exc).__name__}: {str(exc)[:160]}); falling back")
     raise EngineError("MODEL_LOAD_FAILED", f"could not load {name}: {last}",
-                      "The listening model wouldn't start. Try downloading it again in Settings.")
+                      "Reel Studio couldn't start listening, so get the listening download again in Settings.")
 
 
 # --- audio --------------------------------------------------------------------------------------
@@ -864,7 +864,7 @@ def run(project_dir: Path, model_name: Optional[str] = None, language: Optional[
     t1 = time.time()
     model, dev, compute = None, "index", None
     if needs_model:
-        progress(STAGE, 9, "Waking up the listening model", force=True)
+        progress(STAGE, 9, "Getting ready to listen", force=True)
         model, dev, compute = load_model(name, prefer=device)
     t_load = time.time() - t1
     log(f"# whisper {name} on {dev} ({compute}), loaded in {t_load:.1f}s")

@@ -46,12 +46,12 @@ export function checkRow(c: EditCheck): VersionRow | null {
         : { label: 'Subtitle position', before: '', after: `${plural(n, 'subtitle')} under buttons`, title: `${plural(n, 'subtitle')} of ${c.subtitles ?? 0} sit where Instagram's caption or buttons cover them.` }
     case 'loudness':
       return {
-        label: 'Loudness', before: '', after: c.ok ? `${num(c.lufs)} LUFS` : `${num(c.lufs)} LUFS, off target`,
-        title: `Instagram and TikTok play reels at about ${num(c.target ?? -14)} LUFS${c.ok ? ', and this one is there' : '; this one will sound quieter or louder than the reels around it'}.`
+        label: 'Loudness', before: '', after: c.ok ? 'Right for Instagram' : (c.lufs ?? 0) < (c.target ?? -14) ? 'Quieter than most reels' : 'Louder than most reels',
+        title: `Instagram and TikTok play every reel at about the same loudness${c.ok ? ', and this one is there' : '; this one will sound quieter or louder than the reels around it'}.`
       }
     case 'videoFile':
       return c.ok
-        ? { label: 'Video file', before: '', after: 'Plays as expected', title: 'Length, size, frame rate and sound all match the edit.' }
+        ? { label: 'Video file', before: '', after: 'Plays as expected', title: 'Its length, picture and sound all match the edit.' }
         : { label: 'Video file', before: '', after: `${plural(n, 'problem')}`, title: `The video file failed: ${(c.failed ?? []).join(', ')}.` }
     case 'myStyle':
       return c.ok

@@ -166,7 +166,7 @@ def plan_windows(ctx) -> list[dict]:
         if "source" in anc:
             if getattr(ctx, "src_to_out", None) is None:
                 raise EngineError("BAD_ANCHOR", "source-time b-roll needs a source-time mapping",
-                                  "This edit needs a newer video engine.")
+                                  "This edit needs a newer Reel Studio, so update the app.")
             s, e = projmod.anchor_span(ctx, anc)
             if e <= s:
                 continue
@@ -243,7 +243,7 @@ def _asset_path(ctx, a: str) -> Path:
             if q.exists():
                 return q
     raise EngineError("ASSET_MISSING", f"b-roll asset not found: {a} ({p})",
-                      "A picture or clip for your b-roll is missing. It may have been moved or deleted.")
+                      "A picture or clip in this reel was moved or deleted, so put it back or choose another.")
 
 
 _ANIM_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
@@ -714,7 +714,7 @@ def _split_video(ctx, t0: float, t1: float, top_src: Path, top_kind: str, cin: f
             chains.append(f"[{k}:v]fps={fps},scale={W}:{th}:force_original_aspect_ratio=increase,"
                           f"crop={W}:{th},setsar=1,format=yuv420p[top]")
     else:
-        raise EngineError("SPLIT_BAD_ASSET", "split-top needs an image or video", "This b-roll needs a picture or a clip.")
+        raise EngineError("SPLIT_BAD_ASSET", "split-top needs an image or video", "This spot needs a picture or a clip.")
     chains.append(f"[top][spk]vstack=inputs=2,format=yuv420p[out]")
     tmp = out.with_name(out.stem + ".part.mp4")
     run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin", *args, "-filter_complex", ";".join(chains),
@@ -1481,16 +1481,16 @@ def build_layers(ctx) -> list:
                 kind = kind_of(src)
                 if kind not in ("image", "video"):
                     raise EngineError("ASSET_KIND", f"{src.name} is {kind}",
-                                      "This b-roll file isn't a picture or a video.")
+                                      "This file isn't a picture or a video, so choose another.")
             elif tname not in ("text-pop", "text-behind", "post-wall", "icon-wall"):
                 raise EngineError("ASSET_NONE", f"{plan['id']}: {tname} needs an asset",
-                                  "This b-roll needs a picture or a clip.")
+                                  "This spot needs a picture or a clip.")
             asked = tname
             if src is not None and tname != "animation" and animation_sidecar(src) is not None:
                 tname, fn = "animation", _t_anim       # a finished full-frame layer, never a card
             elif tname == "animation" and (src is None or animation_sidecar(src) is None):
                 raise EngineError("ANIM_NOT_ANIMATION", f"{plan['id']}: animation treatment without an animation file",
-                                  "This b-roll is set to show an animation, but its file isn't one. Make the animation again.")
+                                  "This spot is set to show an animation but its file isn't one, so make the animation again.")
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])
             layers, rec = fn(ctx, plan, params, kind, src, zones, face, frame)
             if asked != tname:

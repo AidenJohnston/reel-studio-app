@@ -27,7 +27,7 @@ test("a version's checks show under What changed, failing ones first", async () 
     await expect(checks).toContainText('2 of 3 checks pass.')
     await expect(checks).toContainText('not whether the reel works')
     await expect(checks.locator('.drow').first()).toContainText('Loudness')
-    await expect(checks.locator('.drow').first()).toContainText('−19.6 LUFS, off target')
+    await expect(checks.locator('.drow').first()).toContainText('Quieter than most reels')
     await shot(page, 'edit-checks-01')
   } finally {
     await app.close().catch(() => {})

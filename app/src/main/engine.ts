@@ -286,7 +286,7 @@ function cancelled(): EngineError {
 function stuck(pid: number | undefined): EngineError {
   return {
     code: 'ENGINE_STUCK',
-    userMessage: "Part of Reel Studio's video engine would not stop. Restart Reel Studio before you change this reel again.",
+    userMessage: "Part of Reel Studio wouldn't stop, so restart Reel Studio before you change this reel again.",
     message: `process group ${pid} is still alive after SIGKILL`
   }
 }

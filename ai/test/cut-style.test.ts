@@ -29,7 +29,7 @@ it('persists an explicit seed and logs a generated seed with the selected preset
   expect(view.cutStyle).toEqual(style);
   expect(view.cutStyleSettings).toMatchObject({ secondsPerVisualChange: [1.5, 3], smashes: 2 });
   expect(JSON.parse(generated.content).settings).toEqual(view.cutStyleSettings);
-  expect(events).toContainEqual({ type: 'tool', name: 'set_cut_style', summary: `Set cut style to hyper (seed ${style?.seed})` });
+  expect(events).toContainEqual({ type: 'tool', name: 'set_cut_style', summary: "Picked a hyper pace" });
 });
 
 it('rejects invalid persisted presets and non-integer seeds', async () => {

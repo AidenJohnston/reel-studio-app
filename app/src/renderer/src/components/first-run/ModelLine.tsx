@@ -46,7 +46,7 @@ function useListeningModel(active: boolean): { s: ModelStatus | null; eta: strin
   return {
     s,
     eta: s?.downloading && s.total > 0 ? etaWords(s.total - s.bytes, rate) : null,
-    error: error ?? s?.error ?? (failed ? "Couldn't check for the listening model." : null),
+    error: error ?? s?.error ?? (failed ? "Couldn't check the listening download, so try again." : null),
     retry: () => {
       setError(null)
       started.current = false
@@ -68,7 +68,7 @@ export function ModelLine({ active, computer }: { active: boolean; computer: str
     return (
       <div className="fr-dl" role="alert" data-testid="model-line">
         <span className="fr-dl-1">
-          <b>Couldn't get the listening model</b>
+          <b>Couldn't get ready to listen</b>
           <button className="lk" onClick={retry} data-testid="model-retry">
             Try again
           </button>
@@ -84,14 +84,14 @@ export function ModelLine({ active, computer }: { active: boolean; computer: str
     <div
       className="fr-dl"
       role="progressbar"
-      aria-label="Listening model download"
+      aria-label="Getting ready to listen"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(pct * 100)}
       data-testid="model-line"
     >
       <span className="fr-dl-1">
-        <b>{s.checking ? 'Checking the listening model' : 'Listening model'}</b>
+        <b>{s.checking ? 'Checking the listening download' : 'Getting ready to listen'}</b>
         {!s.checking && <span className="n">{s.total > 0 ? `${mb(s.bytes)} of ${mb(s.total)} MB` : `${s.pct}%`}</span>}
       </span>
       <span className="fr-dl-2">

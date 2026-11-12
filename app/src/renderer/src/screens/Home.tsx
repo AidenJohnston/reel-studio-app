@@ -476,7 +476,7 @@ function Empty({ go }: { go: Go }) {
       </div>
       {model && !model.installed && model.downloading && model.total > 0 && (
         <p className="faint tnum" data-testid="empty-model">
-          Getting the listening model · {mb(model.bytes)} of {mb(model.total)} MB
+          Getting ready to listen · {mb(model.bytes)} of {mb(model.total)} MB
         </p>
       )}
     </div>

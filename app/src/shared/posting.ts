@@ -32,7 +32,7 @@ export type PostingErrorCode =
 export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, string> = {
   POSTING_OFF: "Posting isn't turned on in this version of Reel Studio.",
   NO_KEY: 'Posting uses the download key from your receipt email. Copy the link from that email, then click Paste my download link.',
-  BAD_KEY: "The posting server doesn't recognise this download key. Copy the link from your receipt email again and paste it.",
+  BAD_KEY: "Reel Studio's posting service doesn't recognise this download key, so copy the link from your receipt email again and paste it.",
   ENDED: 'Posting needs an active subscription, and yours has ended.',
   SIGNED_OUT: 'This computer is signed out of posting. Click Sign in to post again.',
   NOT_CONNECTED: 'Connect your YouTube channel first.',
@@ -43,16 +43,16 @@ export const POSTING_ERRORS: Record<Exclude<PostingErrorCode, 'BAD_FIELD'>, stri
   UPLOAD_LIMIT: "YouTube says your channel can't take more videos today. Try again tomorrow.",
   RATE_LIMITED: 'Too many tries in a row. Wait a minute, then try again.',
   EXPIRED: 'YouTube stopped waiting for the rest of this video. Click Post to YouTube to send it again from the start.',
-  OFFLINE: "Reel Studio can't reach its posting server. Check your internet connection, then try again.",
+  OFFLINE: "Reel Studio can't reach its posting service, so check your internet connection and try again.",
   PLATFORM: "YouTube didn't take the video. Try again in a few minutes.",
   NOT_CONFIGURED: "Posting to YouTube isn't switched on yet. Try again later.",
-  SERVER: 'Something went wrong on the posting server. Try again in a few minutes.',
+  SERVER: "Something went wrong on Reel Studio's posting service, so try again in a few minutes.",
   NOT_A_FINISHED_VIDEO: 'Only a finished video can be posted. Export it first.',
   FILE_CHANGED: 'The video changed since this post started. Click Start over.',
   ALREADY_POSTED: 'YouTube already has all of this video, so starting over would post it twice. Click Finish posting to see it.',
-  POSTED_UNREADABLE: "YouTube has this video, but Reel Studio couldn't read the posting server's answer about it. Find it in YouTube Studio before posting it again.",
+  POSTED_UNREADABLE: "YouTube has this video, but Reel Studio couldn't read the posting service's answer about it. Find it in YouTube Studio before posting it again.",
   STOP_UNCONFIRMED:
-    "The posting server didn't confirm that this post stopped, and YouTube may already have all of it, so it's kept. Click Finish posting to check: it carries on from what YouTube has and never posts it twice.",
+    "Reel Studio's posting service didn't confirm that this post stopped, and YouTube may already have all of it, so it's kept. Click Finish posting to check: it carries on from what YouTube has and never posts it twice.",
   BUSY: 'Another video is being posted. Wait for it to finish.'
 }
 
@@ -161,7 +161,7 @@ export const CONNECT_NOTES: Record<ConnectOutcome, string | null> = {
 
 export const POST_COPY = {
   heading: 'Post to YouTube',
-  noKey: 'Posting uses the download key from your receipt email, so the posting server knows you subscribe. Copy the link from that email, then paste it here.',
+  noKey: 'Posting uses the download key from your receipt email, so Reel Studio's posting service knows you subscribe. Copy the link from that email, then paste it here.',
   ended: 'Posting needs an active subscription, and yours has ended.',
   signedOut: 'This computer was signed out of posting, maybe with Sign out everywhere. Sign in again to post.',
   signIn: 'Sign in to post from this computer. It uses the download key from your receipt email. If your YouTube channel is already connected, you can post straight after.',
@@ -202,7 +202,7 @@ export const megabytes = (n: number): string => `${Math.round(n / 1_000_000)}`
 export const SETTINGS_COPY = {
   heading: 'Posting',
   intro: 'Post a finished video to your channels from Reel Studio. It posts only when you click Post.',
-  privacy: "Your Google sign-in stays on Reel Studio's posting server, never on this computer. Your video passes through it to YouTube and isn't kept.",
+  privacy: "Your Google sign-in stays on Reel Studio's posting service, never on this computer. Your video passes through it to YouTube and isn't kept.",
   noKey: 'Signing in uses the download key from your receipt email.',
   disconnectTitle: 'Disconnect YouTube?',
   everywhereTitle: 'Sign out everywhere?',
@@ -261,6 +261,6 @@ export function failedAction(p: PostProgress): FailedAction | null {
 
 /** The line while a post waits to try again, by whose trouble it was. */
 export function retryLine(reason: PostProgress['retryReason'], seconds: number): string {
-  const why = reason === 'youtube' ? 'YouTube is busy.' : reason === 'server' ? 'The posting server is having trouble.' : 'The connection dropped.'
+  const why = reason === 'youtube' ? 'YouTube is busy.' : reason === 'server' ? "Reel Studio's posting service is having trouble." : 'The connection dropped.'
   return `${why} Trying again in ${seconds} second${seconds === 1 ? '' : 's'}…`
 }

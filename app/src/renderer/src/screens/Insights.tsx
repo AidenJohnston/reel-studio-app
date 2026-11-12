@@ -242,7 +242,7 @@ function ReelRow({ r, all, go }: { r: InsightReel; all: InsightReel[]; go: Go })
         <div className={`ins-why${counting ? ' faint' : ''}`} data-testid="insights-why">{line}</div>
         {off.length > 0 && (
           <div className="ins-why faint" data-testid="insights-checks-off">
-            In the edit: {off.map((row) => `${row.label.toLowerCase()} ${row.after}`).join('; ')}.
+            In the edit: {off.map((row) => `${row.label.toLowerCase()}, ${row.after[0].toLowerCase()}${row.after.slice(1)}`).join('; ')}.
           </div>
         )}
       </div>

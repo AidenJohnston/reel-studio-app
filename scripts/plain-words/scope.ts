@@ -159,13 +159,31 @@ export const scope: Scope = {
     { path: 'engine/reelengine/reference_capcut.py', reason: 'reading another editor\'s project, from My style' },
     { path: 'engine/reelengine/reference_edl.py', reason: 'reading another editor\'s project, from My style' },
     { path: 'engine/reelengine/reference_import.py', reason: 'reading another editor\'s project, from My style' },
-    { path: 'engine/reelengine/doctor.py', reason: 'a report for support' }
+    { path: 'engine/reelengine/doctor.py', reason: 'a report for support' },
+    { path: 'app/src/main/meta-http.ts', reason: 'posting to Instagram and Facebook, after a reel is made' },
+    { path: 'app/src/main/past-edits.ts', reason: "reading another editor's projects, from My style" },
+    { path: 'app/src/main/updater.ts', reason: 'updates' },
+    { path: 'app/src/shared/niche.ts', reason: 'My style > who your reels are for' },
+    { path: 'ai/src/niche.ts', reason: 'My style > who your reels are for' },
+    { path: 'app/src/shared/hand-edit.ts', reason: 'Edit it myself' },
+    { path: 'app/src/shared/variations.ts', reason: 'Edit it myself > Pace, trying other paces' }
   ],
 
   keysOnly: [
-    { path: 'ai/src/tools.ts', reason: 'mostly the tool list the AI reads; only its summaries and messages reach the screen' },
-    { path: 'ai/src/index.ts', reason: 'mostly wiring; only its messages reach the screen' }
+    { path: 'ai/src/', reason: 'the AI package: most of its text is instructions and checks sent to the AI; only messages, summaries and labels reach the screen' }
   ],
 
-  allow: []
+  allow: [
+    { file: 'app/src/shared/cut-style.ts', text: 'cutStyle needs preset and seed', reason: "a check on what the AI wrote, answered to the AI" },
+    { file: 'app/src/shared/cut-style.ts', text: 'cutStyle.preset must be', reason: "a check on what the AI wrote, answered to the AI" },
+    { file: 'app/src/shared/cut-style.ts', text: 'cutStyle.seed must be', reason: "a check on what the AI wrote, answered to the AI" },
+    { file: 'app/src/main/index.ts', text: 'Choose a model for each stage.', reason: 'Settings > Advanced, which AI handles each step' },
+    { file: 'app/src/main/index.ts', text: 'Choose whether to make reels at 30 fps.', reason: 'Settings > Advanced' },
+    { file: 'app/src/main/index.ts', text: 'then clear the cache.', reason: 'Settings > Storage' },
+    { file: 'app/src/main/index.ts', text: "Couldn't open the logs folder", reason: 'Settings > Help, for sending a report' },
+    { file: 'app/src/main/index.ts', text: 'Connecting your own AI server', reason: 'Settings > Advanced, your own AI server' },
+    { file: 'app/src/main/index.ts', text: 'updaterCacheDirName', reason: 'an update settings file written for tests, never shown' },
+    { file: 'app/src/main/ai-mock.ts', text: 'Stock API keys need the AI package', reason: 'Settings > Picture sites, on a broken install only' },
+    { file: 'app/src/main/ai-mock.ts', text: 'claude_cli: MCP refused', reason: 'a mode only tests turn on' }
+  ]
 }

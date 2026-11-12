@@ -549,7 +549,7 @@ def cmd_download_model(args: list[str]) -> dict:
         if i == 3 and os.environ.get("FAKE_ENGINE_OFFLINE") == "1":
             raise Fail("OFFLINE", "The download stopped. Check your internet connection and try again; it will "
                                   "pick up where it left off.", "fake offline")
-        progress("download", i * 10, f"Downloading the listening model ({i * 48} of 480 MB)")
+        progress("download", i * 10, f"Getting ready to listen ({i * 48} of 480 MB)")
         time.sleep(float(os.environ.get("FAKE_ENGINE_DOWNLOAD_STEP", "0.05")))
     dest.mkdir(parents=True, exist_ok=True)
     for f in ("model.bin", "config.json", "vocabulary.txt", ".fake"):
@@ -560,7 +560,7 @@ def cmd_download_model(args: list[str]) -> dict:
 def cmd_speech_check(_args: list[str]) -> dict:
     steps = 10
     for i in range(steps):
-        progress("speech-check", i * 100 / steps, "Getting the listening model ready for this computer")
+        progress("speech-check", i * 100 / steps, "Getting ready to listen on this computer")
         time.sleep(float(os.environ.get("FAKE_ENGINE_SPEECH_CHECK", "1")) / steps)
     return {"threads": 4, "default": 8, "device": "cpu",
             "runs": [{"threads": 8, "seconds": 2.5, "sameWords": True}, {"threads": 4, "seconds": 1.4, "sameWords": True}]}

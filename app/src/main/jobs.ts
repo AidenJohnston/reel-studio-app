@@ -63,7 +63,7 @@ interface Running {
   done: Promise<void>
 }
 
-export const WAITING_FOR_RENDER = 'Waiting for another reel to finish rendering'
+export const WAITING_FOR_RENDER = 'Waiting for another reel to finish'
 const shown = (j: Running): string => (j.waitingForRender ? WAITING_FOR_RENDER : j.message)
 
 export function createJobManager(
@@ -367,7 +367,7 @@ export function createJobManager(
         return await fn(owner.token)
       } catch (e) {
         const err = e as { code?: string; userMessage?: string }
-        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio\'s video engine is still running on this video.' })
+        if (err?.code === 'ENGINE_STUCK') stuck.set(slug, { code: err.code, userMessage: err.userMessage ?? 'Part of Reel Studio is still working on this video, so wait a minute and try again.' })
         throw e
       } finally {
         if (!stuck.has(slug)) await owner.release()
@@ -386,7 +386,7 @@ export function createJobManager(
 
   /** A project something of a previous run still writes to (orphans.ts reap): closed until it stops. */
   function keepClosed(slug: string): void {
-    stuck.set(slug, { code: 'ENGINE_STILL_RUNNING', userMessage: "Part of Reel Studio's video engine from last time is still running on this reel. Quit and reopen Reel Studio in a few minutes, or restart your computer, before you change it." })
+    stuck.set(slug, { code: 'ENGINE_STILL_RUNNING', userMessage: "Something from last time is still running on this reel, so quit and reopen Reel Studio in a few minutes before you change it." })
   }
 
   return {

@@ -18,7 +18,7 @@ describe('planAnswerer', () => {
 
   it("leaves the model out when writing is on Auto and the app doesn't know which one the editor picks", () => {
     const who = planAnswerer(p({ id: 'claude-cli', label: 'Claude (your Claude Code app)', detail: '2.1.0' }), 'auto')
-    expect(who).toEqual({ mark: 'claude', name: 'Claude', model: null, full: 'Claude (your Claude Code app), the model it picks' })
+    expect(who).toEqual({ mark: 'claude', name: 'Claude', model: null, full: 'Claude (your Claude Code app)' })
   })
 
   it("names a server's model: the one picked for writing, else the connection's own", () => {

@@ -11,7 +11,7 @@ describe("a version's edit checks", () => {
       { id: 'futureCheck' as never, ok: false }
     ])
     expect(scoreRows(s).map((r) => [r.label, r.after])).toEqual([
-      ['Loudness', '−19.6 LUFS, off target'],
+      ['Loudness', 'Quieter than most reels'],
       ['Video file', 'Plays as expected']
     ])
     expect(scoreLine(s)).toBe('1 of 2 checks pass')

@@ -857,7 +857,7 @@ export interface MergeEditResult extends EditResult, MergeResult {}
 /** Uses the same private edit, final render, compare-and-swap, and cleanup as a note. */
 export async function saveMerge(deps: EditorDeps, projectDir: string, request: MergeRequest, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { id?: string } = {}): Promise<MergeEditResult> {
   const id = opts.id ?? randomUUID();
-  if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', 'Could not start this merge. Try again.');
+  if (!/^[\w-]+$/.test(id)) throw new AIError('bad_note_id', "Couldn't start combining these versions, so try again.");
   const base = await fsp.readFile(path.join(projectDir, PROJECT_FILE));
   const live = withDefaults(JSON.parse(base.toString('utf8')));
   const dir = path.join(projectDir, 'work', 'notes', id);

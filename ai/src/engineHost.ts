@@ -95,12 +95,12 @@ export class PythonEngineHost implements EngineHost {
       });
       const abort = () => killTree(child.pid, () => child.kill());
       signal?.addEventListener('abort', abort, { once: true });
-      child.on('error', (e) => reject({ code: 'ENGINE_MISSING', userMessage: 'The video engine could not start.', message: e.message }));
+      child.on('error', (e) => reject({ code: 'ENGINE_MISSING', userMessage: "Reel Studio couldn't start working on this video, so restart it and try again.", message: e.message }));
       child.on('close', async (code) => {
         signal?.removeEventListener('abort', abort);
         if (buf) onLine(buf);
         if (!(await drained(child.pid))) {
-          return reject({ code: 'ENGINE_STUCK', userMessage: 'Part of the video engine would not stop. Check for a leftover ffmpeg before you edit this reel again.', message: `process group ${child.pid} is still alive after SIGKILL` });
+          return reject({ code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio wouldn't stop, so restart your computer before you edit this reel again.", message: `process group ${child.pid} is still alive after SIGKILL` });
         }
         if (signal?.aborted) return reject({ code: 'cancelled', userMessage: 'Stopped.' });
         if (error) return reject(error);

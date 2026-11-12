@@ -155,7 +155,7 @@ describe('a failed post', () => {
     expect(retryLine('offline', 8)).toBe('The connection dropped. Trying again in 8 seconds…')
     expect(retryLine(undefined, 2)).toBe('The connection dropped. Trying again in 2 seconds…')
     expect(retryLine('youtube', 4)).toBe('YouTube is busy. Trying again in 4 seconds…')
-    expect(retryLine('server', 1)).toBe('The posting server is having trouble. Trying again in 1 second…')
+    expect(retryLine('server', 1)).toBe("Reel Studio's posting service is having trouble. Trying again in 1 second…")
   })
 })
 

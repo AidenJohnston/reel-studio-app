@@ -30,7 +30,7 @@ export function planAnswerer(p: ProviderInfo | null, writer: string): Answerer |
     mark,
     name,
     model,
-    full: `${p.label}${model ? `, ${model}` : mark === 'claude' || mark === 'openai' ? ', the model it picks' : ''}`
+    full: `${p.label}${model ? `, ${model}` : ''}`
   })
   switch (p.id) {
     case 'claude-cli':

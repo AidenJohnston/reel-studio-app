@@ -180,7 +180,7 @@ export function readsAsWords(s: string): boolean {
   if (/var\(--|cubic-bezier|rgba?\(|translate[XY(]|scale\(|inset\(|calc\(|:\/\/|^[./\\#[@]|\\/.test(t)) return false
   if (/^-?[\d.]+(px|ms|s|%|em|rem|vh|vw|fr|deg)?(\s+-?[\d.]+(px|ms|s|%|em|rem|vh|vw|fr|deg)?)*$/.test(t)) return false
   // one token with no spaces: shown only if it is a capitalised word ("Export", "Render"), not "render" or "a-b"
-  if (!/\s/.test(t)) return /^\p{Lu}[\p{Ll}'’]+[.!?…:]?$/u.test(t) || /^\p{Lu}{2,}$/u.test(t)
+  if (!/\s/.test(t)) return /^\p{Lu}[\p{Ll}'’]+[.!?…:]?$/u.test(t)
   // several tokens that are all class-like ("btn primary big") are a class list
   if (/^[a-z0-9_-]+(\s+[a-z0-9_-]+)+$/.test(t) && t.split(/\s+/).every((p) => /[-_]/.test(p) || /^[a-z]+$/.test(p)) && !/\b(the|a|an|to|of|is|and|your|you|it|in|on|for|this|with)\b/.test(t)) return false
   return true

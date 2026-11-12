@@ -71,17 +71,17 @@ def ensure_model() -> Path:
             part.unlink()
         try:
             _fetch_part(url, part, spec["size"], lambda got: progress(
-                "download", 100.0 * got / spec["size"], "Downloading the model that finds you in the picture"))
+                "download", 100.0 * got / spec["size"], "Getting ready to find you in the picture"))
         except (urllib.error.URLError, OSError) as exc:
             raise EngineError("OFFLINE", f"download of {spec['name']} failed: {exc}",
-                              "I couldn't download the model that cuts you out of the picture. "
-                              "Check your internet connection and make the version again.")
+                              "Reel Studio couldn't download what cuts you out of the picture, "
+                              "so check your internet connection and make the version again.")
         got = _sha256(part) if part.exists() else ""
         if got != spec["sha256"]:
             part.unlink(missing_ok=True)
             raise EngineError("DOWNLOAD_CORRUPT", f"{spec['name']}: sha256 {got or 'missing'}, pinned {spec['sha256']}",
-                              "The model that cuts you out of the picture downloaded with errors. "
-                              "Make the version again to retry.")
+                              "What cuts you out of the picture came through damaged, "
+                              "so make the version again to retry.")
         os.replace(part, dest)
     return dest
 
