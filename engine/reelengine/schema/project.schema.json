@@ -79,6 +79,7 @@
             "preset": { "type": "string" },
             "font": { "type": "string" },
             "size": { "type": "number", "minimum": 10, "maximum": 300 },
+            "sizePicked": { "type": "boolean", "description": "the person picked size in Edit it myself, so a new look keeps it (absent = the look's own size)" },
             "maxWords": { "type": "integer", "minimum": 1, "maximum": 12 },
             "case": { "enum": ["upper", "lower", "as-is", "title"] },
             "color": { "$ref": "#/$defs/color" },
@@ -86,7 +87,9 @@
             "outlineColor": { "$ref": "#/$defs/color" },
             "shadow": { "type": "number", "minimum": 0, "maximum": 40 },
             "position": { "type": "number", "minimum": 0.05, "maximum": 0.95 },
-            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" }
+            "box": { "type": "boolean", "description": "draw the words on a solid box in outlineColor" },
+            "highlight": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "colour of the word being spoken (absent = no word highlight)" },
+            "pop": { "type": "boolean", "description": "each line grows into place as it appears" }
           }
         },
         "corrections": {
