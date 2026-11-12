@@ -43,7 +43,7 @@ Write that comment for a stranger: this repo is public.
 ## Branch names
 
 `<owner>/<type>/<topic>`, for example `sam/feat/caption-presets`:
-- **Owner:** the person the work is for. An agent uses its person's name, and its own model goes on the PR's
+- **Owner:** the first name of the person the work is for. An agent uses its person's name, and its own model goes on the PR's
   `Agent:` line, not in the branch.
 - **Type:** a Conventional Commits type (`feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`,
   `chore`, `revert`).
