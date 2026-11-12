@@ -8,6 +8,7 @@ Extra test hooks (env):
   FAKE_ENGINE_SLOW=<seconds>   sleep this long inside transcribe, in small steps (cancel tests)
   FAKE_ENGINE_SLOW_INIT=<seconds>   sleep this long inside init after copying, before project.json exists
   FAKE_ENGINE_FAIL=<command>   that command fails with a friendly error
+  FAKE_ENGINE_SLOW_RENDER=<seconds>   a full-quality render waits this long first, in small steps (Stop tests)
 """
 from __future__ import annotations
 
@@ -302,6 +303,10 @@ def cmd_render(args: list[str]) -> dict:
     data = load(proj, file)
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
+    slow = 0.0 if draft else float(os.environ.get("FAKE_ENGINE_SLOW_RENDER", "0") or 0)
+    for i in range(int(slow * 10)):
+        progress("render", i / slow, "Putting it all together")
+        time.sleep(0.1)
     # docs/versions.md: a draft goes to --out (default versions/preview/); only a final makes
     # versions/vN/, starting afresh when an earlier attempt that was never saved left one there
     n = int(data.get("version", 0)) + 1
