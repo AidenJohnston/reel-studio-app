@@ -247,6 +247,65 @@ def test_zoom_release_hides_under_full_frame(tmp_path, media):
     assert z.t1 == pytest.approx(p["t1"])
 
 
+@pytest.mark.parametrize("fps", [30, 24])
+def test_snap_zoom_never_moves_across_a_cut(tmp_path, media, fps):
+    """A snap zoom held over a cut keeps both eased ramps; one whose release would run across a cut
+    releases on the cut instead, hidden by it. At 24 fps this cut and the zoom's end round to frames
+    two apart."""
+    ctx = _ctx(tmp_path, media["video"], keep=((0.0, 9.0), (10.0, 14.0), (15.0, 20.0)))
+    ctx.fmt["fps"] = fps
+    cut1, cut2 = (s.out_start for s in ctx.out_timeline[1:])
+    fx.set_project(ctx, zooms=[
+        {"anchor": {"from": fx.word_near(ctx, 2.0), "to": fx.word_near(ctx, cut1 - 0.3)}, "scale": 1.12, "style": "snap"},
+        {"anchor": {"from": fx.word_near(ctx, cut2 - 2.0), "to": fx.word_near(ctx, cut2 + 1.5)}, "scale": 1.12,
+         "style": "snap"}])
+    ending, across = zoom.build_zooms(ctx)
+    assert ending.t1 == pytest.approx(cut1, abs=0.5 / fps) and ending.ramp_out == 0 and ending.ramp_in > 0
+    assert across.t0 < cut2 < across.t1 and across.ramp_in > 0 and across.ramp_out > 0
+    assert across.t0 + across.ramp_in < cut2 < across.t1 - across.ramp_out
+
+
+def test_snap_zoom_on_a_short_word_after_a_cut_still_shows(tmp_path, media):
+    """The cut that starts a one-word line sits inside its release window: the zoom keeps its word
+    and releases hard, as a default zoom does."""
+    ctx = _ctx(tmp_path, media["video"], keep=((1.0, 9.0), (10.0, 14.0)))
+    cut = ctx.out_timeline[1].out_start
+    wid = fx.word_near(ctx, cut)
+    tr = ctx.project_dir / "work" / "transcript.json"
+    words = json.loads(tr.read_text())["words"]
+    w = next(w for w in words if w["id"] == wid)
+    w["e"] = round(w["s"] + 0.15, 3)
+    tr.write_text(json.dumps({"words": words}))
+    ctx = fx.make_ctx(ctx.project_dir)
+    fx.set_project(ctx, zooms=[{"anchor": {"from": wid, "to": wid}, "scale": 1.12, "style": "snap"}])
+    [z] = zoom.build_zooms(ctx)
+    assert z.t0 == pytest.approx(cut, abs=0.5 / 30) and z.t1 == pytest.approx(cut + 0.2, abs=0.5 / 30)
+    assert z.ramp_out == 0
+
+
+@pytest.mark.parametrize("fps", [24, 30])
+def test_snap_zoom_keeps_a_short_last_word_starting_on_a_cut(monkeypatch, fps):
+    """A cut on the last word must not end a multi-word zoom before that word plays."""
+    from types import SimpleNamespace
+
+    starts, ends = {"first": 8.0, "last": 10.0}, {"first": 8.3, "last": 10.04}
+    ctx = SimpleNamespace(
+        project={"zooms": [{"anchor": {"from": "first", "to": "last"}, "scale": 1.12, "style": "snap"}]},
+        fmt={"width": W, "height": H, "fps": fps}, duration=12.0,
+        out_timeline=[SimpleNamespace(out_start=0.0), SimpleNamespace(out_start=10.0)],
+        word_out_time=starts.__getitem__, word_out_end=ends.__getitem__)
+    monkeypatch.setattr(broll, "output_face_union", lambda *args: (440, 884, 200, 200))
+
+    [z] = zoom.build_zooms(ctx, with_broll=False)
+
+    assert z.t0 == 8.0
+    assert z.t1 == pytest.approx(round((ends["last"] + zoom.TAIL) * fps) / fps)
+    assert z.t1 > ends["last"]
+    assert z.ramp_in > 0
+    assert z.ramp_out == 0
+    assert zoom.progress(z, starts["last"]) == 1.0
+
+
 # --- music -------------------------------------------------------------------------------------
 
 def test_loudness_matches_ffmpeg(media):
