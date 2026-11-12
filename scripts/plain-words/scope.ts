@@ -194,6 +194,10 @@ export const scope: Scope = {
     { file: 'app/src/main/index.ts', text: 'Connecting your own AI server', reason: 'Settings > Advanced, your own AI server' },
     { file: 'app/src/main/index.ts', text: 'updaterCacheDirName', reason: 'an update settings file written for tests, never shown' },
     { file: 'app/src/main/ai-mock.ts', text: 'Stock API keys need the AI package', reason: 'Settings > Picture sites, on a broken install only' },
-    { file: 'app/src/main/ai-mock.ts', text: 'claude_cli: MCP refused', reason: 'a mode only tests turn on' }
+    { file: 'app/src/main/ai-mock.ts', text: 'claude_cli: MCP refused', reason: 'a mode only tests turn on' },
+    { file: 'ai/src/index.ts', text: 'talking to your server', reason: 'Settings > Advanced, your own AI server' },
+    { file: 'ai/src/index.ts', text: 'Choose Pexels or Pixabay', reason: 'Settings > Picture sites' },
+    { file: 'ai/src/index.ts', text: 'stock API key', reason: 'Settings > Picture sites' },
+    { file: 'ai/src/index.ts', text: 'CLIProxyAPI', reason: 'Settings > Advanced, a CLIProxyAPI server the person runs themselves' }
   ]
 }

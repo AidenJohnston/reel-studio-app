@@ -37,17 +37,19 @@ const shown = (page: Page, sel: string) =>
     .isVisible()
     .catch(() => false)
 
-/** Where the walk is: the first of these the window shows. */
+/** Where the walk is: the first of these the window shows. The tour sits under the welcome, inert, until it starts
+ * (FirstRun.tsx), so its controls count only once its stage is on. */
 async function where(page: Page): Promise<string> {
   if (await shown(page, '[data-testid="share-pop"]')) return 'share'
   if (await shown(page, '[data-testid="log-play-1"]')) return 'ready'
   if (await shown(page, '[data-testid="planned-stage"]')) return 'pick'
   if (await shown(page, '[data-testid="ai-setup"]')) return 'ai-setup'
   if (await shown(page, '.fr-welcome:not(.leaving)')) return 'welcome'
-  if (await shown(page, '[data-testid="first-run-mac"]')) return 'mac'
-  if ((await shown(page, '[data-testid="not-now"]')) || (await shown(page, '[data-testid="editor-continue"]'))) return 'editor'
-  if (await shown(page, '[data-testid="demo-next"]')) return 'sample-done'
-  if (await shown(page, '[data-testid="demo-skip"]')) return 'sample'
+  const tour = (id: string) => shown(page, `.fr-stage.on:not(.leaving) [data-testid="${id}"]`)
+  if (await tour('first-run-mac')) return 'mac'
+  if ((await tour('not-now')) || (await tour('editor-continue'))) return 'editor'
+  if (await tour('demo-next')) return 'sample-done'
+  if (await tour('demo-skip')) return 'sample'
   return 'waiting'
 }
 
