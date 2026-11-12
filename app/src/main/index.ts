@@ -58,10 +58,11 @@ import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { autoUpdater } from 'electron-updater'
-import { LATEST_URL, type FetchLike } from './update-check'
+import { type FetchLike } from './update-check'
 import { createUpdater, menuCheckForUpdates } from './updater'
-import { UPDATE_FEED_URL, electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
+import { electronUpdaterBackend, macBundleCheck, windowsInstaller } from './updater-electron'
 import { disabledReason, updateMode } from './update-machine'
+import { feedFromFile } from './update-feed'
 import { PROTOCOL, createUpdateKeyService } from './update-key'
 import { setupPosting } from './posting-ipc'
 import { createJobFeedback, createMainWindow, feedbackLog, installMenu, startDragOut, titleBarOverlay, windowStateFile, type AppCommand } from './window'
@@ -237,6 +238,8 @@ const updateEnv = {
   hasFeed: updateConfig !== null,
   inApplications: !!TEST_FEED || (app.isPackaged && process.platform === 'darwin' && app.isInApplicationsFolder())
 }
+const siteFeed = feedFromFile(app.isPackaged && !TEST_FEED ? updateConfig : null)
+if (siteFeed.staging) log('[update] staging build: latest.json and updates come from ' + siteFeed.feedUrl)
 const siteFetch: FetchLike = (url, init) => fetch(url, init) // Node's fetch: no Electron session, so no cookies
 const updateOff = disabledReason(updateEnv)
 const updateHow = updateMode(updateEnv)
@@ -250,8 +253,8 @@ const updates = createUpdater({
         updater: autoUpdater,
         version: app.getVersion(),
         fetch: siteFetch,
-        latestUrl: TEST_FEED ? `${TEST_FEED}/latest.json` : LATEST_URL,
-        feedUrl: TEST_FEED ? `${TEST_FEED}/u/` : UPDATE_FEED_URL,
+        latestUrl: TEST_FEED ? `${TEST_FEED}/latest.json` : siteFeed.latestUrl,
+        feedUrl: TEST_FEED ? `${TEST_FEED}/u/` : siteFeed.feedUrl,
         keys: updateKey,
         log,
         devFeedFile: TEST_FEED ? updateConfig ?? undefined : undefined,
