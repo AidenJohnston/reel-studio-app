@@ -122,8 +122,14 @@ describe('mirrored take found at import', () => {
     expect(answerMirror([take('s1', { mirror: true, mirrorCheck: { verdict: 'maybe-mirrored' } })], 'mirror-flip').reply).toBeNull()
   })
 
-  it('the "Flip picture" switch keeps what init saw', () => {
-    expect(mergeSourcesPatch([flipped('s1')], [{ id: 's1', mirror: false }])).toEqual([take('s1', { mirrorCheck: { verdict: 'mirrored', why: WHY } })])
+  it('the "Flip picture" switch and Undo in What I did keep what init saw, and the choice', () => {
+    const off = mergeSourcesPatch([flipped('s1'), take('s2', { mirror: true })], [{ id: 's1', mirror: false }, { id: 's2', mirror: false }])
+    expect(off).toEqual([take('s1', { mirrorCheck: { verdict: 'mirrored', why: WHY, answer: 'undone' } }), take('s2')])
+    expect(mirrorNotices(off)).toEqual([])
+    expect(answerMirror(off, 'mirror-undo').reply).toBeNull()               // the chat's Undo flip has nothing left to do
+    const on = mergeSourcesPatch([maybe('s1')], [{ id: 's1', mirror: true }])
+    expect(on).toEqual([take('s1', { mirror: true, mirrorCheck: { verdict: 'maybe-mirrored', why: MAYBE, answer: 'flipped' } })])
+    expect(mergeSourcesPatch(on, [{ id: 's1', mirror: true }])[0]).toBe(on[0])   // no change, no new answer
   })
 
   it('"What I did" lists the flip and why', () => {

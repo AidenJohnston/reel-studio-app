@@ -21,7 +21,8 @@ export function withMirror(sources: Sources | undefined, on: boolean): Sources {
 
 /** What `projects:update` takes from a `sources` patch: ONLY the mirror flag of takes the project
  * already has. Paths, sizes and ids stay as the engine wrote them (a patch can never point the
- * project at another file). */
+ * project at another file). A take the import check looked at keeps the user's choice in
+ * `mirrorCheck.answer`, as the chat buttons do (`answerMirror`), so nothing undoes or asks it again. */
 export function mergeSourcesPatch(current: Sources | undefined, patch: unknown): Sources {
   const cur = current ?? []
   if (!Array.isArray(patch)) return cur
@@ -30,9 +31,11 @@ export function mergeSourcesPatch(current: Sources | undefined, patch: unknown):
     if (x && typeof x === 'object' && typeof (x as any).id === 'string') want.set((x as any).id, (x as any).mirror === true)
   }
   return cur.map((s) => {
-    if (!want.has(s.id)) return s
+    const on = want.get(s.id)
+    if (on === undefined || on === (s.mirror === true)) return s
     const { mirror: _old, ...rest } = s
-    return want.get(s.id) ? { ...rest, mirror: true } : rest
+    const out = s.mirrorCheck ? { ...rest, mirrorCheck: { ...s.mirrorCheck, answer: on ? ('flipped' as const) : ('undone' as const) } } : rest
+    return on ? { ...out, mirror: true } : out
   })
 }
 

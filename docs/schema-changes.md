@@ -59,6 +59,6 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   and `letters` (letters of everyday words read as filmed and flipped). No timings, so the same take writes the
   same record. The render never reads it: only `mirror` changes the picture, so renders stay deterministic.
 - `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
-  app asks; the user's answer to either line ("Undo flip", "Flip it", "Keep as filmed") goes in
-  `mirrorCheck.answer` (`undone` / `flipped` / `kept`), so nothing is undone or asked twice, and the AI editor
-  sees `userSaidAsFilmed` for `undone` / `kept`.
+  app asks. The user's choice goes in `mirrorCheck.answer` (`undone` / `flipped` / `kept`): from the chat
+  buttons ("Undo flip", "Flip it", "Keep as filmed"), Undo in "What I did" or the "Flip picture" switch. So
+  nothing is undone or asked twice, and the AI editor sees `userSaidAsFilmed` for `undone` / `kept`.
