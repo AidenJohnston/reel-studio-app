@@ -14,7 +14,7 @@ on:
       - packaging/requirements-*.txt
       - engine/requirements.txt
   push:
-    branches: [main, sam/fix/macos-opencv-no-ffmpeg]  # TEMPORARY second branch: the feasibility run on a fork
+    branches: [main]
     paths:
       - .github/workflows/opencv-mac.yml
       - packaging/build_opencv_mac.py
