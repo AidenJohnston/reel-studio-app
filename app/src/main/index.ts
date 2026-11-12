@@ -801,8 +801,14 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
     // waits for that download, or starts it, rather than failing on a missing model (engine transcribe.py MODEL_MISSING).
     if (!models.status().installed && !existsSync(join(dir, 'work', 'transcript.json'))) {
       emit({ type: 'status', message: 'Getting ready to listen', pct: 0, phase: 'listen' })
-      const ready = await models.download()
-      if (signal.aborted) throw { code: 'CANCELLED', userMessage: 'Stopped.' }
+      // Stop ends this wait at once; the download goes on for the next reel (Settings can pause it)
+      const stopped = new Promise<never>((_, reject) => {
+        const stop = () => reject({ code: 'CANCELLED', userMessage: 'Stopped.' })
+        if (signal.aborted) stop()
+        else signal.addEventListener('abort', stop, { once: true })
+      })
+      stopped.catch(() => {})
+      const ready = await Promise.race([models.download(), stopped])
       if (!ready.installed)
         throw { code: 'MODEL_MISSING', userMessage: ready.error ?? "Reel Studio couldn't get ready to listen, so check your internet connection and try again." }
     }

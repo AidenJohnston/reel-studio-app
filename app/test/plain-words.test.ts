@@ -2,7 +2,7 @@
 // the others pin the reader, because a reader that drops strings passes everything.
 import { describe, expect, it } from 'vitest'
 import { resolve } from 'node:path'
-import { scan, stringsOfPy, stringsOfTs, wordsIn } from '../../scripts/plain-words/scan.ts'
+import { pyConstants, scan, stringsOfPy, stringsOfTs, wordsIn } from '../../scripts/plain-words/scan.ts'
 import { scope } from '../../scripts/plain-words/scope.ts'
 
 const REPO = resolve(__dirname, '..', '..')
@@ -39,6 +39,21 @@ describe('reading what a screen shows', () => {
     window.dispatchEvent(new Event('reel:render'))
     throw { code: 'NO_AUDIO', message: 'ffmpeg exit 1 in render', userMessage: 'This video has no sound. Try another one.' }`
     expect(texts(src, 'x.ts')).toEqual(['This video has no sound. Try another one.'])
+  })
+
+  it('in the AI package, reads what reaches the screen and not what is sent to the AI', () => {
+    const src = `onEvent({ type: 'status', message: 'Writing your script' })
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'Reply with the JSON only.' }] }]
+    throw new AIError('bad_note_id', 'Couldn\\'t start this merge, so try again.')`
+    expect(stringsOfTs(src, 'x.ts', 'keys').map((s) => s.text)).toEqual(['Writing your script', "Couldn't start this merge, so try again."])
+  })
+
+  it('reads an engine message held in a constant where it is used, and the note beside a step', () => {
+    const py = `NO_SPACE_MESSAGE = ("Your computer is out of space, "
+                    "so free some up.")
+raise EngineError("NO_SPACE", "ffmpeg: No space left on device", proto.NO_SPACE_MESSAGE)
+progress("transcribe", 40, "Listening", note="The engine is slow today")`
+    expect(stringsOfPy(py, pyConstants(py)).map((s) => s.text)).toEqual(['Your computer is out of space, so free some up.', 'Listening', 'The engine is slow today'])
   })
 
   it('reads the engine messages the app shows, and not the developer detail', () => {

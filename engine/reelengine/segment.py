@@ -24,6 +24,7 @@ import numpy as np
 
 from . import tools
 from .proto import EngineError, log, progress
+from . import proto
 
 PIN = json.loads((Path(__file__).parent / "models" / "segment-models.json").read_text("utf-8"))["pphumanseg"]
 NET_SIZE = 192          # the model's input, square (the zoo's demo squashes any picture to it)
@@ -73,6 +74,8 @@ def ensure_model() -> Path:
             _fetch_part(url, part, spec["size"], lambda got: progress(
                 "download", 100.0 * got / spec["size"], "Getting ready to find you in the picture"))
         except (urllib.error.URLError, OSError) as exc:
+            if proto.disk_full(exc):
+                raise EngineError("NO_SPACE", f"download of {spec['name']} failed: {exc}", proto.NO_SPACE_MESSAGE)
             raise EngineError("OFFLINE", f"download of {spec['name']} failed: {exc}",
                               "Reel Studio couldn't download what cuts you out of the picture, "
                               "so check your internet connection and make the version again.")

@@ -547,8 +547,8 @@ def cmd_download_model(args: list[str]) -> dict:
     dest = Path(os.environ.get("REELENGINE_MODELS", "models")) / name
     for i in range(11):
         if i == 3 and os.environ.get("FAKE_ENGINE_OFFLINE") == "1":
-            raise Fail("OFFLINE", "The download stopped. Check your internet connection and try again; it will "
-                                  "pick up where it left off.", "fake offline")
+            raise Fail("OFFLINE", "The download stopped, so check your internet connection and try again; it "
+                                  "picks up where it left off.", "fake offline")
         progress("download", i * 10, f"Getting ready to listen ({i * 48} of 480 MB)")
         time.sleep(float(os.environ.get("FAKE_ENGINE_DOWNLOAD_STEP", "0.05")))
     dest.mkdir(parents=True, exist_ok=True)

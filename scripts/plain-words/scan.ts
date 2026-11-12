@@ -170,8 +170,12 @@ const CODE_CALLS = new Set([
 ])
 /** Object keys whose values are never shown. */
 const CODE_KEYS = new Set(['className', 'testid', 'code', 'kind', 'type', 'id', 'key', 'event', 'stage', 'channel', 'role', 'icon', 'tone', 'variant', 'easing', 'path', 'file', 'dir', 'url', 'href', 'src', 'slug', 'format', 'mime', 'ext', 'cmd', 'command', 'args', 'env', 'style', 'transform', 'clipPath', 'fill', 'phase'])
-/** In keys mode, the only keys read. */
+/** Keys whose string is shown wherever it sits. */
 const SHOWN_KEYS = new Set(['userMessage', 'summary', 'message', 'label', 'text', 'title', 'status', 'detail', 'body', 'line'])
+/** In keys mode, the only keys read: `text` and `body` there are mostly what is sent to the AI. */
+const KEYS_MODE_KEYS = new Set(['userMessage', 'summary', 'message', 'label', 'title', 'status'])
+/** Error constructors whose argument at this index is what the person reads (ai/src/types.ts AIError(code, userMessage)). */
+const USER_ERROR_ARGS: Record<string, number> = { AIError: 1 }
 
 /** Reads like words a person sees, not an identifier, a path, a class list or a CSS value. */
 export function readsAsWords(s: string): boolean {
@@ -227,6 +231,7 @@ function placeOf(n: ts.Node, mode: Mode): Verdict {
     if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && child !== p.expression) {
       const name = calleeName(p.expression)
       if (p.expression.kind === ts.SyntaxKind.ImportKeyword) return 'skip'
+      if (name && name in USER_ERROR_ARGS && p.arguments?.indexOf(child as ts.Expression) === USER_ERROR_ARGS[name]) return 'shown'
       if (name && CODE_CALLS.has(name)) {
         // console.error('...') and log.error('...') are logs; a component's onError('...') is not in the list
         return 'skip'
@@ -245,7 +250,10 @@ function placeOf(n: ts.Node, mode: Mode): Verdict {
       const obj = p.parent
       // an error's `message` is the developer's detail when a userMessage sits beside it
       if (key === 'message' && ts.isObjectLiteralExpression(obj) && (objectHas(obj, 'userMessage') || objectHas(obj, 'code'))) return 'skip'
-      if (mode === 'keys') return key && SHOWN_KEYS.has(key) ? 'shown' : 'skip'
+      // in the AI package, a chat message for the AI ({ role, content: [{ type: 'text', text }] }) is never shown;
+      // elsewhere a role can sit beside a shown label (an Electron menu item)
+      if (mode === 'keys' && ts.isObjectLiteralExpression(obj) && objectHas(obj, 'role')) return 'skip'
+      if (mode === 'keys') return key && KEYS_MODE_KEYS.has(key) ? 'shown' : 'skip'
       if (key && SHOWN_KEYS.has(key)) return 'shown'
     }
     if (ts.isJsxExpression(p) || ts.isJsxElement(p) || ts.isJsxFragment(p)) return mode === 'keys' ? 'skip' : 'maybe'
@@ -347,12 +355,38 @@ function pyTokens(src: string): PyTok[] {
 const PY_CALLS: Record<string, number> = { EngineError: 2, progress: 2, ready: 2 }
 const PY_KEYWORDS = new Set(['user_message', 'userMessage'])
 
-/** The engine's strings that reach the screen: error messages for the person and progress lines. */
-export function stringsOfPy(source: string): Shown[] {
+/** Module-level string constants (`MSG = "..."`, or several strings in parentheses), by name. */
+export function pyConstants(source: string): Map<string, string> {
+  const toks = pyTokens(source)
+  const out = new Map<string, string>()
+  let depth = 0
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i]
+    if (t.kind === 'open') depth++
+    else if (t.kind === 'close') depth = Math.max(0, depth - 1)
+    if (depth || t.kind !== 'name' || toks[i + 1]?.kind !== 'eq' || (i > 0 && toks[i - 1].line === t.line)) continue
+    let k = i + 2
+    const wrapped = toks[k]?.kind === 'open' && toks[k].text === '('
+    if (wrapped) k++
+    let text = ''
+    while (toks[k]?.kind === 'str') text += toks[k++].text
+    if (text && (!wrapped || toks[k]?.kind === 'close')) out.set(t.text, text)
+  }
+  return out
+}
+
+/** The engine's strings that reach the screen: error messages for the person and progress lines. A message held in a
+ * constant (`constants`, from pyConstants over the engine) counts where it is used. */
+export function stringsOfPy(source: string, constants: Map<string, string> = new Map()): Shown[] {
   const toks = pyTokens(source)
   const out: Shown[] = []
   const strsIn = (from: number, to: number) => {
-    for (let k = from; k < to; k++) if (toks[k].kind === 'str' && /\p{L}/u.test(toks[k].text)) out.push({ text: toks[k].text, line: toks[k].line })
+    for (let k = from; k < to; k++) {
+      const t = toks[k]
+      if (t.kind === 'str' && /\p{L}/u.test(t.text)) out.push({ text: t.text, line: t.line })
+      const named = t.kind === 'name' ? constants.get(t.text.split('.').pop()!) : undefined
+      if (named) out.push({ text: named, line: t.line })
+    }
   }
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
@@ -382,7 +416,9 @@ export function stringsOfPy(source: string): Shown[] {
     let positional = 0
     for (const [a, b] of args) {
       const kw = toks[a]?.kind === 'name' && toks[a + 1]?.kind === 'eq' ? toks[a].text : null
-      if (kw ? PY_KEYWORDS.has(kw) || (idx !== undefined && kw === 'message' && t.text !== 'EngineError') : idx !== undefined && positional === idx) strsIn(kw ? a + 2 : a, b)
+      // progress(..., note=...) is shown beside the step (proto.progress)
+      const shownKw = kw && (PY_KEYWORDS.has(kw) || (idx !== undefined && last !== 'EngineError' && (kw === 'message' || kw === 'note')))
+      if (kw ? shownKw : idx !== undefined && positional === idx) strsIn(kw ? a + 2 : a, b)
       if (!kw) positional++
     }
   }
@@ -424,10 +460,13 @@ export function scan(repo: string, scope: Scope): Report {
   const offPath: Hit[] = []
   let strings = 0
   const usedAllow = new Set<number>()
+  // the engine's message constants, by name, from every Python file (a message is often imported, e.g. proto.NO_SPACE_MESSAGE)
+  const constants = new Map<string, string>()
+  for (const file of rel) if (file.endsWith('.py')) for (const [k, v] of pyConstants(readFileSync(join(repo, file), 'utf8'))) constants.set(k, v)
   for (const file of rel) {
     const src = readFileSync(join(repo, file), 'utf8')
     const mode: Mode = scope.keysOnly.some((e) => under(file, e.path)) ? 'keys' : 'all'
-    const shown = file.endsWith('.py') ? stringsOfPy(src) : stringsOfTs(src, file, mode)
+    const shown = file.endsWith('.py') ? stringsOfPy(src, constants) : stringsOfTs(src, file, mode)
     strings += shown.length
     const off = scope.offPath.some((e) => under(file, e.path))
     for (const s of shown) {

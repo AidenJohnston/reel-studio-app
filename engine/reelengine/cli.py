@@ -6,7 +6,6 @@ Exit code 0 on done, 1 on error.
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import json
 import sys
@@ -757,10 +756,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# errno values for a full disk; Windows has no EDQUOT
-_DISK_FULL = {e for e in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if e is not None}
-
-
 def main(argv=None) -> int:
     proto.capture_stdout()
     try:
@@ -785,7 +780,7 @@ def main(argv=None) -> int:
         return 1
     except OSError as exc:
         # a full disk while writing (errno ENOSPC, EDQUOT; Windows ERROR_DISK_FULL): say what to do, not "unexpected"
-        if exc.errno not in _DISK_FULL and getattr(exc, "winerror", None) != 112:
+        if not proto.disk_full(exc):
             tb = traceback.format_exc()
             proto.log(tb)
             proto.error("INTERNAL", f"{type(exc).__name__}: {exc}\n{tb[-1500:]}",

@@ -1,5 +1,5 @@
-"""A full disk says what to do (NO_SPACE), on the way to a first reel: an ffmpeg that can't write its file, and a
-write of the engine's own. Before, both read "Something went wrong" or "Something unexpected went wrong"."""
+"""A full disk says what to do (NO_SPACE), on the way to a first reel: the video's encode, a picture step and a write
+of the engine's own. Before, they read "Something went wrong" or "Something unexpected went wrong"."""
 import errno
 import io
 import json
@@ -7,13 +7,22 @@ import sys
 
 import pytest
 
-from reelengine import cli, compose_util, proto
+from reelengine import cli, compose_util, proto, tools
 
 
-def test_ffmpeg_that_runs_out_of_space_says_to_free_some_up():
-    cmd = [sys.executable, "-c", "import sys; sys.stderr.write('av_interleaved_write_frame(): No space left on device'); sys.exit(1)"]
+FULL = [sys.executable, "-c", "import sys; sys.stderr.write('av_interleaved_write_frame(): No space left on device'); sys.exit(1)"]
+
+
+def test_an_encode_that_runs_out_of_space_says_to_free_some_up():
+    # the final and draft encodes run through ffmpeg_progress (render.py)
     with pytest.raises(proto.EngineError) as e:
-        compose_util.run(cmd, what="final encode")
+        tools.ffmpeg_progress(FULL, 1.0, lambda _pct: None, 30, "final encode")
+    assert (e.value.code, e.value.user_message) == ("NO_SPACE", proto.NO_SPACE_MESSAGE)
+
+
+def test_a_picture_step_that_runs_out_of_space_says_to_free_some_up():
+    with pytest.raises(proto.EngineError) as e:
+        compose_util.run(FULL, what="picture layer")
     assert (e.value.code, e.value.user_message) == ("NO_SPACE", proto.NO_SPACE_MESSAGE)
 
 

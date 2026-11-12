@@ -170,6 +170,8 @@ def ffmpeg_progress(cmd: list, duration: float, on_pct: Callable[[float], None],
         raise EngineError("TIMEOUT", f"{what} exceeded {timeout:.0f}s and was stopped",
                           "This took far longer than it should, so I stopped it. Please try again.")
     if proc.returncode != 0:
+        if out_of_space(err):
+            raise EngineError("NO_SPACE", f"{what} failed (exit {proc.returncode}):\n{err[-2500:]}", NO_SPACE_MESSAGE)
         raise EngineError("FFMPEG_FAILED", f"{what} failed (exit {proc.returncode}):\n{err[-2500:]}",
                           user_message or "Something went wrong while making your video. "
                                           "Please try again.")

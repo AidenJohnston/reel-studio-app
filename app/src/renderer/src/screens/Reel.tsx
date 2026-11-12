@@ -1241,7 +1241,8 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
                     auto={autoMoment}
                     onDropAuto={() => setStoppedOn(false)}
                     onPoint={() => canPoint && setPointing(true)}
-                    plain={!hasVersions}
+                    // with no AI, only words: pointing at a spot or a moment needs an AI to act on it
+                    plain={!hasVersions || aiOff}
                     playhead={playhead}
                     att={heldN ? { ...att, busy: att.busy + heldN } : att}
                     checking={!providerChecked}

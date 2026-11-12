@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import audio_env, probe as probemod, project as projmod, tools, vocab as vocabmod
-from .proto import EngineError, log, progress
+from .proto import NO_SPACE_MESSAGE, EngineError, disk_full, log, progress
 
 DEFAULT_MODEL = "small.en"          # measured: best WER on CPU int8 at RTF ~0.19
 MULTILINGUAL_MODEL = "small"         # used when the project language is set to anything but English
@@ -275,13 +275,15 @@ def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
             try:
                 _fetch_part(url, part, size, on_bytes)
             except (urllib.error.URLError, OSError) as exc:
+                if disk_full(exc):
+                    raise EngineError("NO_SPACE", f"download of {fname} failed: {exc}", NO_SPACE_MESSAGE)
                 raise EngineError("OFFLINE", f"download of {fname} failed: {exc}",
-                                  "The download stopped. Check your internet connection and try "
-                                  "again; it will pick up where it left off.")
+                                  "The download stopped, so check your internet connection and try "
+                                  "again; it picks up where it left off.")
             got = part.stat().st_size if part.exists() else 0
             if size and got != size:
                 raise EngineError("DOWNLOAD_INCOMPLETE", f"{fname}: got {got} of {size} bytes",
-                                  "The download didn't finish. Please try again; it will pick up "
+                                  "The download didn't finish, so try again; it picks up "
                                   "where it left off.")
             if sha and _sha256(part) != sha:
                 part.unlink(missing_ok=True)    # a corrupt file of the right length: start it again

@@ -58,11 +58,13 @@ function freshProfile(name: string): { root: string; env: Record<string, string>
 }
 
 /** Walks from a fresh install to an exported reel and returns every stop on the way. */
-async function walk(variant: string, env: Record<string, string>, size: { width: number; height: number }): Promise<Stop[]> {
+async function walk(variant: string, env: Record<string, string>, size: { width: number; height: number }, ai: boolean): Promise<Stop[]> {
   const media = makeMedia()
   const profile = freshProfile(variant)
   const { app, page } = await launch({ ...profile.env, ...env })
   await page.setViewportSize(size)
+  const connected = () => page.evaluate(() => window.reel.ai.active().then((p) => p.connected && p.id !== 'none'))
+  await expect.poll(connected, { message: ai ? 'an AI is connected' : 'no AI is connected' }).toBe(ai)
   const stops: Stop[] = []
   const stop = async (name: string, selectors: string[], kind?: Stop['kind']) => {
     const ways = await waysIn(page, selectors)
@@ -135,14 +137,15 @@ test.describe('decisions to a first reel', () => {
   test.setTimeout(320_000)
 
   test('with no AI connected, at 1440 x 900', async () => {
-    const stops = await walk('no-ai', {}, { width: 1440, height: 900 })
+    const stops = await walk('no-ai', {}, { width: 1440, height: 900 }, false)
     record('no-ai', stops)
     expect(stops.filter((s) => s.kind === 'decision').map((s) => s.name)).toEqual(['Pick the video', 'Keep the draft or say what to change', 'Post it or save it'])
     expect(stops.filter((s) => s.kind === 'press').map((s) => s.name)).toEqual([])
   })
 
   test('with an AI connected, at the smallest window', async () => {
-    const stops = await walk('ai', { REELSTUDIO_MOCK_NOTE: '400', REELSTUDIO_MOCK_FIRST_EDIT: 'editor' }, { width: 1100, height: 720 })
+    // the practice editor (main/ai-mock.ts REELSTUDIO_MOCK_NOTE), connected from the start
+    const stops = await walk('ai', { REELSTUDIO_MOCK_NOTE: '400' }, { width: 1100, height: 720 }, true)
     record('ai', stops)
     expect(stops.filter((s) => s.kind === 'decision').map((s) => s.name)).toEqual(['Pick the video', 'Keep the draft or say what to change', 'Post it or save it'])
     expect(stops.filter((s) => s.kind === 'press').map((s) => s.name)).toEqual([])

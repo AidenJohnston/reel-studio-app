@@ -11,6 +11,7 @@ sys.stdout at stderr for the life of a command and keeps the real stdout for pro
 """
 from __future__ import annotations
 
+import errno
 import io
 import json
 import sys
@@ -25,6 +26,14 @@ _LAST = {"t": 0.0, "pct": -1.0, "stage": None}
 NO_SPACE_MESSAGE = "Your computer is out of space, so free some up and try again."
 # What ffmpeg and the OS say when a disk fills (POSIX ENOSPC/EDQUOT, Windows ERROR_DISK_FULL 112)
 _NO_SPACE = ("no space left on device", "disk quota exceeded", "not enough space on the disk")
+
+
+def disk_full(exc: BaseException) -> bool:
+    """Whether an OSError is a full disk: ENOSPC or EDQUOT (Windows has no EDQUOT), or Windows ERROR_DISK_FULL (112)."""
+    if not isinstance(exc, OSError):
+        return False
+    full = {e for e in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if e is not None}
+    return exc.errno in full or getattr(exc, "winerror", None) == 112
 
 
 def out_of_space(text: str) -> bool:
