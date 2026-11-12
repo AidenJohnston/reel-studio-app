@@ -231,13 +231,16 @@ class AgentHook(Kit):
 
     def test_blocks_text_it_cannot_see(self):
         # fails if text the hook can't read is waved through: a variable, a piped or device stdin, --fill, a flag
-        # whose value is on the next line, or a pipe hiding behind another command's heredoc
+        # whose value is on the next line, a pipe hiding behind another command's heredoc, or a command that would
+        # ask for its text in a prompt
         for command in ('gh pr create --title Fix --body "$BODY"',
                         "cat notes.md | gh pr create --title Fix --body-file -",
                         "gh pr create --title Fix --body-file /dev/stdin",
                         'gh pr create --title Fix --body "$(cat /dev/stdin)"',
                         "gh pr create --fill",
-                        "gh pr create --body-file - <<EOF\nclean\nEOF\ncat notes.md | gh pr create --body-file -"):
+                        "gh pr create -t x --body-file - <<EOF\nclean\nEOF\ncat notes.md | gh pr create -t x --body-file -",
+                        "cat notes.md | gh pr create -t x -F -; gh pr create -t x -F - <<EOF\nclean\nEOF",
+                        "gh pr create --title clean", "gh issue comment 5", "gh pr review 5"):
             self.assertBlocked(self.call(command), why="can't")
         for command in ("gh pr comment 3 --body $body", "gh pr create -t x --body `\r\n$body"):
             self.assertBlocked(self.call(command, tool="PowerShell"), why="can't")
@@ -246,11 +249,13 @@ class AgentHook(Kit):
         # fails if the hook blocks clean PR text, or blocks commands other than publishing gh calls
         self.assertAllowed(self.call("gh pr create --title 'feat: presets' --body \"$(cat <<'EOF'\nAdds presets.\nEOF\n)\""))
         self.assertAllowed(self.call(f"grep -rn {PLANTED} docs && gh pr view 5 && gh api repos/o/r/pulls/5"))
+        self.assertAllowed(self.call("gh pr review 5 --approve && gh pr edit 5 --add-label docs"))
 
 
 class Fallbacks(Kit):
     def test_agent_hook_without_python_blocks_only_gh(self):
-        # fails if, with no Python, a gh command runs unchecked, or every other command is blocked
+        # fails if, with no Python, a gh command runs unchecked, or a command that only mentions gh in its folder
+        # or description is blocked
         if os.name == "nt":
             exec_path = subprocess.run(["git", "--exec-path"], capture_output=True, text=True).stdout.strip()
             usr_bin = Path(exec_path).parents[2] / "usr" / "bin"     # Git's own tools, with no Python among them
@@ -258,11 +263,13 @@ class Fallbacks(Kit):
         else:
             bin_dir = self.root / "bin"
             bin_dir.mkdir()
-            os.symlink(shutil.which("cat"), bin_dir / "cat")
+            for tool in ("cat", "sed"):
+                os.symlink(shutil.which(tool), bin_dir / tool)
             sh, path = "/bin/sh", str(bin_dir)
 
         def run(command: str) -> int:
-            payload = {"tool_name": "Bash", "tool_input": {"command": command, "description": "Push it through"}}
+            payload = {"tool_name": "Bash", "tool_input": {"command": command, "description": "push to gh"},
+                       "cwd": str(self.root / "gh")}
             return subprocess.run([sh, "scripts/leak-check/with-python.sh", "--agent-hook",
                                    "scripts/leak-check/agent_hook.py"], cwd=self.root,
                                   input=json.dumps(payload).encode(), capture_output=True,

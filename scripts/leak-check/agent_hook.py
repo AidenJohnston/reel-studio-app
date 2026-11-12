@@ -55,9 +55,10 @@ class Blocked(Exception):
     """The command can't be shown to be clean; the message says what to do."""
 
 
-def lex(line: str, powershell: bool) -> list[tuple[str, bool]]:
-    """Words of one command up to the first unquoted && || ; or |, as (value, dynamic). `dynamic` means the shell
-    fills part of the word in at run time ($VAR, $(...), and in PowerShell (...)), so its text can't be read here."""
+def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int]:
+    """Words of one command up to the first unquoted && || ; or |, as (value, dynamic), and where that command ends
+    in `line`. `dynamic` means the shell fills part of the word in at run time ($VAR, $(...), and in PowerShell
+    (...)), so its text can't be read here."""
     esc = "`" if powershell else "\\"
     words: list[tuple[str, bool]] = []
     cur: str | None = None
@@ -103,7 +104,7 @@ def lex(line: str, powershell: bool) -> list[tuple[str, bool]]:
         i += 1
     if cur is not None:
         words.append((cur, dyn))
-    return words
+    return words, i
 
 
 def flag_value(words: list[tuple[str, bool]], i: int, names: set[str]) -> tuple[tuple[str, bool] | None, int]:
@@ -185,6 +186,31 @@ def normalize(command: str, powershell: bool) -> str:
     return GH_WORD.sub(expand, command)
 
 
+def interactive(sub: str, verb: str, words: list[str]) -> None:
+    """Block a pr or issue command that would ask for its text in a prompt or an editor. Without a terminal gh
+    refuses to ask, but an agent shell that runs commands in a terminal (Codex can) would type the answer later,
+    where this hook never sees it."""
+    def has(*names: str) -> bool:
+        return any(w == n or w.startswith(n + "=") or (len(n) == 2 and w.startswith(n) and not w.startswith("--"))
+                   for w in words for n in names)
+
+    if has("-w", "--web"):
+        return                                              # the browser shows the text; nothing is sent from here
+    if has("-e", "--editor"):
+        raise Blocked(f"`gh {sub} {verb} --editor` takes the text in an editor, which this hook can't see; pass "
+                      "--body or --body-file FILE")
+    title, body = has("-t", "--title"), has("-b", "--body", "-F", "--body-file")
+    if verb == "create" and not (title and body):
+        raise Blocked(f"`gh {sub} {verb}` without both --title and --body asks for the rest interactively, which "
+                      "this hook can't see; pass both (the body can be --body-file FILE)")
+    if verb == "comment" and not (body or has("--delete-last")):
+        raise Blocked(f"`gh {sub} comment` without --body asks for the text interactively, which this hook can't "
+                      "see; pass --body or --body-file FILE")
+    if verb == "review" and not has("-a", "--approve", "-r", "--request-changes", "-c", "--comment"):
+        raise Blocked("`gh pr review` without --approve, --request-changes or --comment asks for the review "
+                      "interactively, which this hook can't see; pass one of them, with --body or --body-file")
+
+
 def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, Path]], list[str]] | None:
     """The files each publishing gh command reads its text from, and the raw spellings of their paths. None when
     the command publishes nothing."""
@@ -201,10 +227,13 @@ def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, P
         line_start = joined.rfind("\n", 0, m.start()) + 1
         line_end = joined.find("\n", m.end())
         line_end = len(joined) if line_end < 0 else line_end
-        words = lex(joined[m.end():line_end], powershell)
-        # Text on stdin is visible only when this gh call's own stdin is a heredoc or a here-string in the command.
-        heredoc = bool(HEREDOC.search(joined, m.end(), line_end)
+        words, length = lex(joined[m.end():line_end], powershell)
+        # Text on stdin is visible only when this gh call's own stdin is a heredoc or a here-string in the command:
+        # a heredoc that starts before this call's && || ; or |, or a here-string piped straight into it.
+        heredoc = bool(HEREDOC.search(joined, m.end(), m.end() + length)
                        or (powershell and HERESTRING.search(joined[line_start:m.start()])))
+        if not is_api:
+            interactive(sub, verb, [w for w, _ in words])
         sources: list[tuple[str, str, bool, bool]] = []      # (flag, value, dynamic, value is a file)
         method = None
         i = 0

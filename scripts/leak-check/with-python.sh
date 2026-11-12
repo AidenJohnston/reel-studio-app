@@ -22,9 +22,10 @@ for py in python3 python py; do
 done
 
 if [ -n "$agent" ]; then
-  input=$(cat)
-  case $input in
-    *[!A-Za-z0-9_-][Gg][Hh][!A-Za-z0-9_-]*)       # gh as a word, as in the JSON's command text
+  # Only the command text counts, not the folder or the description that come with it in the JSON.
+  command=$(cat | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')
+  case " $command" in
+    *[!A-Za-z0-9_-][Gg][Hh][!A-Za-z0-9_-]*|*[!A-Za-z0-9_-][Gg][Hh])       # gh as a word
       echo "Leak check: this command may call gh, and checking what gh publishes needs Python 3 on PATH (python3, python or py). Install Python 3 and run the command again." >&2
       exit 2 ;;
   esac

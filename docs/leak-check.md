@@ -65,9 +65,11 @@ Relative paths resolve from the agent's folder, or from a `cd` earlier in the sa
 It blocks, with the reason, when it finds private material, and also when it can't see the text: a shell
 variable or command substitution (`--body "$BODY"`), stdin that isn't a heredoc or here-string feeding that same
 `gh` call, a device such as `/dev/stdin`, a flag whose value is on the next line, a gh shell alias that publishes,
-or `gh pr create --fill`. The fix is to put the text in a file and pass `--body-file FILE`.
+`gh pr create --fill`, or a command that would ask for its text in a prompt or an editor (`gh pr create` without
+both `--title` and `--body`, `gh pr comment` without `--body`, `gh pr review` without `--approve`,
+`--request-changes` or `--comment`). The fix is to put the text in a file and pass `--body-file FILE`.
 
-Without Python 3, the hook can't check anything, so it blocks every command that mentions `gh` as a word and lets
+Without Python 3, the hook can't check anything, so it blocks every command whose text has `gh` as a word and lets
 the rest run. Installing Python fixes it.
 
 Claude Code runs the hook through `sh`, which on Windows comes with Git for Windows. If the hook can't start at
