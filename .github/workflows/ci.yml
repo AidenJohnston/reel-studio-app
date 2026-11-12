@@ -8,11 +8,9 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
-  # A run on main always finishes, so every main commit is tested.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Which gated jobs a pull request needs (scripts/ci/changes.mjs). Pushes to main and manual runs run everything, and a
-  # gated job runs unless this says 'false', so a failed detector never skips a check.
+  # Gated jobs run unless this says 'false', so a failed detector never skips a check.
   changes:
     name: Changes
     runs-on: ubuntu-24.04
@@ -31,7 +29,6 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/ci/changes.mjs --github
 
-  # Every change, on all three systems.
   node:
     name: Node / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -152,7 +149,6 @@ jobs:
         run: npx playwright install-deps chromium
       - run: npm test
 
-  # Passes when every job passed or was skipped as not needed.
   ci-ok:
     name: CI ok
     needs: [changes, node, engine, animations]

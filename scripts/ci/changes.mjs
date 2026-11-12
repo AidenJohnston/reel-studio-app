@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-// Decides which of CI's gated jobs a change needs; CI and `npm run check:changed` share it. The Node job always runs.
-// Per changed path: INERT needs nothing, RUNS_EVERYTHING needs every job, a JOBS match needs those jobs, and any other
-// path needs every job (unknown paths fail open). If the changed files can't be listed, every job runs.
-//
+// Which gated CI jobs a change needs. A path matching no rule runs every job.
 //   node scripts/ci/changes.mjs --github            in CI: diff the PR's merge commit, write outputs to $GITHUB_OUTPUT
 //   node scripts/ci/changes.mjs --print [files...]  print the decision for these files, or for this branch vs origin/main
 //   node scripts/ci/changes.mjs --run               run the needed checks locally (npm run check:changed)
@@ -22,13 +19,10 @@ const INERT = [
 const RUNS_EVERYTHING = [/^\.github\/workflows\/ci\.yml$/, /^scripts\/ci\//, /^\.gitattributes$/];
 
 export const JOBS = {
-  // Paths only the always-on Node job covers: known, so they don't count as unknown.
+  // Covered by the always-on Node job; listed so they don't count as unknown.
   node: [/^(app|ai|packaging)\//, /^package(-lock)?\.json$/],
-  // The engine's Python suite: its code and its pinned requirements.
   engine: [/^engine\//, /^packaging\/(requirements[^/]*\.txt|hash_requirements\.py)$/],
-  // Animation rendering in headless Chromium.
   animations: [/^templates\//],
-  // Owned elsewhere: the leak check has its own required workflow.
   none: [/^scripts\/leak-check\//, /^\.github\/workflows\/leak-check\.yml$/],
 };
 const JOB_NAMES = ["engine", "animations"];
@@ -60,8 +54,7 @@ const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).split("
 const everything = (reason) => ({ jobs: Object.fromEntries(JOB_NAMES.map((job) => [job, true])), why: { all: [reason] } });
 
 function changedInCI() {
-  // The pull_request checkout is a merge commit: its first parent is the base branch. --no-renames lists both sides
-  // of a move, so a file moved out of engine/ still counts as an engine change.
+  // --no-renames lists both sides of a move, so a file moved out of engine/ still counts.
   return git("diff", "--no-renames", "--name-only", "HEAD^1", "HEAD");
 }
 
