@@ -16,12 +16,28 @@ can change to meet it:
   music.underVoiceDb  {value 12-30}  the voice sits at least `value` dB over the music while talking (music level)
   broll.keepOut       {zone}         no picture covers the face ("face") or the eyes-to-chin zone ("eyes"),
                                      counting pictures that hide the speaker on purpose (b-roll treatment)
+
+Reel Studio's default taste (ai/src/rules.ts DEFAULT_CHECKS) adds kinds the app checks on every AI
+edit unless My style replaces them. Each catches an edit that "screams AI", and each is met by
+changing anchors, zooms or caption settings:
+  opening.calm        {seconds 1-10} at most one picture or zoom starts in the first `seconds`
+  captions.oneLine    {}             no caption wraps onto a second line
+  captions.uniformSize {}            every caption is drawn at the same size (none shrunk to fit)
+  broll.unique        {}             no picture or clip is shown twice
+  broll.clipLength    {min, max}     each video clip is on screen `min` to `max` seconds (0.2-5)
+  broll.cardHold      {value 1-5}    every other visual (still, card, text, animation) holds `value` s
+  broll.faceClear     {}             no card sits on the eyes-to-chin zone; a full-screen cutaway is fine
+  face.maxBare        {value 2-15}   no stretch of plain face (no picture, no zoom) longer than `value` s
+  zooms.maxPerMinute  {value 1-30}   at most `value` zooms per minute of video
 """
 from __future__ import annotations
 
 import json
+import math
+from pathlib import Path
 from typing import Optional
 
+from .compose_util import VIDEO_EXT
 from .proto import EngineError
 
 VERSION = 1
@@ -32,6 +48,15 @@ KINDS: dict = {
     "captions.minSize": {"value": (80, 160)},
     "music.underVoiceDb": {"value": (12, 30)},
     "broll.keepOut": {"zone": ("face", "eyes")},
+    "opening.calm": {"seconds": (1, 10)},
+    "captions.oneLine": {},
+    "captions.uniformSize": {},
+    "broll.unique": {},
+    "broll.clipLength": {"min": (0.2, 5), "max": (0.2, 5)},
+    "broll.cardHold": {"value": (1, 5)},
+    "broll.faceClear": {},
+    "face.maxBare": {"value": (2, 15)},
+    "zooms.maxPerMinute": {"value": (1, 30)},
 }
 INTEGER_FIELDS = {("captions.maxWords", "value")}
 # The mixer aims the voice-over-music gap at its level's target and the measured median lands
@@ -40,6 +65,10 @@ INTEGER_FIELDS = {("captions.maxWords", "value")}
 # level meeting a 24 dB rule on a synthetic take, nothing more.
 GAP_TOLERANCE_DB = 1.0
 MAX_PLACES = 5          # the first few places a rule fails, enough to find and fix them
+# Timings are measured on frame-rounded windows: a 2 s card can come out at 1.98 s.
+FRAME_SLACK = 0.04
+# face.maxBare is "about" its number: a stretch half a second over it is not worth another AI run.
+BARE_SLACK = 0.5
 
 
 def _bad(msg: str) -> EngineError:
@@ -75,6 +104,8 @@ def parse_check(check, where: str = "check") -> dict:
                 raise _bad(f"{where}.{name}: must be between {lo} and {hi}")
             val = int(val) if integer else float(val)
         out[name] = val
+    if kind == "broll.clipLength" and out["min"] > out["max"]:
+        raise _bad(f"{where}: min must not be over max")
     return out
 
 
@@ -132,7 +163,14 @@ def measure(cues: list, fmt: tuple, mix: Optional[dict], broll: list) -> dict:
 
 
 def caption_places(check: dict, cues: list, fmt: tuple) -> list:
-    kind, limit = check["kind"], check["value"]
+    kind, limit = check["kind"], check.get("value")
+    if kind == "captions.oneLine":
+        return [_cue(c, lines=c["lines"]) for c in cues if c.get("lines", 1) > 1]
+    if kind == "captions.uniformSize":
+        # the size most captions are drawn at (the larger on a tie): the others were shrunk to fit
+        sizes = [round(_size(c, fmt)) for c in cues]
+        usual = max(set(sizes), key=lambda v: (sizes.count(v), v)) if sizes else 0
+        return [_cue(c, px=px) for c, px in zip(cues, sizes) if abs(px - usual) > 0.5]
     if kind == "captions.maxWords":
         return [_cue(c, words=len(c["text"].split())) for c in cues if len(c["text"].split()) > limit]
     # half a pixel: sizes are whole pixels at the video's own width
@@ -174,17 +212,99 @@ def broll_places(check: dict, records: list) -> list:
     return out
 
 
-def lint(rules: list, *, cues: list, fmt: tuple, mix: Optional[dict], broll: list, duration: float) -> dict:
+def _shown(records: list) -> list:
+    return [r for r in records if not r.get("skipped") and r.get("t0") is not None]
+
+
+def _place(r: dict, **value) -> dict:
+    return {"t0": round(float(r["t0"]), 2), "t1": round(float(r["t1"]), 2), "item": r.get("id"), **value}
+
+
+def _is_clip(r: dict, assets: dict) -> bool:
+    """Footage, as against a still, a card or an animation (which the engine shows full-frame)."""
+    a = assets.get(r.get("id"))
+    return r.get("treatment") != "animation" and isinstance(a, str) and Path(a).suffix.lower() in VIDEO_EXT
+
+
+def timing_places(check: dict, records: list, assets: dict) -> list:
+    """broll.clipLength and broll.cardHold: how long each visual was on screen."""
+    out = []
+    for r in _shown(records):
+        d = float(r["t1"]) - float(r["t0"])
+        if check["kind"] == "broll.clipLength":
+            if _is_clip(r, assets) and not check["min"] - FRAME_SLACK <= d <= check["max"] + FRAME_SLACK:
+                out.append(_place(r, seconds=round(d, 2)))
+        elif not _is_clip(r, assets) and d < check["value"] - FRAME_SLACK:
+            out.append(_place(r, seconds=round(d, 2)))
+    return out
+
+
+def unique_places(records: list, assets: dict) -> list:
+    """Each repeat of a picture or clip already shown (text cards have no asset)."""
+    seen, out = set(), []
+    for r in sorted(_shown(records), key=lambda r: r["t0"]):
+        a = assets.get(r.get("id"))
+        if not a:
+            continue
+        if a in seen:
+            out.append(_place(r, asset=a))
+        seen.add(a)
+    return out
+
+
+def bare_places(check: dict, records: list, zooms: list, duration: float) -> list:
+    """Stretches with nothing but the face: no picture and no zoom on screen."""
+    spans = sorted([(float(r["t0"]), float(r["t1"])) for r in _shown(records)] + [(float(a), float(b)) for a, b in zooms])
+    out, t = [], 0.0
+    for a, b in spans + [(float(duration), float(duration))]:
+        if a - t > check["value"] + BARE_SLACK:
+            out.append({"t0": round(t, 2), "t1": round(a, 2), "seconds": round(a - t, 2)})
+        t = max(t, b)
+    return out
+
+
+def zoom_places(check: dict, zooms: list, duration: float) -> list:
+    """The whole video, when it has more zooms than its length allows (always at least one)."""
+    allowed = max(1, math.ceil(check["value"] * float(duration) / 60.0 - 1e-9))
+    if len(zooms) <= allowed:
+        return []
+    return [{"t0": 0.0, "t1": round(float(duration), 2), "zooms": len(zooms), "allowed": allowed}]
+
+
+def opening_places(check: dict, records: list, zooms: list) -> list:
+    """Every picture and zoom starting in the opening, when more than one does."""
+    events = [_place(r) for r in _shown(records) if float(r["t0"]) < check["seconds"]]
+    events += [{"t0": round(float(a), 2), "t1": round(float(b), 2), "item": "zoom"} for a, b in zooms if float(a) < check["seconds"]]
+    return sorted(events, key=lambda p: p["t0"]) if len(events) > 1 else []
+
+
+def lint(rules: list, *, cues: list, fmt: tuple, mix: Optional[dict], broll: list, duration: float,
+         zooms: list = (), items: list = ()) -> dict:
     """Every parsed rule measured on one render. `cues` is the caption cue report (empty when the
     captions are off), `broll` the shown b-roll's layer records, `mix` the audio mix report, or None
-    when the render could not say which mix it used."""
+    when the render could not say which mix it used. `zooms` are the built zooms' (t0, t1) and
+    `items` the project's b-roll items (which file each record showed)."""
+    assets = {it.get("id"): it.get("asset") for it in items}
     failures = []
     for r in rules:
         c = r["check"]
-        if c["kind"].startswith("captions."):
+        kind = c["kind"]
+        if kind.startswith("captions."):
             places = caption_places(c, cues, fmt)
-        elif c["kind"] == "music.underVoiceDb":
+        elif kind == "music.underVoiceDb":
             places = music_places(c, mix, duration)
+        elif kind in ("broll.clipLength", "broll.cardHold"):
+            places = timing_places(c, broll, assets)
+        elif kind == "broll.unique":
+            places = unique_places(broll, assets)
+        elif kind == "broll.faceClear":
+            places = [p for p in broll_places({"zone": "eyes"}, broll) if not p["hides"]]
+        elif kind == "face.maxBare":
+            places = bare_places(c, broll, zooms, duration)
+        elif kind == "zooms.maxPerMinute":
+            places = zoom_places(c, zooms, duration)
+        elif kind == "opening.calm":
+            places = opening_places(c, broll, zooms)
         else:
             places = broll_places(c, broll)
         if places:

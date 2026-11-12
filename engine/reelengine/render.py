@@ -861,7 +861,8 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     if checks is not None and not win:
         gone = {g["id"] for g in gone_rows}
         lint = lintmod.lint(checks[0], cues=cap_report, fmt=(W, H), mix=mix_measured(audio),
-                            broll=[r for r in shown if r.get("id") not in gone], duration=tl.duration)
+                            broll=[r for r in shown if r.get("id") not in gone], duration=tl.duration,
+                            zooms=[(z.t0, z.t1) for z in zooms], items=proj.get("broll") or [])
         if not draft and any(f["id"] in checks[1] for f in lint["failures"]):
             try:
                 vdir.rmdir()            # the version folder made above, still empty

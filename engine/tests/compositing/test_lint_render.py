@@ -102,3 +102,22 @@ def test_a_bad_rules_file_stops_the_render_before_any_work(tmp_path, media):
         render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False, rules=rules)
     assert e.value.code == "BAD_RULE"
     assert not (pdir / "versions").exists()
+
+
+def test_the_default_taste_checks_see_the_renders_zooms_and_which_file_each_picture_showed(tmp_path, media):
+    # one picture shown twice and two zooms in a 7 s video: only the render knows both
+    pdir = _project(tmp_path / "taste", media, {}, "under-voice", broll=True)
+    p = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    words = json.loads((pdir / "work" / "transcript.json").read_text(encoding="utf-8"))["words"]
+    near = lambda sec: min(words, key=lambda w: abs(w["s"] - sec))["id"]
+    p["broll"].append({**p["broll"][0], "id": "b2", "anchor": {"from": near(5.5), "to": near(6.0)}})
+    p["zooms"] = [{"anchor": {"from": near(1.0), "to": near(1.5)}, "scale": 1.12},
+                  {"anchor": {"from": near(4.0), "to": near(4.5)}, "scale": 1.12}]
+    (pdir / "project.json").write_text(json.dumps(p, indent=1), encoding="utf-8")
+    rules = _rules(tmp_path / "taste-rules.json", [{"kind": "broll.unique"}, {"kind": "zooms.maxPerMinute", "value": 6},
+                                                   {"kind": "face.maxBare", "value": 4}])
+    res = render.run(pdir, draft=True, root=tmp_path, verify=False, cover=False, rules=rules)
+    fails = {f["id"]: f for f in res["lint"]["failures"]}
+    assert set(fails) == {"r0", "r1"}             # the zooms and pictures leave no long bare stretch
+    assert fails["r0"]["places"][0]["item"] == "b2"
+    assert fails["r1"]["places"][0]["zooms"] == 2 and fails["r1"]["places"][0]["allowed"] == 1
