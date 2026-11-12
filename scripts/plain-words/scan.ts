@@ -34,7 +34,7 @@ export interface Scope {
   offPath: { path: string; reason: string }[]
   /** Files read in `keys` mode, one reason each. */
   keysOnly: { path: string; reason: string }[]
-  /** One string in one file that is fine as it is, one reason each. `text` is a substring of the string. */
+  /** One string in one file that is fine as it is, one reason each. `text` is the whole string as read ({} for each ${...}). */
   allow: { file: string; text: string; reason: string }[]
 }
 
@@ -472,7 +472,7 @@ export function scan(repo: string, scope: Scope): Report {
     for (const s of shown) {
       const words = wordsIn(s.text, scope.words)
       if (!words.length) continue
-      const ok = scope.allow.findIndex((a) => a.file === file && s.text.includes(a.text))
+      const ok = scope.allow.findIndex((a) => a.file === file && s.text === a.text)
       if (ok >= 0) {
         usedAllow.add(ok)
         continue

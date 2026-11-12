@@ -21,7 +21,8 @@ export function AiSetupSlot({ onDone, onSkip }: { onDone: (p: ProviderInfo) => v
       role="group"
       aria-labelledby="ai-setup-why"
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
+        // Escape in a field inside (a key being typed) belongs to that field; from anywhere else it is Not now
+        if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement).closest('input, textarea, [role="dialog"]')) {
           e.stopPropagation()
           onSkip()
         }

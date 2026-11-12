@@ -79,8 +79,9 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
     const deadline = Date.now() + 280_000
     let last = ''
     // A choice made is counted once: after acting, the walk waits for that screen to move on (a new reel's copy keeps
-    // its stage up for a moment), and Share's choice is made once even if its popover has to be opened again.
-    const gone = (sel: string) => expect(page.locator(sel).first()).toBeHidden({ timeout: 60_000 }).catch(() => {})
+    // its stage up for a moment) and fails if it doesn't. The walk shares exactly once, so Share's two choices are
+    // each counted once even when its popover has to be opened again (a job ending re-renders the screen under it).
+    const gone = (sel: string, what: string) => expect(page.locator(sel).first(), `${what} did not move on`).toBeHidden({ timeout: 60_000 })
     let shared = false
     while (!saved()) {
       expect(Date.now(), `stuck at "${last}" after ${stops.map((s) => s.name).join(', ')}`).toBeLessThan(deadline)
@@ -91,7 +92,7 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
         if (await pick.count()) {
           await stop('Pick the video', ['.fr-welcome'], 'decision')
           await pick.setInputFiles([media.video])
-          await gone('.fr-welcome:not(.leaving)')
+          await gone('.fr-welcome:not(.leaving)', 'the welcome, after picking the video')
         } else {
           await stop('Welcome', ['.fr-welcome'])
           await page.getByTestId('get-started').click()
@@ -111,7 +112,7 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
       } else if (at === 'pick') {
         await stop('Pick the video', ['[data-testid="drop-zone"]', '[data-testid="plan-connect-step"]'], 'decision')
         await page.getByTestId('planned-stage').getByTestId('file-input').setInputFiles([media.video])
-        await gone('[data-testid="planned-stage"]')
+        await gone('[data-testid="planned-stage"]', 'the new reel, after picking the video')
       } else if (at === 'ready') {
         const share = page.getByTestId('share')
         await expect(share).toBeEnabled({ timeout: 120_000 })
@@ -123,9 +124,9 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
         // the popover can close under the walk (a job ending re-renders the screen): then the loop opens it again
         const save = page.getByTestId('share-finder')
         if (await save.isVisible().catch(() => false)) {
-          await save.click({ timeout: 5_000 }).catch(() => {})
-          await expect(page.getByTestId('share-pop')).toContainText('.mp4', { timeout: 120_000 }).catch(() => {})
-        }
+          await save.click()
+          await expect(page.getByTestId('share-pop'), 'Show in Explorer or Finder did not save the reel').toContainText('.mp4', { timeout: 120_000 })
+        } else await page.waitForTimeout(250)
       } else if (at === 'ai-setup') {
         throw new Error('AI setup showed on the way to a first reel; it belongs where it first helps, such as the first typed note')
       } else {
