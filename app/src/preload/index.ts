@@ -19,6 +19,9 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
 const api: ReelApi = {
   app: {
     info: () => call('app:info'),
+    clipboardFiles: () => call('app:clipboardFiles'),
+    takeOpenFiles: () => call('app:takeOpenFiles'),
+    onFilesAvailable: (cb) => on('app:filesAvailable', cb),
     finishFirstRun: () => call('app:finishFirstRun'),
     openFolder: (p) => call('app:openFolder', p),
     copyText: (t) => call('app:copyText', t),
