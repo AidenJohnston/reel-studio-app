@@ -1,0 +1,76 @@
+name: Build installers
+
+# Unsigned Windows and macOS installers, checked by running the bundled engine. Signing and publishing to
+# dl.getreelstudio.com stay manual (packaging/README.md).
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: Name for the artifacts, such as v0.1.5 or 0.1.5-nightly.20261112.abc1234.
+        required: true
+        type: string
+      ref:
+        description: Commit, branch or tag to build. Empty builds the triggering commit.
+        required: false
+        type: string
+        default: ''
+      retention-days:
+        required: false
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Installer / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            resources: app/release/win-unpacked/resources
+          - os: macos-15
+            resources: app/release/mac-arm64/Reel Studio.app/Contents/Resources
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/build-win.ps1
+      - name: Build the macOS installer
+        if: runner.os == 'macOS'
+        run: bash packaging/build-mac.sh
+      - name: Check the bundled engine
+        run: python scripts/ci/check-bundle.py "${{ matrix.resources }}"
+      - name: Checksums
+        shell: bash
+        run: |
+          cd app/release
+          files=$(ls *.exe *.dmg signed/*.dmg 2>/dev/null || true)
+          test -n "$files"
+          if command -v sha256sum >/dev/null; then sha256sum $files; else shasum -a 256 $files; fi | tee "SHA256SUMS-${{ runner.os }}.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reel-studio-${{ inputs.label }}-${{ runner.os }}
+          path: |
+            app/release/*.exe
+            app/release/*.dmg
+            app/release/signed/*.dmg
+            app/release/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
