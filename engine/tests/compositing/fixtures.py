@@ -178,9 +178,13 @@ def make_ctx(pdir: Path, root: Path | None = None, draft: bool = True) -> Render
 
     def wend(wid):
         return wout(wid) + by[wid]["e"] - by[wid]["s"]
+
+    kept = {w["id"] for r in proj["cut"]["keep"]
+            for w in words[idx[r["from"]]:idx[r["to"]] + 1]}
+
     return RenderCtx(project=proj, project_dir=pdir, root=root or pdir, out_timeline=segs, word_out_time=wout,
                      duration=t, fmt=proj["format"], draft=draft, work=pdir / "work", ffmpeg=FFMPEG, ffprobe=FFPROBE,
-                     progress=lambda *a: None, word_out_end=wend, words=words)
+                     progress=lambda *a: None, word_out_end=wend, is_kept=kept.__contains__, words=words)
 
 
 def set_project(ctx, **fields) -> None:
