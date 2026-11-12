@@ -1,0 +1,152 @@
+/* The editing timeline (TrackTimeline.tsx): a dark panel the width of the stage, as in a video editor, with a toolbar,
+   a named label beside each lane, and the lanes on one scrolling clock. Each lane has its own colour and its own name;
+   the colours tell lanes apart at a glance, the labels say what they are. */
+.trk {
+  --trk-bg: #121413; --trk-lane: #191C1A; --trk-line: #2A2F2C; --trk-ink: #ECEFEC; --trk-ink-2: #A6ADA8; --trk-ink-3: #737B76;
+  --trk-video: #2D5E50; --trk-video-hi: #4F9C84; --trk-clip: #3F4A63;
+  --trk-pic: #8C6420; --trk-pic-hi: #E2A93B;
+  --trk-cap: #33496B; --trk-cap-hi: #7EA2DA;
+  --trk-song: #4E3F78; --trk-song-hi: #A58CF0;
+  --trk-sound: #7C3A4B; --trk-sound-hi: #E77F98;
+  --trk-head: #F4DF6E; --trk-cut: #FF6B57;
+  --trk-label-w: 104px;
+  --trk-ruler-h: 22px;
+  align-self: stretch; flex: none; margin-top: 10px; background: var(--trk-bg); color: var(--trk-ink); border-radius: var(--r-md);
+  font-size: var(--fs-xs); line-height: var(--lh-xs); user-select: none; -webkit-user-select: none; overflow: hidden;
+}
+.trk-bar { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--trk-line); }
+.trk-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.trk-pick-name { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.trk-hint { color: var(--trk-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trk-btn, .trk-icon {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--trk-line); border-radius: 6px;
+  background: #202421; color: var(--trk-ink); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.trk-icon { width: 26px; padding: 0; justify-content: center; }
+.trk-btn:hover:not(:disabled), .trk-icon:hover:not(:disabled) { background: #2A2F2B; }
+.trk-btn:disabled, .trk-icon:disabled { opacity: .45; cursor: default; }
+.trk-btn.danger { color: #FF9A8A; }
+html.kb .trk-btn:focus-visible, html.kb .trk-icon:focus-visible, html.kb .trk [role="button"]:focus-visible, html.kb .trk-sound:focus-visible { outline: 2px solid var(--trk-head); outline-offset: 1px; }
+.trk-zoom { display: flex; align-items: center; gap: 4px; flex: none; }
+.trk-zoom-range { width: 96px; accent-color: var(--trk-ink-2); }
+
+.trk-body { display: flex; }
+.trk-labels { flex: none; width: var(--trk-label-w); display: flex; flex-direction: column; border-right: 1px solid var(--trk-line); background: var(--trk-bg); }
+.trk-label { display: flex; align-items: center; gap: 6px; padding-left: 12px; color: var(--trk-ink-2); font-weight: 650; border-bottom: 1px solid var(--trk-line); }
+.trk-label svg { flex: none; }
+.trk-label.ruler { height: var(--trk-ruler-h); }
+.trk-label.video, .trk-row.video { height: 48px; }
+.trk-label.pictures, .trk-row.pictures { height: 34px; }
+.trk-label.captions, .trk-row.captions { height: 30px; }
+.trk-label.music, .trk-row.music { height: 30px; }
+.trk-label.sounds, .trk-row.sounds { height: 24px; }
+.trk-label.video svg { color: var(--trk-video-hi); }
+.trk-label.pictures svg { color: var(--trk-pic-hi); }
+.trk-label.captions svg { color: var(--trk-cap-hi); }
+.trk-label.music svg { color: var(--trk-song-hi); }
+.trk-label.sounds svg { color: var(--trk-sound-hi); }
+
+.trk-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #3A403C transparent; }
+.trk-content { position: relative; cursor: text; }
+.trk-content.dragging, .trk-content.dragging * { cursor: grabbing !important; }
+.trk-ruler { position: relative; height: var(--trk-ruler-h); border-bottom: 1px solid var(--trk-line); cursor: ew-resize; }
+.trk-tick { position: absolute; top: 0; bottom: 0; padding: 3px 0 0 4px; border-left: 1px solid var(--trk-line); color: var(--trk-ink-3); font-variant-numeric: tabular-nums; pointer-events: none; }
+.trk-row { position: relative; border-bottom: 1px solid var(--trk-line); background: var(--trk-lane); }
+
+/* your video: each kept part a block with the stills behind it, a red notch at each cut */
+.trk-film { position: absolute; top: 3px; height: calc(100% - 6px); pointer-events: none; opacity: .55; }
+.trk-part {
+  position: absolute; top: 3px; bottom: 3px; border-radius: 5px; background: color-mix(in srgb, var(--trk-video) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--trk-video-hi); overflow: hidden;
+}
+.trk-part.clip { background: color-mix(in srgb, var(--trk-clip) 80%, transparent); box-shadow: inset 0 0 0 1px #7C8DB5; }
+.trk-part.trimming { box-shadow: inset 0 0 0 2px var(--trk-head); z-index: 2; }
+.trk-part-said { position: absolute; left: 8px; right: 8px; bottom: 3px; color: var(--trk-ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; pointer-events: none; }
+.trk-cut { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--trk-cut); pointer-events: none; z-index: 1; }
+.trk-struck {
+  position: absolute; top: 3px; bottom: 3px; border-radius: 3px; pointer-events: auto;
+  background: repeating-linear-gradient(-45deg, rgba(255, 107, 87, .55) 0 3px, rgba(18, 20, 19, .6) 3px 7px);
+}
+.trk-back { position: absolute; top: 2px; transform: translateX(-50%); padding: 0 4px; border-radius: 4px; background: var(--trk-head); color: #2B2400; font-weight: 700; z-index: 2; }
+
+/* the edges a drag trims or resizes by: a grip that shows on hover, wide enough to catch */
+.trk-edge { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; z-index: 3; }
+.trk-edge.start { left: 0; }
+.trk-edge.end { right: 0; }
+.trk-edge::after { content: ''; position: absolute; top: 25%; bottom: 25%; width: 3px; border-radius: 2px; background: var(--trk-ink); opacity: 0; transition: opacity 80ms; }
+.trk-edge.start::after { left: 2px; }
+.trk-edge.end::after { right: 2px; }
+.trk-part:hover .trk-edge::after, .trk-pic:hover .trk-edge::after, .trk-pic.on .trk-edge::after, .trk-part.trimming .trk-edge::after { opacity: .9; }
+
+/* pictures */
+.trk-pic {
+  position: absolute; top: 4px; bottom: 4px; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; border-radius: 5px; overflow: hidden;
+  background: var(--trk-pic); box-shadow: inset 0 0 0 1px var(--trk-pic-hi); cursor: grab; outline: none;
+}
+.trk-pic img { flex: none; height: calc(100% - 6px); aspect-ratio: 1; object-fit: cover; border-radius: 3px; }
+.trk-pic svg { flex: none; }
+.trk-pic-what { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.trk-pic.on { box-shadow: inset 0 0 0 2px #fff; z-index: 2; }
+.trk-pic.moving { opacity: .85; box-shadow: inset 0 0 0 2px var(--trk-head); z-index: 3; }
+.trk-pic.off { background: transparent; border: 1px dashed var(--trk-pic-hi); }
+.trk-pic.fixed { cursor: pointer; }
+
+/* subtitles */
+.trk-cap {
+  position: absolute; top: 4px; bottom: 4px; padding: 0 6px; border-radius: 4px; display: flex; align-items: center; overflow: hidden;
+  background: var(--trk-cap); box-shadow: inset 0 0 0 1px var(--trk-cap-hi); white-space: nowrap; text-overflow: ellipsis; cursor: text; outline: none;
+}
+.trk-cap:hover { background: #3E5880; }
+.trk-cap-input {
+  position: absolute; top: 2px; bottom: 2px; z-index: 4; padding: 0 6px; border: 2px solid var(--trk-head); border-radius: 4px;
+  background: #0B0C0B; color: #fff; font: inherit; font-size: var(--fs-sm); outline: none;
+}
+
+/* the song: a bar the reel's length, its fades as ramps, a mark each second of the song so a drag shows it slide */
+.trk-song {
+  position: absolute; top: 4px; bottom: 4px; left: 0; border-radius: 5px; overflow: hidden; cursor: grab;
+  background: var(--trk-song); box-shadow: inset 0 0 0 1px var(--trk-song-hi);
+}
+.trk-song.fixed { cursor: default; }
+.trk-song-mark { position: absolute; bottom: 0; width: 1px; height: 30%; background: rgba(255, 255, 255, .25); pointer-events: none; }
+.trk-song-mark.big { height: 60%; background: rgba(255, 255, 255, .4); }
+.trk-song-name { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 4px; font-weight: 650; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 2px #000; font-variant-numeric: tabular-nums; }
+.trk-fade { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+.trk-fade.in { left: 0; background: linear-gradient(to right, var(--trk-bg), transparent); }
+.trk-fade.out { right: 0; background: linear-gradient(to left, var(--trk-bg), transparent); }
+
+/* sound effects: a flag with its kind at each moment */
+.trk-sound {
+  position: absolute; top: 3px; height: 18px; padding: 0 6px 0 8px; border: 0; border-radius: 0 4px 4px 0; transform: translateX(-1px);
+  background: var(--trk-sound); color: var(--trk-ink); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; border-left: 2px solid var(--trk-sound-hi);
+}
+.trk-sound.on { box-shadow: 0 0 0 2px #fff; }
+.trk-sound.off { background: transparent; border: 1px dashed var(--trk-sound-hi); border-left-width: 2px; }
+
+/* the playhead, across every lane, and what a drag will do */
+.trk-head { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; z-index: 5; will-change: transform; }
+.trk-head::before { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: var(--trk-head); }
+.trk-head i { position: absolute; top: 0; left: -6px; width: 12px; height: 12px; background: var(--trk-head); clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
+.trk-tip {
+  position: absolute; top: calc(var(--trk-ruler-h) + 2px); transform: translateX(-50%); z-index: 6; padding: 3px 8px; border-radius: 6px;
+  background: #000; color: #fff; font-weight: 650; white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums;
+}
+
+/* Windows high contrast paints every background in the window colour: blocks keep their outlines, the picked one the
+   system highlight */
+@media (forced-colors: active) {
+  .trk-part, .trk-pic, .trk-cap, .trk-song, .trk-sound { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 1px CanvasText; }
+  .trk-pic.on, .trk-sound.on, .trk-part.trimming { box-shadow: inset 0 0 0 3px Highlight; }
+  .trk-head::before, .trk-head i, .trk-cut { forced-color-adjust: none; background: Highlight; }
+}
+
+/* The picked picture's frame on the reel (FramingBox.tsx) */
+.frame-over { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.frame-box { position: absolute; border: 2px solid var(--marker, #F4DF6E); border-radius: 6px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .28); overflow: hidden; pointer-events: auto; }
+.frame-box.pans { cursor: move; }
+.frame-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 120ms; pointer-events: none; }
+.frame-box.live img { opacity: .85; }
+.frame-label { position: absolute; left: 6px; top: 6px; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, .7); color: #fff; font-size: var(--fs-xs); font-weight: 650; pointer-events: none; }
+.frame-corner { position: absolute; right: -1px; bottom: -1px; width: 16px; height: 16px; background: var(--marker, #F4DF6E); border-radius: 4px 0 4px 0; cursor: nwse-resize; }
+.trk-ruler { outline: none; }
+html.kb .trk-ruler:focus-visible { box-shadow: inset 0 0 0 2px var(--trk-head); }

@@ -25,12 +25,17 @@ import { createPlayhead, usePlayhead, type Playhead } from '../components/playhe
 import { createTransport, useTransport, type Transport } from '../components/transport'
 import { versionOnScreen, versionsShown } from '../components/videoLayers'
 import { EXPORT_EVENT, NOTE_DROP_DONE, useNotify } from '../App'
-import { ShowMeHow, type Tab } from './ShowMeHow'
+import { ShowMeHow, type DrawerDraft, type Tab } from './ShowMeHow'
 import { useNoteAttachments } from '../components/NoteAttachments'
 import { NotesLog, useVersionRows, type FirstState } from '../components/NotesLog'
 import { reelsChanged } from '../components/reels-changed'
 import { Composer, region, type Chip } from '../components/Composer'
 import { Timeline, type TimelineMark } from '../components/Timeline'
+import { TrackTimeline } from '../components/TrackTimeline'
+import { FramingBox } from '../components/FramingBox'
+import { trackLanes } from '../../../shared/track-lanes'
+import { brollGesture, framingOf, usableWords, withEdits, type Broll, type Gesture } from '../../../shared/timeline-edit'
+import { countChanges, type HandEdit } from '../../../shared/hand-edit'
 import { lanesOf, pictureWhy, type Lanes } from '../../../shared/lanes'
 import { TIMELINE_SHORTCUT, useTimelineShown } from '../components/timelineShown'
 import { keptIds } from '../../../shared/cut'
@@ -103,9 +108,12 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   // what a note's job has said it was doing, in order, for Steps
   const [steps, setSteps] = useState<string[]>([])
   const [drawer, setDrawer] = useState<Tab | null>(null)
-  // while Edit it myself is open: the lanes as its changes make them, and the sound or picture picked there or on
-  // the timeline
-  const [editLanes, setEditLanes] = useState<Lanes | null>(null)
+  // while Edit it myself is open: its changes, the timeline's own changes on their way to a version, and the sound
+  // or picture picked there or on the timeline
+  const [drawerDraft, setDrawerDraft] = useState<DrawerDraft | null>(null)
+  const [sent, setSent] = useState<HandEdit[]>([])
+  // a change made on the timeline is on its way: its version takes the screen when it lands, without playing
+  const timelineMade = useRef(0)
   const [sound, setSound] = useState<string | null>(null)
   const [reveal, setReveal] = useState(0)
   const [picture, setPicture] = useState<string | null>(null)
@@ -262,6 +270,11 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   /** A version landed: it takes the screen and plays, unless the person is comparing or editing by hand. */
   const land = useCallback(
     async (n: number | undefined) => {
+      if (watching.current.drawer && timelineMade.current > 0) {
+        timelineMade.current--
+        await load(true)
+        return
+      }
       const busyElsewhere = watching.current.compare || watching.current.drawer
       const next = await load(!busyElsewhere)
       const v = n ?? next?.versions[next.versions.length - 1]?.n
@@ -483,6 +496,24 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     const thumb = (b: { id: string }) => d.brollThumbs[b.id] ?? null
     return lanesOf(v.project, { placed: v.words, segments: v.segments, words: d.words, kept, duration: v.duration, layers: new Map(v.layers.map((l) => [l.id!, l])) }, pack, why, thumb)
   }, [timeline, shownVideo, shownN, d?.versions, d?.project.notes, d?.words, d?.brollThumbs, pack]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // While Edit it myself is open, the editing timeline draws what the next version will be: the newest project with
+  // the changes made there, and the timeline's own changes still on their way (waiting in the queue, or just sent), on
+  // the clock of the version on screen.
+  const saidAt = useMemo(() => new Map((d?.words ?? []).map((w) => [w.id, w.w])), [d?.words])
+  const track = useMemo(() => {
+    const v = timeline?.version
+    if (!d || !drawer || !v || timeline.video !== shownVideo || shownN === undefined) return null
+    const landed = new Set((d.project.handEdits as string[] | undefined) ?? [])
+    const waiting = [...d.queue.flatMap((q) => (q.hand && !landed.has(q.id) ? [q.hand.edit] : [])), ...sent]
+    const start = drawerDraft?.draft ?? { p: d.project, kept: new Set(keptIds(d.words, d.project.cut?.keep)) }
+    const draft = withEdits(start, waiting, d.words)
+    const had = new Set((d.project.broll ?? []).map((b) => b.id))
+    const why = (id: string) => (had.has(id) ? pictureWhy(id, d.versions, d.project.notes ?? [], shownN) : drawerDraft ? `New: in Version ${drawerDraft.next} once you make it` : null)
+    const thumb = drawerDraft?.thumb ?? ((b: { id: string }) => d.brollThumbs[b.id] ?? null)
+    const lanes = trackLanes({ draft, version: v, words: d.words, captionLines: d.captionLines, savedCaptions: d.project.captions, heard: saidAt, pack, why, thumb })
+    return { draft, lanes, thumb }
+  }, [d, drawer, timeline, shownVideo, shownN, sent, drawerDraft, saidAt, pack])
 
   usePlanAfterConnect(slug, providerChecked && !!d, d?.status === 'planned' && !aiOff, noteField)
 
@@ -708,6 +739,37 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     return src ? { src, at: at.at } : null
   }
 
+  /** One change made on the editing timeline: a hand edit of its own, made into the next version (main/hand-edit.ts). */
+  const timelineEdit = async (g: Gesture) => {
+    setSent((x) => [...x, g.edit])
+    timelineMade.current++
+    try {
+      await reel.projects.handEdit(slug, g.edit, g.summary, countChanges(g.edit, d.words))
+      await load()
+    } catch (e) {
+      timelineMade.current = Math.max(0, timelineMade.current - 1)
+      notify(userMessage(e), 'error')
+    } finally {
+      setSent((x) => x.filter((y) => y !== g.edit))
+    }
+  }
+  /** A picture or its new file, as update_broll changes it; null when it isn't on the timeline any more. */
+  const pictureEdit = (id: string, next: (b: Broll) => Broll) => {
+    const b = track?.draft.p.broll?.find((x) => x.id === id)
+    const v = timeline?.version
+    return b && v && track ? brollGesture(track.draft.p, track.draft.kept, id, next(b), usableWords(v.words, track.draft.kept)) : null
+  }
+  const swapPicture = async (id: string) => {
+    try {
+      const r = await reel.library.choose('images')
+      const name = r.find((x) => x.bin === 'images' && x.dest)?.dest?.split(/[\/]/).pop()
+      const g = name ? pictureEdit(id, (b) => ({ ...b, asset: `Library/Images/${name}` })) : null
+      if (g) await timelineEdit(g)
+    } catch (e) {
+      notify(userMessage(e), 'error')
+    }
+  }
+
   const runAction = (a: ChatAction, messageId: string) => {
     if (a === 'remember-yes' || a === 'remember-no') {
       reel.style
@@ -730,6 +792,15 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     setPointing(false)
     setHandId(hand)
     setDrawer(t)
+  }
+  const closeDrawer = () => {
+    setDrawer(null)
+    setHandId(null)
+    setPreview(null)
+    setSound(null)
+    setPicture(null)
+    // a version the timeline made after this lands as any other does
+    timelineMade.current = 0
   }
   const watch = (n: number) => {
     setCompare(null)
@@ -856,7 +927,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
   const actions = (
     <>
       {hasVersions && (
-        <Button kind="tertiary" className={drawer ? 'on' : undefined} aria-pressed={!!drawer} onClick={() => (drawer ? (setDrawer(null), setHandId(null), setPreview(null), setSound(null), setPicture(null)) : openDrawer('cut'))} data-testid="edit-myself">
+        <Button kind="tertiary" className={drawer ? 'on' : undefined} aria-pressed={!!drawer} onClick={() => (drawer ? closeDrawer() : openDrawer('cut'))} data-testid="edit-myself">
           <Icon name="sliders" size={16} /> Edit it myself
         </Button>
       )}
@@ -919,9 +990,22 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
     </>
   )
 
+  // the picked picture, when its frame can be dragged on the reel: on the newest version only
+  const framing = drawer && !older && picture ? track?.draft.p.broll?.find((b) => b.id === picture && (framingOf(b).pan !== null || framingOf(b).scale)) : undefined
   const over = (
     <div className="reel-over">
       {drawer && <div className="edit-stage" ref={setStage} />}
+      {framing && track && (
+        <FramingBox
+          key={framing.id}
+          b={framing}
+          thumb={track.thumb(framing)}
+          onFrame={(next) => {
+            const g = pictureEdit(framing.id, () => next)
+            if (g) void timelineEdit(g)
+          }}
+        />
+      )}
       {changing && <ChangeTag {...change} />}
       {tag && (
         <span className="reel-tag" data-testid={jobPreview ? 'change-preview' : 'first-tag'}>
@@ -1039,33 +1123,66 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
               </FullStage>
               {src && (
                 <>
-                  {timelineShown && <Timeline
-                    playhead={playhead}
-                    transport={transport}
-                    duration={duration}
-                    words={timeline && timeline.video === shownVideo ? timeline.words : []}
-                    marks={drawer ? [] : marks}
-                    lanes={drawer ? editLanes : shownLanes}
-                    selectedSound={sound}
-                    onSound={(k) => {
-                      setSound(k)
-                      setReveal((n) => n + 1)
-                      if (!drawer) openDrawer('music')
-                    }}
-                    selectedPicture={picture}
-                    onPicture={(id) => {
-                      setPicture(id)
-                      setPictureReveal((n) => n + 1)
-                      if (!drawer) openDrawer('broll')
-                    }}
-                    onRange={(r) => {
-                      if (!hasVersions || aiOff) return
-                      setChip(r)
-                      // from the keyboard the range keeps growing with Shift and the arrows, so focus stays put
-                      if (!byKeyboard()) noteField.current?.focus()
-                    }}
-                    onPlay={(n) => !drawer && watch(n)}
-                  />}
+                  {drawer ? (
+                    track &&
+                    timeline?.version && (
+                      <TrackTimeline
+                        playhead={playhead}
+                        transport={transport}
+                        duration={duration}
+                        version={timeline.version}
+                        video={shownVideo ?? null}
+                        draft={track.draft}
+                        lanes={track.lanes}
+                        words={d.words}
+                        savedCorrections={d.project.captions?.corrections ?? []}
+                        heard={saidAt}
+                        locked={older ? `Showing Version ${older.n}. Changes go on the newest version.` : null}
+                        selectedPicture={picture}
+                        onPicture={(id) => {
+                          setPicture(id)
+                          if (id) setPictureReveal((n) => n + 1)
+                        }}
+                        selectedSound={sound}
+                        onSound={(k) => {
+                          setSound(k)
+                          setReveal((n) => n + 1)
+                        }}
+                        onGesture={(g) => void timelineEdit(g)}
+                        onSwap={(id) => void swapPicture(id)}
+                      />
+                    )
+                  ) : (
+                    timelineShown && (
+                      <Timeline
+                        playhead={playhead}
+                        transport={transport}
+                        duration={duration}
+                        words={timeline && timeline.video === shownVideo ? timeline.words : []}
+                        marks={marks}
+                        lanes={shownLanes}
+                        selectedSound={sound}
+                        onSound={(k) => {
+                          setSound(k)
+                          setReveal((n) => n + 1)
+                          openDrawer('music')
+                        }}
+                        selectedPicture={picture}
+                        onPicture={(id) => {
+                          setPicture(id)
+                          setPictureReveal((n) => n + 1)
+                          openDrawer('broll')
+                        }}
+                        onRange={(r) => {
+                          if (!hasVersions || aiOff) return
+                          setChip(r)
+                          // from the keyboard the range keeps growing with Shift and the arrows, so focus stays put
+                          if (!byKeyboard()) noteField.current?.focus()
+                        }}
+                        onPlay={watch}
+                      />
+                    )
+                  )}
                   <TransportRow transport={transport} playhead={playhead}>
                     <ViewMenu
                       view={shownView}
@@ -1092,13 +1209,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
               version={version ?? null}
               player={player}
               queued={handId ? (d.queue.find((q) => q.id === handId) ?? null) : null}
-              onClose={() => {
-                setDrawer(null)
-                setHandId(null)
-                setPreview(null)
-                setSound(null)
-                setPicture(null)
-              }}
+              onClose={closeDrawer}
               onPreview={setPreview}
               onTab={(t) => setDrawer(t)}
               sound={sound}
@@ -1107,7 +1218,7 @@ export function Reel({ slug, at, go, draft: startDraft }: { slug: string; at?: n
               picture={picture}
               pictureReveal={pictureReveal}
               onPicture={setPicture}
-              onLanes={setEditLanes}
+              onDraft={setDrawerDraft}
             />
           ) : (
             <>

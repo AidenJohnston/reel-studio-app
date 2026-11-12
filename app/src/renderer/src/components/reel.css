@@ -59,6 +59,8 @@
   position: absolute; left: var(--reel-l, 0); top: var(--reel-t, 0); width: var(--reel-w, 100%); height: var(--reel-h, 100%); z-index: 3; pointer-events: none;
 }
 .reel-over > :not(.edit-stage) { pointer-events: auto; }
+/* the picked picture's frame (FramingBox.tsx) takes the pointer only on its box */
+.reel-over > .frame-over { pointer-events: none; }
 .reel-tag, .change-tag { position: absolute; top: calc(100cqw * (58 + var(--ig-top, 0)) / var(--sw, 393) + var(--reel-dip, 0px)); left: 50%; translate: -50% 0; }
 .reel-tag, .change-label {
   background: rgba(0, 0, 0, .6); color: #fff; font-size: var(--fs-sm); line-height: var(--lh-sm);

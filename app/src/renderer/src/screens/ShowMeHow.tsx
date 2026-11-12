@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CoverCandidate, LibraryFile, PlacedWord, ProjectDetail, ProjectJson, QueuedNote, VersionInfo, VersionTimeline } from '../../../shared/api'
+import type { CoverCandidate, LibraryFile, PlacedWord, ProjectDetail, ProjectJson, QueuedNote, VersionInfo } from '../../../shared/api'
 import { lookFromStyle, sampleLine, sampleLook, type SubtitleLook } from '../../../shared/caption-presets'
 import { coverMoments } from '../../../shared/cover'
 import { describeChange } from '../../../shared/describe'
@@ -17,11 +17,19 @@ import { useEditSession } from './edit/session'
 import { soundPack, SoundTab } from './edit/SoundTab'
 import { SubtitlesTab } from './edit/SubtitlesTab'
 import type { RenderSegment } from '../../../shared/moments'
-import { joinsOf, musicFades, newToTheEar, sfxVolume, soundRows, soundTime, type SoundEffect, type VersionClock } from '../../../shared/sfx'
-import { clipsOf, pictureParts, pictureWhy, soundParts, videoParts, type Lanes } from '../../../shared/lanes'
+import { joinsOf, newToTheEar, sfxVolume, soundTime, type SoundEffect, type VersionClock } from '../../../shared/sfx'
+import type { Broll } from '../../../shared/lanes'
+import type { Draft } from '../../../shared/timeline-edit'
 import './edit/edit.css'
 
 export type { PlayerHandle } from './edit/preview'
+/** The changes in Edit it myself as the timeline draws them: the project with them, each picture's still, and the
+ * version they will make. */
+export interface DrawerDraft {
+  draft: Draft
+  thumb: (b: Broll) => string | null
+  next: number
+}
 export type Tab = 'cut' | 'captions' | 'music' | 'broll' | 'cover'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'cut', label: 'Cut' },
@@ -55,7 +63,7 @@ export function ShowMeHow({
   picture = null,
   pictureReveal = 0,
   onPicture,
-  onLanes
+  onDraft
 }: {
   d: ProjectDetail
   /** The version the player shows: the newest. */
@@ -77,8 +85,8 @@ export function ShowMeHow({
   picture?: string | null
   pictureReveal?: number
   onPicture?: (id: string | null) => void
-  /** What the timeline draws while this is open: the version's video, and the pictures and sounds as changed here. */
-  onLanes?: (l: Lanes | null) => void
+  /** What the timeline draws while this is open: the project as changed here. */
+  onDraft?: (d: DrawerDraft | null) => void
 }) {
   const notify = useNotify()
   const s = useEditSession(d, queued)
@@ -90,7 +98,6 @@ export function ShowMeHow({
   const [making, setMaking] = useState(false)
   const [placed, setPlaced] = useState(() => new Map<string, PlacedWord>())
   const [segments, setSegments] = useState<RenderSegment[]>([])
-  const [shown, setShown] = useState<VersionTimeline | null>(null)
   const [images, setImages] = useState<LibraryFile[]>([])
   const [pack, setPack] = useState<SoundEffect[]>([])
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
@@ -121,7 +128,6 @@ export function ShowMeHow({
         if (!live) return
         setPlaced(new Map((t?.words ?? []).map((w) => [w.id, w])))
         setSegments(t?.segments ?? [])
-        setShown(t)
       })
       .catch((e) => notify(userMessage(e), 'error'))
     return () => {
@@ -265,38 +271,11 @@ export function ShowMeHow({
   const ahead = mine >= 0 ? mine : waiting.length
   const next = latest + (busy ? 1 : 0) + ahead + 1
 
-  // The timeline under the phone shows what this changes: each picture while it shows, each sound at its moment, the
-  // music's fades and the cuts, on the clock of the version on screen. The render's own picture times hold for the
-  // pictures unchanged since it; the rest are placed by its rules.
-  const said = useCallback((id: string) => d.words.find((w) => w.id === id)?.w, [d.words])
-  const music = now.p.music
-  // each lane from what it depends on, so dragging a fade or a level works out only the sounds again
-  const sounds = useMemo(
-    () => soundParts(soundRows(now.p.sfx ?? [], vclock, joins, now.p.broll, now.kept, said, new Map(pack.map((p) => [p.id, p])))),
-    [now.p.sfx, now.p.broll, now.kept, vclock, joins, said, pack]
-  )
-  const fades = useMemo(() => (music?.enabled !== false && music?.track ? musicFades(music) : null), [music])
-  const videoLane = useMemo(
-    () => videoParts(segments, clipsOf(shown?.project.cut?.keep), shown?.words ?? [], joins.filter((j) => j.cut !== null).map((j) => j.t), shown?.project.sources ?? []),
-    [segments, shown, joins]
-  )
-  const pictures = useMemo(() => {
-    const before = new Map((shown?.project.broll ?? []).map((b) => [b.id, JSON.stringify(b)]))
-    const unchanged = new Set((now.p.broll ?? []).filter((b) => before.get(b.id) === JSON.stringify(b)).map((b) => b.id))
-    const layers = new Map((shown?.layers ?? []).flatMap((l) => (l.id && unchanged.has(l.id) ? [[l.id, l] as const] : [])))
-    const had = new Set((base.p.broll ?? []).map((b) => b.id))
-    const why = (id: string) => (had.has(id) ? pictureWhy(id, d.versions, d.project.notes ?? [], version?.n ?? 0) : `New: in Version ${next} once you make it`)
-    return pictureParts(now.p.broll ?? [], { placed: shown?.words ?? [], segments }, layers, shown?.duration ?? 0, why, (b) => pictureUrl(b, d.brollThumbs, images))
-  }, [now.p.broll, shown, segments, base.p.broll, d.versions, d.project.notes, d.brollThumbs, images, version?.n, next])
-  const lanes = useMemo(
-    (): Lanes => ({ video: videoLane, pictures, sounds, music: fades, joins: joins.map(({ t, bridge }) => ({ t, bridge })) }),
-    [videoLane, pictures, sounds, fades, joins]
-  )
-  // a level or a fade being dragged changes the project, not always what the timeline draws: Reel re-renders only
-  // when it does
-  const lanesKey = JSON.stringify(lanes)
-  useEffect(() => onLanes?.(lanes), [lanesKey, onLanes]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => onLanes?.(null), [onLanes])
+  // The timeline under the phone (TrackTimeline) draws what this changes, with each picture's still: one picked from the
+  // Library here has none saved yet
+  const thumb = useCallback((b: Broll) => pictureUrl(b, d.brollThumbs, images), [d.brollThumbs, images])
+  useEffect(() => onDraft?.({ draft: now, thumb, next }), [now, thumb, next, onDraft])
+  useEffect(() => () => onDraft?.(null), [onDraft])
   // a picture picked on the timeline opens its tab on it
   useEffect(() => {
     if (picture && tab !== 'broll') setTab('broll')

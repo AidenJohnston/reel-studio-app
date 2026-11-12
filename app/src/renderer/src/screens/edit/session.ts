@@ -4,11 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectDetail, ProjectJson, QueuedNote } from '../../../../shared/api'
 import { keptIds } from '../../../../shared/cut'
 import { applyHandEdit, countChanges, diffProject, type HandEdit } from '../../../../shared/hand-edit'
+import type { Draft } from '../../../../shared/timeline-edit'
 
-export interface Draft {
-  p: ProjectJson
-  kept: Set<string>
-}
+export type { Draft }
 
 export interface Session {
   /** the project the changes are measured from: the newest one seen, so the preview shows what the next version will */

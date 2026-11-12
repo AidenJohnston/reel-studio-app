@@ -84,11 +84,11 @@ test('sounds: add at the playhead, a level, a removal and a fade, carried by the
   await expect(rows.nth(0).getByRole('button').first()).toHaveText(/^Whoosh at 0:0[23] · on “\w+”$/)
   await expect(rows.nth(1).getByRole('button').first()).toHaveText(/^Hit at 0:0[67] · on “\w+”$/)
   await expect(page.getByTestId('drawer')).not.toContainText('.opus')
-  // on the timeline, and a mark picks its row
-  const marks = page.getByRole('group', { name: 'Sound effects on the timeline' }).getByRole('button')
+  // on the timeline Edit it myself shows, and a mark picks its row
+  const marks = page.getByRole('group', { name: 'Sound effects' }).getByRole('button')
   await expect(marks).toHaveCount(2)
   await expect(marks.nth(0)).toHaveAccessibleName(/^Whoosh at 0:0[23], on “\w+”$/)
-  await expect(page.getByTestId('timeline-music')).toBeVisible()
+  await expect(page.getByTestId('track-song')).toBeVisible()
   await marks.nth(1).click()
   await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true')
   await expect(rows.nth(1)).toBeInViewport()
