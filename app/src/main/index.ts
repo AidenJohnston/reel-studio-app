@@ -130,8 +130,8 @@ const proxies = createProxyBuilds(
       env: engineEnv,
       cwd: engineDir,
       log,
-      onSpawn: (pid) => {
-        pidRegistry?.add(pid)
+      onSpawn: (pid, project) => {
+        pidRegistry?.add(pid, project)
         hooks.onSpawn(pid)
       },
       onExit: (pid) => {
