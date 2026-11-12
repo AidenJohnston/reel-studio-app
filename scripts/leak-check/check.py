@@ -306,7 +306,8 @@ def main() -> int:
             print(f"\nleak check: FAILED ({len(findings)} finding(s) in the text). Remove the private material; "
                   "a finding gives the line and column, never the word.", file=sys.stderr)
             return 1
-        print("leak check: passed (text)")
+        if not args.commit_message:             # a hook stays quiet when it passes
+            print("leak check: passed (text)")
         return 0
 
     if args.staged:
