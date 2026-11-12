@@ -261,3 +261,36 @@ def test_two_apps_downloading_into_one_models_folder_fetch_it_once(env):
     assert (d / "model.bin").read_bytes() == MODEL
     assert not (d / "model.bin.part").exists()
     assert plan.requests == [(0, "ok")]                          # one fetch of model.bin, from the start
+
+
+def test_a_disk_that_fills_mid_download_says_so_instead_of_offline(env, monkeypatch):
+    """A write that fails for space after a dropped connection keeps its errno (before, the retry loop turned it into
+    a bare OSError and the person was told to check their internet)."""
+    import errno as _errno
+    d, start = env
+    plan = Plan([("close", 300_000)])
+    start(plan)
+    opened = []
+
+    class Full:
+        def __init__(self, f):
+            self.f = f
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            self.f.close()
+        def write(self, _b):
+            raise OSError(_errno.ENOSPC, "No space left on device")
+
+    def fake_open(path, mode="r", *a, **k):
+        f = open(path, mode, *a, **k)
+        if str(path).endswith("model.bin.part"):
+            opened.append(mode)
+            if len(opened) > 1:
+                return Full(f)
+        return f
+    monkeypatch.setattr(transcribe, "open", fake_open, raising=False)
+    with pytest.raises(EngineError) as e:
+        transcribe.download_model("tiny.en")
+    assert e.value.code == "NO_SPACE"
+    assert len(opened) == 2                                      # stopped at the full disk, no more retries

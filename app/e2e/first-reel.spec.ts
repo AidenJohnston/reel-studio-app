@@ -65,8 +65,6 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
   const profile = freshProfile(variant)
   const { app, page } = await launch({ ...profile.env, ...env })
   await page.setViewportSize(size)
-  const connected = () => page.evaluate(() => window.reel.ai.active().then((p) => p.connected && p.id !== 'none'))
-  await expect.poll(connected, { message: ai ? 'an AI is connected' : 'no AI is connected' }).toBe(ai)
   const stops: Stop[] = []
   const stop = async (name: string, selectors: string[], kind?: Stop['kind']) => {
     const ways = await waysIn(page, selectors)
@@ -76,6 +74,8 @@ async function walk(variant: string, env: Record<string, string>, size: { width:
   const exports = join(profile.root, 'Library', 'Exports')
   const saved = () => existsSync(exports) && readdirSync(exports).some((f) => f.endsWith('.mp4'))
   try {
+    const connected = () => page.evaluate(() => window.reel.ai.active().then((p) => p.connected && p.id !== 'none'))
+    await expect.poll(connected, { message: ai ? 'an AI is connected' : 'no AI is connected' }).toBe(ai)
     const deadline = Date.now() + 280_000
     let last = ''
     while (!saved()) {
@@ -146,7 +146,8 @@ test.describe('decisions to a first reel', () => {
   })
 
   test('with an AI connected, at the smallest window', async () => {
-    // the practice editor (main/ai-mock.ts REELSTUDIO_MOCK_NOTE), connected from the start
+    // the practice editor (main/ai-mock.ts REELSTUDIO_MOCK_NOTE), connected from the start. Its Version 1 is the mock's
+    // basic first edit; what this counts is the choices around it, which are the same.
     const stops = await walk('ai', { REELSTUDIO_MOCK_NOTE: '400' }, { width: 1100, height: 720 }, true)
     record('ai', stops)
     expect(stops.filter((s) => s.kind === 'decision').map((s) => s.name)).toEqual(['Pick the video', 'Keep the draft or say what to change', 'Post it or save it'])

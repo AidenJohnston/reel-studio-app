@@ -80,7 +80,7 @@ test('without one it downloads by itself with MB progress while setup goes on, a
   try {
     await toStage(offline.page)
     await expect(offline.page.getByTestId('model-error')).toHaveText(
-      'The download stopped, so check your internet connection and try again; it picks up where it left off.'
+      'The download stopped, so check your internet connection and try again, and it will pick up where it left off.'
     )
     await expect(offline.page.getByTestId('model-retry')).toHaveText('Try again')
   } finally {

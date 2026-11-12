@@ -118,7 +118,7 @@ function preference(t: Trial, project: string): { key: string; kind: MemoryKind;
     }
     case 'hook': return { key, kind: 'cuts', line: short(`Prefer the tested opening for ${project}.`), text: `For project ${JSON.stringify(project)}, prefer opening ${canonical(t.to)} over ${canonical(t.from)}.` };
     case 'cover': return { key, kind: 'look', line: short(`Prefer the tested cover for ${project}.`), text: `For project ${JSON.stringify(project)}, prefer cover ${canonical(t.to)} over ${canonical(t.from)}.` };
-    case 'seed': return { key, kind: 'pacing', line: short(`Prefer the tested pace for ${project}.`), text: `For project ${JSON.stringify(project)}, prefer cut-style seed ${canonical(t.to)} over ${canonical(t.from)}.` };
+    case 'seed': return { key, kind: 'pacing', line: short(`Prefer the tested pace for ${project}.`), text: `For project ${JSON.stringify(project)}, use the pace that tested better (number ${canonical(t.to)}, over ${canonical(t.from)}).` };
   }
 }
 const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;

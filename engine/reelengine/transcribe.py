@@ -153,6 +153,8 @@ def _fetch_part(url: str, part: Path, size: int, on_bytes) -> None:
                 continue
             raise
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            if disk_full(exc):
+                raise                           # a full disk is not a dropped connection: no retry, keep its errno
             if drops == 0 and (part.stat().st_size if part.exists() else 0) == have:
                 # not one byte on the first try: we are offline, not dropped. Say so right away.
                 raise exc if isinstance(exc, OSError) else OSError(f"{type(exc).__name__}: {exc}")
@@ -279,11 +281,11 @@ def _download_unlocked(name: str, repo: str, dest: Path) -> dict:
                     raise EngineError("NO_SPACE", f"download of {fname} failed: {exc}", NO_SPACE_MESSAGE)
                 raise EngineError("OFFLINE", f"download of {fname} failed: {exc}",
                                   "The download stopped, so check your internet connection and try "
-                                  "again; it picks up where it left off.")
+                                  "again, and it will pick up where it left off.")
             got = part.stat().st_size if part.exists() else 0
             if size and got != size:
                 raise EngineError("DOWNLOAD_INCOMPLETE", f"{fname}: got {got} of {size} bytes",
-                                  "The download didn't finish, so try again; it picks up "
+                                  "The download didn't finish, so try again, and it will pick up "
                                   "where it left off.")
             if sha and _sha256(part) != sha:
                 part.unlink(missing_ok=True)    # a corrupt file of the right length: start it again

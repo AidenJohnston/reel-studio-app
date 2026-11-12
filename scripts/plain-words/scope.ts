@@ -195,9 +195,14 @@ export const scope: Scope = {
     { file: 'app/src/main/index.ts', text: 'updaterCacheDirName', reason: 'an update settings file written for tests, never shown' },
     { file: 'app/src/main/ai-mock.ts', text: 'Stock API keys need the AI package', reason: 'Settings > Picture sites, on a broken install only' },
     { file: 'app/src/main/ai-mock.ts', text: 'claude_cli: MCP refused', reason: 'a mode only tests turn on' },
-    { file: 'ai/src/index.ts', text: 'talking to your server', reason: 'Settings > Advanced, your own AI server' },
-    { file: 'ai/src/index.ts', text: 'Choose Pexels or Pixabay', reason: 'Settings > Picture sites' },
-    { file: 'ai/src/index.ts', text: 'stock API key', reason: 'Settings > Picture sites' },
-    { file: 'ai/src/index.ts', text: 'CLIProxyAPI', reason: 'Settings > Advanced, a CLIProxyAPI server the person runs themselves' }
+    { file: 'ai/src/index.ts', text: 'Something went wrong talking to your server. Try again.', reason: 'Settings > Advanced, your own AI server' },
+    { file: 'ai/src/index.ts', text: 'Choose Pexels or Pixabay and enter an API key.', reason: 'Settings > Picture sites' },
+    { file: 'ai/src/index.ts', text: 'so the stock API key was not saved.', reason: 'Settings > Picture sites' },
+    { file: 'ai/src/index.ts', text: 'The stock API key could not be saved securely.', reason: 'Settings > Picture sites' },
+    { file: 'ai/src/index.ts', text: 'That CLIProxyAPI is not on this computer, so its key was not sent.', reason: 'Settings > Advanced, a CLIProxyAPI server the person runs themselves' },
+    { file: 'ai/src/index.ts', text: 'Paste a key from api-keys in your CLIProxyAPI config.', reason: 'Settings > Advanced, CLIProxyAPI' },
+    { file: 'ai/src/index.ts', text: 'Give CLIProxyAPI a longer one in api-keys', reason: 'Settings > Advanced, CLIProxyAPI' },
+    { file: 'ai/src/index.ts', text: 'CLIProxyAPI answered, but it offers no models yet.', reason: 'Settings > Advanced, CLIProxyAPI' },
+    { file: 'ai/src/index.ts', text: 'That management key is shorter than', reason: 'Settings > Advanced, CLIProxyAPI' }
   ]
 }
