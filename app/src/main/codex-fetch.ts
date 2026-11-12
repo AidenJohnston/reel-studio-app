@@ -11,6 +11,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream, existsSync, promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { join, posix, win32 } from 'node:path'
 
 export const CODEX_VERSION = '0.167.2'
@@ -136,21 +139,26 @@ export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProg
     if (!res.ok || !res.body) throw new CodexFetchError('offline', FETCH_MESSAGES.offline)
     const total = Number(res.headers.get('content-length')) || pkg.bytes
     const hash = createHash('sha256')
-    const out = createWriteStream(archive)
     let got = 0
     let shown = -1
-    try {
-      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    const meter = new Transform({
+      transform(chunk: Buffer, _enc, done) {
         hash.update(chunk)
-        got += chunk.byteLength
-        if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()))
+        got += chunk.length
         const pct = Math.min(99, Math.floor((got / total) * 100))
         if (pct !== shown) onProgress?.((shown = pct))
+        done(null, chunk)
       }
+    })
+    // pipeline: a write error (a disk that fills up mid-download, a file it can't open) rejects here and closes both
+    // ends, instead of escaping as an unhandled stream error in the main process
+    try {
+      await pipeline(Readable.fromWeb(res.body as unknown as NodeReadableStream<Uint8Array>), meter, createWriteStream(archive), { signal })
     } catch (e) {
-      throw signal.aborted ? cancelled() : isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('offline', FETCH_MESSAGES.offline)
-    } finally {
-      await new Promise<void>((r) => out.end(r))
+      if (signal.aborted) throw cancelled()
+      if (isDiskFull(e)) throw new CodexFetchError('disk', FETCH_MESSAGES.disk)
+      // a file error (it has a syscall: open, write) is this computer's; anything else is the connection
+      throw (e as NodeJS.ErrnoException)?.syscall ? new CodexFetchError('failed', FETCH_MESSAGES.failed) : new CodexFetchError('offline', FETCH_MESSAGES.offline)
     }
     if (signal.aborted) throw cancelled()
     // Nothing from the download is unpacked or run unless it is byte for byte the pinned package.

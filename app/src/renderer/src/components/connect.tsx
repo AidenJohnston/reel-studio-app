@@ -75,6 +75,7 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
   const easy = useEasyAi()
   const guided = !!easy?.on && !anyOn
   const [otherWaysOpen, setOtherWaysOpen] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
   const hubOn = anyOn && active.id === 'custom' && active.label === 'CLIProxyAPI'
   const otherOn = anyOn && !hubOn && !['claude-cli', 'codex-cli'].includes(active.id)
   const [othersOpen, setOthersOpen] = useState(false)
@@ -116,7 +117,16 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
       action={
         easy?.on && active.id === 'custom' && active.label === REEL_STUDIO_AI ? (
           // the guided Reel Studio AI sign-in: Sign out removes its key and connection, not only the choice
-          <Button size="small" onClick={() => void reel.ai.guidedSignOut('publik').then(() => disconnect())} data-testid="guided-sign-out-publik">
+          <Button
+            size="small"
+            onClick={() =>
+              void reel.ai.guidedSignOut('publik').then(
+                () => disconnect(),
+                (e) => setSignOutError(userMessage(e))
+              )
+            }
+            data-testid="guided-sign-out-publik"
+          >
             Sign out
           </Button>
         ) : (
@@ -126,6 +136,11 @@ export function ConnectAI({ onConnected, advanced = true, stagesOpen = false }: 
         )
       }
     >
+      {signOutError && (
+        <p className="pv-note error" role="alert">
+          {signOutError}
+        </p>
+      )}
       {details}
     </ProviderRow>
   )

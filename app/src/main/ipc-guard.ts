@@ -113,7 +113,7 @@ export function validateIpcArgs(channel: string, args: unknown[]): void {
     case 'cloud:save': ok = path(first) && path(second) && text(third) && third.length > 0; break
     case 'style:answer': ok = text(second) && typeof third === 'boolean'; break
     case 'ai:vendorStatus': case 'ai:vendorConnect': case 'ai:vendorCancel': case 'ai:vendorSignInAgain': case 'ai:vendorSignInWithCode': case 'ai:vendorSignIn': ok = first === 'claude' || first === 'chatgpt'; break
-    case 'ai:guidedStart': case 'ai:guidedCancel': case 'ai:guidedReopen': case 'ai:guidedSignOut': ok = first === 'chatgpt' || first === 'publik'; break
+    case 'ai:guidedStart': case 'ai:guidedStatus': case 'ai:guidedCancel': case 'ai:guidedReopen': case 'ai:guidedSignOut': ok = first === 'chatgpt' || first === 'publik'; break
     case 'ai:setEasyAi': ok = typeof first === 'boolean'; break
     case 'ai:setStockKey': ok = (first === 'pexels' || first === 'pixabay') && (second === null || text(second)); break
     // My style › Reference reels (references-ipc.ts) and Your niche (niche-ipc.ts)

@@ -167,13 +167,19 @@ export async function detectCodex(o: CodexDetectOptions = {}): Promise<LocalCode
   if (!bin && o.bin === undefined && o.fallbackBin && path.isAbsolute(o.fallbackBin) && exists(o.fallbackBin)) bin = o.fallbackBin;
   if (!bin) return { state: 'missing', installed: false, signedIn: false, reason: CODEX_MESSAGES.missing };
 
+  // A Codex of the person's own that won't start: the one the app fetched takes its place, if there is one.
+  const found = bin;
+  const broken = (): Promise<LocalCodex> | LocalCodex =>
+    o.fallbackBin && o.fallbackBin !== found && path.isAbsolute(o.fallbackBin) && exists(o.fallbackBin)
+      ? detectCodex({ ...o, bin: o.fallbackBin, fallbackBin: undefined })
+      : { state: 'broken', installed: false, signedIn: false, bin: found, reason: CODEX_MESSAGES.broken };
   let version: string | undefined;
   try {
     const v = await run(bin, ['--version'], { timeoutMs: RUN_TIMEOUT_MS });
-    if (v.code !== 0) return { state: 'broken', installed: false, signedIn: false, bin, reason: CODEX_MESSAGES.broken };
+    if (v.code !== 0) return broken();
     version = (v.stdout.match(/\d+\.\d+(?:\.\d+)?/) ?? [])[0];
   } catch {
-    return { state: 'broken', installed: false, signedIn: false, bin, reason: CODEX_MESSAGES.broken };
+    return broken();
   }
 
   const base = { installed: true, bin, ...(version ? { version } : {}) };

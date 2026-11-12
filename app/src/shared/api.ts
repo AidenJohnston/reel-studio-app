@@ -1129,6 +1129,8 @@ export interface ReelApi {
     setEasyAi(on: boolean): Promise<EasyAiInfo>
     /** Starts (or joins) a guided sign-in; resolves when it ends. Every step also arrives on onGuided. */
     guidedStart(route: GuidedRoute): Promise<GuidedInfo>
+    /** the guided sign-in's latest step (a screen that opens while one runs picks it up) */
+    guidedStatus(route: GuidedRoute): Promise<GuidedInfo>
     guidedCancel(route: GuidedRoute): Promise<void>
     /** waiting: opens the sign-in page again */
     guidedReopen(route: GuidedRoute): Promise<void>

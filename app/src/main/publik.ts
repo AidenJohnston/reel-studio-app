@@ -282,16 +282,21 @@ export function createPublikSignIn(deps: PublikDeps) {
     return 'timeout'
   }
 
+  // Usage counting. Consent is asked before every event, so turning usage data off in Settings stops the next one;
+  // `counting` changes on every start and stop, so a start still waiting on its answer can't run after a stop.
+  let counting = 0
+  const send = async (event: 'app_opened' | 'active_session', key: string, gen: number): Promise<void> => {
+    if (gen === counting && (await deps.countingAllowed()) && gen === counting) await deps.api.telemetry(event, key)
+  }
   function startCounting(key: string): void {
     if (timer) return
-    void deps.countingAllowed().then((allowed) => {
-      if (!allowed || timer) return
-      timer = setInterval(() => void deps.api.telemetry('active_session', key), deps.sessionMs ?? SESSION_MS)
-      timer.unref?.()
-      void deps.api.telemetry('app_opened', key)
-    })
+    const gen = ++counting
+    timer = setInterval(() => void send('active_session', key, gen), deps.sessionMs ?? SESSION_MS)
+    timer.unref?.()
+    void send('app_opened', key, gen)
   }
   function stopCounting(): void {
+    counting++
     if (timer) clearInterval(timer)
     timer = null
   }
@@ -321,7 +326,8 @@ export function createPublikSignIn(deps: PublikDeps) {
         const got = await deps.api.wallet(c.key)
         if (signal.aborted) return cancelled()
         if (got.status === 401) {
-          // the key is gone on publik's side (revoked or deleted): a fresh install, once
+          // the key is gone on publik's side (revoked or deleted): its connection goes too, then a fresh install, once
+          if (c.connection_id) await deps.dropKey(c.connection_id)
           await deps.store.clear()
           c = null
           continue
@@ -353,6 +359,12 @@ export function createPublikSignIn(deps: PublikDeps) {
       if (signal.aborted) return cancelled()
       emit({ step: 'checking', message: PUBLIK_WORDS.connecting })
       const id = await deps.useKey(c.key, c.connection_id)
+      if (signal.aborted) {
+        // Cancel (or the flag turned off) while the key was being checked and saved: take it back out
+        await deps.dropKey(id).catch(() => {})
+        await deps.store.save({ key: c.key, install_id: c.install_id, claim_url: c.claim_url })
+        return cancelled()
+      }
       if (id !== c.connection_id) await deps.store.save({ ...c, connection_id: id })
       startCounting(c.key)
       return emit({ step: 'done', message: PUBLIK_WORDS.done, ...(already ? { already: true } : {}) })
@@ -398,9 +410,13 @@ export function createPublikSignIn(deps: PublikDeps) {
     },
     /** The way back out: the key and its connection are removed; the next sign-in starts a fresh install. */
     async signOut(): Promise<void> {
-      run?.ctrl.abort()
+      // a sign-in still running finishes (cancelled) first, so it can't save the key again after this
+      const running = run
+      running?.ctrl.abort()
+      await running?.done.catch(() => undefined)
       stopCounting()
       const c = await deps.store.load()
+      // if the connection can't be removed, the credential stays, so Sign out can be tried again
       if (c?.connection_id) await deps.dropKey(c.connection_id)
       await deps.store.clear()
       emit({ step: 'idle' })

@@ -312,7 +312,7 @@ export const createMockAI: CreateAI = ({ host, managedCodex }) => {
     },
     async codexStatus() {
       // the Codex app Reel Studio fetched (easy-ai.ts) is found like the real package finds it: signed out at first
-      if (state.chatgpt === 'missing' && managedCodex?.()) state.chatgpt = 'signed_out'
+      if ((state.chatgpt === 'missing' || state.chatgpt === 'broken') && managedCodex?.()) state.chatgpt = 'signed_out'
       return cliStatus('chatgpt')
     },
     async connections() {

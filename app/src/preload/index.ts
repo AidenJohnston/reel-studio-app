@@ -132,6 +132,7 @@ const api: ReelApi = {
     easyStatus: () => call('ai:easyStatus'),
     setEasyAi: (on) => call('ai:setEasyAi', on),
     guidedStart: (route) => call('ai:guidedStart', route),
+    guidedStatus: (route) => call('ai:guidedStatus', route),
     guidedCancel: (route) => call('ai:guidedCancel', route),
     guidedReopen: (route) => call('ai:guidedReopen', route),
     guidedSignOut: (route) => call('ai:guidedSignOut', route),

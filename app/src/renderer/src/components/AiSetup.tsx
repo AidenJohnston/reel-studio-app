@@ -2,7 +2,7 @@
 // first, each one press: "Sign in with ChatGPT" (the app gets ChatGPT ready, then OpenAI's page opens) and "Use
 // Reel Studio's AI" (publik's page opens). Today's ways to connect wait under "Other ways" (connect.tsx ConnectAI).
 // A running sign-in takes over its row: one sentence that changes in place, Cancel, and what to do in the browser.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EasyAiInfo, GuidedInfo, GuidedRoute, ProviderInfo, VendorInfo } from '../../../shared/api'
 import { reel, userMessage } from '../api'
 import { BrandMark, Logo } from './brand'
@@ -46,10 +46,20 @@ const RUNNING = new Set<GuidedInfo['step']>(['checking', 'getting', 'waiting'])
 export function GuidedChoices({ easy, onConnected }: { easy: EasyAiInfo; onConnected: (p: ProviderInfo) => void }) {
   const [info, setInfo] = useState<Record<GuidedRoute, GuidedInfo | null>>({ chatgpt: null, publik: easy.publikNotice ?? null })
   const [codex, setCodex] = useState<VendorInfo | null>(null)
+  const connectedRef = useRef(onConnected)
+  connectedRef.current = onConnected
   useEffect(() => {
     let live = true
     reel.ai.vendorStatus('chatgpt').then((i) => live && setCodex(i), () => {})
-    const off = reel.ai.onGuided((i) => live && setInfo((s) => ({ ...s, [i.route]: i })))
+    // one already running (the person left this screen and came back) shows where it is, with its Cancel
+    for (const r of ['chatgpt', 'publik'] as const)
+      reel.ai.guidedStatus(r).then((i) => live && RUNNING.has(i.step) && setInfo((s) => ({ ...s, [r]: i })), () => {})
+    const off = reel.ai.onGuided((i) => {
+      if (!live) return
+      setInfo((s) => ({ ...s, [i.route]: i }))
+      // the one place a guided sign-in connects the screen, however it was started
+      if (i.step === 'done') void reel.ai.active().then((p) => live && connectedRef.current(p), () => {})
+    })
     return () => {
       live = false
       off()
@@ -60,9 +70,8 @@ export function GuidedChoices({ easy, onConnected }: { easy: EasyAiInfo; onConne
   const start = async (r: GuidedRoute) => {
     setInfo((s) => ({ ...s, [r]: { route: r, step: 'checking' } }))
     try {
-      const end = await reel.ai.guidedStart(r)
-      setInfo((s) => ({ ...s, [r]: end }))
-      if (end.step === 'done') onConnected(await reel.ai.active())
+      // every step, done included, arrives on onGuided above
+      await reel.ai.guidedStart(r)
     } catch (e) {
       setInfo((s) => ({ ...s, [r]: { route: r, step: 'failed', problem: 'failed', message: userMessage(e) } }))
     }

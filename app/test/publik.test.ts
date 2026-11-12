@@ -74,8 +74,8 @@ describe("publik's calls", () => {
 const ORIGIN = 'https://publikhq.com'
 const wallet = (w: Partial<Wallet> = {}): Wallet => ({ claim_state: 'anonymous', claim_url: `${ORIGIN}/claim/k1`, plan: { kind: 'none', label: null }, balance_micros: 0, top_up_url: `${ORIGIN}/top-up`, ...w })
 
-function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean } = {}) {
-  const s = { claimed: !!o.claimed, balance: o.balance ?? 0, provisions: 0, events: [] as string[], revoked: new Set(o.revoked ?? []) }
+function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean; sessionMs?: number; slowSave?: Promise<void>; dropFails?: boolean } = {}) {
+  const s = { claimed: !!o.claimed, balance: o.balance ?? 0, provisions: 0, events: [] as string[], revoked: new Set(o.revoked ?? []), counting: o.counting ?? true, saving: false }
   const fake: PublikApi = {
     async provision() {
       if (o.offline) throw new PublikError('offline', PUBLIK_WORDS.offline)
@@ -103,18 +103,21 @@ function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; of
     openUrl: (u) => opened.push(u),
     async useKey(key, id) {
       used.push({ key, ...(id ? { id } : {}) })
+      s.saving = true
+      await o.slowSave
       return (active = id ?? 'c_publik')
     },
     async dropKey(id) {
+      if (o.dropFails) throw { code: 'locked', userMessage: 'Close other apps, then try again.' }
       dropped.push(id)
       if (active === id) active = null
     },
     inUse: async (id) => active === id,
-    countingAllowed: async () => o.counting ?? true,
+    countingAllowed: async () => s.counting,
     emit: (i) => steps.push(i),
     pollMs: 2,
     limitMs: 60,
-    sessionMs: 60_000
+    sessionMs: o.sessionMs ?? 60_000
   })
   return { s, sign, used, dropped, opened, steps, saved: () => saved }
 }
@@ -181,8 +184,9 @@ describe('Sign in with publik', () => {
   })
 
   it('fails if a key publik no longer knows is kept instead of starting a fresh install, once', async () => {
-    const t = publik({ claimed: true, balance: 1, revoked: ['pk_live_old'], stored: { key: 'pk_live_old', install_id: 'i0', claim_url: null } })
+    const t = publik({ claimed: true, balance: 1, revoked: ['pk_live_old'], stored: { key: 'pk_live_old', install_id: 'i0', claim_url: null, connection_id: 'c_old' } })
     expect(await t.sign.start()).toMatchObject({ step: 'done' })
+    expect(t.dropped).toEqual(['c_old']) // the dead key's connection doesn't stay behind
     expect(t.s.provisions).toBe(1)
     expect(t.used).toEqual([{ key: 'pk_live_1' }])
   })
@@ -211,6 +215,39 @@ describe('Sign in with publik', () => {
     await t.sign.signOut()
     expect(t.dropped).toEqual(['c_publik'])
     expect(t.saved()).toBeNull()
+  })
+})
+
+describe('Sign in with publik: stopping part way', () => {
+  it('fails if Cancel while the key is being saved leaves Reel Studio’s AI connected', async () => {
+    let release: () => void = () => {}
+    const t = publik({ claimed: true, balance: 1, slowSave: new Promise<void>((r) => (release = r)) })
+    const done = t.sign.start()
+    await until(() => t.s.saving)
+    t.sign.cancel()
+    release()
+    expect(await done).toMatchObject({ step: 'idle', problem: 'cancelled' })
+    expect(t.dropped).toEqual(['c_publik'])
+    expect(t.saved()?.connection_id).toBeUndefined()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(t.s.events).toEqual([])
+  })
+
+  it('fails if turning usage data off after signing in does not stop the next event', async () => {
+    const t = publik({ claimed: true, balance: 1, sessionMs: 5 })
+    expect(await t.sign.start()).toMatchObject({ step: 'done' })
+    await until(() => t.s.events.length >= 2)
+    t.s.counting = false
+    const sent = t.s.events.length
+    await new Promise((r) => setTimeout(r, 30))
+    expect(t.s.events.length).toBe(sent)
+    t.sign.stop()
+  })
+
+  it('fails if Sign out says it worked when the connection could not be removed, or forgets what to remove', async () => {
+    const t = publik({ claimed: true, balance: 1, stored: { key: 'pk_live_old', install_id: 'i0', claim_url: null, connection_id: 'c_publik' }, dropFails: true })
+    await expect(t.sign.signOut()).rejects.toMatchObject({ userMessage: 'Close other apps, then try again.' })
+    expect(t.saved()?.connection_id).toBe('c_publik')
   })
 })
 

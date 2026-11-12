@@ -2,7 +2,7 @@
 // and the unpack is a stand-in that writes the package's layout, so these run the same on every system.
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, promises as fs, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, promises as fs, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { codexBinIn, CodexFetchError, ensureCodex, FETCH_MESSAGES, installedCodex, type CodexPackage } from '../src/main/codex-fetch'
@@ -93,6 +93,14 @@ describe('getting the Codex app', () => {
     const full = await ensureCodex({ ...d, freeBytes: async () => BYTES.length * 2, fetch: net.fetch, extract: fakeExtract() }, new AbortController().signal).catch((e) => e)
     expect([full.problem, full.message]).toEqual(['disk', FETCH_MESSAGES.disk])
     expect(net.calls()).toBe(0) // nothing downloads onto a disk that can't hold it
+  })
+
+  it('fails if a download file that cannot be written crashes the app instead of saying so', async () => {
+    const d = place()
+    // the folder turns into a file between the space check and the download, so opening the download fails
+    const blocked = { ...d, freeBytes: async (dir: string) => (rmSync(dir, { recursive: true, force: true }), writeFileSync(dir, 'x'), 10e9) }
+    const err = await ensureCodex({ ...blocked, fetch: serve(BYTES).fetch, extract: fakeExtract() }, new AbortController().signal).catch((e) => e)
+    expect([err.problem, err.message]).toEqual(['failed', FETCH_MESSAGES.failed])
   })
 
   it('fails if a computer the pin has no package for downloads anything', async () => {

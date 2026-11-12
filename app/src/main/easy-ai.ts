@@ -72,7 +72,7 @@ export interface EasyAiDeps {
   vendors: () => VendorConnect
   codexStatus(): Promise<CliStatus>
   ai: {
-    saveConnection(c: { id?: string; label: string; kind: 'openai'; baseURL: string; model: string; key: string }): Promise<{ status: { connected: boolean }; connection?: { id: string }; error?: { userMessage: string } }>
+    saveConnection(c: { id?: string; label: string; kind: 'openai'; baseURL: string; model: string; key: string }): Promise<{ status: { connected: boolean }; connection?: { id: string }; error?: { code?: string; userMessage: string } }>
     removeConnection(id: string): Promise<void>
     active(): Promise<{ id: string; connected: boolean; connectionId?: string }>
   }
@@ -129,14 +129,20 @@ export function setupEasyAi(d: EasyAiDeps) {
     origin,
     openUrl: d.openExternal,
     async useKey(key, connectionId) {
-      const r = await d.ai.saveConnection({ ...(connectionId ? { id: connectionId } : {}), label: PUBLIK_LABEL, kind: 'openai', baseURL: `${origin}/api/v1`, model: PUBLIK_MODEL, key })
+      const save = (id?: string) => d.ai.saveConnection({ ...(id ? { id } : {}), label: PUBLIK_LABEL, kind: 'openai', baseURL: `${origin}/api/v1`, model: PUBLIK_MODEL, key })
+      let r = await save(connectionId)
+      // the connection was removed by hand (Settings › Advanced): save a new one instead of failing every time
+      if (connectionId && r.error?.code === 'connection_gone') r = await save()
       d.aiChanged()
       if (!r.status.connected || !r.connection) throw { userMessage: r.error?.userMessage || 'Reel Studio’s AI didn’t answer. Try again.' }
       return r.connection.id
     },
     async dropKey(id) {
-      await d.ai.removeConnection(id).catch(() => {})
-      d.aiChanged()
+      try {
+        await d.ai.removeConnection(id)
+      } finally {
+        d.aiChanged()
+      }
     },
     async inUse(id) {
       const a = await d.ai.active()
@@ -192,6 +198,7 @@ export function setupEasyAi(d: EasyAiDeps) {
       return chatgpt.start()
     })
   )
+  d.handle('ai:guidedStatus', guarded((r) => (r === 'publik' ? publik.status() : chatgpt.status())))
   d.handle('ai:guidedCancel', guarded((r) => (r === 'publik' ? publik.cancel() : chatgpt.cancel())))
   d.handle('ai:guidedReopen', guarded((r) => (r === 'publik' ? publik.reopen() : chatgpt.reopen())))
   d.handle('ai:guidedSignOut', guarded((r) => (r === 'publik' ? publik.signOut() : undefined)))
