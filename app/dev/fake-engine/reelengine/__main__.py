@@ -165,6 +165,12 @@ def cmd_init(args: list[str]) -> dict:
         sources.append({"id": f"s{i}", "path": f"media/{dest.name}", "duration": info["duration"],
                         "fps": info.get("fps", 30), "width": info.get("width"), "height": info.get("height"),
                         "rotation": info.get("rotation", 0)})
+        # the real init reads the writing in the frames (mirror_detect.py); here the file's name says it
+        name = Path(f).name.lower()
+        if "maybe-mirrored" in name:
+            sources[-1]["mirrorCheck"] = {"verdict": "maybe-mirrored", "why": "some writing behind you seems to read backwards"}
+        elif "mirrored" in name:
+            sources[-1].update(mirror=True, mirrorCheck={"verdict": "mirrored", "why": "the writing behind you reads backwards"})
     slug = proj.name
     data = {
         "schemaVersion": 1, "id": str(uuid.uuid4()), "title": title, "slug": slug,
