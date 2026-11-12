@@ -103,7 +103,8 @@ jobs:
           # (pillow, packaging) at the runtime's versions.
           python -m pip install --target "$RUNNER_TEMP/testlibs" -c engine/requirements.txt 'pytest<10' pillow-heif
           mkdir -p "$RUNNER_TEMP/bin" && ln -sf "$REELENGINE_FFMPEG" "$RUNNER_TEMP/bin/ffmpeg" && ln -sf "$REELENGINE_FFPROBE" "$RUNNER_TEMP/bin/ffprobe"
-          PATH="$RUNNER_TEMP/bin:$PATH" PYTHONPATH="$RUNNER_TEMP/testlibs" REELENGINE_CACHE="$RUNNER_TEMP/reelengine-cache" \
+          # engine/ on PYTHONPATH too: CLI tests start `python -m reelengine` in a child process (CI installs it with -e)
+          PATH="$RUNNER_TEMP/bin:$PATH" PYTHONPATH="$RUNNER_TEMP/testlibs:$PWD/engine" REELENGINE_CACHE="$RUNNER_TEMP/reelengine-cache" \
             packaging/runtime/mac-arm64/python/bin/python3 -s -m pytest engine/tests -ra -p no:cacheprovider
       - name: Summary
         if: always()
