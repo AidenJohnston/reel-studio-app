@@ -240,6 +240,7 @@ class AgentHook(Kit):
                         "gh pr create --fill",
                         "gh pr create -t x --body-file - <<EOF\nclean\nEOF\ncat notes.md | gh pr create -t x --body-file -",
                         "cat notes.md | gh pr create -t x -F -; gh pr create -t x -F - <<EOF\nclean\nEOF",
+                        "gh pr create -t 'title <<EOF' -F -", "gh pr create -t x -F - # <<EOF",
                         "gh pr create --title clean", "gh issue comment 5", "gh pr review 5"):
             self.assertBlocked(self.call(command), why="can't")
         for command in ("gh pr comment 3 --body $body", "gh pr create -t x --body `\r\n$body"):
@@ -267,16 +268,20 @@ class Fallbacks(Kit):
                 os.symlink(shutil.which(tool), bin_dir / tool)
             sh, path = "/bin/sh", str(bin_dir)
 
-        def run(command: str) -> int:
-            payload = {"tool_name": "Bash", "tool_input": {"command": command, "description": "push to gh"},
+        def run(command: str, path: str, description: str = "push to gh") -> int:
+            payload = {"tool_name": "Bash", "tool_input": {"command": command, "description": description},
                        "cwd": str(self.root / "gh")}
             return subprocess.run([sh, "scripts/leak-check/with-python.sh", "--agent-hook",
                                    "scripts/leak-check/agent_hook.py"], cwd=self.root,
                                   input=json.dumps(payload).encode(), capture_output=True,
                                   env={**os.environ, "PATH": path}).returncode
 
-        self.assertEqual(run("gh -R o/r pr create -t x -b y"), 2)
-        self.assertEqual(run("git push fork HEAD"), 0)
+        self.assertEqual(run("gh -R o/r pr create -t x -b y", path), 2)
+        self.assertEqual(run("git push fork HEAD", path), 0)
+        # With not even cat or sed, it still reads the call and blocks gh.
+        nothing = self.root / "empty-bin"
+        nothing.mkdir()
+        self.assertEqual(run("gh -R o/r pr create -t x -b y", str(nothing), "push"), 2)
 
     def test_npm_install_step_sets_up_hooks_without_overriding_or_failing(self):
         # fails if the prepare script breaks `npm install` outside a git checkout, doesn't set core.hooksPath in a

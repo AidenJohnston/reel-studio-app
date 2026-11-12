@@ -36,8 +36,8 @@ BUILTIN = {"accessibility", "agent-task", "alias", "api", "attestation", "auth",
            "completion", "config", "copilot", "extension", "gist", "gpg-key", "help", "issue", "label", "licenses",
            "org", "pr", "preview", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key",
            "status", "variable", "version", "workflow"}
-HEREDOC = re.compile(r"<<-?\s*['\"]?[A-Za-z_]")                 # a bash heredoc starts on the gh line
-HERESTRING = re.compile(r"['\"]@\s*\|\s*$")                     # a PowerShell here-string piped into gh
+CAT_HEREDOC = re.compile(r"^\$\(\s*cat\s+<<-?\s*['\"]?[A-Za-z_]")   # --body "$(cat <<'EOF' ... EOF)"
+HERESTRING = re.compile(r"^\s*['\"]@\s*\|\s*$")                     # a PowerShell here-string's last line, piped
 DEVICE = re.compile(r"^(?:/dev/|/proc/)")   # /dev/stdin and friends: the hook's own stdin, not the command's
 CD = re.compile(r"(?:^|[;&|(\n]\s*)(?:cd|pushd|Set-Location|sl|Push-Location)\s+(\"[^\"]*\"|'[^']*'|[^\s;&|)]+)", re.I)
 CAT = re.compile(r"^\$\(\s*(?:cat|type|gc|Get-Content)\s+(?:-Raw\s+)?([^\s()$`]+)(?:\s+-Raw)?\s*\)$", re.I)
@@ -55,15 +55,17 @@ class Blocked(Exception):
     """The command can't be shown to be clean; the message says what to do."""
 
 
-def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int]:
-    """Words of one command up to the first unquoted && || ; or |, as (value, dynamic), and where that command ends
-    in `line`. `dynamic` means the shell fills part of the word in at run time ($VAR, $(...), and in PowerShell
-    (...)), so its text can't be read here."""
+def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int, bool]:
+    """Words of one command up to the first unquoted && || ; | or # comment, as (value, dynamic); where that command
+    ends in `line`; and whether the command redirects a heredoc (<<) or here-string (<<<) into its stdin, outside
+    quotes and comments. `dynamic` means the shell fills part of the word in at run time ($VAR, $(...), and in
+    PowerShell (...)), so its text can't be read here."""
     esc = "`" if powershell else "\\"
     words: list[tuple[str, bool]] = []
     cur: str | None = None
     dyn = False
     quote = None
+    heredoc = False
     i, n = 0, len(line)
 
     def expands(j: int) -> bool:
@@ -76,7 +78,7 @@ def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int]:
                 if cur is not None:
                     words.append((cur, dyn))
                 cur, dyn = None, False
-            elif line.startswith(("&&", "||"), i) or c in ";|":
+            elif line.startswith(("&&", "||"), i) or c in ";|" or (c == "#" and cur is None):
                 break
             elif c in "'\"":
                 quote, cur = c, cur or ""
@@ -86,6 +88,8 @@ def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int]:
             else:
                 if expands(i) or (powershell and cur is None and c in "($@"):
                     dyn = True
+                if not powershell and line.startswith("<<", i):    # unquoted, so a redirect wherever it sits
+                    heredoc = True
                 cur = (cur or "") + c
         elif quote == "'":
             if c == "'":
@@ -104,7 +108,7 @@ def lex(line: str, powershell: bool) -> tuple[list[tuple[str, bool]], int]:
         i += 1
     if cur is not None:
         words.append((cur, dyn))
-    return words, i
+    return words, i, heredoc
 
 
 def flag_value(words: list[tuple[str, bool]], i: int, names: set[str]) -> tuple[tuple[str, bool] | None, int]:
@@ -227,11 +231,10 @@ def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, P
         line_start = joined.rfind("\n", 0, m.start()) + 1
         line_end = joined.find("\n", m.end())
         line_end = len(joined) if line_end < 0 else line_end
-        words, length = lex(joined[m.end():line_end], powershell)
-        # Text on stdin is visible only when this gh call's own stdin is a heredoc or a here-string in the command:
-        # a heredoc that starts before this call's && || ; or |, or a here-string piped straight into it.
-        heredoc = bool(HEREDOC.search(joined, m.end(), m.end() + length)
-                       or (powershell and HERESTRING.search(joined[line_start:m.start()])))
+        words, _, redirected = lex(joined[m.end():line_end], powershell)
+        # Text on stdin is visible only when it is written in the command for this gh call: a heredoc or here-string
+        # redirected into it, or a PowerShell here-string whose closing line pipes straight into it.
+        heredoc = redirected or bool(powershell and HERESTRING.search(joined[line_start:m.start()]))
         if not is_api:
             interactive(sub, verb, [w for w, _ in words])
         sources: list[tuple[str, str, bool, bool]] = []      # (flag, value, dynamic, value is a file)
@@ -272,7 +275,7 @@ def inputs(command: str, powershell: bool, cwd: Path) -> tuple[list[tuple[str, P
         for word, text, dyn, is_file in sources:
             if not is_file and dyn and (cat := CAT.match(text) or SLURP.match(text)):
                 text, dyn, is_file = cat.group(1), False, True
-            if dyn and not (heredoc and "<<" in text):
+            if dyn and not CAT_HEREDOC.match(text):        # $(cat <<EOF ...): the body is in the command
                 raise Blocked(f"`{word}` gets its text from a shell variable or command substitution, which this "
                               "hook can't read; inline the text or pass --body-file FILE")
             if not is_file:

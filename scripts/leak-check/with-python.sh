@@ -22,8 +22,18 @@ for py in python3 python py; do
 done
 
 if [ -n "$agent" ]; then
-  # Only the command text counts, not the folder or the description that come with it in the JSON.
-  command=$(cat | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')
+  # Read with sh builtins only, so a PATH without cat still sees the input.
+  input=
+  while IFS= read -r line || [ -n "$line" ]; do
+    input="$input $line"
+  done
+  # Only the command text counts, not the folder or the description that come with it in the JSON. Without sed, or
+  # if the command can't be picked out, the whole call is matched instead: that may block more, never less.
+  command=
+  if command -v sed >/dev/null 2>&1; then
+    command=$(printf '%s\n' "$input" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')
+  fi
+  [ -n "$command" ] || command=$input
   case " $command" in
     *[!A-Za-z0-9_-][Gg][Hh][!A-Za-z0-9_-]*|*[!A-Za-z0-9_-][Gg][Hh])       # gh as a word
       echo "Leak check: this command may call gh, and checking what gh publishes needs Python 3 on PATH (python3, python or py). Install Python 3 and run the command again." >&2
