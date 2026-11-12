@@ -287,6 +287,23 @@ def write_captions(proj: Path, data: dict) -> None:
     (proj / "work" / "captions.json").write_text(json.dumps({"cues": cues}), "utf-8")
 
 
+def shown(data: dict) -> str:
+    """What the video shows (engine project.edit_signature): the project without its bookkeeping."""
+    return json.dumps({k: v for k, v in data.items() if k not in ("updatedAt", "version", "notes", "post", "createdAt")},
+                      sort_keys=True)
+
+
+def same_edit(vdir: Path, data: dict) -> bool:
+    snap = vdir / "project.json"
+    return snap.exists() and shown(json.loads(snap.read_text("utf-8"))) == shown(data)
+
+
+def pick_version(proj: Path, data: dict) -> int:
+    """engine render.pick_version: the current version while its edit is unchanged, else the next."""
+    cur = int(data.get("version", 0))
+    return cur if cur and same_edit(proj / "versions" / f"v{cur}", data) else cur + 1
+
+
 def cmd_render(args: list[str]) -> dict:
     draft = "--draft" in args
     proj = Path(take(args, "--project"))
@@ -294,7 +311,7 @@ def cmd_render(args: list[str]) -> dict:
     if os.environ.get("FAKE_ENGINE_FAIL") == "render":
         raise Fail("RENDER_FAILED", "I could not finish your video. Please try again.")
     # docs/versions.md: drafts overwrite versions/preview/; only a final makes versions/vN/.
-    n = int(data.get("version", 0)) + 1
+    n = pick_version(proj, data)
     vdir = proj / "versions" / ("preview" if draft else f"v{n}")
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / ".rendering").write_text("", "utf-8")
@@ -324,6 +341,60 @@ def cmd_render(args: list[str]) -> dict:
     progress("render", 100, "Done")
     return {"version": n, "path": str(vdir / name), "file": str(vdir / name), "draft": draft, "preview": draft,
             "versionDir": str(vdir)}
+
+
+def cmd_save_version(args: list[str]) -> dict:
+    """engine versions.save: the version is the project snapshot and its draft, never a full render."""
+    proj = Path(take(args, "--project"))
+    data = load(proj)
+    cur, n = int(data.get("version", 0)), pick_version(proj, data)
+    vdir = proj / "versions" / f"v{n}"
+    if n == cur and (vdir / "export.mp4").exists():
+        return {"version": n, "file": str(vdir / "export.mp4"), "draft": False, "versionDir": str(vdir)}
+    preview = proj / "versions" / "preview"
+    if not (same_edit(preview, data) and (preview / "draft.mp4").exists()):
+        cmd_render(["--project", str(proj), "--draft"])
+    vdir.mkdir(parents=True, exist_ok=True)
+    for name in ("draft.mp4", "cover.png"):
+        if (preview / name).exists():
+            shutil.copyfile(preview / name, vdir / name)
+    (vdir / "project.json").write_text(json.dumps(dict(data, version=n), indent=2, ensure_ascii=False), "utf-8")
+    data["version"] = n
+    save(proj, data)
+    progress("render", 100, "Your change is saved")
+    return {"version": n, "file": str(vdir / "draft.mp4"), "draft": True, "versionDir": str(vdir)}
+
+
+def export_result(n: int, vdir: Path, reused: bool) -> dict:
+    video = vdir / "export.mp4"
+    info = probe(str(video))
+    fmt = json.loads((vdir / "project.json").read_text("utf-8")).get("format") or {"width": 1080, "height": 1920}
+    cover = vdir / "cover.png"
+    return {"version": n, "file": str(video), "cover": str(cover) if cover.exists() else None, "reused": reused,
+            "facts": {"width": info["width"], "height": info["height"], "fps": info["fps"], "bytes": video.stat().st_size,
+                      "duration": info["duration"],
+                      "fullResolution": (info["width"], info["height"]) == (fmt["width"], fmt["height"])}}
+
+
+def cmd_export(args: list[str]) -> dict:
+    """engine versions.export: the full-quality file, made once and handed back while nothing changed."""
+    proj = Path(take(args, "--project"))
+    asked = take(args, "--version")
+    data = load(proj)
+    n = pick_version(proj, data)
+    if asked is not None and int(asked) != n:
+        vdir = proj / "versions" / f"v{asked}"
+        if not (vdir / "export.mp4").exists():
+            raise Fail("ONLY_A_PREVIEW", f"Version {asked} was saved as a quick preview, so it has no full-quality file.")
+        return export_result(int(asked), vdir, True)
+    vdir = proj / "versions" / f"v{n}"
+    if n == int(data.get("version", 0)) and (vdir / "export.mp4").exists():
+        progress("render", 100, "Your video is ready")
+        return export_result(n, vdir, True)
+    made = cmd_render(["--project", str(proj)])
+    vdir = Path(made["versionDir"])
+    (vdir / "draft.mp4").unlink(missing_ok=True)
+    return export_result(int(made["version"]), vdir, False)
 
 
 def cmd_probe(args: list[str]) -> dict:
@@ -377,7 +448,8 @@ def cmd_doctor(_args: list[str]) -> dict:
 COMMANDS = {
     "probe": cmd_probe, "classify": cmd_classify, "init": cmd_init, "transcribe": cmd_transcribe,
     "analyze": cmd_analyze, "autocut": cmd_autocut, "render": cmd_render, "doctor": cmd_doctor,
-    "download-model": cmd_download_model, "attach": cmd_attach,
+    "download-model": cmd_download_model, "attach": cmd_attach, "save-version": cmd_save_version,
+    "export": cmd_export,
 }
 
 

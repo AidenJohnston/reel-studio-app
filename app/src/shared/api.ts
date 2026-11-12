@@ -344,6 +344,19 @@ export interface ExportResult {
   cover: string | null
   captionFile: string
   caption: string
+  /** read from the exported file itself (engine `export`) */
+  facts: VideoFacts
+}
+
+/** What a video file really is, read with ffprobe: what people check before they post it. */
+export interface VideoFacts {
+  width: number
+  height: number
+  fps: number
+  bytes: number
+  duration: number
+  /** the size the project is made at (its format), not a smaller preview */
+  fullResolution: boolean
 }
 
 /** "Send to my phone": one network the phone could reach this computer on. */

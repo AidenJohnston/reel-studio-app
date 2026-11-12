@@ -241,9 +241,10 @@ export const createMockAI: CreateAI = ({ host }) => {
 
       status('Making your cover', 60)
       status('Putting it all together', 0, 'final')
-      const r = await host.runEngine('render', args, (pr) => status(pr.message || 'Putting it all together', pr.pct, 'final'), signal)
-      const version = Number(r?.version ?? (await readProject(projectDir)).version ?? 1)
-      onEvent({ type: 'render', version, draft: false })
+      // like the real package: the draft, saved as the version; the full-quality file is made at Export
+      const r = await host.runEngine('save-version', args, (pr) => status(pr.message || 'Putting it all together', pr.pct, 'final'), signal)
+      const version = Number(r.version)
+      onEvent({ type: 'render', version, draft: true, file: String(r.file) })
       status('Done', 100)
 
       return {

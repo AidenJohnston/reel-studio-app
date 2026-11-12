@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
 import { clock } from '../../../shared/progress'
+import { exportFacts } from '../../../shared/describe'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
 import type { Go } from '../nav'
@@ -328,8 +329,12 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
             onDuration={setDuration}
             dragFile={version && !version.draft ? version.videoPath : null}
           />
-          {changePreview && (
-            <p className="muted-sm center" data-testid="change-preview">Here's your change. I'm making the full-quality version.</p>
+          {changePreview ? (
+            <p className="muted-sm center" data-testid="change-preview">Here's your change.</p>
+          ) : (
+            version?.draft && (
+              <p className="muted-sm center" data-testid="preview-quality">This is a quick preview. Export makes the full-quality file.</p>
+            )
           )}
           <div className="phone-tools">
             <button
@@ -653,7 +658,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         />
       )}
 
-      {exporting && <ExportDialog result={exporting} phoneFirst={phoneFirst} postFirst={postFirst} about={postAbout} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
+      {exporting && <ExportDialog result={exporting} progress={job} phoneFirst={phoneFirst} postFirst={postFirst} about={postAbout} onClose={() => setExporting(null)} onSaveCaption={(t) => savePost(t, true)} />}
     </div>
   )
 }
@@ -665,6 +670,7 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
  */
 function ExportDialog({
   result,
+  progress,
   phoneFirst,
   postFirst,
   about,
@@ -672,6 +678,8 @@ function ExportDialog({
   onSaveCaption
 }: {
   result: 'busy' | ExportResult
+  /** the export job while the full-quality file is being made */
+  progress: LiveState | null
   phoneFirst?: boolean
   postFirst?: boolean
   about: { slug: string; version: number; title: string; durationSec: number | null }
@@ -692,9 +700,23 @@ function ExportDialog({
     return (
       <Modal testid="export-dialog">
         <h2>{postFirst ? 'Getting it ready for YouTube' : 'Getting it ready for Instagram'}</h2>
-        <div className="row">
-          <Spinner /> <span className="muted">This takes a moment.</span>
-        </div>
+        {progress ? (
+          <div className="stack" style={{ gap: 8 }} data-testid="export-progress">
+            <div className="row">
+              <Spinner /> <span>{progress.message}</span>
+              <span className="spacer" />
+              <span className="muted-sm">{timeLeftWords(progress) ?? ''}</span>
+              <button className="link" onClick={() => progress.jobId && reel.jobs.cancel(progress.jobId)} style={{ padding: 0, marginLeft: 12 }}>
+                Stop
+              </button>
+            </div>
+            <Progress pct={progress.overall} label={progress.message} />
+          </div>
+        ) : (
+          <div className="row">
+            <Spinner /> <span className="muted">This takes a moment.</span>
+          </div>
+        )}
       </Modal>
     )
 
@@ -721,7 +743,8 @@ function ExportDialog({
         <div className="stack" style={{ gap: 6, minWidth: 0 }}>
           {/* says plainly that it is saved, and where (grandma3 #8, #17) */}
           <h2 data-testid="export-saved">Saved to your computer</h2>
-          <p className="muted-sm">Ready to post. Find it any time in Library › Finished videos:</p>
+          <p data-testid="export-facts">{exportFacts(result.facts)}</p>
+          <p className="muted-sm">Find it any time in Library › Finished videos:</p>
           <p className="file-pill" data-testid="export-name" title={result.video}>
             <Icon name="video" size={16} /> {fileName(result.video)}
           </p>
