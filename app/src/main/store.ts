@@ -359,6 +359,10 @@ export function checklist(p: ProjectJson, words: Word[], kept: string[], version
       done: words.length > 0,
       detail: undefined
     },
+    // a flipped take is listed with why (when the app flipped it), and the Reel screen offers Undo
+    ...(p.sources?.some((s) => s.mirror === true)
+      ? [{ key: 'mirror', label: 'Flipped the picture (it was mirrored)', done: true, detail: p.sources.find((s) => s.mirror === true)?.mirrorCheck?.why }]
+      : []),
     {
       key: 'cut',
       label: aiEdited ? 'Picked your best takes and cut the pauses' : 'Cut the pauses and repeated starts',

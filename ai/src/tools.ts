@@ -235,7 +235,11 @@ function projectView(ctx: ToolContext, p: Project, t: Transcript): unknown {
     title: p.title,
     version: p.version,
     format: p.format,
-    sources: p.sources.map((s) => ({ id: s.id, duration: s.duration, mirror: s.mirror === true })),
+    sources: p.sources.map((s) => ({
+      id: s.id, duration: s.duration, mirror: s.mirror === true,
+      // the user answered the app's "it looked mirrored" line with "Undo flip" or "Keep as filmed"
+      ...(s.mirrorCheck?.answer === 'undone' || s.mirrorCheck?.answer === 'kept' ? { userSaidAsFilmed: true } : {}),
+    })),
     cut: cutSummary(t, p),
     captions: p.captions,
     music: p.music,
@@ -1086,7 +1090,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_mirror',
-    description: 'Flip the video left to right when the take is MIRRORED (a front-camera selfie): text in the room (posters, shirts, signs, screens, book covers) reads backwards in the frames. Judge only text that was really in the room, never the captions or the pictures you added, and never the face. on false undoes it. Omit source to flip every take.',
+    description: 'Flip the video left to right when the take is MIRRORED (a front-camera selfie): text in the room (posters, shirts, signs, screens, book covers) reads backwards in the frames. Judge only text that was really in the room, never the captions or the pictures you added, and never the face. on false undoes it. Omit source to flip every take. A take with userSaidAsFilmed: the user already said it is the right way round, so flip it only when their note asks for it.',
     parameters: S.obj({
       on: S.bool('true = flip (the take is mirrored), false = show it as shot'),
       source: S.opt(S.str('source id, e.g. "s1"; null = every take')),

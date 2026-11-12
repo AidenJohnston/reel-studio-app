@@ -1,6 +1,7 @@
 // Types shared by the main process, the preload bridge and the renderer.
 // Keep this file free of Node and DOM imports.
 import type { ChatAction } from './notes'
+import type { MirrorAnswer } from './mirror'
 export type { ChatAction } from './notes'
 
 export type AppCommand = { type: 'new-video' | 'settings' | 'export' | 'library' } | { type: 'open-reel'; slug: string }
@@ -111,6 +112,17 @@ export interface ProjectDetail extends ProjectSummary {
 }
 
 // Loose mirror of project.json (docs/architecture.md section 3). The engine owns validation.
+/** `sources[].mirrorCheck` (engine/reelengine/mirror_detect.py). Only `mirrored` flips a take at import;
+ * `maybe-mirrored` makes the editor ask. */
+export interface MirrorCheck {
+  verdict: 'mirrored' | 'maybe-mirrored' | 'as-filmed' | 'unsure' | 'unknown'
+  /** plain words, e.g. "the writing behind you reads backwards" */
+  why?: string
+  camera?: 'front' | 'back'
+  letters?: { asFilmed: number; flipped: number }
+  answer?: 'flipped' | 'kept' | 'undone'
+}
+
 export interface ProjectJson {
   schemaVersion: number
   id: string
@@ -120,8 +132,9 @@ export interface ProjectJson {
   updatedAt: string
   version: number
   format?: { width: number; height: number; fps: number }
-  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed) */
-  sources?: { id: string; path: string; duration?: number; rotation?: number; mirror?: boolean }[]
+  /** `mirror`: the take is mirrored, the engine flips the picture (absent = as filmed). `mirrorCheck`:
+   * what init saw when it looked for a mirrored take, and what the user then chose (shared/mirror.ts). */
+  sources?: { id: string; path: string; duration?: number; rotation?: number; mirror?: boolean; mirrorCheck?: MirrorCheck }[]
   transcript?: { file: string; language?: string }
   cut?: { keep: { from: string; to: string }[]; gapCap?: number; minSaving?: number }
   captions?: {
@@ -478,6 +491,11 @@ export interface ReelApi {
     damaged(): Promise<boolean>
     /** Answer "Remember this for next time?" on a chat message: Yes saves the rule, No only says so. */
     answer(slug: string, messageId: string, yes: boolean): Promise<void>
+  }
+  mirror: {
+    /** A button under the editor's "I flipped your video" / "Flip it?" line. `change` = what to call
+     * the new version to make (empty: the picture did not change). */
+    answer(slug: string, messageId: string, action: MirrorAnswer): Promise<{ change: string }>
   }
   script: {
     write(idea: string): Promise<ScriptResult>

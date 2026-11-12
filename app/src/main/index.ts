@@ -53,7 +53,7 @@ import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { AppInfo, DropResult, ExportResult, JobEvent, ProjectJson } from '../shared/api'
 import { noAiReply } from '../shared/notes'
 import { versionMessage } from '../shared/describe'
-import { mergeSourcesPatch } from '../shared/mirror'
+import { MIRROR_ANSWERS, answerMirror, mergeSourcesPatch, mirrorNotices, type MirrorAnswer } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
 import { checkNoteAttachments, forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
@@ -280,12 +280,14 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
   return jobs.start(slug, 'first-edit', async (emit, signal) => {
     if (initArgs && !existsSync(join(dir, 'project.json'))) {
       emit({ type: 'status', message: 'Copying your video', pct: 0 })
-      await runEngine(
+      const made = (await runEngine(
         'init',
         ['--project', dir, '--title', initArgs.title, '--slug', slug, ...initArgs.files],
-        (p) => emit({ type: 'status', message: 'Copying your video', pct: Math.round(p.pct * 0.01) }),
+        (p) => emit({ type: 'status', message: p.message || 'Copying your video', pct: Math.round(p.pct * 0.01) }),
         signal
-      )
+      )) as { sources?: ProjectJson['sources'] } | null
+      // init looked at each take for a mirrored picture (engine mirror_detect.py): a flip is never silent
+      for (const n of mirrorNotices(made?.sources)) await addChat(slug, 'editor', n.text, undefined, n.actions)
     }
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
@@ -680,6 +682,27 @@ function registerIpc(): void {
       if (x) delete x.actions
     })
     await addChat(slug, 'editor', yes ? "Saved. I'll do that in your next videos too. You can remove it in My style." : 'OK, only for this video.')
+  })
+
+  // "Undo flip" under "I flipped your video", or "Flip it" / "Keep as filmed" under "Flip it?" (shared/mirror.ts).
+  // Either way the buttons go and the editor answers; the page then makes a new version if the picture changed.
+  handle('mirror:answer', async (_e, slug: string, messageId: string, action: MirrorAnswer) => {
+    if (!MIRROR_ANSWERS.includes(action)) return { change: '' }
+    if (jobs.forSlug(slug)) throw { code: 'BUSY', userMessage: 'I am still working on this video. Give me a moment, or press Stop.' }
+    const st = await readAppState(slug)
+    if (!st.chat.find((x) => x.id === messageId)?.actions?.includes(action)) return { change: '' }
+    const p = await readProject(slug)
+    const r = answerMirror(p.sources, action)
+    if (r.reply) {
+      p.sources = r.sources
+      await writeProject(slug, p)
+    }
+    await updateAppState(slug, (s) => {
+      const x = s.chat.find((y) => y.id === messageId)
+      if (x) delete x.actions
+    })
+    if (r.reply) await addChat(slug, 'editor', r.reply)
+    return { change: r.change }
   })
 
   handle('script:write', (_e, idea: string) => {

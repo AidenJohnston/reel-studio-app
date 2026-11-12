@@ -1,6 +1,7 @@
 // What to say when someone types a note and no AI editor is connected: plainly what they can do
 // instead, plus the one button that opens the matching manual control. Simple keyword routing.
 // Keep this file free of Node and DOM imports (it runs in main and is unit-tested).
+import type { MirrorAnswer } from './mirror'
 
 export type ChatAction =
   | 'open-cut'
@@ -14,6 +15,10 @@ export type ChatAction =
   /** "Remember this for next time?" on a My style suggestion (the message's `suggestion`). */
   | 'remember-yes'
   | 'remember-no'
+  /** Under the editor's "I flipped your video" / "Flip it?" line (shared/mirror.ts mirrorNotices). */
+  | 'mirror-undo'
+  | 'mirror-flip'
+  | 'mirror-keep'
 
 export const ACTION_LABELS: Record<ChatAction, string> = {
   'open-cut': 'Open the cut',
@@ -25,10 +30,13 @@ export const ACTION_LABELS: Record<ChatAction, string> = {
   'open-editor': 'Edit it myself',
   connect: 'Connect ChatGPT',
   'remember-yes': 'Yes, remember it',
-  'remember-no': 'No, just this video'
+  'remember-no': 'No, just this video',
+  'mirror-undo': 'Undo flip',
+  'mirror-flip': 'Flip it',
+  'mirror-keep': 'Keep as filmed'
 }
 
-type Topic = Exclude<ChatAction, 'open-editor' | 'connect' | 'remember-yes' | 'remember-no'>
+type Topic = Exclude<ChatAction, 'open-editor' | 'connect' | 'remember-yes' | 'remember-no' | MirrorAnswer>
 
 // Order matters: the first topic whose words match wins ("post caption" is the post, not captions).
 const TOPICS: { action: Topic; re: RegExp; reply: string }[] = [

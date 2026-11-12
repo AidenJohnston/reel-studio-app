@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatAction, ChecklistItem, ExportResult, ProjectDetail, ProviderInfo } from '../../../shared/api'
 import { ACTION_LABELS } from '../../../shared/notes'
+import { MIRROR_ANSWERS, withMirror, type MirrorAnswer } from '../../../shared/mirror'
 import { clock } from '../../../shared/progress'
 import { EMPTY_LIVE, liveFromDetail, reduceLive, timeLeftWords, type LiveState } from '../../../shared/live'
 import { reel, userMessage } from '../api'
@@ -260,8 +261,23 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
     }
   }
 
+  /** "Undo flip" / "Flip it" / "Keep as filmed" in the chat; a new version when the picture changed. */
+  const answerMirror = (a: MirrorAnswer, messageId: string) =>
+    reel.mirror
+      .answer(slug, messageId, a)
+      .then((r) => (r.change ? rerender(r.change, 'Flipping your video') : load()))
+      .catch((e) => notify(userMessage(e), 'error'))
+
+  /** "Undo" on "Flipped the picture" in What I did: every take back as filmed, then a new version. */
+  const undoFlip = () =>
+    reel.projects
+      .update(slug, { sources: withMirror(d.project.sources, false) })
+      .then(() => rerender('picture back the way you filmed it', 'Flipping your video'))
+      .catch((e) => notify(userMessage(e), 'error'))
+
   const runAction = (a: ChatAction, messageId: string) => {
-    if (a === 'remember-yes' || a === 'remember-no') {
+    if ((MIRROR_ANSWERS as readonly ChatAction[]).includes(a)) void answerMirror(a as MirrorAnswer, messageId)
+    else if (a === 'remember-yes' || a === 'remember-no') {
       reel.style
         .answer(slug, messageId, a === 'remember-yes')
         .then(() => load())
@@ -290,6 +306,8 @@ export function Reel({ slug, go, fresh }: { slug: string; go: Go; fresh?: boolea
         return { label: c.label, act: { label: 'Change', run: () => setDrawer('cover'), testid: 'change-cover' } }
       case 'post':
         return { label: c.label, act: { label: 'Edit', run: () => setPostDraft(d.project.post?.caption ?? ''), testid: 'write-post' } }
+      case 'mirror':
+        return { label: c.label, detail: c.detail, act: { label: 'Undo', run: () => void undoFlip(), testid: 'undo-flip' } }
       default:
         return { label: c.label, detail: c.detail }
     }

@@ -50,3 +50,15 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-11-12 (mirrored take found at import)
+
+- `sources[].mirrorCheck` (object, optional): what `init` saw when it looked at the take for a mirrored picture
+  (`engine/reelengine/mirror_detect.py`): `verdict` (`mirrored` / `maybe-mirrored` / `as-filmed` / `unsure` /
+  `unknown`), `why` (plain words the app may show), `camera` (`front` / `back`, from an iPhone file's lens tag)
+  and `letters` (letters of everyday words read as filmed and flipped). No timings, so the same take writes the
+  same record. The render never reads it: only `mirror` changes the picture, so renders stay deterministic.
+- `init` now writes `sources[].mirror = true` for a `mirrored` take. A `maybe-mirrored` one is left alone and the
+  app asks; the user's answer to either line ("Undo flip", "Flip it", "Keep as filmed") goes in
+  `mirrorCheck.answer` (`undone` / `flipped` / `kept`), so nothing is undone or asked twice, and the AI editor
+  sees `userSaidAsFilmed` for `undone` / `kept`.

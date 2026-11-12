@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAI, executeTool, loadProject, newToolState, Prompts, StyleStore, ToolContext, AgentEvent } from '../src';
+import { createAI, executeTool, loadProject, newToolState, Prompts, StyleStore, TOOLS, ToolContext, AgentEvent } from '../src';
 import { saveProject } from '../src/project';
 import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
@@ -55,6 +55,20 @@ describe('set_mirror', () => {
     expect(bad.isError).toBe(true);
     expect(bad.content).toMatch(/unknown source s9/);
     expect((await executeTool(ctx, 'set_mirror', { on: 'yes', source: null })).isError).toBe(true);
+  });
+
+  it('get_project says when the user already chose "as filmed" in the app, and set_mirror says to respect it', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.sources[0].mirrorCheck = { verdict: 'mirrored', answer: 'undone' };
+    p.sources.push({ ...p.sources[0], id: 's2', mirrorCheck: { verdict: 'maybe-mirrored', answer: 'kept' } });
+    p.sources.push({ ...p.sources[0], id: 's3', mirror: true, mirrorCheck: { verdict: 'maybe-mirrored', answer: 'flipped' } });
+    p.sources.push({ ...p.sources[0], id: 's4', mirrorCheck: { verdict: 'unsure' } });
+    await saveProject(dir, p);
+    const seen = JSON.parse((await executeTool(ctx, 'get_project', {})).content).sources;
+    expect(seen.map((s: { userSaidAsFilmed?: boolean }) => s.userSaidAsFilmed ?? null)).toEqual([true, true, null, null]);
+    expect(seen[2].mirror).toBe(true);
+    expect(TOOLS.find((t) => t.name === 'set_mirror')?.description).toMatch(/userSaidAsFilmed: the user already said it is the right way round/);
   });
 
   it('the prompts tell the editor when to flip, when not to, and how to say it', () => {

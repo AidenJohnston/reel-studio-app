@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import probe as probemod, project as projmod, tools
+from . import mirror_detect, probe as probemod, project as projmod, tools
 from .proto import EngineError, progress
 
 
@@ -49,7 +49,23 @@ def run(project_dir: Path, title: str, files: list, slug: str = None) -> dict:
             "hdr": bool(info.get("hdr")),
         })
     proj["cover"]["source"] = "s1"
+    check_mirror(project_dir, proj)
     projmod.save(project_dir, proj)
     progress("init", 100, "Your video is in", force=True)
     return {"project": str(project_dir), "id": proj["id"], "slug": proj["slug"],
             "sources": proj["sources"]}
+
+
+def check_mirror(project_dir: Path, proj: dict) -> None:
+    """Front-camera takes often come out mirrored (writing in the room reads backwards). Each take is
+    looked at once, here, as it comes in (init is the only place takes are added), and keeps what was
+    seen in `sources[].mirrorCheck`. Only a clearly mirrored take gets `mirror: true`, so every render
+    flips it; the app says so with a one-click undo, and asks about a "maybe-mirrored" one instead.
+    Nothing here ever un-flips or re-checks a take, and a file that was already un-mirrored reads as
+    filmed, so a take is never flipped twice."""
+    for i, s in enumerate(proj["sources"]):
+        progress("init", 100 * i / len(proj["sources"]), "Checking your video is the right way round", force=True)
+        r = mirror_detect.detect(project_dir / s["path"], project_dir / "work", duration=s.get("duration"))
+        s["mirrorCheck"] = mirror_detect.project_record(r)
+        if r["verdict"] == "mirrored":
+            s["mirror"] = True
