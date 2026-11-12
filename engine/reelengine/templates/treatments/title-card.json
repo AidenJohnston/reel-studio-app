@@ -1,0 +1,25 @@
+{
+  "id": "title-card",
+  "label": "Hook or title card",
+  "description": "The hook or a title: dark words filling a white label above the head, each line sized to span the label. Tilted a touch; the opening hook (a title in the first second, or params.hook true) sits square. Uses params.text, or the spoken words of the anchor.",
+  "hidesFace": false,
+  "assetKinds": [],
+  "params": {
+    "text": {
+      "default": null,
+      "help": "the words; default = the anchor's spoken words"
+    },
+    "hook": {
+      "default": null,
+      "help": "true = square (the opening hook); default: true only in the video's first second"
+    },
+    "tilt": {
+      "default": -3.0,
+      "help": "degrees when it is not the hook"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits above the face"
+    }
+  }
+}

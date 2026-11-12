@@ -1,0 +1,19 @@
+{
+  "id": "logo-row",
+  "label": "Row of logos",
+  "description": "Real logos in a row above the face, shown bare (no tiles), one landing per spoken word. A lone logo gets its name beside it so it never sits alone.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "items": {
+      "default": [],
+      "help": "logo files, in the order they are named"
+    },
+    "text": {
+      "default": null,
+      "help": "a lone logo's name; default = the spoken words"
+    }
+  }
+}

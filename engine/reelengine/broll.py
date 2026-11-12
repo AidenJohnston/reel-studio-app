@@ -15,10 +15,20 @@ Treatments (descriptions + defaults live in templates/treatments/<name>.json):
   icon-wall        grid of logos/icons above the face, one per word
   split-top        asset top half, speaker bottom half
   animation        a make_animation .mov (+ .anim.json sidecar) overlaid full-frame at 0,0 as rendered
+  title-card       hook / title: words filling a white label above the head (the opening hook square)
+  panel-card       a screenshot framed on a white panel, or words set on one
+  logo-row         real logos in a row, bare; a lone logo gets its name beside it
+  phone-row        2 to 4 phones side by side (may cover the face: a phone demo)
+  circle-callout   a screenshot card, then a red loop drawn around a spot on it
+  wide-clip        borrowed footage in its own framing, full width over a blurred copy of itself
+  receipt          a screenshot as proof with a small label naming its source
+Any still may carry params.cropBox / params.blurBoxes (hide names and faces); any card may JOIN the
+one before it (params.join: it stacks on it, both stay up) instead of replacing it.
 
 House rules carried over from the original pipeline (general taste, not brand):
   * a card LEADS its phrase by ~0.13 s (landing ON the word reads late)
-  * hard cuts by default (no fades); a still holds >= 2 s unless the next b-roll takes over
+  * hard cuts in and out (no fades); every card holds >= 2 s: a card that comes sooner waits, or
+    joins the one on screen
   * graphics never cover the EYES-TO-CHIN zone (eyes, nose, mouth) or the caption band, except
     treatments that hide the speaker on purpose (full-frame, post-wall, split-top); cards may cover
     hair, the forehead down to just above the brows, and the sides of the head
@@ -26,7 +36,8 @@ House rules carried over from the original pipeline (general taste, not brand):
     it sits as low as the brow line allows; a text card is cropped to its words first (only plain
     margins / flat blocks go, and the floor shrinks with the width dropped, so the words stay as
     big); then over the hair on one side; split view only when nothing readable fits
-  * no blurred backdrops behind anything
+  * no blurred backdrops behind anything (wide-clip's blurred copy of its own footage is the one exception)
+  * a borrowed clip never cuts to another shot in its first second (its in-point moves past the cut)
   * a gap under ~0.22 s between two b-roll windows flashes the bare face: close it
 """
 from __future__ import annotations
@@ -66,13 +77,12 @@ except ImportError:  # pragma: no cover - only before A1's render_ctx exists
 VERSION = 8                    # bump when drawing code changes so cached files are redrawn
 LEAD = 0.13
 MIN_GAP = 0.22
-STILL_MIN_HOLD = 2.0
-VIDEO_MIN_HOLD = 0.6
+MIN_HOLD = 2.0                 # every card holds this long, however soon the next one comes
 LABEL_SIZE = 0.075             # text-pop style "label": ~81 px type at 1080 wide (hand-edit labels), one or two lines
 ANIM_TAIL = 0.35              # an animation stays this long after its last word (its last reveal settles)
 TEMPLATES = Path(__file__).resolve().parent / "templates" / "treatments"
 
-FACE_HIDING = {"full-frame", "post-wall", "split-top"}
+FACE_HIDING = {"full-frame", "post-wall", "split-top", "wide-clip", "phone-row"}   # phone-row: a phone demo
 CARD_MIN_WIDTH = 0.55          # a card with text (screenshot, article, post, clip) reads on a phone at >= 55% wide
 ICON_MIN_WIDTH = 0.22          # a logo / cut-out / tiny asset: >= 22% wide (~240 px)...
 ICON_MIN_AREA = 0.035          # ...and this fraction of the frame (a ~270 px square logo at 1080x1920)
@@ -82,6 +92,33 @@ TEXT_MIN_WIDTH_FLOOR = 0.30    # a text card cropped to its words may shrink its
 MIN_PHONE_WIDTH = 0.30         # phone screen width, fraction of frame width
 SIDE_MIN_WIDTH = ICON_MIN_WIDTH   # side card beside the face: at least this fraction of the frame wide...
 SIDE_MIN_AREA = ICON_MIN_AREA     # ...and this fraction of its area
+HOOK_START = 1.0               # a title card starting in the video's first second is the opening hook: square
+TITLE_TILT = -3.0
+TITLE_PAD = 0.16               # title label padding, fraction of its type size
+PANEL_TEXT = 0.052             # words on a text panel: ~56 px at 1080 wide (shrinks to fit)
+PANEL_BORDER = 0.035           # white border around a framed screenshot, fraction of its width
+LOGO_GAP = 0.045               # between logos in a row, fraction of the frame width
+LOGO_MAX = 0.26                # a logo in a row is at most this tall (fraction of the frame width)
+LOGO_LABEL = 0.55              # a lone logo's name label is this tall, relative to the logo
+PHONES_MAX = 4
+PHONE_RATIO = 19.5 / 9.0
+PHONE_BODY = 1.09              # a phone body is this much wider than its screen (_phone_chrome)
+PHONE_GAP = 0.025
+BLUR_STRENGTH = 0.02           # blur box radius, fraction of the picture's long side...
+BLUR_MIN_PX = 12               # ...never below this
+CIRCLE_RED = (255, 59, 48, 255)
+CIRCLE_PAD = 1.25              # the loop sits this far around the spot (1.0 = on its edge)
+CIRCLE_STROKE = 0.012          # loop width, fraction of the picture's long side
+CIRCLE_AFTER = 0.5             # with no word to land on, the loop comes this long after the card...
+CIRCLE_HOLD = 1.0              # ...and stays at least this long
+WIDE_BLUR = 12                 # blur radius of wide-clip's backdrop, at 1/8 of the frame size
+WIDE_DIM = 0.82                # ...and its brightness
+RECEIPT_LABEL = 0.038          # receipt source label type: ~41 px at 1080 wide
+JOIN_SCALE = 0.72              # a card that joins another is this much smaller (unless params.scale)...
+JOIN_OVERLAP = 0.35            # ...overlaps it by this fraction of its own width...
+JOIN_RISE = 0.30               # ...and sits this fraction of its own height higher
+SCENE_CUT = 0.30               # ffmpeg scene score that counts as a cut to another shot
+CLEAN_START = 1.0              # a borrowed clip never cuts to another shot in its first second
 
 BUILTIN_DEFAULTS = {
     "card-above-head": {"tilt": -2.5, "scale": 1.0, "radius": 0.026, "shadow": True, "maxWidth": 0.88},
@@ -94,6 +131,13 @@ BUILTIN_DEFAULTS = {
     "icon-wall": {"items": [], "tile": "auto"},
     "split-top": {"focusX": 0.5, "focusY": 0.5, "split": "auto", "fit": "auto", "background": "#101010"},
     "animation": {},
+    "title-card": {"text": None, "tilt": TITLE_TILT, "hook": None, "scale": 1.0, "maxWidth": 0.92},
+    "panel-card": {"text": None, "tilt": 0.0, "scale": 1.0, "maxWidth": 0.92},
+    "logo-row": {"items": [], "text": None},
+    "phone-row": {"items": [], "focusY": 0.0},
+    "circle-callout": {"circle": None, "circleAt": None, "tilt": -2.0, "scale": 1.0, "radius": 0.026, "maxWidth": 0.88},
+    "wide-clip": {},
+    "receipt": {"text": None, "tilt": -2.0, "scale": 1.0, "radius": 0.02, "maxWidth": 0.88},
 }
 
 ANIM_KIND = "reelstudio-animation"
@@ -167,29 +211,33 @@ def plan_windows(ctx) -> list[dict]:
         lead = float(it.get("leadIn", LEAD) if it.get("leadIn") is not None else LEAD)
         t0 = max(0.0, s - lead)
         params = it.get("params") or {}
-        is_video = _is_video_item(ctx, it)
         hold = params.get("hold")
-        min_hold = float(hold) if hold is not None else (VIDEO_MIN_HOLD if is_video else STILL_MIN_HOLD)
-        anim = _anim_of(ctx, it)
-        tail = 0.05
-        if anim is not None and hold is None:
-            # an animation leaves with its line, like any card: held long enough to read, never past
-            # its own length (_t_anim caps it), and never playing out over the NEXT idea (a 3 s
-            # count-up on a 1.7 s line used to sit on the following sentence)
-            min_hold, tail = STILL_MIN_HOLD, ANIM_TAIL
+        min_hold = max(MIN_HOLD, float(hold)) if hold is not None else MIN_HOLD
+        # an animation leaves with its line, like any card: held long enough to read, never past its
+        # own length (_t_anim caps it), and never playing out over the NEXT idea (a 3 s count-up on a
+        # 1.7 s line used to sit on the following sentence)
+        tail = ANIM_TAIL if _anim_of(ctx, it) is not None and hold is None else 0.05
         t1 = max(e + tail, t0 + min_hold)
         plans.append({"id": it.get("id", f"b{i + 1}"), "index": i, "treatment": it.get("treatment", "card-above-head"),
-                      "t0": t0, "t1": t1, "word_from": a, "word_to": b, "item": it})
+                      "t0": t0, "t1": t1, "word_from": a, "word_to": b, "item": it, "min_hold": min_hold,
+                      "joins": None})
     plans.sort(key=lambda p: (p["t0"], p["index"]))
+    for p, nxt in zip(plans, plans[1:]):
+        if (nxt["item"].get("params") or {}).get("join") and nxt["t0"] < p["t1"] + MIN_GAP:
+            nxt["joins"] = p["id"]            # stacks on p; both stay up until the last of them goes
+            continue
+        if nxt["t0"] < p["t0"] + p["min_hold"]:
+            # hard-cut handoff, never before the card on screen has been read: the next one waits
+            nxt["t0"] = p["t0"] + p["min_hold"]
+            nxt["t1"] = max(nxt["t1"], nxt["t0"] + nxt["min_hold"])
+        if p["t1"] > nxt["t0"] or nxt["t0"] - p["t1"] < MIN_GAP:   # no flash of the bare face either
+            p["t1"] = nxt["t0"]
+    for p, nxt in reversed(list(zip(plans, plans[1:]))):
+        if nxt["joins"] == p["id"]:
+            p["t1"] = max(p["t1"], nxt["t1"])
     dur = float(getattr(ctx, "duration", 0.0) or 0.0)
-    for k, p in enumerate(plans):
-        if k + 1 < len(plans):
-            nxt = plans[k + 1]["t0"]
-            if p["t1"] > nxt:                 # hard-cut handoff to the next b-roll
-                p["t1"] = nxt
-            elif nxt - p["t1"] < MIN_GAP:     # don't flash the bare face for a few frames
-                p["t1"] = nxt
-        if dur:
+    if dur:
+        for p in plans:
             p["t1"] = min(p["t1"], dur)
     return [p for p in plans if p["t1"] - p["t0"] > 0.05]
 
@@ -202,16 +250,6 @@ def _anim_of(ctx, it) -> Optional[dict]:
         return animation_sidecar(_asset_path(ctx, a))
     except EngineError:
         return None
-
-
-def _is_video_item(ctx, it) -> bool:
-    a = it.get("asset")
-    if not a:
-        return False
-    try:
-        return kind_of(_asset_path(ctx, a)) == "video"
-    except EngineError:
-        return False
 
 
 def _asset_path(ctx, a: str) -> Path:
@@ -556,13 +594,14 @@ def _enc(ctx) -> list:
 
 
 def _clip_window(ctx, src: Path, params: dict, want: float) -> tuple[float, float]:
-    """(in-point, usable duration) for a video asset; never asks for more than the clip has."""
+    """(in-point, usable duration) for a video asset; never asks for more than the clip has, and
+    never starts within a second of a cut to another shot (_clean_start)."""
     info = probe(src, ctx)
     cin = float(params.get("in", 0.0) or 0.0)
-    have = max(0.0, info["duration"] - cin)
-    if have <= 0.1:
-        cin, have = 0.0, info["duration"]
-    return cin, min(want, have)
+    if info["duration"] - cin <= 0.1:
+        cin = 0.0
+    cin = _clean_start(ctx, src, cin, info["duration"])
+    return cin, min(want, max(0.0, info["duration"] - cin))
 
 
 def _video_card(ctx, src: Path, cin: float, dur: float, chrome, screen_xy, mask, stem: str) -> Path:
@@ -1364,11 +1403,426 @@ def _t_anim(ctx, plan, params, kind, src, zones, face, frame):
     return [Layer(path, "video", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], rec
 
 
+# --- the cards an editor reaches for every day ------------------------------------------------
+
+def _card_text(ctx, plan, params) -> str:
+    """A card's words: params.text, else the item's text, else the anchor's spoken words."""
+    text = params.get("text") or plan["item"].get("text")
+    if not text:
+        text = " ".join(_word_text(ctx, w) for w in word_ids_between(ctx, plan["word_from"], plan["word_to"]))
+    return str(text).strip()
+
+
+def _balanced(words: list[str], n: int) -> list[str]:
+    """`words` in n lines of about equal length (characters), every line at least one word."""
+    n = max(1, min(n, len(words)))
+    target = (sum(len(w) for w in words) + len(words) - 1) / n
+    lines, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(w)
+        left, need = len(words) - i - 1, n - 1 - len(lines)
+        if need and (left == need or (len(" ".join(cur)) >= target and left >= need)):
+            lines.append(" ".join(cur))
+            cur = []
+    return lines + ([" ".join(cur)] if cur else [])
+
+
+def _filled_label(text: str, width: int, fill="#FFFFFF", ink="#111111"):
+    """A title label whose words fill it: 1 to 3 balanced lines, each line's type sized so it spans
+    the box (a short line at most 1.5x the size of the longest), on a snug box `width` px wide."""
+    from PIL import Image, ImageDraw
+    words = text.split() or [" "]
+    lines = _balanced(words, 1 if len(words) <= 3 else 2 if len(words) <= 7 else 3)
+    base = 100
+    d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    lw = [max(1.0, d.textlength(ln, font=load_font(base, "bold"))) for ln in lines]
+    span = max(lw)
+    k = width / (span + 2 * TITLE_PAD * base)
+    fonts = [load_font(max(8, int(base * k * min(1.5, span / w))), "bold") for w in lw]
+    boxes = [f.getbbox(ln) for f, ln in zip(fonts, lines)]
+    pad = int(round(TITLE_PAD * base * k))
+    lead = int(round(0.16 * base * k))
+    h = sum(b[3] - b[1] for b in boxes) + lead * (len(lines) - 1) + 2 * pad
+    img = Image.new("RGBA", (int(width), int(h)), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle((0, 0, img.width - 1, img.height - 1), radius=max(4, int(0.12 * base * k)), fill=_rgba(fill))
+    y = pad
+    for f, ln, b in zip(fonts, lines, boxes):
+        dr.text(((img.width - (b[2] - b[0])) / 2 - b[0], y - b[1]), ln, font=f, fill=_rgba(ink, (17, 17, 17, 255)))
+        y += b[3] - b[1] + lead
+    return img
+
+
+def _t_title(ctx, plan, params, kind, src, zones, face, frame):
+    """Hook / title card: dark words filling a white label above the head, tilted a touch; the
+    opening hook (a title in the video's first second, or params.hook) sits square."""
+    W, H, _ = fmt_of(ctx)
+    text = _card_text(ctx, plan, params)
+    if not text:
+        raise EngineError("TITLE_EMPTY", f"{plan['id']}: title card without words", "This title card has no words yet.")
+    hook = params.get("hook")
+    hook = plan["t0"] < HOOK_START if hook is None else bool(hook)
+    tilt = 0.0 if hook else float(params.get("tilt", TITLE_TILT))
+    zone = placement.zone(zones, "above-face")
+    probe_img = _filled_label(text, 1000)
+    cw = min(fit_rotated(probe_img.width / probe_img.height, zone["w"], zone["h"], tilt, 0),
+             float(params.get("maxWidth", 0.92)) * W) * min(1.0, float(params.get("scale", 1.0)))
+    rot = _rotate(_filled_label(text, int(cw)), tilt)
+    x, y = _place_in(zone, rot.width, rot.height, face[0] + face[2] / 2, None)
+    path = _save_png(rot, ctx, f"{plan['id']}-{_key('title', text, tilt, int(cw))}")
+    return [Layer(path, "image", plan["t0"], plan["t1"], x, y, rot.width, rot.height, 0.0)], \
+        {"zone": zone["zone"], "bbox": _opaque_bbox(rot, x, y), "text": text, "hook": hook, "cardWidth": round(cw / W, 3)}
+
+
+def _text_panel(text: str, width: int, size: int, W: int, fill="#FFFFFF", ink="#1D1B18"):
+    """Words set left-aligned on a white panel `width` px wide."""
+    from PIL import Image, ImageDraw
+    font = load_font(size, "semibold")
+    pad = int(round(size * 0.9))
+    d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    lines, cur = [], ""
+    for word in text.split():
+        t = f"{cur} {word}".strip()
+        if d.textlength(t, font=font) <= width - 2 * pad or not cur:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = word
+    lines += [cur] if cur else []
+    lh = int(size * 1.28)
+    img = Image.new("RGBA", (width, lh * len(lines) + 2 * pad - int(size * 0.2)), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle((0, 0, img.width - 1, img.height - 1), radius=int(0.022 * W), fill=_rgba(fill))
+    for i, ln in enumerate(lines):
+        dr.text((pad, pad + i * lh - int(size * 0.12)), ln, font=font, fill=_rgba(ink))
+    return img
+
+
+def _framed(img, W: int):
+    """A screenshot on a white panel with an even border, the picture's own corners rounded."""
+    from PIL import Image
+    b = max(8, int(round(PANEL_BORDER * img.width)))
+    panel = Image.new("RGBA", (img.width + 2 * b, img.height + 2 * b), (255, 255, 255, 255))
+    panel.alpha_composite(_round(img.convert("RGBA"), int(0.6 * b)), (b, b))
+    return panel
+
+
+def _t_panel(ctx, plan, params, kind, src, zones, face, frame):
+    """Panel card: a screenshot framed on a white panel, or (no asset) words set on one, level
+    above the face. A screenshot that can't read framed there is shown as a plain card instead."""
+    W, H, _ = fmt_of(ctx)
+    zone = placement.zone(zones, "above-face")
+    tilt = float(params.get("tilt", 0.0))
+    scale = float(params.get("scale", 1.0))
+    if kind == "video":
+        return _t_card(ctx, plan, {**params, "tilt": 0}, kind, src, zones, face, frame)
+    if kind == "image":
+        st = _load_still(ctx, src, params)
+        st2 = {**st, "image": _framed(st["image"], W), "cutout": False}
+        canvas, x, y, (cw, ch) = _card_layout(ctx, st2, zone, tilt, scale, float(params.get("maxWidth", 0.92)), face,
+                                              0.022, low=True)
+        if not readable(cw, ch, W, H, False, params, scale, photo=is_photo(st, params), tscale=text_scale(st)):
+            layers, rec = _t_card(ctx, plan, params, kind, src, zones, face, frame)
+            rec.setdefault("note", "too small to read framed above the face; shown as a plain card")
+            return layers, rec
+        stem = f"{plan['id']}-{_key('panel', _asset_sig(src), params, zone, face)}"
+        path = _save_png(canvas, ctx, stem)
+        return [Layer(path, "image", plan["t0"], plan["t1"], x, y, canvas.width, canvas.height, 0.0)], \
+            {"zone": zone["zone"], "bbox": _opaque_bbox(canvas, x, y), "cardWidth": round(cw / W, 3), **_content_rec(st)}
+    text = _card_text(ctx, plan, params)
+    pad = _shadow_pad(0, W)
+    width = int(min(zone["w"] - 2 * pad, float(params.get("maxWidth", 0.92)) * W) * min(1.0, scale))
+    size = int(PANEL_TEXT * W)
+    panel = _text_panel(text, width, size, W)
+    while panel.height > zone["h"] - 2 * pad and size > int(0.03 * W):     # long words: smaller type
+        size = int(size * 0.92)
+        panel = _text_panel(text, width, size, W)
+    canvas = _rotate(_with_shadow(panel, pad), tilt)
+    x, y = _place_in(shadow_zone(zone, W, H, pad), canvas.width, canvas.height, face[0] + face[2] / 2,
+                     zone["y"] + zone["h"])
+    path = _save_png(canvas, ctx, f"{plan['id']}-{_key('panel-text', text, params, zone)}")
+    return [Layer(path, "image", plan["t0"], plan["t1"], x, y, canvas.width, canvas.height, 0.0)], \
+        {"zone": zone["zone"], "bbox": _opaque_bbox(canvas, x, y), "text": text, "fontPx": size}
+
+
+def _t_logo_row(ctx, plan, params, kind, src, zones, face, frame):
+    """Logos in a row above the face, shown bare (no tiles), building one per spoken word. A lone
+    logo gets its name beside it (params.text, else the spoken words), so it never sits alone."""
+    W, H, _ = fmt_of(ctx)
+    paths = _items(ctx, plan, params)
+    logos = [_trim_alpha(open_image(p)) for p in paths]
+    zone = placement.zone(zones, "above-face")
+    gap = LOGO_GAP * W
+    aspects = [lg.width / lg.height for lg in logos]
+    name = _card_text(ctx, plan, params) if len(logos) == 1 else ""
+    probe_img = _label_image(name, 10 ** 4, 100, W)[0] if name else None
+    label_a = probe_img.width / probe_img.height * LOGO_LABEL if probe_img else 0.0
+    room = zone["w"] * 0.94 - gap * (len(logos) - 1 + (1 if name else 0))
+    h = min(zone["h"] * 0.8, room / (sum(aspects) + label_a), LOGO_MAX * W)
+    total = h * sum(aspects) + h * label_a + gap * (len(logos) - 1 + (1 if name else 0))
+    x = zone["x"] + (zone["w"] - total) / 2
+    y = int(round(zone["y"] + zone["h"] - h))                 # as low as the brows allow
+    times = _build_times(ctx, plan, len(logos))
+    layers, boxes = [], []
+    for k, (lg, a, p) in enumerate(zip(logos, aspects, paths)):
+        img = lg.resize((max(1, int(round(h * a))), max(1, int(round(h)))), resample=3)
+        path = _save_png(img, ctx, f"{plan['id']}-l{k}-{_key(_asset_sig(p), img.size)}")
+        layers.append(Layer(path, "image", times[k], plan["t1"], int(round(x)), y, img.width, img.height, 0.0, k + 1))
+        boxes.append(_opaque_bbox(img, int(round(x)), y))
+        x += img.width + gap
+    if name:
+        size = max(10, int(100 * LOGO_LABEL * h / probe_img.height))
+        lab = _label_image(name, 10 ** 4, size, W)[0]
+        ly = int(round(y + (h - lab.height) / 2))
+        path = _save_png(lab, ctx, f"{plan['id']}-name-{_key(name, size)}")
+        layers.append(Layer(path, "image", times[0], plan["t1"], int(round(x)), ly, lab.width, lab.height, 0.0, 2))
+        boxes.append((int(round(x)), ly, int(round(x)) + lab.width, ly + lab.height))
+    boxes = [b for b in boxes if b]
+    union = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return layers, {"zone": zone["zone"], "bbox": union, "logos": len(logos), **({"name": name} if name else {}),
+                    "logoPx": int(round(h))}
+
+
+def _t_phone_row(ctx, plan, params, kind, src, zones, face, frame):
+    """Several phones side by side (2 to 4; pictures or clips), one per spoken word: things running
+    in parallel. A phone demo is the one card that may cover the face; it stays above the captions."""
+    W, H, _ = fmt_of(ctx)
+    paths = _items(ctx, plan, params)[:PHONES_MAX]
+    band = placement.caption_band(_frame(ctx))
+    top = placement.SAFE_TOP * H
+    bottom = band[0] - 0.012 * H if band else placement.SAFE_BOTTOM * H
+    mx, gap = placement.SIDE_MARGIN * W, PHONE_GAP * W
+    n = len(paths)
+    col = (W - 2 * mx - gap * (n - 1)) / n
+    sw = int(min(col / PHONE_BODY, (bottom - top) / (PHONE_RATIO + PHONE_BODY - 1))) // 2 * 2
+    sh = int(round(sw * PHONE_RATIO)) // 2 * 2
+    times = _build_times(ctx, plan, n)
+    layers = []
+    for k, p in enumerate(paths):
+        body, (ox, oy), mask = _phone_chrome(sw, sh, W)
+        x0 = int(round((W - (body.width * n + gap * (n - 1))) / 2 + k * (body.width + gap)))
+        y0 = int(round(top + (bottom - top - body.height) / 2))
+        stem = f"{plan['id']}-ph{k}-{_key(_asset_sig(p), sw, sh, params.get('focusY'))}"
+        if kind_of(p) == "video":
+            cin, dur = _clip_window(ctx, p, {}, plan["t1"] - times[k])
+            path = _video_card(ctx, p, cin, dur, body, (ox, oy), mask, stem)
+            layers.append(Layer(path, "video", times[k], times[k] + dur, x0, y0, body.width, body.height, 0.0, k + 1))
+        else:
+            body.paste(_phone_screen(ctx, p, "image", sw, sh, params), (ox, oy), mask)
+            layers.append(Layer(_save_png(body, ctx, stem), "image", times[k], plan["t1"], x0, y0, body.width,
+                                body.height, 0.0, k + 1))
+    x0, y0 = layers[0].x, layers[0].y
+    return layers, {"zone": "phones", "bbox": (x0, y0, layers[-1].x + layers[-1].w, y0 + layers[0].h), "phones": n}
+
+
+def _unit_box(v) -> Optional[tuple]:
+    """[x, y, w, h] as fractions of a picture (each 0..1), or None if it isn't one."""
+    if not isinstance(v, (list, tuple)) or len(v) != 4 or not all(isinstance(c, (int, float)) for c in v):
+        return None
+    x, y, w, h = (min(max(float(c), 0.0), 1.0) for c in v)
+    return (x, y, min(w, 1 - x), min(h, 1 - y)) if w > 0.005 and h > 0.005 else None
+
+
+def _prepared_still(ctx, src: Path, params: dict) -> Path:
+    """A still with the editor's blur boxes (params.blurBoxes: names, faces, numbers to hide) and
+    crop box (params.cropBox) applied, every box in fractions of the picture as given. The same
+    picture when there are none."""
+    from PIL import ImageFilter
+    blurs = [b for b in (_unit_box(v) for v in params.get("blurBoxes") or []) if b]
+    crop = _unit_box(params.get("cropBox"))
+    if not blurs and not crop:
+        return src
+    out = layers_dir(ctx) / f"still-{_key(_asset_sig(src), blurs, crop)}.png"
+    if out.exists():
+        return out
+    img = open_image(src).convert("RGBA")
+    for x, y, w, h in blurs:
+        box = (int(x * img.width), int(y * img.height), int((x + w) * img.width), int((y + h) * img.height))
+        part = img.crop(box)
+        # heavy enough that a name or a face can't be read back: shrink, blur, grow
+        r = max(BLUR_MIN_PX, int(BLUR_STRENGTH * max(img.width, img.height)))
+        small = part.resize((max(1, part.width // 6), max(1, part.height // 6))).filter(ImageFilter.GaussianBlur(r / 6))
+        img.paste(small.resize(part.size), box[:2])
+    if crop:
+        x, y, w, h = crop
+        img = img.crop((int(x * img.width), int(y * img.height), int((x + w) * img.width), int((y + h) * img.height)))
+    tmp = out.with_suffix(".part.png")
+    img.save(tmp)
+    tmp.replace(out)
+    return out
+
+
+def _circled(ctx, src: Path, box: tuple) -> Path:
+    """The still with a hand-drawn red loop around `box` (fractions): "circle to point"."""
+    from PIL import ImageDraw
+    out = layers_dir(ctx) / f"circled-{_key(_asset_sig(src), box)}.png"
+    if out.exists():
+        return out
+    img = open_image(src).convert("RGBA")
+    x, y, w, h = box
+    cx, cy = (x + w / 2) * img.width, (y + h / 2) * img.height
+    rx, ry = w * img.width / 2 * CIRCLE_PAD + 6, h * img.height / 2 * CIRCLE_PAD + 6
+    width = max(4, int(CIRCLE_STROKE * max(img.width, img.height)))
+    # one loop a little past a full turn, its radius wobbling slowly: drawn by hand, the same every time
+    pts = []
+    for i in range(0, 391, 3):
+        th = math.radians(i - 100)
+        wob = 1 + 0.035 * math.sin(3 * th + 0.7) + 0.02 * (i / 390)
+        pts.append((cx + rx * wob * math.cos(th), cy + ry * wob * math.sin(th)))
+    ImageDraw.Draw(img).line(pts, fill=CIRCLE_RED, width=width, joint="curve")
+    tmp = out.with_suffix(".part.png")
+    img.save(tmp)
+    tmp.replace(out)
+    return out
+
+
+def _t_circle(ctx, plan, params, kind, src, zones, face, frame):
+    """Circle callout: a screenshot card; then, on the word that names it (params.circleAt, else
+    the anchor's second word), a red loop is drawn around the spot (params.circle, fractions of the
+    picture). The card is placed like card-above-head and does not move when the loop appears."""
+    circle = _unit_box(params.get("circle"))
+    if kind != "image" or circle is None:
+        raise EngineError("CIRCLE_NONE", f"{plan['id']}: circle-callout needs a picture and params.circle",
+                          "This callout needs a picture and the spot to circle on it.")
+    crop = _unit_box(params.get("cropBox"))
+    if crop:                                  # the circle is given on the whole picture
+        circle = ((circle[0] - crop[0]) / crop[2], (circle[1] - crop[1]) / crop[3], circle[2] / crop[2], circle[3] / crop[3])
+    words = word_ids_between(ctx, plan["word_from"], plan["word_to"])
+    at = params.get("circleAt") or (words[1] if len(words) > 1 else None)
+    tc = (word_start(ctx, at) if at else None)
+    tc = plan["t0"] + CIRCLE_AFTER if tc is None else tc
+    tc = min(max(tc, plan["t0"]), plan["t1"] - CIRCLE_HOLD)
+    card = {**params, "crop": False}          # both stills the same size: the card never jumps
+    layers, rec = _t_card(ctx, {**plan, "t0": tc}, card, kind, _circled(ctx, src, circle), zones, face, frame)
+    if tc - plan["t0"] > 0.05:
+        bare, _ = _t_card(ctx, {**plan, "t1": tc}, card, kind, src, zones, face, frame)
+        layers = bare + layers
+    return layers, {**rec, "circleAt": round(tc, 3)}
+
+
+def _t_wide(ctx, plan, params, kind, src, zones, face, frame):
+    """Borrowed footage kept in its own framing: the clip (or still) at full width, over a blurred
+    copy of itself filling the frame, centred between the top of the safe area and the captions."""
+    W, H, fps = fmt_of(ctx)
+    if kind == "video":
+        info = probe(src, ctx)
+        sw, sh = info["width"], info["height"]
+    else:
+        img = open_image(src).convert("RGBA")
+        sw, sh = img.size
+    band = placement.caption_band(_frame(ctx))
+    top = placement.SAFE_TOP * H
+    bottom = band[0] - 0.012 * H if band else placement.SAFE_BOTTOM * H
+    s = min(W / sw, (bottom - top) / sh)
+    fw, fh = int(sw * s) // 2 * 2, int(sh * s) // 2 * 2
+    fx, fy = (W - fw) // 2, int(round(top + (bottom - top - fh) / 2))
+    stem = f"{plan['id']}-{_key('wide', _asset_sig(src), W, H, fw, fh, fy)}"
+    bw, bh = W // 8, H // 8
+    if kind == "image":
+        from PIL import Image, ImageEnhance, ImageFilter
+        bg = _cover(img, bw, bh).filter(ImageFilter.GaussianBlur(WIDE_BLUR)).resize((W, H), Image.BICUBIC)
+        canvas = ImageEnhance.Brightness(bg.convert("RGB")).enhance(WIDE_DIM).convert("RGBA")
+        canvas.alpha_composite(img.resize((fw, fh), Image.LANCZOS), (fx, fy))
+        path = _save_png(canvas, ctx, stem)
+        return [Layer(path, "image", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], {"zone": "full", "bbox": (0, 0, W, H)}
+    cin, dur = _clip_window(ctx, src, params, plan["t1"] - plan["t0"])
+    plan["t1"] = plan["t0"] + dur
+    out = layers_dir(ctx) / f"{stem}-{_key(round(cin, 3), round(dur, 3), _enc(ctx))}.mp4"
+    if not out.exists():
+        fc = (f"[0:v]fps={fps},setsar=1,split=2[a][b];"
+              f"[a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur={WIDE_BLUR}:2,"
+              f"scale={W}:{H},colorlevels=romax={WIDE_DIM}:gomax={WIDE_DIM}:bomax={WIDE_DIM}[bg];[b]scale={fw}:{fh}[fg];"
+              f"[bg][fg]overlay={fx}:{fy},format=yuv420p[out]")
+        tmp = out.with_name(out.stem + ".part.mp4")
+        run([ffmpeg_bin(ctx), "-y", "-v", "error", "-nostdin", "-ss", f"{cin:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
+             "-filter_complex", fc, "-map", "[out]", "-an", *_enc(ctx), "-t", f"{dur:.3f}", str(tmp)],
+            timeout=max(120, dur * 30), what="wide clip")
+        tmp.replace(out)
+    return [Layer(out, "video", plan["t0"], plan["t1"], 0, 0, W, H, 0.0)], \
+        {"zone": "full", "bbox": (0, 0, W, H), "clip": [fx, fy, fw, fh], "in": round(cin, 3)}
+
+
+def _t_receipt(ctx, plan, params, kind, src, zones, face, frame):
+    """Receipt: a screenshot shown as proof (placed like card-above-head) with a small label naming
+    its source (params.text) on its top edge."""
+    W, H, _ = fmt_of(ctx)
+    layers, rec = _t_card(ctx, plan, params, kind, src, zones, face, frame)
+    name = str(params.get("text") or "").strip()
+    if not name or not rec.get("bbox"):
+        return layers, rec
+    x0, y0, x1, _y1 = rec["bbox"]
+    lab = _label_image(name, int(0.8 * (x1 - x0)), int(RECEIPT_LABEL * W), W, fill="#111111", ink="#FFFFFF")[0]
+    lx = int(x0 + 0.03 * W)
+    ly = int(max(placement.TOP_CHROME * H, y0 - 0.55 * lab.height))     # half over the card's top edge
+    path = _save_png(lab, ctx, f"{plan['id']}-src-{_key(name, lab.size)}")
+    L = layers[-1]
+    layers.append(Layer(path, "image", L.t0, L.t1, lx, ly, lab.width, lab.height, 0.0, 1))
+    return layers, {**rec, "label": name, "bbox": (min(x0, lx), min(y0, ly), max(x1, lx + lab.width), rec["bbox"][3])}
+
+
+def _stack(layers: list, rec: dict, under: dict, W: int, H: int, core: tuple, band) -> bool:
+    """Move a card that JOINS `under` (still on screen) so it overlaps that card's upper corner on
+    the roomier side, instead of covering it. Kept where it was if that spot would touch the
+    eyes-to-chin zone or the captions. -> moved?"""
+    if not rec.get("bbox") or not under.get("bbox"):
+        return False
+    bx0, by0, bx1, by1 = rec["bbox"]
+    ux0, uy0, ux1, uy1 = under["bbox"]
+    w, h = bx1 - bx0, by1 - by0
+    right = (ux0 + ux1) / 2 <= W / 2
+    x = ux1 - JOIN_OVERLAP * w if right else ux0 - (1 - JOIN_OVERLAP) * w
+    x = min(max(x, placement.SIDE_MARGIN * W), W - placement.SIDE_MARGIN * W - w)
+    y = max(placement.TOP_CHROME * H, uy0 - JOIN_RISE * h)
+    nb = (x, y, x + w, y + h)
+    if placement.violates(nb, (core[0], core[1], core[0] + core[2], core[1] + core[3]), band):
+        return False
+    dx, dy = int(round(x - bx0)), int(round(y - by0))
+    for L in layers:
+        L.x += dx
+        L.y += dy
+    rec["bbox"] = (bx0 + dx, by0 + dy, bx1 + dx, by1 + dy)
+    return True
+
+
+def _clean_start(ctx, src: Path, cin: float, duration: float) -> float:
+    """An in-point with no cut to another shot in the clip's first second: if the footage cuts
+    within CLEAN_START of `cin`, start just after that cut (unless that leaves under 2 s). Cached."""
+    cache = layers_dir(ctx) / "clean-starts.json"
+    key = f"{_asset_sig(src)}@{cin:.3f}"
+    try:
+        known = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        known = {}
+    if key in known:
+        return float(known[key])
+    start = cin
+    for _ in range(3):                         # a montage can cut twice in a second
+        cuts = [c for c in _scene_cuts(ctx, src, start, CLEAN_START + 0.1) if 0.0 < c < CLEAN_START]
+        if not cuts or duration - (start + cuts[-1]) < MIN_HOLD:
+            break
+        start = round(start + cuts[-1] + 0.04, 3)
+    known[key] = start
+    cache.write_text(json.dumps(known), encoding="utf-8")
+    return start
+
+
+def _scene_cuts(ctx, src: Path, cin: float, span: float) -> list[float]:
+    """Seconds after `cin` where the clip cuts to another shot (ffmpeg scene score), in order."""
+    proc = run([ffmpeg_bin(ctx), "-v", "info", "-nostdin", "-ss", f"{cin:.3f}", "-t", f"{span:.3f}", "-i", str(src),
+                "-an", "-vf", f"select=eq(n\\,0)+gt(scene\\,{SCENE_CUT}),showinfo", "-f", "null", "-"],
+               timeout=60, what="scene check")
+    times = [float(t) for t in re.findall(r"pts_time:\s*(-?[0-9.]+)", proc.stderr or "")]
+    return [round(t - times[0], 3) for t in times[1:]] if times else []
+
+
 TREATMENT_FNS = {
     "card-above-head": _t_card, "full-frame": _t_full, "phone-card": _t_phone, "side-card": _t_side,
     "text-pop": _t_text, "post-wall": _t_post_wall, "icon-wall": _t_icon_wall, "split-top": _t_split,
-    "animation": _t_anim,
+    "animation": _t_anim, "title-card": _t_title, "panel-card": _t_panel, "logo-row": _t_logo_row,
+    "phone-row": _t_phone_row, "circle-callout": _t_circle, "wide-clip": _t_wide, "receipt": _t_receipt,
 }
+ITEM_TREATMENTS = {"post-wall", "icon-wall", "logo-row", "phone-row"}    # pictures from params.items
+TEXT_ONLY = {"text-pop", "title-card", "panel-card"}                    # need no asset
 
 
 # --- entry point -------------------------------------------------------------------------------
@@ -1377,7 +1831,7 @@ def build_layers(ctx) -> list:
     """project.broll -> [Layer] (output seconds, output px). Also writes work/layers/layers.json,
     the per-item record (zone, opaque bbox, fallbacks, skips) that verify and the AI can read."""
     plans = plan_windows(ctx)
-    out, records = [], []
+    out, records, placed = [], [], {}
     for k, plan in enumerate(plans):
         it = plan["item"]
         tname = plan["treatment"]
@@ -1392,13 +1846,17 @@ def build_layers(ctx) -> list:
         asked = tname
         try:
             src, kind = None, "none"
-            if it.get("asset") and tname not in ("post-wall", "icon-wall"):
+            if it.get("asset") and tname not in ITEM_TREATMENTS:
                 src = _asset_path(ctx, it["asset"])
                 kind = kind_of(src)
                 if kind not in ("image", "video"):
                     raise EngineError("ASSET_KIND", f"{src.name} is {kind}",
                                       "This b-roll file isn't a picture or a video.")
-            elif tname not in ("text-pop", "post-wall", "icon-wall"):
+                if kind == "image" and animation_sidecar(src) is None:
+                    src = _prepared_still(ctx, src, params)
+                    if _unit_box(params.get("cropBox")):
+                        params["crop"] = False        # the editor's crop box replaces the automatic one
+            elif tname not in TEXT_ONLY | ITEM_TREATMENTS:
                 raise EngineError("ASSET_NONE", f"{plan['id']}: {tname} needs an asset",
                                   "This b-roll needs a picture or a clip.")
             asked = tname
@@ -1410,6 +1868,8 @@ def build_layers(ctx) -> list:
             retime = None
             if tname == "animation":
                 src, retime = _current_animation(ctx, it, src)
+            if plan["joins"] and (it.get("params") or {}).get("scale") is None:
+                params["scale"] = JOIN_SCALE
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])
             layers, rec = fn(ctx, plan, params, kind, src, zones, face, frame)
             if asked != tname:
@@ -1423,14 +1883,15 @@ def build_layers(ctx) -> list:
                             "detail": e.message})
             continue
         base_z = 10 * (k + 1)
-        fade = params.get("fade")
         for L in layers:
-            L.z = base_z + (L.z or 0)
-            if fade:
-                fi, fo = (fade, fade) if isinstance(fade, (int, float)) else fade
-                L.fade_in, L.fade_out = float(fi), float(fo)
-        out += layers
+            L.z = base_z + (L.z or 0)                 # hard cuts: no fades in or out
         hiding = tname in FACE_HIDING or rec.get("zone") in ("full", "split-top")
+        under = placed.get(plan["joins"])
+        if under is not None and not hiding and not under.get("faceHiding"):
+            core = frame.get("core", face)
+            if _stack(layers, rec, under, *fmt_of(ctx)[:2], core, placement.caption_band(_frame(ctx))):
+                rec["joined"] = plan["joins"]
+        out += layers
         if tname == "animation" and not hiding and rec.get("bbox"):
             # A re-timed clip is placed for this cut (anim_timing). Until it is rendered the old one
             # plays, and if the cut moved the face under it, it can sit on the face or the captions:
@@ -1449,6 +1910,7 @@ def build_layers(ctx) -> list:
                         "face": [round(v, 1) for v in face],
                         "protected": [round(v, 1) for v in frame.get("core", face)], "layers": len(layers),
                         **{k2: (list(v) if isinstance(v, tuple) else v) for k2, v in rec.items()}})
+        placed[plan["id"]] = records[-1]
     report(ctx, "broll", 100.0, "Adding pictures")
     side = layers_dir(ctx) / "layers.json"
     side.write_text(json.dumps({"version": VERSION, "items": records,

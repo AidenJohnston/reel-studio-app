@@ -262,8 +262,18 @@ Treatments (`engine/reelengine/templates/treatments/` and `broll.py`): `card-abo
 the face, slight tilt, sized to read), `full-frame` (covers the frame, face hidden), `phone-card` (asset in a
 phone frame, beside the face), `side-card` (left or right of the face), `text-pop` (big words above the head),
 `post-wall` (a grid of images building one per word), `icon-wall`, `split-top` (asset on the top half, speaker
-on the bottom half), and `animation`. Each treatment is a deterministic layout from (asset, face track, frame
-size, params).
+on the bottom half), `animation`, and the cards an editor uses every day: `title-card` (the hook or a title, words
+filling a white label; the opening hook square), `panel-card` (a screenshot framed on a white panel, or words set on
+one), `logo-row` (real logos in a row, bare; a lone logo gets its name beside it), `phone-row` (2 to 4 phones side
+by side), `circle-callout` (a screenshot, then a red loop drawn around one spot on it on its word), `wide-clip`
+(borrowed footage in its own framing, full width over a blurred copy of itself) and `receipt` (a screenshot as proof,
+labelled with its source). Any still may carry `params.cropBox` and `params.blurBoxes` (to hide names or faces),
+and any card may `params.join` the card before it: it stacks on it, smaller, and they leave together. Each treatment
+is a deterministic layout from (asset, face track, frame size, params).
+
+**Timing rules.** Every card holds at least 2 s: one that would replace it sooner waits (or joins it). Cards cut in
+and out hard, never fade. A borrowed clip never cuts to another shot in its first second: its in-point moves past
+the cut.
 
 **Placement rule.** The protected zone is the **eyes-to-chin** region (eyes, nose and mouth: from just above
 the eyebrows to the chin, outer eye corners plus a margin) and the **caption band**, not the whole face box.
@@ -280,7 +290,8 @@ forehead down to just above the brows, and the sides of the head.
   smaller over the hair on one side.
 - Split view is the last resort, used only when even the relaxed zone leaves no readable placement; the render
   result reports every such fallback in plain words.
-- `full-frame`, `post-wall` and `split-top` cover or move the face on purpose.
+- `full-frame`, `post-wall`, `split-top` and `wide-clip` cover or move the face on purpose; so may `phone-row`
+  (a phone demo), which stays above the captions.
 - Default look: a short tilt (about 2-3 degrees) on stills; clips stay level.
 
 **Animations** (`templates/animations/`): HTML templates (`stat-count-up`, `big-quote`, `list-reveal`,

@@ -1,0 +1,27 @@
+{
+  "id": "circle-callout",
+  "label": "Circle to point",
+  "description": "A screenshot card above the face; then, on the word that names it, a red hand-drawn loop around one spot on it. params.circle is the spot as [x, y, w, h] fractions of the picture.",
+  "hidesFace": false,
+  "assetKinds": [
+    "image"
+  ],
+  "params": {
+    "circle": {
+      "default": null,
+      "help": "[x, y, w, h], fractions of the picture"
+    },
+    "circleAt": {
+      "default": null,
+      "help": "word id the loop lands on; default = the anchor's second word"
+    },
+    "tilt": {
+      "default": -2.0,
+      "help": "degrees"
+    },
+    "scale": {
+      "default": 1.0,
+      "help": "1.0 = as big as fits"
+    }
+  }
+}

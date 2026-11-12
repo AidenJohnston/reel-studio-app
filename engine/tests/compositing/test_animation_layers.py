@@ -74,7 +74,7 @@ def test_animation_leaves_with_its_line(tmp_path, video):
                                 "asset": "work/assets/a.mov", "params": {}}])
     L = broll.build_layers(ctx)[0]
     # one short word: held the readable minimum, not the whole 3 s over the next line
-    assert L.t1 - L.t0 == pytest.approx(broll.STILL_MIN_HOLD, abs=0.05)
+    assert L.t1 - L.t0 == pytest.approx(broll.MIN_HOLD, abs=0.05)
     rec = json.loads((ctx.work / "layers" / "layers.json").read_text(encoding="utf-8"))["items"][0]
     assert rec["faceHiding"] and rec["zone"] == "full"
 
@@ -89,7 +89,7 @@ def test_animation_runs_to_the_end_of_a_long_line(tmp_path, video):
                                 "asset": "work/assets/a.mov", "params": {}}])
     plan = broll.plan_windows(ctx)[0]
     L = broll.build_layers(ctx)[0]
-    assert plan["t1"] > plan["t0"] + broll.STILL_MIN_HOLD          # the line is longer than 2 s
+    assert plan["t1"] > plan["t0"] + broll.MIN_HOLD          # the line is longer than 2 s
     assert L.t1 - L.t0 == pytest.approx(plan["t1"] - plan["t0"], abs=0.05)   # longer than 3 s: last frame holds
     assert plan["t1"] == pytest.approx(broll.word_end(ctx, b) + broll.ANIM_TAIL, abs=0.01)
 

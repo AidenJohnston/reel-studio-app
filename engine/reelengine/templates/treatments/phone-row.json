@@ -1,0 +1,20 @@
+{
+  "id": "phone-row",
+  "label": "Phones side by side",
+  "description": "Two to four phones side by side, each showing a picture or a clip, one landing per spoken word: things running at the same time (agents working in parallel, apps compared). A phone demo may cover the face; it stays above the captions.",
+  "hidesFace": true,
+  "assetKinds": [
+    "image",
+    "video"
+  ],
+  "params": {
+    "items": {
+      "default": [],
+      "help": "2 to 4 screens (pictures or clips), left to right"
+    },
+    "focusY": {
+      "default": 0.0,
+      "help": "which part of a tall screenshot shows: 0 = top"
+    }
+  }
+}
