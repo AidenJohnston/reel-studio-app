@@ -167,7 +167,48 @@ describe('project store', () => {
     writeFileSync(join(dir, 'versions', 'v1', 'draft.mp4'), 'old-style draft-only folder')
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[0, true]])
     writeFileSync(join(dir, 'versions', 'v1', 'export.mp4'), 'final')
+    const p = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8'))
+    writeFileSync(join(dir, 'project.json'), JSON.stringify({ ...p, version: 1 }))
     expect((await listVersions(dir)).map((v) => [v.n, v.draft])).toEqual([[1, false]])
+  })
+
+  it('cleanup after a failed job keeps a saved version that has lost its video', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('iota', { versions: [1] })
+    await fs.rm(join(dir, 'versions', 'v1', 'export.mp4'))
+    await cleanPartialVersions(dir)
+    expect(existsSync(join(dir, 'versions', 'v1', 'cover.png'))).toBe(true)
+  })
+
+  it('the Subtitles list shows the lines of the saved version, not an older render\'s', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('kappa', { versions: [1] })
+    const cues = (w: string) => ({ cues: [{ run: 0, tokens: [{ w, ids: ['w0'] }] }] })
+    writeFileSync(join(dir, 'versions', 'v1', 'captions.json'), JSON.stringify(cues('now')))
+    writeFileSync(join(dir, 'work', 'captions.json'), JSON.stringify(cues('before')))
+    expect((await detail('kappa')).captionLines).toEqual([[{ w: 'now', ids: ['w0'], run: 0 }]])
+  })
+
+  it('before there is a version, the Subtitles list shows the preview\'s lines', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('lambda', {})
+    mkdirSync(join(dir, 'versions', 'preview'), { recursive: true })
+    writeFileSync(join(dir, 'versions', 'preview', 'captions.json'), JSON.stringify({ cues: [{ run: 0, tokens: [{ w: 'first', ids: ['w0'] }] }] }))
+    expect((await detail('lambda')).captionLines).toEqual([[{ w: 'first', ids: ['w0'], run: 0 }]])
+  })
+
+  // Stop pressed while "Checking your video", or a failed cover: the export is in v2 but project.json
+  // still says 1, and the next final render deletes v2 to make a different video under that number.
+  it('a final render that stopped before it was saved is not shown as a version', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('theta', { versions: [1] })
+    mkdirSync(join(dir, 'versions', 'v2'), { recursive: true })
+    writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'never saved')
+    expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
   })
 
   it('recovers a project that was mid-render when the app quit', async () => {
@@ -193,6 +234,51 @@ describe('project store', () => {
     expect(existsSync(firstOnly)).toBe(true)
     // Running it again finds nothing to do.
     expect(await recoverInterrupted()).toEqual([])
+  })
+
+  it('a note that never got saved is not a version, and leaves no private copy, before or after the app restarts', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('zeta', { versions: [1] })
+    mkdirSync(join(dir, 'versions', 'v2'), { recursive: true }) // the app closed between the final render and the save
+    writeFileSync(join(dir, 'versions', 'v2', 'export.mp4'), 'never saved')
+    mkdirSync(join(dir, 'work', 'notes', 'j5'), { recursive: true })
+    writeFileSync(join(dir, 'work', 'notes', 'j5', 'edit.json'), '{}')
+    expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
+    await updateAppState('zeta', (s) => {
+      s.job = { id: 'j5', kind: 'note', startedAt: new Date().toISOString() }
+    })
+    await recoverInterrupted()
+    expect((await readAppState('zeta')).chat.at(-1)?.text).toMatch(/closed before I finished/)
+    expect((await listVersions(dir)).map((v) => v.n)).toEqual([1])
+    expect(existsSync(join(dir, 'work', 'notes', 'j5'))).toBe(false)
+  })
+
+  it('the app closed right after a note was saved: once project.json can be read, its reply and question are posted once', async () => {
+    setupPaths()
+    await ensureRoot()
+    const dir = fakeProject('eta', { versions: [1, 2] })
+    const p = JSON.parse(await fs.readFile(join(dir, 'project.json'), 'utf8'))
+    p.notes = [{ id: 'j6', version: 2, text: 'from now on more room', applied: ['cut'], at: p.updatedAt,
+      reply: 'I gave the pauses more room. I also saved this to My style for your future videos: "Leave more room." You can remove it in Settings.',
+      styleRulesAdded: ['Leave more room.'] }]
+    await updateAppState('eta', (s) => {
+      s.job = { id: 'j6', kind: 'note', startedAt: new Date().toISOString() }
+    })
+    // unreadable for now (another program is writing it): the note may be saved, so nothing is said yet
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(p).slice(0, 80))
+    expect(await recoverInterrupted()).toEqual([])
+    expect((await readAppState('eta')).job?.id).toBe('j6')
+    expect((await readAppState('eta')).chat).toEqual([])
+    writeFileSync(join(dir, 'project.json'), JSON.stringify(p))
+    await recoverInterrupted()
+    const chat = (await readAppState('eta')).chat
+    expect(chat.map((m) => [m.text, m.version, m.suggestion])).toEqual([
+      ['I gave the pauses more room.', 2, undefined],
+      ['Remember this for next time? "Leave more room."', undefined, 'Leave more room.']
+    ])
+    expect(await recoverInterrupted()).toEqual([])
+    expect((await readAppState('eta')).chat).toHaveLength(2)
   })
 
   it('writes json atomically (no temp files left behind)', async () => {
