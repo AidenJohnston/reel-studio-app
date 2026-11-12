@@ -35,6 +35,14 @@ describe('tool schemas', () => {
     const post = TOOLS.find((t) => t.name === 'write_post')!;
     expect(validate(post.parameters, { caption: 'x', hashtags: ['a', 'b'], keywords: [] }).join()).toMatch(/at least 5/);
   });
+  it('explains when a correction word was cut', async () => {
+    const { ctx } = await ctxFor();
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w27', to: 'w56' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Nobody', to: 'Someone' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('was cut');
+    expect(result.content).not.toContain('not in the transcript');
+  });
 });
 
 describe('tool implementations', () => {
@@ -49,6 +57,187 @@ describe('tool implementations', () => {
     expect((await loadProject(dir)).cut.keep).toHaveLength(2);
     expect(events).toContainEqual({ type: 'tool', name: 'set_cut', summary: 'Picked your best takes' });
     expect(ctx.state.changed.has('cut')).toBe(true);
+  });
+
+  it('fails if possessive correction rules differ from the engine', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = "Claude’s";
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w56' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'Claude', to: 'Claud' }]);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'the assistant' })).isError).toBe(true);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  });
+
+  it.each([
+    ['size', 301], ['maxWords', 0],
+    ['color', 'garbage'], ['case', 'sentence'],
+  ])('fails if invalid caption %s=%s is saved', async (field, value) => {
+    const { ctx, dir } = await ctxFor();
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const result = await executeTool(ctx, 'set_caption_style', { [field]: value });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain(field);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect([...ctx.state.changed]).toEqual([]);
+    expect(ctx.state.summaries).toEqual([]);
+  });
+
+  it.each([
+    { name: 'one word', heard: ['script', 'script'], end: 'w0', scoped: { from: 'script', to: 'JavaScript', at: 'w0' } },
+    { name: 'a phrase', heard: ['type', 'script', 'type', 'script'], end: 'w1', scoped: { from: 'type script', to: 'TypeScript', at: 'w0', through: 'w1' } },
+  ])('respects subtitle edits scoped to $name when checking whether an AI correction applies', async ({ heard, end, scoped }) => {
+    const { ctx, dir, events } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    heard.forEach((w, i) => { transcript.words[i].w = w; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: end }] });
+    const seeded = await loadProject(dir);
+    seeded.captions.corrections = [scoped];
+    await saveProject(dir, seeded);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const eventCount = events.length;
+    const proposed = { from: scoped.from, to: 'Code' };
+    const blocked = await executeTool(ctx, 'add_caption_correction', proposed);
+    expect(blocked.isError).toBe(true);
+    expect(blocked.summary).toBeUndefined();
+    expect(events).toHaveLength(eventCount);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+
+    // The other occurrence is still editable; the subtitle edit applies only at its anchor.
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: `w${heard.length - 1}` }] });
+    expect((await executeTool(ctx, 'add_caption_correction', proposed)).isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([scoped, proposed]);
+
+    // A stale subtitle edit must not block the words heard after re-transcription.
+    const stale = await loadProject(dir);
+    stale.captions.corrections = [{ ...scoped, from: 'something else' }];
+    await saveProject(dir, stale);
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: end }] });
+    expect((await executeTool(ctx, 'add_caption_correction', proposed)).isError).toBe(false);
+  });
+
+  it('fails if a fully shadowed correction is saved or reported as fixed', async () => {
+    const { ctx, dir, events } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = "Claude’s";
+    transcript.words[1].w = "Claude";
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w0' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: "Claude’s", to: 'the assistant' })).isError).toBe(false);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const summaries = [...ctx.state.summaries];
+    const eventCount = events.length;
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Claude’s");
+    expect(result.summary).toBeUndefined();
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(ctx.state.summaries).toEqual(summaries);
+    expect(events).toHaveLength(eventCount);
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w1' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'Claude', to: 'Claud' })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toContainEqual({ from: 'Claude', to: 'Claud' });
+  });
+
+  it('fails if an unrelated correction is blamed for a word that was cut', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    ['hello', 'world', 'Nobody'].forEach((word, i) => { transcript.words[i].w = word; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w1' }] });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'hello', to: 'Hallo' })).isError).toBe(false);
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'Nobody', to: 'Someone' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('was cut');
+    expect(result.content).not.toContain('"hello"');
+  });
+
+  it('fails if an update saves a missing b-roll asset', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll = [{ id: 'b1', anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card', asset: 'work/missing.png', params: {} }];
+    await saveProject(dir, p);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const result = await executeTool(ctx, 'update_broll', { id: 'b1', params: { tilt: 2 } });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('asset not found');
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect(ctx.state.summaries).toEqual([]);
+  });
+
+  it('fails if corrections ignore the cut or accept removed words', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    ['type', 'uh', 'script'].forEach((word, i) => { transcript.words[i].w = word; });
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w0' }, { from: 'w2', to: 'w2' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: 'type script', to: 'TypeScript' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: 'type script', to: 'TypeScript' }]);
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'uh', to: 'um' })).isError).toBe(true);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  });
+
+  it('fails if unrelated missing assets block b-roll removal', async () => {
+    const { ctx, dir } = await ctxFor();
+    const p = await loadProject(dir);
+    p.broll = ['b1', 'b2'].map((id) => ({
+      id, anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card',
+      asset: `work/${id}-missing.png`, params: {},
+    }));
+    await saveProject(dir, p);
+    expect((await executeTool(ctx, 'remove_broll', { id: 'b1' })).isError).toBe(false);
+    expect((await loadProject(dir)).broll.map((b) => b.id)).toEqual(['b2']);
+    expect((await executeTool(ctx, 'remove_broll', { id: 'b2' })).isError).toBe(false);
+    expect((await loadProject(dir)).broll).toEqual([]);
+  });
+
+  it('fails if a split-number correction is rejected', async () => {
+    const { ctx, dir } = await ctxFor();
+    const file = path.join(dir, 'work', 'transcript.json');
+    const transcript = JSON.parse(await fsp.readFile(file, 'utf8'));
+    transcript.words[0].w = '3';
+    transcript.words[1].w = ',000';
+    await fsp.writeFile(file, JSON.stringify(transcript));
+    await executeTool(ctx, 'set_cut', { keep: [{ from: 'w0', to: 'w56' }] });
+    const result = await executeTool(ctx, 'add_caption_correction', { from: '3,000', to: 'three thousand' });
+    expect(result.isError).toBe(false);
+    expect((await loadProject(dir)).captions.corrections).toEqual([{ from: '3,000', to: 'three thousand' }]);
+  });
+
+  it('fails if a missing generated animation is saved', async () => {
+    const { ctx, dir, host } = await ctxFor();
+    host.renderAnimation = async (_template, _params, out) => out;
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const result = await executeTool(ctx, 'add_broll', {
+      anchor: { from: 'w29', to: 'w30' }, treatment: 'animation',
+      animation: { template: 'stat-count-up', params: { text: 'hours', value: '18' } }, params: {},
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/asset not found/);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+  });
+
+  it('fails if a stale search-result asset is saved', async () => {
+    const { ctx, dir, host } = await ctxFor();
+    host.searchResults = [{ url: 'https://example.com/x.png', path: 'work/assets/missing.png', title: 'bread' }];
+    const before = await fsp.readFile(path.join(dir, 'project.json'));
+    const result = await executeTool(ctx, 'add_broll', { anchor: { from: 'w0', to: 'w8' }, treatment: 'side-card', search: 'bread', params: {} });
+    expect(result.isError).toBe(true);
+    expect(await fsp.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    expect([...ctx.state.changed]).toEqual([]);
+    expect(ctx.state.summaries).toEqual([]);
   });
 
   it('get_transcript shows ids, retake groups and the cut', async () => {
@@ -205,7 +394,7 @@ describe('tool implementations', () => {
   });
 
   it('render, frames (images attached), cover, zoom, captions, style, finish', async () => {
-    const { ctx, root, events } = await ctxFor();
+    const { ctx, root, dir, events } = await ctxFor();
     expect((await executeTool(ctx, 'look_at_frames', { times: [1], words: null })).content).toMatch(/render_draft first/);
     await executeTool(ctx, 'set_cut', { keep: [{ from: 'w16', to: 'w56' }] });
     const rd = JSON.parse((await executeTool(ctx, 'render_draft', {})).content);
@@ -217,14 +406,15 @@ describe('tool implementations', () => {
     expect((await executeTool(ctx, 'set_zoom', { zooms: [{ anchor: { from: 'w53', to: 'w56' }, scale: 1.12 }] })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: null, text: 'Bread' })).isError).toBe(false);
     expect((await executeTool(ctx, 'set_cover', { atSourceTime: 6.2, source: 's9', text: null })).isError).toBe(true);
-    expect((await executeTool(ctx, 'set_caption_style', { enabled: null, preset: null, size: 70, maxWords: 2, case: null, color: null, position: 0.72 })).isError).toBe(false);
+    expect((await executeTool(ctx, 'set_caption_style', { size: 70, maxWords: 2, case: 'title', color: '#AABBCC88', position: 0.72 })).isError).toBe(false);
+    expect((await loadProject(dir)).captions.style).toMatchObject({ size: 70, maxWords: 2, case: 'title', color: '#AABBCC88', position: 0.72 });
     const seeded = await loadProject(ctx.projectDir);
-    seeded.captions.corrections = [{ from: 'flower', to: 'Flower', at: 'w20' }];
+    seeded.captions.corrections = [{ from: 'flour', to: 'Flower', at: 'w20' }];
     await saveProject(ctx.projectDir, seeded);
-    expect((await executeTool(ctx, 'add_caption_correction', { from: 'flower', to: 'flour' })).isError).toBe(false);
-    await executeTool(ctx, 'remove_caption_correction', { from: 'flower' });
+    expect((await executeTool(ctx, 'add_caption_correction', { from: 'flour', to: 'flower' })).isError).toBe(false);
+    await executeTool(ctx, 'remove_caption_correction', { from: 'flour' });
     // the person's fix of one word in the Subtitles list outlives the editor's whole-reel corrections
-    expect((await loadProject(ctx.projectDir)).captions.corrections).toEqual([{ from: 'flower', to: 'Flower', at: 'w20' }]);
+    expect((await loadProject(ctx.projectDir)).captions.corrections).toEqual([{ from: 'flour', to: 'Flower', at: 'w20' }]);
     // no note asking to remember: proposed once (deduped), nothing saved
     await executeTool(ctx, 'add_style_rule', { rule: 'keep music quieter under talking' });
     const again = await executeTool(ctx, 'add_style_rule', { rule: 'Keep music quieter under talking.' });
