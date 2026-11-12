@@ -20,8 +20,9 @@ How the result is trusted (a self-built wheel has no reproducible hash to pin):
   * the build cannot see Homebrew or MacPorts (CMAKE_IGNORE_PREFIX_PATH, an empty PKG_CONFIG_LIBDIR, no
     CFLAGS/LDFLAGS from the caller), so every third-party library comes from OpenCV's own source tree;
   * check_wheel() refuses any wheel that bundles a library, contains an FFmpeg/x264/x265 file, has another version,
-    or whose extension links anything outside /usr/lib and /System.
-The cache key covers every input above; changing one rebuilds.
+    has files outside cv2/ and its dist-info, carries native code other than cv2.abi3.so, or whose extension links
+    anything outside /usr/lib and /System.
+The cache key covers every input above and this file itself; changing one rebuilds.
 
 Stdlib only (runs under the macOS system python3, like fetch_runtime.py).
 """
@@ -72,13 +73,13 @@ CMAKE_ARGS = [
     "-DCMAKE_OSX_ARCHITECTURES=arm64",
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + DEPLOYMENT_TARGET,
 ]
-RECIPE = 1  # bump when the build steps change in a way the inputs above do not show
-
 WHEEL_NAME = re.compile(r"^opencv_python_headless-(?P<ver>[^-]+)-cp37-abi3-macosx_(?P<maj>\d+)_(?P<min>\d+)_arm64\.whl$")
 # FFmpeg's libraries and the GPL codecs, under any name a wheel could carry them
 MEDIA_LIB = re.compile(r"^(lib)?(av(codec|format|util|filter|device)|sw(scale|resample)|postproc|x26[45]|"
                        r"opencv_videoio_ffmpeg)", re.IGNORECASE)
 SYSTEM_LIB = ("/usr/lib/", "/System/Library/")
+# Mach-O (32/64-bit, either byte order) and fat binaries
+MACHO_MAGIC = {bytes.fromhex(h) for h in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca")}
 
 
 def log(msg: str) -> None:
@@ -96,8 +97,10 @@ def pin_matches_engine() -> None:
 
 def cache_key() -> str:
     python = fr.PLATFORMS["mac-arm64"]["python"]
+    # this file itself stands for the recipe: any edit to how the wheel is built or checked rebuilds it
     inputs = {"sdist": SDIST["sha256"], "cmake_args": CMAKE_ARGS, "deployment_target": DEPLOYMENT_TARGET,
-              "build_requirements": fr.sha256_of(BUILD_REQUIREMENTS), "python": python["sha256"], "recipe": RECIPE}
+              "build_requirements": fr.sha256_of(BUILD_REQUIREMENTS), "python": python["sha256"],
+              "recipe": fr.sha256_of(Path(__file__))}
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
@@ -111,12 +114,20 @@ def check_wheel(wheel: Path) -> dict:
         raise SystemExit("%s needs a newer macOS than the app's minimum (14.0)" % wheel.name)
     with zipfile.ZipFile(str(wheel)) as z:
         names = z.namelist()
+        # nothing outside the package: a root-level .pth or sitecustomize.py would run at every interpreter start
+        stray = sorted(n for n in names if not n.startswith(("cv2/", "opencv_python_headless-%s.dist-info/" % VERSION)))
+        if stray:
+            raise SystemExit("%s has files outside cv2/ and its dist-info: %s" % (wheel.name, ", ".join(stray)))
         media = sorted(n for n in names if MEDIA_LIB.match(n.rsplit("/", 1)[-1]))
         if media:
             raise SystemExit("%s contains FFmpeg/x264/x265 files: %s" % (wheel.name, ", ".join(media)))
-        bundled = sorted(n for n in names if "/.dylibs/" in n and not n.endswith("/"))
+        bundled = sorted(n for n in names if ".dylibs" in n.split("/"))
         if bundled:
             raise SystemExit("%s bundles libraries (a build-machine library leaked in): %s" % (wheel.name, ", ".join(bundled)))
+        # the extension is the only native code the wheel may carry, whatever a file is called
+        native = sorted(n for n in names if not n.endswith("/") and z.open(n).read(4) in MACHO_MAGIC)
+        if native != ["cv2/cv2.abi3.so"]:
+            raise SystemExit("%s: expected cv2/cv2.abi3.so as its only native file, found %s" % (wheel.name, native))
         for need in ("cv2/cv2.abi3.so", "cv2/data/__init__.py"):  # PyPI's 5.0.0.93 wheels carry no cascade XML either
             if need not in names:
                 raise SystemExit("%s is missing %s" % (wheel.name, need))
@@ -137,8 +148,9 @@ def otool_links(binary: Path) -> list:
 
 
 def build_python() -> Path:
-    """The pinned python-build-standalone CPython 3.11, extracted for building only (not the bundle's copy)."""
-    root = OUT_ROOT / "python"
+    """The pinned python-build-standalone CPython 3.11, extracted for building only (not the bundle's copy). The
+    folder is named by the archive's SHA-256, so a changed pin never builds with an older interpreter."""
+    root = OUT_ROOT / ("python-" + fr.PLATFORMS["mac-arm64"]["python"]["sha256"][:16])
     py = root / "python" / "bin" / "python3"
     if not py.exists():
         fr.rmtree(root)
@@ -214,7 +226,10 @@ def ensure_wheel() -> tuple:
     record_path = out / "build.json"
     if record_path.exists():
         record = json.loads(record_path.read_text(encoding="utf-8"))
-        wheel = out / record["wheel"]["file"]
+        name = record["wheel"]["file"]
+        if not WHEEL_NAME.match(name) or Path(name).name != name:
+            raise SystemExit("%s names an unexpected wheel %r" % (record_path, name))
+        wheel = out / name
         if record.get("key") == key and wheel.exists() and fr.sha256_of(wheel) == record["wheel"]["sha256"]:
             check_wheel(wheel)
             log("cached  %s" % wheel.name)

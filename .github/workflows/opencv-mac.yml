@@ -13,6 +13,11 @@ on:
       - packaging/fetch_runtime.py
       - packaging/requirements-*.txt
       - engine/requirements.txt
+      - packaging/hash_requirements.py
+      - engine/reelengine/cover.py       # the engine's OpenCV callers and the face model they load
+      - engine/reelengine/placement.py
+      - engine/reelengine/models/**
+      - engine/tests/test_no_cv2_media_io.py
   push:
     branches: [main]
     paths:
@@ -22,6 +27,11 @@ on:
       - packaging/fetch_runtime.py
       - packaging/requirements-*.txt
       - engine/requirements.txt
+      - packaging/hash_requirements.py
+      - engine/reelengine/cover.py       # the engine's OpenCV callers and the face model they load
+      - engine/reelengine/placement.py
+      - engine/reelengine/models/**
+      - engine/tests/test_no_cv2_media_io.py
   workflow_dispatch:
 
 permissions:

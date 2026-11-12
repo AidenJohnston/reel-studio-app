@@ -36,6 +36,12 @@ def _last_name(node) -> str:
     return ""
 
 
+def _imports_cv2(node) -> bool:
+    """`importlib.import_module("cv2")` or `__import__("cv2")`."""
+    return (isinstance(node, ast.Call) and _last_name(node.func) in ("import_module", "__import__") and node.args
+            and isinstance(node.args[0], ast.Constant) and node.args[0].value == "cv2")
+
+
 def media_io_uses(source: str) -> list:
     """Lines where `source` reaches OpenCV media I/O, through `cv2`, an alias of it, or an attribute holding it."""
     tree = ast.parse(source)
@@ -43,7 +49,7 @@ def media_io_uses(source: str) -> list:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             aliases.update(a.asname for a in node.names if a.name == "cv2" and a.asname)
-        elif isinstance(node, ast.Assign) and _last_name(node.value) in aliases:
+        elif isinstance(node, ast.Assign) and (_last_name(node.value) in aliases or _imports_cv2(node.value)):
             aliases.update(_last_name(t) for t in node.targets if _last_name(t))
     found = []
     for node in ast.walk(tree):
@@ -56,9 +62,12 @@ def media_io_uses(source: str) -> list:
         elif isinstance(node, ast.Import):
             hit = next((a.name for a in node.names if a.name.startswith("cv2.") and _forbidden(a.name.split(".")[-1])), None)
         elif (isinstance(node, ast.Call) and _last_name(node.func) == "getattr" and len(node.args) >= 2
-              and _last_name(node.args[0]) in aliases and isinstance(node.args[1], ast.Constant)
-              and isinstance(node.args[1].value, str) and _forbidden(node.args[1].value)):
-            hit = node.args[1].value
+              and _last_name(node.args[0]) in aliases):
+            name = node.args[1]
+            if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                hit = "getattr with a computed name"  # cannot be checked, so not allowed on cv2
+            elif _forbidden(name.value):
+                hit = name.value
         if hit:
             found.append((node.lineno, hit))
     return found
@@ -74,6 +83,8 @@ def media_io_uses(source: str) -> list:
     "import cv2.videoio_registry",
     "import cv2\nn = cap.get(cv2.CAP_PROP_FRAME_COUNT)",
     "import cv2\nf = getattr(cv2, 'VideoCapture')",
+    "import cv2\nf = getattr(cv2, 'Video' + 'Capture')",
+    "import importlib\ncv = importlib.import_module('cv2')\ncv.VideoCapture(0)",
 ])
 def test_scanner_finds_media_io(source):
     assert media_io_uses(source)
