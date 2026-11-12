@@ -14,7 +14,8 @@ import {
   settingsDir
 } from './paths'
 import { createEngineRunner, killAllEngines, toUserError, type RunEngine } from './engine'
-import { logDuration } from './diagnostics'
+import { cpus, totalmem } from 'node:os'
+import { DIAGNOSTICS_LOG_BYTES, DIAGNOSTICS_LOG_LINES, diagnosticsReport, lastLines, logDuration, redactDiagnostics, type CliFacts } from './diagnostics'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import {
   addChat,
@@ -249,6 +250,71 @@ function handle(channel: string, fn: Handler): void {
   })
 }
 
+// ---- Copy diagnostics (Settings > About; Help on a Mac) -----------------------------------------------------------
+async function readLogTail(): Promise<string> {
+  try {
+    const fh = await fs.open(logFile(), 'r')
+    try {
+      const { size } = await fh.stat()
+      const len = Math.min(size, DIAGNOSTICS_LOG_BYTES)
+      const buf = Buffer.alloc(len)
+      await fh.read(buf, 0, len, size - len)
+      return lastLines(buf.toString('utf8'), DIAGNOSTICS_LOG_LINES, size > len)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return ''
+  }
+}
+
+/** Puts the diagnostics text on the clipboard. Only the state, version and plan kind of each CLI go in, never a path. */
+async function copyDiagnostics(): Promise<void> {
+  const settled = <T>(p: Promise<T> | undefined): Promise<T | null> => (p ?? Promise.resolve(null)).catch(() => null)
+  const [active, claude, codex, model, logTail] = await Promise.all([
+    settled(ai.active()),
+    settled(ai.claudeCodeStatus?.()),
+    settled(ai.codexStatus?.()),
+    settled(Promise.resolve().then(() => models.status())),
+    readLogTail()
+  ])
+  const facts = (c: { state: string; version?: string; plan?: string } | null): CliFacts | null =>
+    c ? { state: c.state, ...(c.version ? { version: c.version } : {}), ...(c.plan ? { plan: c.plan } : {}) } : null
+  const mac = process.platform === 'darwin'
+  const osName = mac ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  const text = diagnosticsReport(
+    {
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      os: `${osName} ${process.getSystemVersion()}`,
+      arch: process.arch,
+      cpu: cpus()[0]?.model?.trim() || 'unknown',
+      memoryGb: Math.round(totalmem() / 1024 ** 3),
+      ...(app.runningUnderARM64Translation ? { translated: true } : {}),
+      ...(mac ? { inApplications: app.isInApplicationsFolder() } : {}),
+      electron: process.versions.electron,
+      engine: engineMode(),
+      aiEditor: active
+        ? `${active.label}, ${active.connected ? 'connected' : 'not connected'}${active.error ? ` (${active.error.code})` : ''}`
+        : 'unknown',
+      claudeCode: facts(claude),
+      codex: facts(codex),
+      listeningModel: !model
+        ? 'unknown'
+        : model.installed
+          ? `${model.name}, ready`
+          : model.downloading
+            ? `${model.name}, downloading (${Math.round(model.pct)}%)`
+            : `${model.name}, not downloaded${model.error ? ` (${model.error})` : ''}`
+    },
+    logTail,
+    new Date()
+  )
+  // One pass over the whole text: the log and every fact above (a CPU name or a plan kind cannot carry a path, but cheap).
+  clipboard.writeText(redactDiagnostics(text, app.getPath('home')))
+  log('[diagnostics] copied to the clipboard')
+}
+
 async function appInfo(): Promise<AppInfo> {
   const s = await loadSettings()
   // The real long path, never an 8.3 short name like USERNA~1 (design critique 1.9).
@@ -401,6 +467,7 @@ function registerIpc(): void {
     else shell.showItemInFolder(p)
   })
   handle('app:copyText', (_e, t: string) => clipboard.writeText(String(t)))
+  handle('app:copyDiagnostics', () => copyDiagnostics())
   handle('app:dimTitleBar', (_e, on: boolean) => {
     if (process.platform !== 'darwin' && win && !win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay(on === true))
   })
@@ -766,7 +833,14 @@ async function carryOverClaudeCode(settings: { aiAutoPicked: boolean; aiCarriedO
 // ---- window -------------------------------------------------------------------------------------
 function createWindow(): void {
   win = createMainWindow({ preload: join(__dirname, '../preload/index.js'), stateFile: windowStateFile(settingsDir()), test: TEST })
-  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged)
+  installMenu(sendCommand, DEV_PROVIDERS || !app.isPackaged, () => {
+    void copyDiagnostics()
+      .then(() => {
+        const opts = { type: 'info' as const, message: 'Diagnostics copied', detail: 'Paste them into your bug report.' }
+        return win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
+      })
+      .catch((e) => log(`[diagnostics] copy failed: ${String((e as Error)?.message ?? e)}`))
+  })
   win.once('ready-to-show', () => win?.show())
   // Stop flashing the taskbar once the person is back.
   win.on('focus', () => win?.flashFrame(false))

@@ -380,6 +380,8 @@ export interface ReelApi {
     finishFirstRun(): Promise<void>
     openFolder(path: string): Promise<void>
     copyText(text: string): Promise<void>
+    /** "Copy diagnostics": app, computer, AI editor and the end of the log, redacted, onto the clipboard. */
+    copyDiagnostics(): Promise<void>
     /** A modal opened (true) or the last one closed: the OS-drawn strip behind the window buttons follows the scrim. */
     dimTitleBar(on: boolean): Promise<void>
     pathForFile(file: File): string
