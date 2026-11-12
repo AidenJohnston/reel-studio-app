@@ -34,6 +34,7 @@ import {
 } from './store'
 import { addToLibrary, isVideo, listLibrary, uniqueDest } from './library'
 import { createJobManager } from './jobs'
+import { createProxyBuilds } from './proxy-builds'
 import { createLiveVideos } from './live-video'
 import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import type { AgentResult } from './ai-types'
@@ -121,6 +122,25 @@ const runEngine: RunEngine = createEngineRunner({
   onSpawn: (pid, project) => pidRegistry?.add(pid, project),
   onExit: (pid) => pidRegistry?.remove(pid)
 })
+// Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
+const proxies = createProxyBuilds(
+  (hooks) =>
+    createEngineRunner({
+      python: pythonExe,
+      env: engineEnv,
+      cwd: engineDir,
+      log,
+      onSpawn: (pid) => {
+        pidRegistry?.add(pid)
+        hooks.onSpawn(pid)
+      },
+      onExit: (pid) => {
+        pidRegistry?.remove(pid)
+        hooks.onExit(pid)
+      }
+    }),
+  log
+)
 
 const host: EngineHost = {
   runEngine,
@@ -293,6 +313,7 @@ function startFirstEdit(slug: string, initArgs: { title: string; files: string[]
         signal
       )
     }
+    proxies.start(slug, dir)
     const provider = await ai.active().catch(() => null)
     // A render event with firstLook = the quick no-AI draft is ready while the AI keeps editing; the
     // Working screen plays it (shared/live.ts) and says what it is. Once listening is done (the first
@@ -576,6 +597,7 @@ function registerIpc(): void {
       slug,
       'note',
       async (emit, signal, { id, owner }) => {
+        proxies.start(slug, dir) // a project from before preview copies existed gets them now
         // the note is saved under the job's id; the app asks before anything goes into My style
         const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
@@ -639,7 +661,10 @@ function registerIpc(): void {
     }
     // a video kept closed stays: part of its engine may still be writing into the folder
     jobs.refuseIfBusy(slug)
-    await fs.rm(projectDir(slug), { recursive: true, force: true })
+    await proxies.stop(slug)
+    // A cancelled engine's FFmpeg can hold its files for a moment after the cancel returns, and
+    // Windows refuses to delete an open file (EBUSY/EPERM): retry for a few seconds.
+    await fs.rm(projectDir(slug), { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   })
 
   handle('jobs:cancel', (_e, id: string) => jobs.cancel(id))
