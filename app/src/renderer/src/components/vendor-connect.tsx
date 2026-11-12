@@ -689,7 +689,7 @@ function Step({ state, children }: { state: 'now' | 'done' | 'later'; children: 
 }
 
 /** ChatGPT's sign-in code: read here, typed on OpenAI's page, often on another screen. */
-function DeviceCodeBox({ v, code, url }: { v: VendorId; code: string; url: string }) {
+export function DeviceCodeBox({ v, code, url }: { v: VendorId; code: string; url: string }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return

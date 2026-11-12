@@ -198,6 +198,9 @@ export interface CreateAIOptions {
   localClaude?: DetectOptions;
   /** test hook: how the person's own Codex app (`codex`) is found and run for detection */
   localCodex?: CodexDetectOptions;
+  /** The Codex app the app fetched for its guided "Sign in with ChatGPT" (app main/easy-ai.ts), or null. Detection
+   * uses it only when the person has no Codex app of their own. */
+  managedCodex?: () => string | null;
   /** The environment the person's own CLIs get (detection and edits). The app's test switch points it at a throwaway
    * config folder. ANTHROPIC_* and OPENAI_* are always removed. Default: process.env. */
   cliEnv?: () => NodeJS.ProcessEnv;
@@ -267,7 +270,8 @@ export function createAI(opts: CreateAIOptions) {
   let claudeWindows: { at: number; v: import('./types').LimitWindow[] } | null = null;
   async function localCodex(fresh = false): Promise<LocalCodex> {
     if (!fresh && codexCache && Date.now() - codexCache.at < LOCAL_CLAUDE_TTL_MS) return codexCache.v;
-    const v = await detectCodex({ env: env(), ...(opts.localCodex ?? {}) });
+    const managed = opts.managedCodex?.() ?? null;
+    const v = await detectCodex({ env: env(), ...(managed ? { fallbackBin: managed } : {}), ...(opts.localCodex ?? {}) });
     codexCache = { at: Date.now(), v };
     return v;
   }

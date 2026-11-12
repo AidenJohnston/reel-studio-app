@@ -135,6 +135,7 @@ import { openSignInWindow, publicInfo } from './claude-signin'
 import { claudeCheckWords, createVendorConnect, type CliStatus, type VendorConnect } from './vendor-connect'
 import { runLogin, testVendorEnv, testVendorLoginEnv, type Vendor } from './vendor-setup'
 import { confirmHub, detectHub, type HubDetection } from './vendor-hub'
+import { easyAiTest, setupEasyAi, type EasyAi } from './easy-ai'
 import { aiChoiceSaved, carryOverDecision } from './ai-carryover'
 import type { UsageEvent } from '../shared/api'
 import type { AppInfo, DropResult, EngineCache, ExportResult, JobEvent, ProjectDetail, ProjectJson, SettingsPane, CoverCandidate, MatchVerdict, NoteMoment, PacePreview, PlatformExportResult, VersionInfo, VersionTimeline, LearnedRule, MergeRequest, StyleRule, EditorName } from '../shared/api'
@@ -307,6 +308,8 @@ let ai: AI
 let perms: Permissions
 let aiSource: 'package' | 'mock' = 'mock'
 let vendors: VendorConnect
+/** the guided AI setup behind the easy-AI flag (easy-ai.ts); set in registerIpc */
+let easy: EasyAi | null = null
 
 // The environment the person's own Claude Code / Codex apps get. Normally the app's own; the test switch
 // REELSTUDIO_TEST_VENDOR_HOME swaps in a throwaway home (a fresh machine) so a real install + sign-in can be tried
@@ -1493,6 +1496,42 @@ function registerIpc(): void {
   handle('ai:vendorSignInAgain', (_e, v) => void vendors.signInAgain(vendorOf(v)))
   handle('ai:vendorSignInWithCode', (_e, v) => vendors.signInWithCode(vendorOf(v)))
   handle('ai:vendorSignIn', (_e, v) => vendors.signIn(vendorOf(v)))
+  // The guided setup behind the easy-AI flag (easy-ai.ts): Sign in with ChatGPT, and Reel Studio's AI (publik).
+  easy = setupEasyAi({
+    handle,
+    env: process.env,
+    test: easyAiTest(process.env, TEST && !app.isPackaged),
+    saved: async () => (await loadSettings()).easyAi,
+    save: async (on) => void (await saveSettings({ easyAi: on })),
+    userData: app.getPath('userData'),
+    settingsDir: settingsDir(),
+    tokenDirs: [process.resourcesPath, app.getAppPath()],
+    secrets: safeStorage,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    vendors: () => vendors,
+    codexStatus: async () => (await ai.codexStatus?.()) ?? { state: 'missing' },
+    ai: {
+      saveConnection: async (c) => {
+        if (!ai.saveConnection) throw connectionsNotReady
+        return ai.saveConnection(c)
+      },
+      removeConnection: async (id) => void (await ai.removeConnection?.(id)),
+      connections: async () => (await ai.connections?.()) ?? [],
+      active: () => ai.active()
+    },
+    // usage counting stops when the person said no to usage data in Reel Studio (Settings › Privacy)
+    usageAllowed: async () => {
+      const s = (await loadSettings()).sharing
+      return !(s.asked && !(s.on && s.usage))
+    },
+    // test runs never open the browser (e2e/easy-ai.spec.ts plays the person signing in)
+    openExternal: (url) => void (TEST ? log('[easy-ai] test run: browser not opened') : shell.openExternal(url).catch(() => {})),
+    broadcast,
+    aiChanged: () => void ai.active().then((p) => broadcast('ai:change', p), () => {}),
+    log
+  })
   // CLIProxyAPI on this computer (vendor-hub.ts). The key found in its config stays here until Use it; the page gets
   // the address, the model count and which file the key came from. Under test only REELSTUDIO_TEST_HUB_CONFIG is read,
   // so a test never talks to a real CLIProxyAPI on the developer's computer.
@@ -2153,7 +2192,10 @@ function createVendors(): VendorConnect {
         ai.active().then((p) => broadcast('ai:change', p), () => {})
       }
     },
-    emit: (i) => broadcast('ai:vendor', i),
+    emit: (i) => {
+      broadcast('ai:vendor', i)
+      easy?.onVendor(i)
+    },
     log
   })
 }
@@ -2411,7 +2453,8 @@ app.whenReady().then(async () => {
       secretStore: safeStorage,
       roleModels: async () => (await loadSettings()).models,
       cliEnv: cliBaseEnv,
-      moments: true
+      moments: true,
+      managedCodex: () => easy?.managedCodex() ?? null
     },
     log
   )
@@ -2433,6 +2476,7 @@ app.whenReady().then(async () => {
   outside = createOutside()
   if (settings.outsideApps) await outside.enable().catch((e) => log(`[outside] ${String(e?.userMessage ?? e)}`))
   registerIpc()
+  void easy?.resume()
   void companion?.init().catch((e) => log(`[companion] ${String(e)}`))
   createWindow()
   // What a quit, a plan limit or no internet paused last time goes on now, or when it can (main/pause.ts). Sleep

@@ -323,6 +323,19 @@ Prompts are plain markdown in `ai/prompts/`.
   backend) no key is saved. Saving makes one small text request first and, if it fails, says which field to fix.
   A second request carries a 1×1 picture; if the server refuses it, the connection is saved with pictures off and
   the AI editor sends it none. The person can switch pictures on or off on the saved connection.
+- **Easier AI sign-in** (behind a flag, off by default: Settings › Advanced, or `REELSTUDIO_EASY_AI=1`;
+  `app/src/main/easy-ai.ts`): the editor picker puts two guided choices first and today's rows under Other ways.
+  "Sign in with ChatGPT" uses the person's Codex app, or, when there is none, fetches OpenAI's Codex package itself
+  (pinned release, SHA-256 checked before unpacking, kept in `<user data>/codex`, `codex-fetch.ts`), then runs the
+  same Connect ChatGPT sign-in; a browser sign-in that cannot open its port switches to the sign-in with a code by
+  itself. "Use Reel Studio's AI" signs in with publik (`publik.ts`, from publikhq.com/sdk/publik.ts.md): this computer
+  gets a `pk_` key (`POST /api/v1/installs` with the build's public `publik-app-token.txt`), publik's page opens, the
+  app asks `GET /api/v1/wallet` every 3 s for up to 10 minutes until the person is signed in (and has AI time), then
+  saves the key as an OpenAI-compatible connection to `https://publikhq.com/api/v1` with the tier model `publik-smart`.
+  The key is kept encrypted with `safeStorage` (`publik.bin`) and in the connection store, never in a log or a
+  project. Usage counting (`app_opened`, then `active_session` every 30 minutes, no content) runs only while signed
+  in, and stops with `DO_NOT_TRACK`, `PUBLIK_TELEMETRY=0` or usage data turned off in Settings. Sign out removes the
+  key and the connection. A build without the app token does not offer Reel Studio's AI.
 - **Developer providers** (behind a dev flag, never shown to users): a recorded-response replay provider used by
   tests.
 

@@ -96,6 +96,16 @@ describe('asking the Codex app if it is signed in', () => {
       .toMatchObject({ state: 'signed_out', reason: 'Your Codex app took too long to answer. Click Check again.' });
   });
 
+  it("fails if the Codex the app fetched is passed over for the person's own that won't start, or chosen over a working one", async () => {
+    const run: Runner = async (cmd, args) =>
+      args[0] === '--version' ? (cmd === '/x/codex' ? { code: 2, stdout: '', stderr: '' } : { code: 0, stdout: 'codex-cli 0.167.2\n', stderr: '' }) : { code: 1, stdout: 'Not logged in\n', stderr: '' };
+    expect(await detectCodex({ bin: '/x/codex', fallbackBin: '/app/codex/bin/codex', exists: () => true, run })).toMatchObject({ state: 'signed_out', bin: '/app/codex/bin/codex', version: '0.167.2' });
+    expect(await detectCodex({ bin: '/x/codex', fallbackBin: '/app/codex/bin/codex', exists: () => false, run })).toMatchObject({ state: 'broken', bin: '/x/codex' });
+    expect(await detectCodex({ bin: '/y/codex', fallbackBin: '/app/codex/bin/codex', exists: () => true, run })).toMatchObject({ state: 'signed_out', bin: '/y/codex' });
+    // no Codex of their own: the fetched one is found
+    expect(await detectCodex({ env: { PATH: '', HOME: '/nobody' }, platform: 'win32', listDir: () => [], fallbackBin: '/app/codex/bin/codex', exists: (p) => p === '/app/codex/bin/codex', run })).toMatchObject({ bin: '/app/codex/bin/codex' });
+  });
+
   it('runs only --version and login status (never reads ~/.codex, never starts a session)', async () => {
     const run = cli({});
     await detectCodex({ bin: '/x/codex', run });

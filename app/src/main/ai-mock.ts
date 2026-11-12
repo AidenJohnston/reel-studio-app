@@ -103,7 +103,7 @@ const PRACTICE_REELS = [
   { title: 'Bake it hot in a closed pot', why: 'I kept the bake on its own, because it needs nothing said before it.' }
 ]
 
-export const createMockAI: CreateAI = ({ host }) => {
+export const createMockAI: CreateAI = ({ host, managedCodex }) => {
   const styleFile = (): string => join(host.reelStudioRoot(), 'My style.json')
 
   /** Read as the real package reads it (ai/src/style.ts): no file is an empty My style, a damaged one is kept as a copy
@@ -172,6 +172,10 @@ export const createMockAI: CreateAI = ({ host }) => {
   // moments.ts does: the engine's `moments` stills and window, then its draft, while the editor "thinks". A note about
   // the music changes nothing on screen, so it draws nothing, as the real package starts no run for one.
   const mockMoments = process.env.REELSTUDIO_MOCK_MOMENTS === '1'
+  // Tests only (REELSTUDIO_MOCK_EDITS=1, e2e/easy-ai.spec.ts): the editor a test connected (the Codex app, or a saved
+  // connection) answers a note with a new version, as the practice editor does, without replacing the editor in use.
+  const mockEdits = process.env.REELSTUDIO_MOCK_EDITS === '1'
+  const EDIT_MS = 300
   const PRACTICE: ProviderStatus = { id: 'replay', connected: true, label: 'Practice editor (test)' }
   async function slowNote(dir: string, note: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts?: { id?: string; owner?: string; steer?: NoteSteer; base?: number; mergeParent?: number }): Promise<AgentResult> {
     const id = opts?.id ?? randomUUID()
@@ -195,7 +199,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       if (r?.draft?.file) onEvent({ type: 'render', version: Number(r.draft.version ?? 0), draft: true, file: String(r.draft.file) })
     }
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(resolve, noteMs)
+      const t = setTimeout(resolve, noteMs || (mockEdits ? EDIT_MS : 0))
       signal?.addEventListener('abort', () => (clearTimeout(t), reject({ code: 'CANCELLED', userMessage: 'Stopped.' })), { once: true })
     })
     // like the real package: words added while it worked are read before it can finish (ai steer.ts)
@@ -235,7 +239,11 @@ export const createMockAI: CreateAI = ({ host }) => {
     m === 'ready' ? 'ready' : m === 'broken' ? 'broken' : ['signed_out', 'browser', 'signs_in', 'free', 'port_reserved', 'code_off', 'port_in_use', 'status_unknown'].includes(m) ? 'signed_out' : 'missing'
   const state = { claude: startState(mode.claude), chatgpt: startState(mode.chatgpt) }
   const plan: { claude?: string; chatgpt?: string } = mode.claude === 'ready' ? { claude: 'max' } : {}
-  let chosen: 'claude-cli' | 'codex-cli' | null = null
+  let chosen: 'claude-cli' | 'codex-cli' | 'custom' | null = null
+  // A saved connection to an OpenAI-compatible server, as the real package keeps one (the guided Reel Studio AI
+  // sign-in saves publik's key this way). Saving asks the server once, so a test sees the key and model arrive there.
+  let custom: { id: string; label: string; baseURL: string; model: string; key: string } | null = null
+  const customProvider = (): ProviderStatus => ({ id: 'custom', connected: true, label: custom!.label, connectionId: custom!.id })
   // Settings › How notes run, as the real package keeps it (ai index.ts noteRunner). REELSTUDIO_MOCK_HARNESS=refused:
   // the app's self-test fails on the first note run in the app, so that note runs on Reel Studio's editor instead.
   let runInApp = false
@@ -275,6 +283,7 @@ export const createMockAI: CreateAI = ({ host }) => {
       if (noteMs > 0) return PRACTICE
       if (chosen === 'claude-cli' && state.claude === 'ready') return claudeProvider()
       if (chosen === 'codex-cli' && state.chatgpt === 'ready') return cliProvider('chatgpt')
+      if (chosen === 'custom' && custom) return customProvider()
       return NOT_CONNECTED
     },
     async setActive(id) {
@@ -296,7 +305,8 @@ export const createMockAI: CreateAI = ({ host }) => {
           }
         }
         chosen = id
-      } else chosen = null
+      } else if (id === 'custom' && custom) chosen = 'custom'
+      else chosen = null
     },
     cancelCheck() {
       checking?.abort()
@@ -305,7 +315,35 @@ export const createMockAI: CreateAI = ({ host }) => {
       return claudeStatus()
     },
     async codexStatus() {
+      // the Codex app Reel Studio fetched (easy-ai.ts) is found like the real package finds it: signed out at first
+      if ((state.chatgpt === 'missing' || state.chatgpt === 'broken') && managedCodex?.()) state.chatgpt = 'signed_out'
       return cliStatus('chatgpt')
+    },
+    async connections() {
+      return custom ? [{ id: custom.id, label: custom.label, kind: 'openai' as const, baseURL: custom.baseURL, model: custom.model, supportsImages: false, hasKey: true, active: chosen === 'custom' }] : []
+    },
+    async saveConnection(input) {
+      const key = input.key?.trim() || (custom && input.id === custom.id ? custom.key : '')
+      const fail = (userMessage: string) => ({ status: { id: 'custom' as const, connected: false, label: input.label, error: { code: 'connection_error', userMessage } }, error: { code: 'connection_error', userMessage } })
+      try {
+        const res = await fetch(`${input.baseURL.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+          body: JSON.stringify({ model: input.model, max_tokens: 1, messages: [{ role: 'user', content: 'Reply with OK.' }] })
+        })
+        if (!res.ok) return fail('The server did not accept that key. Check the key, then paste it again.')
+      } catch {
+        return fail('Something went wrong talking to your server. Try again.')
+      }
+      custom = { id: input.id ?? custom?.id ?? `c_${randomUUID().slice(0, 8)}`, label: input.label, baseURL: input.baseURL, model: input.model, key }
+      chosen = 'custom'
+      const status = customProvider()
+      return { status, connection: { id: custom.id, label: custom.label, kind: 'openai' as const, baseURL: custom.baseURL, model: custom.model, supportsImages: false, hasKey: true, active: true } }
+    },
+    async removeConnection(id) {
+      if (custom?.id !== id) return
+      custom = null
+      if (chosen === 'custom') chosen = null
     },
     async retireSignInWithChatGPT() {
       return false
@@ -447,7 +485,7 @@ export const createMockAI: CreateAI = ({ host }) => {
         fellBack = { app, reason: 'claude_cli: MCP refused', at: new Date().toISOString() }
         onEvent({ type: 'status', phase: 'edit', message: `${app} self-test failed (claude_cli: MCP refused). Using the text-protocol provider for this session.` })
       }
-      if (noteMs > 0) return slowNote(projectDir, note, onEvent, signal, opts)
+      if (noteMs > 0 || (mockEdits && (chosen === 'custom' || (chosen === 'codex-cli' && state.chatgpt === 'ready')))) return slowNote(projectDir, note, onEvent, signal, opts)
       onEvent({ type: 'status', message: 'Reading your note', pct: 10, phase: 'edit' })
       const p = await readProject(projectDir)
       // Tests only: REELSTUDIO_MOCK_CLAUDE=ready, and the mock Claude Code app chosen in Settings. Then act like the real

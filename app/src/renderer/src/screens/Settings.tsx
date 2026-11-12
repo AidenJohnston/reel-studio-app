@@ -13,6 +13,7 @@ import { AutoUpdatesControl, autoUpdatesLine, LegalText, UpdateSettingsRow, useU
 import { useNotify } from '../App'
 import { CHECKS_NOTE, Privacy } from '../components/ModelsAndPrivacy'
 import { NoteRunnerRow, OutsideAppsRow } from '../components/AiApps'
+import { EasyAiRow } from '../components/AiSetup'
 import { TitleBarSlot } from '../components/titlebar'
 import { findSettings, SECTIONS, SETTING_IDS, SETTINGS, type SectionId, type SettingId } from '../components/settings-index'
 import { Marked, SearchHits, SearchScope, SettingRow, Switch, useShown } from '../components/settings-rows'
@@ -381,6 +382,8 @@ export function Settings({ info, onInfo, section }: { info: AppInfo; onInfo: (i:
               {/* the keys let your editor search for pictures; they are not editors (audit-1028 finding 16) */}
               <Subhead ids={['stock-keys']}>Stock photos and footage</Subhead>
               <StockKeys />
+              <Subhead ids={['easy-ai']}>Being tested</Subhead>
+              <EasyAiRow onError={(m) => notify(m, 'error')} />
               <Subhead ids={['engine-cache', 'logs', 'first-run']}>Troubleshooting</Subhead>
               <CacheRow shared={sharedModel} onError={(m) => notify(m, 'error')} />
               <SettingRow

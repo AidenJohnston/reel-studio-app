@@ -1,0 +1,15 @@
+/* The guided AI setup (AiSetup.tsx): two provider rows (provider-row.tsx) above Other ways, so it reads as the same
+   picker with its two easiest choices first. A running sign-in's sentence settles in place (pv-status.enter). */
+
+.guided > * + * { box-shadow: inset 0 1px 0 var(--line); }
+/* the rows under Other ways keep their own hairline; the disclosure's own line separates them from the guided rows */
+.guided + .disc { margin-top: 0; }
+.guided-more { gap: 10px; }
+.guided-more .progress { max-width: 320px; }
+.guided-row .pv-status > span { min-width: 0; }
+
+/* AiSetup as a block on the default path */
+.ai-setup { display: grid; gap: 8px; max-width: 560px; }
+.ai-setup > h2 { margin: 0; font-size: var(--fs-heading); line-height: var(--lh-heading); font-weight: 650; color: var(--ink); }
+.ai-setup > .muted { margin: 0 0 8px; }
+.ai-setup-skip { display: flex; justify-content: flex-start; padding-top: 4px; }
