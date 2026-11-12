@@ -74,7 +74,7 @@ describe("publik's calls", () => {
 const ORIGIN = 'https://publikhq.com'
 const wallet = (w: Partial<Wallet> = {}): Wallet => ({ claim_state: 'anonymous', claim_url: `${ORIGIN}/claim/k1`, plan: { kind: 'none', label: null }, balance_micros: 0, top_up_url: `${ORIGIN}/top-up`, ...w })
 
-function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean; sessionMs?: number; slowSave?: Promise<void>; dropFails?: boolean } = {}) {
+function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; offline?: boolean; claimUrl?: string; stored?: PublikCredential; counting?: boolean; sessionMs?: number; slowSave?: Promise<void>; dropFails?: boolean; saveFails?: (c: PublikCredential) => boolean } = {}) {
   const s = { claimed: !!o.claimed, balance: o.balance ?? 0, provisions: 0, events: [] as string[], revoked: new Set(o.revoked ?? []), counting: o.counting ?? true, saving: false }
   const fake: PublikApi = {
     async provision() {
@@ -98,7 +98,14 @@ function publik(o: { claimed?: boolean; balance?: number; revoked?: string[]; of
   let active: string | null = o.stored?.connection_id ?? null
   const sign = createPublikSignIn({
     api: fake,
-    store: { load: async () => saved, save: async (c) => void (saved = c), clear: async () => void (saved = null) },
+    store: {
+      load: async () => saved,
+      save: async (c) => {
+        if (o.saveFails?.(c)) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
+        saved = c
+      },
+      clear: async () => void (saved = null)
+    },
     origin: ORIGIN,
     openUrl: (u) => opened.push(u),
     async useKey(key, id) {
@@ -253,6 +260,16 @@ describe('Sign in with publik: stopping part way', () => {
     release()
     expect(await done).toMatchObject({ step: 'failed', message: PUBLIK_WORDS.stillOn })
     expect(t.saved()?.connection_id).toBe('c_publik')
+  })
+})
+
+describe('Sign in with publik: a credential that cannot be saved', () => {
+  it('fails if a connection whose id could not be kept stays connected where Sign out can never reach it', async () => {
+    // the disk fills between saving the install's key and saving the connection's id
+    const t = publik({ claimed: true, balance: 1, saveFails: (c) => !!c.connection_id })
+    expect(await t.sign.start()).toMatchObject({ step: 'failed', problem: 'failed' })
+    expect(t.dropped).toEqual(['c_publik'])
+    expect(t.used).toHaveLength(1)
   })
 })
 

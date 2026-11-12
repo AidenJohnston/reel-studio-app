@@ -361,7 +361,17 @@ export function createPublikSignIn(deps: PublikDeps) {
       emit({ step: 'checking', message: PUBLIK_WORDS.connecting })
       const id = await deps.useKey(c.key, c.connection_id)
       // the connection's id is kept before anything else, so Sign out can always find it
-      if (id !== c.connection_id) await deps.store.save({ ...c, connection_id: id })
+      try {
+        if (id !== c.connection_id) await deps.store.save({ ...c, connection_id: id })
+      } catch (e) {
+        // it couldn't be kept (a full disk): nothing could remove this connection later, so it doesn't stay
+        try {
+          await deps.dropKey(id)
+        } catch {
+          return emit({ step: 'failed', problem: 'failed', message: PUBLIK_WORDS.stillOn })
+        }
+        return signal.aborted ? cancelled() : failWith(e)
+      }
       if (signal.aborted) {
         // Cancel (or the flag turned off) while the key was being checked or saved: take it back out
         try {
