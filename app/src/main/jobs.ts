@@ -1,8 +1,8 @@
 // Long-running work (first edit, notes, re-renders). One job per project at a time. Every event
 // goes to the renderer; app.json records the running job so a crash can be recovered at startup.
 import { randomUUID } from 'node:crypto'
-import type { JobEvent, JobKind, JobUpdate, Phase } from '../shared/api'
-import { addChat, cleanPartialVersions, projectDir, settleInterrupted, stamp, updateAppState } from './store'
+import type { JobEvent, JobKind, JobUpdate, Phase, VersionMade } from '../shared/api'
+import { addChat, cleanPartialVersions, listVersions, projectDir, recordVersionMade, settleInterrupted, stamp, updateAppState } from './store'
 import { claimProject, type ProjectOwner } from './owner'
 import type { ChatLine } from './style-consent'
 import { toUserError } from './engine'
@@ -24,8 +24,13 @@ export interface ProgressDeps {
 export type ToVideo = (slug: string, e: Extract<JobUpdate, { type: 'render' }>) => Promise<string | null>
 /** `job.id`: a note is saved in project.json under it (store.ts settleInterrupted). `job.owner`: the
  * token that owns the project while the job runs; every engine command and edit it starts joins with
- * it (`--owner`, ai owner.ts). `chat`: the lines to post when the job ends (default: the summary). */
-export type JobFn = (emit: Emit, signal: AbortSignal, job: { id: string; owner: string | null }) => Promise<{ summary: string; version?: number; chat?: ChatLine[] }>
+ * it (`--owner`, ai owner.ts). `chat`: the lines to post when the job ends (default: the summary).
+ * `made`: what this job changed, recorded for `version` only if the job's own final render made it (see start). */
+export type JobFn = (
+  emit: Emit,
+  signal: AbortSignal,
+  job: { id: string; owner: string | null }
+) => Promise<{ summary: string; version?: number; chat?: ChatLine[]; made?: Pick<VersionMade, 'by' | 'summary'> }>
 
 interface Running {
   id: string
@@ -125,6 +130,10 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
         // main.log gets each new status line and each AI step, timed, so a slow edit can be traced afterwards
         const t0 = Date.now()
         let logged = ''
+        // What made a version is recorded where success is announced, only if this job's final render produced it
+        // and it did not exist before (an unchanged edit re-renders, and so reuses, the current version).
+        const existed = new Set(slug ? (await listVersions(projectDir(slug))).filter((v) => !v.draft).map((v) => v.n) : [])
+        const finals = new Set<number>()
         const res = await fn((e) => {
           if (e.type === 'status') {
             if (e.message && e.message !== logged) log(`[job ${kind}] ${(logged = e.message)}`)
@@ -147,6 +156,7 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             send({ jobId: id, slug, type: 'tool', name: e.name, summary: e.summary })
           } else if (e.type === 'render') {
             const r = e
+            if (!r.draft) finals.add(r.version)
             const video = slug && toVideo ? toVideo(slug, r).catch(() => null) : Promise.resolve(null)
             pending.push(video.then((v) => { if (open) send({ jobId: id, slug, type: 'render', version: r.version, draft: r.draft, firstLook: !!r.firstLook, video: v }) }))
           } else if (e.type === 'reply') send({ jobId: id, slug, type: 'reply', text: e.text })
@@ -165,6 +175,11 @@ export function createJobManager(broadcast: (e: JobEvent) => void, log: (s: stri
             s.status = 'ready'
             s.chat.push(...(res.chat ?? [{ from: 'editor', text: res.summary, version: res.version }]).map(stamp))
           }).catch((e) => log(`[job ${kind}] saved, but app.json was not updated: ${String(e)}`))
+          const n = res.version
+          if (res.made && n !== undefined && finals.has(n) && !existed.has(n)) {
+            await recordVersionMade(slug, { version: n, ...res.made, at: new Date().toISOString() })
+              .catch((e) => log(`[job ${kind}] saved, but what made v${n} was not recorded: ${String(e)}`))
+          }
         }
         log(`[job ${kind}] done in ${Math.round((Date.now() - t0) / 1000)} s`)
         send({ jobId: id, slug, type: 'done', summary: res.summary, version: res.version })

@@ -626,7 +626,7 @@ function registerIpc(): void {
         const opts = { attachments: files.map((f) => f.asset), id, saveStyleRules: false, ...(owner ? { owner } : {}) }
         const r: AgentResult = await ai.applyNote(dir, note, (e) => emit(e), signal, opts)
         const extra = r.notice?.userMessage ? ` ${r.notice.userMessage}` : ''
-        return replyAskingAboutStyle(r, r.summary + extra)
+        return { ...(await replyAskingAboutStyle(r, r.summary + extra)), made: { by: 'note', summary: note } }
       },
       { note: note || files.map((f) => f.name).join(', ') }
     )
@@ -672,7 +672,8 @@ function registerIpc(): void {
       )
       const version = Number(r?.version ?? (await readProject(slug)).version)
       emit({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) })
-      return { summary: versionMessage(version, typeof change === 'string' ? change.slice(0, 200) : ''), version }
+      const what = typeof change === 'string' ? change.slice(0, 200) : ''
+      return { summary: versionMessage(version, what), version, made: { by: 'hand', summary: what } }
     })
     return { jobId }
   })

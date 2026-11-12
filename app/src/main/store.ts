@@ -14,6 +14,7 @@ import type {
   ProjectSummary,
   ScreenStatus,
   VersionInfo,
+  VersionMade,
   Word,
   JobKind
 } from '../shared/api'
@@ -37,6 +38,8 @@ export interface AppState {
   /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
    * is open): the next start, or the next job on the project, removes them (settleInterrupted). */
   cleanupOwed?: boolean
+  /** What made each version, written once when it was made (jobs.ts). Versions made before these records existed have none. */
+  versionsMade?: VersionMade[]
 }
 
 const EMPTY_STATE: AppState = { chat: [], job: null, status: 'new', lastError: null }
@@ -212,6 +215,16 @@ export async function addChat(
 export const stamp = (line: ChatLine): ChatMessage => ({ id: randomUUID(), at: new Date().toISOString(), ...line })
 
 // ---- versions ---------------------------------------------------------------------------------
+
+/**
+ * Records what made a version. jobs.ts calls this only for a number that had no version when the job
+ * started, so an older record for it belongs to a version since deleted, and is replaced.
+ */
+export async function recordVersionMade(slug: string, made: VersionMade): Promise<void> {
+  await updateAppState(slug, (s) => {
+    s.versionsMade = [...(s.versionsMade ?? []).filter((r) => r.version !== made.version), made]
+  })
+}
 
 const VIDEO_NAMES = ['export.mp4', 'draft.mp4']
 
@@ -588,6 +601,7 @@ export async function detail(slug: string): Promise<ProjectDetail> {
     captionLines,
     brollThumbs,
     checklist: checklist(project, words, kept, versions, !!st.aiEdited),
+    versionsMade: st.versionsMade ?? [],
     // a note's attached files get a URL for their still here (never stored: the root folder can move)
     chat: st.chat.map((m) => (m.attachments?.length ? { ...m, attachments: m.attachments.map((a) => chatThumb(dir, a)) } : m)),
     lastError: st.lastError,

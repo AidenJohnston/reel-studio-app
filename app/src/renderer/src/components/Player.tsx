@@ -112,6 +112,8 @@ export function PhonePlayer({
   src,
   poster,
   autoPlayMuted,
+  playRequest,
+  onPlayRequestHandled,
   subtitle,
   instagram,
   caption,
@@ -129,6 +131,10 @@ export function PhonePlayer({
   poster?: string | null
   /** First arrival after Working: start playing, muted, with a "Tap for sound" chip. */
   autoPlayMuted?: boolean
+  /** Each new number starts playing, with sound (the person just picked this version). */
+  playRequest?: number
+  /** Called once a play request has started, so the caller can drop it. */
+  onPlayRequestHandled?: () => void
   /** Live preview of the subtitle style (the drawer). */
   subtitle?: { look: SubtitleLook; text: string; lit?: number } | null
   /** Faint Instagram buttons + caption area over the video. */
@@ -182,6 +188,18 @@ export function PhonePlayer({
     video.current.muted = true
     void video.current.play().catch(() => {})
   }, [autoPlayMuted, src])
+
+  useEffect(() => {
+    if (!playRequest) return
+    const v = video.current
+    setMuted(false)
+    if (v) {
+      v.muted = false
+      void v.play().catch(() => {})
+    }
+    onPlayRequestHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one run per request, not per callback identity
+  }, [playRequest, src])
 
   // Hold "Original": play the raw footage from the start over the reel, then go back.
   useEffect(() => {
