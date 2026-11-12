@@ -26,20 +26,19 @@ const firstUserText = (r: CompletionRequest) => {
   return m && m.role === 'user' ? m.content.filter((p) => p.type === 'text').map((p: any) => p.text).join('\n') : '';
 };
 
-async function capture(): Promise<Record<string, CompletionRequest>> {
+/** Every request the model gets, in order, tagged with the task it belongs to ("other" if none matches). */
+async function capture(): Promise<{ kind: string; req: CompletionRequest }[]> {
   const prompts = new Prompts(join(__dirname, '..', 'prompts'));
   const starts = (name: 'firstEdit' | 'applyNote' | 'proofread' | 'writeScript' | 'pickTakes', text: string) =>
     text.startsWith(prompts.render(name).slice(0, 60));
-  const seen: Record<string, CompletionRequest> = {};
-  const take = (r: CompletionRequest) => {
+  const kindOf = (r: CompletionRequest) => {
     const task = firstUserText(r);
-    const kind = starts('writeScript', r.system) ? 'writeScript'
+    return starts('writeScript', r.system) ? 'writeScript'
       : starts('pickTakes', r.system) ? 'pickTakes'
       : task.startsWith('The edit of this video is saved') ? 'postKit'
       : starts('proofread', task) ? 'proofread'
       : starts('applyNote', task) ? 'applyNote'
-      : starts('firstEdit', task) ? 'firstEdit' : null;
-    if (kind && !seen[kind]) seen[kind] = r;
+      : starts('firstEdit', task) ? 'firstEdit' : 'other';
   };
 
   const { root, dir, transcript } = await makeProject({ lines: LINES });
@@ -52,20 +51,28 @@ async function capture(): Promise<Record<string, CompletionRequest>> {
   await ai.applyNote(dir, 'x', () => undefined).catch(() => undefined);
   await ai.writeScript('x', () => undefined).catch(() => undefined);
   await pickTakes(transcript, model).catch(() => undefined);
-  model.requests.forEach(take);
-  expect(Object.keys(seen).sort(), 'every AI task was captured').toEqual(['applyNote', 'firstEdit', 'pickTakes', 'postKit', 'proofread', 'writeScript']);
-  return seen;
+  const all = model.requests.map((req) => ({ kind: kindOf(req), req }));
+  expect([...new Set(all.map((x) => x.kind))].filter((k) => k !== 'other').sort(), 'every AI task was captured')
+    .toEqual(['applyNote', 'firstEdit', 'pickTakes', 'postKit', 'proofread', 'writeScript']);
+  return all;
 }
 
 describe('AI context budget', () => {
   it('ai/context-budget.json matches what the tasks send', async () => {
-    const seen = await capture();
+    const all = await capture();
+    // Every request is pinned (retries and follow-up turns included), plus totals, so a longer or an extra request of
+    // any kind raises a number the workflow compares with main.
     const measured: Record<string, number> = {};
-    for (const kind of Object.keys(seen).sort()) {
-      measured[`${kind}, api (chars)`] = api(seen[kind]);
-      measured[`${kind}, cli (chars)`] = cli(seen[kind]);
+    const n: Record<string, number> = {};
+    for (const { kind, req } of all) {
+      const key = `${kind} #${(n[kind] = (n[kind] ?? 0) + 1)}`;
+      measured[`${key}, api (chars)`] = api(req);
+      measured[`${key}, cli (chars)`] = cli(req);
     }
-    measured['tools (count)'] = seen.firstEdit.tools.length;
+    measured['all requests (count)'] = all.length;
+    measured['all requests, api (chars)'] = all.reduce((t, x) => t + api(x.req), 0);
+    measured['all requests, cli (chars)'] = all.reduce((t, x) => t + cli(x.req), 0);
+    measured['tools (count)'] = Math.max(...all.map((x) => x.req.tools.length));
     if (process.env.UPDATE_CONTEXT_BUDGET === '1') writeFileSync(FILE, JSON.stringify(measured, null, 2) + '\n');
     const pinned = JSON.parse(readFileSync(FILE, 'utf8'));
     expect(pinned, 'ai/context-budget.json is out of date: run UPDATE_CONTEXT_BUDGET=1 npm test -w ai and commit it').toEqual(measured);
