@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EasyAiInfo, GuidedInfo, GuidedRoute, VendorInfo } from '../shared/api'
-import { ensureCodex, installedCodex, type CodexPackage } from './codex-fetch'
+import { ensureCodex, installedCodex, type CodexFetchError, type CodexPackage } from './codex-fetch'
 import { createGuidedChatgpt } from './guided-chatgpt'
 import { createPublikSignIn, credentialStore, publikApi, PUBLIK_LABEL, PUBLIK_MODEL, PUBLIK_ORIGIN, telemetryIdFile, type SecretBox } from './publik'
 import type { VendorConnect, CliStatus } from './vendor-connect'
@@ -103,7 +103,11 @@ export function setupEasyAi(d: EasyAiDeps) {
 
   const chatgpt = createGuidedChatgpt({
     status: () => d.codexStatus(),
-    fetchCodex: (signal, onPct) => ensureCodex({ ...codexPlace, systemRoot: d.env.SystemRoot }, signal, onPct),
+    fetchCodex: (signal, onPct) =>
+      ensureCodex({ ...codexPlace, systemRoot: d.env.SystemRoot }, signal, onPct).catch((e) => {
+        d.log(`[easy-ai] getting Codex stopped: ${(e as CodexFetchError)?.problem ?? 'error'}${(e as CodexFetchError)?.detail ? ` (${(e as CodexFetchError).detail})` : ''}`)
+        throw e
+      }),
     useFetched: (bin) => {
       fetched = bin
       d.log('[easy-ai] Codex fetched into the app folder')

@@ -33,9 +33,16 @@ const SPACE_FACTOR = 5
 export type FetchProblem = 'unsupported' | 'offline' | 'disk' | 'bad_download' | 'cancelled' | 'failed'
 
 export class CodexFetchError extends Error {
-  constructor(readonly problem: FetchProblem, message: string) {
+  /** `detail`: for the log only (where it stopped and the system's error code), never shown to the person */
+  constructor(readonly problem: FetchProblem, message: string, readonly detail?: string) {
     super(message)
   }
+}
+
+/** Where a step failed and the system's own code, for the log: no URL, no file contents. */
+const why = (step: string, e?: unknown): string => {
+  const x = e as (NodeJS.ErrnoException & { stderr?: string }) | undefined
+  return [step, x?.code, x?.syscall, x?.stderr ?? (x instanceof Error ? x.message : undefined)].filter(Boolean).join(': ').slice(0, 400)
 }
 
 export const FETCH_MESSAGES: Record<Exclude<FetchProblem, 'cancelled'>, string> = {
@@ -98,9 +105,11 @@ function systemTar(platform: NodeJS.Platform, systemRoot: string): string {
 function tarExtract(platform: NodeJS.Platform, systemRoot: string) {
   return (archive: string, dest: string, signal: AbortSignal): Promise<void> =>
     new Promise((resolve, reject) => {
-      const child = spawn(systemTar(platform, systemRoot), ['-xzf', archive, '-C', dest], { windowsHide: true, stdio: 'ignore', signal })
+      const child = spawn(systemTar(platform, systemRoot), ['-xzf', archive, '-C', dest], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], signal })
+      let said = ''
+      child.stderr?.on('data', (b: Buffer) => void (said = (said + String(b)).slice(-300)))
       child.on('error', reject)
-      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exited ${code}`))))
+      child.on('close', (code) => (code === 0 ? resolve() : reject(Object.assign(new Error(`tar exited ${code}`), { stderr: said.trim() || `tar exited ${code}` }))))
     })
 }
 
@@ -176,19 +185,19 @@ export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProg
       if (signal.aborted) throw cancelled()
       if (isDiskFull(e)) throw new CodexFetchError('disk', FETCH_MESSAGES.disk)
       // a file error (it has a syscall: open, write) is this computer's; anything else is the connection
-      throw (e as NodeJS.ErrnoException)?.syscall ? new CodexFetchError('failed', FETCH_MESSAGES.failed) : new CodexFetchError('offline', FETCH_MESSAGES.offline)
+      throw (e as NodeJS.ErrnoException)?.syscall ? new CodexFetchError('failed', FETCH_MESSAGES.failed, why('save download', e)) : new CodexFetchError('offline', FETCH_MESSAGES.offline, why('download', e))
     }
     if (signal.aborted) throw cancelled()
     // Nothing from the download is unpacked or run unless it is byte for byte the pinned package.
-    if (hash.digest('hex') !== pkg.sha256) throw new CodexFetchError('bad_download', FETCH_MESSAGES.bad_download)
+    if (hash.digest('hex') !== pkg.sha256) throw new CodexFetchError('bad_download', FETCH_MESSAGES.bad_download, why(`hash mismatch after ${got} bytes`))
 
     await fs.mkdir(stage, { recursive: true })
     try {
       await (d.extract ?? tarExtract(d.platform, d.systemRoot ?? 'C:\\Windows'))(archive, stage, signal)
     } catch (e) {
-      throw signal.aborted ? cancelled() : isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed)
+      throw signal.aborted ? cancelled() : isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed, why('unpack', e))
     }
-    if (!existsSync(codexBinIn(stage, d.platform))) throw new CodexFetchError('failed', FETCH_MESSAGES.failed)
+    if (!existsSync(codexBinIn(stage, d.platform))) throw new CodexFetchError('failed', FETCH_MESSAGES.failed, why('unpacked package has no bin/codex'))
     if (d.platform !== 'win32') await fs.chmod(codexBinIn(stage, d.platform), 0o755)
     await fs.writeFile(join(stage, '.complete'), `${pkg.sha256}\n`)
     await fs.rm(release, { recursive: true, force: true })
@@ -197,7 +206,7 @@ export async function ensureCodex(d: CodexFetchDeps, signal: AbortSignal, onProg
     return codexBinIn(release, d.platform)
   } catch (e) {
     if (e instanceof CodexFetchError) throw e
-    throw isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed)
+    throw isDiskFull(e) ? new CodexFetchError('disk', FETCH_MESSAGES.disk) : new CodexFetchError('failed', FETCH_MESSAGES.failed, why('install', e))
   } finally {
     await fs.rm(archive, { force: true }).catch(() => {})
     await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
