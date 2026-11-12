@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { launch, passFirstRun, userData } from './helpers'
+import { launch, passFirstRun, shot, userData } from './helpers'
 
 test('Copy diagnostics puts a redacted report on the clipboard', async () => {
   const { app, page } = await launch()
@@ -17,6 +17,8 @@ test('Copy diagnostics puts a redacted report on the clipboard', async () => {
     await page.getByTestId('nav-settings').click()
     await page.getByTestId('copy-diagnostics').click()
     await expect(page.getByTestId('copy-diagnostics')).toHaveText('Copied')
+    await page.getByTestId('diagnostics').scrollIntoViewIfNeeded()
+    await shot(page, 'diagnostics-copied')
     const text = await app.evaluate(({ clipboard }) => clipboard.readText())
     expect(text).toMatch(/^Reel Studio diagnostics\n/)
     expect(text).toMatch(/\nApp: \d+\.\d+\.\d+/)
