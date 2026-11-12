@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from . import placement, project as projmod
+from . import anim_timing, placement, project as projmod
 from .compose_util import (EngineError, _get, any_mirrored, ffmpeg_bin, fmt_of, kind_of, layers_dir, load_font, log,
                            open_image, probe, reframe_rect, reframe_vf, report, resolve_asset, run, source_mirrored,
                            source_path, source_spans, word_end, word_ids_between, word_start)
@@ -1491,10 +1491,15 @@ def build_layers(ctx) -> list:
             elif tname == "animation" and (src is None or animation_sidecar(src) is None):
                 raise EngineError("ANIM_NOT_ANIMATION", f"{plan['id']}: animation treatment without an animation file",
                                   "This spot is set to show an animation but its file isn't one, so make the animation again.")
+            retime = None
+            if tname == "animation":
+                src, retime = _current_animation(ctx, it, src)
             zones, face, frame = zones_for(ctx, plan["t0"], plan["t1"])
             layers, rec = fn(ctx, plan, params, kind, src, zones, face, frame)
             if asked != tname:
                 rec["note"] = f"an animation is shown full-frame as rendered (asked for {asked})"
+            if retime:
+                rec["retime"] = retime
         except EngineError as e:
             log(f"broll {plan['id']}: {e.message}")
             records.append({"id": plan["id"], "treatment": tname,
@@ -1511,9 +1516,9 @@ def build_layers(ctx) -> list:
         out += layers
         hiding = tname in FACE_HIDING or rec.get("zone") in ("full", "split-top")
         if tname == "animation" and not hiding and rec.get("bbox"):
-            # An animation's position was fixed when it was rendered. If the cut (or the framing under
-            # it) changed since, it can now sit on the face or the captions: say so, so the editor
-            # remakes it (a card would simply be placed again; an animation can't be).
+            # A re-timed clip is placed for this cut (anim_timing). Until it is rendered the old one
+            # plays, and if the cut moved the face under it, it can sit on the face or the captions:
+            # say so, so the editor remakes it if the app could not re-render it.
             core = frame.get("core", face)
             clash = placement.violates(tuple(rec["bbox"]), (core[0], core[1], core[0] + core[2], core[1] + core[3]),
                                        placement.caption_band(_frame(ctx)))
@@ -1535,6 +1540,20 @@ def build_layers(ctx) -> list:
                                             "t1": round(L.t1, 3), "x": L.x, "y": L.y, "w": L.w, "h": L.h, "z": L.z}
                                            for L in out]}, indent=1), encoding="utf-8")
     return sorted(out, key=lambda L: L.z)
+
+
+def _current_animation(ctx, item: dict, src: Path) -> tuple[Path, Optional[str]]:
+    """The clip an animation item plays on this cut (see anim_timing): its own clip while its beats
+    and region still fit, else the clip re-timed to the cut. -> (path, "retimed" | "pending" | None);
+    "pending" = the re-timed clip is not rendered yet (the app renders it before the next render),
+    so the old one plays."""
+    p = anim_timing.plan(ctx, item, animation_sidecar(src) or {})
+    if p is None:
+        return src, None
+    if p["ready"]:
+        return p["out"], "retimed"
+    log(f"broll {item.get('id')}: re-timed animation not rendered yet; the old one plays")
+    return src, "pending"
 
 
 def anim_context(ctx, word_from: str, word_to: str, duration: Optional[float] = None, lead: float = LEAD) -> dict:

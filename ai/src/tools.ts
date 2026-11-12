@@ -1244,11 +1244,13 @@ const ANIM_PARAMS = animationParamsSchema();
 interface AnimContext { t0: number; region?: { x: number; y: number; w: number; h: number }; layout?: 'top' | 'full'; words: TimedWord[]; exact: boolean }
 
 /** Where the clip will start, the free space above the face and each anchor word's time from the
- *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. */
-async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: number): Promise<AnimContext | null> {
+ *  clip start: from the engine (exact, `anim-context`), else approximated from the cut here. The
+ *  engine re-times the animation with the same question when the cut moves (engine anim_timing), so
+ *  `duration` is passed only when the editor set one. */
+async function animContext(ctx: ToolContext, anchor: WordAnchor, duration: unknown): Promise<AnimContext | null> {
   try {
     const r = await ctx.host.runEngine('anim-context', [...projectArgs(ctx, 'anim-context'), '--from', anchor.from, '--to', anchor.to,
-      '--duration', String(duration)], undefined, ctx.signal);
+      ...(typeof duration === 'number' ? ['--duration', String(duration)] : [])], undefined, ctx.signal);
     if (r && Array.isArray(r.words)) return { t0: r.t0, region: r.region, layout: r.layout, words: r.words, exact: true };
   } catch {
     // an older engine without anim-context: approximate timings, no region
@@ -1287,7 +1289,7 @@ async function makeAnimation(ctx: ToolContext, template: string, raw: Record<str
   if (opts.topOnly) params.layout = 'top';
   let timing = 'template default timing';
   if (anchor) {
-    const ac = await animContext(ctx, anchor, Number(params.duration ?? spec.defaultDuration ?? 3.5));
+    const ac = await animContext(ctx, anchor, params.duration);
     if (ac) {
       if (params.layout === undefined && ac.layout === 'full' && !opts.topOnly) params.layout = 'full';   // no readable room above the face
       if (ac.region && params.layout !== 'full') params.region = ac.region;

@@ -178,6 +178,7 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `match-joins [--keep <json>] [--every] [--project-file <f>]` | for each match join of the cut (or, with `--every`, each join that could hold one): whether the frames around it line up, its output time and why not (`match.py`) |
 | `pace-preview` | for no pace and each cut-style preset: picture changes a minute and in the first 5 seconds, from the plan a render would make, without encoding |
 | `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
+| `anim-jobs [--project-file <f>]` | animation clips the current cut needs re-rendered (beats re-timed to their words): `{jobs: [{id, template, params, fps, out}]}` |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report, checked against that render's own manifest |
 | `moments [--mark] [--no-draft] [--project-file <f> --out <dir>]` | what changed on screen since the state last shown (`work/moments/base.json`, or `moments-base.json` beside a note's `--project-file`), as output intervals (`moments.py`): stills inside them (at most 3, sent as `ready` as each is drawn), the 2 s window around the first (`ready`), then the draft (into `--out`, as `render --draft --out` does; `--job-id`, `--parent` and `--merge-parent` are passed on to it); the result has `intervals`, `changes`, `stills`, `window` and `draft` (the render result). The base becomes this state only when the run finishes. `--mark` only writes the base |
@@ -384,7 +385,16 @@ forehead down to just above the brows, and the sides of the head.
 **Animations** (`templates/animations/`): HTML templates (`stat-count-up`, `big-quote`, `list-reveal`,
 `logo-pop`, `price-tag`, `typing-terminal`, and `compose`, which the AI builds from rows of typed parts), each exposing `window.__setup(params)` and `window.__seek(t)`.
 The Electron main process renders them in an offscreen window frame by frame into ffmpeg, producing a
-transparent layer. No CDN is used at run time; any JS is vendored.
+transparent layer. No CDN is used at run time; any JS is vendored. A frame is a pure function of frame time
+(one paused timeline, no clock, timers or randomness; `templates/animations` tests check it).
+
+An animation follows a re-cut. Its beats (each quote word, list item, label or typed line) and its free region
+above the face come from the words of its anchor, so `engine/reelengine/anim_timing.py` re-times every
+animation against the current cut. When that differs from what its clip was rendered with, the clip to play is
+`work/animations/<template>-<key>.mov`, keyed by the spec and the re-timed params: the same project.json
+always plays the same clip. Before every `render` the app asks `anim-jobs` which of those are missing and
+renders them (`app/src/main/anim-retime.ts`); until one exists the old clip plays and layers.json says
+`retime: "pending"`.
 
 ## 8. App and AI interface
 

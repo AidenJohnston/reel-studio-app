@@ -105,6 +105,7 @@ import type { AgentResult } from './ai-types'
 import { loadAI } from './ai'
 import type { AI, EngineHost } from './ai-types'
 import { closeAnimationRenderer, renderAnimation, TEST_TEMPLATE } from './animation'
+import { withAnimationRetiming } from './anim-retime'
 import { captureWebsite } from './capture'
 import { createModelManager } from './models'
 import { createWorkGate } from './work-gate'
@@ -255,7 +256,8 @@ const renderSlot = withRenderSlot(
   }),
   (owner, waiting) => jobs.waitingForRender(owner, waiting)
 )
-const runEngine: RunEngine = renderSlot.run
+// every render first re-times the animations the cut moved (anim-retime.ts), before it waits for the render slot
+const runEngine: RunEngine = withAnimationRetiming(renderSlot.run, renderAnimation, log)
 // Its own runner per build, with the same engine setup, so removing a project can wait for the exit.
 const proxies = createProxyBuilds(
   (hooks) =>
