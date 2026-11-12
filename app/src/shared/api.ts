@@ -159,7 +159,7 @@ export interface ProjectJson {
 export type JobKind = 'first-edit' | 'note' | 'rerender' | 'export' | 'script'
 
 /** The steps of a job, tagged by the ai package on its status events (main/progress.ts times them). */
-export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
+export type Phase = 'prepare' | 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final'
 
 /**
  * What a running job reports to main (jobs.ts `Emit`): the ai package's AgentEvent plus what main adds
@@ -268,6 +268,7 @@ export interface AppInfo {
   /** The root in friendly words: "Documents › Reel Studio". */
   rootDisplay: string
   firstRunDone: boolean
+  fasterExports: boolean
   engine: { mode: 'real' | 'fake'; dir: string; python: string }
   ai: 'package' | 'mock'
   test: boolean
@@ -385,6 +386,7 @@ export interface ReelApi {
     pathForFile(file: File): string
     chooseFolder(): Promise<string | null>
     setRoot(path: string): Promise<AppInfo>
+    setFasterExports(on: boolean): Promise<AppInfo>
     /** Menu items, keyboard shortcuts handled by the menu, and notification clicks. */
     onCommand(cb: (c: AppCommand) => void): () => void
     /** Drag a finished file out of the app (desktop, folder, browser upload box). Call from dragstart. */

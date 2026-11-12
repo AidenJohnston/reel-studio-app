@@ -95,7 +95,7 @@ function editSignature(p: Record<string, unknown>): string {
 /** Fake engine: enough of docs/architecture.md section 4 for the AI layer. Records every call. */
 export class FakeHost implements EngineHost {
   calls: { command: string; args: string[] }[] = [];
-  animations: { template: string; params: any; out: string }[] = [];
+  animations: { template: string; params: any; out: string; fps?: number }[] = [];
   failRender = false;
   searchResults: any[] = [];
   /** set to make `fetch-image` / `analyze-music` behave like a current engine (else: unknown command) */
@@ -110,8 +110,8 @@ export class FakeHost implements EngineHost {
     const t = await fsp.stat(path.join(dir, 'work', 'transcript.json')).catch(() => null);
     return JSON.stringify(t ? [t.size, t.mtimeMs] : null);
   }
-  async renderAnimation(template: string, params: Record<string, unknown>, outPath: string): Promise<string> {
-    this.animations.push({ template, params, out: outPath });
+  async renderAnimation(template: string, params: Record<string, unknown>, outPath: string, fps?: number): Promise<string> {
+    this.animations.push({ template, params, out: outPath, fps });
     await fsp.writeFile(outPath, 'fake animation');
     return outPath;
   }

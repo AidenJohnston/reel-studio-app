@@ -1,5 +1,6 @@
 // End-to-end smoke test: launches the built app, goes through first run, makes a video from a real
-// file, reaches the Reel screen, tries every screen, exports, and survives a quit mid-job.
+// file, reaches the Reel screen, tries every screen, exports, survives a quit mid-job, and resumes a video
+// stopped while it was still being prepared.
 //
 // Run: npm run e2e (builds first). Env:
 //   REELSTUDIO_E2E_VIDEO   the raw take to use (default: a generated clip)
@@ -233,5 +234,22 @@ test('a force quit mid-job recovers on the next start', async () => {
   await page.getByTestId('resume').click()
   await expect(page.getByTestId('player')).toBeVisible({ timeout: 240_000 })
   await shot(page, '20-recovered-after-force-quit')
+  await app.close()
+})
+
+test('a video stopped while it is still being prepared picks up where it left off', async () => {
+  test.skip(!!process.env.REELSTUDIO_ENGINE_DIR, 'FAKE_ENGINE_SLOW_INIT holds the stand-in engine in init; a real engine may finish first')
+  const media = makeMedia()
+  const { app, page } = await launch({ FAKE_ENGINE_SLOW_INIT: '20' })
+  await passFirstRun(page)
+  await page.getByTestId('new-video').click()
+  await page.getByTestId('file-input').setInputFiles([media.video])
+  // Stopped before init has written project.json: the media is half in, the project not yet made.
+  await expect(page.getByTestId('status-message')).toContainText(/Preparing/, { timeout: 60_000 })
+  await page.getByTestId('stop').click()
+  await page.getByTestId('confirm-yes').click()
+  await expect(page.getByText('This video is paused')).toBeVisible({ timeout: 30_000 })
+  await page.getByTestId('resume').click()
+  await expect(page.getByTestId('player')).toBeVisible({ timeout: 240_000 })
   await app.close()
 })
