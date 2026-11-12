@@ -19,8 +19,7 @@ jobs:
       group: pr-size-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      # This workflow runs with a write token. It reads the base branch and fetches
-      # the PR head only as Git data. Do not run PR scripts or install dependencies here.
+      # Write token: fetch the PR head only as Git data, never run it.
       - name: Checkout base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,7 +38,6 @@ jobs:
             const managedLabelNames = new Set(
               manifest.map((label) => label.name).filter((name) => name.startsWith("size:")),
             );
-            // This repo's tests: app/test, ai/test, engine/tests, app/e2e, templates/animations/test, ai/fixtures.
             const testExcludePathspecs = [
               ":(glob,exclude)**/test/**",
               ":(glob,exclude)**/tests/**",
@@ -62,7 +60,6 @@ jobs:
                 }, 0);
 
             const resolveSizeLabel = (totalChangedLines) => {
-              // Fitted to this repo's PRs (median 300-400 changed lines).
               if (totalChangedLines < 30) return "size:XS";
               if (totalChangedLines < 150) return "size:S";
               if (totalChangedLines < 500) return "size:M";
@@ -91,7 +88,7 @@ jobs:
             const totalChangedLines = sumNumstat(git(diffArgs));
             const nonTestChangedLines = sumNumstat(git([...diffArgs, "--", ".", ...testExcludePathspecs]));
             const testChangedLines = Math.max(0, totalChangedLines - nonTestChangedLines);
-            // Tests don't count, except in a test-only PR, which is sized by its test lines.
+            // A test-only PR is sized by its test lines.
             const changedLines = nonTestChangedLines === 0 ? testChangedLines : nonTestChangedLines;
             const nextLabelName = resolveSizeLabel(changedLines);
 

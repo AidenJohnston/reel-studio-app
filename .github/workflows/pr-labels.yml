@@ -19,8 +19,7 @@ jobs:
       group: pr-labels-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      # This workflow runs with a write token. It reads only the base branch, the PR title and the list of changed
-      # file names. Do not check out, run or install anything from the pull request here.
+      # Write token: read only the PR's title and file names, never its code.
       - name: Checkout base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Sync type and area labels
@@ -34,12 +33,10 @@ jobs:
               manifest.map((label) => label.name).filter((name) => name.startsWith("type:") || name.startsWith("area:")),
             );
 
-            // type: from a Conventional Commits title, "type(scope): subject" or "type!: subject".
             const wanted = new Set();
             const match = /^([a-z]+)(?:\([^)]*\))?!?:/i.exec(pr.title.trim());
             if (match && managed.has(`type:${match[1].toLowerCase()}`)) wanted.add(`type:${match[1].toLowerCase()}`);
 
-            // area: from the changed paths (names only, never contents).
             const areaOf = (path) => {
               if (path.startsWith("app/")) return "area:app";
               if (path.startsWith("ai/")) return "area:ai";
@@ -72,7 +69,7 @@ jobs:
             const { data: current } = await github.rest.issues.listLabelsOnIssue({
               owner, repo, issue_number: pr.number, per_page: 100,
             });
-            // The files API stops at 3,000 files: with a partial list, add area labels but never remove one.
+            // The files API stops at 3,000; with a partial list, only add area labels.
             const partial = files.length < pr.changed_files;
             if (partial) core.warning(`Listed ${files.length} of ${pr.changed_files} files; keeping existing area labels.`);
             for (const label of current) {
