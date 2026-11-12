@@ -4,8 +4,9 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, Transcript, TREATMENTS, Word, WordAnchor,
-  anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject, loadTranscript,
+  Analysis, Broll, CaptionStyle, LIBRARY_FOLDERS, LibraryKind, MusicLevel, Project, ScriptAlign, Transcript, TREATMENTS, Word,
+  WordAnchor, anchorText, anchorWords, approxDuration, approxOutputTimes, keptWords, loadAnalysis, loadProject,
+  loadScriptAlign, loadTranscript,
   captionsUnderInstagram, nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
@@ -170,7 +171,7 @@ export function asData(text: string): string {
   return String(text ?? '').replace(/[<>]/g, (c) => (c === '<' ? '\u2039' : '\u203a'));
 }
 
-function formatTranscript(t: Transcript, p: Project, a: Analysis | null): string {
+function formatTranscript(t: Transcript, p: Project, a: Analysis | null, follow: ScriptAlign | null = null): string {
   const lines: string[] = [];
   let cur: string[] = []; let start = 0; let src = '';
   let prev: any = null;
@@ -210,6 +211,19 @@ function formatTranscript(t: Transcript, p: Project, a: Analysis | null): string
     out += '\n\nUNSURE WORDS (the speech model was not sure it heard these right; [the word] in its context). Check each one: '
       + 'if the topic makes a different word or name certain (a sound-alike that fits the sentence), fix it with add_caption_correction on the whole misheard phrase; if the word as heard fits, leave it\n';
     out += unsure.map((u) => `${u.id}: "${asData(u.context)}"`).join('\n');
+  }
+  if (follow && p.captions.followScript !== false) {
+    // the engine draws the script's words over the words that follow it (scriptalign.py)
+    const said = new Map(t.words.map((w) => [w.id, String(w.w).trim()]));
+    out += "\n\nLOCKED SCRIPT (the captions show the script's words wherever the speech follows it, at the audio's times; ad-libs and skipped lines show as said; caption corrections still win)\n"
+      + `<script_data>\n${asData(follow.script.trim().slice(0, 2000))}\n</script_data>`;
+    if (follow.spans.length) out += `\nFOLLOWS THE SCRIPT: ${follow.spans.slice(0, 40).map(([x, y]) => (x === y ? x : `${x}-${y}`)).join(', ')}`;
+    if (follow.groups.length) {
+      out += '\nCAPTIONS SHOW THE SCRIPT HERE (ids: heard -> shown)\n' + follow.groups.slice(0, 40).map((g) => {
+        const ids = g.ids.length > 1 ? `${g.ids[0]}-${g.ids[g.ids.length - 1]}` : g.ids[0];
+        return `${asData(ids)}: "${asData(g.ids.map((i) => said.get(i) ?? '').join(' '))}" -> "${asData(g.words.join(' '))}"`;
+      }).join('\n');
+    }
   }
   const longPauses = (a?.pauses ?? []).filter((x: any) => (x.dur ?? (x.e - x.s)) > 0.8);
   if (longPauses.length) {
@@ -738,7 +752,8 @@ const tools: ToolDef[] = [
     parameters: S.obj({}),
     async run(ctx) {
       const { p, t } = await load(ctx);
-      return { content: `${formatTranscript(t, p, ctx.analysis ?? null)}\n\nCURRENT CUT\n${JSON.stringify(cutSummary(t, p))}` };
+      const follow = await loadScriptAlign(ctx.projectDir);
+      return { content: `${formatTranscript(t, p, ctx.analysis ?? null, follow)}\n\nCURRENT CUT\n${JSON.stringify(cutSummary(t, p))}` };
     },
   },
   {
@@ -779,6 +794,7 @@ const tools: ToolDef[] = [
       position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
+      followScript: S.opt(S.bool("false: captions show what was heard instead of the locked script's words")),
     }),
     async run(ctx, args) {
       let warning: string | null = null;
@@ -787,6 +803,7 @@ const tools: ToolDef[] = [
         const underBefore = shownUnder();
         if (args.highlight != null && args.highlight !== 'none' && !/^#[0-9A-Fa-f]{6}$/.test(args.highlight)) return 'highlight must be a colour like #FFD60A, or "none"';
         if (args.enabled !== null && args.enabled !== undefined) p.captions.enabled = args.enabled;
+        if (args.followScript !== null && args.followScript !== undefined) p.captions.followScript = args.followScript;
         const style = p.captions.style;
         const before = captionLook(style);
         // sizePicked means the person picked this size in Edit it myself; a note that changes it makes it the AI's

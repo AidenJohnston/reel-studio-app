@@ -65,3 +65,17 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
 - `captions.style.sizePicked` (boolean, absent = false): the person picked `size` in the Size row of "Edit it
   myself". Picking a look then keeps that size; without it the look's own size applies. `set_caption_style` removes
   it when it changes the size. The engine ignores it.
+
+## 2026-11-12 (captions follow the script)
+
+- `script` (text, or `{text}`): the locked script the take was read from. Without it, `script.txt` or `script.md` in
+  the project folder is the script. Documented now; the vocabulary pass after transcription already read it.
+- `captions.followScript` (boolean, absent = on when there is a script): captions show the script's words (names,
+  spellings, numbers and punctuation as written) wherever the speech follows the script, at the times the audio
+  says them. Where the speaker went off-script (an ad-lib, a skipped line) captions show the transcript.
+  Corrections (`captions.corrections`) still win over both. `false` turns it off for the project.
+- `work/script-align.json` (written by the engine): the mapping. `groups` (`{ids, words}`: transcript word ids drawn
+  as these script words), `spans` (`[first id, last id]`: the stretches of speech that follow the script), the
+  `script` it was made from, and `key` (a hash of the mapping version, the script and the transcript words; the
+  file is rebuilt when it no longer matches). Anchors stay on transcript word ids: only the text drawn for them
+  changes.

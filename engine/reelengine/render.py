@@ -823,7 +823,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         # Grouping only the window's words made lines the full video never shows ("HERE IS THE" where
         # the video shows "SO HERE IS"), so a window starting or ending mid-line drew the wrong words.
         ass, cap_report, cwarn, (family, font_path), stats = capmod.build_for_timeline(
-            tl, proj, W, H, position_spans=spans)
+            tl, proj, W, H, position_spans=spans, project_dir=project_dir)
         warnings += cwarn
         ass_name = "captions.ass"
         with open(rwork / ass_name, "w", encoding="utf-8", newline="\n") as fh:
