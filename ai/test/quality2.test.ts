@@ -162,6 +162,27 @@ describe('parallel tool calls', () => {
     const gap = host.order.indexOf('fetch-image');
     expect(host.order.slice(0, gap).filter((c) => c === 'search-images')).toHaveLength(6);
   });
+
+  it('once one call fails, the calls already running finish and no new one starts', async () => {
+    const { root, dir } = await makeProject();
+    class StuckHost extends FakeHost {
+      started = 0;
+      async runEngine(command: string, args: string[], onProgress?: any): Promise<any> {
+        if (command !== 'cover-candidates') return super.runEngine(command, args, onProgress);
+        if (this.started++ === 0) throw { code: 'ENGINE_STUCK', userMessage: "Part of Reel Studio's video engine would not stop." };
+        await new Promise((r) => setTimeout(r, 60));
+        return super.runEngine(command, args, onProgress);
+      }
+    }
+    const host = new StuckHost(root);
+    // cover_candidates is parallel-safe and lets an engine failure end the edit
+    const model = new ScriptedModel([
+      { toolCalls: ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'].map((w) => call('cover_candidates', { words: [w] })) },
+    ]);
+    await expect(runAgent({ provider: model, system: 's', task: 't', ctx: ctxOf(dir, host), onEvent: () => undefined })).rejects.toMatchObject({ code: 'ENGINE_STUCK' });
+    // the first four started together; the last two never did
+    expect(host.started).toBe(4);
+  });
 });
 
 describe('post caption credits', () => {
