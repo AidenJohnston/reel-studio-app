@@ -704,7 +704,7 @@ function registerIpc(): void {
           name: `${safeFileName(project.title || slug)} - Version ${version.n}`, request, runEngine, signal,
           onProgress: (message, pct) => emit({ type: 'status', message, pct })
         })
-        return { summary: '', quiet: true }
+        return { summary: '', chat: [] }
       } catch (e) { failure = e; throw e }
     })
     await jobs.forSlug(slug)?.done
