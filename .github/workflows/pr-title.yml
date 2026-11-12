@@ -1,7 +1,5 @@
 name: PR title
 
-# The title becomes the squashed commit on main, so it must be `type(scope): subject` (CONTRIBUTING.md,
-# docs/pull-requests.md). Reads only the title from the event: no checkout, no token beyond read.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -19,9 +17,9 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # The title is never printed: the runner reads "::" and "##[" in output as commands.
+          # Never print the title: the runner reads "::" and "##[" in output as commands.
           types='feat|fix|perf|refactor|docs|test|build|ci|chore|revert'
-          # [[:space:]] misses Unicode spaces (no-break, thin, zero-width...): no title needs them, so none pass.
+          # [[:space:]] misses Unicode spaces.
           if [[ "$TITLE" != *$'\n'* && "$TITLE" != *$'\r'* ]] &&
             ! printf '%s' "$TITLE" | LC_ALL=C.UTF-8 grep -qP '[\x{00A0}\x{1680}\x{2000}-\x{200B}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]' &&
             printf '%s' "$TITLE" | grep -Eq "^($types)(\([a-z0-9][a-z0-9/-]*\))?!?: ([^[:space:].]|[^[:space:]].*[^[:space:].])$"; then
