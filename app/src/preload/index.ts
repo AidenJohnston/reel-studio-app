@@ -97,6 +97,17 @@ const api: ReelApi = {
   script: {
     write: (idea) => call('script:write', idea)
   },
+  plan: {
+    get: (slug) => call('plan:get', slug),
+    updateScript: (slug, script) => call('plan:change', slug, { kind: 'script', ...script }),
+    lock: (slug, locked) => call('plan:change', slug, { kind: 'lock', locked }),
+    setRowStatus: (slug, id, status) => call('plan:change', slug, { kind: 'rowStatus', id, status }),
+    editRow: (slug, id, row, status) => call('plan:change', slug, { kind: 'row', id, row, ...(status ? { status } : {}) }),
+    update: (slug, details) => call('plan:change', slug, { kind: 'details', ...details }),
+    exportMarkdown: (slug) => call('plan:markdown', slug),
+    importMarkdown: (slug, markdown) => call('plan:change', slug, { kind: 'import', markdown }),
+    propose: (slug) => call('plan:propose', slug)
+  },
   dev: {
     renderTestAnimation: (out, full, template, params) => call('dev:renderTestAnimation', out, full, template, params)
   },

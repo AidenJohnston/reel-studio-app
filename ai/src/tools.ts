@@ -10,6 +10,7 @@ import {
   nextBrollId, normalizeKeep, saveProject, validateProject, wordIndex, anchorProblem,
 } from './project';
 import { S, JSONSchema, validate, fillNulls } from './schema';
+import { PLAN_SOURCES, PlanError, aiUpdateRow, followBroll, plansBroll, proposeRows, syncPlan, MAX_HOLD } from './plan';
 import { ANIMATION_IDS, ENGINE_FED, TimedWord, alignWordTimes, animationParamsSchema, cleanParams, itemTimes, phraseTime, templateSpec } from './animations';
 import { chooseReadableLayout, minHeroPx } from './readable';
 import { AgentEvent, AIError, EngineHost, ImagePart, ToolSchema } from './types';
@@ -71,6 +72,8 @@ export interface ToolOutput { content: unknown; images?: ImagePart[]; summary?: 
 
 export interface ToolDef extends ToolSchema {
   run(ctx: ToolContext, args: any): Promise<ToolOutput>;
+  /** offered only to runs that name it (the plan's tools), never in the default toolset */
+  optIn?: boolean;
 }
 
 export function newToolState(): ToolState {
@@ -90,6 +93,8 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
   const { p, t } = await load(ctx);
   const problem = fn(p, t);
   if (typeof problem === 'string') throw new ToolInputError(problem);
+  // in a planned project nothing is in the video without a row of the plan
+  if (field === 'broll') followBroll(p, t);
   const problems = validateProject(p, t);
   if (problems.length) throw new ToolInputError(problems.join('; '));
   await saveProject(ctx.projectDir, p, ctx.note?.file);
@@ -99,6 +104,23 @@ async function mutate(ctx: ToolContext, field: string, fn: (p: Project, t: Trans
 
 export class ToolInputError extends Error {
   constructor(message: string) { super(message); this.name = 'ToolInputError'; }
+}
+
+/** The AI's change to the plan (plan.ts); the b-roll the plan builds follows it (syncPlan). */
+async function mutatePlan(ctx: ToolContext, fn: (p: Project, t: Transcript) => void): Promise<void> {
+  let brollChanged = false;
+  await mutate(ctx, 'plan', (p, t) => {
+    const before = JSON.stringify(p.broll);
+    try { fn(p, t); } catch (e) { if (e instanceof PlanError) return e.message; throw e; }
+    syncPlan(p, t);
+    brollChanged = JSON.stringify(p.broll) !== before;
+  });
+  if (brollChanged) { ctx.state.changed.add('broll'); ctx.state.dirty!.add('broll'); }
+}
+
+/** Outside a note, a planned project's b-roll comes only from its rows (update_plan_row). */
+function refuseUnplanned(ctx: ToolContext, p: Project): void {
+  if (plansBroll(p) && ctx.userNote === undefined) throw new ToolInputError('This video\'s b-roll is planned: only its rows go in. Use update_plan_row.');
 }
 
 function checkAnchor(t: Transcript, a: WordAnchor, what = 'anchor'): void {
@@ -115,6 +137,24 @@ const ANCHOR = S.obj({
   from: S.str('first word id, e.g. "w44"'),
   to: S.str('last word id (inclusive)'),
 });
+
+/** One row of the b-roll plan, as the AI proposes it (plan.ts PlanRow). */
+const PLAN_ROW = {
+  words: S.str('the exact words said where it shows'),
+  anchor: S.opt({ ...ANCHOR, description: 'the same words as transcript word ids' }),
+  visual: S.str('what is on screen, in one line (for a card: its text)'),
+  source: S.enum(PLAN_SOURCES, 'own-file: the creator\'s own file; library; fetched: from the web; card: text on screen; animation; screen-recording'),
+  asset: S.opt(S.str('the file, when known: Library/... or work/assets/...')),
+  hold: S.opt(S.num('seconds it should stay up', { minimum: 0, maximum: MAX_HOLD })),
+  note: S.opt(S.str('why, in a few words')),
+};
+
+/** A file a plan row names, as a project ref. */
+function planAsset(ctx: ToolContext, ref: string): string {
+  const r = resolveAsset(ctx, ref);
+  if (!r) throw new ToolInputError(`asset not found: ${ref}`);
+  return r.ref;
+}
 
 function libraryDir(ctx: ToolContext, kind: LibraryKind): string {
   return path.join(ctx.host.reelStudioRoot(), 'Library', LIBRARY_FOLDERS[kind]);
@@ -447,7 +487,7 @@ export function captionsForProofread(t: Transcript, p: Project): string {
 }
 
 /** Changes the user can only hear or read outside the picture: a preview shows nothing new. */
-const NOT_VISIBLE = new Set(['music', 'post']);
+const NOT_VISIBLE = new Set(['music', 'post', 'plan']);
 
 export function visibleChangeSinceRender(ctx: ToolContext): boolean {
   return [...(ctx.state.dirty ?? [])].some((f) => !NOT_VISIBLE.has(f));
@@ -965,7 +1005,8 @@ const tools: ToolDef[] = [
       params: S.opt(PARAMS),
     }),
     async run(ctx, args) {
-      const { t } = await load(ctx);
+      const { p: cur, t } = await load(ctx);
+      refuseUnplanned(ctx, cur);
       checkAnchor(t, args.anchor);
       let asset: string | null = null;
       if (args.asset) {
@@ -1063,7 +1104,8 @@ const tools: ToolDef[] = [
     description: 'Remove a b-roll by id.',
     parameters: S.obj({ id: S.str() }),
     async run(ctx, args) {
-      const { t } = await load(ctx);
+      const { p: cur, t } = await load(ctx);
+      refuseUnplanned(ctx, cur);
       let says = '';
       await mutate(ctx, 'broll', (p) => {
         const b = p.broll.find((x) => x.id === args.id);
@@ -1376,6 +1418,63 @@ const tools: ToolDef[] = [
     },
   },
   {
+    name: 'propose_plan',
+    optIn: true,
+    description: 'Propose this video\'s plan for the creator to approve: the script in beats, one b-roll row per visual (the words it goes over, what shows, where it comes from), the music and the cover idea. It replaces your earlier proposal; rows the creator already approved or rejected stay as they are.',
+    parameters: S.obj({
+      beats: S.arr(S.obj({ line: S.str('one beat of the script, as said'), visual: S.opt(S.str('what is on screen')), sound: S.opt(S.str('a music or sound cue')) })),
+      broll: S.arr(S.obj(PLAN_ROW)),
+      music: S.opt(S.str('the music choice in one line: a library song, or the feel')),
+      cover: S.opt(S.str('the cover idea in one line')),
+    }),
+    async run(ctx, args) {
+      const { t } = await load(ctx);
+      const rows = args.broll.map((r: any) => {
+        if (r.anchor) checkAnchor(t, r.anchor);
+        return stripNulls({ ...r, asset: r.asset ? planAsset(ctx, r.asset) : null });
+      });
+      await mutatePlan(ctx, (p, tt) => {
+        proposeRows(p, { beats: args.beats.map(stripNulls), broll: rows, music: args.music ?? undefined, cover: args.cover ?? undefined });
+        followBroll(p, tt, 'In the video already.');
+      });
+      const plan = ctx.project!.plan!;
+      return {
+        content: { ok: true, rows: plan.broll.map((r) => ({ id: r.id, words: r.words ?? null, visual: r.visual, status: r.status })) },
+        summary: `Proposed a plan with ${rows.length} b-roll idea${rows.length === 1 ? '' : 's'}`,
+      };
+    },
+  },
+  {
+    name: 'update_plan_row',
+    optIn: true,
+    description: 'Change one row of the b-roll plan by id, or add one (id null: it is proposed, for the creator to approve). On an approved row give only what placing it needs: anchor (its words in the transcript), asset (the file), treatment. A row with its words and file goes in the video at once. Pass null for anything you are not changing.',
+    parameters: S.obj({
+      id: S.opt(S.str('row id, e.g. "p3"')),
+      words: S.opt(PLAN_ROW.words),
+      anchor: PLAN_ROW.anchor,
+      visual: S.opt(PLAN_ROW.visual),
+      source: S.opt(PLAN_ROW.source),
+      asset: PLAN_ROW.asset,
+      treatment: S.opt(S.enum(TREATMENTS)),
+      hold: PLAN_ROW.hold,
+      note: PLAN_ROW.note,
+    }),
+    async run(ctx, args) {
+      const { t } = await load(ctx);
+      if (args.anchor) checkAnchor(t, args.anchor);
+      const { id: wanted, ...fields } = args;
+      const f = stripNulls({ ...fields, asset: fields.asset ? planAsset(ctx, fields.asset) : null });
+      let id = '';
+      await mutatePlan(ctx, (p) => { id = aiUpdateRow(p, wanted ?? null, f); });
+      const row = ctx.project!.plan!.broll.find((r) => r.id === id)!;
+      const placed = !!row.broll;
+      return {
+        content: { ok: true, id, status: row.status, placed, ...(placed ? {} : { why: row.anchor ? 'it needs a file' : 'its words are not in the transcript yet' }) },
+        summary: placed ? `Placed the planned visual on "${quote(t, row.anchor!)}"` : `Updated b-roll plan row ${id}`,
+      };
+    },
+  },
+  {
     name: 'finish',
     description: 'Call last. summary_for_user: 1-3 plain, warm sentences about what you did (no jargon, no em dashes).',
     parameters: S.obj({ summary_for_user: S.str() }),
@@ -1419,7 +1518,12 @@ export function toolByName(name: string): ToolDef | undefined {
   return tools.find((t) => t.name === bare);
 }
 export function toolSchemas(names?: string[]): ToolSchema[] {
-  return tools.filter((t) => !names || names.includes(t.name)).map(({ name, description, parameters }) => ({ name, description, parameters }));
+  return tools.filter((t) => (names ? names.includes(t.name) : !t.optIn)).map(({ name, description, parameters }) => ({ name, description, parameters }));
+}
+
+/** A first edit of a planned project: b-roll comes only from the plan's rows (plan.ts prepareFirstEdit). */
+export function plannedEditTools(): string[] {
+  return [...tools.filter((t) => !t.optIn && t.name !== 'add_broll' && t.name !== 'remove_broll').map((t) => t.name), 'update_plan_row'];
 }
 
 /** Validates + runs one tool call. Never throws for model mistakes: returns an error result the model can read. */

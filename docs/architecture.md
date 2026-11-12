@@ -207,6 +207,7 @@ startAt, level)`, `set_music_automation`, `add_broll(anchor, treatment, asset, p
 backwards in the frames it looks at, or when a note says the video is mirrored), `search_images(query)` / `fetch_image(url)`, `capture_website(url)` (a screenshot of a public web page in a locked-down offscreen window, for an app or site the speaker names), `make_animation(template, params)`, `set_zoom`,
 `set_cover(atSourceTime, text)`, `write_post(caption, hashtags[5], keywords)`, `add_style_rule(rule)`,
 `render_draft`, `look_at_frames(times)` (returns images for vision models), `finish(summary_for_user)`.
+Only the runs that name them get `propose_plan` and `update_plan_row`, the Plan document's tools ([plan.md](plan.md)).
 
 Agent tasks:
 

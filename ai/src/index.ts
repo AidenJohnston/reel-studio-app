@@ -18,6 +18,8 @@ import { detectLocalClaude, DetectOptions, LocalClaude } from './providers/local
 import { detectCodex, CodexDetectOptions, LocalCodex } from './providers/localCodex';
 import * as editor from './editor';
 import { refuseIfOpen } from './owner';
+import { Plan, PlanChange, PlanView, emptyPlan, readPlan, toMarkdown, updatePlan } from './plan';
+import { proposePlan } from './planAgent';
 
 export * from './types';
 export * from './project';
@@ -38,6 +40,10 @@ export { detectCodex, findCodex, codexCandidates, codexFromLoginShell, CODEX_MES
 export type { LocalCodex, CodexState } from './providers/localCodex';
 export { cliEnv } from './safety';
 export { pickTakes, formatForPicking, deterministicEdit } from './editor';
+export {
+  PLAN_SOURCES, ROW_STATUSES, PlanError, applyPlanChange, changePlan, emptyPlan, fromMarkdown, planProblems, readPlan, syncPlan, toMarkdown, updatePlan,
+} from './plan';
+export type { Plan, PlanBeat, PlanChange, PlanRow, PlanScript, PlanSource, PlanView, RowStatus, Unbuilt } from './plan';
 export type { ApplyNoteOptions } from './editor';
 export { ATTACHMENT_REF, MAX_ATTACHMENTS_PER_NOTE, readAttachment, listAttachments, validateAttachments, placedAssets } from './attachments';
 export type { AttachmentInfo } from './attachments';
@@ -521,6 +527,20 @@ export function createAI(opts: CreateAIOptions) {
     },
     async writeScript(idea: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<ScriptResult> {
       return editor.writeScript(deps(opts.host), await modelProvider(), idea, onEvent, signal);
+    },
+    /** The AI proposes the plan (plan.ts) before the first edit; it changes only `plan`. */
+    async proposePlan(projectDir: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal, opts: { owner?: string } = {}): Promise<{ summary: string; plan: Plan }> {
+      return exclusive(projectDir, opts.owner, () => edit(opts.owner, async (d) => proposePlan(d, await modelProvider(), projectDir, onEvent, signal)));
+    },
+    /** The creator's side of the plan: read it, change it, and carry it as markdown. The app runs `change`
+     * and `importMarkdown` as held edits, so it is the project's only writer meanwhile. */
+    plan: {
+      get: (projectDir: string): Promise<PlanView> => readPlan(projectDir),
+      change: (projectDir: string, change: PlanChange): Promise<PlanView> => updatePlan(projectDir, change),
+      async markdown(projectDir: string): Promise<string> {
+        const { plan } = await readPlan(projectDir);
+        return toMarkdown(plan ?? emptyPlan());
+      },
     },
     async styleRules() { return style.list(); },
     async removeStyleRule(id: string) { return style.remove(id); },

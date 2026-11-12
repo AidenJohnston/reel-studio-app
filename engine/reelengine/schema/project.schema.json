@@ -197,6 +197,58 @@
           "styleSuggestions": { "type": "array", "items": { "type": "string" }, "description": "My style rules the AI proposed" }
         }
       }
+    },
+    "plan": {
+      "type": "object",
+      "description": "The Plan document (docs/plan.md, ai/src/plan.ts): what the creator and the AI agree on before the first edit. The engine renders `broll`, which the AI layer derives from plan.broll deterministically; it never reads this section itself.",
+      "required": ["script", "beats", "broll"],
+      "properties": {
+        "script": {
+          "type": "object",
+          "required": ["draft", "rewrite", "locked"],
+          "properties": {
+            "draft": { "type": ["string", "null"], "description": "the AI's draft, kept so a UI can show a redline against the rewrite" },
+            "rewrite": { "type": ["string", "null"], "description": "the creator's own rewrite; null until they rewrite it" },
+            "locked": { "type": "boolean", "description": "locked to shoot: the draft and the rewrite no longer change until it is unlocked" },
+            "lockedAt": { "type": "string" },
+            "hook": { "type": "string", "description": "the draft's first spoken line" },
+            "onScreenText": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "beats": {
+          "type": "array",
+          "description": "the script plan, one row of `| # | Line | Visual | Sound |` each",
+          "items": {
+            "type": "object",
+            "required": ["line"],
+            "properties": { "line": { "type": "string" }, "visual": { "type": "string" }, "sound": { "type": "string" } }
+          }
+        },
+        "broll": {
+          "type": "array",
+          "description": "the b-roll plan, word to visual. Rows that are approved (or proposed, with buildProposed) and have their words and file are built as project broll items",
+          "items": {
+            "type": "object",
+            "required": ["id", "visual", "source", "status"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^p[0-9]+$" },
+              "words": { "type": "string", "description": "the script words it goes over" },
+              "anchor": { "$ref": "#/$defs/wordRange", "description": "the same words in the transcript, once there is one" },
+              "visual": { "type": "string", "description": "what is on screen, in one line (a card's text)" },
+              "source": { "enum": ["own-file", "library", "fetched", "card", "animation", "screen-recording"] },
+              "asset": { "anyOf": [{ "$ref": "#/$defs/relPath" }, { "type": "null" }] },
+              "treatment": { "type": "string", "description": "how it is shown (a broll treatment); absent = the source's default" },
+              "status": { "enum": ["proposed", "approved", "rejected"] },
+              "hold": { "type": "number", "minimum": 0, "maximum": 60, "description": "seconds it should stay up: a hint; the anchor's words decide the real length" },
+              "note": { "type": "string" },
+              "broll": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "the broll item this row built" }
+            }
+          }
+        },
+        "music": { "type": "string", "description": "the music choice, one line" },
+        "cover": { "type": "string", "description": "the cover idea, one line" },
+        "buildProposed": { "type": "boolean", "description": "build proposed rows as if approved; absent = only approved rows are built" }
+      }
     }
   },
   "$defs": {

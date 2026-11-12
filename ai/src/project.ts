@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { Plan } from './plan';
 
 export interface Format { width: number; height: number; fps: number }
 export interface Source {
@@ -75,6 +76,8 @@ export interface Project {
   cover: Cover;
   post: Post;
   notes: NoteEntry[];
+  /** the Plan document (plan.ts): absent until the creator or the AI starts one */
+  plan?: Plan;
   [k: string]: unknown;
 }
 

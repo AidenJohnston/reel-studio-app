@@ -60,3 +60,13 @@ All additive (optional fields only), per docs/architecture.md section 3. Schema:
   grouped as before. Anchored on word ids, so a recut keeps them.
 - `work/captions.json` cues gain `tokens` (each word as drawn, before upper-casing, with the transcript word ids
   it came from; a word taken off the captions is `""`) and `run` (lines with different runs can't be joined).
+
+## 2026-11-12 (the Plan document)
+
+- `plan` (object, optional): the Plan document ([plan.md](plan.md)). `script` {`draft`, `rewrite` (text or null),
+  `locked`, `lockedAt`, `hook`, `onScreenText`}, `beats[]` {`line`, `visual`, `sound`}, `broll[]` {`id` (`p1`...),
+  `words`, `anchor` (word range), `visual`, `source` (own-file | library | fetched | card | animation |
+  screen-recording), `asset`, `treatment`, `status` (proposed | approved | rejected), `hold` (seconds, a hint),
+  `note`, `broll` (the b-roll item it built)}, `music`, `cover` (one line each), `buildProposed` (build proposed
+  rows as if approved). The engine renders only `broll`, which the AI layer derives from the rows; its edit
+  signature counts only `plan.script`.

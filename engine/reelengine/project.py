@@ -191,6 +191,9 @@ def edit_signature(proj: dict) -> str:
     p = copy.deepcopy(proj)
     for key in ("updatedAt", "version", "notes", "post", "createdAt"):
         p.pop(key, None)
+    # the plan reaches the video through `broll` (the AI layer builds it) and its script (captions)
+    if isinstance(p.get("plan"), dict):
+        p["plan"] = {"script": p["plan"].get("script")}
     return json.dumps(p, sort_keys=True, ensure_ascii=False)
 
 

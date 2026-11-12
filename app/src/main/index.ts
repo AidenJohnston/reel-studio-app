@@ -56,6 +56,7 @@ import { versionMessage } from '../shared/describe'
 import { mergeSourcesPatch } from '../shared/mirror'
 import { displayPath } from '../shared/display-path'
 import { registerPhoneIpc, stopPhoneShare } from './phone-ipc'
+import { registerPlanIpc } from './plan-ipc'
 import { forChat, pickClipboardType, registerAttachmentIpc } from './attachments'
 import { takeNote } from './note-intake'
 import { createUpdateService } from './update-check'
@@ -431,6 +432,8 @@ function registerIpc(): void {
   })
 
   registerPhoneIpc({ handle, roots: () => [reelStudioRoot(), projectsDir()], send: broadcast, log, test: TEST })
+  // the Plan document (main/plan-ipc.ts)
+  registerPlanIpc({ handle, ai: () => ai, projectDir, hold: jobs.hold, start: jobs.start })
   // pictures, GIFs and clips on a note (main/attachments.ts)
   registerAttachmentIpc({
     handle,
