@@ -39,7 +39,7 @@ def _link_or_copy(src: Path, dst: Path) -> None:
 # What the engine writes (renders, b-roll layers, cover search, transcription audio): never part of
 # a take's inputs, so a cold copy leaves them out.
 GENERATED = ("versions", "work/render", "work/layers", "work/cover-candidates", "work/audio",
-             "work/captions.json")
+             "work/captions.json", "work/proxy")
 
 
 def project_inputs(project: Path) -> list:
@@ -226,13 +226,31 @@ def _complete_video(ffprobe: str, path: Path, duration: float, fps: float) -> No
                            f"engine said {duration}s")
 
 
-def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprobe: str) -> dict:
+def _check_copy_read(call, copies: dict, what: str) -> None:
+    """With --proxy, a preview that did not read every finished copy measured the wrong thing."""
+    want = {sid for sid, r in copies["sources"].items() if r.get("status") in ("built", "ready")}
+    got = {sid for sid, v in (call.result.get("videoFrom") or {}).items() if v == "proxy"}
+    if got != want:
+        raise RuntimeError(f"{what} read the preview copy of {sorted(got)}, but copies exist for {sorted(want)}")
+
+
+def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprobe: str,
+           proxy: bool = False) -> dict:
     """One cold, timed replay of the take's session. Outputs are hard-linked into keep_dir (when
-    given) for checking; otherwise only their hashes are kept."""
+    given) for checking; otherwise only their hashes are kept. `proxy`: first build the preview
+    copies (`proxy`, which the app runs after import while the speech model listens), timed on its
+    own and left out of the session wait; every draft and window must then read them."""
     proj = scratch / f"run-{take.id}"
     copy_project(take.project, proj)
     seconds = {k: [] for k in STEPS}
     files = []
+    copies = None
+    if proxy:
+        built = cand.run("proxy", ["--project", proj])
+        copies = {"seconds": round(built.seconds, 3), "sources": built.result["sources"]}
+        bad = {sid: r for sid, r in copies["sources"].items() if r.get("status") not in ("built", "ready", "not-needed")}
+        if bad:
+            raise RuntimeError(f"{take.id}: preview copies not made, so --proxy would measure the originals: {bad}")
     for k, (step, ref) in enumerate(zip(take.session, refs)):
         write_state(proj, take.state(step))
         fps = ref["fps"]
@@ -244,6 +262,9 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
         a, b = ref["window"]
         window = cand.run("render", ["--project", proj, "--window", f"{a:.6f}:{b:.6f}"])
         _complete_video(ffprobe, window.result["file"], window.result["duration"], fps)
+        if copies is not None:
+            _check_copy_read(draft, copies, f"{take.id} note {k} draft")
+            _check_copy_read(window, copies, f"{take.id} note {k} window")
         for name, call in (("draft", draft), ("still", still), ("window", window)):
             seconds[name].append(round(call.seconds, 3))
         kept = {"draft": Path(draft.result["file"]), "window": Path(window.result["file"]),
@@ -253,7 +274,8 @@ def replay(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprob
     _complete_video(ffprobe, final.result["file"], final.result["duration"], refs[-1]["fps"])
     final_file = _keep({"final": Path(final.result["file"])}, keep_dir)
     shutil.rmtree(proj, ignore_errors=True)
-    return {"seconds": seconds, "final": round(final.seconds, 3), "files": files, "finalFile": final_file}
+    return {"seconds": seconds, "final": round(final.seconds, 3), "files": files, "finalFile": final_file,
+            "copies": copies}
 
 
 def replay_moments(take: Take, cand: Engine, refs: list, scratch: Path, keep_dir, ffprobe: str) -> dict:

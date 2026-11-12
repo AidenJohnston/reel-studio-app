@@ -10,6 +10,7 @@ Run it from `engine/` with the engine's Python and the product's FFmpeg:
 python -m harness pin                          # hashes to put in config.json (a person does this)
 python -m harness run                          # setup + 5 timed replays of every loop take
 python -m harness run --split held-out         # the held-out fifth, before a kept change merges
+python -m harness run --proxy                  # previews read each take's preview copy (below)
 python -m harness agree runs/A/report.json runs/B/report.json
 python -m harness run --flow moments           # changed moments first: one `moments` command per note
 ```
@@ -32,6 +33,12 @@ of the child process, and its output is opened after the clock stops to confirm 
 One untimed warm-up draft per take comes first, so every timed run starts with the sources in the
 OS file cache and the GPU encoder probed (the OS cache is never cleared). The report gives the
 median of the runs and their spread, (max - min) / median.
+
+With `--proxy`, each replay first runs `proxy` on the fresh project, as the app does after import, and
+times it on its own: the app runs it while the speech model listens, so it is reported beside the
+session wait, not in it. A draft or window that did not read every copy `proxy` made fails the run,
+so a fallback to the original can't pass for a measurement of the copy. Finals and their checks are
+the same in both modes.
 
 The session wait, the number the speed loop lowers: for each note, the time until the changed
 moment is on screen (draft + stills in this flow, since the stills are cut from the draft) plus the time
