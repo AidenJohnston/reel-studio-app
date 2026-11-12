@@ -856,7 +856,7 @@ const tools: ToolDef[] = [
       maxWords: S.opt(S.int('words per caption chunk, 1-4', { minimum: 1, maximum: 12 })),
       case: S.opt(S.enum(['upper', 'lower', 'as-is', 'title'])),
       color: S.opt(S.str('hex color like #FFFFFF', { pattern: '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$' })),
-      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 }, { minimum: 0.05, maximum: 0.95 })),
+      position: S.opt(S.num('vertical position of the line centre as a fraction of height. Default 0.75 = just under the chin; 0.66 = higher. 0.75 is as low as they go at the default size and stay clear of Instagram\'s caption and username, less when bigger. Lower is allowed, and the result then carries a warning to pass on', { minimum: 0.05, maximum: 0.95 })),
       highlight: S.opt(S.str('colour of the word being spoken, hex like #FFD60A; "none" turns the word highlight off')),
       pop: S.opt(S.bool()),
     }),
