@@ -1,74 +1,71 @@
-// Pins the fixed text each AI task sends before the user's own data (ai/context-budget.json), in both shapes: "api"
-// (a pasted key; tools as JSON schemas) and "cli" (Claude Code; renderConversation() plus its --system-prompt).
+// Pins what each AI task sends the model (ai/context-budget.json): the real requests, captured by running the editor
+// against a fake model and a fixed tiny project, so the user's own data is the same every run. Two shapes: "api"
+// (system, messages and tool schemas as JSON) and "cli" (Claude Code's --system-prompt plus renderConversation()).
 // After an intended change: UPDATE_CONTEXT_BUDGET=1 npm test -w ai, and commit the file.
 import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
+import type { CompletionRequest } from '../src/types';
+import { createAI, pickTakes } from '../src';
+import { ClaudeCliProvider, renderConversation } from '../src/providers/cli';
 import { Prompts } from '../src/prompts';
-import { toolSchemas } from '../src/tools';
-import { DATA_BOUNDARY } from '../src/editor';
-import { renderConversation } from '../src/providers/cli';
+import { FakeHost, ScriptedModel, call, makeProject, tmpDir } from './helpers';
 
 const FILE = join(__dirname, '..', 'context-budget.json');
-const src = (file: string) => readFileSync(join(__dirname, '..', 'src', file), 'utf8');
+const LINES = ['Here is the one thing about bread.', 'Wait for it to rise.'];
+const claudeSystem = (() => {
+  const args = (new ClaudeCliProvider() as unknown as { args(): string[] }).args();
+  return args[args.indexOf('--system-prompt') + 1];
+})();
 
-// Tool lists as editor.ts passes them (undefined = every tool). Keep in step with editor.ts.
-const POST_KIT_TOOLS = ['get_transcript', 'cover_candidates', 'set_cover', 'write_post', 'finish'];
-const PROOFREAD_TOOLS = ['add_caption_correction', 'remove_caption_correction', 'finish'];
+const api = (r: CompletionRequest) => r.system.length + JSON.stringify(r.messages).length + JSON.stringify(r.tools).length;
+const cli = (r: CompletionRequest) => claudeSystem.length + renderConversation(r).text.length;
+const firstUserText = (r: CompletionRequest) => {
+  const m = r.messages.find((x) => x.role === 'user');
+  return m && m.role === 'user' ? m.content.filter((p) => p.type === 'text').map((p: any) => p.text).join('\n') : '';
+};
 
-/** A string literal from the source, so the budget sees edits to it. Fails if the code around it changes shape. */
-function literal(file: string, re: RegExp): string {
-  const m = re.exec(src(file));
-  if (!m) throw new Error(`context-budget.test.ts: ${re} no longer matches src/${file}; update the test`);
-  return m[1];
-}
-
-function measure(): Record<string, number> {
+async function capture(): Promise<Record<string, CompletionRequest>> {
   const prompts = new Prompts(join(__dirname, '..', 'prompts'));
-  const system = `${prompts.render('system', { styleRules: '' })}\n\n${DATA_BOUNDARY}\n`;
-  const claudeSystem = literal('providers/cli.ts', /'--system-prompt', '([^']+)'/);
-  const postKitLead = (needCover: boolean) => {
-    const [, cover, noCover] = /\$\{needCover \? '([^']+)' : '([^']+)'\}/.exec(src('editor.ts')) ?? [];
-    const lead = literal('editor.ts', /const task = `(The edit of this video is saved[^$]*)\$\{needCover/);
-    const tail = literal('editor.ts', /'Call write_post'\}([^$]*)\$\{deps\.prompts\.render\('firstEdit'\)/);
-    if (!cover || !noCover) throw new Error('context-budget.test.ts: the post-kit lead-in in editor.ts changed shape');
-    return `${lead}${needCover ? cover : noCover}${tail}`.replace(/\\n/g, '\n');
+  const starts = (name: 'firstEdit' | 'applyNote' | 'proofread' | 'writeScript' | 'pickTakes', text: string) =>
+    text.startsWith(prompts.render(name).slice(0, 60));
+  const seen: Record<string, CompletionRequest> = {};
+  const take = (r: CompletionRequest) => {
+    const task = firstUserText(r);
+    const kind = starts('writeScript', r.system) ? 'writeScript'
+      : starts('pickTakes', r.system) ? 'pickTakes'
+      : task.startsWith('The edit of this video is saved') ? 'postKit'
+      : starts('proofread', task) ? 'proofread'
+      : starts('applyNote', task) ? 'applyNote'
+      : starts('firstEdit', task) ? 'firstEdit' : null;
+    if (kind && !seen[kind]) seen[kind] = r;
   };
-  const postKitSections = prompts.render('firstEdit').split(/^## /m).filter((s) => /^\d+\. (Post kit|Cover)/.test(s)).map((s) => `## ${s}`).join('\n');
-  const postKit = `${postKitLead(true)}${postKitSections}`;
 
-  const api = (sys: string, task: string, names?: string[]) => sys.length + task.length + JSON.stringify(toolSchemas(names)).length;
-  const cli = (sys: string, task: string | null, names?: string[], jsonOnly = false) =>
-    claudeSystem.length + renderConversation({
-      system: sys,
-      messages: task === null ? [] : [{ role: 'user', content: [{ type: 'text', text: task }] }],
-      tools: jsonOnly ? [] : toolSchemas(names),
-      jsonOnly,
-    }).text.length;
-
-  const firstEdit = prompts.render('firstEdit');
-  const applyNote = prompts.render('applyNote', { note: '' });
-  const proofread = prompts.render('proofread', { captions: '' });
-  return {
-    'firstEdit, api (chars)': api(system, firstEdit),
-    'firstEdit, cli (chars)': cli(system, firstEdit),
-    'applyNote, api (chars)': api(system, applyNote),
-    'applyNote, cli (chars)': cli(system, applyNote),
-    'proofread, api (chars)': api(system, proofread, PROOFREAD_TOOLS),
-    'proofread, cli (chars)': cli(system, proofread, PROOFREAD_TOOLS),
-    'postKit, api (chars)': api(system, postKit, POST_KIT_TOOLS),
-    'postKit, cli (chars)': cli(system, postKit, POST_KIT_TOOLS),
-    'postKit without cover, api (chars)': api(system, `${postKitLead(false)}${postKitSections}`, POST_KIT_TOOLS),
-    'writeScript, cli (chars)': cli(prompts.render('writeScript', { idea: '', styleRules: '' }), null, undefined, true),
-    'pickTakes, cli (chars)': cli(prompts.render('pickTakes'), null, undefined, true),
-    'system prompt (chars)': system.length,
-    'tools (count)': toolSchemas().length,
-  };
+  const { root, dir, transcript } = await makeProject({ lines: LINES });
+  // One word the speech model was unsure of, and a cut that keeps it, so the caption proofread runs too.
+  transcript.words[6] = { ...transcript.words[6], p: 0.5 } as typeof transcript.words[6];
+  await fsp.writeFile(join(dir, 'work', 'transcript.json'), JSON.stringify(transcript));
+  const model = new ScriptedModel([{ toolCalls: [call('set_cut', { keep: [{ from: 'w0', to: `w${transcript.words.length - 1}` }] })] }]);
+  const ai = createAI({ host: new FakeHost(root), settingsDir: tmpDir('settings '), providerOverride: model });
+  await ai.firstEdit(dir, () => undefined).catch(() => undefined);
+  await ai.applyNote(dir, 'x', () => undefined).catch(() => undefined);
+  await ai.writeScript('x', () => undefined).catch(() => undefined);
+  await pickTakes(transcript, model).catch(() => undefined);
+  model.requests.forEach(take);
+  expect(Object.keys(seen).sort(), 'every AI task was captured').toEqual(['applyNote', 'firstEdit', 'pickTakes', 'postKit', 'proofread', 'writeScript']);
+  return seen;
 }
 
 describe('AI context budget', () => {
-  it('ai/context-budget.json matches what the tasks send', () => {
-    const measured = measure();
+  it('ai/context-budget.json matches what the tasks send', async () => {
+    const seen = await capture();
+    const measured: Record<string, number> = {};
+    for (const kind of Object.keys(seen).sort()) {
+      measured[`${kind}, api (chars)`] = api(seen[kind]);
+      measured[`${kind}, cli (chars)`] = cli(seen[kind]);
+    }
+    measured['tools (count)'] = seen.firstEdit.tools.length;
     if (process.env.UPDATE_CONTEXT_BUDGET === '1') writeFileSync(FILE, JSON.stringify(measured, null, 2) + '\n');
     const pinned = JSON.parse(readFileSync(FILE, 'utf8'));
     expect(pinned, 'ai/context-budget.json is out of date: run UPDATE_CONTEXT_BUDGET=1 npm test -w ai and commit it').toEqual(measured);
