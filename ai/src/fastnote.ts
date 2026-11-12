@@ -1,5 +1,5 @@
 // Fast path for notes whose meaning is unambiguous and whole-video ("smaller captions", "quieter
-// music", "no music"). They become one direct tool call and the final render: no model turns at all.
+// music", "no music"). They become one direct tool call and its draft: no model turns at all.
 // Anything with a place in the video, a second request, a lasting preference or a word we are not
 // sure about goes to the full AI editor instead. Missing a fast path costs ~20 s; a wrong one costs
 // the user's trust, so this list stays short and strict.

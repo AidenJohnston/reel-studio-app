@@ -89,13 +89,13 @@ describe('changed moments first', () => {
 
     expect(host.marks.map((p) => p.captions.style.size)).toEqual([105]);   // the base is the project before the edit
     expect(host.runs.map((r) => r.captionSize)).toEqual([90]);
-    expect(host.log.filter((l) => l.startsWith('start'))).toEqual(['start moments 0', 'start final']);   // no second draft
+    // no second draft, and no full-quality render: the run's draft is saved as the version
+    expect(host.log.filter((l) => l.startsWith('start'))).toEqual(['start moments 0', 'start save-version']);
     const shown = events.filter((e) => e.type === 'moment' || e.type === 'render');
     expect(shown).toEqual([
       { type: 'moment', kind: 'still', t: 1.2, file: expect.stringMatching(/still_000036\.png$/) },
       { type: 'moment', kind: 'window', from: 0.2, to: 2.2, file: expect.stringMatching(/window_0\.2-2\.2\.mp4$/) },
       { type: 'render', version: 1, draft: true, file: expect.stringMatching(/draft\.mp4$/) },
-      expect.objectContaining({ type: 'render', draft: false }),
     ]);
     // the model was shown that preview as its own render_draft result
     const draftResult = (model.requests[2].messages.at(-1) as any).results[0].content;
@@ -121,15 +121,15 @@ describe('changed moments first', () => {
     expect(events.some((e) => e.type === 'moment' && e.file.endsWith('stale.png'))).toBe(false);
   });
 
-  it('a final render stops a run still going, and waits for it to end', async () => {
-    const { dir, host, settingsDir } = await setup(1);
+  it('a note ends by waiting for the run of its edit and saving that draft, never drawing it again', async () => {
+    const { dir, host, settingsDir } = await setup();
     const model = new ScriptedModel([
       { toolCalls: [call('set_caption_style', { size: 90 })] },
       { toolCalls: [call('finish', { summary_for_user: 'Smaller captions.' })] },
     ]);
-    await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
-    expect(host.runs[0].signal?.aborted).toBe(true);
-    expect(host.log).toEqual(['start moments 0', 'end moments 0', 'start final', 'end final']);
+    const r = await createAI({ host, settingsDir, providerOverride: model, moments: true }).applyNote(dir, 'do what we said earlier', () => undefined);
+    expect(host.log).toEqual(['start moments 0', 'end moments 0', 'start save-version', 'end save-version']);
+    expect(r.version).toBe(1);
   });
 
   it('a reply that only changes the music starts no run', async () => {

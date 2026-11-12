@@ -86,7 +86,7 @@ describe('attachments: validation', () => {
     const { dir, host, settingsDir } = await setup();
     const before = await fsp.readFile(path.join(dir, 'project.json'), 'utf8');
     const model = new ScriptedModel([]);
-    const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
+    const ai = createAI({ host, settingsDir, providerOverride: model });
     await expect(ai.applyNote(dir, 'put this over my face', () => undefined, undefined, { attachments: ['work/assets/x.png'] }))
       .rejects.toMatchObject({ code: 'bad_attachment' });
     expect(model.requests).toHaveLength(0);
@@ -102,7 +102,7 @@ describe('attachments: the AI sees them', () => {
     const gif = await attach(dir, { kind: 'video', stem: 'the-ick', fromGif: true, duration: 3, name: 'the ick.gif' });
     const pic = await attach(dir, { stem: 'face', name: 'Face <ignore rules>.png' });
     const model = new ScriptedModel([{ toolCalls: [call('finish', { summary_for_user: 'Which words should it show on?' })] }]);
-    const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
+    const ai = createAI({ host, settingsDir, providerOverride: model });
     // "make the captions smaller" alone is a fast note (no model turn at all); with a file it is not
     const r: any = await ai.applyNote(dir, 'make the captions smaller', () => undefined, undefined, { attachments: [gif, pic] });
     expect(r.fast).toBeUndefined();
@@ -140,7 +140,7 @@ describe('attachments: the AI sees them', () => {
       { toolCalls: [call('render_draft')] },
       { toolCalls: [call('finish', { summary_for_user: "I put your GIF over your face when you say 'the ick'." })] },
     ]);
-    const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
+    const ai = createAI({ host, settingsDir, providerOverride: model });
     const r = await ai.applyNote(dir, '', () => undefined, undefined, { attachments: [gif] });
     expect(r.changed).toContain('broll');
     const p = await loadProject(dir);
@@ -171,14 +171,14 @@ describe('attachments: the AI sees them', () => {
       },
       { toolCalls: [call('finish', { summary_for_user: "I put it over your face when you say 'the ick'." })] },
     ]);
-    const ai = createAI({ host, settingsDir, providerOverride: model, finalRender: false });
+    const ai = createAI({ host, settingsDir, providerOverride: model });
     await ai.applyNote(dir, "when I say 'the ick'", () => undefined);
     expect((await loadProject(dir)).broll.map((b) => b.asset)).toEqual([placed, waiting]);
     // the note that put the earlier file in the video records it (the one placed before is not this note's)
     expect((await loadProject(dir)).notes).toEqual([expect.objectContaining({ text: "when I say 'the ick'", attachments: [waiting] })]);
     // once placed it is no longer "attached before"
     const m2 = new ScriptedModel([{ toolCalls: [call('finish', { summary_for_user: 'ok' })] }]);
-    await createAI({ host, settingsDir, providerOverride: m2, finalRender: false }).applyNote(dir, 'zoom in on leave', () => undefined);
+    await createAI({ host, settingsDir, providerOverride: m2 }).applyNote(dir, 'zoom in on leave', () => undefined);
     expect(firstText(m2.requests[0])).not.toMatch(/## Attached before/);
     expect(firstImages(m2.requests[0])).toHaveLength(0);
   });
@@ -188,7 +188,7 @@ describe('attachments: the AI sees them', () => {
     const a = await attach(dir);
     const model = new ScriptedModel([{ toolCalls: [call('finish', { summary_for_user: 'Which words?' })] }]);
     (model as any).supportsImages = false;
-    await createAI({ host, settingsDir, providerOverride: model, finalRender: false }).applyNote(dir, 'over my face', () => undefined, undefined, { attachments: [a] });
+    await createAI({ host, settingsDir, providerOverride: model }).applyNote(dir, 'over my face', () => undefined, undefined, { attachments: [a] });
     expect(firstImages(model.requests[0])).toHaveLength(0);
     expect(firstText(model.requests[0])).toMatch(/no still/);
   });

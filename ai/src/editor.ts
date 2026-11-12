@@ -22,8 +22,6 @@ export interface EditorDeps {
   style: StyleStore;
   fetchImpl?: typeof fetch;
   maxSteps?: number;
-  /** render a full-quality export after the agent finishes (default true) */
-  finalRender?: boolean;
   /** cumulative token brake per run (default agent.DEFAULT_TOKEN_BUDGET) */
   tokenBudget?: number;
   /** DNS lookup for the private-host check (test hook) */
@@ -212,19 +210,16 @@ async function proofreadCaptions(deps: EditorDeps, provider: ModelProvider, ctx:
   }
 }
 
+/** A task ends at the draft: the person watches the change there, and the version it saves is the
+ * project snapshot plus that draft (engine `save-version`). The full-quality file is made once, when
+ * they export (engine `export`, app main exportVersion). Returns the version saved. */
 async function finalize(deps: EditorDeps, ctx: ToolContext, onEvent: (e: AgentEvent) => void): Promise<number> {
   await refreshCredits(ctx).catch(() => undefined);
-  const changedSinceRender = ctx.state.renders.length === 0 || ctx.state.changed.size > 0;
-  // A full-quality render makes "Export for Instagram" instant; fall back to a draft if it fails.
-  if (deps.finalRender !== false) {
-    try { return (await doRender(ctx, false)).version; } catch (e) {
-      if (ctx.signal?.aborted) throw e;
-      if (ctx.state.renders.length) return ctx.state.renders.at(-1)!.version;
-      throw e;
-    }
-  }
-  if (changedSinceRender) return (await doRender(ctx, true)).version;
-  return ctx.state.renders.at(-1)!.version;
+  // The post text is beside the video, not in it: a draft made before it was written still shows this edit.
+  const stale = !ctx.state.renders.length || [...(ctx.state.dirty ?? [])].some((f) => f !== 'post');
+  if (stale) await doRender(ctx);   // reuses the draft moments made of this edit, if any
+  const saved = await deps.host.runEngine('save-version', engineArgs(ctx.projectDir), progress(onEvent, 'final'), ctx.signal);
+  return Number(saved.version);
 }
 
 // ---------------------------------------------------------------- first edit
@@ -320,26 +315,27 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
   const refs = attached.map((a) => a.asset);
   let ctx: ToolContext = { ...newCtx(deps, projectDir, provider, onEvent, signal, 2), userNote: note };
   const { p: p0 } = await load(ctx);
-  // A note is all-or-nothing: if ANYTHING fails (the AI, the final render, the save), put
+  // A note is all-or-nothing: if ANYTHING fails (the AI, the draft, the save), put
   // project.json, My style and work/assets back as they were.
   const before = await fsp.readFile(path.join(projectDir, 'project.json'));
   // null: no credits file yet. undefined: it could not be read, so the note goes ahead and a rollback leaves it alone.
   const creditsBefore = await fsp.readFile(path.join(projectDir, 'work', 'assets', 'credits.json'))
     .catch((e) => (e.code === 'ENOENT' ? null : undefined));
   const assetsBefore = await listAssets(projectDir);
-  const mediaSec = mediaSeconds(p0);
-  // "smaller captions", "quieter music": one direct change and the final render, no AI turns
+  // "smaller captions", "quieter music": one direct change and its draft, no AI turns
   const fast = deps.fastNotes === false || attached.length ? null : planFastNote(note, p0);
   if (fast) {
     onEvent({ type: 'status', message: 'Making your change', pct: 10, phase: 'final' });
+    watchMoments(deps, ctx);
     let ok = true;
     for (const c of fast.calls) {
       const r = await executeTool(ctx, c.name, c.args);
       if (r.isError) { ok = false; break; }
     }
     if (ok) {
-      // the change is made: say so now, the render that shows it follows
+      // the change is made: say so now; its stills, its 2 s window and its draft follow
       onEvent({ type: 'reply', text: fast.summary });
+      if (ctx.state.pictureEdit) ctx.moments?.show(ctx.state.edits, ctx.state.pictureEdit);
       try {
         const version = await finalize(deps, ctx, onEvent);
         const p = await loadProject(projectDir);
@@ -349,6 +345,7 @@ export async function applyNote(deps: EditorDeps, provider: ModelProvider | null
         onEvent({ type: 'status', message: 'Done', pct: 100 });
         return { summary: fast.summary, version, styleRulesAdded: [], styleSuggestions: [], changed: [...ctx.state.changed], fast: fast.kind };
       } catch (e) {
+        await ctx.moments?.stop();   // it writes versions/preview and its base: gone before the rollback
         await rollbackNote(deps, projectDir, before, creditsBefore, assetsBefore, ctx.state);
         throw e;
       }
@@ -484,9 +481,10 @@ export async function deterministicEdit(deps: EditorDeps, projectDir: string, on
   }
   await saveProject(projectDir, p);
   onEvent({ type: 'status', message: 'Making your video', pct: 0, phase: 'final' });
-  const r = await deps.host.runEngine('render', engineArgs(projectDir), progress(onEvent, 'final'), signal);
-  const version = Number(r?.version ?? (await loadProject(projectDir)).version ?? 1);
-  onEvent({ type: 'render', version, draft: false, ...(r?.file ? { file: String(r.file) } : {}) });
+  // the draft and its version, as after a note (finalize): the full-quality file is made at Export
+  const r = await deps.host.runEngine('save-version', engineArgs(projectDir), progress(onEvent, 'final'), signal);
+  const version = Number(r.version);
+  onEvent({ type: 'render', version, draft: r.draft !== false, file: String(r.file) });
   const songName = song ? path.basename(song, path.extname(song)) : null;
   const did = `I cut out the pauses and added captions${songName ? `, with your song "${songName}" underneath` : ''}.`;
   const summary = why

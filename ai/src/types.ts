@@ -2,7 +2,7 @@
 
 /** Where a long task is, for honest overall progress + time left (the app weighs phases from history).
  * listen = transcribe, analyze = retakes/face, firstLook = the no-AI preview, edit = the AI's turns and
- * tools, final = the full-quality render. */
+ * tools, final = the video that ends the task (a note's draft and its saved version, or Export's full-quality file). */
 export type Phase = 'listen' | 'analyze' | 'firstLook' | 'edit' | 'final';
 
 export type AgentEvent =

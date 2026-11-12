@@ -16,7 +16,7 @@ import type { Moments } from './moments';
 import { StyleStore, cleanRuleText, noteAsksToRemember } from './style';
 import { BlockedUrlError, LookupFn, UnsafePathError, guardedFetch, pathProblem, safeResolve, slugName, sniffImage } from './safety';
 
-export interface RenderInfo { version: number; draft: boolean; result: any }
+export interface RenderInfo { version: number; result: any }
 
 export interface ToolState {
   changed: Set<string>;
@@ -412,19 +412,20 @@ export function visibleChangeSinceRender(ctx: ToolContext): boolean {
   return [...(ctx.state.dirty ?? [])].some((f) => !NOT_VISIBLE.has(f));
 }
 
-export async function doRender(ctx: ToolContext, draft: boolean): Promise<RenderInfo> {
-  // a draft of this very edit may already be made, or being made, by moments; a final stops it
-  const drawn = await ctx.moments?.before(draft ? ctx.state.edits : null);
+/** A draft of the edit as it is now (engine `render --draft`). The full-quality file is made only at Export. */
+export async function doRender(ctx: ToolContext): Promise<RenderInfo> {
+  // a draft of this very edit may already be made, or being made, by moments
+  const drawn = await ctx.moments?.before(ctx.state.edits);
   if (ctx.renderGate) await ctx.renderGate.catch(() => undefined);
   ctx.state.dirty = new Set();
-  const made = draft && drawn?.draft?.file ? drawn.draft : null;
-  const result = made ?? await engine(ctx, 'render', draft ? ['--draft'] : [], draft ? 'Making a preview' : 'Making the final video');
+  const made = drawn?.draft?.file ? drawn.draft : null;
+  const result = made ?? await engine(ctx, 'render', ['--draft'], 'Making a preview');
   const p = await loadProject(ctx.projectDir);
   const version = Number(result?.version ?? p.version ?? 0);
   ctx.project = p;
-  const info: RenderInfo = { version, draft, result };
+  const info: RenderInfo = { version, result };
   ctx.state.renders.push(info);
-  if (!made) ctx.emit({ type: 'render', version, draft, ...(result?.file ? { file: String(result.file) } : {}) });  // moments sent its own
+  if (!made) ctx.emit({ type: 'render', version, draft: true, ...(result?.file ? { file: String(result.file) } : {}) });  // moments sent its own
   return info;
 }
 
@@ -1213,17 +1214,16 @@ const tools: ToolDef[] = [
     description: 'Render a quick preview of the whole edit and check it.',
     parameters: S.obj({}),
     async run(ctx) {
-      const drafts = ctx.state.renders.filter((r) => r.draft).length;
-      if (ctx.maxDraftRenders !== undefined && drafts >= ctx.maxDraftRenders) {
-        throw new ToolInputError('No more previews for this task. Call finish now. The final full-quality video includes every change. If you SAW a problem you could not fix, say so plainly in your summary; small fixes the checks asked for (a longer anchor, a removed or moved card, a zoom) need no mention.');
+      if (ctx.maxDraftRenders !== undefined && ctx.state.renders.length >= ctx.maxDraftRenders) {
+        throw new ToolInputError('No more previews for this task. Call finish now. The version saved after finish includes every change. If you SAW a problem you could not fix, say so plainly in your summary; small fixes the checks asked for (a longer anchor, a removed or moved card, a zoom) need no mention.');
       }
       // Nothing you can SEE changed since the last preview (music, post caption): a preview would
-      // show the same frames. The full-quality render after finish includes the change anyway.
+      // show the same frames. The version saved after finish includes the change anyway.
       const prior = ctx.state.renders.at(-1);
       if (!visibleChangeSinceRender(ctx) && (prior || ctx.state.changed.size)) {
-        return { content: { ok: true, skipped: 'Nothing visible changed since the last preview, so I did not make a new one. The final video after finish includes your change. Do not render again for this.', version: prior?.version ?? null } };
+        return { content: { ok: true, skipped: 'Nothing visible changed since the last preview, so I did not make a new one. The version saved after finish includes your change. Do not render again for this.', version: prior?.version ?? null } };
       }
-      const info = await doRender(ctx, true);
+      const info = await doRender(ctx);
       const r = info.result ?? {};
       const p = ctx.project!;
       const notes: string[] = [];

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // reelstudio-ai CLI (dev). Commands:
 //   pick-takes  --provider claude-cli|codex-cli|claude|replay --model M --in transcript.json --out cut.json [--record f.json]
-//   first-edit  --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record f.json] [--draft-only]
+//   first-edit  --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record f.json]
 //   apply-note  --project DIR --note "..." --provider P [...]
 //   write-script --idea "..." --provider P [...]
 import * as fs from 'node:fs';
@@ -85,7 +85,7 @@ async function main() {
       log: flags.verbose ? (l) => process.stderr.write(`[engine] ${l}\n`) : undefined,
     });
     const settingsDir = typeof flags.settings === 'string' ? flags.settings : defaultSettingsDir();
-    const ai = createAI({ host, settingsDir, dev: true, providerOverride: provider, finalRender: !flags['draft-only'] });
+    const ai = createAI({ host, settingsDir, dev: true, providerOverride: provider });
     let result: unknown;
     if (cmd === 'first-edit') result = await ai.firstEdit(String(flags.project), log);
     else if (cmd === 'apply-note') result = await ai.applyNote(String(flags.project), String(flags.note ?? ''), log);
@@ -95,7 +95,7 @@ async function main() {
   }
   process.stdout.write(`reelstudio-ai <command>
   pick-takes   --provider claude-cli|codex-cli|claude|replay [--model M] --in transcript.json --out cut.json [--record session.json]
-  first-edit   --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record session.json] [--draft-only]
+  first-edit   --project DIR --provider P [--model M] [--engine-cwd DIR] [--root DIR] [--record session.json]
   apply-note   --project DIR --note TEXT --provider P [...]
   write-script --idea TEXT --provider P [...]
 `);
