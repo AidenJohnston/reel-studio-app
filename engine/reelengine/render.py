@@ -9,6 +9,9 @@ normalisation to -14 LUFS when no music module is installed). The video pass map
 Segment boundaries are on the source frame grid (cut.py), so each segment's picture and sound are
 the same length and the concat cannot drift. Every ffmpeg input is bounded.
 
+A final is joined from ~2 s chunks cached by what draws into them (chunked_video, chunks.py), so an edit
+re-encodes only the chunks it changed; the single pass is its fallback.
+
 Inputs are opened in LANES: each lane is one ffmpeg input of a source whose segments run forward in
 source time. A cut in source order is one lane per source. A reordered cut (hook recorded last,
 placed first) gets an extra lane, opened with an input seek, so ffmpeg never has to buffer minutes
@@ -27,7 +30,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, captions as capmod, cut as cutmod, project as projmod, proxy as proxymod, safepath, tools
+from . import __version__, captions as capmod, chunks as chunkmod, cut as cutmod, project as projmod, proxy as proxymod
+from . import safepath, tools
 from .proto import EngineError, log, progress
 from .render_ctx import Layer, RenderCtx, Segment, ZoomSpan
 
@@ -497,10 +501,21 @@ def _layer_chain(idx: int, layer: Layer, f: float, fps: float, t_shift: float, d
     return ",".join(parts), int(round(x)), int(round(y)), t0, t1, seek, trim / fps
 
 
-def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
-                    out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
-                    audio: Optional[Path], audio_seek: float, dur: float, t_shift: float, encoder: Optional[str],
-                    out_part: Path, graph_file: Path, use_hw: bool = True) -> list:
+def _zoom_frames(z: ZoomSpan, fps: float, video_dur: float) -> Optional[tuple]:
+    """(first, last) frames of the full video that a zoom punches in on: those starting in [t0, t1). A
+    window or chunk zooms these same frames, counted on its own frames (video_graph)."""
+    if z.scale <= 1.001:
+        return None
+    first = max(0, int(math.ceil(z.t0 * fps - 1e-6)))
+    last = min(int(round(video_dur * fps)), int(math.ceil(z.t1 * fps - 1e-6))) - 1
+    return (first, last) if last >= first else None
+
+
+def video_graph(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
+                out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
+                dur: float, t_shift: float, use_hw: bool = True, encode: bool = True) -> tuple:
+    """(command up to its inputs, filter chains ending in [vout]) for the picture of output seconds
+    [t_shift, t_shift + dur): the whole video, a window, a chunk, or a still when `encode` is False."""
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
     lanes = plan_lanes(segments)
@@ -566,28 +581,32 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
     else:
         chains.append("".join(labels) + f"concat=n={len(segments)}:v=1:a=0,{tail}[base0]")
     cur = "base0"
-    # zooms move the FOOTAGE, so they sit on the base, under every card and caption
+    # Zooms move the FOOTAGE, so they sit on the base, under every card and caption. They are counted in
+    # frames: frame k here is frame k + k_shift of the full video (as the caption track maps a window).
+    k_shift = round(t_shift * fps)
     for zi, z in enumerate(zooms or []):
-        t0, t1 = z.t0 - t_shift, z.t1 - t_shift
-        if t1 <= 0 or t0 >= dur or z.scale <= 1.001:
+        span = _zoom_frames(z, fps, ctx.duration)
+        if span is None:
             continue
-        t0, t1 = max(0.0, t0), min(dur, t1)
+        j0, j1 = max(0, span[0] - k_shift), min(n_frames - 1, span[1] - k_shift)
+        if j1 < j0:
+            continue
         cw = int(round(out_w / z.scale / 2)) * 2
         ch = int(round(out_h / z.scale / 2)) * 2
         cx, cy = z.cx * f, z.cy * f
         x = int(min(max(0, cx - cw / 2), out_w - cw))
         y = int(min(max(0, cy - ch / 2), out_h - ch))
         chains.append(f"[{cur}]split=2[zm{zi}][zs{zi}]")
-        # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The
-        # base is on the fps grid, so start on a frame: trim and padding then agree to the frame.
-        k0 = int(math.ceil(t0 * fps - 1e-6))
-        t0 = k0 / fps
-        pad = f",fps={fps},tpad=start={k0}" if k0 > 0 else ""
-        chains.append(f"[zs{zi}]trim=start={_f(t0)}:end={_f(t1)},setpts=PTS-STARTPTS,crop={cw}:{ch}:{x}:{y},"
+        # padded from 0 (see _layer_chain): the overlay never waits for the zoom's first frame. The trim
+        # and the padding count frames, and `enable` sits on half-frame midpoints, so all three agree on
+        # exactly frames j0..j1 whatever the rounding of their times.
+        pad = f",fps={fps},tpad=start={j0}" if j0 > 0 else ""
+        chains.append(f"[zs{zi}]trim=start_frame={j0}:end_frame={j1 + 1},setpts=PTS-STARTPTS,"
+                      f"crop={cw}:{ch}:{x}:{y},"
                       f"scale={out_w}:{out_h}:flags={'fast_bilinear' if ctx.draft else 'lanczos'},"
                       f"setsar=1{pad}[zz{zi}]")
         chains.append(f"[zm{zi}][zz{zi}]overlay=0:0:eof_action=pass:repeatlast=0:"
-                      f"enable='between(t,{_f(t0)},{_f(t1)})'[zb{zi}]")
+                      f"enable='between(t,{_f(max(0.0, (j0 - 0.5) / fps))},{_f((j1 + 0.5) / fps)})'[zb{zi}]")
         cur = f"zb{zi}"
     # overlay layers, lowest z first
     k = n_in
@@ -621,31 +640,59 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
             to_full, from_full = f"setpts=PTS+{k0},", f",setpts=PTS-{k0}"
         chains.append(f"[{cur}]{to_full}subtitles=filename={ass_name}:fontsdir=fonts{from_full}[capd]")
         cur = "capd"
-    chains.append(f"[{cur}]format=yuv420p[vout]")
+    # An encoded picture's frames carry the colour the encoder tags it with (encoder_args). Left unset,
+    # FFmpeg 8 negotiates a conversion into the tagged colour for the encoder, and the encoded frames then
+    # differ from run to run (measured on 8.0.1); the pixels are the same either way.
+    chains.append(f"[{cur}]format=yuv420p{',' + BT709_FRAMES if encode else ''}[vout]")
+    return cmd + layer_inputs, chains
+
+
+BT709_FRAMES = "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+
+
+def write_graph(chains: list, graph_file: Path) -> None:
     with open(graph_file, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(";\n".join(chains))
-    cmd += layer_inputs
+
+
+def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: dict, faces: dict,
+                    out_w: int, out_h: int, layers: list, zooms: list, ass_name: Optional[str],
+                    audio: Optional[Path], audio_seek: float, dur: float, t_shift: float, encoder: Optional[str],
+                    out_part: Path, graph_file: Path, use_hw: bool = True) -> list:
+    """One FFmpeg pass: the picture (video_graph) with its sound into an mp4, or one frame as a PNG when
+    `audio` is None."""
+    fps = float(ctx.fmt.get("fps") or 30)
+    cmd, chains = video_graph(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms, ass_name,
+                              dur, t_shift, use_hw, encode=audio is not None)
+    write_graph(chains, graph_file)
     if audio is None:       # a still (stills()): the one frame as a PNG, with no sound and no encode
         return cmd + [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-frames:v", "1",
                       "-c:v", "png", "-f", "image2", "-update", "1", str(out_part)]
+    audio_idx = cmd.count("-i")
     if audio_seek > 0:
         cmd += ["-ss", _f(audio_seek)]
     cmd += ["-t", _f(dur + 0.05), "-i", str(audio)]
-    audio_idx = k
     cmd += [*tools.filter_script_args(graph_file.name), "-map", "[vout]", "-map", f"{audio_idx}:a",
             "-af", "apad"]
     cmd += encoder_args(encoder, ctx.draft, fps)
-    cmd += ["-r", _f(fps), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-            "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
-            "-f", "mp4", str(out_part)]
+    cmd += ["-r", _f(fps), *AUDIO_ARGS, "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1",
+            "-nostats", "-f", "mp4", str(out_part)]
     return cmd
 
 
-# Final x264 preset. Instagram re-encodes every upload, so the export only has to be a clean master at
-# CRF 18. Measured on a 1:34 take (status/wire.md): encode 30-41 s vs `medium` 88-100 s, file 53.6 MB vs
-# 64.6 MB, SSIM 0.993 against the `medium` file (`faster`: 45-48 s, 64.3 MB, the same SSIM). Same bytes
-# per project still holds (software encoder, fixed args).
+# Final x264 preset. Instagram re-encodes every upload, so the export only has to be a clean master.
+# Measured on a 1:34 take at CRF 18 (status/wire.md): encode 30-41 s vs `medium` 88-100 s, file 53.6 MB vs
+# 64.6 MB, SSIM 0.993 against the `medium` file (`faster`: 45-48 s, 64.3 MB, the same SSIM).
 FINAL_PRESET = "veryfast"
+# A chunked final (chunked_video) encodes every ~2 s chunk with an encoder of its own. These settings make
+# a chunk look the same as those frames inside one long encode, the one-pass fallback included: a quantiser
+# fixed by the settings (CRF's rate control would restart at every chunk, and carries frame complexity
+# across keyframes), keyframes at fixed frames (a closed GOP of exactly one second, no scene-cut
+# keyframes), and a fixed thread count (x264's frame threads change its decisions), which also gives the
+# same bytes on every machine with the same FFmpeg build.
+FINAL_QP = 18
+X264_THREADS = 8
 
 
 def encoder_args(encoder: str, draft: bool, fps: float) -> list:
@@ -658,8 +705,102 @@ def encoder_args(encoder: str, draft: bool, fps: float) -> list:
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p"] + tags
     # A keyframe every second: the player seeks by decoding from the keyframe before the target, and x264's
     # default allows 250 frames between them (over 8 s at 30 fps). Measured on 60 s reels, files grew 5-9%.
-    return ["-c:v", "libx264", "-preset", FINAL_PRESET, "-crf", "18", "-profile:v", "high",
-            "-g", str(round(fps)), "-pix_fmt", "yuv420p"] + tags
+    gop = str(chunkmod.gop_frames(fps))
+    return ["-c:v", "libx264", "-preset", FINAL_PRESET, "-qp", str(FINAL_QP), "-profile:v", "high",
+            "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-flags", "+cgop", "-threads", str(X264_THREADS),
+            "-pix_fmt", "yuv420p"] + tags
+
+
+# --- chunked final ----------------------------------------------------------------------------------
+
+def _chunk_window(tl, f0: int, f1: int, n_frames: int, fps: float) -> tuple:
+    """(segments, dur, t_shift) for output frames [f0, f1); the whole cut's own when that is all of it."""
+    if f0 == 0 and f1 == n_frames:
+        return tl.segments, tl.duration, 0.0
+    return cutmod.window_segments(tl.segments, f0 / fps, f1 / fps), (f1 - f0) / fps, f0 / fps
+
+
+def chunked_video(ctx: RenderCtx, tl, src_meta: dict, src_paths: dict, faces: dict, layers: list, zooms: list,
+                  ass_name: Optional[str], font_path, audio: Path, out_part: Path, rwork: Path, on_pct,
+                  warnings: list) -> dict:
+    """The final export as a row of cached ~2 s chunks (chunks.py). Chunks with no file under their key are
+    encoded, one FFmpeg pass per run of consecutive missing chunks; then every chunk is joined by the concat
+    demuxer, copying the picture, and the sound is encoded whole beside it as a single pass encodes it.
+    -> {total: how many chunks, encoded: [indices of those encoded]}, or None when a take's frames are
+    unevenly spaced (chunks.even_frames): that final is rendered in one pass."""
+    cache = chunkmod.Cache(rwork / chunkmod.DIR)
+    timing = cache.dir / "frame-timing.json"
+    takes = {seg.source for seg in tl.segments}
+    if not all(chunkmod.even_frames(ctx.ffprobe, src_paths[sid], timing) for sid in takes):
+        log("# a take's frames are unevenly spaced: the final is rendered in one pass")
+        return None
+    fps = float(ctx.fmt["fps"])
+    W, H = int(ctx.fmt["width"]), int(ctx.fmt["height"])
+    n_frames = max(1, int(round(tl.duration * fps)))
+    spans = chunkmod.plan(n_frames, fps)
+    enc = encoder_args("libx264", False, fps)
+    ass = (rwork / ass_name).read_text(encoding="utf-8") if ass_name else None
+    font = chunkmod.file_identity(font_path) if font_path else None
+    build = chunkmod.ffmpeg_build(ctx.ffmpeg)
+
+    def picture(f0: int, f1: int) -> tuple:
+        segs, dur, shift = _chunk_window(tl, f0, f1, n_frames, fps)
+        cmd, chains = video_graph(ctx, segs, src_meta, src_paths, faces, W, H, layers, zooms, ass_name, dur, shift)
+        return cmd, chains, dur, shift
+
+    keys, known = [], {}
+    for f0, f1 in spans:
+        cmd, chains, dur, shift = picture(f0, f1)
+        keys.append(chunkmod.chunk_key({
+            "ffmpeg": build, "frames": f1 - f0, "command": chunkmod.command_identity(cmd, rwork, known),
+            "graph": chains, "encoder": enc, "font": font,
+            "captions": chunkmod.caption_events(ass, shift, shift + dur) if ass else None}))
+    missing = [i for i, key in enumerate(keys) if not cache.has(key)]
+    todo = sum(spans[i][1] - spans[i][0] for i in missing)
+    made_dir, graph = cache.dir / "new", rwork / "graph_chunk.txt"
+    done = 0
+    for run in chunkmod.runs(missing):
+        # One pass draws the run's frames; each chunk gets its own encoder, which starts fresh on the
+        # chunk's first frame (chunks.py). The first output only counts frames, for the progress.
+        f0, f1 = spans[run[0]][0], spans[run[-1]][1]
+        cmd, chains, dur, shift = picture(f0, f1)
+        chains.append(f"[vout]split={len(run) + 1}[count]" + "".join(f"[c{j}]" for j in range(len(run))))
+        for j, i in enumerate(run):
+            a, b = spans[i][0] - f0, spans[i][1] - f0
+            chains.append(f"[c{j}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS[p{j}]")
+        write_graph(chains, graph)
+        shutil.rmtree(made_dir, ignore_errors=True)
+        made_dir.mkdir()
+        cmd += [*tools.filter_script_args(graph.name), "-progress", "pipe:1", "-nostats",
+                "-map", "[count]", "-f", "null", "-"]
+        for j in range(len(run)):
+            cmd += ["-map", f"[p{j}]", *enc, "-r", _f(fps), "-f", "mp4", str(made_dir / f"{j:05d}.mp4")]
+
+        def run_pct(p, base=done, frames=f1 - f0):
+            on_pct(90 * (base + frames * p / 100) / todo)
+        err = tools.ffmpeg_progress(cmd, dur, run_pct, timeout=max(600, dur * 40), what="chunk render", cwd=rwork,
+                                    frames=f1 - f0)
+        if font_path is not None and chunkmod.caption_events(ass, shift, shift + dur)[1]:
+            font_check(err, font_path, warnings)
+        for j, i in enumerate(run):
+            cache.put(made_dir / f"{j:05d}.mp4", keys[i])
+        done += f1 - f0
+    shutil.rmtree(made_dir, ignore_errors=True)
+
+    listing = chunkmod.concat_list([cache.path(key).name for key in keys], cache.dir / "export.ffconcat")
+    dur = tl.duration
+    cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner", "-f", "concat", "-i", str(listing),
+           "-t", _f(dur + 0.05), "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", "apad",
+           *AUDIO_ARGS, "-t", _f(dur), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
+           "-f", "mp4", str(out_part)]
+    tools.ffmpeg_progress(cmd, dur, lambda p: on_pct(90 + p / 10 if todo else p), timeout=max(300, dur * 4),
+                          what="chunk join")
+    got = tools.text_run([ctx.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=nb_frames", "-of", "csv=p=0", str(out_part)], 60, "chunk join check").stdout
+    if got.strip() != str(n_frames):
+        raise RuntimeError(f"the joined chunks have {got.strip() or 'no'} frames, not {n_frames}")
+    cache.prune(keys)
+    return {"total": len(spans), "encoded": missing}
 
 
 # --- cover --------------------------------------------------------------------------------------
@@ -767,6 +908,17 @@ def read_broll_report(project_dir: Path) -> list:
     return out
 
 
+def font_check(stderr: str, font_path, warnings: list) -> None:
+    """Stop when libass drew the captions in another font than ours; warn when it did not say."""
+    bad = check_fontselect(stderr, Path(font_path))
+    if bad:
+        raise EngineError("FONT_SUBSTITUTED", f"libass used a different font: {bad}",
+                          "Your captions came out in the wrong font, so I stopped. Please "
+                          "reinstall Reel Studio.")
+    if "fontselect:" not in stderr:
+        warnings.append("libass did not report its font choice; caption font unverified")
+
+
 def check_fontselect(stderr: str, font_path: Path) -> Optional[str]:
     """libass logs which file it actually used. Anything other than our font = silent substitution."""
     hits = [ln for ln in stderr.splitlines() if "fontselect:" in ln]
@@ -796,7 +948,9 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, chunked: bool = True) -> dict:
+    """Render the project. A final is chunked (chunked_video) unless `chunked` is False, which renders it in
+    the one pass a draft uses."""
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     proj = projmod.load(project_dir)
@@ -898,55 +1052,64 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     def on_pct(p):
         progress(STAGE, 20 + 0.72 * p, "Making your video")
 
-    err = None
-    try:
-        err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                    cwd=rwork, user_message="I couldn't finish making your video. "
-                                                            "Please try again.")
-    except EngineError as exc:
-        if not draft:
-            raise
-        if vpaths != src_paths:
-            # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
-            # so a bad copy costs one retry and never marks a working encoder as failed.
-            log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
-            video_from = {sid: "original" for sid in src_meta}
-            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
-                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
-            try:
+    chunks = None
+    if chunked and not draft:
+        # A final is made of cached chunks, so an edit re-encodes only the chunks it touched. A take that
+        # can't be chunked, or anything going wrong there, falls back to the single pass below, except
+        # captions in the wrong font, which the single pass would draw the same way.
+        try:
+            chunks = chunked_video(ctx, tl, src_meta, src_paths, faces, layers, zooms, ass_name, font_path, audio,
+                                   out_part, rwork, on_pct, warnings)
+        except EngineError as exc:
+            if exc.code == "FONT_SUBSTITUTED":
+                raise
+            log(f"# chunked final failed, rendering it in one pass: {exc.message[-400:]}")
+        except Exception as exc:   # noqa: BLE001 -- the single pass is the fallback for any failure
+            log(f"# chunked final failed, rendering it in one pass: {exc!r}")
+    if chunks is None:
+        err = None
+        try:
+            err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                        cwd=rwork, user_message="I couldn't finish making your video. "
+                                                                "Please try again.")
+        except EngineError as exc:
+            if not draft:
+                raise
+            if vpaths != src_paths:
+                # A damaged copy fails whatever encodes it: read the originals with the same encoder first,
+                # so a bad copy costs one retry and never marks a working encoder as failed.
+                log(f"# draft from the preview copies failed, retrying from the originals: {exc.message[-400:]}")
+                video_from = {sid: "original" for sid in src_meta}
+                cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                      ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph)
+                try:
+                    err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
+                                                cwd=rwork)
+                except EngineError as again:
+                    exc = again
+            if err is None:
+                log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
+                warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
+                failed_encoder, encoder = encoder, "libx264"
+                video_from = {sid: "original" for sid in src_meta}
+                cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
+                                      ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
+                                      use_hw=False)
                 err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
                                             cwd=rwork)
-            except EngineError as again:
-                exc = again
-        if err is None:
-            log(f"# hardware draft path failed, retrying in software: {exc.message[-400:]}")
-            warnings.append("The fast preview path didn't work on this computer, so I used the slower one.")
-            failed_encoder, encoder = encoder, "libx264"
-            video_from = {sid: "original" for sid in src_meta}
-            cmd = build_video_cmd(ctx, segments, src_meta, src_paths, faces, out_w, out_h, layers, zooms,
-                                  ass_name, audio, audio_seek, dur, t_shift, encoder, out_part, graph,
-                                  use_hw=False)
-            err = tools.ffmpeg_progress(cmd, dur, on_pct, timeout=max(600, dur * 40), what="video render",
-                                        cwd=rwork)
-            if failed_encoder != "libx264":
-                # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
-                tools.mark_encoder_failed(failed_encoder)
+                if failed_encoder != "libx264":
+                    # Software worked where the GPU encoder did not: stop trying that encoder for a few days.
+                    tools.mark_encoder_failed(failed_encoder)
+        if font_path is not None:
+            font_check(err, font_path, warnings)
     timings["encode"] = round(time.time() - t, 2)
-    if font_path is not None:
-        bad = check_fontselect(err, Path(font_path))
-        if bad:
-            raise EngineError("FONT_SUBSTITUTED", f"libass used a different font: {bad}",
-                              "Your captions came out in the wrong font, so I stopped. Please "
-                              "reinstall Reel Studio.")
-        if "fontselect:" not in err:
-            warnings.append("libass did not report its font choice; caption font unverified")
     os.replace(out_part, out)
 
     result = {"version": version, "preview": preview, "versionDir": str(vdir), "file": str(out),
               "draft": draft, "window": list(win) if win else None, "firstLook": first_look,
               "duration": round(dur, 3), "segments": len(segments), "encoder": encoder,
               "size": [out_w, out_h], "videoFrom": video_from, "layers": len(layers), "zooms": len(zooms),
-              "captions": len(cap_report), "warnings": warnings,
+              "captions": len(cap_report), "warnings": warnings, "chunks": chunks,
               "broll": [r for r in broll_report if r.get("fallback") or r.get("skipped") or r.get("remake")]}
 
     # 5. cover (full renders only; a preview may skip it). It ran beside the encode (above).

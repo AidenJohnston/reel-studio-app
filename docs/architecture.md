@@ -157,7 +157,7 @@ event may carry `ready`, a file the app can show right away: `{"kind":"still","t
 | `transcribe` | faster-whisper word timestamps -> `work/transcript.json` with stable ids |
 | `analyze` | audio envelope, pause list, retake groups (lines said more than once), face box track, a deterministic default cut |
 | `autocut` | writes a deterministic baseline `cut.keep`; the AI then refines it |
-| `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview |
+| `render [--draft] [--window a:b]` | renders project.json -> `versions/vN/{export.mp4, cover.png, verify.json}`; `--draft` is a fast preview. A final is joined from ~2 s chunks cached in `work/render/chunks/` by everything that draws into them (`chunks.py`), so an edit re-encodes only the chunks it changed; a take with uneven frame times, or any failure there, renders it in one pass |
 | `proxy` | makes the preview copy of each take bigger than 1080p or HDR: `work/proxy/<sid>-<key>.mp4` (H.264, every frame a keyframe, short side 1080, SDR, no sound) + its `.json` sidecar. Drafts and windows read it when it matches the take as it is now; finals and covers read the original. The app starts it after import, at below-normal priority |
 | `cover` | renders cover.png only |
 | `verify <mp4>` | A/V sync, loudness (-14 LUFS target), duration, black frames, caption-safe placement report |
@@ -175,7 +175,7 @@ x64. Encoders: libx264 for the final export; drafts use `h264_videotoolbox` on m
 
 | Area | Modules |
 |---|---|
-| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `verify.py`, `frames.py`, `doctor.py` |
+| Core | `cli.py`, `project.py` (load/save/validate, word-anchor to output-time mapping), `schema/`, `probe.py`, `classify.py`, `transcribe.py`, `analyze.py` (pauses, retakes, default cut), `cut.py`, `captions.py`, `render.py` (orchestration and the final ffmpeg graph), `chunks.py` (the chunks of a final and their cache), `verify.py`, `frames.py`, `doctor.py` |
 | Compositing | `broll.py` (treatments to layers), `placement.py` (face-aware safe boxes), `zoom.py`, `music.py` (track analysis, level presets, automation, ducking, loudness), `cover.py`, `assets.py` (images from the web, media from a link via yt-dlp), `templates/` |
 
 The core renders by composing: cut video (+ zooms) -> overlay layers by z -> captions burned last -> mux the
