@@ -3,7 +3,9 @@
 // Anything with a place in the video, a second request, a lasting preference or a word we are not
 // sure about goes to the full AI editor instead. Missing a fast path costs ~20 s; a wrong one costs
 // the user's trust, so this list stays short and strict.
-import type { Project } from './project';
+import { captionsUnderInstagram, lowestCaptionPosition, type Project } from './project';
+
+const UNDER_INSTAGRAM = 'Where they sit, a two-line caption reaches under Instagram\'s own caption and username, so part of it can be hidden on Instagram. Say "captions higher" to move them up.';
 
 export interface FastCall { name: string; args: Record<string, unknown> }
 export interface FastPlan { kind: string; calls: FastCall[]; summary: string }
@@ -25,6 +27,9 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
   if (caps) {
     const style: any = p.captions?.style ?? {};
     const size = Number(style.size) || 105;
+    // Size changes turn captions on, so a caption hidden before is new on screen even where it already sat.
+    const newlyUnder = (next: Record<string, unknown>) =>
+      !!captionsUnderInstagram(p.format, next) && (!p.captions.enabled || !captionsUnderInstagram(p.format, style));
     if (/\b(no|remove|turn off|take out|get rid of|hide|without)\b/.test(n) && !/\b(smaller|bigger|larger|higher|lower|up|down)\b/.test(n)) {
       if (!p.captions.enabled) return null;
       return { kind: 'captions-off', calls: [{ name: 'set_caption_style', args: { enabled: false } }], summary: 'I took the captions off.' };
@@ -32,12 +37,15 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
     if (/\b(smaller|too big|too large|tinier|less big|shrink)\b/.test(n)) {
       const next = Math.round(clamp(size * 0.85, 80, 160));
       if (next >= size) return null;               // already at the smallest readable size: the AI explains
-      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the captions a bit smaller.' };
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the captions a bit smaller. ${UNDER_INSTAGRAM}` : 'I made the captions a bit smaller.';
+      return { kind: 'captions-smaller', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     if (/\b(bigger|larger|too small|too tiny|hard to read|enlarge)\b/.test(n)) {
       const next = Math.round(clamp(size * 1.15, 80, 160));
       if (next <= size) return null;
-      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary: 'I made the captions a bit bigger.' };
+      // a bigger line is taller and can reach Instagram's caption: say so, but never move them unasked
+      const summary = newlyUnder({ ...style, size: next }) ? `I made the captions a bit bigger. ${UNDER_INSTAGRAM}` : 'I made the captions a bit bigger.';
+      return { kind: 'captions-bigger', calls: [{ name: 'set_caption_style', args: { size: next, enabled: true } }], summary };
     }
     const pos = Number(style.position) || 0.75;
     if (/\b(higher|up|too low)\b/.test(n)) {
@@ -46,12 +54,13 @@ export function planFastNote(note: string, p: Project): FastPlan | null {
       return { kind: 'captions-up', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions up a little.' };
     }
     if (/\b(lower|down|too high)\b/.test(n)) {
-      const next = Math.round(clamp(pos + 0.06, 0.5, 0.85) * 100) / 100;
+      const next = Math.round(clamp(pos + 0.06, 0.5, lowestCaptionPosition(p.format, style)) * 100) / 100;
       if (next <= pos) return null;
       return { kind: 'captions-down', calls: [{ name: 'set_caption_style', args: { position: next } }], summary: 'I moved the captions down a little.' };
     }
     if (/\b(add|turn on|put back|bring back|show)\b/.test(n) && !p.captions.enabled) {
-      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary: 'I put the captions back on.' };
+      const summary = captionsUnderInstagram(p.format, style) ? `I put the captions back on. ${UNDER_INSTAGRAM}` : 'I put the captions back on.';
+      return { kind: 'captions-on', calls: [{ name: 'set_caption_style', args: { enabled: true } }], summary };
     }
     return null;
   }
