@@ -18,6 +18,7 @@ import type {
   JobKind
 } from '../shared/api'
 import { mediaUrl } from './media-url'
+import { replyChat, styleConsent, type ChatLine } from './style-consent'
 import { keptIds } from '../shared/cut'
 import { readCaptionLines } from '../shared/subtitle-lines'
 export { keptIds, rangesFromKept, rangesKeepingOrder } from '../shared/cut'
@@ -32,7 +33,7 @@ export interface AppState {
   /** An AI editor made the first edit (false/absent = the simple no-AI edit). */
   aiEdited?: boolean
   /** A job ended without removing its unfinished versions (removal refused, as Windows does while a file
-   * is open): the next start removes them (recoverInterrupted). */
+   * is open): the next start, or the next job on the project, removes them (settleInterrupted). */
   cleanupOwed?: boolean
 }
 
@@ -199,12 +200,14 @@ export async function addChat(
   attachments?: ChatMessage['attachments']
 ): Promise<void> {
   await updateAppState(slug, (s) => {
-    s.chat.push({
-      id: randomUUID(), from, text, at: new Date().toISOString(), version,
+    s.chat.push(stamp({
+      from, text, version,
       ...(actions?.length ? { actions } : {}), ...(suggestion ? { suggestion } : {}), ...(attachments?.length ? { attachments } : {})
-    })
+    }))
   })
 }
+
+export const stamp = (line: ChatLine): ChatMessage => ({ id: randomUUID(), at: new Date().toISOString(), ...line })
 
 // ---- versions ---------------------------------------------------------------------------------
 
@@ -221,8 +224,8 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
     return []
   }
   // docs/versions.md: a version is a `vN` folder with `export.mp4`, N up to project.json's `version`
-  // (a higher one is a render that was never saved, which the next final render replaces). Drafts
-  // live in `versions/preview/` and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
+  // (a higher one is a note or a render that was never saved). Drafts live in `versions/preview/`
+  // and are overwritten; they only show (as n = 0, "Preview") when no final version exists yet,
   // e.g. when an AI run's final render failed.
   const out: VersionInfo[] = []
   const push = async (n: number, d: string, video: string): Promise<void> => {
@@ -256,8 +259,9 @@ export async function listVersions(dir: string): Promise<VersionInfo[]> {
 export const PREVIEW_DIR = 'preview'
 
 /**
- * Removes versions that never finished (crash or quit mid-render) and stray temp files.
- * A finished version has a video file and no `.rendering` marker.
+ * Removes versions that never finished (crash or quit mid-render, or a note that never saved its
+ * final) and stray temp files. A finished version has a video file, no `.rendering` marker, and a
+ * number project.json has saved. Runs only in the job lane or at startup, before any job.
  */
 export async function cleanPartialVersions(dir: string): Promise<string[]> {
   const removed: string[] = []
@@ -269,7 +273,8 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
     return removed
   }
   // a folder up to project.json's version is a saved version, and stays even with a file missing
-  // (render.py never encodes into it); null: project.json can't be read, so only the files decide
+  // (render.py never encodes into it); one above it is a final no note or render ever saved
+  // (docs/versions.md); null: project.json can't be read, so only the files decide
   const p = await readJson<{ version?: unknown } | null>(join(dir, 'project.json'), null)
   const saved = p ? Number(p.version) || 0 : null
   for (const name of names) {
@@ -288,7 +293,7 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
     const n = /^v(\d+)$/.exec(name)
     const finished =
       !!n &&
-      ((saved !== null && Number(n[1]) <= saved) || (VIDEO_NAMES.some((v) => existsSync(join(d, v))) && !existsSync(join(d, '.rendering'))))
+      (saved !== null ? Number(n[1]) <= saved : VIDEO_NAMES.some((v) => existsSync(join(d, v))) && !existsSync(join(d, '.rendering')))
     if (!finished) {
       await fs.rm(d, { recursive: true, force: true })
       removed.push(d)
@@ -304,11 +309,14 @@ export async function cleanPartialVersions(dir: string): Promise<string[]> {
   return removed
 }
 
-/** Removes what an ended job left (cleanPartialVersions). False when a removal was refused, as Windows
- * does while a file is open: the caller keeps cleanupOwed for a later try. Any other failure throws. */
+/** Removes what an ended job left (cleanPartialVersions, and a note's work/notes). False when a removal
+ * was refused, as Windows does while a file is open: the caller keeps cleanupOwed for a later try. Any
+ * other failure throws. */
 async function removeLeftovers(dir: string): Promise<boolean> {
   try {
     await cleanPartialVersions(dir)
+    // a note's private copy and drafts (ai editor.ts applyNote), which it deletes itself unless the app died
+    await fs.rm(join(dir, 'work', 'notes'), { recursive: true, force: true })
     return true
   } catch (e) {
     if ([...WINDOWS_LOCK, 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code ?? '')) return false
@@ -331,38 +339,60 @@ export async function recoverInterrupted(stillRunning: string[] = []): Promise<s
     return recovered
   }
   for (const slug of slugs) {
-    let dir: string
     try {
-      dir = projectDir(slug)
+      projectDir(slug) // refuses a folder name that is not a project
     } catch {
       continue
     }
     if (stillRunning.includes(slug)) continue // an engine of the last run may still write there
-    if (!existsSync(join(dir, 'app.json'))) continue
-    const s = await readAppState(slug)
-    if (!s.job && !s.cleanupOwed) continue
-    // a removal still refused keeps the mark for the next start; the job is settled all the same, and the
-    // other projects are still recovered
-    const cleaned = await removeLeftovers(dir)
-    if (!s.job && !cleaned) continue
-    await updateAppState(slug, (st) => {
-      if (cleaned) delete st.cleanupOwed
-      else st.cleanupOwed = true
-      if (!st.job) return // the job itself ended and said so: only its clean-up was left
-      st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
-      if (st.status === 'ready' && st.job?.kind !== 'export') {
-        st.chat.push({
-          id: randomUUID(),
-          from: 'editor',
-          text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.',
-          at: new Date().toISOString()
-        })
-      }
-      st.job = null
-    })
-    recovered.push(slug)
+    if ((await settleInterrupted(slug)) === 'settled') recovered.push(slug)
   }
   return recovered
+}
+
+/**
+ * Ends a job app.json still records but nothing is running: the app quit or crashed during it, or the
+ * write that ends it failed. Runs at startup, before any job, and as the next job on that project
+ * begins, so a new job
+ * never replaces a marker whose note may already be saved. A note found saved in project.json (by its
+ * job id) gets its reply and questions; one that is not gets "send it again". While project.json
+ * cannot be read the marker stays for the next try: the note may be saved, and telling the creator
+ * to send it again would apply it twice.
+ */
+export async function settleInterrupted(slug: string): Promise<'settled' | 'unreadable' | 'nothing'> {
+  const dir = projectDir(slug)
+  if (!existsSync(join(dir, 'app.json'))) return 'nothing'
+  const s = await readAppState(slug)
+  if (!s.job && !s.cleanupOwed) return 'nothing'
+  const saved = s.job?.kind === 'note' ? await savedNote(dir, s.job.id) : null
+  if (saved === UNREADABLE) return 'unreadable'
+  // a removal still refused keeps the mark for a later try; the job is settled all the same, so the other
+  // projects, and the next job on this one, go ahead
+  const cleaned = await removeLeftovers(dir)
+  if (!s.job && !cleaned) return 'nothing'
+  await updateAppState(slug, (st) => {
+    if (cleaned) delete st.cleanupOwed
+    else st.cleanupOwed = true
+    if (!st.job) return // the job itself ended and said so: only its clean-up was left
+    st.status = st.job?.kind === 'first-edit' || !existsSync(join(dir, 'versions')) ? 'interrupted' : 'ready'
+    if (saved) {
+      const reply = saved.reply ?? `I made your change. It is Version ${saved.version}.`
+      st.chat.push(...replyChat(styleConsent(reply, saved.styleRulesAdded, saved.styleSuggestions), saved.version).map(stamp))
+    } else if (st.status === 'ready' && st.job?.kind !== 'export') {
+      st.chat.push(stamp({ from: 'editor', text: 'Reel Studio closed before I finished that change. Send your note again and I will pick it up.' }))
+    }
+    st.job = null
+  })
+  return 'settled'
+}
+
+interface SavedNote { id?: string; version: number; reply?: string; styleRulesAdded?: string[]; styleSuggestions?: string[] }
+const UNREADABLE = Symbol('unreadable')
+
+/** The note a job saved in project.json (ai/src/editor.ts applyNote), null when it is not there. */
+async function savedNote(dir: string, jobId: string): Promise<SavedNote | null | typeof UNREADABLE> {
+  const p = await readJson<{ notes?: SavedNote[] } | typeof UNREADABLE>(join(dir, 'project.json'), UNREADABLE)
+  return p === UNREADABLE ? p : (p.notes?.find((n) => n.id === jobId) ?? null)
 }
 
 // ---- transcript and cut ------------------------------------------------------------------------

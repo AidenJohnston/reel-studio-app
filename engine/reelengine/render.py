@@ -721,10 +721,11 @@ def first_look_project(project_dir: Path, proj: dict, music: Optional[str] = Non
 
 def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         root: Optional[Path] = None, verify: bool = True, first_look: bool = False,
-        music: Optional[str] = None, cover: bool = True) -> dict:
+        music: Optional[str] = None, cover: bool = True, project_file: Optional[Path] = None,
+        out: Optional[Path] = None) -> dict:
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    proj = projmod.load(project_dir, file=project_file)
     if first_look:
         draft = True
         proj = first_look_project(project_dir, proj, music)
@@ -741,7 +742,7 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
     committed = int(proj.get("version") or 0)
     version = pick_version(project_dir, proj, root)  # for a preview: the number this edit WILL get
     preview = bool(draft)
-    vdir = preview_dir(project_dir) if preview else project_dir / "versions" / f"v{version}"
+    vdir = (Path(out) if out else preview_dir(project_dir)) if preview else project_dir / "versions" / f"v{version}"
     if not preview and version == committed:
         # a saved version is never rewritten: the same edit gets its video back
         if (vdir / "export.mp4").exists() and (vdir / "render.json").exists():
@@ -751,8 +752,16 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         # one with a file missing (removed by hand) is left as it is too: this render is the next version
         version = committed + 1
         vdir = project_dir / "versions" / f"v{version}"
-    if not preview and version > committed and vdir.exists():
-        shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
+    if not preview and version > committed:
+        # A note renders its private copy, whose version is the one it started from. A version that
+        # project.json saved since (another note, a change made by hand) is never replaced.
+        saved = committed if project_file is None else int(projmod.load(project_dir, check=False).get("version") or 0)
+        if version <= saved:
+            raise EngineError("PROJECT_CHANGED", f"v{version} was saved after {project_file} was copied (project.json is at v{saved})",
+                              "Your video was changed somewhere else while I worked on your note, so I left it as it was. "
+                              "Send your note again.")
+        if vdir.exists():
+            shutil.rmtree(vdir)      # above project.version: an attempt that was never saved
     vdir.mkdir(parents=True, exist_ok=True)
     if win:     # one scratch window at a time: older window slices go
         for old in vdir.glob("window_*"):
@@ -953,9 +962,9 @@ def run(project_dir: Path, draft: bool = False, window: Optional[str] = None,
         if not preview and int(proj.get("version") or 0) != version:
             # Re-read: an edit saved during this 1-2 minute render must survive. Patch the one field
             # render owns instead of writing back the dict loaded at the start.
-            fresh = projmod.load(project_dir)
+            fresh = projmod.load(project_dir, file=project_file)
             fresh["version"] = version          # project.version = the last FINAL version
-            projmod.save(project_dir, fresh)
+            projmod.save(project_dir, fresh, file=project_file)
     progress(STAGE, 100, "Your video is ready", force=True)
     return result
 
@@ -1055,11 +1064,12 @@ def render_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png: Path, warni
     return fallback_cover(ctx, proj, tl, src_meta, src_paths, faces, out_png)
 
 
-def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None) -> dict:
+def cover_candidates(project_dir: Path, moments: list, source: Optional[str] = None, root: Optional[Path] = None,
+                     project_file: Optional[Path] = None) -> dict:
     """`cover-candidates --at t1,t2,...`: the best cover frame near each raw-take moment, as small
     stills the AI looks at before choosing (cover.candidates)."""
     project_dir = Path(project_dir).resolve()
-    proj = projmod.load(project_dir)
+    proj = projmod.load(project_dir, file=project_file)
     tl = projmod.timeline(project_dir, proj)
     ctx = make_ctx(project_dir, proj, tl, True, tools.root_dir(str(root) if root else None),
                    project_dir / "work" / "render")

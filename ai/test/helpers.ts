@@ -74,6 +74,9 @@ export function tinyPng(rgb: [number, number, number] = [200, 30, 30]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/** A JSON file as the engine reads it (project.py read_json): a leading byte-order mark is skipped. */
+const readEngineJson = async (file: string): Promise<any> => JSON.parse((await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
+
 /** A project after its first edit, as every note finds it: a cut, and (`render`) Version 1. */
 export async function firstVersion(dir: string, host: FakeHost, render = true): Promise<void> {
   const pj = path.join(dir, 'project.json');
@@ -119,8 +122,8 @@ export class FakeHost implements EngineHost {
     if (!args.includes('--owner') && fs.existsSync(path.join(dir, OWNER_LOCK))) {
       throw { code: 'PROJECT_OPEN', userMessage: 'Reel Studio may be using this project.' };
     }
-    const pj = path.join(dir, 'project.json');
-    const p = JSON.parse(await fsp.readFile(pj, 'utf8'));
+    const pj = args.includes('--project-file') ? args[args.indexOf('--project-file') + 1] : path.join(dir, 'project.json');
+    const p = await readEngineJson(pj);
     onProgress?.({ stage: command, pct: 50, message: 'Working on it' });
     switch (command) {
       case 'transcribe': {
@@ -136,9 +139,9 @@ export class FakeHost implements EngineHost {
       }
       case 'render': {
         if (this.failRender) throw { code: 'RENDER_FAILED', userMessage: 'The video could not be made.' };
-        // docs/versions.md: drafts overwrite versions/preview/ and never bump the version; a final of an
-        // unchanged edit returns its saved version, else starts v(N+1) afresh, snapshots the edit, then
-        // patches `version` into project.json
+        // docs/versions.md: a draft goes to --out (default versions/preview/) and never bumps the
+        // version; a final of an unchanged edit returns its saved version, else starts v(N+1) afresh,
+        // snapshots the edit, then patches `version` into the project file it rendered
         const draft = args.includes('--draft');
         const saved = path.join(dir, 'versions', `v${p.version}`);
         const snapshot = !draft && p.version ? await fsp.readFile(path.join(saved, 'project.json'), 'utf8').catch(() => null) : null;
@@ -149,7 +152,11 @@ export class FakeHost implements EngineHost {
           return { version: p.version, preview: false, draft: false, file: path.join(saved, 'export.mp4'), reused: true };
         }
         const v = (p.version ?? 0) + 1;
-        const vd = path.join(dir, 'versions', draft ? 'preview' : `v${v}`);
+        // like render.py: a note's copy never renders over a version project.json saved since it was made
+        if (!draft && args.includes('--project-file') && v <= (await readEngineJson(path.join(dir, 'project.json'))).version) {
+          throw { code: 'PROJECT_CHANGED', userMessage: 'Your video was changed somewhere else while I worked on your note.' };
+        }
+        const vd = draft ? (args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(dir, 'versions', 'preview')) : path.join(dir, 'versions', `v${v}`);
         if (!draft) await fsp.rm(vd, { recursive: true, force: true });
         await fsp.mkdir(vd, { recursive: true });
         const file = path.join(vd, draft ? 'draft.mp4' : 'export.mp4');

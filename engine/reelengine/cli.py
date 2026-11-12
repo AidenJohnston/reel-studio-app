@@ -30,6 +30,19 @@ def _project(args) -> Path:
     return Path(args.project)
 
 
+def _in_work(args, option: str):
+    """A path option that must stay inside <project>/work (a note's private document and drafts)."""
+    value = getattr(args, option, None)
+    if not value:
+        return None
+    pdir = _project(args).resolve()
+    path = (pdir / value).resolve()
+    if not path.is_relative_to(pdir / "work"):
+        raise EngineError("UNSAFE_PATH", f"--{option.replace('_', '-')} {value} is outside {pdir / 'work'}",
+                          "Reel Studio asked the engine to use a file outside this video's folder.")
+    return path
+
+
 def cmd_probe(args):
     from . import probe
     return probe.probe(Path(args.file))
@@ -73,7 +86,8 @@ def cmd_render(args):
     from . import render
     return render.run(_project(args), draft=args.draft, window=args.window,
                       root=Path(args.root) if args.root else None, verify=not args.no_verify,
-                      first_look=args.first_look, music=args.music, cover=not args.no_cover)
+                      first_look=args.first_look, music=args.music, cover=not args.no_cover,
+                      project_file=_in_work(args, "project_file"), out=_in_work(args, "out"))
 
 
 def cmd_cover(args):
@@ -87,7 +101,8 @@ def cmd_cover_candidates(args):
     if not moments:
         raise EngineError("BAD_ARGS", "cover-candidates needs --at", "Reel Studio didn't say which moments to look at.")
     return render.cover_candidates(_project(args), moments, source=args.source,
-                                   root=Path(args.root) if args.root else None)
+                                   root=Path(args.root) if args.root else None,
+                                   project_file=_in_work(args, "project_file"))
 
 
 def cmd_verify(args):
@@ -275,7 +290,7 @@ def cmd_anim_context(args):
     broll.anim_context). The AI calls this before rendering an animation."""
     from . import broll, project as projmod, render, tools
     pdir = _project(args).resolve()
-    proj = projmod.load(pdir)
+    proj = projmod.load(pdir, file=_in_work(args, "project_file"))
     words = projmod.load_transcript(pdir, proj)["words"]
     tl = projmod.timeline(pdir, proj, words)
     ctx = render.make_ctx(pdir, proj, tl, True, tools.root_dir(args.root), pdir / "work" / "render")
@@ -341,10 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--first-look", action="store_true",
                     help="preview of the deterministic edit (default cut + captions) without saving it")
     sp.add_argument("--music", help="Library/... song for --first-look when the project has none")
+    sp.add_argument("--project-file", help="render this project document instead of project.json")
+    sp.add_argument("--out", help="folder for a draft (default versions/preview)")
     sp = add("cover-candidates", cmd_cover_candidates, "the best cover frame near each moment, as stills")
     sp.add_argument("--at", required=True, help="raw-take seconds t1,t2,...")
     sp.add_argument("--source")
     sp.add_argument("--root")
+    sp.add_argument("--project-file")
     sp = add("cover", cmd_cover, "render cover.png only")
     sp.add_argument("--root")
     sp = add("verify", cmd_verify, "check an mp4")
@@ -383,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", dest="word_to", required=True)
     sp.add_argument("--duration", type=float)
     sp.add_argument("--root")
+    sp.add_argument("--project-file")
     sp = add("attach", cmd_attach, "add a picture, GIF or short clip attached to a note")
     sp.add_argument("file")
     sp.add_argument("--name", help="the file's original name (shown to the user)")
