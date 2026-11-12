@@ -337,18 +337,13 @@ def draft_encoder() -> str:
 
 
 def hwaccel() -> Optional[str]:
-    """Hardware DECODE for previews (frames come back to system memory for the filters). The final
-    export decodes in software so the same project always gives the same bytes."""
+    """"cuda" when SDR previews may decode and scale on an NVIDIA GPU (render.gpu_reframe, which also
+    needs scale_cuda), else None; other drafts use hwaccel_to_memory. The final export decodes in
+    software so the same project always gives the same bytes."""
     if os.environ.get("REELENGINE_HWACCEL", "1") == "0":
         return None
     if "hwaccel" not in _CACHE:
-        names = hwaccels()
-        pick = None
-        if sys.platform == "darwin" and "videotoolbox" in names:
-            pick = "videotoolbox"
-        elif "cuda" in names and encoder_works("h264_nvenc"):
-            pick = "cuda"
-        _CACHE["hwaccel"] = pick
+        _CACHE["hwaccel"] = "cuda" if "cuda" in hwaccels() and encoder_works("h264_nvenc") else None
     return _CACHE["hwaccel"]
 
 
@@ -360,9 +355,9 @@ def hwaccels() -> set:
     return _CACHE["hwaccels"]
 
 
-# Hardware decode whose frames come back to system memory, for HDR drafts: their tonemap runs in
-# software (zscale), so the frames have to end up there anyway. On Windows this is D3D11VA, which any
-# DirectX 11 GPU offers. Not CUDA: the product's FFmpeg is built without NVDEC, so `-hwaccel cuda`
+# Hardware decode whose frames come back to system memory, for drafts: their crop, scale and HDR
+# tonemap run in software, so the frames have to end up there anyway. On Windows this is D3D11VA, which
+# any DirectX 11 GPU offers. Not CUDA: the product's FFmpeg is built without NVDEC, so `-hwaccel cuda`
 # decodes in software without saying so (pinned 7.1.1-rs2, Windows 11, 2026-11-04).
 HWACCEL_TO_MEMORY = {"darwin": "videotoolbox", "win32": "d3d11va"}
 

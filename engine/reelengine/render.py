@@ -496,17 +496,21 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
                     audio: Path, audio_seek: float, dur: float, t_shift: float, encoder: str,
                     out_part: Path, graph_file: Path, fast: bool = True) -> list:
     """The draft/final ffmpeg command; writes the filter graph to `graph_file`. fast=False is the
-    draft path from before hardware decode for HDR: no -hwaccel, and an HDR source tonemapped before
-    the crop and scale. render.run retries a failed draft that way."""
+    draft path from before hardware decode: no -hwaccel, and an HDR source tonemapped before the
+    crop and scale. render.run retries a failed draft that way. Finals always decode in software."""
     fps = float(ctx.fmt.get("fps") or 30)
     f = out_w / float(ctx.fmt.get("width") or out_w)
     lanes = video_lanes(segments)
     cmd = [ctx.ffmpeg, "-y", "-nostdin", "-hide_banner"]
     fast = ctx.draft and fast
-    hw = tools.hwaccel() if fast else None
-    hdr_dec = []
-    if fast and any(src_meta[lane["source"]].get("hdr") for lane in lanes):
-        devices, hdr_dec = tools.hwaccel_to_memory(encoder)
+    cuda = fast and tools.hwaccel() == "cuda" and "scale_cuda" in tools.filters()
+
+    def on_cuda(src: dict) -> bool:     # decode and scale on an NVIDIA GPU; needs an FFmpeg with scale_cuda
+        return cuda and not src.get("hdr")
+
+    mem_dec = []
+    if fast and not all(on_cuda(src_meta[lane["source"]]) for lane in lanes):
+        devices, mem_dec = tools.hwaccel_to_memory(encoder)
         cmd += devices                         # global options: once, before the first input
     seg_input, seg_chain = {}, {}
     chains, labels = [], []
@@ -514,15 +518,11 @@ def build_video_cmd(ctx: RenderCtx, segments: list, src_meta: dict, src_paths: d
         src = src_meta[lane["source"]]
         face = faces.get(lane["source"])
         hdr = bool(src.get("hdr"))
-        gpu = hw == "cuda" and not hdr and "scale_cuda" in tools.filters()
-        if gpu:
+        if on_cuda(src):
             cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
             pre, per_seg = gpu_reframe(src, out_w, out_h, face)
         else:
-            if hdr:
-                cmd += hdr_dec
-            elif hw and hw != "cuda":
-                cmd += ["-hwaccel", hw]
+            cmd += mem_dec
             pre = None
             reframe = reframe_filter(src, out_w, out_h, face, ctx.draft)
             if hdr and "zscale" in tools.filters():
