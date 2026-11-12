@@ -1,0 +1,86 @@
+name: PR Labels
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Label PR type and area
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    concurrency:
+      group: pr-labels-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # Write token: read only the PR's title and file names, never its code.
+      - name: Checkout base repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Sync type and area labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const manifest = require(`${process.env.GITHUB_WORKSPACE}/.github/labels.json`);
+            const managed = new Set(
+              manifest.map((label) => label.name).filter((name) => name.startsWith("type:") || name.startsWith("area:")),
+            );
+
+            const wanted = new Set();
+            const match = /^([a-z]+)(?:\([^)]*\))?!?:/i.exec(pr.title.trim());
+            if (match && managed.has(`type:${match[1].toLowerCase()}`)) wanted.add(`type:${match[1].toLowerCase()}`);
+
+            const areaOf = (path) => {
+              if (path.startsWith("app/")) return "area:app";
+              if (path.startsWith("ai/")) return "area:ai";
+              if (path.startsWith("engine/")) return "area:engine";
+              if (path.startsWith("templates/")) return "area:templates";
+              if (path.startsWith("packaging/")) return "area:packaging";
+              if (path.startsWith("docs/") || !path.includes("/") && path.toLowerCase().endsWith(".md")) return "area:docs";
+              if (path.startsWith(".github/") || path.startsWith("scripts/")) return "area:ci";
+              return null;
+            };
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            for (const file of files) {
+              for (const path of [file.filename, file.previous_filename]) {
+                const area = path ? areaOf(path) : null;
+                if (area) wanted.add(area);
+              }
+            }
+
+            const defined = new Set(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 })).map((l) => l.name),
+            );
+            const missing = [...wanted].filter((name) => !defined.has(name));
+            if (missing.length) {
+              core.setFailed(`${missing.join(", ")} not defined. Run the Labels workflow to sync .github/labels.json.`);
+              return;
+            }
+
+            const { data: current } = await github.rest.issues.listLabelsOnIssue({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            // The files API stops at 3,000; with a partial list, only add area labels.
+            const partial = files.length < pr.changed_files;
+            if (partial) core.warning(`Listed ${files.length} of ${pr.changed_files} files; keeping existing area labels.`);
+            for (const label of current) {
+              if (!managed.has(label.name) || wanted.has(label.name)) continue;
+              if (partial && label.name.startsWith("area:")) continue;
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: label.name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+            const toAdd = [...wanted].filter((name) => !current.some((label) => label.name === name));
+            if (toAdd.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: toAdd });
+            core.info(`PR #${pr.number}: ${[...wanted].join(", ") || "no type or area labels"}`);
