@@ -1,0 +1,124 @@
+name: OpenCV for macOS
+
+# The macOS bundle installs an OpenCV built from source without FFmpeg (packaging/build_opencv_mac.py), because every
+# macOS arm64 wheel on PyPI bundles GPL x264/x265. This job builds it (or reuses the cached build for the same
+# inputs), assembles the macOS runtime with it (fetch_runtime.py runs the GPL guard and the smoke test), checks that
+# the engine's face detector answers the same as with PyPI's wheel, and runs the engine tests on that runtime.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/opencv-mac.yml
+      - packaging/build_opencv_mac.py
+      - packaging/opencv_probe.py
+      - packaging/fetch_runtime.py
+      - packaging/requirements-*.txt
+      - engine/requirements.txt
+  push:
+    branches: [main, sam/fix/macos-opencv-no-ffmpeg]  # TEMPORARY second branch: the feasibility run on a fork
+    paths:
+      - .github/workflows/opencv-mac.yml
+      - packaging/build_opencv_mac.py
+      - packaging/opencv_probe.py
+      - packaging/fetch_runtime.py
+      - packaging/requirements-*.txt
+      - engine/requirements.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencv-mac-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  opencv:
+    name: OpenCV for macOS / arm64
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Cache key of the build's inputs
+        id: key
+        working-directory: packaging
+        run: |
+          key=$(python3 -c 'import build_opencv_mac as b; print(b.cache_key())')
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "dir=packaging/cache/opencv/${key:0:16}" >> "$GITHUB_OUTPUT"
+      # Only the finished wheel and its build record are cached. On a hit, build_opencv_mac.py still checks the
+      # wheel's SHA-256 against the record and re-runs the content check before using it.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.key.outputs.dir }}
+          key: opencv-mac-arm64-${{ steps.key.outputs.key }}
+      - name: Build OpenCV and the macOS runtime
+        run: python3 packaging/fetch_runtime.py
+      - name: The wheel has no FFmpeg, x264, x265 or other bundled library
+        env:
+          DIR: ${{ steps.key.outputs.dir }}
+        run: |
+          cat "$DIR/build.json"
+          python3 packaging/build_opencv_mac.py --check "$DIR"/*.whl
+          unzip -l "$DIR"/*.whl | tee "$RUNNER_TEMP/wheel-files.txt" | tail -1
+          if grep -E 'libx26|libav|libsw|libpostproc|\.dylibs/' "$RUNNER_TEMP/wheel-files.txt"; then exit 1; fi
+          ls -l "$DIR"/*.whl
+      - name: The runtime passes the GPL guard
+        run: python3 -c 'import sys; sys.path.insert(0, "packaging"); import fetch_runtime as f; f.check_no_gpl_codec_libs(f.RUNTIME / "mac-arm64"); print("check_no_gpl_codec_libs passed")'
+      - name: Same faces as with PyPI's wheel
+        env:
+          PY: packaging/runtime/mac-arm64/python/bin/python3
+        run: |
+          "$PY" -s packaging/opencv_probe.py > "$RUNNER_TEMP/ours.json"
+          # PyPI's wheel, hash-checked against the pin, into a separate folder for the comparison only
+          grep -A3 '^opencv-python-headless==' packaging/requirements-runtime.hashed.txt > "$RUNNER_TEMP/pypi-opencv.txt"
+          python3 -m pip download --no-deps --only-binary :all: --platform macosx_13_0_arm64 --python-version 3.11 \
+            --require-hashes -r "$RUNNER_TEMP/pypi-opencv.txt" -d "$RUNNER_TEMP/pypi-wheel"
+          unzip -q "$RUNNER_TEMP"/pypi-wheel/*.whl -d "$RUNNER_TEMP/pypi-cv2"
+          "$PY" -s packaging/opencv_probe.py "$RUNNER_TEMP/pypi-cv2" > "$RUNNER_TEMP/pypi.json"
+          cat "$RUNNER_TEMP/ours.json"
+          python3 packaging/opencv_probe.py --compare "$RUNNER_TEMP/ours.json" "$RUNNER_TEMP/pypi.json"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Engine tests on the macOS runtime
+        env:
+          REELENGINE_NET_TESTS: '0'
+          REELENGINE_FFMPEG: ${{ github.workspace }}/packaging/runtime/mac-arm64/ffmpeg/ffmpeg
+          REELENGINE_FFPROBE: ${{ github.workspace }}/packaging/runtime/mac-arm64/ffmpeg/ffprobe
+        run: |
+          # Test tools go in a separate folder; the runtime itself stays as shipped. pillow-heif encodes HEIC test
+          # samples, as in the CI engine job; the runtime keeps decode-only pi-heif. -c keeps their dependencies
+          # (pillow, packaging) at the runtime's versions.
+          python -m pip install --target "$RUNNER_TEMP/testlibs" -c engine/requirements.txt 'pytest<10' pillow-heif
+          mkdir -p "$RUNNER_TEMP/bin" && ln -sf "$REELENGINE_FFMPEG" "$RUNNER_TEMP/bin/ffmpeg" && ln -sf "$REELENGINE_FFPROBE" "$RUNNER_TEMP/bin/ffprobe"
+          PATH="$RUNNER_TEMP/bin:$PATH" PYTHONPATH="$RUNNER_TEMP/testlibs" REELENGINE_CACHE="$RUNNER_TEMP/reelengine-cache" \
+            packaging/runtime/mac-arm64/python/bin/python3 -s -m pytest engine/tests -ra -p no:cacheprovider
+      - name: Summary
+        if: always()
+        env:
+          DIR: ${{ steps.key.outputs.dir }}
+        run: |
+          [ -f "$DIR/build.json" ] || exit 0
+          python3 - "$DIR/build.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          w = r["wheel"]
+          print("| | |\n|---|---|")
+          print("| Wheel | `%s` |" % w["file"])
+          print("| Size | %.1f MB |" % w["size_mb"])
+          print("| SHA-256 | `%s` |" % w["sha256"])
+          print("| Build time | %d min (built %s) |" % (r["build_seconds"] // 60, r["built"]))
+          print("| Links | %s |" % ", ".join("`%s`" % l for l in w["links"]))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: opencv-macos-arm64
+          path: |
+            ${{ steps.key.outputs.dir }}
+            ${{ runner.temp }}/ours.json
+            ${{ runner.temp }}/pypi.json
+          if-no-files-found: ignore
+          retention-days: 30
