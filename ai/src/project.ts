@@ -38,7 +38,14 @@ export interface CaptionStyle {
 export interface CaptionCorrection { from: string; to: string; at?: string; through?: string }
 /** vocabulary: names/jargon the user or the AI supplies; the engine respells sound-alikes to them after
  * transcription (engine/reelengine/vocab.py). */
-export interface Captions { enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; hidden?: WordAnchor[]; vocabulary?: string[]; [k: string]: unknown }
+/** followScript: captions show the locked script's words where the speech follows it (engine scriptalign.py);
+ * absent = on when there is a script. */
+export interface Captions {
+  enabled: boolean; style: CaptionStyle; corrections: CaptionCorrection[]; hidden?: WordAnchor[]; vocabulary?: string[]; followScript?: boolean;
+  [k: string]: unknown;
+}
+/** work/script-align.json, written by the engine: the transcript words (ids) the captions draw as script words. */
+export interface ScriptAlign { script: string; groups: { ids: string[]; words: string[] }[]; spans: [string, string][] }
 
 export type MusicLevel = 'under-voice' | 'quiet' | 'loud-intro';
 export interface MusicAutomation { fromWord: string; toWord: string; gainDb: number }
@@ -347,6 +354,15 @@ export async function loadAnalysis(projectDir: string): Promise<Analysis | null>
       try { return normalizeAnalysis(await readJson(file)); } catch { /* fall through */ }
     }
   }
+  return null;
+}
+
+/** The engine's script mapping, or null when there is none (no script, or captions don't follow it yet). */
+export async function loadScriptAlign(projectDir: string): Promise<ScriptAlign | null> {
+  try {
+    const a = await readJson<ScriptAlign>(path.join(projectDir, 'work', 'script-align.json'));
+    if (typeof a?.script === 'string' && Array.isArray(a.groups) && Array.isArray(a.spans)) return a;
+  } catch { /* not written yet */ }
   return null;
 }
 

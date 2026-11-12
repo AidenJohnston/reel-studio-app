@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from . import tools, verify
+from . import scriptalign, tools, verify
 from .proto import EngineError
 
 MAX_WORDS = 3
@@ -215,7 +215,8 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
     then single words. A word already fixed is never corrected again: with "script" -> "TypeScript"
     AND "type script" -> "TypeScript", the single word applied first used to leave "type TypeScript"
     on screen. A word fixed to nothing is marked `gone`: it keeps its place, so the lines around it
-    group as before, and build_cues leaves it out of the text."""
+    group as before, and build_cues leaves it out of the text. Every word a correction wrote is marked
+    `fixed`, so the script (follow_script) never redraws it: an explicit correction wins."""
     words = [dict(w) for w in words]
     single = corrections.get("single") or {}
     spans = corrections.get("spans") or []
@@ -271,17 +272,59 @@ def apply_corrections(words: list, corrections: dict, stats: Optional[dict] = No
             lead, core, tail = m.groups()
             if core.lower() in single:
                 w["w"] = lead + single[core.lower()] + tail
+                w["_fixed"] = True
                 if stats is not None:
                     stats[core.lower()] += 1
             else:
                 base = re.split(r"['’]", core)[0]
                 if base.lower() in single and base != core:
                     w["w"] = lead + single[base.lower()] + core[len(base):] + tail
+                    w["_fixed"] = True
                     if stats is not None:
                         stats[base.lower()] += 1
     for w in words:
-        w.pop("_fixed", None)
+        if w.pop("_fixed", None):
+            w["fixed"] = True
     return [w for w in words if w["w"].strip()]
+
+
+def _respell(src: list, shown: list) -> list:
+    """Transcript words `src` drawn as the script's words `shown`, at the same times. Word for word,
+    each keeps its own time and ids; otherwise the script's words share the stretch by length and all
+    carry every id, so they stay on one line, as the words of a phrase correction do."""
+    if len(src) == len(shown):
+        return [dict(w, w=t) for w, t in zip(src, shown)]
+    s, e = src[0]["s"], src[-1]["e"]
+    ids = [x for w in src for x in w["ids"]]
+    weights = [max(1, len(_bare(t))) for t in shown]
+    total, done, out = sum(weights), 0, []
+    for t, n in zip(shown, weights):
+        out.append({"s": round(s + (e - s) * done / total, 3), "e": round(s + (e - s) * (done + n) / total, 3),
+                    "w": t, "ids": ids})
+        done += n
+    return out
+
+
+def follow_script(words: list, groups: list) -> list:
+    """Draw the script's words over the transcript words they align to (scriptalign: each group is
+    "transcript word ids -> script words"). A group applies only where the cut keeps all its words
+    together and no correction touched them; everywhere else the words stay as heard."""
+    by_first = {g["ids"][0]: g for g in groups or () if g.get("ids")}
+    out, k = [], 0
+    while k < len(words):
+        g = by_first.get(words[k]["ids"][0])
+        if g is not None:
+            got, j = [], k
+            while j < len(words) and len(got) < len(g["ids"]):
+                got += words[j]["ids"]
+                j += 1
+            if got == g["ids"] and not any(w.get("fixed") for w in words[k:j]):
+                out += _respell(words[k:j], g["words"])
+                k = j
+                continue
+        out.append(words[k])
+        k += 1
+    return out
 
 
 def split_runs(words: list, max_gap: float = RUN_GAP) -> list:
@@ -579,13 +622,18 @@ def line_text(text_lines: list, active: int, marks: tuple) -> str:
     return "\\N".join(out)
 
 
-def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, stats=None) -> list:
+def build_cues(words_out: list, cap: dict, hidden_ids: Optional[set] = None, stats=None,
+               script_groups: Optional[list] = None) -> list:
+    """script_groups: scriptalign's mapping groups; the script's words are drawn where they apply,
+    after the corrections (which win) and before numbers become digits."""
     style = cap.get("style") or {}
     max_words = int(style.get("maxWords") or MAX_WORDS)
     words = [{"s": w["s"], "e": w["e"], "w": w["w"], "id": w["id"]} for w in words_out]
     words = stitch_numbers(words)
     heard = {w["id"]: w["w"] for w in words_out}
     words = apply_corrections(words, normalize_corrections(cap.get("corrections"), heard), stats)
+    if script_groups:
+        words = follow_script(words, script_groups)
     if cap.get("digits", True):
         words = digits_for_numbers(words)
     gone = {tuple(w["ids"]) for w in words if w.get("gone")}
@@ -704,12 +752,15 @@ def hidden_set(tl, cap: dict) -> set:
     return out
 
 
-def build_for_timeline(tl, proj: dict, width: int, height: int, words_out=None, position_spans=None):
-    """-> (ass_text, report, warnings, (family, font_path), stats)"""
+def build_for_timeline(tl, proj: dict, width: int, height: int, words_out=None, position_spans=None,
+                       project_dir: Optional[Path] = None):
+    """-> (ass_text, report, warnings, (family, font_path), stats). With project_dir, a script in the
+    project folder counts too, and its mapping is stored in work/ (scriptalign.mapping)."""
     cap = proj.get("captions") or {}
     stats = {}
-    cues = build_cues(words_out if words_out is not None else tl.words_out, cap,
-                      hidden_set(tl, cap), stats)
+    words_out = words_out if words_out is not None else tl.words_out
+    follow = scriptalign.mapping(project_dir, proj, tl.words if tl is not None else words_out)
+    cues = build_cues(words_out, cap, hidden_set(tl, cap), stats, (follow or {}).get("groups"))
     ass, report, warns, font = render_ass(cues, cap, width, height, position_spans)
     # the subtitle editor shows and edits each word as drawn, by the transcript words it came from; the
     # words one phrase correction wrote share their ids and are edited as one; a word fixed to nothing is ""
@@ -733,7 +784,8 @@ def write_for_project(project_dir: Path) -> dict:
     proj = projmod.load(project_dir)
     tl = projmod.timeline(project_dir, proj)
     fmt = proj["format"]
-    ass, report, warns, font, stats = build_for_timeline(tl, proj, fmt["width"], fmt["height"])
+    ass, report, warns, font, stats = build_for_timeline(tl, proj, fmt["width"], fmt["height"],
+                                                         project_dir=project_dir)
     out = Path(project_dir) / "work" / "captions.ass"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="\n") as fh:

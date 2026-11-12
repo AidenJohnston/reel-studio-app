@@ -135,8 +135,14 @@
           "items": { "$ref": "#/$defs/wordRange" }
         },
         "split": { "type": "array", "description": "words that start a new caption line", "items": { "$ref": "#/$defs/wordId" } },
-        "join": { "type": "array", "description": "the caption line starting at `to` goes onto the line ending at `from`", "items": { "$ref": "#/$defs/wordRange" } }
+        "join": { "type": "array", "description": "the caption line starting at `to` goes onto the line ending at `from`", "items": { "$ref": "#/$defs/wordRange" } },
+        "followScript": { "type": "boolean", "description": "captions show the script's words (`script`) where the speech follows it, at the audio's times; corrections still win. Absent = on when there is a script; false = captions show the transcript" }
       }
+    },
+    "script": {
+      "type": ["string", "object"],
+      "description": "the locked script the take was read from (text, or {text}); without it, script.txt or script.md in the project folder. Primes the vocabulary pass after transcription, and captions follow it (captions.followScript)",
+      "properties": { "text": { "type": "string" } }
     },
     "music": {
       "type": ["object", "null"],
